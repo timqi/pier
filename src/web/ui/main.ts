@@ -67,11 +67,10 @@ const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 const sessionList = $("#session-list");
 const turnsPane = $("#turns");
 const input = $<HTMLTextAreaElement>("#input");
-const modeHint = $("#mode-hint");
 const chatTitle = $("#chat-title");
 const chatCwd = $("#chat-cwd");
-const chatState = $("#chat-state");
-const abortBtn = $("#abort");
+const stateChip = $("#state-chip");
+const sendBtn = $("#send");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const modelSelect = $<HTMLSelectElement>("#model-select");
 const knownProjects = $("#known-projects");
@@ -164,13 +163,6 @@ function renderHeader(): void {
   chatTitle.textContent = s?.title ?? (currentId ? currentId.slice(0, 8) : "no session");
   chatCwd.textContent = s?.cwd ?? "";
   modelSelect.classList.toggle("hidden", !currentId);
-  chatState.textContent = currentState;
-  chatState.className = `flex-none rounded-full px-2 py-0.5 text-[12px] ${
-    currentState === "streaming"
-      ? "bg-green-100 text-green-700"
-      : "bg-neutral-100 text-neutral-500"
-  }`;
-  abortBtn.classList.toggle("hidden", currentState !== "streaming");
 }
 
 function setState(state: SessionState): void {
@@ -179,15 +171,21 @@ function setState(state: SessionState): void {
   if (s) s.state = state;
   renderSessions();
   renderHeader();
-  updateModeHint();
+  updateComposer();
   if (state === "idle") void refreshSessions();
 }
 
-function updateModeHint(): void {
+/** One composer row: state chip + contextual buttons (Send ↔ Queue label). */
+function updateComposer(): void {
   const streaming = currentState === "streaming";
-  modeHint.textContent = streaming
-    ? "streaming — Send queues · Send now steers"
+  stateChip.textContent = currentState;
+  stateChip.title = streaming
+    ? "streaming — Queue defers · Send now steers · Stop aborts"
     : "idle — send starts a turn";
+  stateChip.className = `mb-1 flex-none rounded-full px-2 py-0.5 text-[12px] ${
+    streaming ? "bg-green-100 text-green-700" : "bg-neutral-100 text-neutral-500"
+  }`;
+  sendBtn.textContent = streaming ? "Queue" : "Send";
   sendNowBtn.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("hidden", !streaming);
 }
@@ -489,7 +487,7 @@ async function send(mode: "auto" | "steer"): Promise<void> {
   const text = input.value.trim();
   if (!text || !currentId) return;
   input.value = "";
-  updateModeHint();
+  updateComposer();
   // Optimistic: an idle send (or a steer) reads as a user turn; a queued send
   // shows up in the queue panel via the queue-state snapshot instead.
   if (currentState === "idle" || mode === "steer") {
@@ -535,17 +533,14 @@ $<HTMLFormElement>("#new-form").onsubmit = async () => {
   await select(id);
   input.focus();
 };
-const abort = () =>
+stopBtn.onclick = () =>
   currentId && fetch(`/api/sessions/${currentId}/abort`, { method: "POST" });
-abortBtn.onclick = abort;
-stopBtn.onclick = abort;
 sendNowBtn.onclick = () => void send("steer");
 $("#queue-recall").onclick = () => void recallQueue();
 $<HTMLFormElement>("#composer").onsubmit = (ev) => {
   ev.preventDefault();
   void send("auto");
 };
-input.oninput = updateModeHint;
 input.onkeydown = (ev) => {
   // IME guard: Enter that confirms a composition candidate must not send
   // (isComposing covers modern browsers; 229 covers stragglers).
@@ -561,4 +556,4 @@ void refreshSessions().then(() => {
   if (first) void select(first.id);
   else renderHeader();
 });
-updateModeHint();
+updateComposer();

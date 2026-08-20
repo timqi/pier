@@ -19,8 +19,6 @@
       <span id="chat-title" class="truncate font-medium"></span>
       <span id="chat-cwd" class="truncate font-mono text-[12px] text-neutral-400"></span>
       <select id="model-select" class="ml-auto max-w-56 flex-none cursor-pointer truncate rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[12px] text-neutral-600 focus:outline-none"></select>
-      <span id="chat-state" class="flex-none rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] text-neutral-500">idle</span>
-      <button type="button" id="abort" class="btn hidden flex-none text-[12.5px] text-red-600">Abort</button>
     </header>
     <div id="turns" class="flex-1 space-y-2 overflow-y-auto px-4 py-3"></div>
     <div id="queue-panel" class="hidden flex-col gap-1 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
@@ -30,16 +28,15 @@
       </div>
       <ul id="queue-rows" class="flex flex-col gap-1"></ul>
     </div>
-    <form id="composer" class="flex flex-col gap-1.5 border-t border-neutral-200 p-3">
+    <form id="composer" class="flex items-end gap-1.5 border-t border-neutral-200 p-3">
       <textarea id="input" rows="2"
-        class="w-full resize-y rounded-lg border border-neutral-300 px-2.5 py-2 focus:border-indigo-400 focus:outline-none"
+        class="min-w-0 flex-1 resize-y rounded-lg border border-neutral-300 px-2.5 py-2 focus:border-indigo-400 focus:outline-none"
         placeholder="Message…"></textarea>
-      <div class="flex items-center gap-1.5">
-        <span id="mode-hint" class="mr-auto text-[12px] text-neutral-500"></span>
-        <button type="button" id="stop" class="btn hidden text-[13px] text-red-600">Stop</button>
-        <button type="button" id="send-now" class="btn hidden text-[13px]">Send now</button>
-        <button type="submit" id="send" class="btn btn-primary text-[13px]">Send</button>
-      </div>
+      <span id="state-chip" title="idle — send starts a turn"
+        class="mb-1 flex-none rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] text-neutral-500">idle</span>
+      <button type="button" id="stop" class="btn mb-0.5 hidden text-[13px] text-red-600">Stop</button>
+      <button type="button" id="send-now" class="btn mb-0.5 hidden text-[13px]">Send now</button>
+      <button type="submit" id="send" class="btn btn-primary mb-0.5 text-[13px]">Send</button>
     </form>
   </main>
 
