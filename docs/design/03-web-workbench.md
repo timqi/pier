@@ -14,7 +14,8 @@ contains no agent logic.
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
 | `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
-| `POST /api/sessions/:id/abort` | abort the session |
+| `POST /api/sessions/:id/abort` | abort the current run |
+| `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` |
 
@@ -37,9 +38,13 @@ Activity groups):
 - **Chat header**: title, cwd, model picker (switches the session's model),
   state badge, abort while streaming.
 - **Chat** (center): rendered turns; streaming text appended from
-  `text-delta`. Input box: Enter sends `mode:"auto"`; `!` prefix works via
-  queue policy; explicit "Steer" and "Queue" buttons send `mode:"steer"` /
-  `"followUp"`. When the session is streaming, show which mode a send will use.
+  `text-delta`. Composer semantics: **Send** = `mode:"auto"` (idle starts a
+  turn; streaming queues as follow-up), **Send now** = `mode:"steer"`
+  (streaming only), **Stop** = abort (streaming only). Enter sends; Enter
+  during IME composition never sends (`isComposing`/229 guard). A pending
+  **queue panel** above the composer renders `queue-state` snapshots with
+  mode chips and a "Recall all" action that clears the queue back into the
+  composer (append, never clobber the draft).
 - **Activity groups** (in-chat): one collapsible bubble per turn collects
   thinking + tool activity (avibe AgentActivityGroup concept): status
   (running/done/failed/interrupted), step count, duration, latest step in the

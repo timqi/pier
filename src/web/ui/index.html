@@ -23,14 +23,21 @@
       <button type="button" id="abort" class="btn hidden flex-none text-[12.5px] text-red-600">Abort</button>
     </header>
     <div id="turns" class="flex-1 space-y-2 overflow-y-auto px-4 py-3"></div>
+    <div id="queue-panel" class="hidden flex-col gap-1 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
+      <div class="flex items-center">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Queued</span>
+        <button type="button" id="queue-recall" class="ml-auto text-[12px] text-amber-700 underline-offset-2 hover:underline">Recall all</button>
+      </div>
+      <ul id="queue-rows" class="flex flex-col gap-1"></ul>
+    </div>
     <form id="composer" class="flex flex-col gap-1.5 border-t border-neutral-200 p-3">
       <textarea id="input" rows="2"
         class="w-full resize-y rounded-lg border border-neutral-300 px-2.5 py-2 focus:border-indigo-400 focus:outline-none"
-        placeholder="Message… (! prefix steers while streaming)"></textarea>
+        placeholder="Message…"></textarea>
       <div class="flex items-center gap-1.5">
         <span id="mode-hint" class="mr-auto text-[12px] text-neutral-500"></span>
-        <button type="button" id="send-steer" class="btn text-[13px]">Steer</button>
-        <button type="button" id="send-queue" class="btn text-[13px]">Queue</button>
+        <button type="button" id="stop" class="btn hidden text-[13px] text-red-600">Stop</button>
+        <button type="button" id="send-now" class="btn hidden text-[13px]">Send now</button>
         <button type="submit" id="send" class="btn btn-primary text-[13px]">Send</button>
       </div>
     </form>

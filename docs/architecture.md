@@ -76,6 +76,8 @@ export type SessionEventPayload =
   | { type: "turn-end"; text: string }        // full assistant text of the turn
   | { type: "state"; state: SessionState }
   | { type: "queued"; mode: "steer" | "followUp"; text: string }
+  // Authoritative pending-queue snapshot (emitted whenever it changes).
+  | { type: "queue-state"; steering: string[]; followUp: string[] }
   | { type: "error"; message: string };
 
 /** Stamped by core/hub.ts — seq is per-session monotonic. */
@@ -106,6 +108,8 @@ export interface AgentSession {
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;
+  /** Drop all pending queued messages and return them (for recall-to-composer). */
+  clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   prompt(text: string): Promise<void>;   // resolves when the turn settles
   steer(text: string): Promise<void>;    // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle

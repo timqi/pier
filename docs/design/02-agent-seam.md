@@ -28,8 +28,9 @@ structurally typed — no Pi imports) so it is unit-testable without Pi:
 - `message_update` text_delta → `text-delta`; thinking_delta → `thinking-delta`
 - `tool_execution_start` → `tool-start`; `tool_execution_end` → `tool-end`
   (output = joined text content of the result)
-- `queue_update` → dropped; `queued` is emitted by the router when the queue
-  policy defers a message
+- `queue_update` → `queue-state` snapshot (`steering`/`followUp` arrays);
+  `queued` is still emitted by the router when the queue policy defers a
+  message (IM/observability), but UIs should reconcile from `queue-state`
 - anything else → `[]` (dropped). Do NOT invent event types; extend
   architecture.md first if a new one is needed.
 

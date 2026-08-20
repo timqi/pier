@@ -35,6 +35,7 @@ type SessionEvent = { seq: number; ts: number; sessionId: string } & (
   | { type: "turn-end"; text: string }
   | { type: "state"; state: SessionState }
   | { type: "queued"; mode: "steer" | "followUp"; text: string }
+  | { type: "queue-state"; steering: string[]; followUp: string[] }
   | { type: "error"; message: string }
 );
 
@@ -74,6 +75,10 @@ const abortBtn = $("#abort");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const modelSelect = $<HTMLSelectElement>("#model-select");
 const knownProjects = $("#known-projects");
+const queuePanel = $("#queue-panel");
+const queueRows = $("#queue-rows");
+const sendNowBtn = $("#send-now");
+const stopBtn = $("#stop");
 
 // --- state ---------------------------------------------------------------------
 
@@ -179,13 +184,39 @@ function setState(state: SessionState): void {
 }
 
 function updateModeHint(): void {
-  if (currentState === "idle") {
-    modeHint.textContent = "idle — send starts a turn";
-  } else {
-    modeHint.textContent = input.value.startsWith("!")
-      ? "streaming — will steer"
-      : "streaming — will queue as follow-up";
-  }
+  const streaming = currentState === "streaming";
+  modeHint.textContent = streaming
+    ? "streaming — Send queues · Send now steers"
+    : "idle — send starts a turn";
+  sendNowBtn.classList.toggle("hidden", !streaming);
+  stopBtn.classList.toggle("hidden", !streaming);
+}
+
+// --- pending queue panel (avibe ChatQueueRow concept) -----------------------
+
+function renderQueue(steering: string[], followUp: string[]): void {
+  const rows = [
+    ...steering.map((text) => ({ mode: "steer", text })),
+    ...followUp.map((text) => ({ mode: "queued", text })),
+  ];
+  queuePanel.classList.toggle("hidden", rows.length === 0);
+  queuePanel.classList.toggle("flex", rows.length > 0);
+  queueRows.replaceChildren(
+    ...rows.map((r) => {
+      const li = h("li", "flex items-center gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-[13px]");
+      li.append(
+        h(
+          "span",
+          `flex-none rounded px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${
+            r.mode === "steer" ? "bg-indigo-100 text-indigo-700" : "bg-amber-100 text-amber-700"
+          }`,
+          r.mode,
+        ),
+        h("span", "truncate text-neutral-700", r.text),
+      );
+      return li;
+    }),
+  );
 }
 
 // --- chat bubbles ------------------------------------------------------------------
@@ -363,7 +394,11 @@ function handleEvent(e: SessionEvent): void {
       finalizeStreaming();
       break;
     case "queued":
-      appendTurn("queued", `[${e.mode}] ${e.text}`);
+      // The queue panel (fed by queue-state snapshots) is the pending view;
+      // nothing to render in the transcript until delivery.
+      break;
+    case "queue-state":
+      renderQueue(e.steering, e.followUp);
       break;
     case "error":
       if (activity) activity.sawError = true;
@@ -376,6 +411,7 @@ function handleEvent(e: SessionEvent): void {
         finishActivity("interrupted");
         finalizeStreaming();
       }
+      if (e.state === "idle") renderQueue([], []); // delivered or dropped
       setState(e.state);
       break;
   }
@@ -394,6 +430,7 @@ async function select(id: string): Promise<void> {
   currentId = id;
   source?.close();
   turnsPane.replaceChildren();
+  renderQueue([], []);
   streamingEl = null;
   activity = null;
   turnOpen = false;
@@ -448,18 +485,35 @@ modelSelect.onchange = async () => {
   if (!res.ok) appendTurn("error", `model change failed: ${res.status}`);
 };
 
-async function send(mode: "auto" | "steer" | "followUp"): Promise<void> {
+async function send(mode: "auto" | "steer"): Promise<void> {
   const text = input.value.trim();
   if (!text || !currentId) return;
   input.value = "";
   updateModeHint();
-  appendTurn("user", text); // optimistic; queue/error states arrive via SSE
-  scrollBottom(true);
+  // Optimistic: an idle send (or a steer) reads as a user turn; a queued send
+  // shows up in the queue panel via the queue-state snapshot instead.
+  if (currentState === "idle" || mode === "steer") {
+    appendTurn("user", text);
+    scrollBottom(true);
+  }
   await fetch(`/api/sessions/${currentId}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text, mode }),
   });
+}
+
+async function recallQueue(): Promise<void> {
+  if (!currentId) return;
+  const res = await fetch(`/api/sessions/${currentId}/queue/recall`, { method: "POST" });
+  if (!res.ok) return;
+  const { messages } = (await res.json()) as { messages: string[] };
+  // Append (not replace) so an existing draft isn't clobbered — avibe recall rule.
+  if (messages.length) {
+    input.value = [input.value.trim(), ...messages].filter(Boolean).join("\n");
+    input.focus();
+  }
+  renderQueue([], []);
 }
 
 // --- wiring ----------------------------------------------------------------------------
@@ -481,16 +535,21 @@ $<HTMLFormElement>("#new-form").onsubmit = async () => {
   await select(id);
   input.focus();
 };
-abortBtn.onclick = () =>
+const abort = () =>
   currentId && fetch(`/api/sessions/${currentId}/abort`, { method: "POST" });
-$("#send-steer").onclick = () => void send("steer");
-$("#send-queue").onclick = () => void send("followUp");
+abortBtn.onclick = abort;
+stopBtn.onclick = abort;
+sendNowBtn.onclick = () => void send("steer");
+$("#queue-recall").onclick = () => void recallQueue();
 $<HTMLFormElement>("#composer").onsubmit = (ev) => {
   ev.preventDefault();
   void send("auto");
 };
 input.oninput = updateModeHint;
 input.onkeydown = (ev) => {
+  // IME guard: Enter that confirms a composition candidate must not send
+  // (isComposing covers modern browsers; 229 covers stragglers).
+  if (ev.isComposing || ev.keyCode === 229) return;
   if (ev.key === "Enter" && !ev.shiftKey) {
     ev.preventDefault();
     void send("auto");

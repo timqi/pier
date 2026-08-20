@@ -54,6 +54,10 @@ class PiSession implements AgentSession {
     return curated;
   }
 
+  async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    return this.pi.clearQueue();
+  }
+
   async history(): Promise<ChatTurn[]> {
     const turns: ChatTurn[] = [];
     for (const m of this.pi.messages as PiMessage[]) {

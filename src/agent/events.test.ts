@@ -72,9 +72,14 @@ describe("toSessionEvents", () => {
       expected: [{ type: "tool-end", toolCallId: "t1", isError: false, output: "a.txt\nb.txt" }],
     },
     {
-      name: "queue_update is dropped (router emits queued)",
+      name: "queue_update → queue-state snapshot",
+      input: { type: "queue_update", steering: ["a"], followUp: ["b", "c"] },
+      expected: [{ type: "queue-state", steering: ["a"], followUp: ["b", "c"] }],
+    },
+    {
+      name: "queue_update with empty queues",
       input: { type: "queue_update" },
-      expected: [],
+      expected: [{ type: "queue-state", steering: [], followUp: [] }],
     },
     {
       name: "unknown events are dropped",

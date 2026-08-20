@@ -44,6 +44,10 @@ function fakeSession(id: string): AgentSession & {
     steer: async (t: string) => void calls.push(`steer:${t}`),
     followUp: async (t: string) => void calls.push(`followUp:${t}`),
     abort: async () => void calls.push("abort"),
+    clearQueue: async () => {
+      calls.push("clearQueue");
+      return { steering: ["s-msg"], followUp: ["f-msg"] };
+    },
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -198,6 +202,14 @@ describe("workbench server", () => {
       body: JSON.stringify({ text: "   " }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("recalls the pending queue", async () => {
+    const { app, session } = setup();
+    const res = await app.request("/api/sessions/s1/queue/recall", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ messages: ["s-msg", "f-msg"] });
+    expect(session.calls).toContain("clearQueue");
   });
 
   it("aborts via the router", async () => {

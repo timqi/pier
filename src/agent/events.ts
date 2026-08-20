@@ -25,6 +25,8 @@ export interface PiEvent {
   args?: unknown;
   isError?: boolean;
   result?: { content?: TextPart[] };
+  steering?: readonly string[];
+  followUp?: readonly string[];
 }
 
 export function textOf(content: string | TextPart[] | undefined): string {
@@ -77,6 +79,14 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
           toolCallId: e.toolCallId ?? "",
           toolName: e.toolName ?? "",
           args: e.args,
+        },
+      ];
+    case "queue_update":
+      return [
+        {
+          type: "queue-state",
+          steering: [...(e.steering ?? [])],
+          followUp: [...(e.followUp ?? [])],
         },
       ];
     case "tool_execution_end":

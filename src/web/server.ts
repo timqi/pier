@@ -90,6 +90,18 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
     return c.json({ sessionId }, 202);
   });
 
+  // Recall: drop all pending queued messages and hand them back (composer restore).
+  app.post("/api/sessions/:id/queue/recall", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      const { steering, followUp } = await session.clearQueue();
+      return c.json({ messages: [...steering, ...followUp] });
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
   app.post("/api/sessions/:id/abort", async (c) => {
     const id = c.req.param("id");
     await router.abort(id);
