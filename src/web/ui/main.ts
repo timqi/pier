@@ -19,6 +19,7 @@ import type {
   ModelRef,
   SessionEvent,
   SessionState,
+  ThinkingLevel,
   TurnMeta,
   WorkspaceEvent,
 } from "../../core/types.js";
@@ -31,6 +32,11 @@ interface SessionSnapshot {
   state: SessionState;
   context: ContextUsage | null;
   queue: { steering: string[]; followUp: string[] };
+}
+
+interface ThinkingResponse {
+  level: ThinkingLevel;
+  levels: ThinkingLevel[];
 }
 
 declare const __PIER_VERSION__: string; // injected by vite.config.ts
@@ -879,18 +885,25 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
 }
 
 async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
-  const res = await fetch(`/api/sessions/${id}/models`);
-  if (!res.ok) return;
-  const models = (await res.json()) as ModelRef[];
+  const [modelsRes, thinkingRes] = await Promise.all([
+    fetch(`/api/sessions/${id}/models`),
+    fetch(`/api/sessions/${id}/thinking`),
+  ]);
+  if (!modelsRes.ok || !thinkingRes.ok) return;
+  const models = (await modelsRes.json()) as ModelRef[];
+  const thinking = (await thinkingRes.json()) as ThinkingResponse;
   openPanel(
     anchor,
     modelPicker({
       models,
       current: id === currentId ? currentModel : null,
+      thinkingLevel: thinking.level,
+      thinkingLevels: thinking.levels,
       onPick: (m) => {
         closeMenu();
         void setModel(id, m);
       },
+      onThinkingPick: (level) => void setThinkingLevel(id, level),
     }),
   );
 }
@@ -914,6 +927,15 @@ async function setModel(id: string, model: ModelRef): Promise<void> {
     currentModel = applied;
     renderHeader();
   }
+}
+
+async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void> {
+  const res = await fetch(`/api/sessions/${id}/thinking`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ level }),
+  });
+  if (!res.ok) appendTurn("error", `reasoning change failed: ${res.status}`);
 }
 
 function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {

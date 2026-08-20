@@ -16,6 +16,7 @@ import type {
   ModelRef,
   SessionEventPayload,
   SessionState,
+  ThinkingLevel,
   TurnMeta,
 } from "../core/types.js";
 import {
@@ -46,6 +47,10 @@ class PiSession implements AgentSession {
     return m ? { provider: m.provider, id: m.id } : undefined;
   }
 
+  get thinkingLevel(): ThinkingLevel {
+    return this.pi.thinkingLevel;
+  }
+
   get contextUsage(): ContextUsage | undefined {
     const u = this.pi.getContextUsage();
     return u ? { tokens: u.tokens, contextWindow: u.contextWindow } : undefined;
@@ -69,6 +74,14 @@ class PiSession implements AgentSession {
       curated.unshift(current);
     }
     return curated;
+  }
+
+  availableThinkingLevels(): ThinkingLevel[] {
+    return this.pi.getAvailableThinkingLevels();
+  }
+
+  setThinkingLevel(level: ThinkingLevel): void {
+    this.pi.setThinkingLevel(level);
   }
 
   async pendingQueue(): Promise<{ steering: string[]; followUp: string[] }> {

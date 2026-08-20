@@ -107,17 +107,22 @@ export interface ModelRef {
   id: string;
 }
 
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {
   readonly id: string;
   readonly state: SessionState;
   readonly model: ModelRef | undefined;
+  readonly thinkingLevel: ThinkingLevel;
   readonly contextUsage: ContextUsage | undefined;
   /** Completed turns of the persisted transcript (no partial streaming). */
   history(): Promise<ChatTurn[]>;
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;
+  availableThinkingLevels(): ThinkingLevel[];
+  setThinkingLevel(level: ThinkingLevel): void;
   /** Pending queue as-is, for snapshotting a session into a fresh client. */
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** Drop all pending queued messages and return them (for recall-to-composer). */

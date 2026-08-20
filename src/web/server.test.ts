@@ -4,7 +4,18 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, AgentSession, ChatTurn, ConfigScope, ConfigStore, ImageAttachment, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
+import type {
+  AgentFactory,
+  AgentSession,
+  ChatTurn,
+  ConfigScope,
+  ConfigStore,
+  ImageAttachment,
+  ModelRef,
+  SessionEventPayload,
+  SessionState,
+  ThinkingLevel,
+} from "../core/types.js";
 import { PinStore } from "./pins.js";
 import { createServer } from "./server.js";
 
@@ -16,6 +27,7 @@ function fakeSession(id: string): AgentSession & {
 } {
   let state: SessionState = "idle";
   let model: ModelRef = { provider: "anthropic", id: "claude-opus-4-5" };
+  let thinkingLevel: ThinkingLevel = "medium";
   const listeners = new Set<(e: SessionEventPayload) => void>();
   const calls: string[] = [];
   return {
@@ -27,6 +39,14 @@ function fakeSession(id: string): AgentSession & {
       if (m.id === "nope") throw new Error("unknown model");
       model = m;
       calls.push(`setModel:${m.provider}/${m.id}`);
+    },
+    get thinkingLevel() {
+      return thinkingLevel;
+    },
+    availableThinkingLevels: () => ["off", "low", "medium", "high"],
+    setThinkingLevel: (level: ThinkingLevel) => {
+      thinkingLevel = level;
+      calls.push(`setThinkingLevel:${level}`);
     },
     contextUsage: { tokens: 1200, contextWindow: 200_000 },
     availableModels: async (): Promise<ModelRef[]> => [
@@ -308,6 +328,28 @@ describe("workbench server", () => {
     expect(session.calls).toContain("setModel:openai/gpt-5.2");
     expect((await post({ provider: "x" })).status).toBe(400);
     expect((await post({ provider: "x", id: "nope" })).status).toBe(400);
+  });
+
+  it("reports and changes the reasoning level, rejecting invalid levels", async () => {
+    const { app, session } = setup();
+    const get = await app.request("/api/sessions/s1/thinking");
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual({
+      level: "medium",
+      levels: ["off", "low", "medium", "high"],
+    });
+
+    const post = (body: unknown) =>
+      app.request("/api/sessions/s1/thinking", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const ok = await post({ level: "low" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ level: "low" });
+    expect(session.calls).toContain("setThinkingLevel:low");
+    expect((await post({ level: "extreme" })).status).toBe(400);
   });
 
   it("routes messages through the queue policy", async () => {

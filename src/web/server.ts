@@ -12,6 +12,7 @@ import type {
   ConfigStore,
   ImageAttachment,
   InboundMessage,
+  ThinkingLevel,
 } from "../core/types.js";
 import type { PinStore } from "./pins.js";
 
@@ -24,6 +25,7 @@ export interface WebDeps {
 }
 
 const HEARTBEAT_MS = 15_000;
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const MAX_IMAGES = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
 
@@ -173,6 +175,19 @@ export function createServer({ factory, router, hub, pins, config }: WebDeps): H
     }
   });
 
+  app.get("/api/sessions/:id/thinking", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      return c.json({
+        level: session.thinkingLevel,
+        levels: session.availableThinkingLevels(),
+      });
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
   app.post("/api/sessions/:id/model", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
@@ -183,6 +198,21 @@ export function createServer({ factory, router, hub, pins, config }: WebDeps): H
       const session = await router.ensure({ channelId: "web", conversationId: id });
       await session.setModel({ provider: body.provider, id: body.id });
       return c.json({ model: session.model });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  app.post("/api/sessions/:id/thinking", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body.level !== "string" || !THINKING_LEVELS.has(body.level)) {
+      return c.json({ error: "valid thinking level required" }, 400);
+    }
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      session.setThinkingLevel(body.level as ThinkingLevel);
+      return c.json({ level: session.thinkingLevel });
     } catch (err) {
       return c.json({ error: String(err) }, 400);
     }
