@@ -183,16 +183,19 @@ function setState(state: SessionState): void {
   if (state === "idle") void refreshSessions();
 }
 
-/** One composer row: state chip + contextual buttons (Send ↔ Queue label). */
+/** Composer toolbar: subtle state indicator + contextual buttons. */
 function updateComposer(): void {
   const streaming = currentState === "streaming";
-  stateChip.textContent = currentState;
+  stateChip.replaceChildren(
+    h(
+      "span",
+      `h-1.5 w-1.5 flex-none rounded-full ${streaming ? "bg-green-500 animate-pulse" : "bg-neutral-300"}`,
+    ),
+    h("span", streaming ? "text-green-700" : "", streaming ? "streaming" : "idle"),
+  );
   stateChip.title = streaming
     ? "streaming — Queue defers · Send now steers · Stop aborts"
     : "idle — send starts a turn";
-  stateChip.className = `mb-1 flex-none rounded-full px-2 py-0.5 text-[12px] ${
-    streaming ? "bg-green-100 text-green-700" : "bg-neutral-100 text-neutral-500"
-  }`;
   sendBtn.textContent = streaming ? "Queue" : "Send";
   sendNowBtn.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("hidden", !streaming);

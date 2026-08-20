@@ -28,19 +28,27 @@
       </div>
       <ul id="queue-rows" class="flex flex-col gap-1"></ul>
     </div>
-    <div id="image-strip" class="hidden gap-2 border-t border-neutral-200 px-3 pt-2"></div>
-    <form id="composer" class="flex items-end gap-1.5 border-t border-neutral-200 p-3">
-      <button type="button" id="attach" title="Attach image (or paste / drop)"
-        class="btn mb-0.5 flex-none px-2 text-[15px] leading-none">+</button>
-      <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
-      <textarea id="input" rows="2"
-        class="min-w-0 flex-1 resize-y rounded-lg border border-neutral-300 px-2.5 py-2 focus:border-indigo-400 focus:outline-none"
-        placeholder="Message…"></textarea>
-      <span id="state-chip" title="idle — send starts a turn"
-        class="mb-1 flex-none rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] text-neutral-500">idle</span>
-      <button type="button" id="stop" class="btn mb-0.5 hidden text-[13px] text-red-600">Stop</button>
-      <button type="button" id="send-now" class="btn mb-0.5 hidden text-[13px]">Send now</button>
-      <button type="submit" id="send" class="btn btn-primary mb-0.5 text-[13px]">Send</button>
+    <form id="composer" class="border-t border-neutral-200 p-3">
+      <div class="rounded-xl border border-neutral-300 bg-white transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
+        <div id="image-strip" class="hidden flex-wrap gap-2 px-3 pt-2.5"></div>
+        <textarea id="input" rows="2"
+          class="block w-full resize-none bg-transparent px-3 py-2.5 focus:outline-none"
+          placeholder="Message…"></textarea>
+        <div class="flex items-center gap-2 px-2 pb-2">
+          <button type="button" id="attach" title="Attach image (or paste / drop)"
+            class="flex h-7 w-7 flex-none items-center justify-center rounded-md text-[17px] leading-none text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">+</button>
+          <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
+          <span id="state-chip" class="flex items-center gap-1.5 text-[12px] text-neutral-400"></span>
+          <div class="ml-auto flex items-center gap-1">
+            <button type="button" id="stop"
+              class="hidden rounded-lg px-2.5 py-1 text-[13px] text-red-600 hover:bg-red-50">Stop</button>
+            <button type="button" id="send-now"
+              class="hidden rounded-lg px-2.5 py-1 text-[13px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700">Send now</button>
+            <button type="submit" id="send"
+              class="rounded-lg bg-indigo-600 px-3.5 py-1 text-[13px] font-medium text-white hover:bg-indigo-500 active:bg-indigo-700">Send</button>
+          </div>
+        </div>
+      </div>
     </form>
   </main>
 
