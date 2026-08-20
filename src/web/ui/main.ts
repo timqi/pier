@@ -5,9 +5,18 @@
 import "./style.css";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+// Type-only import of the seam contract — erased at build, keeps the wire
+// shapes single-sourced in core/types.ts instead of hand-copied here.
+import type {
+  ChatTurn,
+  ImageAttachment,
+  ModelRef,
+  SessionEvent,
+  SessionState,
+  TurnMeta,
+} from "../../core/types.js";
 
-type SessionState = "idle" | "streaming";
-
+/** GET /api/sessions row: AgentFactory.list() entry + live state. */
 interface SessionInfo {
   id: string;
   cwd: string;
@@ -15,41 +24,6 @@ interface SessionInfo {
   title?: string;
   state: SessionState;
 }
-
-interface ChatTurn {
-  role: "user" | "assistant";
-  text: string;
-  meta?: TurnMeta;
-}
-
-interface TurnMeta {
-  completedAt: number; // ms epoch
-  durationMs: number;
-  tokens: number; // cumulative session tokens at completion
-}
-
-interface ModelRef {
-  provider: string;
-  id: string;
-}
-
-interface ImageAttachment {
-  data: string; // base64, no data: prefix
-  mimeType: string;
-}
-
-type SessionEvent = { seq: number; ts: number; sessionId: string } & (
-  | { type: "turn-start" }
-  | { type: "text-delta"; text: string }
-  | { type: "thinking-delta"; text: string }
-  | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool-end"; toolCallId: string; isError: boolean; output: string }
-  | { type: "turn-end"; text: string; meta?: TurnMeta }
-  | { type: "state"; state: SessionState }
-  | { type: "queued"; mode: "steer" | "followUp"; text: string }
-  | { type: "queue-state"; steering: string[]; followUp: string[] }
-  | { type: "error"; message: string }
-);
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);

@@ -36,15 +36,18 @@ Activity groups):
   "New session" dialog with cwd input + known-project suggestions.
 - **Chat header**: title, cwd, model picker (switches the session's model),
   state badge, abort while streaming.
-- **Chat** (center): rendered turns; streaming text appended from
-  `text-delta`. Composer semantics: **Send** = `mode:"auto"` (idle starts a
+- **Chat** (center): Slack-style full-width rows, no bubbles — user turns
+  carry an indigo accent bar + tint, agent turns stay plain; consecutive
+  same-sender rows group tighter. Agent rows show a hover meta chip
+  (completion time · duration · cumulative tokens) from `turn-end.meta` /
+  history `meta`. Streaming text appended from `text-delta`. Composer semantics: **Send** = `mode:"auto"` (idle starts a
   turn; streaming queues as follow-up), **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends; Enter
   during IME composition never sends (`isComposing`/229 guard). A pending
   **queue panel** above the composer renders `queue-state` snapshots with
   mode chips and a "Recall all" action that clears the queue back into the
   composer (append, never clobber the draft).
-- **Activity groups** (in-chat): one collapsible bubble per turn collects
+- **Activity groups** (in-chat): one collapsible group per turn collects
   thinking + tool activity (avibe AgentActivityGroup concept): status icon
   (spinner/✓/✕/⏸) + rotating chevron, step count, duration, latest step in
   the headline while running. Each step is its own expandable details row:
@@ -53,7 +56,7 @@ Activity groups):
   Idle-without-turn-end marks the group interrupted.
 - **Images**: paste, drag-drop, or attach via the `+` button → pending
   thumbnail strip (removable) above the composer; sent as base64 attachments
-  and rendered in the optimistic user bubble. History shows `[n images]`
+  and rendered in the optimistic user row. History shows `[n images]`
   markers (pi transcripts aren't re-served as binaries).
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
@@ -75,7 +78,7 @@ never duplicate history.
 - Assistant content renders as markdown (`marked` + DOMPurify sanitization,
   `@tailwindcss/typography` for prose styling). Streamed text stays plain
   while in flight and is markdown-rendered when the block finalizes
-  (tool-start or turn-end). User/queued/error bubbles stay plain text.
+  (tool-start or turn-end). User/error rows stay plain text.
 
 ## Tests
 

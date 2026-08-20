@@ -17,11 +17,11 @@ import type {
   SessionState,
   TurnMeta,
 } from "../core/types.js";
+import { textOf, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
+import { curateModels } from "./models.js";
 
 const toImageContent = (images?: ImageAttachment[]) =>
   images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
-import { textOf, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
-import { curateModels } from "./models.js";
 
 class PiSession implements AgentSession {
   constructor(private readonly pi: PiAgentSession) {}
