@@ -1,6 +1,7 @@
 // Wiring only — no logic lives here. See docs/architecture.md.
 
 import { serve } from "@hono/node-server";
+import { PiConfigStore } from "./agent/config.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { EventHub } from "./core/hub.js";
 import { Router } from "./core/router.js";
@@ -14,7 +15,13 @@ const router = new Router(hub, (key) => {
   if (key.channelId === "web") return factory.resume(key.conversationId);
   return factory.create({ cwd: process.cwd() });
 });
-const app = createServer({ factory, router, hub, pins: new PinStore() });
+const app = createServer({
+  factory,
+  router,
+  hub,
+  pins: new PinStore(),
+  config: new PiConfigStore(),
+});
 
 const port = Number(process.env.PORT ?? 3141);
 serve({ fetch: app.fetch, port }, () => {

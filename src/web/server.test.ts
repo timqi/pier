@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, AgentSession, ChatTurn, ImageAttachment, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
+import type { AgentFactory, AgentSession, ChatTurn, ConfigScope, ConfigStore, ImageAttachment, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
 import { PinStore } from "./pins.js";
 import { createServer } from "./server.js";
 
@@ -69,6 +69,35 @@ function fakeSession(id: string): AgentSession & {
   };
 }
 
+/** Scripted ConfigStore — records calls, echoes canned content. */
+function fakeConfig(): ConfigStore & { calls: string[] } {
+  const calls: string[] = [];
+  const at = (s: ConfigScope) => (s.kind === "global" ? "global" : s.cwd);
+  return {
+    calls,
+    listFiles: async (s) => {
+      calls.push(`listFiles:${at(s)}`);
+      return [{ name: "SYSTEM.md", exists: true }];
+    },
+    readFile: async (s, name) => {
+      calls.push(`read:${at(s)}/${name}`);
+      if (name === "nope.md") throw new Error("not an editable config file");
+      return "content";
+    },
+    writeFile: async (s, name, content) => {
+      calls.push(`write:${at(s)}/${name}=${content}`);
+    },
+    listResources: async (s) => {
+      calls.push(`listResources:${at(s)}`);
+      return { extensions: ["quiet.ts"], skills: [] };
+    },
+    readResource: async (s, kind, name) => {
+      calls.push(`resource:${at(s)}/${kind}/${name}`);
+      return "// ext";
+    },
+  };
+}
+
 function setup() {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
@@ -80,8 +109,9 @@ function setup() {
   const router = new Router(hub, () => factory.resume("s1"));
   // Hermetic: pins land in a throwaway dir, never the real $HOME.
   const pins = new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json"));
-  const app = createServer({ factory, router, hub, pins });
-  return { app, session, factory, hub, router, pins };
+  const config = fakeConfig();
+  const app = createServer({ factory, router, hub, pins, config });
+  return { app, session, factory, hub, router, pins, config };
 }
 
 describe("workbench server", () => {
@@ -92,6 +122,36 @@ describe("workbench server", () => {
     expect(await res.json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false },
     ]);
+  });
+
+  it("lists a created session before Pi persists it, without duplicating later", async () => {
+    const session = fakeSession("s2");
+    const listed: { id: string; cwd: string; createdAt: number }[] = [];
+    const factory: AgentFactory = {
+      create: vi.fn(async () => session),
+      resume: vi.fn(async () => session),
+      list: vi.fn(async () => listed),
+    };
+    const hub = new EventHub();
+    const app = createServer({
+      factory,
+      router: new Router(hub, () => factory.resume("s2")),
+      hub,
+      pins: new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+      config: fakeConfig(),
+    });
+    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
+
+    // Not on disk yet — the nascent entry fills the gap.
+    let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
+    expect(rows).toEqual([
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: true },
+    ]);
+
+    // Pi persisted it — the real row wins, no duplicate.
+    listed.push({ id: "s2", cwd: "/tmp", createdAt: 1 });
+    rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
+    expect(rows).toEqual([{ id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", pinned: true }]);
   });
 
   it("pins sessions created here, and toggles pins on demand", async () => {
@@ -163,9 +223,51 @@ describe("workbench server", () => {
       router,
       hub,
       pins: new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+      config: fakeConfig(),
     });
     const res = await app.request("/api/sessions/nope/history");
     expect(res.status).toBe(404);
+  });
+
+  it("serves config for the global scope and known project cwds only", async () => {
+    const { app, config } = setup();
+    const globalRes = await app.request("/api/config");
+    expect(globalRes.status).toBe(200);
+    expect(await globalRes.json()).toEqual({
+      files: [{ name: "SYSTEM.md", exists: true }],
+      resources: { extensions: ["quiet.ts"], skills: [] },
+    });
+    // /tmp is a session cwd (factory.list); anything else is rejected.
+    expect((await app.request("/api/config?scope=/tmp")).status).toBe(200);
+    expect((await app.request("/api/config?scope=/etc")).status).toBe(400);
+    expect(config.calls).toContain("listFiles:/tmp");
+  });
+
+  it("reads and writes config files, surfacing store errors as 400", async () => {
+    const { app, config } = setup();
+    const read = await app.request("/api/config/files/SYSTEM.md?scope=/tmp");
+    expect(await read.json()).toEqual({ content: "content" });
+    const write = await app.request("/api/config/files/SYSTEM.md", {
+      method: "PUT",
+      body: JSON.stringify({ content: "new" }),
+    });
+    expect(write.status).toBe(200);
+    expect(config.calls).toContain("write:global/SYSTEM.md=new");
+    expect((await app.request("/api/config/files/nope.md")).status).toBe(400);
+    const noBody = await app.request("/api/config/files/SYSTEM.md", {
+      method: "PUT",
+      body: "{}",
+    });
+    expect(noBody.status).toBe(400);
+  });
+
+  it("serves read-only resources and validates kind", async () => {
+    const { app, config } = setup();
+    const ok = await app.request("/api/config/resource?kind=extensions&name=quiet.ts");
+    expect(await ok.json()).toEqual({ content: "// ext" });
+    expect(config.calls).toContain("resource:global/extensions/quiet.ts");
+    expect((await app.request("/api/config/resource?kind=themes&name=x")).status).toBe(400);
+    expect((await app.request("/api/config/resource?kind=skills")).status).toBe(400);
   });
 
   it("SSE honors the after query param", async () => {

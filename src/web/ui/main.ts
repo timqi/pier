@@ -5,6 +5,7 @@
 import "./style.css";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
@@ -61,6 +62,10 @@ const compact = (n: number): string =>
 // --- static elements ---------------------------------------------------------
 
 const projectTree = $("#project-tree");
+const chatHeader = $("#chat-header");
+const composer = $<HTMLFormElement>("#composer");
+const consoleSection = $<HTMLDetailsElement>("#console-section");
+const openConfigBtn = $("#open-config");
 const archiveDialog = $<HTMLDialogElement>("#archive-dialog");
 const archiveList = $("#archive-list");
 const archiveSearch = $<HTMLInputElement>("#archive-search");
@@ -280,13 +285,8 @@ function renderArchive(): void {
   );
 }
 
-/** Sessions created here that Pi doesn't list yet (persisted on first message). */
-const fresh = new Map<string, SessionInfo>();
-
 async function refreshSessions(): Promise<void> {
-  const listed = (await (await fetch("/api/sessions")).json()) as SessionInfo[];
-  for (const s of listed) fresh.delete(s.id);
-  sessions = [...fresh.values(), ...listed];
+  sessions = (await (await fetch("/api/sessions")).json()) as SessionInfo[];
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
 }
@@ -695,9 +695,32 @@ function connect(id: string, after: number): void {
   source.onmessage = (m) => handleEvent(JSON.parse(m.data) as SessionEvent);
 }
 
+// --- view switching (chat ↔ Console views) -----------------------------------
+// The config view hides the chat elements but leaves the session wiring
+// (SSE, state) untouched — switching back is instant.
+
+const chatEls = [chatHeader, turnsPane, queuePanel, composer];
+const configView = createConfigView($("#config-view"), () =>
+  [...groupByCwd(sessions).keys()],
+);
+
+function showConfig(): void {
+  for (const el of chatEls) el.classList.add("hidden");
+  openConfigBtn.classList.add("bg-indigo-50");
+  configView.show();
+}
+
+function showChat(): void {
+  if (!configView.visible) return;
+  configView.hide();
+  openConfigBtn.classList.remove("bg-indigo-50");
+  for (const el of chatEls) el.classList.remove("hidden");
+}
+
 // --- selection & sending --------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
+  showChat();
   if (id === currentId) return;
   currentId = id;
   source?.close();
@@ -932,6 +955,10 @@ async function recallQueue(): Promise<void> {
 
 // --- wiring ----------------------------------------------------------------------------
 
+openConfigBtn.onclick = () => showConfig();
+consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
+consoleSection.ontoggle = () =>
+  localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");
 $("#new-session").onclick = () => {
   $<HTMLInputElement>("#new-cwd").value = "";
   newDialog.showModal();
@@ -958,9 +985,6 @@ $<HTMLFormElement>("#new-form").onsubmit = async () => {
     return;
   }
   const { id } = (await res.json()) as { id: string };
-  // Insert into Projects immediately (the server pins web-created sessions);
-  // waiting for Pi's list would leave the session invisible until turn one ends.
-  fresh.set(id, { id, cwd, createdAt: Date.now(), state: "idle", pinned: true });
   await refreshSessions();
   await select(id);
   input.focus();

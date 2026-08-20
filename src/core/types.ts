@@ -131,6 +131,28 @@ export interface AgentSession {
   dispose(): Promise<void>;
 }
 
+/** Where agent configuration lives: Pi's global dir or a project checkout. */
+export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
+
+export type ConfigResourceKind = "extensions" | "skills";
+
+/**
+ * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
+ * browsing. Changes apply to sessions created afterwards — Pi reads these
+ * files at session start, never mid-run.
+ */
+export interface ConfigStore {
+  /** The scope's editable files (fixed whitelist; missing files included). */
+  listFiles(scope: ConfigScope): Promise<{ name: string; exists: boolean }[]>;
+  /** Whitelisted file content, "" if absent. Secrets arrive masked. */
+  readFile(scope: ConfigScope, name: string): Promise<string>;
+  /** Masked secrets that come back unchanged keep their stored value. */
+  writeFile(scope: ConfigScope, name: string, content: string): Promise<void>;
+  /** Relative file paths under each resource dir (read-only surface). */
+  listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, string[]>>;
+  readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string>;
+}
+
 export interface AgentFactory {
   create(opts: { cwd: string }): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;

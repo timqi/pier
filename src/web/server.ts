@@ -6,7 +6,13 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, ImageAttachment, InboundMessage } from "../core/types.js";
+import type {
+  AgentFactory,
+  ConfigScope,
+  ConfigStore,
+  ImageAttachment,
+  InboundMessage,
+} from "../core/types.js";
 import type { PinStore } from "./pins.js";
 
 export interface WebDeps {
@@ -14,6 +20,7 @@ export interface WebDeps {
   router: Router;
   hub: EventHub;
   pins: PinStore;
+  config: ConfigStore;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -40,13 +47,75 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
   return images;
 }
 
-export function createServer({ factory, router, hub, pins }: WebDeps): Hono {
+export function createServer({ factory, router, hub, pins, config }: WebDeps): Hono {
   const app = new Hono();
+
+  // Scope comes from the client as "global" or a project cwd; only cwds Pi
+  // already knows (the session list) are accepted — never an arbitrary path.
+  const parseScope = async (raw: string | undefined): Promise<ConfigScope | null> => {
+    if (!raw || raw === "global") return { kind: "global" };
+    const known = await factory.list();
+    return known.some((s) => s.cwd === raw) ? { kind: "project", cwd: raw } : null;
+  };
+
+  app.get("/api/config", async (c) => {
+    const scope = await parseScope(c.req.query("scope"));
+    if (!scope) return c.json({ error: "unknown scope" }, 400);
+    return c.json({
+      files: await config.listFiles(scope),
+      resources: await config.listResources(scope),
+    });
+  });
+
+  app.get("/api/config/files/:name", async (c) => {
+    const scope = await parseScope(c.req.query("scope"));
+    if (!scope) return c.json({ error: "unknown scope" }, 400);
+    try {
+      return c.json({ content: await config.readFile(scope, c.req.param("name")) });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  app.put("/api/config/files/:name", async (c) => {
+    const scope = await parseScope(c.req.query("scope"));
+    if (!scope) return c.json({ error: "unknown scope" }, 400);
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.content !== "string") return c.json({ error: "content required" }, 400);
+    try {
+      await config.writeFile(scope, c.req.param("name"), body.content);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  // Resource names may contain slashes — query params, not path params.
+  app.get("/api/config/resource", async (c) => {
+    const scope = await parseScope(c.req.query("scope"));
+    if (!scope) return c.json({ error: "unknown scope" }, 400);
+    const kind = c.req.query("kind");
+    const name = c.req.query("name");
+    if ((kind !== "extensions" && kind !== "skills") || !name) {
+      return c.json({ error: "kind and name required" }, 400);
+    }
+    try {
+      return c.json({ content: await config.readResource(scope, kind, name) });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  // Sessions created here that Pi doesn't list yet — it persists a session
+  // only once the first assistant message lands. Merged into the list below
+  // so every client sees a new session immediately; dropped once Pi lists it.
+  const nascent = new Map<string, { cwd: string; createdAt: number }>();
 
   app.get("/api/sessions", async (c) => {
     const sessions = await factory.list();
+    for (const s of sessions) nascent.delete(s.id);
     return c.json(
-      sessions.map((s) => ({
+      [...[...nascent].map(([id, n]) => ({ id, ...n })), ...sessions].map((s) => ({
         ...s,
         state: router.stateOf(s.id) ?? "idle",
         pinned: pins.has(s.id),
@@ -59,6 +128,7 @@ export function createServer({ factory, router, hub, pins }: WebDeps): Hono {
     // A session always starts in its project directory — never in pier's own.
     if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
     const session = await factory.create({ cwd: body.cwd });
+    nascent.set(session.id, { cwd: body.cwd, createdAt: Date.now() });
     router.attach({ channelId: "web", conversationId: session.id }, session);
     // Created here = part of the workspace; pinning is what Projects lists.
     pins.set(session.id, true);

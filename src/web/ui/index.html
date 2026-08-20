@@ -10,6 +10,15 @@
     <header class="flex items-center justify-between gap-2 px-3 py-2">
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
     </header>
+    <details id="console-section" open class="flex-none border-b border-neutral-200/70">
+      <summary class="flex cursor-pointer select-none items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 hover:bg-neutral-100">
+        <span class="chev">▶</span>Console
+      </summary>
+      <ul class="pb-1 text-[13.5px]">
+        <li><button type="button" id="open-config"
+          class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Configuration</button></li>
+      </ul>
+    </details>
     <div class="flex items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
       Projects
       <button type="button" id="open-archive" title="Search all sessions"
@@ -34,7 +43,8 @@
   </aside>
 
   <main class="flex min-w-0 flex-col overflow-hidden">
-    <header class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
+    <section id="config-view" class="hidden min-h-0 flex-1 flex-col"></section>
+    <header id="chat-header" class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
       <span id="chat-title" class="truncate font-medium"></span>
       <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
         class="icon-btn ml-auto">⋯</button>
