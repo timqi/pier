@@ -41,8 +41,8 @@ Per-step specs: `docs/design/01-skeleton.md`, `02-agent-seam.md`,
 ## Status
 
 - [x] 1. Skeleton
-- [ ] 2. Agent seam
-- [ ] 3. Web workbench v1
+- [x] 2. Agent seam
+- [x] 3. Web workbench v1 (manual browser check pending: steering live, SSE reconnect)
 - [ ] 4. Telegram channel
 - [ ] 5. Scheduler
 - [ ] 6. Show pages

@@ -67,7 +67,7 @@ export interface Channel {
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */
-export type SessionEvent = { seq: number; ts: number; sessionId: string } & (
+export type SessionEventPayload =
   | { type: "turn-start" }
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
@@ -76,8 +76,11 @@ export type SessionEvent = { seq: number; ts: number; sessionId: string } & (
   | { type: "turn-end"; text: string }        // full assistant text of the turn
   | { type: "state"; state: SessionState }
   | { type: "queued"; mode: "steer" | "followUp"; text: string }
-  | { type: "error"; message: string }
-);
+  | { type: "error"; message: string };
+
+/** Stamped by core/hub.ts — seq is per-session monotonic. */
+export type SessionEvent = { seq: number; ts: number; sessionId: string } &
+  SessionEventPayload;
 
 export type SessionState = "idle" | "streaming";
 
@@ -89,12 +92,13 @@ export interface AgentSession {
   steer(text: string): Promise<void>;    // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle
   abort(): Promise<void>;
-  subscribe(fn: (e: SessionEvent) => void): () => void;
+  /** Emits payloads only; core/hub.ts owns seq/ts stamping. */
+  subscribe(fn: (e: SessionEventPayload) => void): () => void;
   dispose(): Promise<void>;
 }
 
 export interface AgentFactory {
-  create(opts: { cwd: string; systemPrompt?: string }): Promise<AgentSession>;
+  create(opts: { cwd: string }): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
   list(): Promise<{ id: string; cwd: string; createdAt: number; title?: string }[]>;
 }
@@ -109,7 +113,8 @@ export interface AgentFactory {
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
   fan-out to subscribers. No persistence — pi's session files are the durable
-  record.
+  record. `queued` events are emitted by the router when the queue policy
+  defers a message (pi's `queue_update` is dropped at the seam).
 - **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory
   for v1 (moves to SQLite with the scheduler). Unknown conversation → create a
   session lazily via `AgentFactory`.

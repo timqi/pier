@@ -8,8 +8,8 @@ lines. This is the ONLY file allowed to import `@mariozechner/pi-*`.
 
 | Pier seam            | Pi SDK                                              |
 | -------------------- | --------------------------------------------------- |
-| `create({cwd})`      | `createAgentSession({ sessionManager: SessionManager.create(cwd), ... })` |
-| `resume(id)`         | `SessionManager.open(<session file for id>)`        |
+| `create({cwd})`      | `createAgentSession({ cwd, sessionManager: SessionManager.create(cwd) })` |
+| `resume(id)`         | `SessionManager.listAll()` → find by id → `SessionManager.open(path)` |
 | `list()`             | `SessionManager.listAll(...)`                       |
 | `prompt/steer/followUp/abort` | same-named session methods                 |
 | `subscribe`          | `session.subscribe(...)` + event translation        |
@@ -18,15 +18,19 @@ lines. This is the ONLY file allowed to import `@mariozechner/pi-*`.
 
 ## Event Translation (Pi → SessionEvent)
 
-Translate in one pure function `toSessionEvent(piEvent): SessionEvent | null`
-so it is unit-testable without Pi:
+Translate in one pure function
+`toSessionEvents(piEvent): SessionEventPayload[]` (in `src/agent/events.ts`,
+structurally typed — no Pi imports) so it is unit-testable without Pi:
 
-- `agent_start` → `state: streaming`; `agent_end` → `state: idle` and
-  `turn-end` with the final assistant text
+- `agent_start` → `[state: streaming, turn-start]`; `agent_end` →
+  `[turn-end (final assistant text), state: idle]` plus an `error` payload
+  when the final assistant message has `stopReason: "error"`
 - `message_update` text_delta → `text-delta`; thinking_delta → `thinking-delta`
 - `tool_execution_start` → `tool-start`; `tool_execution_end` → `tool-end`
-- `queue_update` → `queued`
-- anything else → `null` (dropped). Do NOT invent event types; extend
+  (output = joined text content of the result)
+- `queue_update` → dropped; `queued` is emitted by the router when the queue
+  policy defers a message
+- anything else → `[]` (dropped). Do NOT invent event types; extend
   architecture.md first if a new one is needed.
 
 `seq`/`ts`/`sessionId` are stamped by `core/hub.ts`, not here — the seam emits

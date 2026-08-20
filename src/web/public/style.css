@@ -1,0 +1,42 @@
+* { box-sizing: border-box; margin: 0; }
+body {
+  display: grid;
+  grid-template-columns: 220px 1fr 380px;
+  height: 100vh;
+  font: 14px/1.5 system-ui, sans-serif;
+  color: #1a1a1a;
+}
+aside, main { overflow-y: auto; display: flex; flex-direction: column; }
+aside { background: #f6f6f4; border-right: 1px solid #e2e2de; }
+#timeline-pane { border-right: none; border-left: 1px solid #e2e2de; }
+header { padding: 12px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+h1 { font-size: 16px; }
+h2 { font-size: 13px; text-transform: uppercase; color: #777; }
+button { font: inherit; padding: 4px 10px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+button:hover { background: #eee; }
+
+#session-list { list-style: none; overflow-y: auto; }
+#session-list li { padding: 8px 12px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; border-bottom: 1px solid #ececea; }
+#session-list li.active { background: #e8e8ff; }
+#session-list .dot { width: 8px; height: 8px; border-radius: 50%; background: #bbb; flex: none; align-self: center; }
+#session-list .dot.streaming { background: #2fa84f; }
+#session-list .title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+#turns { flex: 1; overflow-y: auto; padding: 16px; }
+.turn { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn.user { background: #eef3ff; }
+.turn.assistant { background: #f7f7f5; }
+.turn.queued { background: #fff7e0; font-style: italic; }
+.turn.error { background: #ffecec; color: #a00; }
+
+#composer { border-top: 1px solid #e2e2de; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+#input { font: inherit; padding: 8px; border: 1px solid #ccc; border-radius: 6px; resize: vertical; }
+#composer-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+#mode-hint { margin-right: auto; color: #888; font-size: 12px; }
+
+#timeline { list-style: none; overflow-y: auto; flex: 1; padding: 8px; font-size: 12px; }
+#timeline li { padding: 4px 6px; border-bottom: 1px solid #efefec; overflow-wrap: anywhere; }
+#timeline .t { color: #999; margin-right: 6px; }
+#timeline .k { font-weight: 600; margin-right: 6px; }
+#timeline details summary { cursor: pointer; }
+#timeline pre { white-space: pre-wrap; background: #f6f6f4; padding: 4px; border-radius: 4px; max-height: 160px; overflow-y: auto; }

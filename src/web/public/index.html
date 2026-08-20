@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pier</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <aside id="sessions">
+    <header>
+      <h1>Pier</h1>
+      <button id="new-session">New session</button>
+    </header>
+    <ul id="session-list"></ul>
+  </aside>
+  <main id="chat">
+    <div id="turns"></div>
+    <form id="composer">
+      <textarea id="input" rows="3" placeholder="Message… (! prefix steers while streaming)"></textarea>
+      <div id="composer-actions">
+        <span id="mode-hint"></span>
+        <button type="button" id="abort">Abort</button>
+        <button type="button" id="send-steer">Steer</button>
+        <button type="button" id="send-queue">Queue</button>
+        <button type="submit" id="send">Send</button>
+      </div>
+    </form>
+  </main>
+  <aside id="timeline-pane">
+    <header><h2>Timeline</h2></header>
+    <ul id="timeline"></ul>
+  </aside>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

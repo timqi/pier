@@ -18,7 +18,11 @@ contains no agent logic.
 The web surface implements `Channel` only if it falls out naturally; do not
 force it — SSE already delivers outbound content, so `send()` may be a no-op.
 
-## Frontend (`src/web/public/`, Vite + vanilla TS, no framework)
+## Frontend (`src/web/public/`, vanilla TS, no framework, no bundler)
+
+Source `src/web/ui/main.ts` is compiled by `tsc` (separate `tsconfig.web.json`,
+DOM lib) straight to `src/web/public/main.js` — one file, ES modules, no Vite
+(dependency-minimalism per AGENTS.md principle 7).
 
 Single page, three panes:
 

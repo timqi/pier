@@ -25,7 +25,7 @@ export interface Channel {
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */
-export type SessionEvent = { seq: number; ts: number; sessionId: string } & (
+export type SessionEventPayload =
   | { type: "turn-start" }
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
@@ -34,8 +34,14 @@ export type SessionEvent = { seq: number; ts: number; sessionId: string } & (
   | { type: "turn-end"; text: string } // full assistant text of the turn
   | { type: "state"; state: SessionState }
   | { type: "queued"; mode: "steer" | "followUp"; text: string }
-  | { type: "error"; message: string }
-);
+  | { type: "error"; message: string };
+
+/** Stamped by core/hub.ts — seq is per-session monotonic. */
+export type SessionEvent = {
+  seq: number;
+  ts: number;
+  sessionId: string;
+} & SessionEventPayload;
 
 export type SessionState = "idle" | "streaming";
 
@@ -47,12 +53,13 @@ export interface AgentSession {
   steer(text: string): Promise<void>; // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle
   abort(): Promise<void>;
-  subscribe(fn: (e: SessionEvent) => void): () => void;
+  /** Emits payloads only; core/hub.ts owns seq/ts stamping. */
+  subscribe(fn: (e: SessionEventPayload) => void): () => void;
   dispose(): Promise<void>;
 }
 
 export interface AgentFactory {
-  create(opts: { cwd: string; systemPrompt?: string }): Promise<AgentSession>;
+  create(opts: { cwd: string }): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
   list(): Promise<
     { id: string; cwd: string; createdAt: number; title?: string }[]
