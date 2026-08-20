@@ -985,24 +985,32 @@ const activityView = createActivityView(
   (taskId) => showTasks(taskId),
 );
 
-const consoleViews: { view: { show(arg?: string): void; hide(): void; visible: boolean }; btn: HTMLElement }[] = [
-  { view: configView, btn: openConfigBtn },
-  { view: tasksView, btn: openTasksBtn },
-  { view: activityView, btn: openActivityBtn },
+type ConsoleName = "config" | "tasks" | "activity";
+
+const consoleViews: {
+  name: ConsoleName;
+  view: { show(arg?: string): void; hide(): void; visible: boolean };
+  btn: HTMLElement;
+}[] = [
+  { name: "config", view: configView, btn: openConfigBtn },
+  { name: "tasks", view: tasksView, btn: openTasksBtn },
+  { name: "activity", view: activityView, btn: openActivityBtn },
 ];
 
-function showConsole(active: (typeof consoleViews)[number]["view"], arg?: string): void {
+function showConsole(name: ConsoleName, arg?: string): void {
+  setHash({ kind: "console", name, arg });
   chatVisible = false;
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
-  for (const { view, btn } of consoleViews) {
-    btn.classList.toggle("bg-indigo-50", view === active);
-    if (view === active) view.show(arg);
-    else view.hide();
+  for (const entry of consoleViews) {
+    const active = entry.name === name;
+    entry.btn.classList.toggle("bg-indigo-50", active);
+    if (active) entry.view.show(arg);
+    else entry.view.hide();
   }
 }
 
-const showTasks = (taskId?: string): void => showConsole(tasksView, taskId);
+const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
 
 function showChat(): void {
   if (!consoleViews.some(({ view }) => view.visible)) return;
@@ -1015,10 +1023,65 @@ function showChat(): void {
   syncQueuePanel();
 }
 
+// --- routing (the hash is the address bar's copy of "where am I") ---------------------
+// Every view is addressable — a session's chat, each Console view, one task
+// inside it — so refresh, bookmarks and back/forward land where the user was.
+// Hash, not path: the static file server stays a static file server.
+
+type Route = { kind: "session"; id: string } | { kind: "console"; name: ConsoleName; arg?: string };
+
+const hashOf = (r: Route): string =>
+  r.kind === "session"
+    ? `#/session/${encodeURIComponent(r.id)}`
+    : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}`;
+
+function parseHash(): Route | null {
+  const [head = "", arg] = location.hash.replace(/^#\/?/, "").split("/");
+  const name = consoleViews.find((v) => v.name === head)?.name;
+  if (name) return { kind: "console", name, arg: arg ? decodeURIComponent(arg) : undefined };
+  if (head === "session" && arg) return { kind: "session", id: decodeURIComponent(arg) };
+  return null; // unknown or empty → the fallback in applyRoute()
+}
+
+// While a route is applied the UI must not rewrite the hash it is reading; the
+// guard spans only the synchronous view switch, never the history fetch.
+let applyingRoute = false;
+
+function setHash(r: Route, replace = false): void {
+  if (applyingRoute) return;
+  const next = hashOf(r);
+  if (location.hash === next) return;
+  if (replace) history.replaceState(null, "", next);
+  else location.hash = next; // pushes an entry, so Back returns to the last view
+}
+
+/** Hash → UI. A missing or stale route falls back to the first pinned session. */
+function applyRoute(): void {
+  const route = parseHash();
+  const wanted = route?.kind === "session" ? route.id : null;
+  const id =
+    wanted && sessions.some((s) => s.id === wanted)
+      ? wanted
+      : (currentId ?? (sessions.find((s) => s.pinned) ?? sessions[0])?.id ?? null);
+  applyingRoute = true;
+  try {
+    if (id && id !== currentId) void select(id);
+    if (route?.kind === "console") showConsole(route.name, route.arg);
+    else showChat();
+    if (!id) renderHeader();
+  } finally {
+    applyingRoute = false;
+  }
+  // Boot with no hash, or a session that no longer exists: name where we landed
+  // without adding a history entry.
+  if (route?.kind !== "console" && id) setHash({ kind: "session", id }, true);
+}
+
 // --- selection & sending --------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
   showChat();
+  setHash({ kind: "session", id });
   if (id === currentId) return;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
@@ -1344,9 +1407,9 @@ async function recallQueue(): Promise<void> {
 
 // --- wiring ----------------------------------------------------------------------------
 
-openActivityBtn.onclick = () => showConsole(activityView);
+openActivityBtn.onclick = () => showConsole("activity");
 openTasksBtn.onclick = () => showTasks();
-openConfigBtn.onclick = () => showConsole(configView);
+openConfigBtn.onclick = () => showConsole("config");
 consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
 consoleSection.ontoggle = () =>
   localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");
@@ -1407,9 +1470,6 @@ attachInput.onchange = () => {
 };
 
 connectWorkspace();
-void refreshSessions().then(() => {
-  const first = sessions.find((s) => s.pinned) ?? sessions[0];
-  if (first) void select(first.id);
-  else renderHeader();
-});
+window.onhashchange = applyRoute; // Back/forward and hand-edited URLs
+void refreshSessions().then(applyRoute);
 updateComposer();
