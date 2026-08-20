@@ -16,6 +16,7 @@ import type {
   SessionState,
 } from "../core/types.js";
 import { textOf, toSessionEvents, type PiEvent, type PiMessage } from "./events.js";
+import { curateModels } from "./models.js";
 
 class PiSession implements AgentSession {
   constructor(private readonly pi: PiAgentSession) {}
@@ -40,9 +41,18 @@ class PiSession implements AgentSession {
   }
 
   async availableModels(): Promise<ModelRef[]> {
-    return this.pi.modelRegistry
-      .getAvailable()
-      .map((m) => ({ provider: m.provider, id: m.id }));
+    const curated = curateModels(
+      this.pi.modelRegistry
+        .getAvailable()
+        .map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+    );
+    // The session's active model must stay selectable even when curation
+    // (or an older catalog) would hide it.
+    const current = this.model;
+    if (current && !curated.some((m) => m.provider === current.provider && m.id === current.id)) {
+      curated.unshift(current);
+    }
+    return curated;
   }
 
   async history(): Promise<ChatTurn[]> {
