@@ -94,6 +94,7 @@ const newDialog = $<HTMLDialogElement>("#new-dialog");
 const knownProjects = $("#known-projects");
 const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
+const queueLabel = $("#queue-label");
 const stopBtn = $("#stop");
 const imageStrip = $("#image-strip");
 const attachInput = $<HTMLInputElement>("#attach-input");
@@ -396,20 +397,24 @@ function renderQueue(steering: string[], followUp: string[]): void {
     ...followUp.map((text) => ({ mode: "queued", text })),
   ];
   queueHasRows = rows.length > 0;
+  // The count sits on the label so the header actions read as queue-wide.
+  queueLabel.textContent = rows.length > 1 ? `Queued · ${rows.length}` : "Queued";
   syncQueuePanel();
   queueRows.replaceChildren(
     ...rows.map((r) => {
-      const li = h("li", "flex items-center gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-[13px]");
-      li.append(
-        h(
-          "span",
-          `flex-none rounded px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide ${
-            r.mode === "steer" ? "bg-indigo-100 text-indigo-700" : "bg-amber-100 text-amber-700"
-          }`,
-          r.mode,
-        ),
-        h("span", "truncate text-neutral-700", r.text),
-      );
+      const li = h("li", "flex h-6 items-center gap-2 text-[13px]");
+      // Only "steer" earns a badge: it deviates from the panel's own label,
+      // which already says these messages are queued.
+      if (r.mode === "steer") {
+        li.append(
+          h(
+            "span",
+            "flex-none rounded bg-indigo-100 px-1 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-indigo-700",
+            r.mode,
+          ),
+        );
+      }
+      li.append(h("span", "truncate text-neutral-700", r.text));
       return li;
     }),
   );
@@ -826,19 +831,24 @@ function activityThinking(ts: number, text: string): void {
  */
 let replaySeq = 0;
 
-function replayActivity(steps: ActivityStep[], durationMs = 0): void {
+function replayActivity(steps: ActivityStep[], durationMs = 0, live = false): void {
   const start = Date.now() - durationMs; // headline duration is now - startTs
   for (const s of steps) {
     if (s.kind === "thinking") {
       activityThinking(start, s.text ?? "");
       continue;
     }
-    const id = `replay-${++replaySeq}`;
+    // Real tool call ids when the snapshot has them: a live tool-end for a
+    // replayed row then closes that row instead of missing it.
+    const id = s.id ?? `replay-${++replaySeq}`;
     activityToolStart(start, id, s.toolName ?? "", s.args);
     // No recorded output = the run was cut short; leave the row running so
     // finishActivity marks the group interrupted.
     if (s.output !== undefined) activityToolEnd(id, s.isError ?? false, s.output);
   }
+  // The turn still running keeps its group open, so the live stream counts on
+  // into it instead of opening a second bubble beneath the replayed one.
+  if (live) return;
   finishActivity(
     steps.some((s) => s.kind === "tool" && s.output === undefined) ? "interrupted" : "done",
   );
@@ -1010,8 +1020,10 @@ function showChat(): void {
 async function select(id: string): Promise<void> {
   showChat();
   if (id === currentId) return;
+  saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
+  restoreDraft(id);
   renderSessions();
   renderHeader();
   await loadSession(id);
@@ -1035,11 +1047,25 @@ async function loadSession(id: string): Promise<void> {
     appendTurn("error", `failed to load session: ${res.status}`);
     return;
   }
-  for (const t of snap.turns) {
-    if (t.steps?.length) replayActivity(t.steps, t.meta?.durationMs);
-    if (!t.text) continue;
-    if (t.role === "system" && t.origin) appendSystemInput(t.text, t.origin);
-    else setMetaHint(appendTurn(t.role, t.text, t.role === "assistant"), t.meta);
+  for (const [i, t] of snap.turns.entries()) {
+    // The in-flight turn is the trailing one, recognisable while streaming by a
+    // tool call without a result or by activity with no answer yet.
+    const live =
+      snap.state === "streaming" &&
+      i === snap.turns.length - 1 &&
+      (!t.text || (t.steps?.some((s) => s.kind === "tool" && s.output === undefined) ?? false));
+    if (t.steps?.length) replayActivity(t.steps, t.meta?.durationMs, live);
+    if (!t.text && !t.images?.length) continue;
+    if (t.role === "system" && t.origin) {
+      appendSystemInput(t.text, t.origin);
+      continue;
+    }
+    const bubble = appendTurn(t.role, t.text, t.role === "assistant");
+    setMetaHint(bubble, t.meta);
+    // Refs only in the snapshot: each thumbnail pulls its own bytes.
+    for (const img of t.images ?? []) {
+      bubble.append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
+    }
   }
   for (const run of snap.backgroundRuns) renderBackgroundRun(run);
   scrollBottom(true);
@@ -1174,6 +1200,23 @@ function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
 
 // --- image attachments ---------------------------------------------------------
 
+const imageDialog = $<HTMLDialogElement>("#image-dialog");
+const imageFull = $<HTMLImageElement>("#image-full");
+imageDialog.onclick = () => imageDialog.close();
+
+/** Thumbnail in a chat row; click shows the image full size. */
+function imageThumb(src: string): HTMLImageElement {
+  const thumb = document.createElement("img");
+  thumb.src = src;
+  thumb.loading = "lazy";
+  thumb.className = "mt-1.5 max-h-48 cursor-zoom-in rounded-md border border-black/5";
+  thumb.onclick = () => {
+    imageFull.src = src;
+    imageDialog.showModal();
+  };
+  return thumb;
+}
+
 function renderImageStrip(): void {
   imageStrip.classList.toggle("hidden", pendingImages.length === 0);
   imageStrip.classList.toggle("flex", pendingImages.length > 0);
@@ -1213,6 +1256,26 @@ function addImageFile(file: File): void {
 const imageMarker = (text: string, images: number): string =>
   images ? `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]` : text;
 
+// --- composer drafts -------------------------------------------------------------------
+// One draft per session, in localStorage only: switching sessions must not
+// carry text (or attachments) into the wrong conversation, and an unsent draft
+// is the client's business, never the agent's.
+
+const draftKey = (id: string): string => `pier.draft.${id}`;
+
+function saveDraft(): void {
+  if (!currentId) return;
+  if (input.value.trim()) localStorage.setItem(draftKey(currentId), input.value);
+  else localStorage.removeItem(draftKey(currentId));
+}
+
+function restoreDraft(id: string): void {
+  input.value = localStorage.getItem(draftKey(id)) ?? "";
+  autosize();
+  pendingImages = [];
+  renderImageStrip();
+}
+
 /** Single-line by default; grows with content, icons stay on the bottom row. */
 function autosize(): void {
   input.style.height = "auto";
@@ -1227,6 +1290,8 @@ async function send(mode: "auto" | "steer"): Promise<void> {
   const startsTurn = currentState === "idle" && mode === "auto";
   input.value = "";
   autosize();
+  saveDraft(); // sent text is no longer a draft
+
   pendingImages = [];
   renderImageStrip();
   if (startsTurn) setState("streaming");
@@ -1236,12 +1301,7 @@ async function send(mode: "auto" | "steer"): Promise<void> {
   if (startsTurn || mode === "steer") {
     optimisticUserTexts.push(imageMarker(text, images.length));
     const bubble = appendTurn("user", text);
-    for (const img of images) {
-      const thumb = document.createElement("img");
-      thumb.src = `data:${img.mimeType};base64,${img.data}`;
-      thumb.className = "mt-1.5 max-h-48 rounded-md";
-      bubble.append(thumb);
-    }
+    for (const img of images) bubble.append(imageThumb(`data:${img.mimeType};base64,${img.data}`));
     scrollBottom(true);
   }
   const res = await fetch(`/api/sessions/${id}/messages`, {
@@ -1276,6 +1336,7 @@ async function recallQueue(): Promise<void> {
   if (messages.length) {
     input.value = [input.value.trim(), ...messages].filter(Boolean).join("\n");
     autosize();
+    saveDraft();
     input.focus();
   }
   renderQueue([], []);
@@ -1314,7 +1375,10 @@ $<HTMLFormElement>("#composer").onsubmit = (ev) => {
   ev.preventDefault();
   void send("auto");
 };
-input.oninput = autosize;
+input.oninput = () => {
+  autosize();
+  saveDraft();
+};
 input.onkeydown = (ev) => {
   // IME guard: Enter that confirms a composition candidate must not send
   // (isComposing covers modern browsers; 229 covers stragglers).

@@ -106,10 +106,21 @@ export type WorkspaceEvent =
 export interface ActivityStep {
   kind: "thinking" | "tool";
   text?: string; // thinking steps
+  id?: string; // tool call id — lets a client resuming mid-turn close the row
   toolName?: string; // tool steps
   args?: unknown;
   output?: string;
   isError?: boolean;
+}
+
+/**
+ * An image in the transcript. Snapshots carry the reference only; the bytes
+ * are fetched one by one via image(), so history stays small.
+ */
+export interface ImageRef {
+  mimeType: string;
+  /** Ordinal among the transcript's images, in message order. */
+  ordinal: number;
 }
 
 /** A completed conversation turn, for history rendering. */
@@ -119,6 +130,7 @@ export interface ChatTurn {
   origin?: SystemInputOrigin; // system inputs only
   meta?: TurnMeta; // assistant turns only
   steps?: ActivityStep[]; // assistant turns only; activity preceding the text
+  images?: ImageRef[]; // attachments of the turn, bytes fetched on demand
 }
 
 /** Completion metadata of an assistant turn (bubble hover hints). */
@@ -151,6 +163,8 @@ export interface AgentSession {
   readonly contextUsage: ContextUsage | undefined;
   /** Completed turns of the persisted transcript (no partial streaming). */
   history(): Promise<ChatTurn[]>;
+  /** Bytes behind a history ImageRef; undefined once the transcript moved on. */
+  image(ordinal: number): Promise<ImageAttachment | undefined>;
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;

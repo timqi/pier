@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toChatTurns, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
+import { imageAt, toChatTurns, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
 
 describe("toSessionEvents", () => {
   const cases: { name: string; input: PiEvent; expected: unknown[] }[] = [
@@ -176,7 +176,7 @@ describe("toChatTurns", () => {
         meta: { completedAt: 3000, durationMs: 2000, tokens: 0 },
         steps: [
           { kind: "thinking", text: "hmm" },
-          { kind: "tool", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false },
+          { kind: "tool", id: "t1", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false },
         ],
       },
     ]);
@@ -200,8 +200,29 @@ describe("toChatTurns", () => {
     ]);
     expect(turns).toEqual([
       { role: "user", text: "go" },
-      { role: "assistant", text: "", steps: [{ kind: "tool", toolName: "bash", args: {} }] },
+      { role: "assistant", text: "", steps: [{ kind: "tool", id: "t1", toolName: "bash", args: {} }] },
     ]);
+  });
+
+  it("numbers attachments as refs and resolves them back to bytes", () => {
+    const messages: PiMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look" },
+          { type: "image", data: "AAA", mimeType: "image/png" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      { role: "user", content: [{ type: "image", data: "BBB", mimeType: "image/jpeg" }] },
+    ];
+    expect(toChatTurns(messages)).toEqual([
+      { role: "user", text: "look", images: [{ mimeType: "image/png", ordinal: 0 }] },
+      { role: "assistant", text: "ok" },
+      { role: "user", text: "", images: [{ mimeType: "image/jpeg", ordinal: 1 }] },
+    ]);
+    expect(imageAt(messages, 1)).toEqual({ data: "BBB", mimeType: "image/jpeg" });
+    expect(imageAt(messages, 2)).toBeUndefined();
   });
 });
 

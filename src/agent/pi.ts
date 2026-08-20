@@ -25,6 +25,7 @@ import type {
   TurnMeta,
 } from "../core/types.js";
 import {
+  imageAt,
   toChatTurns,
   toSessionEvents,
   turnMetaAt,
@@ -102,6 +103,10 @@ class PiSession implements AgentSession {
 
   async history(): Promise<ChatTurn[]> {
     return toChatTurns(this.pi.messages as PiMessage[]);
+  }
+
+  async image(ordinal: number): Promise<ImageAttachment | undefined> {
+    return imageAt(this.pi.messages as PiMessage[], ordinal);
   }
 
   async rewindToUserTurn(index: number): Promise<void> {

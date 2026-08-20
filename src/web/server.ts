@@ -169,6 +169,24 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
     }
   });
 
+  // Transcript images by their history ordinal: the snapshot ships refs, the
+  // browser pulls (and caches) the bytes only for what it renders.
+  app.get("/api/sessions/:id/images/:ordinal", async (c) => {
+    const ordinal = Number(c.req.param("ordinal"));
+    if (!Number.isInteger(ordinal) || ordinal < 0) return c.json({ error: "bad ordinal" }, 400);
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: c.req.param("id") });
+      const image = await session.image(ordinal);
+      if (!image) return c.json({ error: "no such image" }, 404);
+      return c.body(Buffer.from(image.data, "base64"), 200, {
+        "content-type": image.mimeType,
+        "cache-control": "private, max-age=3600",
+      });
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
   app.get("/api/sessions/:id/models", async (c) => {
     const id = c.req.param("id");
     try {

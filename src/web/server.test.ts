@@ -66,9 +66,11 @@ function fakeSession(id: string): AgentSession & {
     emit: (p: SessionEventPayload) => listeners.forEach((fn) => fn(p)),
     calls,
     history: async (): Promise<ChatTurn[]> => [
-      { role: "user", text: "hi" },
+      { role: "user", text: "hi", images: [{ mimeType: "image/png", ordinal: 0 }] },
       { role: "assistant", text: "hello" },
     ],
+    image: async (ordinal: number) =>
+      ordinal === 0 ? { data: Buffer.from("png-bytes").toString("base64"), mimeType: "image/png" } : undefined,
     prompt: async (t: string, imgs?: ImageAttachment[]) =>
       void calls.push(`prompt:${t}${imgs ? `+${imgs.length}img` : ""}`),
     steer: async (t: string, imgs?: ImageAttachment[]) =>
@@ -224,6 +226,16 @@ describe("workbench server", () => {
     expect(seen).toHaveBeenCalledOnce();
   });
 
+  it("serves a transcript image by ordinal, 404 past the end", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/sessions/s1/images/0");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(await res.text()).toBe("png-bytes");
+    expect((await app.request("/api/sessions/s1/images/1")).status).toBe(404);
+    expect((await app.request("/api/sessions/s1/images/-1")).status).toBe(400);
+  });
+
   it("snapshots history, live state and pending queue on demand", async () => {
     const { app, hub, session } = setup();
     hub.emit("s1", { type: "turn-start" });
@@ -232,7 +244,7 @@ describe("workbench server", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       turns: [
-        { role: "user", text: "hi" },
+        { role: "user", text: "hi", images: [{ mimeType: "image/png", ordinal: 0 }] },
         { role: "assistant", text: "hello" },
       ],
       lastSeq: 1,

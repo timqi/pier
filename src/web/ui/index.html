@@ -56,35 +56,42 @@
         class="icon-btn ml-auto">⋯</button>
     </header>
     <div id="turns" class="flex-1 overflow-y-auto pb-4 pt-1"></div>
-    <div id="queue-panel" class="hidden flex-col gap-1 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
-      <div class="flex items-center">
-        <span class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Queued</span>
-        <div class="ml-auto flex items-center gap-1 text-amber-700">
-          <button type="button" id="queue-steer" title="Send now into the running turn" aria-label="Send now"
+    <!-- Pi's queue primitives are whole-queue (steer / clear), so the actions
+         live on the header row and read as "the queue", never per message. -->
+    <div id="queue-panel" class="hidden flex-col border-t border-neutral-200 px-3 py-1.5">
+      <div class="flex h-7 items-center gap-2">
+        <span id="queue-label" class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Queued</span>
+        <div class="ml-auto flex items-center gap-0.5 text-amber-700">
+          <button type="button" id="queue-steer" title="Send the whole queue now into the running turn" aria-label="Send queue now"
             class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
               stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
               <path d="M14.5 1.5 7 9m7.5-7.5-4.2 12.6L7 9 1.7 6.7l12.8-5.2z" />
             </svg>
           </button>
-          <button type="button" id="queue-restart" title="Stop the running turn and send as a new prompt" aria-label="Stop and send"
+          <button type="button" id="queue-restart" title="Stop the running turn and send the whole queue as a new prompt" aria-label="Stop and send queue"
             class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
               stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
-              <path d="M13 5.2V1.8m0 0H9.6M13 1.8A6 6 0 1 0 14 9" />
-              <path d="M6.2 8h4M8.5 5.7 10.8 8l-2.3 2.3" />
+              <!-- The arc's ink sits high-right of the box; centre it so the
+                   three icons share one baseline. -->
+              <g transform="translate(-0.8 1.9)">
+                <path d="M13 5.2V1.8m0 0H9.6M13 1.8A6 6 0 1 0 14 9" />
+                <path d="M6.2 8h4M8.5 5.7 10.8 8l-2.3 2.3" />
+              </g>
             </svg>
           </button>
           <button type="button" id="queue-recall" title="Return queued messages to the composer" aria-label="Recall queued messages"
             class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
               stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
-              <path d="M5 4 2 7l3 3M2.5 7H10a3.5 3.5 0 0 1 0 7H8" />
+              <!-- Ink centred on the 16×16 box, or the glyph sits low next to its neighbours. -->
+              <path d="M5 3 2 6l3 3M2.5 6H10a3.5 3.5 0 0 1 0 7H8" />
             </svg>
           </button>
         </div>
       </div>
-      <ul id="queue-rows" class="flex flex-col gap-1"></ul>
+      <ul id="queue-rows" class="flex flex-col"></ul>
     </div>
     <form id="composer" class="border-t border-neutral-200 px-4 py-2">
       <div class="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
@@ -144,6 +151,11 @@
       <button type="button" id="archive-close" class="btn flex-none text-[12px]">Close</button>
     </div>
     <ul id="archive-list" class="max-h-[60vh] overflow-y-auto py-1 text-[13.5px]"></ul>
+  </dialog>
+
+  <!-- Full-size view of a transcript image; click anywhere (or Esc) closes. -->
+  <dialog id="image-dialog" class="m-auto max-h-[92vh] max-w-[92vw] rounded-xl bg-transparent p-0 backdrop:bg-black/70">
+    <img id="image-full" alt="" class="max-h-[92vh] max-w-[92vw] cursor-zoom-out rounded-xl object-contain" />
   </dialog>
 
   <script type="module" src="/main.ts"></script>

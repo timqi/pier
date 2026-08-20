@@ -61,6 +61,7 @@ function fakeSession(id = "s1"): AgentSession & {
     availableModels: async () => [model],
     availableThinkingLevels: () => ["off"],
     setThinkingLevel: () => {},
+    image: async () => undefined,
     pendingQueue: async () => ({ steering: [], followUp: [] }),
     clearQueue: async () => ({ steering: [], followUp: [] }),
     rewindToUserTurn: async () => {},

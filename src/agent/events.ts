@@ -6,6 +6,8 @@
 import type {
   ActivityStep,
   ChatTurn,
+  ImageAttachment,
+  ImageRef,
   SessionEventPayload,
   SystemInputOrigin,
   TurnMeta,
@@ -19,6 +21,8 @@ interface TextPart {
   id?: string; // toolCall
   name?: string; // toolCall
   arguments?: unknown; // toolCall
+  data?: string; // image, base64
+  mimeType?: string; // image
 }
 
 export interface PiMessage {
@@ -60,12 +64,14 @@ export function textOf(content: string | TextPart[] | undefined): string {
     .join("");
 }
 
-/** Renderable text of a message, with an image marker (binaries aren't served). */
+function imageParts(m: PiMessage): TextPart[] {
+  return Array.isArray(m.content) ? m.content.filter((p) => p.type === "image") : [];
+}
+
+/** Renderable text of a message, with an image marker (IM can't show them). */
 function displayText(m: PiMessage): string {
   const text = textOf(m.content);
-  const images = Array.isArray(m.content)
-    ? m.content.filter((p) => p.type === "image").length
-    : 0;
+  const images = imageParts(m).length;
   if (!images) return text;
   return `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]`;
 }
@@ -90,6 +96,22 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
       origin.messageKind === "progress" || origin.messageKind === "decision" || origin.messageKind === "reply")
   ) return origin as SystemInputOrigin;
   return null;
+}
+
+/**
+ * Bytes of the ordinal-th transcript image. Walks user/assistant messages in
+ * the same order toChatTurns numbers them — the two must not drift.
+ */
+export function imageAt(messages: PiMessage[], ordinal: number): ImageAttachment | undefined {
+  let n = 0;
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    for (const p of imageParts(m)) {
+      if (n++ !== ordinal) continue;
+      return p.data ? { data: p.data, mimeType: p.mimeType ?? "image/png" } : undefined;
+    }
+  }
+  return undefined;
 }
 
 function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {
@@ -147,12 +169,14 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
   let steps: ActivityStep[] = []; // activity seen since the last emitted turn
   const pendingTools = new Map<string, ActivityStep>();
+  let ordinal = 0; // must advance exactly like imageAt() walks the messages
 
   const flush = (
     role: ChatTurn["role"],
     text: string,
     meta?: TurnMeta,
     origin?: SystemInputOrigin,
+    images?: ImageRef[],
   ): void => {
     const turn: ChatTurn = { role, text };
     if (meta) turn.meta = meta;
@@ -161,6 +185,7 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
       turn.steps = steps;
       steps = [];
     }
+    if (images?.length) turn.images = images;
     turns.push(turn);
   };
 
@@ -189,6 +214,7 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
         } else if (part.type === "toolCall") {
           const step: ActivityStep = {
             kind: "tool",
+            id: part.id,
             toolName: part.name ?? "",
             args: part.arguments,
           };
@@ -198,9 +224,15 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
       }
     }
 
-    const text = displayText(m);
-    if (!text) continue; // step-only assistant messages keep buffering activity
-    flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined);
+    // Refs, not bytes: the web fetches each image from its own route.
+    const images: ImageRef[] = imageParts(m).map((p) => ({
+      mimeType: p.mimeType ?? "image/png",
+      ordinal: ordinal++,
+    }));
+    const text = textOf(m.content);
+    // step-only assistant messages keep buffering activity
+    if (!text && !images.length) continue;
+    flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined, undefined, images);
   }
   // Activity with no answer after it (aborted run) still belongs on the page.
   if (steps.length) flush("assistant", "");

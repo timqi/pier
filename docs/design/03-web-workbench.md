@@ -14,6 +14,7 @@ REST + SSE, no agent logic. Kept current as the workbench evolves.
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
 | `POST /api/sessions/:id/messages` | body `{text, mode, images?}` (`mode` defaults `auto`; images = base64 `{data, mimeType}`, max 8 × 8MB, validated at the seam; text or images required) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
+| `GET /api/sessions/:id/images/:ordinal` | bytes of the ordinal-th transcript image (`content-type` from the message), 404 past the end |
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
@@ -99,8 +100,10 @@ per-turn Activity groups):
   Idle-without-turn-end marks the group interrupted.
 - **Images**: paste, drag-drop, or attach via the `+` button → pending
   thumbnail strip (removable) above the composer; sent as base64 attachments
-  and rendered in the optimistic user row. History shows `[n images]`
-  markers (pi transcripts aren't re-served as binaries).
+  and rendered in the optimistic user row. History carries image *refs*
+  (`{mimeType, ordinal}`); each thumbnail lazily pulls its bytes from
+  `/api/sessions/:id/images/:ordinal` and opens full size in a lightbox.
+  IM channels still get the `[n images]` text marker.
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
 
