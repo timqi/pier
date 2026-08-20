@@ -74,13 +74,13 @@ const turnsPane = $("#turns");
 const input = $<HTMLTextAreaElement>("#input");
 const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
-const stateChip = $("#state-chip");
 const sendBtn = $("#send");
+const sendPlane = $("#send-plane");
+const sendQueue = $("#send-queue");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const knownProjects = $("#known-projects");
 const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
-const sendNowBtn = $("#send-now");
 const stopBtn = $("#stop");
 const imageStrip = $("#image-strip");
 const attachInput = $<HTMLInputElement>("#attach-input");
@@ -317,22 +317,21 @@ function setState(state: SessionState): void {
   if (state === "idle") void refreshSessions();
 }
 
-/** Composer toolbar: subtle state indicator + contextual buttons. */
+/** The composer buttons ARE the state display: indigo plane when idle
+ *  (send starts a turn), amber clock + red stop while streaming (send
+ *  queues; the queue panel offers Send now / Abort & send). */
 function updateComposer(): void {
   const streaming = currentState === "streaming";
-  stateChip.replaceChildren(
-    h(
-      "span",
-      `h-1.5 w-1.5 flex-none rounded-full ${streaming ? "bg-green-500 animate-pulse" : "bg-neutral-300"}`,
-    ),
-    h("span", streaming ? "text-green-700" : "", streaming ? "streaming" : "idle"),
-  );
-  stateChip.title = streaming
-    ? "streaming — Queue defers · Send now steers · Stop aborts"
-    : "idle — send starts a turn";
-  sendBtn.textContent = streaming ? "Queue" : "Send";
-  sendNowBtn.classList.toggle("hidden", !streaming);
+  sendBtn.className = `flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg ${
+    streaming
+      ? "bg-amber-100 text-amber-700 hover:bg-amber-200 active:bg-amber-300"
+      : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
+  }`;
+  sendBtn.title = streaming ? "Queue — delivered when the turn ends" : "Send";
+  sendPlane.classList.toggle("hidden", streaming);
+  sendQueue.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("hidden", !streaming);
+  stopBtn.classList.toggle("flex", streaming);
 }
 
 // --- pending queue panel (avibe ChatQueueRow concept) -----------------------
@@ -380,9 +379,74 @@ function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, text);
   if (markdown) renderMarkdown(node, text);
   row.append(node);
+  if (kind === "user") {
+    const edit = h(
+      "button",
+      "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex",
+    );
+    edit.title = "Edit — resends from here; this message and later turns leave the context";
+    edit.setAttribute("aria-label", "Edit message");
+    edit.innerHTML =
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="m10.7 2.3 3 3L6 13H3v-3l7.7-7.7zM9.3 3.7l3 3"/></svg>';
+    edit.onclick = () => startEdit(row, node);
+    row.append(edit);
+  }
   turnsPane.append(row);
   scrollBottom();
   return node;
+}
+
+// --- edit user message ------------------------------------------------------------
+// Pencil on a user row → inline textarea; Enter rewinds the transcript to just
+// before that message server-side and re-sends the edited text, so the old
+// message stops polluting the context. Later turns are dropped with it.
+
+function startEdit(row: HTMLElement, node: HTMLElement): void {
+  if (currentState !== "idle") {
+    appendTurn("error", "can't edit while streaming — stop the turn first");
+    return;
+  }
+  if (row.querySelector("textarea")) return;
+  const area = document.createElement("textarea");
+  area.value = node.textContent ?? ""; // user turns are plain text
+  area.rows = Math.min(8, area.value.split("\n").length);
+  area.className =
+    "block w-full resize-none rounded-md border border-indigo-300 bg-white px-2 py-1 focus:outline-none";
+  node.classList.add("hidden");
+  node.after(area);
+  area.focus();
+  area.setSelectionRange(area.value.length, area.value.length);
+  const cancel = (): void => {
+    area.remove();
+    node.classList.remove("hidden");
+  };
+  area.onkeydown = (ev) => {
+    if (ev.isComposing || ev.keyCode === 229) return;
+    if (ev.key === "Escape") cancel();
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      const text = area.value.trim();
+      if (!text) return cancel();
+      void submitEdit(row, text);
+    }
+  };
+}
+
+async function submitEdit(row: HTMLElement, text: string): Promise<void> {
+  const id = currentId;
+  if (!id) return;
+  // The Nth user row on screen is the Nth user turn of history().
+  const index = [...turnsPane.querySelectorAll('[data-kind="user"]')].indexOf(row);
+  const res = await fetch(`/api/sessions/${id}/turns/${index}/edit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    appendTurn("error", `edit failed: ${res.status}`);
+    return;
+  }
+  if (currentId === id) await loadSession(id); // the transcript was rewound — reload it
 }
 
 /** Row-hover meta chip on agent turns: completion time · duration · tokens. */
@@ -426,6 +490,7 @@ function finalizeStreaming(): void {
 type ActivityStatus = "running" | "done" | "failed" | "interrupted";
 
 interface ToolRow {
+  el: HTMLDetailsElement;
   statusEl: HTMLElement;
   outputPre: HTMLElement;
 }
@@ -438,8 +503,9 @@ interface Activity {
   toolRows: Map<string, ToolRow>;
   thinking: { pre: HTMLElement; summary: HTMLElement } | null;
   steps: number;
+  failedSteps: number;
   startTs: number;
-  sawError: boolean;
+  sawError: boolean; // turn-level error event — fails the whole group
 }
 
 let activity: Activity | null = null; // the live (running) group
@@ -487,7 +553,7 @@ function ensureActivity(ts: number): Activity {
   el.append(rowsEl);
   turnsPane.append(el);
   scrollBottom();
-  activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, startTs: ts, sawError: false };
+  activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };
   return activity;
 }
 
@@ -495,7 +561,11 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
   const secs = Math.max(1, Math.round((Date.now() - a.startTs) / 1000));
   const base = `${a.steps} step${a.steps === 1 ? "" : "s"} · ${secs}s`;
   a.headline.textContent =
-    status === "running" && latest ? `${base} · ${latest}` : `${base} · ${status}`;
+    status === "running" && latest
+      ? `${base} · ${latest}`
+      : status === "done"
+        ? base
+        : `${base} · ${status}`;
   a.el.className = `mx-5 mt-2 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
   const icon = statusIconEl(status);
   a.statusIcon.replaceWith(icon);
@@ -508,7 +578,13 @@ function finishActivity(status: ActivityStatus): void {
   for (const { statusEl } of activity.toolRows.values()) {
     if (statusEl.textContent === "running…") statusEl.textContent = "interrupted";
   }
-  activityHeadline(activity, activity.sawError && status === "done" ? "failed" : status);
+  // One failed step doesn't fail the group — its red row says enough. All-red
+  // is reserved for every step failing, or a turn-level error (sawError).
+  const allFailed = activity.steps > 0 && activity.failedSteps === activity.steps;
+  activityHeadline(
+    activity,
+    (activity.sawError || allFailed) && status === "done" ? "failed" : status,
+  );
   activity = null;
 }
 
@@ -529,7 +605,7 @@ function activityToolStart(ts: number, id: string, name: string, args: unknown):
   const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]");
   body.append(argsPre, outputPre);
   el.append(body);
-  a.toolRows.set(id, { statusEl, outputPre });
+  a.toolRows.set(id, { el, statusEl, outputPre });
   a.rowsEl.append(el);
   activityHeadline(a, "running", name);
   scrollBottom();
@@ -543,11 +619,13 @@ function activityToolEnd(id: string, isError: boolean, output: string): void {
   if (row) {
     row.statusEl.textContent = isError ? "failed" : "ok";
     row.statusEl.className = `ml-auto flex-none ${isError ? "text-red-600" : "text-green-700"}`;
+    row.el.classList.toggle("bg-red-50", isError);
+    row.el.classList.toggle("text-red-700", isError);
     if (output) {
       row.outputPre.textContent = output.length > 8000 ? output.slice(0, 8000) + "…" : output;
       row.outputPre.classList.remove("hidden");
     }
-    if (isError) a.sawError = true;
+    if (isError) a.failedSteps += 1;
   }
   activityHeadline(a, "running");
 }
@@ -723,6 +801,14 @@ async function select(id: string): Promise<void> {
   showChat();
   if (id === currentId) return;
   currentId = id;
+  currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
+  renderSessions();
+  renderHeader();
+  await loadSession(id);
+}
+
+/** (Re)load the current session's snapshot and reconnect its event stream. */
+async function loadSession(id: string): Promise<void> {
   source?.close();
   turnsPane.replaceChildren();
   renderQueue([], []);
@@ -731,9 +817,6 @@ async function select(id: string): Promise<void> {
   turnOpen = false;
   optimisticUserTexts = [];
   lastSeq = 0;
-  currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
-  renderSessions();
-  renderHeader();
   const res = await fetch(`/api/sessions/${id}/history`);
   const snap = res.ok ? ((await res.json()) as SessionSnapshot) : null;
   if (currentId !== id) return; // stale: the user switched again mid-fetch
@@ -900,11 +983,18 @@ function addImageFile(file: File): void {
 const imageMarker = (text: string, images: number): string =>
   images ? `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]` : text;
 
+/** Single-line by default; grows with content, icons stay on the bottom row. */
+function autosize(): void {
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 192)}px`; // cap = max-h-48
+}
+
 async function send(mode: "auto" | "steer"): Promise<void> {
   const text = input.value.trim();
   const images = pendingImages;
   if ((!text && images.length === 0) || !currentId) return;
   input.value = "";
+  autosize();
   pendingImages = [];
   renderImageStrip();
   updateComposer();
@@ -948,6 +1038,7 @@ async function recallQueue(): Promise<void> {
   // Append (not replace) so an existing draft isn't clobbered — avibe recall rule.
   if (messages.length) {
     input.value = [input.value.trim(), ...messages].filter(Boolean).join("\n");
+    autosize();
     input.focus();
   }
   renderQueue([], []);
@@ -991,7 +1082,6 @@ $<HTMLFormElement>("#new-form").onsubmit = async () => {
 };
 stopBtn.onclick = () =>
   currentId && fetch(`/api/sessions/${currentId}/abort`, { method: "POST" });
-sendNowBtn.onclick = () => void send("steer");
 $("#queue-steer").onclick = () => void deliverQueue("steer");
 $("#queue-restart").onclick = () => void deliverQueue("restart");
 $("#queue-recall").onclick = () => void recallQueue();
@@ -999,6 +1089,7 @@ $<HTMLFormElement>("#composer").onsubmit = (ev) => {
   ev.preventDefault();
   void send("auto");
 };
+input.oninput = autosize;
 input.onkeydown = (ev) => {
   // IME guard: Enter that confirms a composition candidate must not send
   // (isComposing covers modern browsers; 229 covers stragglers).

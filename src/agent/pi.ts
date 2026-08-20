@@ -86,6 +86,22 @@ class PiSession implements AgentSession {
     return toChatTurns(this.pi.messages as PiMessage[]);
   }
 
+  async rewindToUserTurn(index: number): Promise<void> {
+    const total = (await this.history()).filter((t) => t.role === "user").length;
+    // Anchor at the tail: branch entries keep compacted-away history that
+    // history() no longer shows, so only end-relative indices line up.
+    const back = total - index;
+    const users = this.pi.sessionManager
+      .getBranch()
+      .filter((e) => e.type === "message" && e.message.role === "user");
+    const target = back >= 1 ? users[users.length - back] : undefined;
+    if (!target) throw new Error(`no user turn at index ${index}`);
+    // navigateTree on a user message moves the leaf to its parent — the old
+    // branch stays in the file but leaves the context.
+    const { cancelled } = await this.pi.navigateTree(target.id);
+    if (cancelled) throw new Error("rewind cancelled");
+  }
+
   prompt(text: string, images?: ImageAttachment[]): Promise<void> {
     return this.pi.prompt(text, { images: toImageContent(images) });
   }

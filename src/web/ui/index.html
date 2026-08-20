@@ -53,36 +53,62 @@
     <div id="queue-panel" class="hidden flex-col gap-1 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
       <div class="flex items-center">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Queued</span>
-        <div class="ml-auto flex items-center gap-3 text-[12px] text-amber-700">
-          <button type="button" id="queue-steer" title="Deliver now, interrupting the running turn"
-            class="cursor-pointer underline-offset-2 hover:underline">Send now</button>
-          <button type="button" id="queue-restart" title="Abort the running turn and send as a new prompt"
-            class="cursor-pointer underline-offset-2 hover:underline">Abort &amp; send</button>
-          <button type="button" id="queue-recall"
-            class="cursor-pointer underline-offset-2 hover:underline">Recall all</button>
+        <div class="ml-auto flex items-center gap-1 text-amber-700">
+          <button type="button" id="queue-steer" title="Send now into the running turn" aria-label="Send now"
+            class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
+              <path d="M14.5 1.5 7 9m7.5-7.5-4.2 12.6L7 9 1.7 6.7l12.8-5.2z" />
+            </svg>
+          </button>
+          <button type="button" id="queue-restart" title="Stop the running turn and send as a new prompt" aria-label="Stop and send"
+            class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
+              <path d="M13 5.2V1.8m0 0H9.6M13 1.8A6 6 0 1 0 14 9" />
+              <path d="M6.2 8h4M8.5 5.7 10.8 8l-2.3 2.3" />
+            </svg>
+          </button>
+          <button type="button" id="queue-recall" title="Return queued messages to the composer" aria-label="Recall queued messages"
+            class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
+              <path d="M5 4 2 7l3 3M2.5 7H10a3.5 3.5 0 0 1 0 7H8" />
+            </svg>
+          </button>
         </div>
       </div>
       <ul id="queue-rows" class="flex flex-col gap-1"></ul>
     </div>
     <form id="composer" class="border-t border-neutral-200 p-3">
-      <div class="rounded-xl border border-neutral-300 bg-white transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
-        <div id="image-strip" class="hidden flex-wrap gap-2 px-3 pt-2.5"></div>
-        <textarea id="input" rows="2"
-          class="block w-full resize-none bg-transparent px-3 py-2.5 focus:outline-none"
-          placeholder="Message…"></textarea>
-        <div class="flex items-center gap-2 px-2 pb-2">
+      <div class="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
+        <div id="image-strip" class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
+        <!-- items-end keeps the icons on the bottom row while the textarea grows upward -->
+        <div class="flex items-end gap-1.5">
           <button type="button" id="attach" title="Attach image (or paste / drop)"
-            class="flex h-7 w-7 flex-none items-center justify-center rounded-md text-[17px] leading-none text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">+</button>
+            class="flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-[17px] leading-none text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600">+</button>
           <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
-          <span id="state-chip" class="flex items-center gap-1.5 text-[12px] text-neutral-400"></span>
-          <div class="ml-auto flex items-center gap-1">
-            <button type="button" id="stop"
-              class="hidden rounded-lg px-2.5 py-1 text-[13px] text-red-600 hover:bg-red-50">Stop</button>
-            <button type="button" id="send-now"
-              class="hidden rounded-lg px-2.5 py-1 text-[13px] text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700">Send now</button>
-            <button type="submit" id="send"
-              class="rounded-lg bg-indigo-600 px-3.5 py-1 text-[13px] font-medium text-white hover:bg-indigo-500 active:bg-indigo-700">Send</button>
-          </div>
+          <textarea id="input" rows="1"
+            class="block max-h-48 min-w-0 flex-1 resize-none bg-transparent px-1 py-0.5 focus:outline-none"
+            placeholder="Message…"></textarea>
+          <button type="button" id="stop" title="Stop the running turn"
+            class="hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+            <svg viewBox="0 0 16 16" fill="currentColor" class="h-3.5 w-3.5">
+              <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />
+            </svg>
+          </button>
+          <!-- Style + icon double as the state display: indigo plane = send, amber clock = queue -->
+          <button type="submit" id="send" title="Send">
+            <svg id="send-plane" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">
+              <path d="M14.5 1.5 7 9m7.5-7.5-4.2 12.6L7 9 1.7 6.7l12.8-5.2z" />
+            </svg>
+            <svg id="send-queue" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" class="hidden h-3.5 w-3.5">
+              <circle cx="8" cy="8" r="6" />
+              <path d="M8 4.75V8l2.4 1.5" />
+            </svg>
+          </button>
         </div>
       </div>
     </form>

@@ -56,6 +56,7 @@ function fakeSession(id: string): AgentSession & {
       calls.push("abort");
       state = "idle";
     },
+    rewindToUserTurn: async (i: number) => void calls.push(`rewind:${i}`),
     pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
     clearQueue: async () => {
       calls.push("clearQueue");
@@ -369,6 +370,36 @@ describe("workbench server", () => {
       body: JSON.stringify({ text: "x", images: [{ data: "a", mimeType: "text/html" }] }),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("edits a user turn: rewind, then re-dispatch the new text", async () => {
+    const { app, session } = setup();
+    const res = await app.request("/api/sessions/s1/turns/0/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "fixed" }),
+    });
+    expect(res.status).toBe(202);
+    expect(session.calls).toEqual(["rewind:0", "prompt:fixed"]);
+  });
+
+  it("rejects edits while streaming or with bad input", async () => {
+    const { app, session } = setup();
+    session.setState("streaming");
+    const busy = await app.request("/api/sessions/s1/turns/0/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "fixed" }),
+    });
+    expect(busy.status).toBe(409);
+    session.setState("idle");
+    const bad = await app.request("/api/sessions/s1/turns/x/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "fixed" }),
+    });
+    expect(bad.status).toBe(400);
+    expect(session.calls).toEqual([]);
   });
 
   it("recalls the pending queue", async () => {

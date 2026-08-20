@@ -211,6 +211,32 @@ export function createServer({ factory, router, hub, pins, config }: WebDeps): H
     return c.json({ sessionId }, 202);
   });
 
+  // Edit a user turn: rewind the transcript to just before it, then re-send
+  // the edited text as a fresh dispatch. Pi keeps the old branch in the
+  // session file but out of context — the "deleted" message stops polluting.
+  app.post("/api/sessions/:id/turns/:index/edit", async (c) => {
+    const id = c.req.param("id");
+    const index = Number(c.req.param("index"));
+    const body = await c.req.json().catch(() => null);
+    if (!Number.isInteger(index) || index < 0 || typeof body?.text !== "string" || !body.text.trim()) {
+      return c.json({ error: "index and text required" }, 400);
+    }
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
+      await session.rewindToUserTurn(index);
+      await router.dispatch({
+        key: { channelId: "web", conversationId: id },
+        senderId: "web",
+        text: body.text,
+        mode: "auto",
+      });
+      return c.json({ ok: true }, 202);
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
   // Promote queued messages: "steer" delivers them into the running turn,
   // "restart" aborts the turn and sends them as a fresh prompt. Pi has no
   // promote primitive, so this is clear-queue + re-dispatch through core.

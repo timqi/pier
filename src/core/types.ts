@@ -122,6 +122,13 @@ export interface AgentSession {
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** Drop all pending queued messages and return them (for recall-to-composer). */
   clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
+  /**
+   * Rewind the transcript to just before the index-th user turn (as counted
+   * in history()), dropping it and everything after from the context — the
+   * edit-message primitive. The caller re-prompts with the edited text.
+   * Rejects while streaming.
+   */
+  rewindToUserTurn(index: number): Promise<void>;
   prompt(text: string, images?: ImageAttachment[]): Promise<void>; // resolves when the turn settles
   steer(text: string, images?: ImageAttachment[]): Promise<void>; // interrupt mid-run
   followUp(text: string, images?: ImageAttachment[]): Promise<void>; // deliver when idle
