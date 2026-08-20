@@ -199,14 +199,30 @@ function sessionRow(s: SessionInfo): HTMLElement {
 
 /** One collapsible project = one cwd; collapse state lives in localStorage. */
 function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
-  const badge = list.some((s) => s.state === "streaming")
-    ? h("span", "ml-auto h-2 w-2 flex-none rounded-full bg-green-500 animate-pulse")
-    : h("span", "ml-auto flex-none text-[11px] text-neutral-400", String(list.length));
+  const count = h(
+    "span",
+    "ml-auto flex-none text-[11px] text-neutral-400 group-hover:hidden",
+    String(list.length),
+  );
+  // Hover shortcut: new session in this cwd, no dialog — the cwd is the answer
+  // the dialog would have asked for.
+  const add = h(
+    "button",
+    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block",
+    "+",
+  );
+  add.title = `New session in ${cwd}`;
+  add.onclick = (ev) => {
+    ev.preventDefault(); // a click inside <summary> would toggle the project
+    ev.stopPropagation();
+    void createSession(cwd);
+  };
   const { el, summary } = detailsRow("border-b border-neutral-200/70", [
     h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", basename(cwd)),
-    badge,
+    count,
+    add,
   ]);
-  summary.className += " px-3 py-1.5 hover:bg-neutral-100";
+  summary.className += " group px-3 py-1.5 hover:bg-neutral-100";
   summary.title = cwd;
   el.open = !collapsed.has(cwd);
   el.ontoggle = () => setCollapsed(cwd, !el.open);
@@ -291,6 +307,22 @@ function renderArchive(): void {
       ? nodes
       : [h("li", "px-3 py-3 text-[13px] text-neutral-400", "No matching sessions.")]),
   );
+}
+
+async function createSession(cwd: string): Promise<void> {
+  const res = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  if (!res.ok) {
+    appendTurn("error", `session create failed: ${res.status}`);
+    return;
+  }
+  const { id } = (await res.json()) as { id: string };
+  await refreshSessions();
+  await select(id);
+  input.focus();
 }
 
 async function refreshSessions(): Promise<void> {
@@ -1105,22 +1137,8 @@ $("#open-archive").onclick = () => {
 $("#archive-close").onclick = () => archiveDialog.close();
 $("#version").textContent = `v${__PIER_VERSION__}`;
 archiveSearch.oninput = () => renderArchive();
-$<HTMLFormElement>("#new-form").onsubmit = async () => {
-  const cwd = $<HTMLInputElement>("#new-cwd").value.trim();
-  const res = await fetch("/api/sessions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cwd }),
-  });
-  if (!res.ok) {
-    appendTurn("error", `session create failed: ${res.status}`);
-    return;
-  }
-  const { id } = (await res.json()) as { id: string };
-  await refreshSessions();
-  await select(id);
-  input.focus();
-};
+$<HTMLFormElement>("#new-form").onsubmit = () =>
+  void createSession($<HTMLInputElement>("#new-cwd").value.trim());
 stopBtn.onclick = () =>
   currentId && fetch(`/api/sessions/${currentId}/abort`, { method: "POST" });
 $("#queue-steer").onclick = () => void deliverQueue("steer");
