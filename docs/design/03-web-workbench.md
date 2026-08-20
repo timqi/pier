@@ -7,14 +7,17 @@ REST + SSE, no agent logic. Kept current as the workbench evolves.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/sessions` | `AgentFactory.list()` + live state from router |
-| `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
-| `GET /api/sessions/:id/history` | resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model}`; 404 if unknown |
+| `GET /api/sessions` | `AgentFactory.list()` + live state from router + `pinned` from the pin store |
+| `POST /api/sessions` | body `{cwd?}` → create session (auto-pinned), returns `{id}` |
+| `POST /api/sessions/:id/pin` | body `{pinned}` → add/remove from Projects, returns `{pinned}` |
+| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue}`; 404 if unknown |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
 | `POST /api/sessions/:id/messages` | body `{text, mode, images?}` (`mode` defaults `auto`; images = base64 `{data, mimeType}`, max 8 × 8MB, validated at the seam; text or images required) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/sessions/:id/abort` | abort the current run |
+| `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
+| `GET /api/events` | SSE workspace stream: `sessions-changed` (created / pinned → client re-lists) and `session-state` (patch the list dot). Pointers only, no content, no replay — a reconnect re-lists. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` |
 
@@ -31,11 +34,35 @@ custom classes are `.btn`/`.btn-primary`. `npm run dev:web` gives HMR with an
 Single page, two panes (the raw timeline pane was folded into per-turn
 Activity groups):
 
-- **Session list** (left): grouped by project (derived from session cwd),
-  rows with state dot (idle/streaming) and relative time, click to switch,
+- **Projects** (left): only *pinned* sessions, grouped by project (derived from
+  session cwd). Sessions created in Pier are pinned automatically; everything
+  else stays out of the sidebar. Each project is a collapsible group (collapse
+  state in `localStorage`) whose header shows the session count, or a green dot
+  while any of its sessions stream; rows carry a state dot, relative time and a
+  hover `⋯` opening the session menu. The section header carries the only two
+  sidebar actions as icons (avibe layout): search → All sessions, plus → the
   "New session" dialog with cwd input + known-project suggestions.
-- **Chat header**: title, cwd, model picker (switches the session's model),
-  state badge, abort while streaming.
+- **All sessions** (search icon → modal): everything `AgentFactory.list()`
+  knows about, searchable over title + cwd, grouped by project, each row with a
+  pin toggle; click opens the session. Pins are the only UI-owned persisted
+  state — a plain id array in `$PIER_HOME|~/.pier/pins.json` (`src/web/pins.ts`),
+  outside the seams, injected into `createServer` so tests stay hermetic.
+- **Snapshot then deltas**: the stream carries deltas only, so a fresh client
+  starts from `/history` — transcript (including each assistant turn's `steps`,
+  the thinking/tool activity rebuilt from the Pi transcript), run `state` and
+  pending `queue` — then applies SSE events after `lastSeq`. Nothing about a
+  session's state is defaulted client-side; a reload shows real step counts and
+  the correct composer buttons.
+- **Chat header**: title and the `⋯` session menu — nothing else; details live
+  in the menu instead of taking permanent header space.
+- **Session menu** (`menu.ts`): one anchored popover primitive, one open at a
+  time, closed by outside pointerdown / Esc / page scroll (scrolling *inside*
+  the panel does not close it). Opened from the chat header and from project
+  rows; holds session info (title, cwd, id, model, context usage from the
+  snapshot), pin-to-Projects and the model picker. `model-picker.ts` is the
+  standalone grouped-by-provider list, groups collapsed except the one holding
+  the current model — separate because model choice will also be needed outside
+  chat (scheduled tasks).
 - **Chat** (center): Slack-style full-width rows, no bubbles — user turns
   carry an indigo accent bar + tint, agent turns stay plain; consecutive
   same-sender rows group tighter. Agent rows show a hover meta chip
@@ -45,8 +72,13 @@ Activity groups):
   (streaming only), **Stop** = abort (streaming only). Enter sends; Enter
   during IME composition never sends (`isComposing`/229 guard). A pending
   **queue panel** above the composer renders `queue-state` snapshots with
-  mode chips and a "Recall all" action that clears the queue back into the
-  composer (append, never clobber the draft).
+  mode chips and three actions on the whole queue: **Send now** (steer it into
+  the running turn), **Abort & send** (stop the turn, send it as a new prompt)
+  and **Recall all** (clear it back into the composer — append, never clobber
+  the draft). Multiple queued messages are joined with newlines. When the agent
+  actually picks a queued message up, the seam's `user-message` event renders it
+  as a real user turn; own sends render optimistically and reconcile against
+  that event by text instead of drawing twice.
 - **Activity groups** (in-chat): one collapsible group per turn collects
   thinking + tool activity (avibe AgentActivityGroup concept): status icon
   (spinner/✓/✕/⏸) + rotating chevron, step count, duration, latest step in
@@ -71,8 +103,10 @@ never duplicate history.
 
 ## Rules
 
-- All data arrives via the SSE event stream; the frontend never polls except
-  the initial session list.
+- All data arrives via the SSE event streams (workspace + per session); the
+  frontend never polls. Multi-client sync needs no duplex channel: commands go
+  out over REST, everything else comes back on the streams, so every open tab
+  shows the same lists, run states and transcripts.
 - Reconnect: EventSource auto-reconnect + `Last-Event-ID` replay must survive
   a server restart gap without duplicating rendered events (dedupe by seq).
 - Assistant content renders as markdown (`marked` + DOMPurify sanitization,
@@ -90,6 +124,6 @@ never duplicate history.
 ## Acceptance
 
 - Two browser tabs on one session see identical timelines (fan-out works).
-- While a long turn streams: plain send queues (`queued` event visible),
+- While a long turn streams: plain send queues (queue panel updates via `queue-state`),
   `!text` visibly interrupts the run.
 - Kill/restart server, tab reconnects and replays without duplicates.

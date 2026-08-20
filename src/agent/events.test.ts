@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
+import { toChatTurns, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
 
 describe("toSessionEvents", () => {
   const cases: { name: string; input: PiEvent; expected: unknown[] }[] = [
@@ -82,6 +82,16 @@ describe("toSessionEvents", () => {
       expected: [{ type: "queue-state", steering: [], followUp: [] }],
     },
     {
+      name: "message_start with a user message → user-message (queued delivery)",
+      input: { type: "message_start", message: { role: "user", content: "do it" } },
+      expected: [{ type: "user-message", text: "do it" }],
+    },
+    {
+      name: "message_start for non-user messages is dropped",
+      input: { type: "message_start", message: { role: "assistant", content: "hi" } },
+      expected: [],
+    },
+    {
       name: "unknown events are dropped",
       input: { type: "compaction_start" },
       expected: [],
@@ -95,6 +105,47 @@ describe("toSessionEvents", () => {
   }
 });
 
+describe("toChatTurns", () => {
+  it("attaches the thinking + tool activity that preceded each answer", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "go", timestamp: 1000 },
+      {
+        role: "assistant",
+        timestamp: 2000,
+        content: [
+          { type: "thinking", thinking: "hmm" },
+          { type: "toolCall", id: "t1", name: "read", arguments: { path: "a.ts" } },
+        ],
+      },
+      { role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "file" }], isError: false },
+      { role: "assistant", timestamp: 3000, content: [{ type: "text", text: "done" }] },
+    ]);
+    expect(turns).toEqual([
+      { role: "user", text: "go" },
+      {
+        role: "assistant",
+        text: "done",
+        meta: { completedAt: 3000, durationMs: 2000, tokens: 0 },
+        steps: [
+          { kind: "thinking", text: "hmm" },
+          { kind: "tool", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps activity from an aborted run as a text-less turn", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "go" },
+      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: {} }] },
+    ]);
+    expect(turns).toEqual([
+      { role: "user", text: "go" },
+      { role: "assistant", text: "", steps: [{ kind: "tool", toolName: "bash", args: {} }] },
+    ]);
+  });
+});
+
 describe("turnMetaAt", () => {
   const msgs: PiMessage[] = [
     { role: "user", timestamp: 1000 },
@@ -104,16 +155,27 @@ describe("turnMetaAt", () => {
     { role: "assistant", timestamp: 12_000, usage: { totalTokens: 250 } },
   ];
 
-  it("computes duration from the preceding user message and cumulative tokens", () => {
-    expect(turnMetaAt(msgs, 4)).toEqual({ completedAt: 12_000, durationMs: 2000, tokens: 350 });
+  it("computes duration from the preceding user message and context size", () => {
+    // 250, not 350: totalTokens is already the whole request's context.
+    expect(turnMetaAt(msgs, 4)).toEqual({ completedAt: 12_000, durationMs: 2000, tokens: 250 });
   });
 
   it("prefers a caller-supplied completion clock (live turn-end)", () => {
-    expect(turnMetaAt(msgs, 4, 15_000)).toEqual({ completedAt: 15_000, durationMs: 5000, tokens: 350 });
+    expect(turnMetaAt(msgs, 4, 15_000)).toEqual({ completedAt: 15_000, durationMs: 5000, tokens: 250 });
   });
 
-  it("only counts tokens up to the given turn", () => {
+  it("reads the context size of the given turn, not later ones", () => {
     expect(turnMetaAt(msgs, 1)).toEqual({ completedAt: 3000, durationMs: 2000, tokens: 100 });
+  });
+
+  it("falls back to the last message that reported usage", () => {
+    const withGap: PiMessage[] = [
+      { role: "user", timestamp: 1000 },
+      { role: "assistant", timestamp: 2000, usage: { totalTokens: 500 } },
+      { role: "toolResult", timestamp: 2500 },
+      { role: "assistant", timestamp: 3000 }, // aborted turn: no usage
+    ];
+    expect(turnMetaAt(withGap, 3)?.tokens).toBe(500);
   });
 
   it("returns undefined for non-assistant or untimestamped messages", () => {

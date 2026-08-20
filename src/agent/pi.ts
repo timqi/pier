@@ -11,13 +11,20 @@ import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
+  ContextUsage,
   ImageAttachment,
   ModelRef,
   SessionEventPayload,
   SessionState,
   TurnMeta,
 } from "../core/types.js";
-import { textOf, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
+import {
+  toChatTurns,
+  toSessionEvents,
+  turnMetaAt,
+  type PiEvent,
+  type PiMessage,
+} from "./events.js";
 import { curateModels } from "./models.js";
 
 const toImageContent = (images?: ImageAttachment[]) =>
@@ -37,6 +44,11 @@ class PiSession implements AgentSession {
   get model(): ModelRef | undefined {
     const m = this.pi.model;
     return m ? { provider: m.provider, id: m.id } : undefined;
+  }
+
+  get contextUsage(): ContextUsage | undefined {
+    const u = this.pi.getContextUsage();
+    return u ? { tokens: u.tokens, contextWindow: u.contextWindow } : undefined;
   }
 
   async setModel(ref: ModelRef): Promise<void> {
@@ -59,25 +71,19 @@ class PiSession implements AgentSession {
     return curated;
   }
 
+  async pendingQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    return {
+      steering: [...this.pi.getSteeringMessages()],
+      followUp: [...this.pi.getFollowUpMessages()],
+    };
+  }
+
   async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
     return this.pi.clearQueue();
   }
 
   async history(): Promise<ChatTurn[]> {
-    const turns: ChatTurn[] = [];
-    const messages = this.pi.messages as PiMessage[];
-    for (const [i, m] of messages.entries()) {
-      if (m.role !== "user" && m.role !== "assistant") continue;
-      let text = textOf(m.content);
-      const imageCount = Array.isArray(m.content)
-        ? m.content.filter((p) => p.type === "image").length
-        : 0;
-      if (imageCount) text = `${text}${text ? " " : ""}[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
-      if (!text) continue;
-      const meta = m.role === "assistant" ? turnMetaAt(messages, i) : undefined;
-      turns.push(meta ? { role: m.role, text, meta } : { role: m.role, text });
-    }
-    return turns;
+    return toChatTurns(this.pi.messages as PiMessage[]);
   }
 
   prompt(text: string, images?: ImageAttachment[]): Promise<void> {

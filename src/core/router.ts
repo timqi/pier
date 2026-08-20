@@ -43,6 +43,14 @@ export class Router {
     this.bySession.set(session.id, { session, key });
     session.subscribe((payload) => {
       this.hub.emit(session.id, payload);
+      // Run state is workspace-visible: every client's session list shows it.
+      if (payload.type === "state") {
+        this.hub.emitWorkspace({
+          type: "session-state",
+          sessionId: session.id,
+          state: payload.state,
+        });
+      }
       if (payload.type === "turn-end" && payload.text) {
         const channel = this.channels.get(key.channelId);
         if (channel) {
@@ -74,9 +82,6 @@ export class Router {
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
     const session = await this.ensure(msg.key);
     const { action, text } = decide(msg, session.state);
-    if (action !== "prompt") {
-      this.hub.emit(session.id, { type: "queued", mode: action, text });
-    }
     // Turn outcomes flow through the event stream; a rejected call surfaces
     // there too, never as a thrown exception across the seam.
     session[action](text, msg.images).catch((err) => {

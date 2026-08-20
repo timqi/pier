@@ -9,22 +9,48 @@
   <aside class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
     <header class="flex items-center justify-between gap-2 px-3 py-2">
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
-      <button id="new-session" class="btn btn-primary text-[13px]">New</button>
     </header>
-    <ul id="session-list" class="flex-1 overflow-y-auto text-[13.5px]"></ul>
+    <div class="flex items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+      Projects
+      <button type="button" id="open-archive" title="Search all sessions"
+        class="icon-btn ml-auto" aria-label="Search all sessions">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5">
+          <circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2 14 14" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button type="button" id="new-session" title="New session"
+        class="icon-btn" aria-label="New session">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5">
+          <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.5" />
+          <path d="M8 5.5v5M5.5 8h5" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+    <div id="project-tree" class="flex-1 overflow-y-auto text-[13.5px]"></div>
+    <footer class="flex flex-none items-center gap-2 border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400">
+      Pier
+      <span id="version" class="ml-auto font-mono"></span>
+    </footer>
   </aside>
 
   <main class="flex min-w-0 flex-col overflow-hidden">
     <header class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
       <span id="chat-title" class="truncate font-medium"></span>
-      <span id="chat-cwd" class="truncate font-mono text-[12px] text-neutral-400"></span>
-      <select id="model-select" class="ml-auto max-w-56 flex-none cursor-pointer truncate rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[12px] text-neutral-600 focus:outline-none"></select>
+      <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
+        class="icon-btn ml-auto">⋯</button>
     </header>
     <div id="turns" class="flex-1 overflow-y-auto pb-4 pt-1"></div>
     <div id="queue-panel" class="hidden flex-col gap-1 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
       <div class="flex items-center">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Queued</span>
-        <button type="button" id="queue-recall" class="ml-auto text-[12px] text-amber-700 underline-offset-2 hover:underline">Recall all</button>
+        <div class="ml-auto flex items-center gap-3 text-[12px] text-amber-700">
+          <button type="button" id="queue-steer" title="Deliver now, interrupting the running turn"
+            class="cursor-pointer underline-offset-2 hover:underline">Send now</button>
+          <button type="button" id="queue-restart" title="Abort the running turn and send as a new prompt"
+            class="cursor-pointer underline-offset-2 hover:underline">Abort &amp; send</button>
+          <button type="button" id="queue-recall"
+            class="cursor-pointer underline-offset-2 hover:underline">Recall all</button>
+        </div>
       </div>
       <ul id="queue-rows" class="flex flex-col gap-1"></ul>
     </div>
@@ -57,7 +83,7 @@
       <h3 class="font-semibold">New session</h3>
       <label class="flex flex-col gap-1 text-[13px] text-neutral-600">
         Working directory
-        <input id="new-cwd" type="text" placeholder="server default" list="known-projects"
+        <input id="new-cwd" type="text" required placeholder="/path/to/project" list="known-projects"
           class="rounded-md border border-neutral-300 px-2 py-1.5 font-mono text-[13px] focus:border-indigo-400 focus:outline-none" />
         <datalist id="known-projects"></datalist>
       </label>
@@ -66,6 +92,16 @@
         <button type="submit" class="btn btn-primary text-[13px]">Create</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="archive-dialog" class="m-auto w-[560px] max-w-[90vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
+    <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
+      <input id="archive-search" type="text" placeholder="Search all sessions…"
+        class="w-full bg-transparent text-[14px] focus:outline-none" />
+      <span id="archive-count" class="flex-none rounded bg-neutral-100 px-1.5 text-[11px] text-neutral-500"></span>
+      <button type="button" id="archive-close" class="btn flex-none text-[12px]">Close</button>
+    </div>
+    <ul id="archive-list" class="max-h-[60vh] overflow-y-auto py-1 text-[13.5px]"></ul>
   </dialog>
 
   <script type="module" src="/main.ts"></script>

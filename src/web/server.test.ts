@@ -1,7 +1,11 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import type { AgentFactory, AgentSession, ChatTurn, ImageAttachment, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
+import { PinStore } from "./pins.js";
 import { createServer } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -24,6 +28,7 @@ function fakeSession(id: string): AgentSession & {
       model = m;
       calls.push(`setModel:${m.provider}/${m.id}`);
     },
+    contextUsage: { tokens: 1200, contextWindow: 200_000 },
     availableModels: async (): Promise<ModelRef[]> => [
       { provider: "anthropic", id: "claude-opus-4-5" },
       { provider: "openai", id: "gpt-5.2" },
@@ -46,7 +51,12 @@ function fakeSession(id: string): AgentSession & {
       void calls.push(`steer:${t}${imgs ? `+${imgs.length}img` : ""}`),
     followUp: async (t: string, imgs?: ImageAttachment[]) =>
       void calls.push(`followUp:${t}${imgs ? `+${imgs.length}img` : ""}`),
-    abort: async () => void calls.push("abort"),
+    // Pi's abort resolves only once the agent is idle again.
+    abort: async () => {
+      calls.push("abort");
+      state = "idle";
+    },
+    pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
     clearQueue: async () => {
       calls.push("clearQueue");
       return { steering: ["s-msg"], followUp: ["f-msg"] };
@@ -68,8 +78,10 @@ function setup() {
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
-  const app = createServer({ factory, router, hub });
-  return { app, session, factory, hub, router };
+  // Hermetic: pins land in a throwaway dir, never the real $HOME.
+  const pins = new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json"));
+  const app = createServer({ factory, router, hub, pins });
+  return { app, session, factory, hub, router, pins };
 }
 
 describe("workbench server", () => {
@@ -77,15 +89,37 @@ describe("workbench server", () => {
     const { app } = setup();
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([{ id: "s1", cwd: "/tmp", createdAt: 1, state: "idle" }]);
+    expect(await res.json()).toEqual([
+      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false },
+    ]);
   });
 
-  it("creates a session and attaches it to the router", async () => {
+  it("pins sessions created here, and toggles pins on demand", async () => {
+    const { app, pins } = setup();
+    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
+    expect(pins.has("s1")).toBe(true);
+
+    const off = await app.request("/api/sessions/s1/pin", {
+      method: "POST",
+      body: JSON.stringify({ pinned: false }),
+    });
+    expect(off.status).toBe(200);
+    expect(pins.has("s1")).toBe(false);
+
+    const bad = await app.request("/api/sessions/s1/pin", { method: "POST", body: "{}" });
+    expect(bad.status).toBe(400);
+  });
+
+  it("creates a session in the given project directory, never pier's own", async () => {
     const { app, factory, session, hub } = setup();
-    const res = await app.request("/api/sessions", { method: "POST", body: "{}" });
+    expect((await app.request("/api/sessions", { method: "POST", body: "{}" })).status).toBe(400);
+    const res = await app.request("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ cwd: "/tmp" }),
+    });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: "s1" });
-    expect(factory.create).toHaveBeenCalledOnce();
+    expect(factory.create).toHaveBeenCalledExactlyOnceWith({ cwd: "/tmp" });
     // attached: session events now reach the hub
     const seen = vi.fn();
     hub.subscribe("s1", seen);
@@ -93,9 +127,10 @@ describe("workbench server", () => {
     expect(seen).toHaveBeenCalledOnce();
   });
 
-  it("loads history and attaches the session on demand", async () => {
+  it("snapshots history, live state and pending queue on demand", async () => {
     const { app, hub, session } = setup();
     hub.emit("s1", { type: "turn-start" });
+    session.setState("streaming");
     const res = await app.request("/api/sessions/s1/history");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -105,7 +140,11 @@ describe("workbench server", () => {
       ],
       lastSeq: 1,
       model: { provider: "anthropic", id: "claude-opus-4-5" },
+      state: "streaming",
+      context: { tokens: 1200, contextWindow: 200_000 },
+      queue: { steering: ["s-msg"], followUp: ["f-msg"] },
     });
+    session.setState("idle");
     // ensure() attached the session: its events now reach the hub
     const seen = vi.fn();
     hub.subscribe("s1", seen);
@@ -119,7 +158,12 @@ describe("workbench server", () => {
     const router = new Router(hub, async () => {
       throw new Error("unknown session: nope");
     });
-    const app = createServer({ factory, router, hub });
+    const app = createServer({
+      factory,
+      router,
+      hub,
+      pins: new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+    });
     const res = await app.request("/api/sessions/nope/history");
     expect(res.status).toBe(404);
   });
@@ -187,17 +231,6 @@ describe("workbench server", () => {
     ]);
   });
 
-  it("emits queued events into the hub when deferring", async () => {
-    const { app, session, hub } = setup();
-    session.setState("streaming");
-    await app.request("/api/sessions/s1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "later" }),
-    });
-    expect(hub.replay("s1", 0)).toMatchObject([{ type: "queued", mode: "followUp", text: "later" }]);
-  });
-
   it("rejects messages without text", async () => {
     const { app } = setup();
     const res = await app.request("/api/sessions/s1/messages", {
@@ -244,10 +277,40 @@ describe("workbench server", () => {
     expect(session.calls).toContain("clearQueue");
   });
 
+  it("delivers the queue as steering", async () => {
+    const { app, session } = setup();
+    session.setState("streaming");
+    const res = await app.request("/api/sessions/s1/queue/deliver", {
+      method: "POST",
+      body: JSON.stringify({ mode: "steer" }),
+    });
+    expect(res.status).toBe(202);
+    expect(session.calls).toEqual(["clearQueue", "steer:s-msg\nf-msg"]);
+    session.setState("idle");
+  });
+
+  it("restart aborts the run before re-prompting, and rejects bad modes", async () => {
+    const { app, session } = setup();
+    session.setState("streaming");
+    const res = await app.request("/api/sessions/s1/queue/deliver", {
+      method: "POST",
+      body: JSON.stringify({ mode: "restart" }),
+    });
+    expect(res.status).toBe(202);
+    // abort runs first; state is idle by then, so the queue lands as a prompt
+    expect(session.calls).toEqual(["clearQueue", "abort", "prompt:s-msg\nf-msg"]);
+
+    const bad = await app.request("/api/sessions/s1/queue/deliver", {
+      method: "POST",
+      body: JSON.stringify({ mode: "nope" }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it("aborts via the router", async () => {
     const { app, session } = setup();
     // attach first so the router knows the session
-    await app.request("/api/sessions", { method: "POST", body: "{}" });
+    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
     const res = await app.request("/api/sessions/s1/abort", { method: "POST" });
     expect(res.status).toBe(202);
     expect(session.calls).toContain("abort");

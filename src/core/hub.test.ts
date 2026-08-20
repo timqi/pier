@@ -28,6 +28,19 @@ describe("EventHub", () => {
     expect(events[0]?.seq).toBe(6);
   });
 
+  it("fans workspace events out to every client", () => {
+    const hub = new EventHub();
+    const a = vi.fn();
+    const b = vi.fn();
+    hub.subscribeWorkspace(a);
+    const unsub = hub.subscribeWorkspace(b);
+    hub.emitWorkspace({ type: "sessions-changed" });
+    unsub();
+    hub.emitWorkspace({ type: "session-state", sessionId: "s1", state: "streaming" });
+    expect(a).toHaveBeenCalledTimes(2);
+    expect(b).toHaveBeenCalledTimes(1);
+  });
+
   it("unsubscribe stops delivery", () => {
     const hub = new EventHub();
     const fn = vi.fn();

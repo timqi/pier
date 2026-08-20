@@ -3,11 +3,16 @@
 // and Pi types never leak past the seam. The golden-table test in
 // events.test.ts is the mapping's spec; extend types.ts before adding events.
 
-import type { SessionEventPayload, TurnMeta } from "../core/types.js";
+import type { ActivityStep, ChatTurn, SessionEventPayload, TurnMeta } from "../core/types.js";
 
+/** Union of the assistant content blocks we care about (text/thinking/toolCall). */
 interface TextPart {
   type: string;
   text?: string;
+  thinking?: string;
+  id?: string; // toolCall
+  name?: string; // toolCall
+  arguments?: unknown; // toolCall
 }
 
 export interface PiMessage {
@@ -17,10 +22,15 @@ export interface PiMessage {
   errorMessage?: string;
   timestamp?: number; // ms epoch, stamped by Pi at message creation
   usage?: { totalTokens?: number };
+  // toolResult messages
+  toolCallId?: string;
+  toolName?: string;
+  isError?: boolean;
 }
 
 export interface PiEvent {
   type: string;
+  message?: PiMessage;
   messages?: PiMessage[];
   assistantMessageEvent?: { type: string; delta?: string };
   toolCallId?: string;
@@ -41,6 +51,16 @@ export function textOf(content: string | TextPart[] | undefined): string {
     .join("");
 }
 
+/** Renderable text of a message, with an image marker (binaries aren't served). */
+function displayText(m: PiMessage): string {
+  const text = textOf(m.content);
+  const images = Array.isArray(m.content)
+    ? m.content.filter((p) => p.type === "image").length
+    : 0;
+  if (!images) return text;
+  return `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]`;
+}
+
 function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {
   if (!messages) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -54,6 +74,11 @@ function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined
  * hints). `completedAt` defaults to the message's own timestamp — Pi stamps
  * that at stream start, so callers with a real clock (live turn-end) pass
  * their own; history accepts the approximation.
+ *
+ * `tokens` is the context size at that point, not a sum: each assistant
+ * message's `totalTokens` already covers the whole request (prompt + cache +
+ * output), so adding them up double-counts the context on every turn. Pi
+ * itself reads context usage off the last assistant message the same way.
  */
 export function turnMetaAt(
   messages: PiMessage[],
@@ -72,11 +97,71 @@ export function turnMetaAt(
     }
   }
   let tokens = 0;
-  for (let i = 0; i <= index; i++) {
+  for (let i = index; i >= 0; i--) {
     const t = messages[i];
-    if (t?.role === "assistant") tokens += t.usage?.totalTokens ?? 0;
+    if (t?.role === "assistant" && t.usage?.totalTokens) {
+      tokens = t.usage.totalTokens;
+      break;
+    }
   }
   return { completedAt: end, durationMs: Math.max(0, end - started), tokens };
+}
+
+/**
+ * Rebuild the renderable transcript: user/assistant turns plus the activity
+ * (thinking + tool calls) that preceded each assistant answer. This is what
+ * makes a page reload show the real step counts instead of restarting at zero.
+ */
+export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  let steps: ActivityStep[] = []; // activity seen since the last emitted turn
+  const pendingTools = new Map<string, ActivityStep>();
+
+  const flush = (role: "user" | "assistant", text: string, meta?: TurnMeta): void => {
+    const turn: ChatTurn = { role, text };
+    if (meta) turn.meta = meta;
+    if (steps.length) {
+      turn.steps = steps;
+      steps = [];
+    }
+    turns.push(turn);
+  };
+
+  for (const [i, m] of messages.entries()) {
+    if (m.role === "toolResult") {
+      const step = pendingTools.get(m.toolCallId ?? "");
+      if (step) {
+        step.output = textOf(m.content);
+        step.isError = m.isError ?? false;
+        pendingTools.delete(m.toolCallId ?? "");
+      }
+      continue;
+    }
+    if (m.role !== "user" && m.role !== "assistant") continue;
+
+    if (m.role === "assistant" && Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (part.type === "thinking" && part.thinking) {
+          steps.push({ kind: "thinking", text: part.thinking });
+        } else if (part.type === "toolCall") {
+          const step: ActivityStep = {
+            kind: "tool",
+            toolName: part.name ?? "",
+            args: part.arguments,
+          };
+          steps.push(step);
+          if (part.id) pendingTools.set(part.id, step);
+        }
+      }
+    }
+
+    const text = displayText(m);
+    if (!text) continue; // step-only assistant messages keep buffering activity
+    flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined);
+  }
+  // Activity with no answer after it (aborted run) still belongs on the page.
+  if (steps.length) flush("assistant", "");
+  return turns;
 }
 
 /** Translate one Pi session event into zero or more Pier payloads. */
@@ -94,6 +179,14 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       }
       out.push({ type: "state", state: "idle" });
       return out;
+    }
+    case "message_start": {
+      // Pi emits this for every message entering the context; the user ones are
+      // what a client can't know about (queued/steered messages, IM traffic).
+      const m = e.message;
+      if (m?.role !== "user") return [];
+      const text = displayText(m);
+      return text ? [{ type: "user-message", text }] : [];
     }
     case "message_update": {
       const ame = e.assistantMessageEvent;

@@ -7,11 +7,13 @@ import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import type { AgentFactory, ImageAttachment, InboundMessage } from "../core/types.js";
+import type { PinStore } from "./pins.js";
 
 export interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;
+  pins: PinStore;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -38,24 +40,42 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
   return images;
 }
 
-export function createServer({ factory, router, hub }: WebDeps): Hono {
+export function createServer({ factory, router, hub, pins }: WebDeps): Hono {
   const app = new Hono();
 
   app.get("/api/sessions", async (c) => {
     const sessions = await factory.list();
     return c.json(
-      sessions.map((s) => ({ ...s, state: router.stateOf(s.id) ?? "idle" })),
+      sessions.map((s) => ({
+        ...s,
+        state: router.stateOf(s.id) ?? "idle",
+        pinned: pins.has(s.id),
+      })),
     );
   });
 
   app.post("/api/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const cwd = typeof body.cwd === "string" && body.cwd ? body.cwd : process.cwd();
-    const session = await factory.create({ cwd });
+    // A session always starts in its project directory — never in pier's own.
+    if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
+    const session = await factory.create({ cwd: body.cwd });
     router.attach({ channelId: "web", conversationId: session.id }, session);
+    // Created here = part of the workspace; pinning is what Projects lists.
+    pins.set(session.id, true);
+    hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
 
+  app.post("/api/sessions/:id/pin", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
+    pins.set(c.req.param("id"), body.pinned);
+    hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ pinned: body.pinned });
+  });
+
+  // Snapshot: everything a fresh client needs before it starts consuming
+  // deltas from SSE — transcript, live state, pending queue, model.
   app.get("/api/sessions/:id/history", async (c) => {
     const id = c.req.param("id");
     try {
@@ -64,6 +84,9 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
         turns: await session.history(),
         lastSeq: hub.lastSeq(id),
         model: session.model ?? null,
+        state: session.state,
+        context: session.contextUsage ?? null,
+        queue: await session.pendingQueue(),
       });
     } catch (err) {
       return c.json({ error: String(err) }, 404);
@@ -118,6 +141,34 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
     return c.json({ sessionId }, 202);
   });
 
+  // Promote queued messages: "steer" delivers them into the running turn,
+  // "restart" aborts the turn and sends them as a fresh prompt. Pi has no
+  // promote primitive, so this is clear-queue + re-dispatch through core.
+  app.post("/api/sessions/:id/queue/deliver", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null);
+    const mode: unknown = body?.mode;
+    if (mode !== "steer" && mode !== "restart") {
+      return c.json({ error: "mode must be steer or restart" }, 400);
+    }
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      const { steering, followUp } = await session.clearQueue();
+      const text = [...steering, ...followUp].join("\n").trim();
+      if (!text) return c.json({ error: "queue is empty" }, 409);
+      if (mode === "restart") await router.abort(id); // resolves once idle
+      await router.dispatch({
+        key: { channelId: "web", conversationId: id },
+        senderId: "web",
+        text,
+        mode: mode === "steer" ? "steer" : "auto",
+      });
+      return c.json({ delivered: text }, 202);
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
   // Recall: drop all pending queued messages and hand them back (composer restore).
   app.post("/api/sessions/:id/queue/recall", async (c) => {
     const id = c.req.param("id");
@@ -135,6 +186,21 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
     await router.abort(id);
     return c.json({ ok: true }, 202);
   });
+
+  // Workspace stream: one per client, keeps every session list in sync
+  // (created/pinned → re-list, run state → patch) without polling.
+  app.get("/api/events", (c) =>
+    streamSSE(c, async (stream) => {
+      const unsubscribe = hub.subscribeWorkspace(
+        (e) => void stream.writeSSE({ data: JSON.stringify(e) }),
+      );
+      stream.onAbort(unsubscribe);
+      while (!stream.aborted) {
+        await stream.sleep(HEARTBEAT_MS);
+        await stream.write(": ping\n\n");
+      }
+    }),
+  );
 
   app.get("/api/sessions/:id/events", (c) => {
     const id = c.req.param("id");

@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { PiAgentFactory } from "./agent/pi.js";
 import { EventHub } from "./core/hub.js";
 import { Router } from "./core/router.js";
+import { PinStore } from "./web/pins.js";
 import { createServer } from "./web/server.js";
 
 const factory = new PiAgentFactory();
@@ -13,7 +14,7 @@ const router = new Router(hub, (key) => {
   if (key.channelId === "web") return factory.resume(key.conversationId);
   return factory.create({ cwd: process.cwd() });
 });
-const app = createServer({ factory, router, hub });
+const app = createServer({ factory, router, hub, pins: new PinStore() });
 
 const port = Number(process.env.PORT ?? 3141);
 serve({ fetch: app.fetch, port }, () => {

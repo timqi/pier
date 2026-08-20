@@ -35,13 +35,15 @@ export interface Channel {
 /** Pier's normalized event. The ONLY observability currency in the system. */
 export type SessionEventPayload =
   | { type: "turn-start" }
+  // A user message entered the model's context: a fresh prompt, a steer, or a
+  // queued message the agent just picked up. Clients render it as a user turn.
+  | { type: "user-message"; text: string }
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-end"; toolCallId: string; isError: boolean; output: string }
   | { type: "turn-end"; text: string; meta?: TurnMeta } // full assistant text of the turn
   | { type: "state"; state: SessionState }
-  | { type: "queued"; mode: "steer" | "followUp"; text: string }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
   | { type: "queue-state"; steering: string[]; followUp: string[] }
   | { type: "error"; message: string };
@@ -55,18 +57,48 @@ export type SessionEvent = {
 
 export type SessionState = "idle" | "streaming";
 
+/**
+ * Workspace-scoped events: pointers only (which sessions exist, how they are
+ * organized, whether they run), never content. Every client keeps its session
+ * list in sync from this stream instead of polling; a session's content still
+ * comes from that session's own event stream.
+ */
+export type WorkspaceEvent =
+  | { type: "sessions-changed" } // created, pinned/unpinned → re-list
+  | { type: "session-state"; sessionId: string; state: SessionState };
+
+/**
+ * One step of an assistant turn's activity, reconstructed from the transcript
+ * so a reloaded client shows the same Activity group the live stream built.
+ */
+export interface ActivityStep {
+  kind: "thinking" | "tool";
+  text?: string; // thinking steps
+  toolName?: string; // tool steps
+  args?: unknown;
+  output?: string;
+  isError?: boolean;
+}
+
 /** A completed conversation turn, for history rendering. */
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   meta?: TurnMeta; // assistant turns only
+  steps?: ActivityStep[]; // assistant turns only; activity preceding the text
 }
 
 /** Completion metadata of an assistant turn (bubble hover hints). */
 export interface TurnMeta {
   completedAt: number; // ms epoch
   durationMs: number; // preceding user prompt → completion
-  tokens: number; // cumulative session totalTokens at completion
+  tokens: number; // context size at completion (last usage, never a sum)
+}
+
+/** Context-window usage of a live session; unknown before the first turn. */
+export interface ContextUsage {
+  tokens: number | null; // null right after compaction, before the next response
+  contextWindow: number;
 }
 
 /** Backend-neutral model reference. */
@@ -80,11 +112,14 @@ export interface AgentSession {
   readonly id: string;
   readonly state: SessionState;
   readonly model: ModelRef | undefined;
+  readonly contextUsage: ContextUsage | undefined;
   /** Completed turns of the persisted transcript (no partial streaming). */
   history(): Promise<ChatTurn[]>;
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;
+  /** Pending queue as-is, for snapshotting a session into a fresh client. */
+  pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** Drop all pending queued messages and return them (for recall-to-composer). */
   clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   prompt(text: string, images?: ImageAttachment[]): Promise<void>; // resolves when the turn settles

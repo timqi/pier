@@ -5,37 +5,43 @@
 import "./style.css";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { $, h } from "./dom.js";
+import { closeMenu, openMenu, openPanel } from "./menu.js";
+import { modelPicker } from "./model-picker.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
 import type {
+  ActivityStep,
   ChatTurn,
+  ContextUsage,
   ImageAttachment,
   ModelRef,
   SessionEvent,
   SessionState,
   TurnMeta,
+  WorkspaceEvent,
 } from "../../core/types.js";
 
-/** GET /api/sessions row: AgentFactory.list() entry + live state. */
+/** GET /api/sessions/:id/history — the snapshot every delta is applied onto. */
+interface SessionSnapshot {
+  turns: ChatTurn[];
+  lastSeq: number;
+  model: ModelRef | null;
+  state: SessionState;
+  context: ContextUsage | null;
+  queue: { steering: string[]; followUp: string[] };
+}
+
+declare const __PIER_VERSION__: string; // injected by vite.config.ts
+
+/** GET /api/sessions row: AgentFactory.list() entry + live state + pin flag. */
 interface SessionInfo {
   id: string;
   cwd: string;
   createdAt: number;
   title?: string;
   state: SessionState;
-}
-
-const $ = <T extends HTMLElement>(sel: string): T => {
-  const el = document.querySelector<T>(sel);
-  if (!el) throw new Error(`missing element: ${sel}`);
-  return el;
-};
-
-function h(tag: string, cls: string, text?: string): HTMLElement {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
+  pinned: boolean;
 }
 
 function relTime(ts: number): string {
@@ -48,17 +54,24 @@ function relTime(ts: number): string {
 
 const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 
+/** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
+const compact = (n: number): string =>
+  n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K` : String(n);
+
 // --- static elements ---------------------------------------------------------
 
-const sessionList = $("#session-list");
+const projectTree = $("#project-tree");
+const archiveDialog = $<HTMLDialogElement>("#archive-dialog");
+const archiveList = $("#archive-list");
+const archiveSearch = $<HTMLInputElement>("#archive-search");
+const archiveCount = $("#archive-count");
 const turnsPane = $("#turns");
 const input = $<HTMLTextAreaElement>("#input");
 const chatTitle = $("#chat-title");
-const chatCwd = $("#chat-cwd");
+const chatMenu = $("#chat-menu");
 const stateChip = $("#state-chip");
 const sendBtn = $("#send");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
-const modelSelect = $<HTMLSelectElement>("#model-select");
 const knownProjects = $("#known-projects");
 const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
@@ -76,6 +89,9 @@ let source: EventSource | null = null;
 let lastSeq = 0;
 let streamingEl: HTMLElement | null = null;
 let pendingImages: ImageAttachment[] = [];
+// Texts already rendered optimistically, awaiting their user-message event so
+// the same turn isn't drawn twice.
+let optimisticUserTexts: string[] = [];
 
 // --- scrolling -------------------------------------------------------------------
 // Stick to the bottom only when the user is already there (avibe behavior);
@@ -88,54 +104,179 @@ function scrollBottom(force = false): void {
   if (force || nearBottom()) turnsPane.scrollTop = turnsPane.scrollHeight;
 }
 
-// --- session list (grouped by project = cwd) -------------------------------------
+// --- projects (pinned sessions, grouped by cwd) ------------------------------------
+// Projects lists pinned sessions only — those created in Pier (auto-pinned) or
+// pinned from the All-sessions dialog — so Pi history never floods the sidebar.
+
+const COLLAPSED_KEY = "pier.collapsedProjects";
+const collapsed = new Set<string>(loadCollapsed());
+
+function loadCollapsed(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((c): c is string => typeof c === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function setCollapsed(cwd: string, closed: boolean): void {
+  if (closed) collapsed.add(cwd);
+  else collapsed.delete(cwd);
+  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+}
+
+function groupByCwd(list: SessionInfo[]): Map<string, SessionInfo[]> {
+  const groups = new Map<string, SessionInfo[]>();
+  for (const s of list) {
+    const existing = groups.get(s.cwd);
+    if (existing) existing.push(s);
+    else groups.set(s.cwd, [s]);
+  }
+  return groups;
+}
+
+const stateDot = (s: SessionInfo): HTMLElement =>
+  h(
+    "span",
+    `h-2 w-2 flex-none rounded-full ${
+      s.state === "streaming" ? "bg-green-500 animate-pulse" : "bg-neutral-300"
+    }`,
+  );
+
+/** Unpin keeps the session — it just moves back into the All-sessions list. */
+async function setPinned(s: SessionInfo, pinned: boolean): Promise<void> {
+  s.pinned = pinned;
+  renderSessions();
+  renderHeader();
+  const res = await fetch(`/api/sessions/${s.id}/pin`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pinned }),
+  });
+  if (!res.ok) {
+    s.pinned = !pinned; // reconcile: the server is the truth
+    renderSessions();
+    renderHeader();
+  }
+}
 
 function sessionRow(s: SessionInfo): HTMLElement {
   const active = s.id === currentId;
   const li = h(
     "li",
-    `flex cursor-pointer items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100 ${
+    `group flex cursor-pointer items-center gap-1.5 py-1.5 pl-6 pr-3 hover:bg-neutral-100 ${
       active ? "bg-indigo-50 hover:bg-indigo-50" : ""
     }`,
   );
-  li.append(
-    h(
-      "span",
-      `h-2 w-2 flex-none rounded-full ${
-        s.state === "streaming" ? "bg-green-500 animate-pulse" : "bg-neutral-300"
-      }`,
-    ),
-    h("span", "truncate", s.title ?? "untitled"),
-    h("span", "ml-auto flex-none text-[11px] text-neutral-400", relTime(s.createdAt)),
+  const more = h(
+    "button",
+    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block",
+    "\u22ef",
   );
+  more.title = "Session actions";
+  more.onclick = (ev) => {
+    ev.stopPropagation();
+    sessionMenu(more, s);
+  };
+  li.append(stateDot(s), h("span", "truncate", s.title ?? "untitled"), more);
   li.onclick = () => void select(s.id);
   return li;
 }
 
+/** One collapsible project = one cwd; collapse state lives in localStorage. */
+function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
+  const badge = list.some((s) => s.state === "streaming")
+    ? h("span", "ml-auto h-2 w-2 flex-none rounded-full bg-green-500 animate-pulse")
+    : h("span", "ml-auto flex-none text-[11px] text-neutral-400", String(list.length));
+  const { el, summary } = detailsRow("border-b border-neutral-200/70", [
+    h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", basename(cwd)),
+    badge,
+  ]);
+  summary.className += " px-3 py-1.5 hover:bg-neutral-100";
+  summary.title = cwd;
+  el.open = !collapsed.has(cwd);
+  el.ontoggle = () => setCollapsed(cwd, !el.open);
+  const rows = h("ul", "pb-1");
+  rows.append(...list.map(sessionRow));
+  el.append(rows);
+  return el;
+}
+
 function renderSessions(): void {
-  const groups = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
-    const list = groups.get(s.cwd);
-    if (list) list.push(s);
-    else groups.set(s.cwd, [s]);
-  }
-  const nodes: HTMLElement[] = [];
-  for (const [cwd, list] of groups) {
-    const headerEl = h(
-      "li",
-      "truncate border-b border-neutral-200/70 px-3 pb-1 pt-2.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500",
-      basename(cwd),
-    );
-    headerEl.title = cwd;
-    nodes.push(headerEl, ...list.map(sessionRow));
-  }
-  sessionList.replaceChildren(...nodes);
+  const projects = groupByCwd(sessions.filter((s) => s.pinned));
+  projectTree.replaceChildren(
+    ...(projects.size
+      ? [...projects].map(([cwd, list]) => projectNode(cwd, list))
+      : [
+          h(
+            "p",
+            "px-3 py-2 text-[12.5px] leading-snug text-neutral-400",
+            "No projects yet — create a session, or pin one from All sessions.",
+          ),
+        ]),
+  );
+  archiveCount.textContent = String(sessions.length);
   knownProjects.replaceChildren(
-    ...[...groups.keys()].map((cwd) => {
+    ...[...groupByCwd(sessions).keys()].map((cwd) => {
       const opt = document.createElement("option");
       opt.value = cwd;
       return opt;
     }),
+  );
+  if (archiveDialog.open) renderArchive();
+}
+
+// --- all sessions (everything Pi knows about, pin from here) -----------------------
+
+function archiveRow(s: SessionInfo): HTMLElement {
+  const li = h("li", "flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-neutral-100");
+  const pin = h(
+    "button",
+    `flex-none rounded px-1.5 py-0.5 text-[11.5px] ${
+      s.pinned
+        ? "bg-indigo-50 text-indigo-600"
+        : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"
+    }`,
+    s.pinned ? "pinned" : "pin",
+  );
+  pin.title = s.pinned ? "Remove from Projects" : "Pin to Projects";
+  pin.onclick = (ev) => {
+    ev.stopPropagation();
+    void setPinned(s, !s.pinned);
+  };
+  li.append(
+    stateDot(s),
+    h("span", "truncate", s.title ?? "untitled"),
+    h("span", "ml-auto flex-none text-[11px] text-neutral-400", relTime(s.createdAt)),
+    pin,
+  );
+  li.onclick = () => {
+    archiveDialog.close();
+    void select(s.id);
+  };
+  return li;
+}
+
+function renderArchive(): void {
+  const q = archiveSearch.value.trim().toLowerCase();
+  const match = sessions.filter(
+    (s) => !q || `${s.title ?? ""} ${s.cwd}`.toLowerCase().includes(q),
+  );
+  const nodes: HTMLElement[] = [];
+  for (const [cwd, list] of groupByCwd(match)) {
+    const head = h(
+      "li",
+      "truncate px-3 pb-0.5 pt-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500",
+      basename(cwd),
+    );
+    head.title = cwd;
+    nodes.push(head, ...list.map(archiveRow));
+  }
+  archiveList.replaceChildren(
+    ...(nodes.length
+      ? nodes
+      : [h("li", "px-3 py-3 text-[13px] text-neutral-400", "No matching sessions.")]),
   );
 }
 
@@ -150,8 +291,9 @@ async function refreshSessions(): Promise<void> {
 function renderHeader(): void {
   const s = sessions.find((x) => x.id === currentId);
   chatTitle.textContent = s?.title ?? (currentId ? currentId.slice(0, 8) : "no session");
-  chatCwd.textContent = s?.cwd ?? "";
-  modelSelect.classList.toggle("hidden", !currentId);
+  chatMenu.classList.toggle("hidden", !s);
+  // Everything per-session (info, pin, model) lives in the ⋯ menu.
+  if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
 }
 
 function setState(state: SessionState): void {
@@ -237,11 +379,16 @@ function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
   if (!meta) return;
   const secs = Math.max(1, Math.round(meta.durationMs / 1000));
   const dur = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
-  const time = new Date(meta.completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // 24-hour, local timezone.
+  const time = new Date(meta.completedAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
   const chip = h(
     "span",
     "absolute -top-2.5 right-3 z-10 hidden rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] text-neutral-500 shadow-sm group-hover:inline",
-    `${time} · ${dur} · ${meta.tokens.toLocaleString()} tok`,
+    `${time} · ${dur} · ${compact(meta.tokens)} tok`,
   );
   (node.parentElement ?? node).append(chip);
 }
@@ -413,6 +560,31 @@ function activityThinking(ts: number, text: string): void {
   label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
 }
 
+/**
+ * Rebuild a finished turn's Activity group from the snapshot, through the same
+ * functions the live stream drives — so a reload shows the real step count and
+ * duration instead of restarting at zero.
+ */
+let replaySeq = 0;
+
+function replayActivity(steps: ActivityStep[], durationMs = 0): void {
+  const start = Date.now() - durationMs; // headline duration is now - startTs
+  for (const s of steps) {
+    if (s.kind === "thinking") {
+      activityThinking(start, s.text ?? "");
+      continue;
+    }
+    const id = `replay-${++replaySeq}`;
+    activityToolStart(start, id, s.toolName ?? "", s.args);
+    // No recorded output = the run was cut short; leave the row running so
+    // finishActivity marks the group interrupted.
+    if (s.output !== undefined) activityToolEnd(id, s.isError ?? false, s.output);
+  }
+  finishActivity(
+    steps.some((s) => s.kind === "tool" && s.output === undefined) ? "interrupted" : "done",
+  );
+}
+
 // --- event handling ----------------------------------------------------------------
 
 function handleEvent(e: SessionEvent): void {
@@ -422,6 +594,18 @@ function handleEvent(e: SessionEvent): void {
     case "turn-start":
       turnOpen = true;
       break;
+    case "user-message": {
+      // Already on screen from our own optimistic render? Just reconcile.
+      const i = optimisticUserTexts.indexOf(e.text);
+      if (i >= 0) {
+        optimisticUserTexts.splice(i, 1);
+        break;
+      }
+      finalizeStreaming(); // a delivered queue message ends the text block
+      appendTurn("user", e.text);
+      scrollBottom();
+      break;
+    }
     case "text-delta":
       if (!streamingEl) streamingEl = appendTurn("assistant", "");
       streamingEl.dataset.raw = (streamingEl.dataset.raw ?? "") + e.text;
@@ -441,13 +625,15 @@ function handleEvent(e: SessionEvent): void {
     case "turn-end":
       turnOpen = false;
       finishActivity("done");
-      if (!streamingEl && e.text) setMetaHint(appendTurn("assistant", e.text, true), e.meta);
-      else if (streamingEl) setMetaHint(streamingEl, e.meta);
+      // e.text is the authoritative full turn text — a client that joined
+      // mid-turn only holds the deltas it happened to see.
+      if (streamingEl) {
+        if (e.text) streamingEl.dataset.raw = e.text;
+        setMetaHint(streamingEl, e.meta);
+      } else if (e.text) {
+        setMetaHint(appendTurn("assistant", e.text, true), e.meta);
+      }
       finalizeStreaming();
-      break;
-    case "queued":
-      // The queue panel (fed by queue-state snapshots) is the pending view;
-      // nothing to render in the transcript until delivery.
       break;
     case "queue-state":
       renderQueue(e.steering, e.followUp);
@@ -469,6 +655,29 @@ function handleEvent(e: SessionEvent): void {
   }
 }
 
+/**
+ * Workspace stream: keeps this client's session list in step with every other
+ * client (and with IM traffic). Content still arrives per session.
+ */
+function connectWorkspace(): void {
+  const src = new EventSource("/api/events");
+  // Any (re)connect may follow a gap — re-list instead of replaying.
+  src.onopen = () => void refreshSessions();
+  src.onmessage = (m) => {
+    const e = JSON.parse(m.data) as WorkspaceEvent;
+    if (e.type === "sessions-changed") {
+      void refreshSessions();
+      return;
+    }
+    // The selected session's own stream already drives composer state.
+    if (e.sessionId === currentId) return;
+    const s = sessions.find((x) => x.id === e.sessionId);
+    if (!s) return;
+    s.state = e.state;
+    renderSessions();
+  };
+}
+
 function connect(id: string, after: number): void {
   source?.close();
   source = new EventSource(`/api/sessions/${id}/events?after=${after}`);
@@ -486,56 +695,135 @@ async function select(id: string): Promise<void> {
   streamingEl = null;
   activity = null;
   turnOpen = false;
+  optimisticUserTexts = [];
   lastSeq = 0;
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
   renderSessions();
   renderHeader();
   const res = await fetch(`/api/sessions/${id}/history`);
-  if (!res.ok) {
+  const snap = res.ok ? ((await res.json()) as SessionSnapshot) : null;
+  if (currentId !== id) return; // stale: the user switched again mid-fetch
+  if (!snap) {
     appendTurn("error", `failed to load session: ${res.status}`);
     return;
   }
-  const { turns, lastSeq: seq, model } = (await res.json()) as {
-    turns: ChatTurn[];
-    lastSeq: number;
-    model: ModelRef | null;
-  };
-  for (const t of turns) setMetaHint(appendTurn(t.role, t.text, t.role === "assistant"), t.meta);
+  for (const t of snap.turns) {
+    if (t.steps?.length) replayActivity(t.steps, t.meta?.durationMs);
+    if (t.text) setMetaHint(appendTurn(t.role, t.text, t.role === "assistant"), t.meta);
+  }
   scrollBottom(true);
-  lastSeq = seq;
-  connect(id, seq);
-  void loadModels(id, model);
+  lastSeq = snap.lastSeq;
+  // Server is the truth for everything the client would otherwise guess:
+  // run state (composer buttons) and the pending queue panel.
+  turnOpen = snap.state === "streaming";
+  setState(snap.state);
+  renderQueue(snap.queue.steering, snap.queue.followUp);
+  currentModel = snap.model;
+  currentContext = snap.context;
+  renderHeader();
+  connect(id, snap.lastSeq);
 }
 
-// --- model picker -----------------------------------------------------------------------
+// --- session context menu (pin + model) -------------------------------------------------
+// Same menu from the chat header and from a project row's ⋯ button.
 
-const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
+/** Model + context usage of the *current* session (from its snapshot). */
+let currentModel: ModelRef | null = null;
+let currentContext: ContextUsage | null = null;
 
-async function loadModels(id: string, current: ModelRef | null): Promise<void> {
+/** Read-only details panel: what this session is and how full its context is. */
+function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
+  const rows: [string, string][] = [
+    ["Title", s.title ?? "untitled"],
+    ["Directory", s.cwd],
+    ["Session", s.id],
+  ];
+  if (s.id === currentId) {
+    rows.push(["Model", currentModel?.id ?? "—"]);
+    const u = currentContext;
+    rows.push([
+      "Context",
+      u
+        ? `${u.tokens === null ? "?" : compact(u.tokens)} / ${compact(u.contextWindow)}` +
+          (u.tokens === null ? "" : ` (${Math.round((u.tokens / u.contextWindow) * 100)}%)`)
+        : "—",
+    ]);
+  }
+  const panel = h("div", "flex max-w-80 flex-col gap-1.5 px-3 py-2");
+  for (const [label, value] of rows) {
+    const row = h("div", "flex flex-col");
+    row.append(
+      h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
+      h("span", "break-all font-mono text-[12px] text-neutral-700", value),
+    );
+    panel.append(row);
+  }
+  openPanel(anchor, panel);
+}
+
+async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
   const res = await fetch(`/api/sessions/${id}/models`);
-  if (!res.ok || id !== currentId) return;
+  if (!res.ok) return;
   const models = (await res.json()) as ModelRef[];
-  modelSelect.replaceChildren(
-    ...models.map((m) => {
-      const opt = document.createElement("option");
-      opt.value = modelKey(m);
-      opt.textContent = m.id;
-      return opt;
+  openPanel(
+    anchor,
+    modelPicker({
+      models,
+      current: id === currentId ? currentModel : null,
+      onPick: (m) => {
+        closeMenu();
+        void setModel(id, m);
+      },
     }),
   );
-  if (current) modelSelect.value = modelKey(current);
 }
 
-modelSelect.onchange = async () => {
-  if (!currentId) return;
-  const m = modelSelect.value.split("/");
-  const res = await fetch(`/api/sessions/${currentId}/model`, {
+async function setModel(id: string, model: ModelRef): Promise<void> {
+  if (id === currentId) {
+    currentModel = model; // optimistic; the POST response is the truth
+    renderHeader();
+  }
+  const res = await fetch(`/api/sessions/${id}/model`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ provider: m[0], id: m.slice(1).join("/") }),
+    body: JSON.stringify(model),
   });
-  if (!res.ok) appendTurn("error", `model change failed: ${res.status}`);
-};
+  if (!res.ok) {
+    appendTurn("error", `model change failed: ${res.status}`);
+    return;
+  }
+  const { model: applied } = (await res.json()) as { model: ModelRef | null };
+  if (id === currentId && applied) {
+    currentModel = applied;
+    renderHeader();
+  }
+}
+
+function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
+  openMenu(anchor, [
+    {
+      items: [
+        {
+          label: "Session info",
+          onSelect: () => sessionInfo(anchor, s),
+        },
+        {
+          label: s.pinned ? "Remove from Projects" : "Pin to Projects",
+          checked: s.pinned,
+          onSelect: () => {
+            closeMenu();
+            void setPinned(s, !s.pinned);
+          },
+        },
+        {
+          label: "Model",
+          hint: s.id === currentId ? (currentModel?.id ?? "…") : "",
+          onSelect: () => void pickModel(anchor, s.id),
+        },
+      ],
+    },
+  ]);
+}
 
 // --- image attachments ---------------------------------------------------------
 
@@ -574,6 +862,10 @@ function addImageFile(file: File): void {
   reader.readAsDataURL(file);
 }
 
+/** Mirrors the agent seam's user-message text so reconcile can match on it. */
+const imageMarker = (text: string, images: number): string =>
+  images ? `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]` : text;
+
 async function send(mode: "auto" | "steer"): Promise<void> {
   const text = input.value.trim();
   const images = pendingImages;
@@ -585,6 +877,7 @@ async function send(mode: "auto" | "steer"): Promise<void> {
   // Optimistic: an idle send (or a steer) reads as a user turn; a queued send
   // shows up in the queue panel via the queue-state snapshot instead.
   if (currentState === "idle" || mode === "steer") {
+    optimisticUserTexts.push(imageMarker(text, images.length));
     const bubble = appendTurn("user", text);
     for (const img of images) {
       const thumb = document.createElement("img");
@@ -599,6 +892,18 @@ async function send(mode: "auto" | "steer"): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text, mode, images: images.length ? images : undefined }),
   });
+}
+
+/** Promote the queue: steer into the running turn, or abort it and re-prompt. */
+async function deliverQueue(mode: "steer" | "restart"): Promise<void> {
+  if (!currentId) return;
+  renderQueue([], []); // optimistic; queue-state snapshots reconcile
+  const res = await fetch(`/api/sessions/${currentId}/queue/deliver`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) appendTurn("error", `queue ${mode} failed: ${res.status}`);
 }
 
 async function recallQueue(): Promise<void> {
@@ -621,13 +926,26 @@ $("#new-session").onclick = () => {
   newDialog.showModal();
 };
 $("#new-cancel").onclick = () => newDialog.close();
+$("#open-archive").onclick = () => {
+  archiveSearch.value = "";
+  renderArchive();
+  archiveDialog.showModal();
+  archiveSearch.focus();
+};
+$("#archive-close").onclick = () => archiveDialog.close();
+$("#version").textContent = `v${__PIER_VERSION__}`;
+archiveSearch.oninput = () => renderArchive();
 $<HTMLFormElement>("#new-form").onsubmit = async () => {
   const cwd = $<HTMLInputElement>("#new-cwd").value.trim();
   const res = await fetch("/api/sessions", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(cwd ? { cwd } : {}),
+    body: JSON.stringify({ cwd }),
   });
+  if (!res.ok) {
+    appendTurn("error", `session create failed: ${res.status}`);
+    return;
+  }
   const { id } = (await res.json()) as { id: string };
   await refreshSessions();
   await select(id);
@@ -636,6 +954,8 @@ $<HTMLFormElement>("#new-form").onsubmit = async () => {
 stopBtn.onclick = () =>
   currentId && fetch(`/api/sessions/${currentId}/abort`, { method: "POST" });
 sendNowBtn.onclick = () => void send("steer");
+$("#queue-steer").onclick = () => void deliverQueue("steer");
+$("#queue-restart").onclick = () => void deliverQueue("restart");
 $("#queue-recall").onclick = () => void recallQueue();
 $<HTMLFormElement>("#composer").onsubmit = (ev) => {
   ev.preventDefault();
@@ -668,8 +988,9 @@ attachInput.onchange = () => {
   attachInput.value = "";
 };
 
+connectWorkspace();
 void refreshSessions().then(() => {
-  const first = sessions[0];
+  const first = sessions.find((s) => s.pinned) ?? sessions[0];
   if (first) void select(first.id);
   else renderHeader();
 });
