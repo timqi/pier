@@ -35,6 +35,7 @@ interface SessionSnapshot {
   model: ModelRef | null;
   state: SessionState;
   context: ContextUsage | null;
+  thinkingLevel: ThinkingLevel;
   queue: { steering: string[]; followUp: string[] };
   backgroundRuns: BackgroundRun[];
 }
@@ -87,6 +88,7 @@ const turnsPane = $("#turns");
 const input = $<HTMLTextAreaElement>("#input");
 const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
+const sessionMeta = $("#session-meta");
 const sendBtn = $("#send");
 const sendPlane = $("#send-plane");
 const sendQueue = $("#send-queue");
@@ -354,6 +356,62 @@ function renderHeader(): void {
   chatMenu.classList.toggle("hidden", !s);
   // Everything per-session (info, pin, model) lives in the ⋯ menu.
   if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
+  renderSessionMeta();
+}
+
+/** Percent of the context window used (capped at 100). */
+const contextUsed = (tokens: number, u: ContextUsage): number =>
+  Math.min(100, Math.round((tokens / u.contextWindow) * 100));
+
+/** Full context reading, shared by the meta chip's hover and the info panel. */
+const contextLabel = (u: ContextUsage): string =>
+  u.tokens === null
+    ? `?/${compact(u.contextWindow)}`
+    : `${compact(u.tokens)}/${compact(u.contextWindow)} · ${100 - contextUsed(u.tokens, u)}% left`;
+
+/** Title-row meta: the resident chip shows bare token usage ("12K tok",
+ *  quiet → amber ≥ 70% used → red ≥ 90%); hover swaps in the full headroom
+ *  reading and unfolds model + reasoning chips. Before the first usage
+ *  report the model chip stands in as the resident hover target. */
+function renderSessionMeta(): void {
+  const chip = (cls: string, text: string): HTMLElement =>
+    h("span", `flex-none rounded px-1.5 py-px font-mono ${cls}`, text);
+  const u = currentContext;
+  const tokens = u?.tokens ?? null;
+  const onHover = "hidden group-hover:inline";
+  const chips: HTMLElement[] = [];
+  if (currentModel) {
+    const resident = tokens === null ? "" : `${onHover} `;
+    chips.push(chip(`${resident}bg-indigo-50 font-medium text-indigo-700`, currentModel.id));
+  }
+  if (currentThinking && currentThinking !== "off") {
+    chips.push(chip(`${onHover} bg-neutral-100 text-neutral-500`, `reasoning ${currentThinking}`));
+  }
+  if (u && tokens !== null) {
+    const used = contextUsed(tokens, u);
+    const tone =
+      used >= 90
+        ? "bg-red-50 text-red-700"
+        : used >= 70
+          ? "bg-amber-50 text-amber-700"
+          : "bg-neutral-100 text-neutral-500";
+    const ctx = chip(tone, "");
+    ctx.append(h("span", "group-hover:hidden", `${compact(tokens)} tok`), h("span", onHover, contextLabel(u)));
+    chips.push(ctx);
+  }
+  sessionMeta.replaceChildren(...chips);
+  sessionMeta.classList.toggle("hidden", chips.length === 0);
+  sessionMeta.classList.toggle("flex", chips.length > 0);
+}
+
+/** First prompt titles the session optimistically — the server list, which
+ *  only updates once Pi persists the session, reconciles it later. */
+function maybeSetTitle(id: string, text: string): void {
+  const s = sessions.find((x) => x.id === id);
+  if (!s || s.title || !text.trim()) return;
+  s.title = text.trim().slice(0, 80);
+  renderSessions();
+  renderHeader();
 }
 
 function setState(state: SessionState): void {
@@ -584,11 +642,17 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
   if (row.querySelector("textarea")) return;
   const area = document.createElement("textarea");
   area.value = node.textContent ?? ""; // user turns are plain text
-  area.rows = Math.min(8, area.value.split("\n").length);
   area.className =
     "block w-full resize-none rounded-md border border-indigo-300 bg-white px-2 py-1 focus:outline-none";
+  // Grow with content like the composer does; same 192px cap (max-h-48).
+  const grow = (): void => {
+    area.style.height = "auto";
+    area.style.height = `${Math.min(area.scrollHeight, 192)}px`;
+  };
+  area.oninput = grow;
   node.classList.add("hidden");
   node.after(area);
+  grow();
   area.focus();
   area.setSelectionRange(area.value.length, area.value.length);
   const cancel = (): void => {
@@ -871,6 +935,7 @@ function handleEvent(e: SessionEvent): void {
       renderBackgroundRun(e.run);
       break;
     case "user-message": {
+      maybeSetTitle(e.sessionId, e.text); // first prompt names the session
       // Already on screen from our own optimistic render? Just reconcile.
       const i = optimisticUserTexts.indexOf(e.text);
       if (i >= 0) {
@@ -901,6 +966,11 @@ function handleEvent(e: SessionEvent): void {
     case "turn-end":
       turnOpen = false;
       finishActivity("done");
+      // meta.tokens is the context size at completion — keep the meta line live.
+      if (e.meta && currentContext) {
+        currentContext = { ...currentContext, tokens: e.meta.tokens };
+        renderSessionMeta();
+      }
       // e.text is the authoritative full turn text — a client that joined
       // mid-turn only holds the deltas it happened to see.
       if (streamingEl) {
@@ -1097,6 +1167,10 @@ async function loadSession(id: string): Promise<void> {
   source?.close();
   turnsPane.replaceChildren();
   renderQueue([], []);
+  currentModel = null;
+  currentContext = null;
+  currentThinking = null;
+  renderSessionMeta();
   streamingEl = null;
   activity = null;
   turnOpen = false;
@@ -1140,6 +1214,7 @@ async function loadSession(id: string): Promise<void> {
   renderQueue(snap.queue.steering, snap.queue.followUp);
   currentModel = snap.model;
   currentContext = snap.context;
+  currentThinking = snap.thinkingLevel;
   renderHeader();
   connect(id, snap.lastSeq);
 }
@@ -1150,6 +1225,7 @@ async function loadSession(id: string): Promise<void> {
 /** Model + context usage of the *current* session (from its snapshot). */
 let currentModel: ModelRef | null = null;
 let currentContext: ContextUsage | null = null;
+let currentThinking: ThinkingLevel | null = null;
 
 /** Read-only details panel: what this session is and how full its context is. */
 function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
@@ -1160,14 +1236,7 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
   ];
   if (s.id === currentId) {
     rows.push(["Model", currentModel?.id ?? "—"]);
-    const u = currentContext;
-    rows.push([
-      "Context",
-      u
-        ? `${u.tokens === null ? "?" : compact(u.tokens)} / ${compact(u.contextWindow)}` +
-          (u.tokens === null ? "" : ` (${Math.round((u.tokens / u.contextWindow) * 100)}%)`)
-        : "—",
-    ]);
+    rows.push(["Context", currentContext ? contextLabel(currentContext) : "—"]);
   }
   const panel = h("div", "flex max-w-80 flex-col gap-1.5 px-3 py-2");
   for (const [label, value] of rows) {
@@ -1232,7 +1301,15 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ level }),
   });
-  if (!res.ok) appendTurn("error", `reasoning change failed: ${res.status}`);
+  if (!res.ok) {
+    appendTurn("error", `reasoning change failed: ${res.status}`);
+    return;
+  }
+  const { level: applied } = (await res.json()) as { level: ThinkingLevel };
+  if (id === currentId) {
+    currentThinking = applied;
+    renderSessionMeta();
+  }
 }
 
 function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {

@@ -161,6 +161,7 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
         model: session.model ?? null,
         state: session.state,
         context: session.contextUsage ?? null,
+        thinkingLevel: session.thinkingLevel,
         queue: await session.pendingQueue(),
         backgroundRuns: backgroundRuns?.(id) ?? [],
       });

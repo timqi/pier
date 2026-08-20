@@ -251,6 +251,7 @@ describe("workbench server", () => {
       model: { provider: "anthropic", id: "claude-opus-4-5" },
       state: "streaming",
       context: { tokens: 1200, contextWindow: 200_000 },
+      thinkingLevel: "medium",
       queue: { steering: ["s-msg"], followUp: ["f-msg"] },
       backgroundRuns: [],
     });

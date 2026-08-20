@@ -52,8 +52,15 @@
     <section id="config-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <header id="chat-header" class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
       <span id="chat-title" class="truncate font-medium"></span>
-      <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
-        class="icon-btn ml-auto">⋯</button>
+      <!-- Right cluster: meta chips sit flush against the ⋯ button. Two
+           ml-autos would split the free space, so one wrapper owns it. -->
+      <div class="ml-auto flex flex-none items-center gap-1.5">
+        <!-- Inline session meta: a resident token chip; model + reasoning
+             unfold to its left on hover. Costs the header no extra height. -->
+        <div id="session-meta" class="group hidden flex-none items-center gap-1.5 text-[11px]"></div>
+        <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
+          class="icon-btn">⋯</button>
+      </div>
     </header>
     <div id="turns" class="flex-1 overflow-y-auto pb-4 pt-1"></div>
     <!-- Pi's queue primitives are whole-queue (steer / clear), so the actions
