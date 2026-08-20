@@ -1,5 +1,5 @@
 // Pure Pi-event → SessionEventPayload translation. Structurally typed on
-// purpose: no @mariozechner/pi-* imports, so it stays unit-testable without Pi
+// purpose: no @earendil-works/pi-* imports, so it stays unit-testable without Pi
 // and Pi types never leak past the seam. See docs/design/02-agent-seam.md.
 
 import type { SessionEventPayload } from "../core/types.js";

@@ -30,7 +30,7 @@ Slack / Telegram / Lark          Web workbench (browser)
 ```
 src/
   core/        types.ts, router.ts, hub.ts, queue.ts
-  agent/       pi.ts (the ONLY file importing @mariozechner/pi-*)
+  agent/       pi.ts (the ONLY file importing @earendil-works/pi-*)
   channels/    telegram.ts, slack.ts, lark.ts   [step 4+]
   web/         server.ts, static frontend       [step 3]
   tasks/       scheduler.ts, task tool          [step 5]

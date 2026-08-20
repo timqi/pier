@@ -8,7 +8,7 @@ Per-step specs: `docs/design/01-skeleton.md`, `02-agent-seam.md`,
 ## Context
 
 - Standalone TypeScript/Node program embedding the Pi SDK
-  (`@mariozechner/pi-coding-agent`), not a Pi extension.
+  (`@earendil-works/pi-coding-agent`), not a Pi extension.
 - Pi SDK chosen over RPC: `steer()` / `followUp()` and event subscription are
   first-class in-process; keep `AgentSession` as a seam so RPC (process
   isolation) can replace it later without touching callers.

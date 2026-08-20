@@ -1,8 +1,8 @@
 # Design 02 — Agent Seam
 
 Goal: `src/agent/pi.ts` implements `AgentFactory`/`AgentSession` (from
-`src/core/types.ts`) on top of `@mariozechner/pi-coding-agent`. Budget ≤ 200
-lines. This is the ONLY file allowed to import `@mariozechner/pi-*`.
+`src/core/types.ts`) on top of `@earendil-works/pi-coding-agent`. Budget ≤ 200
+lines. This is the ONLY file allowed to import `@earendil-works/pi-*`.
 
 ## Mapping
 

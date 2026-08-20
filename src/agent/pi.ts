@@ -1,4 +1,4 @@
-// The ONLY file allowed to import @mariozechner/pi-*. Implements the
+// The ONLY file allowed to import @earendil-works/pi-*. Implements the
 // AgentFactory/AgentSession seam from src/core/types.ts on the Pi SDK.
 // No Pi type may appear in an exported signature.
 
@@ -6,7 +6,7 @@ import {
   createAgentSession,
   SessionManager,
   type AgentSession as PiAgentSession,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type {
   AgentFactory,
   AgentSession,
@@ -35,16 +35,15 @@ class PiSession implements AgentSession {
   }
 
   async setModel(ref: ModelRef): Promise<void> {
-    const m = this.pi.modelRegistry.find(ref.provider, ref.id);
+    const m = this.pi.modelRuntime.getModel(ref.provider, ref.id);
     if (!m) throw new Error(`unknown model: ${ref.provider}/${ref.id}`);
     await this.pi.setModel(m);
   }
 
   async availableModels(): Promise<ModelRef[]> {
+    const available = await this.pi.modelRuntime.getAvailable();
     const curated = curateModels(
-      this.pi.modelRegistry
-        .getAvailable()
-        .map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+      available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
     );
     // The session's active model must stay selectable even when curation
     // (or an older catalog) would hide it.
