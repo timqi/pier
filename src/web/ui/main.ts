@@ -3,6 +3,8 @@
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
 import "./style.css";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 
 type SessionState = "idle" | "streaming";
 
@@ -190,17 +192,32 @@ const turnStyles: Record<string, string> = {
   error: "bg-red-50 text-red-700",
 };
 
-function appendTurn(kind: keyof typeof turnStyles, text: string): HTMLElement {
+function appendTurn(kind: keyof typeof turnStyles, text: string, markdown = false): HTMLElement {
   const wrap = h("div", kind === "user" ? "flex justify-end" : "flex");
   const node = h(
     "div",
     `max-w-[50rem] whitespace-pre-wrap break-words rounded-lg px-3 py-2 ${turnStyles[kind]}`,
     text,
   );
+  if (markdown) renderMarkdown(node, text);
   wrap.append(node);
   turnsPane.append(wrap);
   turnsPane.scrollTop = turnsPane.scrollHeight;
   return node;
+}
+
+/** Swap a plain-text bubble to sanitized rendered markdown. */
+function renderMarkdown(node: HTMLElement, raw: string): void {
+  node.innerHTML = DOMPurify.sanitize(marked.parse(raw, { async: false }));
+  node.classList.remove("whitespace-pre-wrap");
+  node.classList.add("md");
+}
+
+/** Finalize the in-flight streamed text block (markdown-render it). */
+function finalizeStreaming(): void {
+  if (!streamingEl) return;
+  renderMarkdown(streamingEl, streamingEl.dataset.raw ?? streamingEl.textContent ?? "");
+  streamingEl = null;
 }
 
 /** Compact inline tool activity row, avibe-chat style: "⚙ bash · running". */
@@ -213,8 +230,6 @@ function appendToolRow(id: string, name: string): void {
   toolRows.set(id, row);
   turnsPane.append(row);
   turnsPane.scrollTop = turnsPane.scrollHeight;
-  // A tool call ends any in-flight text block; the next delta starts a new one.
-  streamingEl = null;
 }
 
 function finishToolRow(id: string, isError: boolean): void {
@@ -272,10 +287,13 @@ function handleEvent(e: SessionEvent): void {
   switch (e.type) {
     case "text-delta":
       if (!streamingEl) streamingEl = appendTurn("assistant", "");
-      streamingEl.textContent += e.text;
+      streamingEl.dataset.raw = (streamingEl.dataset.raw ?? "") + e.text;
+      streamingEl.textContent = streamingEl.dataset.raw;
       turnsPane.scrollTop = turnsPane.scrollHeight;
       break;
     case "tool-start":
+      // A tool call ends any in-flight text block; the next delta starts a new one.
+      finalizeStreaming();
       appendToolRow(e.toolCallId, e.toolName);
       break;
     case "tool-end":
@@ -284,8 +302,8 @@ function handleEvent(e: SessionEvent): void {
     case "turn-end":
       // Streamed deltas already rendered the text across tool-call blocks;
       // only materialize the full text when nothing streamed (e.g. replay gap).
-      if (!streamingEl && e.text) appendTurn("assistant", e.text);
-      streamingEl = null;
+      if (!streamingEl && e.text) appendTurn("assistant", e.text, true);
+      finalizeStreaming();
       break;
     case "queued":
       appendTurn("queued", `[${e.mode}] ${e.text}`);
@@ -329,7 +347,7 @@ async function select(id: string): Promise<void> {
     lastSeq: number;
     model: ModelRef | null;
   };
-  for (const t of turns) appendTurn(t.role, t.text);
+  for (const t of turns) appendTurn(t.role, t.text, t.role === "assistant");
   lastSeq = seq;
   connect(id, seq);
   void loadModels(id, model);

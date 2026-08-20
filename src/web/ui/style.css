@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* Shared button styles — the only custom classes; everything else is utilities. */
 @layer components {
@@ -7,5 +8,19 @@
   }
   .btn-primary {
     @apply border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700;
+  }
+  /* Markdown-rendered chat content: prose rhythm, chat font size. */
+  .md {
+    @apply prose prose-neutral max-w-none;
+    font-size: inherit;
+  }
+  .md :first-child {
+    margin-top: 0;
+  }
+  .md :last-child {
+    margin-bottom: 0;
+  }
+  .md pre {
+    @apply text-[13px];
   }
 }

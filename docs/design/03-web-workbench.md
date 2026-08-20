@@ -58,7 +58,10 @@ never duplicate history.
   the initial session list.
 - Reconnect: EventSource auto-reconnect + `Last-Event-ID` replay must survive
   a server restart gap without duplicating rendered events (dedupe by seq).
-- No markdown-rendering dependency in v1; render text pre-wrap. (Revisit later.)
+- Assistant content renders as markdown (`marked` + DOMPurify sanitization,
+  `@tailwindcss/typography` for prose styling). Streamed text stays plain
+  while in flight and is markdown-rendered when the block finalizes
+  (tool-start or turn-end). User/queued/error bubbles stay plain text.
 
 ## Tests
 
