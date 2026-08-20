@@ -19,6 +19,11 @@ interface ChatTurn {
   text: string;
 }
 
+interface ModelRef {
+  provider: string;
+  id: string;
+}
+
 type SessionEvent = { seq: number; ts: number; sessionId: string } & (
   | { type: "turn-start" }
   | { type: "text-delta"; text: string }
@@ -66,6 +71,8 @@ const chatCwd = $("#chat-cwd");
 const chatState = $("#chat-state");
 const abortBtn = $("#abort");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
+const modelSelect = $<HTMLSelectElement>("#model-select");
+const knownProjects = $("#known-projects");
 
 // --- state ------------------------------------------------------------------
 
@@ -77,33 +84,55 @@ let lastSeq = 0;
 let streamingEl: HTMLElement | null = null;
 const toolRows = new Map<string, HTMLElement>(); // toolCallId → chat row
 
-// --- session list -----------------------------------------------------------
+// --- session list (grouped by project = cwd) --------------------------------
+
+function sessionRow(s: SessionInfo): HTMLElement {
+  const active = s.id === currentId;
+  const li = h(
+    "li",
+    `flex cursor-pointer items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100 ${
+      active ? "bg-indigo-50 hover:bg-indigo-50" : ""
+    }`,
+  );
+  li.append(
+    h(
+      "span",
+      `h-2 w-2 flex-none rounded-full ${
+        s.state === "streaming" ? "bg-green-500 animate-pulse" : "bg-neutral-300"
+      }`,
+    ),
+    h("span", "truncate", s.title ?? "untitled"),
+    h("span", "ml-auto flex-none text-[11px] text-neutral-400", relTime(s.createdAt)),
+  );
+  li.onclick = () => void select(s.id);
+  return li;
+}
 
 function renderSessions(): void {
-  sessionList.replaceChildren(
-    ...sessions.map((s) => {
-      const active = s.id === currentId;
-      const li = h(
-        "li",
-        `cursor-pointer border-b border-neutral-200/70 px-3 py-2 hover:bg-neutral-100 ${
-          active ? "bg-indigo-50 hover:bg-indigo-50" : ""
-        }`,
-      );
-      const top = h("div", "flex items-center gap-1.5");
-      top.append(
-        h(
-          "span",
-          `h-2 w-2 flex-none rounded-full ${
-            s.state === "streaming" ? "bg-green-500 animate-pulse" : "bg-neutral-300"
-          }`,
-        ),
-        h("span", "truncate font-medium", s.title ?? "untitled"),
-        h("span", "ml-auto flex-none text-[11px] text-neutral-400", relTime(s.createdAt)),
-      );
-      const sub = h("div", "truncate pl-3.5 font-mono text-[11px] text-neutral-400", basename(s.cwd));
-      li.append(top, sub);
-      li.onclick = () => void select(s.id);
-      return li;
+  // Projects are derived, not registered: one group per distinct cwd,
+  // ordered by the group's most recent session.
+  const groups = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    const list = groups.get(s.cwd);
+    if (list) list.push(s);
+    else groups.set(s.cwd, [s]);
+  }
+  const nodes: HTMLElement[] = [];
+  for (const [cwd, list] of groups) {
+    const headerEl = h(
+      "li",
+      "truncate border-b border-neutral-200/70 px-3 pb-1 pt-2.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500",
+      basename(cwd),
+    );
+    headerEl.title = cwd;
+    nodes.push(headerEl, ...list.map(sessionRow));
+  }
+  sessionList.replaceChildren(...nodes);
+  knownProjects.replaceChildren(
+    ...[...groups.keys()].map((cwd) => {
+      const opt = document.createElement("option");
+      opt.value = cwd;
+      return opt;
     }),
   );
 }
@@ -120,8 +149,9 @@ function renderHeader(): void {
   const s = sessions.find((x) => x.id === currentId);
   chatTitle.textContent = s?.title ?? (currentId ? currentId.slice(0, 8) : "no session");
   chatCwd.textContent = s?.cwd ?? "";
+  modelSelect.classList.toggle("hidden", !currentId);
   chatState.textContent = currentState;
-  chatState.className = `ml-auto flex-none rounded-full px-2 py-0.5 text-[12px] ${
+  chatState.className = `flex-none rounded-full px-2 py-0.5 text-[12px] ${
     currentState === "streaming"
       ? "bg-green-100 text-green-700"
       : "bg-neutral-100 text-neutral-500"
@@ -294,11 +324,46 @@ async function select(id: string): Promise<void> {
     appendTurn("error", `failed to load session: ${res.status}`);
     return;
   }
-  const { turns, lastSeq: seq } = (await res.json()) as { turns: ChatTurn[]; lastSeq: number };
+  const { turns, lastSeq: seq, model } = (await res.json()) as {
+    turns: ChatTurn[];
+    lastSeq: number;
+    model: ModelRef | null;
+  };
   for (const t of turns) appendTurn(t.role, t.text);
   lastSeq = seq;
   connect(id, seq);
+  void loadModels(id, model);
 }
+
+// --- model picker -------------------------------------------------------------
+
+const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
+
+async function loadModels(id: string, current: ModelRef | null): Promise<void> {
+  const res = await fetch(`/api/sessions/${id}/models`);
+  if (!res.ok || id !== currentId) return;
+  const models = (await res.json()) as ModelRef[];
+  modelSelect.replaceChildren(
+    ...models.map((m) => {
+      const opt = document.createElement("option");
+      opt.value = modelKey(m);
+      opt.textContent = m.id;
+      return opt;
+    }),
+  );
+  if (current) modelSelect.value = modelKey(current);
+}
+
+modelSelect.onchange = async () => {
+  if (!currentId) return;
+  const m = modelSelect.value.split("/");
+  const res = await fetch(`/api/sessions/${currentId}/model`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: m[0], id: m.slice(1).join("/") }),
+  });
+  if (!res.ok) appendTurn("error", `model change failed: ${res.status}`);
+};
 
 async function send(mode: "auto" | "steer" | "followUp"): Promise<void> {
   const text = input.value.trim();

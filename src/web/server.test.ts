@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, AgentSession, ChatTurn, SessionEventPayload, SessionState } from "../core/types.js";
+import type { AgentFactory, AgentSession, ChatTurn, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
 import { createServer } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -11,10 +11,23 @@ function fakeSession(id: string): AgentSession & {
   setState: (s: SessionState) => void;
 } {
   let state: SessionState = "idle";
+  let model: ModelRef = { provider: "anthropic", id: "claude-opus-4-5" };
   const listeners = new Set<(e: SessionEventPayload) => void>();
   const calls: string[] = [];
   return {
     id,
+    get model() {
+      return model;
+    },
+    setModel: async (m: ModelRef) => {
+      if (m.id === "nope") throw new Error("unknown model");
+      model = m;
+      calls.push(`setModel:${m.provider}/${m.id}`);
+    },
+    availableModels: async (): Promise<ModelRef[]> => [
+      { provider: "anthropic", id: "claude-opus-4-5" },
+      { provider: "openai", id: "gpt-5.2" },
+    ],
     get state() {
       return state;
     },
@@ -84,6 +97,7 @@ describe("workbench server", () => {
         { role: "assistant", text: "hello" },
       ],
       lastSeq: 1,
+      model: { provider: "anthropic", id: "claude-opus-4-5" },
     });
     // ensure() attached the session: its events now reach the hub
     const seen = vi.fn();
@@ -114,6 +128,32 @@ describe("workbench server", () => {
     await reader.cancel();
     expect(chunk).toContain('"seq":2');
     expect(chunk).not.toContain('"seq":1,');
+  });
+
+  it("lists available models for a session", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/sessions/s1/models");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { provider: "anthropic", id: "claude-opus-4-5" },
+      { provider: "openai", id: "gpt-5.2" },
+    ]);
+  });
+
+  it("switches the model and rejects bad input", async () => {
+    const { app, session } = setup();
+    const post = (body: unknown) =>
+      app.request("/api/sessions/s1/model", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const ok = await post({ provider: "openai", id: "gpt-5.2" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ model: { provider: "openai", id: "gpt-5.2" } });
+    expect(session.calls).toContain("setModel:openai/gpt-5.2");
+    expect((await post({ provider: "x" })).status).toBe(400);
+    expect((await post({ provider: "x", id: "nope" })).status).toBe(400);
   });
 
   it("routes messages through the queue policy", async () => {

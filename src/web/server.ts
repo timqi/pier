@@ -38,9 +38,38 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
     const id = c.req.param("id");
     try {
       const session = await router.ensure({ channelId: "web", conversationId: id });
-      return c.json({ turns: await session.history(), lastSeq: hub.lastSeq(id) });
+      return c.json({
+        turns: await session.history(),
+        lastSeq: hub.lastSeq(id),
+        model: session.model ?? null,
+      });
     } catch (err) {
       return c.json({ error: String(err) }, 404);
+    }
+  });
+
+  app.get("/api/sessions/:id/models", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      return c.json(await session.availableModels());
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
+  app.post("/api/sessions/:id/model", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body.provider !== "string" || typeof body.id !== "string") {
+      return c.json({ error: "provider and id required" }, 400);
+    }
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      await session.setModel({ provider: body.provider, id: body.id });
+      return c.json({ model: session.model });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
     }
   });
 

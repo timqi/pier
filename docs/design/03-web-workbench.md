@@ -10,7 +10,9 @@ contains no agent logic.
 | ----- | -------- |
 | `GET /api/sessions` | `AgentFactory.list()` + live state from router |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
-| `GET /api/sessions/:id/history` | resume/attach on demand via `router.ensure`, returns `{turns, lastSeq}`; 404 if unknown |
+| `GET /api/sessions/:id/history` | resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model}`; 404 if unknown |
+| `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
+| `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
 | `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/sessions/:id/abort` | abort the session |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
@@ -28,8 +30,11 @@ custom classes are `.btn`/`.btn-primary`. `npm run dev:web` gives HMR with an
 
 Single page, three panes:
 
-- **Session list** (left): sessions with state dot (idle/streaming), click to
-  switch, "New session" button.
+- **Session list** (left): grouped by project (derived from session cwd),
+  rows with state dot (idle/streaming) and relative time, click to switch,
+  "New session" dialog with cwd input + known-project suggestions.
+- **Chat header**: title, cwd, model picker (switches the session's model),
+  state badge, abort while streaming.
 - **Chat** (center): rendered turns; streaming text appended from
   `text-delta`. Input box: Enter sends `mode:"auto"`; `!` prefix works via
   queue policy; explicit "Steer" and "Queue" buttons send `mode:"steer"` /

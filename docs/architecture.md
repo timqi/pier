@@ -90,12 +90,22 @@ export interface ChatTurn {
   text: string;
 }
 
+/** Backend-neutral model reference. */
+export interface ModelRef {
+  provider: string;
+  id: string;
+}
+
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {
   readonly id: string;
   readonly state: SessionState;
+  readonly model: ModelRef | undefined;
   /** Completed turns of the persisted transcript (no partial streaming). */
   history(): Promise<ChatTurn[]>;
+  setModel(model: ModelRef): Promise<void>;
+  /** Models with configured auth, selectable via setModel. */
+  availableModels(): Promise<ModelRef[]>;
   prompt(text: string): Promise<void>;   // resolves when the turn settles
   steer(text: string): Promise<void>;    // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle
@@ -144,3 +154,7 @@ export interface AgentFactory {
 - Frontend build: Vite + Tailwind (static CSS, zero runtime). Adopted early by
   explicit decision instead of the original no-bundler plan; still no UI
   framework until componentization is needed.
+- Projects are derived, not registered: a project is a distinct session cwd.
+  No project store exists; the sidebar groups by cwd and the new-session
+  dialog suggests known cwds. A real registry only arrives if derivation
+  proves insufficient.

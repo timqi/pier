@@ -11,6 +11,7 @@ import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
+  ModelRef,
   SessionEventPayload,
   SessionState,
 } from "../core/types.js";
@@ -25,6 +26,23 @@ class PiSession implements AgentSession {
 
   get state(): SessionState {
     return this.pi.isStreaming ? "streaming" : "idle";
+  }
+
+  get model(): ModelRef | undefined {
+    const m = this.pi.model;
+    return m ? { provider: m.provider, id: m.id } : undefined;
+  }
+
+  async setModel(ref: ModelRef): Promise<void> {
+    const m = this.pi.modelRegistry.find(ref.provider, ref.id);
+    if (!m) throw new Error(`unknown model: ${ref.provider}/${ref.id}`);
+    await this.pi.setModel(m);
+  }
+
+  async availableModels(): Promise<ModelRef[]> {
+    return this.pi.modelRegistry
+      .getAvailable()
+      .map((m) => ({ provider: m.provider, id: m.id }));
   }
 
   async history(): Promise<ChatTurn[]> {

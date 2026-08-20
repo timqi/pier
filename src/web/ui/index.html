@@ -18,7 +18,8 @@
     <header class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
       <span id="chat-title" class="truncate font-medium"></span>
       <span id="chat-cwd" class="truncate font-mono text-[12px] text-neutral-400"></span>
-      <span id="chat-state" class="ml-auto flex-none rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] text-neutral-500">idle</span>
+      <select id="model-select" class="ml-auto max-w-56 flex-none cursor-pointer truncate rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[12px] text-neutral-600 focus:outline-none"></select>
+      <span id="chat-state" class="flex-none rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] text-neutral-500">idle</span>
       <button type="button" id="abort" class="btn hidden flex-none text-[12.5px] text-red-600">Abort</button>
     </header>
     <div id="turns" class="flex-1 space-y-2 overflow-y-auto px-4 py-3"></div>
@@ -47,8 +48,9 @@
       <h3 class="font-semibold">New session</h3>
       <label class="flex flex-col gap-1 text-[13px] text-neutral-600">
         Working directory
-        <input id="new-cwd" type="text" placeholder="server default"
+        <input id="new-cwd" type="text" placeholder="server default" list="known-projects"
           class="rounded-md border border-neutral-300 px-2 py-1.5 font-mono text-[13px] focus:border-indigo-400 focus:outline-none" />
+        <datalist id="known-projects"></datalist>
       </label>
       <div class="flex justify-end gap-2">
         <button type="button" id="new-cancel" class="btn text-[13px]">Cancel</button>
