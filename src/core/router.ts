@@ -3,6 +3,7 @@
 
 import { EventHub } from "./hub.js";
 import { decide } from "./queue.js";
+import { splitReply } from "./reply.js";
 import type {
   AgentSession,
   Channel,
@@ -68,7 +69,7 @@ export class Router {
       if (payload.type === "turn-end" && payload.text) {
         const channel = this.channels.get(key.channelId);
         if (channel) {
-          channel.send(key.conversationId, payload.text).catch((err) => {
+          channel.send(key.conversationId, splitReply(payload.text)).catch((err) => {
             this.hub.emit(session.id, {
               type: "error",
               message: `outbound to ${key.channelId} failed: ${String(err)}`,

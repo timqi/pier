@@ -163,6 +163,16 @@
     <img id="image-full" alt="" class="max-h-[92vh] max-w-[92vw] cursor-zoom-out rounded-xl object-contain" />
   </dialog>
 
+  <!-- Text preview of an agent attachment; download stays one click away. -->
+  <dialog id="file-dialog" class="m-auto w-[720px] max-w-[92vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/40">
+    <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
+      <span id="file-name" class="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-700"></span>
+      <a id="file-download" download class="btn flex-none text-[12px] no-underline">Download</a>
+      <button type="button" id="file-close" class="btn flex-none text-[12px]">Close</button>
+    </div>
+    <pre id="file-text" class="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-[12.5px] leading-relaxed"></pre>
+  </dialog>
+
   <script type="module" src="/main.ts"></script>
 </body>
 </html>

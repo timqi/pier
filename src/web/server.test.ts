@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -119,7 +119,7 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
     },
     listResources: async (s) => {
       calls.push(`listResources:${at(s)}`);
-      return { extensions: ["quiet.ts"], skills: [] };
+      return { extensions: [{ name: "quiet.ts", link: false }], skills: [] };
     },
     readResource: async (s, kind, name) => {
       calls.push(`resource:${at(s)}/${kind}/${name}`);
@@ -128,13 +128,13 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
   };
 }
 
-function setup() {
+function setup(cwd = "/tmp") {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
     create: vi.fn(async () => session),
     fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
-    list: vi.fn(async () => [{ id: "s1", cwd: "/tmp", createdAt: 1 }]),
+    list: vi.fn(async () => [{ id: "s1", cwd, createdAt: 1 }]),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
@@ -236,6 +236,31 @@ describe("workbench server", () => {
     expect((await app.request("/api/sessions/s1/images/-1")).status).toBe(400);
   });
 
+  it("serves agent attachments from the session cwd, and nothing outside it", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pier-files-")));
+    writeFileSync(join(root, "report.md"), "# hi");
+    const outside = join(realpathSync(mkdtempSync(join(tmpdir(), "pier-outside-"))), "secret.txt");
+    writeFileSync(outside, "nope");
+    symlinkSync(outside, join(root, "escape.txt"));
+    const { app } = setup(root);
+    const url = (p: string) => `/api/sessions/s1/files?path=${encodeURIComponent(p)}`;
+
+    const ok = await app.request(url(join(root, "report.md")));
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await ok.text()).toBe("# hi");
+    expect((await app.request(`${url(join(root, "report.md"))}&download=1`)).headers.get("content-disposition"))
+      .toBe("attachment; filename*=UTF-8''report.md");
+
+    // Traversal, symlink escape, relative paths, missing file: all refused.
+    expect((await app.request(url(outside))).status).toBe(404);
+    expect((await app.request(url(join(root, "..", "..", "etc", "passwd")))).status).toBe(404);
+    expect((await app.request(url(join(root, "escape.txt")))).status).toBe(404);
+    expect((await app.request(url("report.md"))).status).toBe(404);
+    expect((await app.request(url(root))).status).toBe(404); // a directory is not a file
+    expect((await app.request("/api/sessions/s1/files")).status).toBe(400);
+  });
+
   it("snapshots history, live state and pending queue on demand", async () => {
     const { app, hub, session } = setup();
     hub.emit("s1", { type: "turn-start" });
@@ -286,7 +311,7 @@ describe("workbench server", () => {
     expect(globalRes.status).toBe(200);
     expect(await globalRes.json()).toEqual({
       files: [{ name: "SYSTEM.md", exists: true }],
-      resources: { extensions: ["quiet.ts"], skills: [] },
+      resources: { extensions: [{ name: "quiet.ts", link: false }], skills: [] },
     });
     // /tmp is a session cwd (factory.list); anything else is rejected.
     expect((await app.request("/api/config?scope=/tmp")).status).toBe(200);

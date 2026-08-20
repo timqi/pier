@@ -5,7 +5,12 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import type { ConfigResourceKind, ConfigScope, ConfigStore } from "../core/types.js";
+import type {
+  ConfigResource,
+  ConfigResourceKind,
+  ConfigScope,
+  ConfigStore,
+} from "../core/types.js";
 
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
@@ -68,7 +73,7 @@ export class PiConfigStore implements ConfigStore {
     await fs.writeFile(path, data);
   }
 
-  async listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, string[]>> {
+  async listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, ConfigResource[]>> {
     return {
       extensions: await listDir(this.resourceRoot(scope, "extensions")),
       skills: await listDir(this.resourceRoot(scope, "skills")),
@@ -84,17 +89,32 @@ export class PiConfigStore implements ConfigStore {
   }
 }
 
-/** Relative paths of all files under root, bounded depth, sorted; [] if absent. */
-async function listDir(root: string, prefix = "", depth = RESOURCE_DEPTH): Promise<string[]> {
+/**
+ * Relative paths of all files under root, bounded depth, sorted; [] if absent.
+ * Symlinks are followed (skills and extensions are routinely linked in from a
+ * checkout elsewhere) and everything reached through one is flagged, so the UI
+ * can say where it really came from. The depth bound is also the cycle guard.
+ */
+async function listDir(
+  root: string,
+  prefix = "",
+  depth = RESOURCE_DEPTH,
+  linked = false,
+): Promise<ConfigResource[]> {
   if (depth === 0) return [];
   const entries = await fs.readdir(join(root, prefix), { withFileTypes: true }).catch(() => []);
-  const out: string[] = [];
+  const out: ConfigResource[] = [];
   for (const e of entries) {
     const rel = prefix ? `${prefix}/${e.name}` : e.name;
-    if (e.isDirectory()) out.push(...(await listDir(root, rel, depth - 1)));
-    else if (e.isFile()) out.push(rel);
+    const link = linked || e.isSymbolicLink();
+    // A Dirent for a symlink is neither file nor directory — stat through it.
+    const target = e.isSymbolicLink()
+      ? await fs.stat(join(root, rel)).catch(() => null) // dangling link → skip
+      : e;
+    if (target?.isDirectory()) out.push(...(await listDir(root, rel, depth - 1, link)));
+    else if (target?.isFile()) out.push({ name: rel, link });
   }
-  return out.sort();
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**

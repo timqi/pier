@@ -1,6 +1,8 @@
 // Web workbench backend: REST + SSE, a pure consumer of core.
 // See docs/design/03-web-workbench.md for the route contract.
 
+import { readFile, realpath, stat } from "node:fs/promises";
+import { basename, extname, isAbsolute, resolve, sep } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -31,6 +33,27 @@ const HEARTBEAT_MS = 15_000;
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const MAX_IMAGES = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
+
+// Content types for the attachment route. Anything unlisted downloads as
+// bytes — guessing a type we can't vouch for is how a file starts executing.
+const FILE_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/plain; charset=utf-8",
+  ".log": "text/plain; charset=utf-8",
+  ".json": "text/plain; charset=utf-8",
+  ".csv": "text/plain; charset=utf-8",
+  ".yaml": "text/plain; charset=utf-8",
+  ".yml": "text/plain; charset=utf-8",
+};
+const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 /** Validate at the seam: malformed attachments are rejected, never half-sent. */
 function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
@@ -186,6 +209,43 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
     } catch (err) {
       return c.json({ error: String(err) }, 404);
     }
+  });
+
+  /** Real path of a file a session may expose: inside its cwd, nothing else. */
+  const resolveFile = async (id: string, raw: string): Promise<string | null> => {
+    const cwd = nascent.get(id)?.cwd ?? (await factory.list()).find((s) => s.id === id)?.cwd;
+    if (!cwd || !isAbsolute(raw)) return null;
+    try {
+      // realpath both ends, so neither `..` nor a symlink can step outside.
+      const root = await realpath(cwd);
+      const target = await realpath(resolve(root, raw));
+      if (target !== root && !target.startsWith(root + sep)) return null;
+      return (await stat(target)).isFile() ? target : null;
+    } catch {
+      return null; // missing, unreadable, or not a file
+    }
+  };
+
+  // Agent attachments: the agent links a file it produced (`file:///abs/path`)
+  // and the client fetches the bytes here — read-only, and only from within
+  // the session's own working directory.
+  app.get("/api/sessions/:id/files", async (c) => {
+    const raw = c.req.query("path");
+    if (!raw) return c.json({ error: "path required" }, 400);
+    const file = await resolveFile(c.req.param("id"), raw);
+    if (!file) return c.json({ error: "no such file" }, 404);
+    const { size } = await stat(file);
+    if (size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
+    const name = basename(file);
+    // Unknown extension → octet-stream: never let the browser guess a type we
+    // can't vouch for (that is how an attachment starts executing).
+    const type = FILE_TYPES[extname(file).toLowerCase()] ?? "application/octet-stream";
+    const disposition = c.req.query("download") === "1" ? "attachment" : "inline";
+    return c.body(await readFile(file), 200, {
+      "content-type": type,
+      "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "cache-control": "private, max-age=60",
+    });
   });
 
   app.get("/api/sessions/:id/models", async (c) => {

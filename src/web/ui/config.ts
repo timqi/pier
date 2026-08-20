@@ -2,11 +2,12 @@
 // plus read-only extension/skill browsing. A pure consumer of /api/config;
 // scope choices come from the session list (global + each project cwd).
 
+import type { ConfigResource } from "../../core/types.js";
 import { h } from "./dom.js";
 
 interface ConfigIndex {
   files: { name: string; exists: boolean }[];
-  resources: { extensions: string[]; skills: string[] };
+  resources: { extensions: ConfigResource[]; skills: ConfigResource[] };
 }
 
 type Selection =
@@ -75,14 +76,33 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return h("div", "px-3 pb-0.5 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title);
   }
 
-  function navRow(label: string, active: boolean, dim: boolean, onPick: () => void, depth = 0): HTMLElement {
+  /** Symlinked resources are real config, just stored elsewhere — say so. */
+  const linkBadge = (): HTMLElement => {
+    const badge = h(
+      "span",
+      "flex-none rounded bg-neutral-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500",
+      "link",
+    );
+    badge.title = "Reached through a symlink";
+    return badge;
+  };
+
+  function navRow(
+    label: string,
+    active: boolean,
+    dim: boolean,
+    onPick: () => void,
+    depth = 0,
+    link = false,
+  ): HTMLElement {
     const row = h(
       "button",
-      `block w-full cursor-pointer truncate py-1 pr-3 text-left hover:bg-neutral-100 ${
+      `flex w-full cursor-pointer items-center gap-1.5 py-1 pr-3 text-left hover:bg-neutral-100 ${
         active ? "bg-indigo-50 hover:bg-indigo-50" : ""
       } ${dim ? "text-neutral-400" : ""}`,
-      label,
     );
+    row.append(h("span", "truncate", label));
+    if (link) row.append(linkBadge());
     row.style.paddingLeft = `${20 + depth * 14}px`;
     row.title = label;
     row.onclick = onPick;
@@ -92,21 +112,24 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   // --- resource folder tree (folders collapsed by default) ---------------------
 
   interface Tree {
-    files: string[];
+    files: ConfigResource[];
     dirs: Map<string, Tree>;
+    /** A folder is a link when everything under it came through one. */
+    link: boolean;
   }
 
-  function buildTree(names: string[]): Tree {
-    const root: Tree = { files: [], dirs: new Map() };
-    for (const name of names) {
-      const parts = name.split("/");
+  function buildTree(resources: ConfigResource[]): Tree {
+    const root: Tree = { files: [], dirs: new Map(), link: true };
+    for (const res of resources) {
+      const parts = res.name.split("/");
       let node = root;
       for (const dir of parts.slice(0, -1)) {
         let next = node.dirs.get(dir);
-        if (!next) node.dirs.set(dir, (next = { files: [], dirs: new Map() }));
+        if (!next) node.dirs.set(dir, (next = { files: [], dirs: new Map(), link: true }));
+        next.link &&= res.link;
         node = next;
       }
-      node.files.push(parts[parts.length - 1]!);
+      node.files.push({ name: parts[parts.length - 1]!, link: res.link });
     }
     return root;
   }
@@ -133,13 +156,14 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       summary.style.paddingLeft = `${20 + depth * 14}px`;
       summary.title = path;
       summary.append(h("span", "chev", "▶"), h("span", "truncate text-neutral-600", dir));
+      if (sub.link) summary.append(linkBadge());
       el.append(summary, ...renderTree(kind, sub, path, depth + 1, isActive, open));
       rows.push(el);
     }
     for (const file of tree.files) {
-      const name = prefix ? `${prefix}/${file}` : file;
+      const name = prefix ? `${prefix}/${file.name}` : file.name;
       const sel: Selection = { type: "resource", kind, name };
-      rows.push(navRow(file, isActive(sel), false, () => open(sel), depth));
+      rows.push(navRow(file.name, isActive(sel), false, () => open(sel), depth, file.link));
     }
     return rows;
   }
@@ -163,9 +187,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     for (const kind of ["extensions", "skills"] as const) {
       rows.push(navSection(`${kind} (read-only)`));
-      const names = index.resources[kind];
-      if (!names.length) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
-      rows.push(...renderTree(kind, buildTree(names), "", 0, isActive, open));
+      const items = index.resources[kind];
+      if (!items.length) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
+      rows.push(...renderTree(kind, buildTree(items), "", 0, isActive, open));
     }
     navList.replaceChildren(...rows);
   }

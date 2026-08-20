@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -102,13 +102,36 @@ describe("resources", () => {
 
   it("lists relative paths per scope; missing dirs are empty", async () => {
     expect(await store.listResources(GLOBAL)).toEqual({
-      extensions: ["native-web/index.ts", "quiet.ts"],
+      extensions: [
+        { name: "native-web/index.ts", link: false },
+        { name: "quiet.ts", link: false },
+      ],
       skills: [],
     });
     expect(await store.listResources(project)).toEqual({
       extensions: [],
-      skills: ["greet/SKILL.md"],
+      skills: [{ name: "greet/SKILL.md", link: false }],
     });
+  });
+
+  it("follows symlinked resources and flags them, skipping dangling ones", async () => {
+    const elsewhere = join(cwd, "shared-skills", "review");
+    mkdirSync(elsewhere, { recursive: true });
+    writeFileSync(join(elsewhere, "SKILL.md"), "# review");
+    const skills = join(agentDir, "skills");
+    mkdirSync(skills, { recursive: true });
+    symlinkSync(elsewhere, join(skills, "review")); // linked directory
+    symlinkSync(join(elsewhere, "SKILL.md"), join(skills, "solo.md")); // linked file
+    symlinkSync(join(cwd, "gone.md"), join(skills, "dangling.md"));
+
+    expect(await store.listResources(GLOBAL)).toMatchObject({
+      skills: [
+        { name: "review/SKILL.md", link: true },
+        { name: "solo.md", link: true },
+      ],
+    });
+    // A link is still readable through its listed path.
+    expect(await store.readResource(GLOBAL, "skills", "review/SKILL.md")).toBe("# review");
   });
 
   it("reads a resource and rejects path traversal", async () => {

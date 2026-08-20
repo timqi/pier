@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { PiConfigStore } from "./agent/config.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { EventHub } from "./core/hub.js";
+import { REPLY_SURFACE_PROMPT } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
@@ -14,9 +15,10 @@ import { PinStore } from "./web/pins.js";
 import { createServer } from "./web/server.js";
 
 let tasks: TaskService;
-const factory = new PiAgentFactory([
-  taskToolSpec((params, callerSessionId, signal) => tasks.tool(params, callerSessionId, signal)),
-]);
+const factory = new PiAgentFactory(
+  [taskToolSpec((params, callerSessionId, signal) => tasks.tool(params, callerSessionId, signal))],
+  REPLY_SURFACE_PROMPT,
+);
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
   // Web conversation ids ARE session ids; IM channels create sessions lazily.

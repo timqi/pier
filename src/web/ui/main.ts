@@ -5,11 +5,14 @@
 import "./style.css";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { splitReply } from "../../core/reply.js";
 import { createActivityView } from "./activity.js";
+import { renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
+import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import { createTasksView } from "./tasks.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
@@ -708,16 +711,33 @@ function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
 
 /** Swap a plain-text bubble to sanitized rendered markdown. */
 function renderMarkdown(node: HTMLElement, raw: string): void {
-  node.innerHTML = DOMPurify.sanitize(marked.parse(raw, { async: false }));
+  // Attachment links are rewritten to the session's files route first: the
+  // sanitizer drops `file:` URLs (rightly), so they'd vanish otherwise.
+  const md = currentId ? rewriteFileLinks(raw, currentId) : raw;
+  node.innerHTML = DOMPurify.sanitize(marked.parse(md, { async: false }));
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
+  renderAttachments(node, showImage);
 }
+
+/** An assistant turn: markdown bubble, hover meta, next-step buttons. */
+function renderAssistant(node: HTMLElement, raw: string, meta?: TurnMeta): HTMLElement {
+  const { text, suggestions } = splitReply(raw);
+  renderMarkdown(node, text);
+  setMetaHint(node, meta);
+  renderSuggestions(node.parentElement ?? node, suggestions, (label) => void send("auto", label));
+  return node;
+}
+
+const appendAssistant = (raw: string, meta?: TurnMeta): HTMLElement =>
+  renderAssistant(appendTurn("assistant", ""), raw, meta);
 
 /** Finalize the in-flight streamed text block (markdown-render it). */
 function finalizeStreaming(): void {
   if (!streamingEl) return;
-  renderMarkdown(streamingEl, streamingEl.dataset.raw ?? streamingEl.textContent ?? "");
+  const node = streamingEl;
   streamingEl = null;
+  renderAssistant(node, node.dataset.raw ?? node.textContent ?? "");
 }
 
 // --- activity group ------------------------------------------------------------------
@@ -976,7 +996,7 @@ function handleEvent(e: SessionEvent): void {
         if (e.text) streamingEl.dataset.raw = e.text;
         setMetaHint(streamingEl, e.meta);
       } else if (e.text) {
-        setMetaHint(appendTurn("assistant", e.text, true), e.meta);
+        appendAssistant(e.text, e.meta);
       }
       finalizeStreaming();
       break;
@@ -1179,6 +1199,7 @@ async function loadSession(id: string): Promise<void> {
   streamingEl = null;
   activity = null;
   turnOpen = false;
+  resetSuggestions();
   optimisticUserTexts = [];
   backgroundRows.clear();
   lastSeq = 0;
@@ -1202,8 +1223,9 @@ async function loadSession(id: string): Promise<void> {
       appendSystemInput(t.text, t.origin);
       continue;
     }
-    const bubble = appendTurn(t.role, t.text, t.role === "assistant");
-    setMetaHint(bubble, t.meta);
+    // meta is assistant-only (core/types.ts), so plain turns need no hint.
+    const bubble =
+      t.role === "assistant" ? appendAssistant(t.text, t.meta) : appendTurn(t.role, t.text);
     // Refs only in the snapshot: each thumbnail pulls its own bytes.
     for (const img of t.images ?? []) {
       bubble.append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
@@ -1349,16 +1371,19 @@ const imageDialog = $<HTMLDialogElement>("#image-dialog");
 const imageFull = $<HTMLImageElement>("#image-full");
 imageDialog.onclick = () => imageDialog.close();
 
+/** Full-size view of any chat image (transcript, pending, or attachment). */
+function showImage(src: string): void {
+  imageFull.src = src;
+  imageDialog.showModal();
+}
+
 /** Thumbnail in a chat row; click shows the image full size. */
 function imageThumb(src: string): HTMLImageElement {
   const thumb = document.createElement("img");
   thumb.src = src;
   thumb.loading = "lazy";
   thumb.className = "mt-1.5 max-h-48 cursor-zoom-in rounded-md border border-black/5";
-  thumb.onclick = () => {
-    imageFull.src = src;
-    imageDialog.showModal();
-  };
+  thumb.onclick = () => showImage(src);
   return thumb;
 }
 
@@ -1427,18 +1452,21 @@ function autosize(): void {
   input.style.height = `${Math.min(input.scrollHeight, 192)}px`; // cap = max-h-48
 }
 
-async function send(mode: "auto" | "steer"): Promise<void> {
-  const text = input.value.trim();
-  const images = pendingImages;
+/** `label` sends that text instead of the composer's — a next-step button
+ *  click is a side action and must not consume the user's unsent draft. */
+async function send(mode: "auto" | "steer", label?: string): Promise<void> {
+  const text = (label ?? input.value).trim();
+  const images = label === undefined ? pendingImages : [];
   const id = currentId;
   if ((!text && images.length === 0) || !id) return;
   const startsTurn = currentState === "idle" && mode === "auto";
-  input.value = "";
-  autosize();
-  saveDraft(); // sent text is no longer a draft
-
-  pendingImages = [];
-  renderImageStrip();
+  if (label === undefined) {
+    input.value = "";
+    autosize();
+    saveDraft(); // sent text is no longer a draft
+    pendingImages = [];
+    renderImageStrip();
+  }
   if (startsTurn) setState("streaming");
   else updateComposer();
   // Optimistic: a fresh prompt (or a steer) reads as a user turn; only a
@@ -1532,12 +1560,20 @@ input.onkeydown = (ev) => {
     void send("auto");
   }
 };
-// Paste / drop / picker → pending image strip.
+// Paste / drop / picker → pending image strip. Pasted text is trimmed: copied
+// snippets drag along leading/trailing blank lines nobody wants in a prompt.
 input.onpaste = (ev) => {
   for (const item of ev.clipboardData?.items ?? []) {
     const file = item.kind === "file" ? item.getAsFile() : null;
     if (file) addImageFile(file);
   }
+  const pasted = ev.clipboardData?.getData("text/plain") ?? "";
+  const trimmed = pasted.trim();
+  if (!trimmed || trimmed === pasted) return; // nothing to fix — native paste
+  ev.preventDefault();
+  input.setRangeText(trimmed, input.selectionStart ?? 0, input.selectionEnd ?? 0, "end");
+  autosize();
+  saveDraft();
 };
 turnsPane.ondragover = (ev) => ev.preventDefault();
 turnsPane.ondrop = (ev) => {

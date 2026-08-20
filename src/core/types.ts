@@ -14,6 +14,18 @@ export interface ImageAttachment {
   mimeType: string;
 }
 
+/**
+ * What an assistant turn renders as on any surface: markdown plus the
+ * next-step labels the agent offered. Every surface renders the labels as
+ * buttons (web chat now, IM quick replies later) and a click sends the label
+ * back as an ordinary user message. Parsed by core/reply.ts — the syntax is
+ * never a platform's business.
+ */
+export interface AgentReply {
+  text: string;
+  suggestions: string[];
+}
+
 export interface InboundMessage {
   key: ConversationKey;
   senderId: string;
@@ -27,8 +39,8 @@ export interface InboundMessage {
 export interface Channel {
   readonly id: string;
   start(onMessage: (msg: InboundMessage) => void): Promise<void>;
-  /** Render markdown to the platform's format and send it. */
-  send(conversationId: string, markdown: string): Promise<void>;
+  /** Render the reply (markdown + next-step buttons) and send it. */
+  send(conversationId: string, reply: AgentReply): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -198,6 +210,16 @@ export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
 export type ConfigResourceKind = "extensions" | "skills";
 
 /**
+ * One read-only resource file, by path relative to its resource dir. `link`
+ * marks a file reached through a symlink (a skills repo checked out elsewhere
+ * is the common case) — surfaces say so instead of pretending it lives here.
+ */
+export interface ConfigResource {
+  name: string;
+  link: boolean;
+}
+
+/**
  * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
  * browsing. Changes apply to sessions created afterwards — Pi reads these
  * files at session start, never mid-run.
@@ -209,8 +231,8 @@ export interface ConfigStore {
   readFile(scope: ConfigScope, name: string): Promise<string>;
   /** Masked secrets that come back unchanged keep their stored value. */
   writeFile(scope: ConfigScope, name: string, content: string): Promise<void>;
-  /** Relative file paths under each resource dir (read-only surface). */
-  listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, string[]>>;
+  /** Files under each resource dir, symlinks followed (read-only surface). */
+  listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, ConfigResource[]>>;
   readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string>;
 }
 

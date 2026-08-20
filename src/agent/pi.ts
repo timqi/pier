@@ -4,6 +4,7 @@
 
 import {
   createAgentSession,
+  DefaultResourceLoader,
   defineTool,
   SessionManager,
   type AgentSession as PiAgentSession,
@@ -32,6 +33,7 @@ import {
   type PiEvent,
   type PiMessage,
 } from "./events.js";
+import { defaultAgentDir } from "./config.js";
 import { curateModels } from "./models.js";
 
 const toImageContent = (images?: ImageAttachment[]) =>
@@ -180,7 +182,32 @@ class PiSession implements AgentSession {
 }
 
 export class PiAgentFactory implements AgentFactory {
-  constructor(private readonly extraTools: AgentCustomTool[] = []) {}
+  constructor(
+    private readonly extraTools: AgentCustomTool[] = [],
+    /** Appended as a virtual context file, so Pi's own prompt stays intact. */
+    private readonly instructions = "",
+  ) {}
+
+  /**
+   * Pi discovers AGENTS.md itself; we append one more, in memory, telling the
+   * agent what the surface it is talking to can render. Layered as a context
+   * file (not a systemPromptOverride) so the user's own instructions still win.
+   */
+  private async resourceLoader(cwd: string): Promise<DefaultResourceLoader | undefined> {
+    if (!this.instructions) return undefined;
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir: defaultAgentDir(), // same discovery Pi would have done itself
+      agentsFilesOverride: (current) => ({
+        agentsFiles: [
+          ...current.agentsFiles,
+          { path: "<pier>/AGENTS.md", content: this.instructions },
+        ],
+      }),
+    });
+    await loader.reload();
+    return loader;
+  }
 
   private async open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
     let live: PiAgentSession | undefined;
@@ -206,7 +233,13 @@ export class PiAgentFactory implements AgentFactory {
     const tools = opts.capabilities === "read"
       ? ["read", "grep", "find", "ls", ...this.extraTools.map((tool) => tool.name)]
       : undefined;
-    const created = await createAgentSession({ cwd, sessionManager, customTools, tools });
+    const created = await createAgentSession({
+      cwd,
+      sessionManager,
+      customTools,
+      tools,
+      resourceLoader: await this.resourceLoader(cwd),
+    });
     live = created.session;
     const session = new PiSession(live);
     if (opts.model) await session.setModel(opts.model);

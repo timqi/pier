@@ -45,7 +45,9 @@ imports platform SDKs or Pi. Nothing imports sideways between channels.
 of truth (this doc stopped mirroring it to avoid drift). The seams:
 
 - `Channel` — platform ↔ core: `start(onMessage)`, `send(conversationId,
-  markdown)`, `stop()`. One implementation per platform.
+  reply)`, `stop()`. One implementation per platform. `AgentReply` is markdown
+  plus next-step labels (`core/reply.ts` parses the agent's trailing `---\n[a] |
+  [b]` block once); every surface renders them as buttons that send the label.
 - `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (all
   accept optional image attachments), persisted system input, abort, history,
   model get/set/list, clearQueue, create/fork/resume, and a payload-only
