@@ -84,6 +84,7 @@ export function createTasksView(
   getSessions: () => SessionChoice[],
   openSession: (id: string) => void,
   getCurrentSessionId: () => string | null,
+  openActivity: (arg?: string) => void,
 ): TasksView {
   let visible = false;
   let rows: TaskRow[] = [];
@@ -107,9 +108,9 @@ export function createTasksView(
     root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", message));
   }
 
-  function header(title: string, actions: HTMLElement[]): HTMLElement {
+  function header(title: string | HTMLElement, actions: HTMLElement[]): HTMLElement {
     const el = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4");
-    el.append(h("span", "truncate font-medium", title));
+    el.append(typeof title === "string" ? h("span", "truncate font-medium", title) : title);
     if (actions.length) {
       const box = h("div", "ml-auto flex items-center gap-2");
       box.append(...actions);
@@ -118,10 +119,33 @@ export function createTasksView(
     return el;
   }
 
+  // Console tab strip (Sessions | Dependencies | Tasks) mirrors the Activity
+  // view's; the first two navigate there, Tasks returns to this view's list.
+  // Rendered on the list and the detail page alike, so the console tabs never
+  // disappear while inside a task.
+  function consoleTabs(): HTMLElement {
+    const strip = h("div", "flex flex-none items-center gap-1 border-b border-neutral-200 px-4 py-2");
+    const sessionsTab = button("Sessions");
+    sessionsTab.onclick = () => openActivity("sessions");
+    const depsTab = button("Dependencies");
+    depsTab.onclick = () => openActivity("dependencies");
+    const tasksTab = button("Tasks");
+    tasksTab.classList.add("bg-neutral-200");
+    tasksTab.onclick = showList;
+    strip.append(sessionsTab, depsTab, tasksTab);
+    return strip;
+  }
+
+  function showList(): void {
+    selectedId = null;
+    renderList();
+  }
+
   function renderList(): void {
     const create = button("New task", true);
     create.onclick = () => editDialog();
-    const filters = h("div", "flex flex-none items-center gap-1 border-b border-neutral-200 px-4 py-2");
+    const filters = consoleTabs();
+    const filterBox = h("div", "ml-auto flex items-center gap-1");
     const filterOptions: [string, string][] = [["All", "active"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"], ["Archived", "archived"]];
     for (const [label, key] of filterOptions) {
       const tab = button(label);
@@ -131,8 +155,9 @@ export function createTasksView(
         selectedId = null;
         void load();
       };
-      filters.append(tab);
+      filterBox.append(tab);
     }
+    filters.append(filterBox);
     const table = document.createElement("table");
     table.className = "w-full table-fixed text-left text-[12.5px]";
     table.innerHTML = `<thead class="sticky top-0 bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
@@ -194,11 +219,13 @@ export function createTasksView(
     if (!taskRes.ok || !runsRes.ok) return renderError("Failed to load task");
     const task = (await taskRes.json()) as TaskDefinition;
     const runs = (await runsRes.json()) as TaskRun[];
-    const back = button("Back");
-    back.onclick = () => {
-      selectedId = null;
-      renderList();
-    };
+    // "Tasks › <name>" breadcrumb: names the task being viewed and doubles
+    // as the way back to the list (replaces the old Back button).
+    const crumb = h("span", "flex min-w-0 items-center gap-1.5");
+    const listLink = h("button", "cursor-pointer text-neutral-500 hover:underline", "Tasks");
+    (listLink as HTMLButtonElement).type = "button";
+    listLink.onclick = showList;
+    crumb.append(listLink, h("span", "text-neutral-400", "›"), h("span", "truncate font-medium", task.name));
     const run = button("Run now", true);
     run.disabled = task.archived;
     run.onclick = () => void runTask(task.id);
@@ -228,7 +255,7 @@ export function createTasksView(
       renderRuns(pane, task, runs);
     };
     tabs.append(definitionTab, runsTab);
-    root.replaceChildren(header(task.name, [back, run, pause, edit, archive]), tabs, pane);
+    root.replaceChildren(header(crumb, [run, pause, edit, archive]), consoleTabs(), tabs, pane);
     if (runs.length) runsTab.click();
     else showDefinition();
   }

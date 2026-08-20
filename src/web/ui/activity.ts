@@ -17,7 +17,7 @@ interface ActivitySnapshot {
 }
 
 export interface ActivityView {
-  show(): void;
+  show(arg?: string): void;
   hide(): void;
   refresh(): void;
   readonly visible: boolean;
@@ -35,7 +35,7 @@ const elapsed = (since: number | null): string => {
 export function createActivityView(
   root: HTMLElement,
   openSession: (id: string) => void,
-  openTask: (id: string) => void,
+  openTask: (id?: string) => void,
 ): ActivityView {
   let visible = false;
   let tab: "sessions" | "dependencies" = "sessions";
@@ -66,12 +66,14 @@ export function createActivityView(
     header.append(h("span", "font-medium", "Activity"));
     const tabs = h("div", "flex items-center gap-1 border-b border-neutral-200 px-4 py-2");
     tabs.append(
-      control("Active sessions", tab === "sessions", () => {
+      control("Sessions", tab === "sessions", () => {
         tab = "sessions";
         if (scope !== "active") { scope = "active"; void load(); }
         else render();
       }),
       control("Dependencies", tab === "dependencies", () => { tab = "dependencies"; render(); }),
+      // Tasks is the sibling console view; the strip just navigates to it.
+      control("Tasks", false, () => openTask()),
     );
     if (tab === "dependencies") {
       const scopeControl = h("div", "ml-auto flex gap-1");
@@ -228,7 +230,15 @@ export function createActivityView(
 
   return {
     get visible() { return visible; },
-    show() { visible = true; root.classList.remove("hidden"); root.classList.add("flex"); void load(); },
+    show(arg) {
+      visible = true;
+      // No arg → reopen on whatever tab was showing when we left.
+      if (arg === "dependencies") tab = "dependencies";
+      else if (arg === "sessions") { tab = "sessions"; scope = "active"; }
+      root.classList.remove("hidden");
+      root.classList.add("flex");
+      void load();
+    },
     hide() { visible = false; root.classList.add("hidden"); root.classList.remove("flex"); },
     refresh() { if (visible) void load(); },
   };

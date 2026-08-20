@@ -78,7 +78,6 @@ const chatHeader = $("#chat-header");
 const composer = $<HTMLFormElement>("#composer");
 const consoleSection = $<HTMLDetailsElement>("#console-section");
 const openActivityBtn = $("#open-activity");
-const openTasksBtn = $("#open-tasks");
 const openConfigBtn = $("#open-config");
 const archiveDialog = $<HTMLDialogElement>("#archive-dialog");
 const archiveList = $("#archive-list");
@@ -1048,6 +1047,7 @@ const tasksView = createTasksView(
   () => sessions.map(({ id, cwd, title }) => ({ id, cwd, title })),
   (id) => void select(id),
   () => currentId,
+  (arg) => showConsole("activity", arg),
 );
 const activityView = createActivityView(
   $("#activity-view"),
@@ -1060,34 +1060,39 @@ type ConsoleName = "config" | "tasks" | "activity";
 const consoleViews: {
   name: ConsoleName;
   view: { show(arg?: string): void; hide(): void; visible: boolean };
-  btn: HTMLElement;
 }[] = [
-  { name: "config", view: configView, btn: openConfigBtn },
-  { name: "tasks", view: tasksView, btn: openTasksBtn },
-  { name: "activity", view: activityView, btn: openActivityBtn },
+  { name: "config", view: configView },
+  { name: "tasks", view: tasksView },
+  { name: "activity", view: activityView },
 ];
 
+const consoleBtns = [openConfigBtn, openActivityBtn];
+
+// The Activity menu item reopens whichever of its views (Activity or Tasks)
+// was showing last; the views themselves keep their tab/selection state.
+let lastActivityConsole: ConsoleName = "activity";
+
 function showConsole(name: ConsoleName, arg?: string): void {
+  if (name !== "config") lastActivityConsole = name;
   setHash({ kind: "console", name, arg });
   chatVisible = false;
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
   for (const entry of consoleViews) {
-    const active = entry.name === name;
-    entry.btn.classList.toggle("bg-indigo-50", active);
-    if (active) entry.view.show(arg);
+    if (entry.name === name) entry.view.show(arg);
     else entry.view.hide();
   }
+  // Tasks lives under the Activity menu item (tab strip inside the views).
+  openConfigBtn.classList.toggle("bg-indigo-50", name === "config");
+  openActivityBtn.classList.toggle("bg-indigo-50", name !== "config");
 }
 
 const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
 
 function showChat(): void {
   if (!consoleViews.some(({ view }) => view.visible)) return;
-  for (const { view, btn } of consoleViews) {
-    view.hide();
-    btn.classList.remove("bg-indigo-50");
-  }
+  for (const { view } of consoleViews) view.hide();
+  for (const btn of consoleBtns) btn.classList.remove("bg-indigo-50");
   chatVisible = true;
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
@@ -1484,8 +1489,7 @@ async function recallQueue(): Promise<void> {
 
 // --- wiring ----------------------------------------------------------------------------
 
-openActivityBtn.onclick = () => showConsole("activity");
-openTasksBtn.onclick = () => showTasks();
+openActivityBtn.onclick = () => showConsole(lastActivityConsole);
 openConfigBtn.onclick = () => showConsole("config");
 consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
 consoleSection.ontoggle = () =>
