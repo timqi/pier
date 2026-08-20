@@ -280,8 +280,13 @@ function renderArchive(): void {
   );
 }
 
+/** Sessions created here that Pi doesn't list yet (persisted on first message). */
+const fresh = new Map<string, SessionInfo>();
+
 async function refreshSessions(): Promise<void> {
-  sessions = (await (await fetch("/api/sessions")).json()) as SessionInfo[];
+  const listed = (await (await fetch("/api/sessions")).json()) as SessionInfo[];
+  for (const s of listed) fresh.delete(s.id);
+  sessions = [...fresh.values(), ...listed];
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
 }
@@ -289,8 +294,14 @@ async function refreshSessions(): Promise<void> {
 // --- chat header -----------------------------------------------------------------
 
 function renderHeader(): void {
-  const s = sessions.find((x) => x.id === currentId);
-  chatTitle.textContent = s?.title ?? (currentId ? currentId.slice(0, 8) : "no session");
+  // A fresh session may not be listed yet (Pi persists on first message) —
+  // synthesize a stub so the ⋯ menu (info, pin, model) works from turn zero.
+  const s =
+    sessions.find((x) => x.id === currentId) ??
+    (currentId
+      ? { id: currentId, cwd: "—", createdAt: Date.now(), state: currentState, pinned: false }
+      : undefined);
+  chatTitle.textContent = s ? (s.title ?? "Untitled session") : "no session";
   chatMenu.classList.toggle("hidden", !s);
   // Everything per-session (info, pin, model) lives in the ⋯ menu.
   if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
@@ -947,6 +958,9 @@ $<HTMLFormElement>("#new-form").onsubmit = async () => {
     return;
   }
   const { id } = (await res.json()) as { id: string };
+  // Insert into Projects immediately (the server pins web-created sessions);
+  // waiting for Pi's list would leave the session invisible until turn one ends.
+  fresh.set(id, { id, cwd, createdAt: Date.now(), state: "idle", pinned: true });
   await refreshSessions();
   await select(id);
   input.focus();
