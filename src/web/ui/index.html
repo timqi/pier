@@ -5,37 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pier</title>
 </head>
-<body class="grid h-screen grid-cols-[240px_minmax(0,1fr)_400px] text-sm text-neutral-800 antialiased">
+<body class="grid h-screen grid-cols-[230px_minmax(0,1fr)_360px] text-[15px] leading-normal text-neutral-800 antialiased">
   <aside class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
-    <header class="flex items-center justify-between gap-2 px-4 py-3">
-      <h1 class="text-base font-semibold tracking-tight">Pier</h1>
-      <button id="new-session" class="btn btn-primary">New</button>
+    <header class="flex items-center justify-between gap-2 px-3 py-2">
+      <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
+      <button id="new-session" class="btn btn-primary text-[13px]">New</button>
     </header>
-    <ul id="session-list" class="flex-1 overflow-y-auto"></ul>
+    <ul id="session-list" class="flex-1 overflow-y-auto text-[13.5px]"></ul>
   </aside>
 
   <main class="flex min-w-0 flex-col overflow-hidden">
-    <div id="turns" class="flex-1 space-y-3 overflow-y-auto px-6 py-4"></div>
-    <form id="composer" class="flex flex-col gap-2 border-t border-neutral-200 p-4">
-      <textarea id="input" rows="3"
-        class="w-full resize-y rounded-lg border border-neutral-300 p-2.5 focus:border-indigo-400 focus:outline-none"
+    <header class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
+      <span id="chat-title" class="truncate font-medium"></span>
+      <span id="chat-cwd" class="truncate font-mono text-[12px] text-neutral-400"></span>
+      <span id="chat-state" class="ml-auto flex-none rounded-full bg-neutral-100 px-2 py-0.5 text-[12px] text-neutral-500">idle</span>
+      <button type="button" id="abort" class="btn hidden flex-none text-[12.5px] text-red-600">Abort</button>
+    </header>
+    <div id="turns" class="flex-1 space-y-2 overflow-y-auto px-4 py-3"></div>
+    <form id="composer" class="flex flex-col gap-1.5 border-t border-neutral-200 p-3">
+      <textarea id="input" rows="2"
+        class="w-full resize-y rounded-lg border border-neutral-300 px-2.5 py-2 focus:border-indigo-400 focus:outline-none"
         placeholder="Message… (! prefix steers while streaming)"></textarea>
-      <div class="flex items-center gap-2">
-        <span id="mode-hint" class="mr-auto text-xs text-neutral-500"></span>
-        <button type="button" id="abort" class="btn text-red-600">Abort</button>
-        <button type="button" id="send-steer" class="btn">Steer</button>
-        <button type="button" id="send-queue" class="btn">Queue</button>
-        <button type="submit" id="send" class="btn btn-primary">Send</button>
+      <div class="flex items-center gap-1.5">
+        <span id="mode-hint" class="mr-auto text-[12px] text-neutral-500"></span>
+        <button type="button" id="send-steer" class="btn text-[13px]">Steer</button>
+        <button type="button" id="send-queue" class="btn text-[13px]">Queue</button>
+        <button type="submit" id="send" class="btn btn-primary text-[13px]">Send</button>
       </div>
     </form>
   </main>
 
   <aside class="flex flex-col overflow-hidden border-l border-neutral-200 bg-neutral-50">
-    <header class="px-4 py-3">
-      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Timeline</h2>
+    <header class="px-3 py-2">
+      <h2 class="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Timeline</h2>
     </header>
-    <ul id="timeline" class="flex-1 overflow-y-auto px-2 pb-2 text-xs"></ul>
+    <ul id="timeline" class="flex-1 overflow-y-auto px-1.5 pb-2 text-[12.5px]"></ul>
   </aside>
+
+  <dialog id="new-dialog" class="m-auto w-96 rounded-xl border border-neutral-200 p-4 shadow-xl backdrop:bg-black/20">
+    <form id="new-form" method="dialog" class="flex flex-col gap-3">
+      <h3 class="font-semibold">New session</h3>
+      <label class="flex flex-col gap-1 text-[13px] text-neutral-600">
+        Working directory
+        <input id="new-cwd" type="text" placeholder="server default"
+          class="rounded-md border border-neutral-300 px-2 py-1.5 font-mono text-[13px] focus:border-indigo-400 focus:outline-none" />
+      </label>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="new-cancel" class="btn text-[13px]">Cancel</button>
+        <button type="submit" class="btn btn-primary text-[13px]">Create</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="/main.ts"></script>
 </body>
