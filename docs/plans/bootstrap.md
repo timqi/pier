@@ -40,7 +40,7 @@ Per-step specs: `docs/design/01-skeleton.md`, `02-agent-seam.md`,
 
 ## Status
 
-- [ ] 1. Skeleton
+- [x] 1. Skeleton
 - [ ] 2. Agent seam
 - [ ] 3. Web workbench v1
 - [ ] 4. Telegram channel
