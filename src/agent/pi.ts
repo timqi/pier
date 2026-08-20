@@ -15,11 +15,12 @@ import type {
   ModelRef,
   SessionEventPayload,
   SessionState,
+  TurnMeta,
 } from "../core/types.js";
 
 const toImageContent = (images?: ImageAttachment[]) =>
   images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
-import { textOf, toSessionEvents, type PiEvent, type PiMessage } from "./events.js";
+import { textOf, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
 import { curateModels } from "./models.js";
 
 class PiSession implements AgentSession {
@@ -64,14 +65,17 @@ class PiSession implements AgentSession {
 
   async history(): Promise<ChatTurn[]> {
     const turns: ChatTurn[] = [];
-    for (const m of this.pi.messages as PiMessage[]) {
+    const messages = this.pi.messages as PiMessage[];
+    for (const [i, m] of messages.entries()) {
       if (m.role !== "user" && m.role !== "assistant") continue;
       let text = textOf(m.content);
       const imageCount = Array.isArray(m.content)
         ? m.content.filter((p) => p.type === "image").length
         : 0;
       if (imageCount) text = `${text}${text ? " " : ""}[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
-      if (text) turns.push({ role: m.role, text });
+      if (!text) continue;
+      const meta = m.role === "assistant" ? turnMetaAt(messages, i) : undefined;
+      turns.push(meta ? { role: m.role, text, meta } : { role: m.role, text });
     }
     return turns;
   }
@@ -94,8 +98,19 @@ class PiSession implements AgentSession {
 
   subscribe(fn: (e: SessionEventPayload) => void): () => void {
     return this.pi.subscribe((event) => {
-      for (const payload of toSessionEvents(event as PiEvent)) fn(payload);
+      for (const payload of toSessionEvents(event as PiEvent)) {
+        fn(payload.type === "turn-end" ? { ...payload, meta: this.lastTurnMeta() } : payload);
+      }
     });
+  }
+
+  /** Meta of the just-finished turn; live path, so "now" is the completion. */
+  private lastTurnMeta(): TurnMeta | undefined {
+    const messages = this.pi.messages as PiMessage[];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === "assistant") return turnMetaAt(messages, i, Date.now());
+    }
+    return undefined;
   }
 
   async dispose(): Promise<void> {

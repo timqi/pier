@@ -39,7 +39,7 @@ export type SessionEventPayload =
   | { type: "thinking-delta"; text: string }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-end"; toolCallId: string; isError: boolean; output: string }
-  | { type: "turn-end"; text: string } // full assistant text of the turn
+  | { type: "turn-end"; text: string; meta?: TurnMeta } // full assistant text of the turn
   | { type: "state"; state: SessionState }
   | { type: "queued"; mode: "steer" | "followUp"; text: string }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
@@ -59,6 +59,14 @@ export type SessionState = "idle" | "streaming";
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
+  meta?: TurnMeta; // assistant turns only
+}
+
+/** Completion metadata of an assistant turn (bubble hover hints). */
+export interface TurnMeta {
+  completedAt: number; // ms epoch
+  durationMs: number; // preceding user prompt → completion
+  tokens: number; // cumulative session totalTokens at completion
 }
 
 /** Backend-neutral model reference. */

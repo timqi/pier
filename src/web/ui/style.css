@@ -26,10 +26,20 @@
     @apply h-3 w-3 flex-none animate-spin rounded-full border-2 border-current border-t-transparent;
   }
 
-  /* Markdown-rendered chat content: prose rhythm, chat font size. */
+  /* Markdown-rendered chat content: prose rhythm, chat font size.
+     Prose's default 1.75 line-height reads airy in chat — tighten it. */
   .md {
     @apply prose prose-neutral max-w-none;
     font-size: inherit;
+    line-height: inherit;
+  }
+  .md p,
+  .md ul,
+  .md ol {
+    margin-block: 0.5em;
+  }
+  .md li {
+    margin-block: 0.15em;
   }
   .md :first-child {
     margin-top: 0;

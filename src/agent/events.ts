@@ -3,7 +3,7 @@
 // and Pi types never leak past the seam. The golden-table test in
 // events.test.ts is the mapping's spec; extend types.ts before adding events.
 
-import type { SessionEventPayload } from "../core/types.js";
+import type { SessionEventPayload, TurnMeta } from "../core/types.js";
 
 interface TextPart {
   type: string;
@@ -15,6 +15,8 @@ export interface PiMessage {
   content?: string | TextPart[];
   stopReason?: string;
   errorMessage?: string;
+  timestamp?: number; // ms epoch, stamped by Pi at message creation
+  usage?: { totalTokens?: number };
 }
 
 export interface PiEvent {
@@ -45,6 +47,36 @@ function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined
     if (messages[i]?.role === "assistant") return messages[i];
   }
   return undefined;
+}
+
+/**
+ * Completion metadata for the assistant message at `index` (bubble hover
+ * hints). `completedAt` defaults to the message's own timestamp — Pi stamps
+ * that at stream start, so callers with a real clock (live turn-end) pass
+ * their own; history accepts the approximation.
+ */
+export function turnMetaAt(
+  messages: PiMessage[],
+  index: number,
+  completedAt?: number,
+): TurnMeta | undefined {
+  const m = messages[index];
+  if (m?.role !== "assistant" || typeof m.timestamp !== "number") return undefined;
+  const end = completedAt ?? m.timestamp;
+  let started = end;
+  for (let i = index - 1; i >= 0; i--) {
+    const t = messages[i];
+    if (t?.role === "user" && typeof t.timestamp === "number") {
+      started = t.timestamp;
+      break;
+    }
+  }
+  let tokens = 0;
+  for (let i = 0; i <= index; i++) {
+    const t = messages[i];
+    if (t?.role === "assistant") tokens += t.usage?.totalTokens ?? 0;
+  }
+  return { completedAt: end, durationMs: Math.max(0, end - started), tokens };
 }
 
 /** Translate one Pi session event into zero or more Pier payloads. */

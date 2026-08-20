@@ -19,6 +19,13 @@ interface SessionInfo {
 interface ChatTurn {
   role: "user" | "assistant";
   text: string;
+  meta?: TurnMeta;
+}
+
+interface TurnMeta {
+  completedAt: number; // ms epoch
+  durationMs: number;
+  tokens: number; // cumulative session tokens at completion
 }
 
 interface ModelRef {
@@ -37,7 +44,7 @@ type SessionEvent = { seq: number; ts: number; sessionId: string } & (
   | { type: "thinking-delta"; text: string }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-end"; toolCallId: string; isError: boolean; output: string }
-  | { type: "turn-end"; text: string }
+  | { type: "turn-end"; text: string; meta?: TurnMeta }
   | { type: "state"; state: SessionState }
   | { type: "queued"; mode: "steer" | "followUp"; text: string }
   | { type: "queue-state"; steering: string[]; followUp: string[] }
@@ -228,27 +235,41 @@ function renderQueue(steering: string[], followUp: string[]): void {
   );
 }
 
-// --- chat bubbles ------------------------------------------------------------------
+// --- chat rows (Slack-style full-width) ----------------------------------------------
+// No sender labels: user rows carry an accent bar + tint, agent rows stay plain.
 
-const turnStyles: Record<string, string> = {
-  user: "bg-indigo-50 text-indigo-950",
-  assistant: "bg-neutral-100",
-  queued: "bg-amber-50 italic text-amber-900",
-  error: "bg-red-50 text-red-700",
+const ROW_STYLE: Record<string, { row: string; body: string }> = {
+  user: { row: "border-l-2 border-indigo-500 bg-indigo-50/60", body: "text-neutral-900" },
+  assistant: { row: "border-l-2 border-transparent", body: "text-neutral-800" },
+  error: { row: "border-l-2 border-red-400 bg-red-50/60", body: "text-red-700" },
 };
 
-function appendTurn(kind: keyof typeof turnStyles, text: string, markdown = false): HTMLElement {
-  const wrap = h("div", kind === "user" ? "flex justify-end" : "flex");
-  const node = h(
-    "div",
-    `max-w-[50rem] whitespace-pre-wrap break-words rounded-lg px-3 py-2 ${turnStyles[kind]}`,
-    text,
-  );
+function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false): HTMLElement {
+  const s = ROW_STYLE[kind]!;
+  // Consecutive rows from the same sender read as one block (Slack grouping).
+  const grouped = (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
+  const row = h("div", `group relative px-5 py-1 ${grouped ? "mt-px" : "mt-2"} ${s.row}`);
+  row.dataset.kind = kind;
+  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, text);
   if (markdown) renderMarkdown(node, text);
-  wrap.append(node);
-  turnsPane.append(wrap);
+  row.append(node);
+  turnsPane.append(row);
   scrollBottom();
   return node;
+}
+
+/** Row-hover meta chip on agent turns: completion time · duration · tokens. */
+function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
+  if (!meta) return;
+  const secs = Math.max(1, Math.round(meta.durationMs / 1000));
+  const dur = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
+  const time = new Date(meta.completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const chip = h(
+    "span",
+    "absolute -top-2.5 right-3 z-10 hidden rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] text-neutral-500 shadow-sm group-hover:inline",
+    `${time} · ${dur} · ${meta.tokens.toLocaleString()} tok`,
+  );
+  (node.parentElement ?? node).append(chip);
 }
 
 /** Swap a plain-text bubble to sanitized rendered markdown. */
@@ -326,9 +347,10 @@ function ensureActivity(ts: number): Activity {
   const statusIcon = statusIconEl("running");
   const headline = h("span", "truncate", "working…");
   const { el } = detailsRow(
-    `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`,
+    `mx-5 mt-2 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`,
     [statusIcon, headline],
   );
+  el.dataset.kind = "activity";
   const rowsEl = h("div", "mt-1.5 flex flex-col gap-1 border-t border-black/5 pt-1.5");
   el.append(rowsEl);
   turnsPane.append(el);
@@ -342,7 +364,7 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
   const base = `${a.steps} step${a.steps === 1 ? "" : "s"} · ${secs}s`;
   a.headline.textContent =
     status === "running" && latest ? `${base} · ${latest}` : `${base} · ${status}`;
-  a.el.className = `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
+  a.el.className = `mx-5 mt-2 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
   const icon = statusIconEl(status);
   a.statusIcon.replaceWith(icon);
   a.statusIcon = icon;
@@ -445,7 +467,8 @@ function handleEvent(e: SessionEvent): void {
     case "turn-end":
       turnOpen = false;
       finishActivity("done");
-      if (!streamingEl && e.text) appendTurn("assistant", e.text, true);
+      if (!streamingEl && e.text) setMetaHint(appendTurn("assistant", e.text, true), e.meta);
+      else if (streamingEl) setMetaHint(streamingEl, e.meta);
       finalizeStreaming();
       break;
     case "queued":
@@ -503,7 +526,7 @@ async function select(id: string): Promise<void> {
     lastSeq: number;
     model: ModelRef | null;
   };
-  for (const t of turns) appendTurn(t.role, t.text, t.role === "assistant");
+  for (const t of turns) setMetaHint(appendTurn(t.role, t.text, t.role === "assistant"), t.meta);
   scrollBottom(true);
   lastSeq = seq;
   connect(id, seq);

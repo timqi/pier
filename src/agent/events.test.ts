@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toSessionEvents, type PiEvent } from "./events.js";
+import { toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
 
 describe("toSessionEvents", () => {
   const cases: { name: string; input: PiEvent; expected: unknown[] }[] = [
@@ -93,4 +93,31 @@ describe("toSessionEvents", () => {
       expect(toSessionEvents(c.input)).toEqual(c.expected);
     });
   }
+});
+
+describe("turnMetaAt", () => {
+  const msgs: PiMessage[] = [
+    { role: "user", timestamp: 1000 },
+    { role: "assistant", timestamp: 3000, usage: { totalTokens: 100 } },
+    { role: "toolResult", timestamp: 4000 },
+    { role: "user", timestamp: 10_000 },
+    { role: "assistant", timestamp: 12_000, usage: { totalTokens: 250 } },
+  ];
+
+  it("computes duration from the preceding user message and cumulative tokens", () => {
+    expect(turnMetaAt(msgs, 4)).toEqual({ completedAt: 12_000, durationMs: 2000, tokens: 350 });
+  });
+
+  it("prefers a caller-supplied completion clock (live turn-end)", () => {
+    expect(turnMetaAt(msgs, 4, 15_000)).toEqual({ completedAt: 15_000, durationMs: 5000, tokens: 350 });
+  });
+
+  it("only counts tokens up to the given turn", () => {
+    expect(turnMetaAt(msgs, 1)).toEqual({ completedAt: 3000, durationMs: 2000, tokens: 100 });
+  });
+
+  it("returns undefined for non-assistant or untimestamped messages", () => {
+    expect(turnMetaAt(msgs, 0)).toBeUndefined();
+    expect(turnMetaAt([{ role: "assistant" }], 0)).toBeUndefined();
+  });
 });

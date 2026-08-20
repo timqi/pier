@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pier</title>
 </head>
-<body class="grid h-screen grid-cols-[230px_minmax(0,1fr)] text-[15px] leading-normal text-neutral-800 antialiased">
+<body class="grid h-screen grid-cols-[230px_minmax(0,1fr)] text-[16px] leading-[1.45] text-neutral-800 antialiased">
   <aside class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
     <header class="flex items-center justify-between gap-2 px-3 py-2">
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
@@ -20,7 +20,7 @@
       <span id="chat-cwd" class="truncate font-mono text-[12px] text-neutral-400"></span>
       <select id="model-select" class="ml-auto max-w-56 flex-none cursor-pointer truncate rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[12px] text-neutral-600 focus:outline-none"></select>
     </header>
-    <div id="turns" class="flex-1 space-y-2 overflow-y-auto px-4 py-3"></div>
+    <div id="turns" class="flex-1 overflow-y-auto pb-4 pt-1"></div>
     <div id="queue-panel" class="hidden flex-col gap-1 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
       <div class="flex items-center">
         <span class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Queued</span>
