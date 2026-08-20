@@ -45,10 +45,18 @@ export type SessionEvent = {
 
 export type SessionState = "idle" | "streaming";
 
+/** A completed conversation turn, for history rendering. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {
   readonly id: string;
   readonly state: SessionState;
+  /** Completed turns of the persisted transcript (no partial streaming). */
+  history(): Promise<ChatTurn[]>;
   prompt(text: string): Promise<void>; // resolves when the turn settles
   steer(text: string): Promise<void>; // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle

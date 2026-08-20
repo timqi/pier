@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, AgentSession, SessionEventPayload, SessionState } from "../core/types.js";
+import type { AgentFactory, AgentSession, ChatTurn, SessionEventPayload, SessionState } from "../core/types.js";
 import { createServer } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -23,6 +23,10 @@ function fakeSession(id: string): AgentSession & {
     },
     emit: (p: SessionEventPayload) => listeners.forEach((fn) => fn(p)),
     calls,
+    history: async (): Promise<ChatTurn[]> => [
+      { role: "user", text: "hi" },
+      { role: "assistant", text: "hello" },
+    ],
     prompt: async (t: string) => void calls.push(`prompt:${t}`),
     steer: async (t: string) => void calls.push(`steer:${t}`),
     followUp: async (t: string) => void calls.push(`followUp:${t}`),
@@ -67,6 +71,49 @@ describe("workbench server", () => {
     hub.subscribe("s1", seen);
     session.emit({ type: "turn-start" });
     expect(seen).toHaveBeenCalledOnce();
+  });
+
+  it("loads history and attaches the session on demand", async () => {
+    const { app, hub, session } = setup();
+    hub.emit("s1", { type: "turn-start" });
+    const res = await app.request("/api/sessions/s1/history");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      turns: [
+        { role: "user", text: "hi" },
+        { role: "assistant", text: "hello" },
+      ],
+      lastSeq: 1,
+    });
+    // ensure() attached the session: its events now reach the hub
+    const seen = vi.fn();
+    hub.subscribe("s1", seen);
+    session.emit({ type: "turn-start" });
+    expect(seen).toHaveBeenCalledOnce();
+  });
+
+  it("returns 404 for unknown sessions", async () => {
+    const { factory } = setup();
+    const hub = new EventHub();
+    const router = new Router(hub, async () => {
+      throw new Error("unknown session: nope");
+    });
+    const app = createServer({ factory, router, hub });
+    const res = await app.request("/api/sessions/nope/history");
+    expect(res.status).toBe(404);
+  });
+
+  it("SSE honors the after query param", async () => {
+    const { app, hub } = setup();
+    hub.emit("s1", { type: "turn-start" });
+    hub.emit("s1", { type: "state", state: "idle" });
+    const res = await app.request("/api/sessions/s1/events?after=1");
+    const reader = res.body!.getReader();
+    const { value } = await reader.read();
+    const chunk = new TextDecoder().decode(value);
+    await reader.cancel();
+    expect(chunk).toContain('"seq":2');
+    expect(chunk).not.toContain('"seq":1,');
   });
 
   it("routes messages through the queue policy", async () => {

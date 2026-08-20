@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* Shared button styles — the only custom classes; everything else is utilities. */
+@layer components {
+  .btn {
+    @apply rounded-md border border-neutral-300 bg-white px-3 py-1 hover:bg-neutral-100 active:bg-neutral-200 cursor-pointer;
+  }
+  .btn-primary {
+    @apply border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700;
+  }
+}

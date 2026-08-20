@@ -84,10 +84,18 @@ export type SessionEvent = { seq: number; ts: number; sessionId: string } &
 
 export type SessionState = "idle" | "streaming";
 
+/** A completed conversation turn, for history rendering. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {
   readonly id: string;
   readonly state: SessionState;
+  /** Completed turns of the persisted transcript (no partial streaming). */
+  history(): Promise<ChatTurn[]>;
   prompt(text: string): Promise<void>;   // resolves when the turn settles
   steer(text: string): Promise<void>;    // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle
@@ -133,3 +141,6 @@ export interface AgentFactory {
 - Web workbench before IM channels (fastest loop for steering/observability).
 - Show pages: static HTML + optional SSE reload; Pi `export_html` for replay.
 - Persistence: pi session files now; one SQLite db arrives with step 5.
+- Frontend build: Vite + Tailwind (static CSS, zero runtime). Adopted early by
+  explicit decision instead of the original no-bundler plan; still no UI
+  framework until componentization is needed.

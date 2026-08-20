@@ -5,16 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build:web && tsx watch src/main.ts",
+    "dev:web": "vite",
     "build": "tsc && npm run build:web",
-    "build:web": "tsc -p tsconfig.web.json",
+    "build:web": "vite build",
     "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "oxlint src",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "oxlint": "^1.79.0",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
+    "vite": "^8.2.1",
     "vitest": "^4.1.11"
   },
   "dependencies": {

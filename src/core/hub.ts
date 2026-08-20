@@ -47,4 +47,9 @@ export class EventHub {
   replay(sessionId: string, afterSeq: number): SessionEvent[] {
     return this.bus(sessionId).buffer.filter((e) => e.seq > afterSeq);
   }
+
+  /** Highest seq stamped so far (0 if none). */
+  lastSeq(sessionId: string): number {
+    return this.buses.get(sessionId)?.seq ?? 0;
+  }
 }

@@ -10,19 +10,21 @@ contains no agent logic.
 | ----- | -------- |
 | `GET /api/sessions` | `AgentFactory.list()` + live state from router |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
+| `GET /api/sessions/:id/history` | resume/attach on demand via `router.ensure`, returns `{turns, lastSeq}`; 404 if unknown |
 | `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/sessions/:id/abort` | abort the session |
-| `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; on `Last-Event-ID`, replay from hub ring buffer, then live. Heartbeat comment every 15s. |
+| `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` |
 
 The web surface implements `Channel` only if it falls out naturally; do not
 force it — SSE already delivers outbound content, so `send()` may be a no-op.
 
-## Frontend (`src/web/public/`, vanilla TS, no framework, no bundler)
+## Frontend (`src/web/ui/`, Vite + Tailwind, vanilla TS, no framework)
 
-Source `src/web/ui/main.ts` is compiled by `tsc` (separate `tsconfig.web.json`,
-DOM lib) straight to `src/web/public/main.js` — one file, ES modules, no Vite
-(dependency-minimalism per AGENTS.md principle 7).
+`src/web/ui/` (index.html + main.ts + style.css) builds via Vite to
+`src/web/public/` (gitignored). Tailwind utilities carry the styling; the only
+custom classes are `.btn`/`.btn-primary`. `npm run dev:web` gives HMR with an
+`/api` proxy to :3141. `tsconfig.web.json` stays as the typecheck gate.
 
 Single page, three panes:
 
@@ -40,6 +42,10 @@ Single page, three panes:
 Keep it plain: one `.ts` entry, one `.css`, EventSource + fetch. No state
 library, no router, no components framework. Third repeat rule applies before
 introducing any abstraction.
+
+Selecting a session loads `/history` first (renders completed turns), then
+opens the SSE stream with `?after=lastSeq` so replayed ring-buffer events
+never duplicate history.
 
 ## Rules
 

@@ -9,7 +9,7 @@ interface TextPart {
   text?: string;
 }
 
-interface PiMessage {
+export interface PiMessage {
   role?: string;
   content?: string | TextPart[];
   stopReason?: string;
@@ -27,7 +27,7 @@ export interface PiEvent {
   result?: { content?: TextPart[] };
 }
 
-function textOf(content: string | TextPart[] | undefined): string {
+export function textOf(content: string | TextPart[] | undefined): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content

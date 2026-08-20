@@ -61,12 +61,18 @@ export class Router {
     await this.bySession.get(sessionId)?.session.abort();
   }
 
-  async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
-    let session = this.byKey.get(keyOf(msg.key));
+  /** Session owning a conversation, resolving and attaching it on first use. */
+  async ensure(key: ConversationKey): Promise<AgentSession> {
+    let session = this.byKey.get(keyOf(key));
     if (!session) {
-      session = await this.resolve(msg.key);
-      this.attach(msg.key, session);
+      session = await this.resolve(key);
+      this.attach(key, session);
     }
+    return session;
+  }
+
+  async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
+    const session = await this.ensure(msg.key);
     const { action, text } = decide(msg, session.state);
     if (action !== "prompt") {
       this.hub.emit(session.id, { type: "queued", mode: action, text });

@@ -10,10 +10,11 @@ import {
 import type {
   AgentFactory,
   AgentSession,
+  ChatTurn,
   SessionEventPayload,
   SessionState,
 } from "../core/types.js";
-import { toSessionEvents, type PiEvent } from "./events.js";
+import { textOf, toSessionEvents, type PiEvent, type PiMessage } from "./events.js";
 
 class PiSession implements AgentSession {
   constructor(private readonly pi: PiAgentSession) {}
@@ -24,6 +25,16 @@ class PiSession implements AgentSession {
 
   get state(): SessionState {
     return this.pi.isStreaming ? "streaming" : "idle";
+  }
+
+  async history(): Promise<ChatTurn[]> {
+    const turns: ChatTurn[] = [];
+    for (const m of this.pi.messages as PiMessage[]) {
+      if (m.role !== "user" && m.role !== "assistant") continue;
+      const text = textOf(m.content);
+      if (text) turns.push({ role: m.role, text });
+    }
+    return turns;
   }
 
   prompt(text: string): Promise<void> {

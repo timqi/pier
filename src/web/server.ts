@@ -34,6 +34,16 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
     return c.json({ id: session.id }, 201);
   });
 
+  app.get("/api/sessions/:id/history", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const session = await router.ensure({ channelId: "web", conversationId: id });
+      return c.json({ turns: await session.history(), lastSeq: hub.lastSeq(id) });
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
   app.post("/api/sessions/:id/messages", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
@@ -59,7 +69,10 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
 
   app.get("/api/sessions/:id/events", (c) => {
     const id = c.req.param("id");
-    const lastId = Number(c.req.header("Last-Event-ID") ?? "0") || 0;
+    const lastId =
+      Number(c.req.header("Last-Event-ID") ?? "") ||
+      Number(c.req.query("after") ?? "") ||
+      0;
     return streamSSE(c, async (stream) => {
       const send = (e: { seq: number }) =>
         stream.writeSSE({ id: String(e.seq), data: JSON.stringify(e) });

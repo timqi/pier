@@ -6,7 +6,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "outDir": "src/web/public",
+    "noEmit": true,
+    "types": ["vite/client"],
     "rootDir": "src/web/ui"
   },
   "include": ["src/web/ui"]

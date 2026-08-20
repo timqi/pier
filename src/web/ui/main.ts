@@ -1,5 +1,7 @@
 // Workbench frontend: session list + chat + raw event timeline.
-// Compiled by tsconfig.web.json to /main.js. No framework, no deps.
+// Vite + Tailwind, no framework. Layout lives in index.html.
+
+import "./style.css";
 
 type SessionState = "idle" | "streaming";
 
@@ -9,6 +11,11 @@ interface SessionInfo {
   createdAt: number;
   title?: string;
   state: SessionState;
+}
+
+interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
 }
 
 type SessionEvent = { seq: number; ts: number; sessionId: string } & (
@@ -29,8 +36,15 @@ const $ = <T extends HTMLElement>(sel: string): T => {
   return el;
 };
 
+function h(tag: string, cls: string, text?: string): HTMLElement {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
 const sessionList = $("#session-list");
-const turns = $("#turns");
+const turnsPane = $("#turns");
 const timeline = $("#timeline");
 const input = $<HTMLTextAreaElement>("#input");
 const modeHint = $("#mode-hint");
@@ -42,22 +56,33 @@ let source: EventSource | null = null;
 let lastSeq = 0;
 let streamingEl: HTMLElement | null = null;
 
-function el(tag: string, cls: string, text?: string): HTMLElement {
-  const node = document.createElement(tag);
-  node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+const TURN_CLS = "max-w-[52rem] whitespace-pre-wrap break-words rounded-lg px-3.5 py-2.5";
+const turnStyles: Record<string, string> = {
+  user: "bg-indigo-50 text-indigo-950",
+  assistant: "bg-neutral-100",
+  queued: "bg-amber-50 italic text-amber-900",
+  error: "bg-red-50 text-red-700",
+};
 
 function renderSessions(): void {
   sessionList.replaceChildren(
     ...sessions.map((s) => {
-      const li = el("li", s.id === currentId ? "active" : "");
-      li.append(
-        el("span", `dot ${s.state}`),
-        el("span", "title", s.title ?? s.id.slice(0, 8)),
+      const active = s.id === currentId;
+      const li = h(
+        "li",
+        `flex cursor-pointer items-center gap-2 border-b border-neutral-200/70 px-4 py-2.5 hover:bg-neutral-100 ${
+          active ? "bg-indigo-50 hover:bg-indigo-50" : ""
+        }`,
       );
-      li.onclick = () => select(s.id);
+      const dot = h(
+        "span",
+        `h-2 w-2 flex-none rounded-full ${
+          s.state === "streaming" ? "bg-green-500 animate-pulse" : "bg-neutral-300"
+        }`,
+      );
+      const title = h("span", "truncate", s.title ?? s.id.slice(0, 8));
+      li.append(dot, title);
+      li.onclick = () => void select(s.id);
       return li;
     }),
   );
@@ -81,57 +106,65 @@ function updateModeHint(): void {
   }
 }
 
-function appendTurn(cls: string, text: string): HTMLElement {
-  const node = el("div", `turn ${cls}`, text);
-  turns.append(node);
-  turns.scrollTop = turns.scrollHeight;
+function appendTurn(kind: keyof typeof turnStyles, text: string): HTMLElement {
+  const wrap = h("div", kind === "user" ? "flex justify-end" : "flex");
+  const node = h("div", `${TURN_CLS} ${turnStyles[kind]}`, text);
+  wrap.append(node);
+  turnsPane.append(wrap);
+  turnsPane.scrollTop = turnsPane.scrollHeight;
   return node;
 }
 
+function detailsRow(summaryText: string, body: string, isError = false): HTMLElement {
+  const details = h("details", "min-w-0 flex-1");
+  const summary = h(
+    "summary",
+    `cursor-pointer select-none ${isError ? "text-red-600" : "text-neutral-600"}`,
+    summaryText,
+  );
+  const pre = h(
+    "pre",
+    "mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-neutral-100 p-1.5",
+    body,
+  );
+  details.append(summary, pre);
+  return details;
+}
+
 function timelineRow(e: SessionEvent): void {
-  const li = document.createElement("li");
-  const time = new Date(e.ts).toLocaleTimeString();
-  li.append(el("span", "t", time), el("span", "k", e.type));
+  const li = h("li", "flex gap-2 border-b border-neutral-200/60 px-2 py-1.5 break-words");
+  li.append(
+    h("span", "flex-none text-neutral-400", new Date(e.ts).toLocaleTimeString()),
+    h("span", "flex-none font-semibold text-neutral-700", e.type),
+  );
   if (e.type === "tool-start") {
-    const details = document.createElement("details");
-    const summary = document.createElement("summary");
-    summary.textContent = e.toolName;
-    const pre = document.createElement("pre");
-    pre.textContent = JSON.stringify(e.args, null, 2);
-    details.append(summary, pre);
-    li.append(details);
+    li.append(detailsRow(e.toolName, JSON.stringify(e.args, null, 2)));
   } else if (e.type === "tool-end") {
-    const details = document.createElement("details");
-    const summary = document.createElement("summary");
-    summary.textContent = e.isError ? "error" : "ok";
-    const pre = document.createElement("pre");
-    pre.textContent = e.output;
-    details.append(summary, pre);
-    li.append(details);
+    li.append(detailsRow(e.isError ? "error" : "ok", e.output, e.isError));
   } else if (e.type === "text-delta" || e.type === "thinking-delta") {
-    li.append(el("span", "", e.text.length > 60 ? e.text.slice(0, 60) + "…" : e.text));
+    li.append(h("span", "truncate text-neutral-500", e.text));
   } else if (e.type === "queued") {
-    li.append(el("span", "", `${e.mode}: ${e.text}`));
+    li.append(h("span", "text-amber-700", `${e.mode}: ${e.text}`));
   } else if (e.type === "state") {
-    li.append(el("span", "", e.state));
+    li.append(h("span", "text-neutral-500", e.state));
   } else if (e.type === "error") {
-    li.append(el("span", "", e.message));
+    li.append(h("span", "text-red-600", e.message));
   } else if (e.type === "turn-end") {
-    li.append(el("span", "", `${e.text.length} chars`));
+    li.append(h("span", "text-neutral-500", `${e.text.length} chars`));
   }
   timeline.append(li);
   timeline.scrollTop = timeline.scrollHeight;
 }
 
 function handleEvent(e: SessionEvent): void {
-  if (e.seq <= lastSeq) return; // dedupe on replay
+  if (e.sessionId !== currentId || e.seq <= lastSeq) return; // stale or replayed
   lastSeq = e.seq;
   timelineRow(e);
   switch (e.type) {
     case "text-delta":
       if (!streamingEl) streamingEl = appendTurn("assistant", "");
       streamingEl.textContent += e.text;
-      turns.scrollTop = turns.scrollHeight;
+      turnsPane.scrollTop = turnsPane.scrollHeight;
       break;
     case "turn-end":
       if (streamingEl) {
@@ -153,20 +186,30 @@ function handleEvent(e: SessionEvent): void {
   }
 }
 
-function connect(id: string): void {
+function connect(id: string, after: number): void {
   source?.close();
-  lastSeq = 0;
-  source = new EventSource(`/api/sessions/${id}/events`);
+  source = new EventSource(`/api/sessions/${id}/events?after=${after}`);
   source.onmessage = (m) => handleEvent(JSON.parse(m.data) as SessionEvent);
 }
 
-function select(id: string): void {
+async function select(id: string): Promise<void> {
+  if (id === currentId) return;
   currentId = id;
-  turns.replaceChildren();
+  source?.close();
+  turnsPane.replaceChildren();
   timeline.replaceChildren();
   streamingEl = null;
+  lastSeq = 0;
   renderSessions();
-  connect(id);
+  const res = await fetch(`/api/sessions/${id}/history`);
+  if (!res.ok) {
+    appendTurn("error", `failed to load session: ${res.status}`);
+    return;
+  }
+  const { turns, lastSeq: seq } = (await res.json()) as { turns: ChatTurn[]; lastSeq: number };
+  for (const t of turns) appendTurn(t.role, t.text);
+  lastSeq = seq;
+  connect(id, seq);
 }
 
 async function refreshSessions(): Promise<void> {
@@ -192,7 +235,7 @@ $("#new-session").onclick = async () => {
   const res = await fetch("/api/sessions", { method: "POST", body: "{}" });
   const { id } = (await res.json()) as { id: string };
   await refreshSessions();
-  select(id);
+  await select(id);
 };
 $("#abort").onclick = () =>
   currentId && fetch(`/api/sessions/${currentId}/abort`, { method: "POST" });
@@ -212,6 +255,6 @@ input.onkeydown = (ev) => {
 
 void refreshSessions().then(() => {
   const first = sessions[0];
-  if (first) select(first.id);
+  if (first) void select(first.id);
 });
 updateModeHint();
