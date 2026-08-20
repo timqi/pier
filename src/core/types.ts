@@ -7,10 +7,17 @@ export interface ConversationKey {
   conversationId: string; // platform thread/chat id, or web session ui id
 }
 
+/** Base64 image payload (no data: URL prefix), IM- and web-friendly. */
+export interface ImageAttachment {
+  data: string;
+  mimeType: string;
+}
+
 export interface InboundMessage {
   key: ConversationKey;
   senderId: string;
   text: string;
+  images?: ImageAttachment[];
   /** How to deliver when the agent is busy. "auto" = queue policy decides. */
   mode: "auto" | "steer" | "followUp";
 }
@@ -71,9 +78,9 @@ export interface AgentSession {
   availableModels(): Promise<ModelRef[]>;
   /** Drop all pending queued messages and return them (for recall-to-composer). */
   clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
-  prompt(text: string): Promise<void>; // resolves when the turn settles
-  steer(text: string): Promise<void>; // interrupt mid-run
-  followUp(text: string): Promise<void>; // deliver when idle
+  prompt(text: string, images?: ImageAttachment[]): Promise<void>; // resolves when the turn settles
+  steer(text: string, images?: ImageAttachment[]): Promise<void>; // interrupt mid-run
+  followUp(text: string, images?: ImageAttachment[]): Promise<void>; // deliver when idle
   abort(): Promise<void>;
   /** Emits payloads only; core/hub.ts owns seq/ts stamping. */
   subscribe(fn: (e: SessionEventPayload) => void): () => void;

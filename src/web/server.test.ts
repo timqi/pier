@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, AgentSession, ChatTurn, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
+import type { AgentFactory, AgentSession, ChatTurn, ImageAttachment, ModelRef, SessionEventPayload, SessionState } from "../core/types.js";
 import { createServer } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -40,9 +40,12 @@ function fakeSession(id: string): AgentSession & {
       { role: "user", text: "hi" },
       { role: "assistant", text: "hello" },
     ],
-    prompt: async (t: string) => void calls.push(`prompt:${t}`),
-    steer: async (t: string) => void calls.push(`steer:${t}`),
-    followUp: async (t: string) => void calls.push(`followUp:${t}`),
+    prompt: async (t: string, imgs?: ImageAttachment[]) =>
+      void calls.push(`prompt:${t}${imgs ? `+${imgs.length}img` : ""}`),
+    steer: async (t: string, imgs?: ImageAttachment[]) =>
+      void calls.push(`steer:${t}${imgs ? `+${imgs.length}img` : ""}`),
+    followUp: async (t: string, imgs?: ImageAttachment[]) =>
+      void calls.push(`followUp:${t}${imgs ? `+${imgs.length}img` : ""}`),
     abort: async () => void calls.push("abort"),
     clearQueue: async () => {
       calls.push("clearQueue");
@@ -202,6 +205,35 @@ describe("workbench server", () => {
       body: JSON.stringify({ text: "   " }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("passes image attachments through to the session", async () => {
+    const { app, session } = setup();
+    const img = { data: "aGVsbG8=", mimeType: "image/png" };
+    const res = await app.request("/api/sessions/s1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "look", images: [img] }),
+    });
+    expect(res.status).toBe(202);
+    expect(session.calls).toEqual(["prompt:look+1img"]);
+  });
+
+  it("accepts image-only messages and rejects malformed images", async () => {
+    const { app, session } = setup();
+    const ok = await app.request("/api/sessions/s1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "", images: [{ data: "aGVsbG8=", mimeType: "image/jpeg" }] }),
+    });
+    expect(ok.status).toBe(202);
+    expect(session.calls).toEqual(["prompt:+1img"]);
+    const bad = await app.request("/api/sessions/s1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "x", images: [{ data: "a", mimeType: "text/html" }] }),
+    });
+    expect(bad.status).toBe(400);
   });
 
   it("recalls the pending queue", async () => {

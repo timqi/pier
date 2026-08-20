@@ -79,7 +79,7 @@ export class Router {
     }
     // Turn outcomes flow through the event stream; a rejected call surfaces
     // there too, never as a thrown exception across the seam.
-    session[action](text).catch((err) => {
+    session[action](text, msg.images).catch((err) => {
       this.hub.emit(session.id, { type: "error", message: String(err) });
     });
     return { sessionId: session.id };

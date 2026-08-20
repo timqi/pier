@@ -13,7 +13,7 @@ contains no agent logic.
 | `GET /api/sessions/:id/history` | resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model}`; 404 if unknown |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
-| `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
+| `POST /api/sessions/:id/messages` | body `{text, mode, images?}` (`mode` defaults `auto`; images = base64 `{data, mimeType}`, max 8 × 8MB, validated at the seam; text or images required) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
@@ -46,10 +46,16 @@ Activity groups):
   mode chips and a "Recall all" action that clears the queue back into the
   composer (append, never clobber the draft).
 - **Activity groups** (in-chat): one collapsible bubble per turn collects
-  thinking + tool activity (avibe AgentActivityGroup concept): status
-  (running/done/failed/interrupted), step count, duration, latest step in the
-  headline while running; expandable rows show tool name/args with output on
-  hover. Idle-without-turn-end marks the group interrupted.
+  thinking + tool activity (avibe AgentActivityGroup concept): status icon
+  (spinner/✓/✕/⏸) + rotating chevron, step count, duration, latest step in
+  the headline while running. Each step is its own expandable details row:
+  tool rows reveal full args + output pre blocks; the thinking row shows its
+  latest line collapsed and the full (tail-capped) text expanded.
+  Idle-without-turn-end marks the group interrupted.
+- **Images**: paste, drag-drop, or attach via the `+` button → pending
+  thumbnail strip (removable) above the composer; sent as base64 attachments
+  and rendered in the optimistic user bubble. History shows `[n images]`
+  markers (pi transcripts aren't re-served as binaries).
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
 

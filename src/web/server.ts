@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
-import type { AgentFactory, InboundMessage } from "../core/types.js";
+import type { AgentFactory, ImageAttachment, InboundMessage } from "../core/types.js";
 
 export interface WebDeps {
   factory: AgentFactory;
@@ -15,6 +15,28 @@ export interface WebDeps {
 }
 
 const HEARTBEAT_MS = 15_000;
+const MAX_IMAGES = 8;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
+
+/** Validate at the seam: malformed attachments are rejected, never half-sent. */
+function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > MAX_IMAGES) return { error: "invalid images" };
+  const images: ImageAttachment[] = [];
+  for (const i of raw) {
+    if (
+      typeof i?.data !== "string" ||
+      !i.data ||
+      i.data.length > (MAX_IMAGE_BYTES * 4) / 3 ||
+      typeof i?.mimeType !== "string" ||
+      !i.mimeType.startsWith("image/")
+    ) {
+      return { error: "invalid images" };
+    }
+    images.push({ data: i.data, mimeType: i.mimeType });
+  }
+  return images;
+}
 
 export function createServer({ factory, router, hub }: WebDeps): Hono {
   const app = new Hono();
@@ -76,8 +98,13 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
   app.post("/api/sessions/:id/messages", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.text !== "string" || !body.text.trim()) {
+    if (!body || typeof body.text !== "string") {
       return c.json({ error: "text required" }, 400);
+    }
+    const images = parseImages(body.images);
+    if ("error" in images) return c.json({ error: images.error }, 400);
+    if (!body.text.trim() && images.length === 0) {
+      return c.json({ error: "text or images required" }, 400);
     }
     const mode: InboundMessage["mode"] =
       body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
@@ -85,6 +112,7 @@ export function createServer({ factory, router, hub }: WebDeps): Hono {
       key: { channelId: "web", conversationId: id },
       senderId: "web",
       text: body.text,
+      images: images.length ? images : undefined,
       mode,
     });
     return c.json({ sessionId }, 202);

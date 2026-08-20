@@ -26,6 +26,11 @@ interface ModelRef {
   id: string;
 }
 
+interface ImageAttachment {
+  data: string; // base64, no data: prefix
+  mimeType: string;
+}
+
 type SessionEvent = { seq: number; ts: number; sessionId: string } & (
   | { type: "turn-start" }
   | { type: "text-delta"; text: string }
@@ -78,6 +83,8 @@ const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
 const sendNowBtn = $("#send-now");
 const stopBtn = $("#stop");
+const imageStrip = $("#image-strip");
+const attachInput = $<HTMLInputElement>("#attach-input");
 
 // --- state ---------------------------------------------------------------------
 
@@ -87,6 +94,7 @@ let currentState: SessionState = "idle";
 let source: EventSource | null = null;
 let lastSeq = 0;
 let streamingEl: HTMLElement | null = null;
+let pendingImages: ImageAttachment[] = [];
 
 // --- scrolling -------------------------------------------------------------------
 // Stick to the bottom only when the user is already there (avibe behavior);
@@ -256,16 +264,23 @@ function finalizeStreaming(): void {
 
 // --- activity group ------------------------------------------------------------------
 // One collapsible bubble per turn collects thinking + tool activity
-// (avibe's AgentActivityGroup: status, steps, duration, expandable rows).
+// (avibe's AgentActivityGroup: status icon + chevron, steps, duration,
+// each step itself an expandable details row).
 
 type ActivityStatus = "running" | "done" | "failed" | "interrupted";
 
+interface ToolRow {
+  statusEl: HTMLElement;
+  outputPre: HTMLElement;
+}
+
 interface Activity {
   el: HTMLDetailsElement;
+  statusIcon: HTMLElement;
   headline: HTMLElement;
   rowsEl: HTMLElement;
-  toolRows: Map<string, HTMLElement>;
-  thinkingRow: HTMLElement | null;
+  toolRows: Map<string, ToolRow>;
+  thinking: { pre: HTMLElement; summary: HTMLElement } | null;
   steps: number;
   startTs: number;
   sawError: boolean;
@@ -281,18 +296,41 @@ const STATUS_STYLE: Record<ActivityStatus, string> = {
   interrupted: "border-amber-200 bg-amber-50 text-amber-800",
 };
 
+const STATUS_ICON: Record<Exclude<ActivityStatus, "running">, string> = {
+  done: "✓",
+  failed: "✕",
+  interrupted: "⏸",
+};
+
+function statusIconEl(status: ActivityStatus): HTMLElement {
+  return status === "running"
+    ? h("span", "spinner")
+    : h("span", "flex-none text-[12px] font-bold", STATUS_ICON[status]);
+}
+
+/** Chevron + summary skeleton shared by the group chip and step rows. */
+function detailsRow(cls: string, summaryChildren: HTMLElement[]): { el: HTMLDetailsElement; summary: HTMLElement } {
+  const el = document.createElement("details");
+  el.className = cls;
+  const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
+  summary.append(h("span", "chev", "▶"), ...summaryChildren);
+  el.append(summary);
+  return { el, summary };
+}
+
 function ensureActivity(ts: number): Activity {
   if (activity) return activity;
-  const el = document.createElement("details");
-  el.className = `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`;
-  const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
+  const statusIcon = statusIconEl("running");
   const headline = h("span", "truncate", "working…");
-  summary.append(h("span", "flex-none", "⚙"), headline);
-  const rowsEl = h("div", "mt-1.5 flex flex-col gap-1 border-t border-black/5 pt-1.5 font-mono text-[12.5px]");
-  el.append(summary, rowsEl);
+  const { el } = detailsRow(
+    `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`,
+    [statusIcon, headline],
+  );
+  const rowsEl = h("div", "mt-1.5 flex flex-col gap-1 border-t border-black/5 pt-1.5");
+  el.append(rowsEl);
   turnsPane.append(el);
   scrollBottom();
-  activity = { el, headline, rowsEl, toolRows: new Map(), thinkingRow: null, steps: 0, startTs: ts, sawError: false };
+  activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, startTs: ts, sawError: false };
   return activity;
 }
 
@@ -302,14 +340,16 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
   a.headline.textContent =
     status === "running" && latest ? `${base} · ${latest}` : `${base} · ${status}`;
   a.el.className = `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
+  const icon = statusIconEl(status);
+  a.statusIcon.replaceWith(icon);
+  a.statusIcon = icon;
 }
 
 function finishActivity(status: ActivityStatus): void {
   if (!activity) return;
   // Any still-running tool rows were cut short.
-  for (const row of activity.toolRows.values()) {
-    const s = row.querySelector<HTMLElement>(".tool-status");
-    if (s && s.textContent === "running…") s.textContent = "interrupted";
+  for (const { statusEl } of activity.toolRows.values()) {
+    if (statusEl.textContent === "running…") statusEl.textContent = "interrupted";
   }
   activityHeadline(activity, activity.sawError && status === "done" ? "failed" : status);
   activity = null;
@@ -318,16 +358,22 @@ function finishActivity(status: ActivityStatus): void {
 function activityToolStart(ts: number, id: string, name: string, args: unknown): void {
   const a = ensureActivity(ts);
   a.steps += 1;
-  a.thinkingRow = null;
-  const row = h("div", "flex items-baseline gap-1.5");
-  const argsText = JSON.stringify(args);
-  row.append(
+  a.thinking = null;
+  const argsText = JSON.stringify(args, null, 2) ?? "";
+  const short = argsText.replace(/\s+/g, " ");
+  const statusEl = h("span", "ml-auto flex-none text-black/40", "running…");
+  const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03]", [
     h("span", "flex-none font-semibold", name),
-    h("span", "truncate text-black/50", argsText.length > 120 ? argsText.slice(0, 120) + "…" : argsText),
-    h("span", "tool-status ml-auto flex-none text-black/40", "running…"),
-  );
-  a.toolRows.set(id, row);
-  a.rowsEl.append(row);
+    h("span", "truncate text-black/50", short.length > 100 ? short.slice(0, 100) + "…" : short),
+    statusEl,
+  ]);
+  const body = h("div", "mt-1 flex flex-col gap-1 pl-4");
+  const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]", argsText);
+  const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]");
+  body.append(argsPre, outputPre);
+  el.append(body);
+  a.toolRows.set(id, { statusEl, outputPre });
+  a.rowsEl.append(el);
   activityHeadline(a, "running", name);
   scrollBottom();
 }
@@ -338,13 +384,12 @@ function activityToolEnd(id: string, isError: boolean, output: string): void {
   const row = a.toolRows.get(id);
   a.toolRows.delete(id);
   if (row) {
-    const s = row.querySelector<HTMLElement>(".tool-status");
-    if (s) {
-      s.textContent = isError ? "failed" : "ok";
-      s.className = `tool-status ml-auto flex-none ${isError ? "text-red-600" : "text-green-700"}`;
+    row.statusEl.textContent = isError ? "failed" : "ok";
+    row.statusEl.className = `ml-auto flex-none ${isError ? "text-red-600" : "text-green-700"}`;
+    if (output) {
+      row.outputPre.textContent = output.length > 8000 ? output.slice(0, 8000) + "…" : output;
+      row.outputPre.classList.remove("hidden");
     }
-    // Keep rows compact; hover shows the (truncated) tool output.
-    if (output) row.title = output.length > 2000 ? output.slice(0, 2000) + "…" : output;
     if (isError) a.sawError = true;
   }
   activityHeadline(a, "running");
@@ -352,12 +397,21 @@ function activityToolEnd(id: string, isError: boolean, output: string): void {
 
 function activityThinking(ts: number, text: string): void {
   const a = ensureActivity(ts);
-  if (!a.thinkingRow) {
-    a.thinkingRow = h("div", "whitespace-pre-wrap break-words text-black/45 italic", "");
-    a.rowsEl.append(a.thinkingRow);
+  if (!a.thinking) {
+    const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-black/50 hover:bg-black/[0.03]", [
+      h("span", "truncate", "thinking…"),
+    ]);
+    const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap pl-4 not-italic text-black/60", "");
+    el.append(pre);
+    a.rowsEl.append(el);
+    a.thinking = { pre, summary };
     activityHeadline(a, "running", "thinking…");
   }
-  a.thinkingRow.textContent = ((a.thinkingRow.textContent ?? "") + text).slice(-500);
+  const t = a.thinking;
+  t.pre.textContent = ((t.pre.textContent ?? "") + text).slice(-4000);
+  const line = (t.pre.textContent ?? "").split("\n").filter(Boolean).pop() ?? "thinking…";
+  const label = t.summary.lastElementChild as HTMLElement;
+  label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
 }
 
 // --- event handling ----------------------------------------------------------------
@@ -483,21 +537,67 @@ modelSelect.onchange = async () => {
   if (!res.ok) appendTurn("error", `model change failed: ${res.status}`);
 };
 
+// --- image attachments ---------------------------------------------------------
+
+function renderImageStrip(): void {
+  imageStrip.classList.toggle("hidden", pendingImages.length === 0);
+  imageStrip.classList.toggle("flex", pendingImages.length > 0);
+  imageStrip.replaceChildren(
+    ...pendingImages.map((img, i) => {
+      const wrap = h("div", "relative");
+      const thumb = document.createElement("img");
+      thumb.src = `data:${img.mimeType};base64,${img.data}`;
+      thumb.className = "h-16 w-16 rounded-md border border-neutral-200 object-cover";
+      const remove = h(
+        "button",
+        "absolute -right-1.5 -top-1.5 h-4 w-4 cursor-pointer rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600",
+        "×",
+      );
+      remove.onclick = () => {
+        pendingImages.splice(i, 1);
+        renderImageStrip();
+      };
+      wrap.append(thumb, remove);
+      return wrap;
+    }),
+  );
+}
+
+function addImageFile(file: File): void {
+  if (!file.type.startsWith("image/") || pendingImages.length >= 8) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const url = reader.result as string;
+    pendingImages.push({ data: url.slice(url.indexOf(",") + 1), mimeType: file.type });
+    renderImageStrip();
+  };
+  reader.readAsDataURL(file);
+}
+
 async function send(mode: "auto" | "steer"): Promise<void> {
   const text = input.value.trim();
-  if (!text || !currentId) return;
+  const images = pendingImages;
+  if ((!text && images.length === 0) || !currentId) return;
   input.value = "";
+  pendingImages = [];
+  renderImageStrip();
   updateComposer();
   // Optimistic: an idle send (or a steer) reads as a user turn; a queued send
   // shows up in the queue panel via the queue-state snapshot instead.
   if (currentState === "idle" || mode === "steer") {
-    appendTurn("user", text);
+    const bubble = appendTurn("user", text);
+    for (const img of images) {
+      const thumb = document.createElement("img");
+      thumb.src = `data:${img.mimeType};base64,${img.data}`;
+      thumb.className = "mt-1.5 max-h-48 rounded-md";
+      bubble.append(thumb);
+    }
     scrollBottom(true);
   }
   await fetch(`/api/sessions/${currentId}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, mode }),
+    body: JSON.stringify({ text, mode, images: images.length ? images : undefined }),
   });
 }
 
@@ -549,6 +649,23 @@ input.onkeydown = (ev) => {
     ev.preventDefault();
     void send("auto");
   }
+};
+// Paste / drop / picker → pending image strip.
+input.onpaste = (ev) => {
+  for (const item of ev.clipboardData?.items ?? []) {
+    const file = item.kind === "file" ? item.getAsFile() : null;
+    if (file) addImageFile(file);
+  }
+};
+turnsPane.ondragover = (ev) => ev.preventDefault();
+turnsPane.ondrop = (ev) => {
+  ev.preventDefault();
+  for (const file of ev.dataTransfer?.files ?? []) addImageFile(file);
+};
+$("#attach").onclick = () => attachInput.click();
+attachInput.onchange = () => {
+  for (const file of attachInput.files ?? []) addImageFile(file);
+  attachInput.value = "";
 };
 
 void refreshSessions().then(() => {

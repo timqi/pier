@@ -28,7 +28,11 @@
       </div>
       <ul id="queue-rows" class="flex flex-col gap-1"></ul>
     </div>
+    <div id="image-strip" class="hidden gap-2 border-t border-neutral-200 px-3 pt-2"></div>
     <form id="composer" class="flex items-end gap-1.5 border-t border-neutral-200 p-3">
+      <button type="button" id="attach" title="Attach image (or paste / drop)"
+        class="btn mb-0.5 flex-none px-2 text-[15px] leading-none">+</button>
+      <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
       <textarea id="input" rows="2"
         class="min-w-0 flex-1 resize-y rounded-lg border border-neutral-300 px-2.5 py-2 focus:border-indigo-400 focus:outline-none"
         placeholder="Message…"></textarea>

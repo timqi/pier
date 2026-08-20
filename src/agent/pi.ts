@@ -11,10 +11,14 @@ import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
+  ImageAttachment,
   ModelRef,
   SessionEventPayload,
   SessionState,
 } from "../core/types.js";
+
+const toImageContent = (images?: ImageAttachment[]) =>
+  images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
 import { textOf, toSessionEvents, type PiEvent, type PiMessage } from "./events.js";
 import { curateModels } from "./models.js";
 
@@ -62,22 +66,26 @@ class PiSession implements AgentSession {
     const turns: ChatTurn[] = [];
     for (const m of this.pi.messages as PiMessage[]) {
       if (m.role !== "user" && m.role !== "assistant") continue;
-      const text = textOf(m.content);
+      let text = textOf(m.content);
+      const imageCount = Array.isArray(m.content)
+        ? m.content.filter((p) => p.type === "image").length
+        : 0;
+      if (imageCount) text = `${text}${text ? " " : ""}[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
       if (text) turns.push({ role: m.role, text });
     }
     return turns;
   }
 
-  prompt(text: string): Promise<void> {
-    return this.pi.prompt(text);
+  prompt(text: string, images?: ImageAttachment[]): Promise<void> {
+    return this.pi.prompt(text, { images: toImageContent(images) });
   }
 
-  steer(text: string): Promise<void> {
-    return this.pi.steer(text);
+  steer(text: string, images?: ImageAttachment[]): Promise<void> {
+    return this.pi.steer(text, toImageContent(images));
   }
 
-  followUp(text: string): Promise<void> {
-    return this.pi.followUp(text);
+  followUp(text: string, images?: ImageAttachment[]): Promise<void> {
+    return this.pi.followUp(text, toImageContent(images));
   }
 
   abort(): Promise<void> {
