@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pier</title>
 </head>
-<body class="grid h-screen grid-cols-[230px_minmax(0,1fr)_360px] text-[15px] leading-normal text-neutral-800 antialiased">
+<body class="grid h-screen grid-cols-[230px_minmax(0,1fr)] text-[15px] leading-normal text-neutral-800 antialiased">
   <aside class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
     <header class="flex items-center justify-between gap-2 px-3 py-2">
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
@@ -35,13 +35,6 @@
       </div>
     </form>
   </main>
-
-  <aside class="flex flex-col overflow-hidden border-l border-neutral-200 bg-neutral-50">
-    <header class="px-3 py-2">
-      <h2 class="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Timeline</h2>
-    </header>
-    <ul id="timeline" class="flex-1 overflow-y-auto px-1.5 pb-2 text-[12.5px]"></ul>
-  </aside>
 
   <dialog id="new-dialog" class="m-auto w-96 rounded-xl border border-neutral-200 p-4 shadow-xl backdrop:bg-black/20">
     <form id="new-form" method="dialog" class="flex flex-col gap-3">

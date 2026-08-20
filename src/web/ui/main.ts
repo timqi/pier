@@ -1,5 +1,5 @@
-// Workbench frontend: session list + chat (with inline tool activity) + raw
-// event timeline. Vanilla TS + Tailwind; layout lives in index.html.
+// Workbench frontend: session list + chat with per-turn Activity groups
+// (avibe's AgentActivityGroup concept, event-driven vanilla port).
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
 import "./style.css";
@@ -61,11 +61,10 @@ function relTime(ts: number): string {
 
 const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 
-// --- static elements -------------------------------------------------------
+// --- static elements ---------------------------------------------------------
 
 const sessionList = $("#session-list");
 const turnsPane = $("#turns");
-const timeline = $("#timeline");
 const input = $<HTMLTextAreaElement>("#input");
 const modeHint = $("#mode-hint");
 const chatTitle = $("#chat-title");
@@ -76,7 +75,7 @@ const newDialog = $<HTMLDialogElement>("#new-dialog");
 const modelSelect = $<HTMLSelectElement>("#model-select");
 const knownProjects = $("#known-projects");
 
-// --- state ------------------------------------------------------------------
+// --- state ---------------------------------------------------------------------
 
 let sessions: SessionInfo[] = [];
 let currentId: string | null = null;
@@ -84,9 +83,19 @@ let currentState: SessionState = "idle";
 let source: EventSource | null = null;
 let lastSeq = 0;
 let streamingEl: HTMLElement | null = null;
-const toolRows = new Map<string, HTMLElement>(); // toolCallId → chat row
 
-// --- session list (grouped by project = cwd) --------------------------------
+// --- scrolling -------------------------------------------------------------------
+// Stick to the bottom only when the user is already there (avibe behavior);
+// force on own sends so the conversation follows the user's action.
+
+const nearBottom = (): boolean =>
+  turnsPane.scrollHeight - turnsPane.scrollTop - turnsPane.clientHeight < 80;
+
+function scrollBottom(force = false): void {
+  if (force || nearBottom()) turnsPane.scrollTop = turnsPane.scrollHeight;
+}
+
+// --- session list (grouped by project = cwd) -------------------------------------
 
 function sessionRow(s: SessionInfo): HTMLElement {
   const active = s.id === currentId;
@@ -111,8 +120,6 @@ function sessionRow(s: SessionInfo): HTMLElement {
 }
 
 function renderSessions(): void {
-  // Projects are derived, not registered: one group per distinct cwd,
-  // ordered by the group's most recent session.
   const groups = new Map<string, SessionInfo[]>();
   for (const s of sessions) {
     const list = groups.get(s.cwd);
@@ -145,7 +152,7 @@ async function refreshSessions(): Promise<void> {
   renderSessions();
 }
 
-// --- chat header ------------------------------------------------------------
+// --- chat header -----------------------------------------------------------------
 
 function renderHeader(): void {
   const s = sessions.find((x) => x.id === currentId);
@@ -168,8 +175,6 @@ function setState(state: SessionState): void {
   renderSessions();
   renderHeader();
   updateModeHint();
-  // Titles are derived server-side from the first message; refresh cheaply
-  // when a turn settles instead of polling.
   if (state === "idle") void refreshSessions();
 }
 
@@ -183,7 +188,7 @@ function updateModeHint(): void {
   }
 }
 
-// --- chat pane ----------------------------------------------------------------
+// --- chat bubbles ------------------------------------------------------------------
 
 const turnStyles: Record<string, string> = {
   user: "bg-indigo-50 text-indigo-950",
@@ -202,7 +207,7 @@ function appendTurn(kind: keyof typeof turnStyles, text: string, markdown = fals
   if (markdown) renderMarkdown(node, text);
   wrap.append(node);
   turnsPane.append(wrap);
-  turnsPane.scrollTop = turnsPane.scrollHeight;
+  scrollBottom();
   return node;
 }
 
@@ -220,88 +225,140 @@ function finalizeStreaming(): void {
   streamingEl = null;
 }
 
-/** Compact inline tool activity row, avibe-chat style: "⚙ bash · running". */
-function appendToolRow(id: string, name: string): void {
-  const row = h(
-    "div",
-    "flex items-center gap-1.5 pl-1 font-mono text-[12.5px] text-neutral-500",
-  );
-  row.append(h("span", "", "⚙"), h("span", "font-semibold", name), h("span", "tool-status", "running…"));
-  toolRows.set(id, row);
-  turnsPane.append(row);
-  turnsPane.scrollTop = turnsPane.scrollHeight;
+// --- activity group ------------------------------------------------------------------
+// One collapsible bubble per turn collects thinking + tool activity
+// (avibe's AgentActivityGroup: status, steps, duration, expandable rows).
+
+type ActivityStatus = "running" | "done" | "failed" | "interrupted";
+
+interface Activity {
+  el: HTMLDetailsElement;
+  headline: HTMLElement;
+  rowsEl: HTMLElement;
+  toolRows: Map<string, HTMLElement>;
+  thinkingRow: HTMLElement | null;
+  steps: number;
+  startTs: number;
+  sawError: boolean;
 }
 
-function finishToolRow(id: string, isError: boolean): void {
-  const row = toolRows.get(id);
-  if (!row) return;
-  toolRows.delete(id);
-  const status = row.querySelector<HTMLElement>(".tool-status");
-  if (!status) return;
-  status.textContent = isError ? "failed" : "done";
-  status.className = `tool-status ${isError ? "text-red-600" : "text-green-600"}`;
+let activity: Activity | null = null; // the live (running) group
+let turnOpen = false;
+
+const STATUS_STYLE: Record<ActivityStatus, string> = {
+  running: "border-green-200 bg-green-50 text-green-800",
+  done: "border-neutral-200 bg-neutral-50 text-neutral-500",
+  failed: "border-red-200 bg-red-50 text-red-700",
+  interrupted: "border-amber-200 bg-amber-50 text-amber-800",
+};
+
+function ensureActivity(ts: number): Activity {
+  if (activity) return activity;
+  const el = document.createElement("details");
+  el.className = `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`;
+  const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
+  const headline = h("span", "truncate", "working…");
+  summary.append(h("span", "flex-none", "⚙"), headline);
+  const rowsEl = h("div", "mt-1.5 flex flex-col gap-1 border-t border-black/5 pt-1.5 font-mono text-[12.5px]");
+  el.append(summary, rowsEl);
+  turnsPane.append(el);
+  scrollBottom();
+  activity = { el, headline, rowsEl, toolRows: new Map(), thinkingRow: null, steps: 0, startTs: ts, sawError: false };
+  return activity;
 }
 
-// --- timeline ---------------------------------------------------------------
-
-function detailsRow(summaryText: string, body: string, isError = false): HTMLElement {
-  const details = h("details", "min-w-0 flex-1");
-  details.append(
-    h("summary", `cursor-pointer select-none ${isError ? "text-red-600" : "text-neutral-600"}`, summaryText),
-    h("pre", "mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-neutral-100 p-1.5 text-[12px]", body),
-  );
-  return details;
+function activityHeadline(a: Activity, status: ActivityStatus, latest?: string): void {
+  const secs = Math.max(1, Math.round((Date.now() - a.startTs) / 1000));
+  const base = `${a.steps} step${a.steps === 1 ? "" : "s"} · ${secs}s`;
+  a.headline.textContent =
+    status === "running" && latest ? `${base} · ${latest}` : `${base} · ${status}`;
+  a.el.className = `max-w-[50rem] rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
 }
 
-function timelineRow(e: SessionEvent): void {
-  const li = h("li", "flex gap-2 border-b border-neutral-200/60 px-1.5 py-1 break-words");
-  li.append(
-    h("span", "flex-none text-neutral-400", new Date(e.ts).toLocaleTimeString()),
-    h("span", "flex-none font-semibold text-neutral-700", e.type),
-  );
-  if (e.type === "tool-start") {
-    li.append(detailsRow(e.toolName, JSON.stringify(e.args, null, 2)));
-  } else if (e.type === "tool-end") {
-    li.append(detailsRow(e.isError ? "error" : "ok", e.output, e.isError));
-  } else if (e.type === "text-delta" || e.type === "thinking-delta") {
-    li.append(h("span", "truncate text-neutral-500", e.text));
-  } else if (e.type === "queued") {
-    li.append(h("span", "text-amber-700", `${e.mode}: ${e.text}`));
-  } else if (e.type === "state") {
-    li.append(h("span", "text-neutral-500", e.state));
-  } else if (e.type === "error") {
-    li.append(h("span", "text-red-600", e.message));
-  } else if (e.type === "turn-end") {
-    li.append(h("span", "text-neutral-500", `${e.text.length} chars`));
+function finishActivity(status: ActivityStatus): void {
+  if (!activity) return;
+  // Any still-running tool rows were cut short.
+  for (const row of activity.toolRows.values()) {
+    const s = row.querySelector<HTMLElement>(".tool-status");
+    if (s && s.textContent === "running…") s.textContent = "interrupted";
   }
-  timeline.append(li);
-  timeline.scrollTop = timeline.scrollHeight;
+  activityHeadline(activity, activity.sawError && status === "done" ? "failed" : status);
+  activity = null;
 }
 
-// --- event handling -----------------------------------------------------------
+function activityToolStart(ts: number, id: string, name: string, args: unknown): void {
+  const a = ensureActivity(ts);
+  a.steps += 1;
+  a.thinkingRow = null;
+  const row = h("div", "flex items-baseline gap-1.5");
+  const argsText = JSON.stringify(args);
+  row.append(
+    h("span", "flex-none font-semibold", name),
+    h("span", "truncate text-black/50", argsText.length > 120 ? argsText.slice(0, 120) + "…" : argsText),
+    h("span", "tool-status ml-auto flex-none text-black/40", "running…"),
+  );
+  a.toolRows.set(id, row);
+  a.rowsEl.append(row);
+  activityHeadline(a, "running", name);
+  scrollBottom();
+}
+
+function activityToolEnd(id: string, isError: boolean, output: string): void {
+  const a = activity;
+  if (!a) return;
+  const row = a.toolRows.get(id);
+  a.toolRows.delete(id);
+  if (row) {
+    const s = row.querySelector<HTMLElement>(".tool-status");
+    if (s) {
+      s.textContent = isError ? "failed" : "ok";
+      s.className = `tool-status ml-auto flex-none ${isError ? "text-red-600" : "text-green-700"}`;
+    }
+    // Keep rows compact; hover shows the (truncated) tool output.
+    if (output) row.title = output.length > 2000 ? output.slice(0, 2000) + "…" : output;
+    if (isError) a.sawError = true;
+  }
+  activityHeadline(a, "running");
+}
+
+function activityThinking(ts: number, text: string): void {
+  const a = ensureActivity(ts);
+  if (!a.thinkingRow) {
+    a.thinkingRow = h("div", "whitespace-pre-wrap break-words text-black/45 italic", "");
+    a.rowsEl.append(a.thinkingRow);
+    activityHeadline(a, "running", "thinking…");
+  }
+  a.thinkingRow.textContent = ((a.thinkingRow.textContent ?? "") + text).slice(-500);
+}
+
+// --- event handling ----------------------------------------------------------------
 
 function handleEvent(e: SessionEvent): void {
   if (e.sessionId !== currentId || e.seq <= lastSeq) return; // stale or replayed
   lastSeq = e.seq;
-  timelineRow(e);
   switch (e.type) {
+    case "turn-start":
+      turnOpen = true;
+      break;
     case "text-delta":
       if (!streamingEl) streamingEl = appendTurn("assistant", "");
       streamingEl.dataset.raw = (streamingEl.dataset.raw ?? "") + e.text;
       streamingEl.textContent = streamingEl.dataset.raw;
-      turnsPane.scrollTop = turnsPane.scrollHeight;
+      scrollBottom();
+      break;
+    case "thinking-delta":
+      activityThinking(e.ts, e.text);
       break;
     case "tool-start":
-      // A tool call ends any in-flight text block; the next delta starts a new one.
-      finalizeStreaming();
-      appendToolRow(e.toolCallId, e.toolName);
+      finalizeStreaming(); // a tool call ends the in-flight text block
+      activityToolStart(e.ts, e.toolCallId, e.toolName, e.args);
       break;
     case "tool-end":
-      finishToolRow(e.toolCallId, e.isError);
+      activityToolEnd(e.toolCallId, e.isError, e.output);
       break;
     case "turn-end":
-      // Streamed deltas already rendered the text across tool-call blocks;
-      // only materialize the full text when nothing streamed (e.g. replay gap).
+      turnOpen = false;
+      finishActivity("done");
       if (!streamingEl && e.text) appendTurn("assistant", e.text, true);
       finalizeStreaming();
       break;
@@ -309,9 +366,16 @@ function handleEvent(e: SessionEvent): void {
       appendTurn("queued", `[${e.mode}] ${e.text}`);
       break;
     case "error":
+      if (activity) activity.sawError = true;
       appendTurn("error", e.message);
       break;
     case "state":
+      if (e.state === "idle" && turnOpen) {
+        // idle without a turn-end: the run was aborted
+        turnOpen = false;
+        finishActivity("interrupted");
+        finalizeStreaming();
+      }
       setState(e.state);
       break;
   }
@@ -323,16 +387,16 @@ function connect(id: string, after: number): void {
   source.onmessage = (m) => handleEvent(JSON.parse(m.data) as SessionEvent);
 }
 
-// --- selection & sending -------------------------------------------------------
+// --- selection & sending --------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
   if (id === currentId) return;
   currentId = id;
   source?.close();
   turnsPane.replaceChildren();
-  timeline.replaceChildren();
-  toolRows.clear();
   streamingEl = null;
+  activity = null;
+  turnOpen = false;
   lastSeq = 0;
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
   renderSessions();
@@ -348,12 +412,13 @@ async function select(id: string): Promise<void> {
     model: ModelRef | null;
   };
   for (const t of turns) appendTurn(t.role, t.text, t.role === "assistant");
+  scrollBottom(true);
   lastSeq = seq;
   connect(id, seq);
   void loadModels(id, model);
 }
 
-// --- model picker -------------------------------------------------------------
+// --- model picker -----------------------------------------------------------------------
 
 const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
 
@@ -389,6 +454,7 @@ async function send(mode: "auto" | "steer" | "followUp"): Promise<void> {
   input.value = "";
   updateModeHint();
   appendTurn("user", text); // optimistic; queue/error states arrive via SSE
+  scrollBottom(true);
   await fetch(`/api/sessions/${currentId}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -396,7 +462,7 @@ async function send(mode: "auto" | "steer" | "followUp"): Promise<void> {
   });
 }
 
-// --- wiring --------------------------------------------------------------------
+// --- wiring ----------------------------------------------------------------------------
 
 $("#new-session").onclick = () => {
   $<HTMLInputElement>("#new-cwd").value = "";

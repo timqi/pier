@@ -28,7 +28,8 @@ force it — SSE already delivers outbound content, so `send()` may be a no-op.
 custom classes are `.btn`/`.btn-primary`. `npm run dev:web` gives HMR with an
 `/api` proxy to :3141. `tsconfig.web.json` stays as the typecheck gate.
 
-Single page, three panes:
+Single page, two panes (the raw timeline pane was folded into per-turn
+Activity groups):
 
 - **Session list** (left): grouped by project (derived from session cwd),
   rows with state dot (idle/streaming) and relative time, click to switch,
@@ -39,10 +40,13 @@ Single page, three panes:
   `text-delta`. Input box: Enter sends `mode:"auto"`; `!` prefix works via
   queue policy; explicit "Steer" and "Queue" buttons send `mode:"steer"` /
   `"followUp"`. When the session is streaming, show which mode a send will use.
-- **Timeline** (right): raw observability. One row per event: tool calls with
-  name/args/collapsed output, thinking deltas collapsed, state changes,
-  queued messages. This pane renders EVERY SessionEvent — it is the "what is
-  the agent doing right now" view.
+- **Activity groups** (in-chat): one collapsible bubble per turn collects
+  thinking + tool activity (avibe AgentActivityGroup concept): status
+  (running/done/failed/interrupted), step count, duration, latest step in the
+  headline while running; expandable rows show tool name/args with output on
+  hover. Idle-without-turn-end marks the group interrupted.
+- Auto-scroll sticks to the bottom only when the user is already near it;
+  own sends force-scroll.
 
 Keep it plain: one `.ts` entry, one `.css`, EventSource + fetch. No state
 library, no router, no components framework. Third repeat rule applies before
