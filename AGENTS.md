@@ -19,6 +19,12 @@ scheduled tasks, live observability, and static Show pages.
    consumers of it — never parallel bookkeeping.
 6. **No speculative generality.** The third repeat earns an abstraction.
    Show pages stay static HTML (+ SSE reload at most), no runtime.
+7. **Minimal dependencies — supply chain is attack surface.** Prefer stdlib,
+   then officially-backed, actively-maintained libraries (platform vendors'
+   SDKs, Pi, well-audited staples) that also reduce our own code. No
+   micro-deps, no transitively-heavy packages; every new runtime dep needs a
+   one-line justification in the PR. Pin versions via the lockfile and review
+   diffs on upgrades.
 
 ## Architecture
 
