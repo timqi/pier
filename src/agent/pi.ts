@@ -4,11 +4,15 @@
 
 import {
   createAgentSession,
+  defineTool,
   SessionManager,
   type AgentSession as PiAgentSession,
 } from "@earendil-works/pi-coding-agent";
+import type { TSchema } from "typebox";
 import type {
+  AgentCustomTool,
   AgentFactory,
+  AgentLaunchOptions,
   AgentSession,
   ChatTurn,
   ContextUsage,
@@ -16,6 +20,7 @@ import type {
   ModelRef,
   SessionEventPayload,
   SessionState,
+  SystemInputOrigin,
   ThinkingLevel,
   TurnMeta,
 } from "../core/types.js";
@@ -127,6 +132,17 @@ class PiSession implements AgentSession {
     return this.pi.followUp(text, toImageContent(images));
   }
 
+  systemInput(
+    text: string,
+    origin: SystemInputOrigin,
+    mode: "prompt" | "steer" | "followUp",
+  ): Promise<void> {
+    return this.pi.sendCustomMessage(
+      { customType: "pier.system-input", content: text, display: true, details: origin },
+      { triggerTurn: true, deliverAs: mode === "prompt" ? undefined : mode },
+    );
+  }
+
   abort(): Promise<void> {
     return this.pi.abort();
   }
@@ -154,23 +170,67 @@ class PiSession implements AgentSession {
 }
 
 export class PiAgentFactory implements AgentFactory {
-  async create(opts: { cwd: string }): Promise<AgentSession> {
-    const { session } = await createAgentSession({
-      cwd: opts.cwd,
-      sessionManager: SessionManager.create(opts.cwd),
-    });
-    return new PiSession(session);
+  constructor(private readonly extraTools: AgentCustomTool[] = []) {}
+
+  private async open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
+    let live: PiAgentSession | undefined;
+    // Generic translation only — tool contracts are data owned by their feature.
+    const customTools = this.extraTools.map((tool) =>
+      defineTool({
+        name: tool.name,
+        label: tool.label,
+        description: tool.description,
+        parameters: tool.parameters as TSchema,
+        execute: async (_id, params, signal) => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(await tool.execute(params, live?.sessionId ?? "unknown", signal), null, 2),
+            },
+          ],
+          details: {},
+        }),
+      }),
+    );
+    if (opts.name) sessionManager.appendSessionInfo(opts.name);
+    const tools = opts.capabilities === "read"
+      ? ["read", "grep", "find", "ls", ...this.extraTools.map((tool) => tool.name)]
+      : undefined;
+    const created = await createAgentSession({ cwd, sessionManager, customTools, tools });
+    live = created.session;
+    const session = new PiSession(live);
+    if (opts.model) await session.setModel(opts.model);
+    if (opts.thinking) session.setThinkingLevel(opts.thinking);
+    return session;
+  }
+
+  async create(opts: AgentLaunchOptions): Promise<AgentSession> {
+    return this.open(opts.cwd, SessionManager.create(opts.cwd), opts);
+  }
+
+  async fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession> {
+    const infos = await SessionManager.listAll();
+    const source = infos.find((session) => session.id === sourceSessionId);
+    if (!source) throw new Error(`unknown session: ${sourceSessionId}`);
+    const targetDir = SessionManager.create(opts.cwd).getSessionDir();
+    const manager = SessionManager.open(source.path, targetDir, opts.cwd);
+    const branch = manager.getBranch();
+    const latest = branch.at(-1);
+    const hasPendingToolCall = latest?.type === "message" &&
+      latest.message.role === "assistant" &&
+      Array.isArray(latest.message.content) &&
+      latest.message.content.some((part) => part.type === "toolCall");
+    const leafId = hasPendingToolCall ? latest.parentId : latest?.id;
+    if (!leafId) throw new Error("cannot fork a session before its first persisted input");
+    manager.createBranchedSession(leafId);
+    return this.open(opts.cwd, manager, opts);
   }
 
   async resume(sessionId: string): Promise<AgentSession> {
     const infos = await SessionManager.listAll();
     const info = infos.find((s) => s.id === sessionId);
     if (!info) throw new Error(`unknown session: ${sessionId}`);
-    const { session } = await createAgentSession({
-      cwd: info.cwd || process.cwd(),
-      sessionManager: SessionManager.open(info.path),
-    });
-    return new PiSession(session);
+    return this.open(info.cwd || process.cwd(), SessionManager.open(info.path));
   }
 
   async list(): Promise<

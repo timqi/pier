@@ -8,6 +8,7 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import type {
   AgentFactory,
+  BackgroundRun,
   ConfigScope,
   ConfigStore,
   ImageAttachment,
@@ -22,6 +23,8 @@ export interface WebDeps {
   hub: EventHub;
   pins: PinStore;
   config: ConfigStore;
+  /** Injected by main.ts; web stays blind to the task service. */
+  backgroundRuns?: (sessionId: string) => BackgroundRun[];
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -49,7 +52,7 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
   return images;
 }
 
-export function createServer({ factory, router, hub, pins, config }: WebDeps): Hono {
+export function createServer({ factory, router, hub, pins, config, backgroundRuns }: WebDeps): Hono {
   const app = new Hono();
 
   // Scope comes from the client as "global" or a project cwd; only cwds Pi
@@ -159,6 +162,7 @@ export function createServer({ factory, router, hub, pins, config }: WebDeps): H
         state: session.state,
         context: session.contextUsage ?? null,
         queue: await session.pendingQueue(),
+        backgroundRuns: backgroundRuns?.(id) ?? [],
       });
     } catch (err) {
       return c.json({ error: String(err) }, 404);

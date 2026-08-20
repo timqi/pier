@@ -10,14 +10,15 @@ REST + SSE, no agent logic. Kept current as the workbench evolves.
 | `GET /api/sessions` | `AgentFactory.list()` + live state from router + `pinned` from the pin store |
 | `POST /api/sessions` | body `{cwd?}` → create session (auto-pinned), returns `{id}` |
 | `POST /api/sessions/:id/pin` | body `{pinned}` → add/remove from Projects, returns `{pinned}` |
-| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue}`; 404 if unknown |
+| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
 | `POST /api/sessions/:id/messages` | body `{text, mode, images?}` (`mode` defaults `auto`; images = base64 `{data, mimeType}`, max 8 × 8MB, validated at the seam; text or images required) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `GET /api/events` | SSE workspace stream: `sessions-changed` (created / pinned → client re-lists) and `session-state` (patch the list dot). Pointers only, no content, no replay — a reconnect re-lists. |
+| `GET /api/activity` | Active or last-hour sessions, task runs, and Subagent control/supervisor message edges for Console Activity |
+| `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` |
 
@@ -31,8 +32,8 @@ force it — SSE already delivers outbound content, so `send()` may be a no-op.
 custom classes are `.btn`/`.btn-primary`. `npm run dev:web` gives HMR with an
 `/api` proxy to :3141. `tsconfig.web.json` stays as the typecheck gate.
 
-Single page, two panes (the raw timeline pane was folded into per-turn
-Activity groups):
+Single page, with chat plus Console views (the raw timeline pane was folded into
+per-turn Activity groups):
 
 - **Projects** (left): only *pinned* sessions, grouped by project (derived from
   session cwd). Sessions created in Pier are pinned automatically; everything
@@ -63,6 +64,16 @@ Activity groups):
   standalone grouped-by-provider list, groups collapsed except the one holding
   the current model — separate because model choice will also be needed outside
   chat (scheduled tasks).
+- **Console Activity**: active Session table plus a directed task dependency
+  graph. Invocation edges are solid, callbacks dashed, and Subagent control or
+  supervisor messages dotted; Session nodes
+  open chat and edges open Tasks. Active and last-hour scopes share the same
+  task-run records.
+- **Task communication**: detached task calls create live Background Run rows in
+  the invoking chat, updated in place from `task-status` session events. Agent
+  delegation and callback inputs are persisted Pi custom messages rendered as
+  distinct System input rows with source Session and Run links, never as user
+  messages. Snapshot `backgroundRuns` restores recent detached work.
 - **Chat** (center): Slack-style full-width rows, no bubbles — user turns
   carry an indigo accent bar + tint, agent turns stay plain; consecutive
   same-sender rows group tighter. Agent rows show a hover meta chip

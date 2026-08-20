@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
@@ -16,6 +17,9 @@ import type {
   SessionState,
   ThinkingLevel,
 } from "../core/types.js";
+import { registerTaskRoutes } from "../tasks/routes.js";
+import { TaskService } from "../tasks/service.js";
+import { TaskStore } from "../tasks/store.js";
 import { PinStore } from "./pins.js";
 import { createServer } from "./server.js";
 
@@ -71,6 +75,9 @@ function fakeSession(id: string): AgentSession & {
       void calls.push(`steer:${t}${imgs ? `+${imgs.length}img` : ""}`),
     followUp: async (t: string, imgs?: ImageAttachment[]) =>
       void calls.push(`followUp:${t}${imgs ? `+${imgs.length}img` : ""}`),
+    systemInput: async (text, origin, mode) => {
+      calls.push(`systemInput:${origin.kind}:${mode}:${text}`);
+    },
     // Pi's abort resolves only once the agent is idle again.
     abort: async () => {
       calls.push("abort");
@@ -123,6 +130,7 @@ function setup() {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
     create: vi.fn(async () => session),
+    fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
     list: vi.fn(async () => [{ id: "s1", cwd: "/tmp", createdAt: 1 }]),
   };
@@ -131,8 +139,15 @@ function setup() {
   // Hermetic: pins land in a throwaway dir, never the real $HOME.
   const pins = new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json"));
   const config = fakeConfig();
-  const app = createServer({ factory, router, hub, pins, config });
-  return { app, session, factory, hub, router, pins, config };
+  const tasks = new TaskService(new TaskStore(":memory:"), factory, router, hub);
+  // Composed exactly like main.ts: task routes and web server never import each other.
+  const app = new Hono();
+  registerTaskRoutes(app, tasks, { factory, router });
+  app.route("/", createServer({
+    factory, router, hub, pins, config,
+    backgroundRuns: (id) => tasks.backgroundRuns(id),
+  }));
+  return { app, session, factory, hub, router, pins, config, tasks };
 }
 
 describe("workbench server", () => {
@@ -150,6 +165,7 @@ describe("workbench server", () => {
     const listed: { id: string; cwd: string; createdAt: number }[] = [];
     const factory: AgentFactory = {
       create: vi.fn(async () => session),
+      fork: vi.fn(async () => session),
       resume: vi.fn(async () => session),
       list: vi.fn(async () => listed),
     };
@@ -224,6 +240,7 @@ describe("workbench server", () => {
       state: "streaming",
       context: { tokens: 1200, contextWindow: 200_000 },
       queue: { steering: ["s-msg"], followUp: ["f-msg"] },
+      backgroundRuns: [],
     });
     session.setState("idle");
     // ensure() attached the session: its events now reach the hub
@@ -302,6 +319,34 @@ describe("workbench server", () => {
     await reader.cancel();
     expect(chunk).toContain('"seq":2');
     expect(chunk).not.toContain('"seq":1,');
+  });
+
+  it("reports recent session dependencies from task provenance", async () => {
+    const { app, tasks } = setup();
+    const task = await tasks.create({
+      name: "delegate",
+      trigger: { type: "manual" },
+      action: { type: "agent", sessionId: "s1", prompt: "work" },
+    });
+    const run = tasks.run(task.id, null, "agent", null, {
+      invokedBySessionId: "source-session",
+      background: true,
+      callbackSessionId: null,
+    });
+    await tasks.waitForRun(run.id);
+    const res = await app.request("/api/activity?scope=recent");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      sessions: expect.arrayContaining([
+        expect.objectContaining({ id: "s1" }),
+        expect.objectContaining({ id: "source-session" }),
+      ]),
+      runs: [expect.objectContaining({
+        id: run.id,
+        invokedBySessionId: "source-session",
+        targetSessionId: "s1",
+      })],
+    });
   });
 
   it("lists available models for a session", async () => {

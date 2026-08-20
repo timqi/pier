@@ -32,12 +32,41 @@ export interface Channel {
   stop(): Promise<void>;
 }
 
+export type SystemInputOrigin = {
+  kind: "task-delegation" | "task-callback";
+  taskId: string;
+  runId: string;
+  sourceSessionId: string | null;
+} | {
+  kind: "task-message";
+  taskId: string;
+  runId: string;
+  sourceSessionId: string;
+  messageId: string;
+  messageKind: "steer" | "follow_up" | "progress" | "decision" | "reply";
+};
+
+export interface BackgroundRun {
+  runId: string;
+  taskId: string;
+  taskName: string;
+  state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "skipped";
+  targetSessionId: string | null;
+  sessionMode: "reuse" | "fresh" | "fork" | null;
+  depth: number;
+  queuedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
+
 /** Pier's normalized event. The ONLY observability currency in the system. */
 export type SessionEventPayload =
   | { type: "turn-start" }
   // A user message entered the model's context: a fresh prompt, a steer, or a
   // queued message the agent just picked up. Clients render it as a user turn.
   | { type: "user-message"; text: string }
+  | { type: "system-input"; text: string; origin: SystemInputOrigin }
+  | { type: "task-status"; run: BackgroundRun }
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
@@ -65,7 +94,10 @@ export type SessionState = "idle" | "streaming";
  */
 export type WorkspaceEvent =
   | { type: "sessions-changed" } // created, pinned/unpinned → re-list
-  | { type: "session-state"; sessionId: string; state: SessionState };
+  | { type: "session-state"; sessionId: string; state: SessionState }
+  | { type: "tasks-changed" }
+  | { type: "task-run-changed"; taskId: string; runId: string }
+  | { type: "task-message-changed"; runId: string; messageId: string };
 
 /**
  * One step of an assistant turn's activity, reconstructed from the transcript
@@ -82,8 +114,9 @@ export interface ActivityStep {
 
 /** A completed conversation turn, for history rendering. */
 export interface ChatTurn {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
+  origin?: SystemInputOrigin; // system inputs only
   meta?: TurnMeta; // assistant turns only
   steps?: ActivityStep[]; // assistant turns only; activity preceding the text
 }
@@ -137,6 +170,8 @@ export interface AgentSession {
   prompt(text: string, images?: ImageAttachment[]): Promise<void>; // resolves when the turn settles
   steer(text: string, images?: ImageAttachment[]): Promise<void>; // interrupt mid-run
   followUp(text: string, images?: ImageAttachment[]): Promise<void>; // deliver when idle
+  /** Persisted non-user input with provenance; prompt waits, queued modes may not. */
+  systemInput(text: string, origin: SystemInputOrigin, mode: "prompt" | "steer" | "followUp"): Promise<void>;
   abort(): Promise<void>;
   /** Emits payloads only; core/hub.ts owns seq/ts stamping. */
   subscribe(fn: (e: SessionEventPayload) => void): () => void;
@@ -165,8 +200,29 @@ export interface ConfigStore {
   readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string>;
 }
 
+/**
+ * Backend-neutral custom tool: schema as plain data, owned by the feature
+ * that defines the contract (tasks/), translated to the backend by agent/.
+ */
+export interface AgentCustomTool {
+  name: string;
+  label: string;
+  description: string;
+  parameters: object; // JSON Schema
+  execute(params: unknown, callerSessionId: string, signal?: AbortSignal): Promise<unknown>;
+}
+
+export interface AgentLaunchOptions {
+  cwd: string;
+  name?: string;
+  model?: ModelRef;
+  thinking?: ThinkingLevel;
+  capabilities?: "read" | "write";
+}
+
 export interface AgentFactory {
-  create(opts: { cwd: string }): Promise<AgentSession>;
+  create(opts: AgentLaunchOptions): Promise<AgentSession>;
+  fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
   list(): Promise<
     { id: string; cwd: string; createdAt: number; title?: string }[]

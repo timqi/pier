@@ -1,5 +1,5 @@
 // Conversation → session routing plus event wiring. In-memory for v1;
-// persistence arrives with the scheduler (docs/plans/bootstrap.md step 5).
+// persistence arrives with task storage (docs/plans/bootstrap.md step 4).
 
 import { EventHub } from "./hub.js";
 import { decide } from "./queue.js";
@@ -19,7 +19,7 @@ export class Router {
   private readonly byKey = new Map<string, AgentSession>();
   private readonly bySession = new Map<
     string,
-    { session: AgentSession; key: ConversationKey }
+    { session: AgentSession; key: ConversationKey; stateSince: number }
   >();
   private readonly channels = new Map<string, Channel>();
 
@@ -37,14 +37,22 @@ export class Router {
     return this.bySession.get(sessionId)?.session.state;
   }
 
+  stateSinceOf(sessionId: string): number | undefined {
+    return this.bySession.get(sessionId)?.stateSince;
+  }
+
   /** Attach an existing session to a conversation and wire its events. */
   attach(key: ConversationKey, session: AgentSession): void {
     this.byKey.set(keyOf(key), session);
-    this.bySession.set(session.id, { session, key });
+    const existing = this.bySession.get(session.id);
+    if (existing?.session === session) return;
+    this.bySession.set(session.id, { session, key, stateSince: Date.now() });
     session.subscribe((payload) => {
       this.hub.emit(session.id, payload);
       // Run state is workspace-visible: every client's session list shows it.
       if (payload.type === "state") {
+        const attached = this.bySession.get(session.id);
+        if (attached) attached.stateSince = Date.now();
         this.hub.emitWorkspace({
           type: "session-state",
           sessionId: session.id,
@@ -72,6 +80,12 @@ export class Router {
   /** Session owning a conversation, resolving and attaching it on first use. */
   async ensure(key: ConversationKey): Promise<AgentSession> {
     let session = this.byKey.get(keyOf(key));
+    // Web and task conversation ids are session ids. Reuse an attached
+    // instance so two surfaces never open the same Pi transcript twice.
+    if (!session && (key.channelId === "web" || key.channelId === "task")) {
+      session = this.bySession.get(key.conversationId)?.session;
+      if (session) this.byKey.set(keyOf(key), session);
+    }
     if (!session) {
       session = await this.resolve(key);
       this.attach(key, session);

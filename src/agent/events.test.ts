@@ -87,6 +87,54 @@ describe("toSessionEvents", () => {
       expected: [{ type: "user-message", text: "do it" }],
     },
     {
+      name: "message_start with a Pier custom message preserves provenance",
+      input: {
+        type: "message_start",
+        message: {
+          role: "custom",
+          customType: "pier.system-input",
+          content: "delegated work",
+          details: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: "s1" },
+        },
+      },
+      expected: [{
+        type: "system-input",
+        text: "delegated work",
+        origin: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: "s1" },
+      }],
+    },
+    {
+      name: "message_start preserves task control message identity",
+      input: {
+        type: "message_start",
+        message: {
+          role: "custom",
+          customType: "pier.system-input",
+          content: "change direction",
+          details: {
+            kind: "task-message",
+            taskId: "t1",
+            runId: "r1",
+            sourceSessionId: "s1",
+            messageId: "m1",
+            messageKind: "steer",
+          },
+        },
+      },
+      expected: [{
+        type: "system-input",
+        text: "change direction",
+        origin: {
+          kind: "task-message",
+          taskId: "t1",
+          runId: "r1",
+          sourceSessionId: "s1",
+          messageId: "m1",
+          messageKind: "steer",
+        },
+      }],
+    },
+    {
       name: "message_start for non-user messages is dropped",
       input: { type: "message_start", message: { role: "assistant", content: "hi" } },
       expected: [],
@@ -131,6 +179,17 @@ describe("toChatTurns", () => {
           { kind: "tool", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false },
         ],
       },
+    ]);
+  });
+
+  it("rebuilds persisted Pier system inputs with their origin", () => {
+    const origin = { kind: "task-callback" as const, taskId: "t1", runId: "r1", sourceSessionId: "s2" };
+    expect(toChatTurns([
+      { role: "custom", customType: "pier.system-input", content: "result", details: origin, timestamp: 1000 },
+      { role: "assistant", content: "handled", timestamp: 2000 },
+    ])).toEqual([
+      { role: "system", text: "result", origin },
+      { role: "assistant", text: "handled", meta: { completedAt: 2000, durationMs: 1000, tokens: 0 } },
     ]);
   });
 

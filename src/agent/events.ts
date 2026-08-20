@@ -3,7 +3,13 @@
 // and Pi types never leak past the seam. The golden-table test in
 // events.test.ts is the mapping's spec; extend types.ts before adding events.
 
-import type { ActivityStep, ChatTurn, SessionEventPayload, TurnMeta } from "../core/types.js";
+import type {
+  ActivityStep,
+  ChatTurn,
+  SessionEventPayload,
+  SystemInputOrigin,
+  TurnMeta,
+} from "../core/types.js";
 
 /** Union of the assistant content blocks we care about (text/thinking/toolCall). */
 interface TextPart {
@@ -26,6 +32,9 @@ export interface PiMessage {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  // persisted custom messages
+  customType?: string;
+  details?: unknown;
 }
 
 export interface PiEvent {
@@ -61,6 +70,28 @@ function displayText(m: PiMessage): string {
   return `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]`;
 }
 
+function systemOrigin(message: PiMessage): SystemInputOrigin | null {
+  if (message.role !== "custom" || message.customType !== "pier.system-input") return null;
+  const value = message.details;
+  if (!value || typeof value !== "object") return null;
+  const origin = value as Record<string, unknown>;
+  if (
+    typeof origin.taskId !== "string" ||
+    typeof origin.runId !== "string" ||
+    (origin.sourceSessionId !== null && typeof origin.sourceSessionId !== "string")
+  ) return null;
+  if (origin.kind === "task-delegation" || origin.kind === "task-callback") {
+    return origin as SystemInputOrigin;
+  }
+  if (
+    origin.kind === "task-message" &&
+    typeof origin.messageId === "string" &&
+    (origin.messageKind === "steer" || origin.messageKind === "follow_up" ||
+      origin.messageKind === "progress" || origin.messageKind === "decision" || origin.messageKind === "reply")
+  ) return origin as SystemInputOrigin;
+  return null;
+}
+
 function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {
   if (!messages) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -91,7 +122,7 @@ export function turnMetaAt(
   let started = end;
   for (let i = index - 1; i >= 0; i--) {
     const t = messages[i];
-    if (t?.role === "user" && typeof t.timestamp === "number") {
+    if (t && (t.role === "user" || systemOrigin(t) !== null) && typeof t.timestamp === "number") {
       started = t.timestamp;
       break;
     }
@@ -117,9 +148,15 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
   let steps: ActivityStep[] = []; // activity seen since the last emitted turn
   const pendingTools = new Map<string, ActivityStep>();
 
-  const flush = (role: "user" | "assistant", text: string, meta?: TurnMeta): void => {
+  const flush = (
+    role: ChatTurn["role"],
+    text: string,
+    meta?: TurnMeta,
+    origin?: SystemInputOrigin,
+  ): void => {
     const turn: ChatTurn = { role, text };
     if (meta) turn.meta = meta;
+    if (origin) turn.origin = origin;
     if (steps.length) {
       turn.steps = steps;
       steps = [];
@@ -135,6 +172,12 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
         step.isError = m.isError ?? false;
         pendingTools.delete(m.toolCallId ?? "");
       }
+      continue;
+    }
+    const origin = systemOrigin(m);
+    if (origin) {
+      const text = displayText(m);
+      if (text) flush("system", text, undefined, origin);
       continue;
     }
     if (m.role !== "user" && m.role !== "assistant") continue;
@@ -184,8 +227,11 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       // Pi emits this for every message entering the context; the user ones are
       // what a client can't know about (queued/steered messages, IM traffic).
       const m = e.message;
-      if (m?.role !== "user") return [];
+      if (!m) return [];
+      const origin = systemOrigin(m);
       const text = displayText(m);
+      if (origin) return text ? [{ type: "system-input", text, origin }] : [];
+      if (m.role !== "user") return [];
       return text ? [{ type: "user-message", text }] : [];
     }
     case "message_update": {

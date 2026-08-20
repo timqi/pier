@@ -5,20 +5,24 @@
 import "./style.css";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import { createActivityView } from "./activity.js";
 import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
+import { createTasksView } from "./tasks.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
 import type {
   ActivityStep,
+  BackgroundRun,
   ChatTurn,
   ContextUsage,
   ImageAttachment,
   ModelRef,
   SessionEvent,
   SessionState,
+  SystemInputOrigin,
   ThinkingLevel,
   TurnMeta,
   WorkspaceEvent,
@@ -32,6 +36,7 @@ interface SessionSnapshot {
   state: SessionState;
   context: ContextUsage | null;
   queue: { steering: string[]; followUp: string[] };
+  backgroundRuns: BackgroundRun[];
 }
 
 interface ThinkingResponse {
@@ -71,6 +76,8 @@ const projectTree = $("#project-tree");
 const chatHeader = $("#chat-header");
 const composer = $<HTMLFormElement>("#composer");
 const consoleSection = $<HTMLDetailsElement>("#console-section");
+const openActivityBtn = $("#open-activity");
+const openTasksBtn = $("#open-tasks");
 const openConfigBtn = $("#open-config");
 const archiveDialog = $<HTMLDialogElement>("#archive-dialog");
 const archiveList = $("#archive-list");
@@ -105,6 +112,7 @@ let pendingImages: ImageAttachment[] = [];
 // Texts already rendered optimistically, awaiting their user-message event so
 // the same turn isn't drawn twice.
 let optimisticUserTexts: string[] = [];
+const backgroundRows = new Map<string, HTMLElement>();
 
 // --- scrolling -------------------------------------------------------------------
 // Stick to the bottom only when the user is already there (avibe behavior);
@@ -414,6 +422,7 @@ const ROW_STYLE: Record<string, { row: string; body: string }> = {
   user: { row: "border-l-2 border-indigo-500 bg-indigo-50/60", body: "text-neutral-900" },
   assistant: { row: "border-l-2 border-transparent", body: "text-neutral-800" },
   error: { row: "border-l-2 border-red-400 bg-red-50/60", body: "text-red-700" },
+  system: { row: "border-l-2 border-cyan-500 bg-cyan-50/60", body: "text-neutral-800" },
 };
 
 function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false): HTMLElement {
@@ -440,6 +449,121 @@ function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false
   turnsPane.append(row);
   scrollBottom();
   return node;
+}
+
+function appendSystemInput(text: string, origin: SystemInputOrigin): void {
+  const kind = origin.kind === "task-callback"
+    ? "Task callback"
+    : origin.kind === "task-message"
+      ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
+      : "Agent task input";
+  const row = h("div", "mt-2 border-l-2 border-cyan-500 bg-cyan-50/60 px-5 py-2");
+  row.dataset.kind = "system";
+  const head = h("div", "mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase text-cyan-800");
+  head.append(h("span", "", kind));
+  if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
+    const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
+    source.title = "Open source session";
+    source.onclick = () => void select(origin.sourceSessionId!);
+    head.append(h("span", "text-cyan-400", "from"), source);
+  }
+  const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
+  run.onclick = () => showTasks(origin.taskId);
+  head.append(run);
+  if (origin.kind === "task-message" && origin.messageKind === "decision") {
+    const reply = h("button", "flex-none text-[11px] font-semibold normal-case text-cyan-800 hover:underline", "Reply");
+    reply.onclick = () => void replyToDecision(origin.messageId);
+    head.append(reply);
+  }
+  row.append(head, h("div", "whitespace-pre-wrap break-words text-[14px] text-neutral-800", text));
+  turnsPane.append(row);
+  scrollBottom();
+}
+
+const RUN_STYLE: Record<BackgroundRun["state"], string> = {
+  queued: "border-amber-200 bg-amber-50 text-amber-800",
+  running: "border-green-200 bg-green-50 text-green-800",
+  succeeded: "border-neutral-200 bg-neutral-50 text-neutral-600",
+  failed: "border-red-200 bg-red-50 text-red-700",
+  cancelled: "border-neutral-200 bg-neutral-50 text-neutral-500",
+  interrupted: "border-amber-200 bg-amber-50 text-amber-800",
+  skipped: "border-neutral-200 bg-neutral-50 text-neutral-500",
+};
+
+async function replyToDecision(messageId: string): Promise<void> {
+  if (!currentId) return;
+  const message = window.prompt("Reply to subagent");
+  if (!message?.trim()) return;
+  const res = await fetch(`/api/task-messages/${messageId}/reply`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, sourceSessionId: currentId }),
+  });
+  if (!res.ok) appendTurn("error", ((await res.json()) as { error?: string }).error ?? "reply failed");
+}
+
+async function steerBackground(runId: string): Promise<void> {
+  const message = window.prompt("Steer subagent");
+  if (!message?.trim()) return;
+  await fetch(`/api/task-runs/${runId}/steer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, mode: "steer", sourceSessionId: currentId }),
+  });
+}
+
+async function resumeBackground(runId: string): Promise<void> {
+  const message = window.prompt("Continue subagent");
+  if (!message?.trim()) return;
+  await fetch(`/api/task-runs/${runId}/resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, sourceSessionId: currentId }),
+  });
+}
+
+function renderBackgroundRun(run: BackgroundRun): void {
+  let row = backgroundRows.get(run.runId);
+  if (!row) {
+    row = h("div", "mx-5 mt-2 border px-3 py-2 text-[13px]");
+    row.dataset.kind = "background-run";
+    turnsPane.append(row);
+    backgroundRows.set(run.runId, row);
+  }
+  row.className = `mx-5 mt-2 border px-3 py-2 text-[13px] ${RUN_STYLE[run.state]}`;
+  const active = run.state === "queued" || run.state === "running";
+  const status = active ? h("span", "spinner") : h("span", "w-3 flex-none text-center", run.state === "succeeded" ? "✓" : run.state === "failed" ? "✕" : "·");
+  const title = h("button", "min-w-0 truncate text-left font-medium hover:underline", run.taskName);
+  title.onclick = () => showTasks(run.taskId);
+  const head = h("div", "flex items-center gap-2");
+  head.append(status, h("span", "flex-none text-[11px] font-semibold uppercase", run.state), title);
+  const controls = h("div", "ml-auto flex flex-none items-center gap-2");
+  if (run.targetSessionId) {
+    const target = h("button", "font-mono text-[11px] hover:underline", "Open");
+    target.title = `Open ${run.targetSessionId}`;
+    target.onclick = () => void select(run.targetSessionId!);
+    controls.append(target);
+  }
+  if (active) {
+    const steer = h("button", "text-[11px] font-semibold hover:underline", "Steer");
+    steer.onclick = () => void steerBackground(run.runId);
+    const cancel = h("button", "text-[11px] font-semibold hover:underline", "Stop");
+    cancel.onclick = () => void fetch(`/api/task-runs/${run.runId}/cancel`, { method: "POST" });
+    controls.append(steer, cancel);
+  } else if (run.targetSessionId && run.sessionMode !== null) {
+    const resume = h("button", "text-[11px] font-semibold hover:underline", "Continue");
+    resume.onclick = () => void resumeBackground(run.runId);
+    controls.append(resume);
+  }
+  head.append(controls);
+  const started = run.startedAt ?? run.queuedAt;
+  const end = run.finishedAt ?? Date.now();
+  const seconds = Math.max(0, Math.round((end - started) / 1000));
+  row.replaceChildren(
+    head,
+    h("div", "mt-1 text-[11px] opacity-70", `${run.sessionMode ?? "task"} · depth ${run.depth} · ${seconds}s · ${run.runId}`),
+  );
+  scrollBottom();
 }
 
 // --- edit user message ------------------------------------------------------------
@@ -729,6 +853,13 @@ function handleEvent(e: SessionEvent): void {
     case "turn-start":
       turnOpen = true;
       break;
+    case "system-input":
+      finalizeStreaming();
+      appendSystemInput(e.text, e.origin);
+      break;
+    case "task-status":
+      renderBackgroundRun(e.run);
+      break;
     case "user-message": {
       // Already on screen from our own optimistic render? Just reconcile.
       const i = optimisticUserTexts.indexOf(e.text);
@@ -804,6 +935,12 @@ function connectWorkspace(): void {
       void refreshSessions();
       return;
     }
+    if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed") {
+      tasksView.refresh(e.type === "task-run-changed" ? e.taskId : undefined);
+      activityView.refresh();
+      return;
+    }
+    activityView.refresh();
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;
     const s = sessions.find((x) => x.id === e.sessionId);
@@ -820,26 +957,49 @@ function connect(id: string, after: number): void {
 }
 
 // --- view switching (chat ↔ Console views) -----------------------------------
-// The config view hides the chat elements but leaves the session wiring
-// (SSE, state) untouched — switching back is instant.
+// Console views hide chat elements but leave session SSE wiring untouched.
 
 const chatEls = [chatHeader, turnsPane, composer];
 const configView = createConfigView($("#config-view"), () =>
   [...groupByCwd(sessions).keys()],
 );
+const tasksView = createTasksView(
+  $("#tasks-view"),
+  () => sessions.map(({ id, cwd, title }) => ({ id, cwd, title })),
+  (id) => void select(id),
+  () => currentId,
+);
+const activityView = createActivityView(
+  $("#activity-view"),
+  (id) => void select(id),
+  (taskId) => showTasks(taskId),
+);
 
-function showConfig(): void {
+const consoleViews: { view: { show(arg?: string): void; hide(): void; visible: boolean }; btn: HTMLElement }[] = [
+  { view: configView, btn: openConfigBtn },
+  { view: tasksView, btn: openTasksBtn },
+  { view: activityView, btn: openActivityBtn },
+];
+
+function showConsole(active: (typeof consoleViews)[number]["view"], arg?: string): void {
   chatVisible = false;
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
-  openConfigBtn.classList.add("bg-indigo-50");
-  configView.show();
+  for (const { view, btn } of consoleViews) {
+    btn.classList.toggle("bg-indigo-50", view === active);
+    if (view === active) view.show(arg);
+    else view.hide();
+  }
 }
 
+const showTasks = (taskId?: string): void => showConsole(tasksView, taskId);
+
 function showChat(): void {
-  if (!configView.visible) return;
-  configView.hide();
-  openConfigBtn.classList.remove("bg-indigo-50");
+  if (!consoleViews.some(({ view }) => view.visible)) return;
+  for (const { view, btn } of consoleViews) {
+    view.hide();
+    btn.classList.remove("bg-indigo-50");
+  }
   chatVisible = true;
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
@@ -866,6 +1026,7 @@ async function loadSession(id: string): Promise<void> {
   activity = null;
   turnOpen = false;
   optimisticUserTexts = [];
+  backgroundRows.clear();
   lastSeq = 0;
   const res = await fetch(`/api/sessions/${id}/history`);
   const snap = res.ok ? ((await res.json()) as SessionSnapshot) : null;
@@ -876,8 +1037,11 @@ async function loadSession(id: string): Promise<void> {
   }
   for (const t of snap.turns) {
     if (t.steps?.length) replayActivity(t.steps, t.meta?.durationMs);
-    if (t.text) setMetaHint(appendTurn(t.role, t.text, t.role === "assistant"), t.meta);
+    if (!t.text) continue;
+    if (t.role === "system" && t.origin) appendSystemInput(t.text, t.origin);
+    else setMetaHint(appendTurn(t.role, t.text, t.role === "assistant"), t.meta);
   }
+  for (const run of snap.backgroundRuns) renderBackgroundRun(run);
   scrollBottom(true);
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
@@ -1119,7 +1283,9 @@ async function recallQueue(): Promise<void> {
 
 // --- wiring ----------------------------------------------------------------------------
 
-openConfigBtn.onclick = () => showConfig();
+openActivityBtn.onclick = () => showConsole(activityView);
+openTasksBtn.onclick = () => showTasks();
+openConfigBtn.onclick = () => showConsole(configView);
 consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
 consoleSection.ontoggle = () =>
   localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");
