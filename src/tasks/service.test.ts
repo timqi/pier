@@ -17,6 +17,7 @@ import type {
 } from "../core/types.js";
 import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
+import type { RunSummary } from "./tool.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
 
@@ -167,8 +168,8 @@ describe("task service", () => {
       if (event.type === "task-status") statuses.push(event.run.state);
     });
 
-    const queued = await service.tool({ operation: "run", task_id: task.id, wait: false }, "s1") as TaskRun;
-    const done = await service.waitForRun(queued.id);
+    const queued = await service.tool({ operation: "run", task_id: task.id, wait: false }, "s1") as RunSummary;
+    const done = await service.waitForRun(queued.runId);
     await vi.waitFor(() => expect(service.getRun(done.id).callbackState).toBe("delivered"));
     const stored = service.getRun(done.id);
     expect(stored).toMatchObject({
@@ -196,10 +197,11 @@ describe("task service", () => {
     expect(session.systemInputs).toHaveLength(callbackCount);
     restarted.stop();
 
-    const foreground = await service.tool({ operation: "run", task_id: task.id, wait: true }, "s1") as TaskRun;
+    const foreground = await service.tool({ operation: "run", task_id: task.id, wait: true }, "s1") as RunSummary;
     expect(foreground).toMatchObject({ background: false, callbackSessionId: null, callbackState: null });
-    const silent = await service.tool({ operation: "run", task_id: task.id, wait: false, callback: "none" }, "s1") as TaskRun;
-    expect((await service.waitForRun(silent.id))).toMatchObject({
+    expect(foreground).not.toHaveProperty("context");
+    const silent = await service.tool({ operation: "run", task_id: task.id, wait: false, callback: "none" }, "s1") as RunSummary;
+    expect((await service.waitForRun(silent.runId))).toMatchObject({
       background: true,
       callbackSessionId: null,
       callbackState: null,
@@ -246,14 +248,14 @@ describe("task service", () => {
       trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "fork" }, prompt: "Continue from context" },
     });
-    const forkRun = await service.tool({ operation: "run", task_id: forked.id, wait: true }, "s1") as TaskRun;
+    const forkRun = await service.tool({ operation: "run", task_id: forked.id, wait: true }, "s1") as RunSummary;
     expect(factory.fork).toHaveBeenCalledWith("s1", expect.objectContaining({ cwd }));
     expect(forkRun).toMatchObject({
       state: "succeeded",
-      sourceSessionId: "s1",
       targetSessionId: "fork-child",
       sessionMode: "fork",
     });
+    expect(service.getRun(forkRun.runId).sourceSessionId).toBe("s1");
   });
 
   it("allows concurrent interactive fresh runs of one role", async () => {
@@ -350,8 +352,62 @@ describe("task service", () => {
 
     const bash = await service.create(bashDraft(cwd, "true"));
     await expect(service.tool({ operation: "run", task_id: bash.id }, child.id)).rejects.toThrow("only invoke Agent tasks");
+    await expect(service.tool({
+      operation: "run",
+      task: { name: "inline bash", action: { type: "bash", cwd, script: "true" } },
+    }, child.id)).rejects.toThrow("only inline Agent tasks");
+    await expect(service.tool({
+      operation: "run",
+      task: { name: "inline reuse", action: { type: "agent", session: { mode: "reuse", sessionId: parent.id }, prompt: "p" } },
+    }, child.id)).rejects.toThrow("cannot reuse an existing session");
     child.setState("idle");
     await service.waitForRun(run.id);
+  });
+
+  it("runs inline subagent drafts atomically and filters them from lists", async () => {
+    const { cwd, service } = setup();
+    const run = await service.tool({
+      operation: "run",
+      wait: true,
+      task: {
+        name: "inline reviewer",
+        action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review" },
+      },
+    }, "s1") as RunSummary;
+    expect(run.state).toBe("succeeded");
+    expect(service.getRun(run.runId).invokedBySessionId).toBe("s1");
+
+    // Definition is persisted (auditable, taskId resolves) but kind-tagged.
+    const task = service.get(run.taskId);
+    expect(task).toMatchObject({ kind: "subagent", trigger: { type: "manual" }, createdBySessionId: "s1" });
+    expect(service.listRuns(task.id).map((row) => row.id)).toContain(run.runId);
+
+    // Hidden from the agent-facing list; visible in the unfiltered service list.
+    expect(await service.tool({ operation: "list" }, "s1")).toEqual([]);
+    expect(service.list().map((row) => row.id)).toContain(task.id);
+
+    await expect(service.tool({
+      operation: "run",
+      task: {
+        ...bashDraft(cwd, "true"),
+        trigger: { type: "cron", expression: "* * * * *", timezone: "UTC" },
+      },
+    }, "s1")).rejects.toThrow("manual trigger");
+  });
+
+  it("inherits the caller's live model for fresh children", async () => {
+    const { cwd, service, session, factory, router } = setup();
+    router.attach({ channelId: "web", conversationId: session.id }, session);
+    vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("fresh-inherit"));
+    const run = await service.tool({
+      operation: "run",
+      wait: true,
+      task: { name: "inherit", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } },
+    }, session.id) as RunSummary;
+    expect(run.state).toBe("succeeded");
+    expect(factory.create).toHaveBeenCalledWith(expect.objectContaining({
+      model: { provider: "test", id: "model" },
+    }));
   });
 
   it("resumes a watch Agent without re-running its probe", async () => {

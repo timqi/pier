@@ -107,11 +107,12 @@ export class TaskDefinitions {
     if (!task) throw new Error(`unknown task: ${id}`);
     return task;
   }
-  async create(raw: unknown, creator = "http"): Promise<TaskDefinition> {
+  async create(raw: unknown, creator = "http", kind: TaskDefinition["kind"] = "task"): Promise<TaskDefinition> {
     const draft = await this.parseDraft(raw);
     const now = Date.now();
     const task: TaskDefinition = {
       id: randomUUID(),
+      kind,
       name: draft.name,
       description: draft.description ?? "",
       enabled: draft.enabled ?? true,
@@ -209,7 +210,10 @@ export class TaskDefinitions {
     const trigger = parseTrigger(value.trigger);
     if (trigger.type === "watch") await this.assertDirectory(trigger.cwd);
     const actionRaw = record(value.action);
-    if (!actionRaw) throw new Error("action required");
+    // Self-documenting: tool callers (models) recover from this in one retry.
+    if (!actionRaw) {
+      throw new Error('action required, e.g. {"type":"agent","session":{"mode":"fresh","cwd":"/abs/path"},"prompt":"..."}');
+    }
     let action: TaskAction;
     if (actionRaw.type === "bash") {
       const cwd = requiredString(actionRaw.cwd, "bash cwd");
@@ -258,7 +262,7 @@ export class TaskDefinitions {
     } else {
       // Validation never mutates: a dedicated session is created explicitly
       // (POST /api/sessions) and then referenced with mode:"reuse".
-      throw new Error("agent session policy required (reuse, fresh, or fork)");
+      throw new Error('agent session policy required, e.g. {"mode":"fresh","cwd":"/abs/path"} or {"mode":"fork"} or {"mode":"reuse","sessionId":"..."}');
     }
     if (session.mode === "reuse" && launch) throw new Error("launch policy only applies to fresh or fork sessions");
     return { type: "agent", session, prompt, ...(launch ? { launch } : {}) };

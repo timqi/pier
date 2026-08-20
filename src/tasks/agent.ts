@@ -98,7 +98,10 @@ export class AgentTaskRunner {
     const opts = {
       cwd,
       name: `${run.context.definition.name} [${run.id.slice(0, 8)}]`,
-      model: action.launch?.model,
+      // Unspecified model inherits the caller's live model, not the global
+      // default; falls back to the default when the caller isn't attached.
+      model: action.launch?.model ??
+        (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
       thinking: action.launch?.thinking,
       capabilities: action.launch?.capabilities,
     };

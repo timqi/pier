@@ -8,7 +8,12 @@ interface JsonRow {
   json: string;
 }
 
-const parseTask = (json: string): TaskDefinition => JSON.parse(json) as TaskDefinition;
+// Rows written before the kind field existed default to "task".
+const parseTask = (json: string): TaskDefinition => {
+  const task = JSON.parse(json) as TaskDefinition;
+  task.kind ??= "task";
+  return task;
+};
 const parseRun = (json: string): TaskRun => JSON.parse(json) as TaskRun;
 
 export function defaultTaskDbPath(): string {

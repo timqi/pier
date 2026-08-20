@@ -64,7 +64,12 @@ class PiSession implements AgentSession {
 
   async setModel(ref: ModelRef): Promise<void> {
     const m = this.pi.modelRuntime.getModel(ref.provider, ref.id);
-    if (!m) throw new Error(`unknown model: ${ref.provider}/${ref.id}`);
+    if (!m) {
+      // Lazy discovery: the failure itself documents what is selectable.
+      const available = (await this.availableModels())
+        .slice(0, 8).map((entry) => `${entry.provider}/${entry.id}`).join(", ");
+      throw new Error(`unknown model: ${ref.provider}/${ref.id}; available: ${available}`);
+    }
     await this.pi.setModel(m);
   }
 

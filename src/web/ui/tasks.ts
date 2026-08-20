@@ -93,11 +93,12 @@ export function createTasksView(
   let filter = "active";
 
   async function load(): Promise<void> {
-    const res = await fetch(`/api/tasks?state=${filter === "archived" ? "archived" : "active"}`);
+    const state = filter === "archived" ? "archived" : "active";
+    const res = await fetch(`/api/tasks?state=${state}${filter === "subagent" ? "&kind=subagent" : ""}`);
     if (!res.ok) return renderError(`Failed to load tasks: ${res.status}`);
     rows = (await res.json()) as TaskRow[];
-    if (filter !== "archived") availableTasks = rows;
-    if (filter !== "active" && filter !== "archived") {
+    if (filter !== "archived" && filter !== "subagent") availableTasks = rows;
+    if (filter !== "active" && filter !== "archived" && filter !== "subagent") {
       rows = rows.filter((task) => task.trigger.type === filter);
     }
     if (selectedId) await renderDetail(selectedId);
@@ -146,7 +147,7 @@ export function createTasksView(
     create.onclick = () => editDialog();
     const filters = consoleTabs();
     const filterBox = h("div", "ml-auto flex items-center gap-1");
-    const filterOptions: [string, string][] = [["All", "active"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"], ["Archived", "archived"]];
+    const filterOptions: [string, string][] = [["All", "active"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"], ["Subagents", "subagent"], ["Archived", "archived"]];
     for (const [label, key] of filterOptions) {
       const tab = button(label);
       if (filter === key) tab.classList.add("bg-neutral-200");

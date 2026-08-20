@@ -8,6 +8,7 @@ import type {
   Channel,
   ConversationKey,
   InboundMessage,
+  ModelRef,
   SessionState,
 } from "./types.js";
 
@@ -39,6 +40,11 @@ export class Router {
 
   stateSinceOf(sessionId: string): number | undefined {
     return this.bySession.get(sessionId)?.stateSince;
+  }
+
+  /** Current in-memory model of a live session (undefined when not attached). */
+  modelOf(sessionId: string): ModelRef | undefined {
+    return this.bySession.get(sessionId)?.session.model;
   }
 
   /** Attach an existing session to a conversation and wire its events. */

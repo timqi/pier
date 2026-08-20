@@ -35,6 +35,8 @@ export type TaskCallback =
 
 export interface TaskDefinition {
   id: string;
+  /** "subagent" marks one-shot delegations created inline via run; hidden from default lists. */
+  kind: "task" | "subagent";
   name: string;
   description: string;
   enabled: boolean;

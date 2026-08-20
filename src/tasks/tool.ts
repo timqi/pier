@@ -4,7 +4,93 @@ import { TaskDefinitions, record, requiredString } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { TaskRun } from "./types.js";
+import type { TaskDefinition, TaskResult, TaskRun } from "./types.js";
+
+// JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
+const strEnum = <const T extends readonly string[]>(...values: T) =>
+  Type.Unsafe<T[number]>({ type: "string", enum: [...values] });
+
+/** Model-facing run shape: everything the caller can act on, none of the
+ * context echo (definition, renderedPrompt, probe) that wastes its tokens. */
+export interface RunSummary {
+  runId: string;
+  taskId: string;
+  taskName: string;
+  state: TaskRun["state"];
+  background: boolean;
+  sessionMode: TaskRun["sessionMode"];
+  targetSessionId: string | null;
+  callbackSessionId: string | null;
+  callbackState: TaskRun["callbackState"];
+  depth: number;
+  queuedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  result: TaskResult | null;
+  error: string | null;
+  skipReason: string | null;
+}
+
+const summarize = (run: TaskRun): RunSummary => ({
+  runId: run.id,
+  taskId: run.taskId,
+  taskName: run.context.definition.name,
+  state: run.state,
+  background: run.background,
+  sessionMode: run.sessionMode,
+  targetSessionId: run.targetSessionId,
+  callbackSessionId: run.callbackSessionId,
+  callbackState: run.callbackState,
+  depth: run.depth,
+  queuedAt: run.queuedAt,
+  startedAt: run.startedAt,
+  finishedAt: run.finishedAt,
+  result: run.result,
+  error: run.error,
+  skipReason: run.skipReason,
+});
+
+// Model-facing draft shape. Guidance only: runtime truth stays in parseDraft,
+// so schema drift can never loosen boundary validation.
+const DraftSchema = Type.Object({
+  name: Type.String(),
+  description: Type.Optional(Type.String()),
+  trigger: Type.Optional(Type.Union([
+    Type.Object({ type: Type.Literal("manual") }),
+    Type.Object({ type: Type.Literal("cron"), expression: Type.String(), timezone: Type.String() }),
+    Type.Object({
+      type: Type.Literal("watch"),
+      script: Type.String(),
+      cwd: Type.String(),
+      intervalSeconds: Type.Number(),
+      mode: strEnum("once", "repeat"),
+    }),
+  ])),
+  action: Type.Union([
+    Type.Object({
+      type: Type.Literal("agent"),
+      session: Type.Union([
+        Type.Object({ mode: Type.Literal("fresh"), cwd: Type.String() }),
+        Type.Object({ mode: Type.Literal("fork"), cwd: Type.Optional(Type.String()) }),
+        Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
+      ]),
+      prompt: Type.String(),
+      launch: Type.Optional(Type.Object({
+        model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
+        thinking: Type.Optional(Type.String()),
+        capabilities: Type.Optional(Type.Union([Type.Literal("read"), Type.Literal("write")])),
+      })),
+    }),
+    Type.Object({ type: Type.Literal("bash"), script: Type.String(), cwd: Type.String() }),
+    Type.Object({ type: Type.Literal("task"), taskId: Type.String() }),
+  ]),
+  callback: Type.Optional(Type.Union([
+    Type.Object({ type: Type.Literal("none") }),
+    Type.Object({ type: Type.Literal("origin") }),
+    Type.Object({ type: Type.Literal("session"), sessionId: Type.String() }),
+  ])),
+  timeoutSeconds: Type.Optional(Type.Number()),
+});
 
 /** The model-facing `task` tool contract, injected into the agent seam as data. */
 export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTool {
@@ -12,34 +98,24 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run detached work with callbacks or wait for results; use wait/steer/follow_up/resume for child control and contact/reply for detached supervisor decisions.",
+      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run executes a stored task by task_id, or pass task (no task_id) to atomically create and run a one-shot subagent. Run detached work with callbacks or wait for results; use wait/steer/follow_up/resume for child control and contact/reply for detached supervisor decisions.",
     parameters: Type.Object({
-      operation: Type.Union([
-        Type.Literal("list"),
-        Type.Literal("create"),
-        Type.Literal("update"),
-        Type.Literal("run"),
-        Type.Literal("get"),
-        Type.Literal("cancel"),
-        Type.Literal("wait"),
-        Type.Literal("steer"),
-        Type.Literal("follow_up"),
-        Type.Literal("resume"),
-        Type.Literal("contact"),
-        Type.Literal("reply"),
-      ]),
+      operation: strEnum(
+        "list", "create", "update", "run", "get", "cancel",
+        "wait", "steer", "follow_up", "resume", "contact", "reply",
+      ),
       task_id: Type.Optional(Type.String()),
       run_id: Type.Optional(Type.String()),
       run_ids: Type.Optional(Type.Array(Type.String())),
       message_id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
-      reason: Type.Optional(Type.Union([Type.Literal("progress"), Type.Literal("decision")])),
-      wait_mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("first")])),
-      session_mode: Type.Optional(Type.Union([Type.Literal("fresh"), Type.Literal("fork")])),
-      task: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      reason: Type.Optional(strEnum("progress", "decision")),
+      wait_mode: Type.Optional(strEnum("all", "first")),
+      session_mode: Type.Optional(strEnum("fresh", "fork")),
+      task: Type.Optional(DraftSchema),
       input: Type.Optional(Type.Unknown()),
       wait: Type.Optional(Type.Boolean()),
-      callback: Type.Optional(Type.Union([Type.Literal("origin"), Type.Literal("none")])),
+      callback: Type.Optional(strEnum("origin", "none")),
       callback_session_id: Type.Optional(Type.String()),
     }),
     execute,
@@ -58,7 +134,7 @@ export async function handleTaskTool(
   const input = record(raw);
   if (!input) throw new Error("task tool parameters required");
   const active = store.findActiveRunForTarget(callerSessionId);
-  if (input.operation === "list") return definitions.list();
+  if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
   if (input.operation === "create") {
     if (active) throw new Error("subagents cannot create task definitions");
     return definitions.create(input.task, `session:${callerSessionId}`);
@@ -68,13 +144,27 @@ export async function handleTaskTool(
     return definitions.update(requiredString(input.task_id, "task_id"), input.task);
   }
   if (input.operation === "run") {
-    const task = definitions.get(requiredString(input.task_id, "task_id"));
-    if (active) {
-      if (task.action.type !== "agent") throw new Error("subagents may only invoke Agent tasks");
-      if (active.context.definition.action.type === "agent" && active.context.definition.action.launch?.capabilities === "read") {
-        throw new Error("read-only subagents cannot delegate nested work");
-      }
+    if (active && active.context.definition.action.type === "agent" && active.context.definition.action.launch?.capabilities === "read") {
+      throw new Error("read-only subagents cannot delegate nested work");
     }
+    const draft = input.task_id === undefined ? record(input.task) : undefined;
+    let task: TaskDefinition;
+    if (draft) {
+      // Inline one-shot subagent: persisted like any task (kind "subagent",
+      // filtered from default lists) so runs stay auditable and resumable.
+      if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
+        throw new Error("inline subagent tasks must use a manual trigger");
+      }
+      if (active) {
+        const action = record(draft.action);
+        if (action?.type !== "agent") throw new Error("subagents may only inline Agent tasks");
+        if (record(action.session)?.mode === "reuse") throw new Error("subagent inline tasks cannot reuse an existing session");
+      }
+      task = await definitions.create({ ...draft, trigger: { type: "manual" } }, `session:${callerSessionId}`, "subagent");
+    } else {
+      task = definitions.get(requiredString(input.task_id, "task_id"));
+    }
+    if (active && task.action.type !== "agent") throw new Error("subagents may only invoke Agent tasks");
     const wait = input.wait === true;
     const sessionMode = input.session_mode === "fresh" || input.session_mode === "fork" ? input.session_mode : undefined;
     if (wait && task.action.type === "agent" && !sessionMode && task.action.session.mode === "reuse" && task.action.session.sessionId === callerSessionId) {
@@ -92,20 +182,20 @@ export async function handleTaskTool(
       background: !wait,
       sessionMode,
     });
-    return wait ? host.waitForRun(run.id) : run;
+    return wait ? summarize(await host.waitForRun(run.id, signal)) : summarize(run);
   }
-  if (input.operation === "get") return host.getRun(requiredString(input.run_id, "run_id"));
+  if (input.operation === "get") return summarize(host.getRun(requiredString(input.run_id, "run_id")));
   if (input.operation === "wait") {
     const ids = Array.isArray(input.run_ids)
       ? input.run_ids.map((id) => requiredString(id, "run_id"))
       : [requiredString(input.run_id, "run_id")];
     for (const id of ids) assertOwns(store, callerSessionId, active, host.getRun(id));
-    return host.waitForRuns(ids, input.wait_mode === "first" ? "first" : "all");
+    return (await host.waitForRuns(ids, input.wait_mode === "first" ? "first" : "all", signal)).map(summarize);
   }
   if (input.operation === "cancel") {
     const run = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(store, callerSessionId, active, run);
-    return host.cancel(run.id);
+    return summarize(host.cancel(run.id));
   }
   if (input.operation === "steer" || input.operation === "follow_up") {
     const run = host.getRun(requiredString(input.run_id, "run_id"));
@@ -121,7 +211,7 @@ export async function handleTaskTool(
       callbackSessionId: wait ? null : callerSessionId,
       background: !wait,
     });
-    return wait ? host.waitForRun(run.id) : run;
+    return wait ? summarize(await host.waitForRun(run.id, signal)) : summarize(run);
   }
   if (input.operation === "contact") {
     if (!active) throw new Error("contact is only available inside an active Agent run");

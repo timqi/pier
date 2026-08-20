@@ -146,19 +146,25 @@ export class TaskService {
     return this.runs.enqueue(task, input, source, parentRunId, provenance);
   }
 
-  async waitForRun(id: string): Promise<TaskRun> {
+  async waitForRun(id: string, signal?: AbortSignal): Promise<TaskRun> {
     const current = this.getRun(id);
     if (isTerminal(current.state)) return current;
-    return new Promise((resolve) => {
+    if (signal?.aborted) throw new Error("wait cancelled");
+    return new Promise((resolve, reject) => {
       let set = this.waiters.get(id);
       if (!set) this.waiters.set(id, (set = new Set()));
       set.add(resolve);
+      // An aborted caller must not leave its waiter behind forever.
+      signal?.addEventListener("abort", () => {
+        set.delete(resolve);
+        reject(new Error("wait cancelled"));
+      }, { once: true });
     });
   }
 
-  async waitForRuns(ids: string[], mode: "all" | "first" = "all"): Promise<TaskRun[]> {
+  async waitForRuns(ids: string[], mode: "all" | "first" = "all", signal?: AbortSignal): Promise<TaskRun[]> {
     if (!ids.length) throw new Error("run_ids required");
-    const waits = [...new Set(ids)].map((id) => this.waitForRun(id));
+    const waits = [...new Set(ids)].map((id) => this.waitForRun(id, signal));
     return mode === "first" ? [await Promise.race(waits)] : Promise.all(waits);
   }
 

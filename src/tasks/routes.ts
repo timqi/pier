@@ -56,7 +56,10 @@ export function registerTaskRoutes(
   app.get("/api/tasks", (c) => {
     const trigger = c.req.query("trigger");
     const state = c.req.query("state");
+    const kind = c.req.query("kind");
     let rows = tasks.list();
+    // Subagent one-shots are hidden unless explicitly requested via ?kind=subagent.
+    rows = kind ? rows.filter((task) => task.kind === kind) : rows.filter((task) => task.kind !== "subagent");
     if (trigger) rows = rows.filter((task) => task.trigger.type === trigger);
     if (state === "archived") rows = rows.filter((task) => task.archived);
     else if (state === "active") rows = rows.filter((task) => !task.archived);
