@@ -96,6 +96,8 @@ const attachInput = $<HTMLInputElement>("#attach-input");
 let sessions: SessionInfo[] = [];
 let currentId: string | null = null;
 let currentState: SessionState = "idle";
+let chatVisible = true;
+let queueHasRows = false;
 let source: EventSource | null = null;
 let lastSeq = 0;
 let streamingEl: HTMLElement | null = null;
@@ -342,13 +344,19 @@ function updateComposer(): void {
 
 // --- pending queue panel (avibe ChatQueueRow concept) -----------------------
 
+function syncQueuePanel(): void {
+  const visible = chatVisible && queueHasRows;
+  queuePanel.classList.toggle("hidden", !visible);
+  queuePanel.classList.toggle("flex", visible);
+}
+
 function renderQueue(steering: string[], followUp: string[]): void {
   const rows = [
     ...steering.map((text) => ({ mode: "steer", text })),
     ...followUp.map((text) => ({ mode: "queued", text })),
   ];
-  queuePanel.classList.toggle("hidden", rows.length === 0);
-  queuePanel.classList.toggle("flex", rows.length > 0);
+  queueHasRows = rows.length > 0;
+  syncQueuePanel();
   queueRows.replaceChildren(
     ...rows.map((r) => {
       const li = h("li", "flex items-center gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-[13px]");
@@ -783,13 +791,15 @@ function connect(id: string, after: number): void {
 // The config view hides the chat elements but leaves the session wiring
 // (SSE, state) untouched — switching back is instant.
 
-const chatEls = [chatHeader, turnsPane, queuePanel, composer];
+const chatEls = [chatHeader, turnsPane, composer];
 const configView = createConfigView($("#config-view"), () =>
   [...groupByCwd(sessions).keys()],
 );
 
 function showConfig(): void {
+  chatVisible = false;
   for (const el of chatEls) el.classList.add("hidden");
+  syncQueuePanel();
   openConfigBtn.classList.add("bg-indigo-50");
   configView.show();
 }
@@ -798,7 +808,9 @@ function showChat(): void {
   if (!configView.visible) return;
   configView.hide();
   openConfigBtn.classList.remove("bg-indigo-50");
+  chatVisible = true;
   for (const el of chatEls) el.classList.remove("hidden");
+  syncQueuePanel();
 }
 
 // --- selection & sending --------------------------------------------------------------
@@ -1014,15 +1026,18 @@ function autosize(): void {
 async function send(mode: "auto" | "steer"): Promise<void> {
   const text = input.value.trim();
   const images = pendingImages;
-  if ((!text && images.length === 0) || !currentId) return;
+  const id = currentId;
+  if ((!text && images.length === 0) || !id) return;
+  const startsTurn = currentState === "idle" && mode === "auto";
   input.value = "";
   autosize();
   pendingImages = [];
   renderImageStrip();
-  updateComposer();
-  // Optimistic: an idle send (or a steer) reads as a user turn; a queued send
-  // shows up in the queue panel via the queue-state snapshot instead.
-  if (currentState === "idle" || mode === "steer") {
+  if (startsTurn) setState("streaming");
+  else updateComposer();
+  // Optimistic: a fresh prompt (or a steer) reads as a user turn; only a
+  // message sent into an existing run waits for the queue-state snapshot.
+  if (startsTurn || mode === "steer") {
     optimisticUserTexts.push(imageMarker(text, images.length));
     const bubble = appendTurn("user", text);
     for (const img of images) {
@@ -1033,11 +1048,15 @@ async function send(mode: "auto" | "steer"): Promise<void> {
     }
     scrollBottom(true);
   }
-  await fetch(`/api/sessions/${currentId}/messages`, {
+  const res = await fetch(`/api/sessions/${id}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text, mode, images: images.length ? images : undefined }),
   });
+  if (!res.ok && currentId === id) {
+    appendTurn("error", `send failed: ${res.status}`);
+    await loadSession(id);
+  }
 }
 
 /** Promote the queue: steer into the running turn, or abort it and re-prompt. */
