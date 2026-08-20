@@ -1,9 +1,10 @@
 # Pier Bootstrap Plan
 
 Roadmap for the initial build. Read `AGENTS.md` first — principles and
-budgets there override anything here. System contract: `docs/architecture.md`.
-Per-step specs: `docs/design/01-skeleton.md`, `02-agent-seam.md`,
-`03-web-workbench.md`.
+budgets there override anything here. System contract: `src/core/types.ts` +
+`docs/architecture.md`. Design docs exist only for in-flight/pending work
+(completed specs are deleted once code + tests carry the knowledge); write
+`docs/design/0N-*.md` for a step before dispatching it to an implementer.
 
 ## Context
 
@@ -18,15 +19,11 @@ Per-step specs: `docs/design/01-skeleton.md`, `02-agent-seam.md`,
 
 ## Steps
 
-1. **Skeleton** — `git init`, package.json, strict tsconfig, directory layout
-   (`core/ channels/ agent/ web/ tasks/`), define the two seam interfaces:
-   `Channel` (platform ↔ core) and `AgentSession` (core ↔ Pi).
-2. **Agent seam** — wrap Pi SDK in `agent/` behind `AgentSession`: create
-   session, prompt/steer/followUp, subscribe to the event stream. Budget
-   ≤ 200 lines.
-3. **Web workbench (v1)** — chat + observability timeline + session list.
-   SSE from the per-session event stream; verify steering and queued
-   messages end to end here. This is the primary surface.
+1. **Skeleton** — done.
+2. **Agent seam** — done (`src/agent/`, seam per `src/core/types.ts`).
+3. **Web workbench** — done and grown well past v1: chat + activity groups,
+   steering/queue semantics with recall, model picker, derived projects,
+   markdown, image attachments. Living spec: `docs/design/03-web-workbench.md`.
 4. **First IM channel: Telegram** — thinnest adapter, validates the
    `Channel` seam. Inbound normalize, outbound markdown render. Default
    queue policy: busy agent → `followUp()`; `!` prefix → `steer()`.
@@ -42,8 +39,8 @@ Per-step specs: `docs/design/01-skeleton.md`, `02-agent-seam.md`,
 
 - [x] 1. Skeleton
 - [x] 2. Agent seam
-- [x] 3. Web workbench v1 (manual browser check pending: steering live, SSE reconnect)
-- [ ] 4. Telegram channel
-- [ ] 5. Scheduler
-- [ ] 6. Show pages
-- [ ] 7. Slack + Lark
+- [x] 3. Web workbench (verified in daily use)
+- [ ] 4. Telegram channel (design doc pending)
+- [ ] 5. Scheduler (design doc pending)
+- [ ] 6. Show pages (design doc pending)
+- [ ] 7. Slack + Lark (design doc pending)

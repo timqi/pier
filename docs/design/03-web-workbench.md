@@ -1,8 +1,7 @@
-# Design 03 — Web Workbench v1
+# Web Workbench (living spec)
 
-Goal: browser surface for chat + live observability. Proves steering, queued
-messages, and the event stream end to end. This is a consumer of core; it
-contains no agent logic.
+Browser surface for chat + live observability: a consumer of core over
+REST + SSE, no agent logic. Kept current as the workbench evolves.
 
 ## Backend (`src/web/server.ts`, Hono, ≤ 300 lines)
 

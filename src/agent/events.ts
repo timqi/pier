@@ -1,6 +1,7 @@
 // Pure Pi-event → SessionEventPayload translation. Structurally typed on
 // purpose: no @earendil-works/pi-* imports, so it stays unit-testable without Pi
-// and Pi types never leak past the seam. See docs/design/02-agent-seam.md.
+// and Pi types never leak past the seam. The golden-table test in
+// events.test.ts is the mapping's spec; extend types.ts before adding events.
 
 import type { SessionEventPayload } from "../core/types.js";
 

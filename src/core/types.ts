@@ -1,5 +1,6 @@
-// Normative seam types. Source of truth: docs/architecture.md.
-// Changing anything here is a design decision — update architecture.md first.
+// Normative seam types — THIS FILE is the system contract (docs/architecture.md
+// documents the rules around it). Changing a seam is a design decision, not a
+// refactor; keep it implementable over RPC (no Pi types may appear here).
 
 /** A conversation is the unit of session routing. */
 export interface ConversationKey {
