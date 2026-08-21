@@ -12,7 +12,7 @@ import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
-import { markPicked, renderSuggestions, resetSuggestions } from "./suggestions.js";
+import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import { createTasksView } from "./tasks.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
@@ -736,24 +736,33 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   renderAttachments(node, showImage);
 }
 
-/** An assistant turn: markdown bubble, hover meta, next-step buttons. */
-function renderAssistant(node: HTMLElement, raw: string, meta?: TurnMeta): HTMLElement {
+/** An assistant turn: markdown bubble, hover meta, and — only for the turn
+ *  that just ended (`offer`) — next-step buttons. A mid-turn text block or a
+ *  replayed history turn never offers them: the run has moved on. */
+function renderAssistant(
+  node: HTMLElement,
+  raw: string,
+  meta?: TurnMeta,
+  offer = false,
+): HTMLElement {
   const { text, suggestions } = splitReply(raw);
   renderMarkdown(node, text);
   setMetaHint(node, meta);
-  renderSuggestions(node.parentElement ?? node, suggestions, (label) => void send("auto", label));
+  if (offer) {
+    renderSuggestions(node.parentElement ?? node, suggestions, (label) => void send("auto", label));
+  }
   return node;
 }
 
-const appendAssistant = (raw: string, meta?: TurnMeta): HTMLElement =>
-  renderAssistant(appendTurn("assistant", ""), raw, meta);
+const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>
+  renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
 
 /** Finalize the in-flight streamed text block (markdown-render it). */
-function finalizeStreaming(): void {
+function finalizeStreaming(offer = false): void {
   if (!streamingEl) return;
   const node = streamingEl;
   streamingEl = null;
-  renderAssistant(node, node.dataset.raw ?? node.textContent ?? "");
+  renderAssistant(node, node.dataset.raw ?? node.textContent ?? "", undefined, offer);
 }
 
 // --- activity group ------------------------------------------------------------------
@@ -1012,9 +1021,9 @@ function handleEvent(e: SessionEvent): void {
         if (e.text) streamingEl.dataset.raw = e.text;
         setMetaHint(streamingEl, e.meta);
       } else if (e.text) {
-        appendAssistant(e.text, e.meta);
+        appendAssistant(e.text, e.meta, true);
       }
-      finalizeStreaming();
+      finalizeStreaming(true);
       break;
     case "queue-state":
       renderQueue(e.steering, e.followUp);
@@ -1506,7 +1515,6 @@ async function send(mode: "auto" | "steer", label?: string): Promise<void> {
   if (startsTurn || mode === "steer") {
     optimisticUserTexts.push(imageMarker(text, images.length));
     const bubble = appendTurn("user", text);
-    if (label !== undefined) markPicked(bubble); // came from a next-step button
     for (const img of images) bubble.append(imageThumb(`data:${img.mimeType};base64,${img.data}`));
     scrollBottom(true);
   }
