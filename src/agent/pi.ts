@@ -8,6 +8,7 @@ import {
   defineTool,
   SessionManager,
   type AgentSession as PiAgentSession,
+  type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import type {
@@ -38,6 +39,23 @@ import { curateModels } from "./models.js";
 
 const toImageContent = (images?: ImageAttachment[]) =>
   images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
+
+/** Pi's bash tool has no default timeout, so a hung command holds the turn
+ * until someone aborts it — nobody is watching in a scheduled task. Kept below
+ * the task-run timeout (tasks/definitions.ts) so a stuck command comes back as
+ * a tool error the agent can retry with an explicit longer timeout, instead of
+ * killing the whole run. */
+const BASH_DEFAULT_TIMEOUT_SECONDS = 600;
+
+/** Patching the call is cheaper than replacing the tool: the built-in keeps its
+ * shell settings, and the agent spends no tokens deciding a timeout. */
+const bashTimeoutDefault = (pi: ExtensionAPI) => {
+  pi.on("tool_call", (event) => {
+    if (event.toolName === "bash" && event.input.timeout === undefined) {
+      event.input.timeout = BASH_DEFAULT_TIMEOUT_SECONDS;
+    }
+  });
+};
 
 class PiSession implements AgentSession {
   constructor(private readonly pi: PiAgentSession) {}
@@ -196,12 +214,12 @@ export class PiAgentFactory implements AgentFactory {
    * agent what the surface it is talking to can render. Layered as a context
    * file (not a systemPromptOverride) so the user's own instructions still win.
    */
-  private async resourceLoader(cwd: string): Promise<DefaultResourceLoader | undefined> {
-    if (!this.instructions && !this.skillPaths.length) return undefined;
+  private async resourceLoader(cwd: string): Promise<DefaultResourceLoader> {
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(), // same discovery Pi would have done itself
       additionalSkillPaths: this.skillPaths,
+      extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
       agentsFilesOverride: (current) => ({
         agentsFiles: this.instructions
           ? [...current.agentsFiles, { path: "<pier>/AGENTS.md", content: this.instructions }]
