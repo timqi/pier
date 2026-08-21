@@ -100,6 +100,7 @@ export interface TaskRun {
   taskId: string;
   taskRevision: number;
   parentRunId: string | null;
+  groupId: string | null;
   rootRunId: string;
   depth: number;
   resumedFromRunId: string | null;
@@ -127,6 +128,25 @@ export interface TaskRun {
   finishedAt: number | null;
 }
 
+export type GroupJoinMode = "all" | "first";
+
+/** A fan-out join owned by core: one aggregated callback when the join
+ * condition is met. Members carry `groupId` and no individual callback. */
+export interface TaskGroup {
+  id: string;
+  join: GroupJoinMode;
+  invokedBySessionId: string;
+  callbackSessionId: string | null;
+  memberRunIds: string[];
+  winnerRunId: string | null;
+  callbackState: "pending" | "delivered" | "failed" | null;
+  callbackAttempts: number;
+  callbackError: string | null;
+  callbackNextAttemptAt: number | null;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
 export type TaskMessageKind = "steer" | "follow_up" | "progress" | "decision" | "reply";
 export type TaskMessageState = "pending" | "delivered" | "answered" | "failed" | "expired";
 
@@ -137,7 +157,6 @@ export interface TaskMessage {
   fromSessionId: string;
   toSessionId: string;
   replyTo: string | null;
-  retryOf: string | null;
   state: TaskMessageState;
   content: string;
   createdAt: number;

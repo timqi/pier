@@ -44,6 +44,9 @@ export class AgentTaskRunner {
         });
         const abort = (): void => void session.abort();
         signal.addEventListener("abort", abort, { once: true });
+        // A pre-aborted signal never fires the listener: check before the
+        // prompt starts or a cancelled run would hang until its timeout.
+        if (signal.aborted) throw new Error("cancelled");
         try {
           const turn = session.systemInput(
             prompt,
@@ -56,7 +59,7 @@ export class AgentTaskRunner {
             "prompt",
           );
           await Promise.resolve();
-          await this.messages.deliverPendingControls(run);
+          this.messages.deliverPendingControls(run);
           await turn;
           if (signal.aborted) throw new Error("cancelled");
           if (!text) {

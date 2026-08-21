@@ -65,10 +65,12 @@ A definition contains:
 Every trigger attempt creates a run record containing:
 
 - run id, task id/revision, trigger source, parent run id, and timestamps
-- invoking, target, and callback session ids plus foreground/background mode
+- invoking, target, and callback session ids, plus group id when the run
+  belongs to a fan-out group
 - callback delivery state, attempts, next retry, and last delivery error
 - state: `queued`, `running`, `succeeded`, `failed`, `cancelled`, `interrupted`,
-  or `skipped`
+  or `skipped`; an aborted run reports why we stopped it (`cancelled`, or
+  `task timed out`), never how its killed child looked
 - exact input and execution context: definition snapshot, cwd, timeout, and,
   for Agent actions, session id, model, and rendered prompt
 - result: Agent response and session id; Bash exit code/stdout/stderr; or child
@@ -159,23 +161,27 @@ path.
 ## Agent collaboration
 
 Pier registers one `task` tool with operations `list`, `create`, `update`,
-`run`, `get`, and `cancel`. It calls the same task service as HTTP. `run` can
-return a run id immediately or wait for a terminal result, allowing an agent to
-delegate to an Agent task and consume the other session's response as a
-sub-agent result. Creator session id and parent run id are propagated for an
-auditable collaboration chain.
+`run`, `get`, and `cancel`. It calls the same task service as HTTP. `run`
+always returns run ids immediately; results come back exclusively as persisted
+callbacks, so a model never blocks inside a tool call waiting on another
+session. Creator session id and parent run id are propagated for an auditable
+collaboration chain.
 
 The tool does not expose raw SQLite or a separate scheduler API. Agent-created
 tasks appear immediately in Console and obey the same validation, concurrency,
 history, and cancellation rules.
 
+Its usage guide ships in the repo at `skills/pier-tasks/SKILL.md` and is loaded
+per session through the agent seam (`additionalSkillPaths`), never installed
+into the user's global or project skill directories: the document describes a
+tool that only exists inside a Pier session, and it must version with
+`src/tasks/tool.ts` rather than with someone's home directory.
+
 ### Session communication
 
-An asynchronous `task.run` records the caller as `invokedBySessionId`, appears
-as a live Background Run row in that session, and defaults its callback to the
-caller. A waiting call (`wait:true`) returns through the tool result and does
-not also callback. Detached calls may override with `callback:none` or
-`callback_session_id`. Definition-level callback policies (`none`, `origin`, or a
+Every `task.run` records the caller as `invokedBySessionId`, appears as a live
+Background Run row in that session, and defaults its callback to the caller.
+Calls may override with `callback:none` or `callback_session_id`. Definition-level callback policies (`none`, `origin`, or a
 specific session) cover scheduled and HTTP-started work.
 
 Agent delegation and callbacks use Pi persisted custom messages rather than
@@ -183,8 +189,30 @@ pretending to be user input. Their metadata contains task/run/source session
 ids; the session stream emits `system-input`, and transcript replay rebuilds the
 same System input row. Callback acceptance is a durable outbox state on the run:
 failed delivery retries with backoff, while a busy target accepts it as a Pi
-follow-up. Full results remain on the run; callback content is bounded and links
-to the run id.
+follow-up. Waiting for a busy target is not a delivery attempt — it reschedules
+without touching `callbackAttempts`, so the counter keeps its meaning and the
+failure backoff never starts at its ceiling. `delivered` means the input was handed to the
+target session, not that it finished reading it: the seam's `systemInput`
+promise settles with the turn the input triggers, so delivery is recorded on
+hand-off and a rejection flips the state to `failed`.
+
+Supervisor and control messages are handed off the same way and never awaited —
+awaiting would block the sender on the recipient's entire turn, which is exactly
+the deadlock class that removed `wait`. A failed injection is retried by the
+service tick with backoff, and a control message whose run finished meanwhile
+expires there instead of retrying forever; retry state is in-memory because a
+restart already expires undelivered controls and keeps decisions answerable.
+The residual crash window — hand-off recorded, process dies before Pi persists
+the message — loses that one input; the transcript dedupe in delivery covers the
+opposite order. Full results remain on the run; callback content is bounded and
+links to the run id.
+
+Delivery batches per target session: when a busy session accumulates several
+pending callbacks and progress messages, the outbox merges everything pending
+for that session into one combined system input at the next turn boundary —
+one model turn consumes the backlog instead of one turn per message. Each
+section keeps its own run/message id for transcript dedupe; decision questions
+and steers are never batched, they deliver individually.
 
 ### Activity console
 
@@ -210,8 +238,8 @@ or forked session is "starting a subagent".
 
 - Start an isolated child from a reusable Agent Task, either with fresh context
   or a fork of the invoking session.
-- Run several isolated children concurrently, then inspect, steer, stop, wait
-  for, or continue them through stable run ids.
+- Run several isolated children concurrently as one core-joined group, then
+  inspect, steer, stop, or continue them through stable run ids.
 - Let a detached child send progress or request a decision from its immediate
   supervisor, with durable provenance and an explicit reply.
 - Keep every child as a normal persisted Pi session with one existing event
@@ -288,6 +316,14 @@ Task delegation. Reused sessions own their model and tools, so a definition with
 `mode:"reuse"` rejects launch policy rather than mutating a shared session.
 These controls reduce accidental authority; they are not an OS sandbox.
 
+`capabilities` is a Console/HTTP field only and is absent from the model-facing
+draft schema: a delegating agent gets a child with its own tools and spends no
+decision on the knob. An inline draft that carries it anyway is rejected rather
+than silently honoured, so a model working from stale memory learns the field is
+gone. Live testing showed the cost of exposing it — a read-only child asked to
+run a command narrated the command instead of reporting the missing tool, and
+the run still recorded `succeeded`.
+
 Pier does not add a separate system-prompt format in this slice. The Task's base
 prompt and delimited per-run input remain the child brief. Project instructions,
 skills, extensions, and model defaults continue to come from Pi for the target
@@ -326,7 +362,7 @@ definition snapshot and reuses its `targetSessionId`. It does not silently pick
 up edits made to the current Task definition. The new prompt is recorded as a
 follow-up brief and the new run links back with `resumedFromRunId`.
 
-### Concurrency and waiting
+### Concurrency and fan-out
 
 Automatic triggers preserve the existing overlap rule: when a definition is
 already active, cron and watch produce a `skipped` run. Interactive delegation
@@ -343,19 +379,43 @@ These are fixed initial limits, not user-facing configuration. Raise them only
 after usage shows a real need. Task timeout and output caps continue to apply to
 every child independently.
 
-`wait:true` keeps current foreground semantics: the tool result returns the
-terminal run. Detached runs return immediately and callback exactly once.
-`task.wait` accepts one or more run ids plus `mode:"all"|"first"`, allowing a
-parent to launch several detached children and join them without polling. Runs
-intended for a join use `callback:"none"`; waiting does not silently consume or
-cancel an already configured callback.
+**All agent-facing communication is asynchronous and owned by core.** A tool
+call never blocks on another session; `run` returns immediately, results arrive
+through the callback outbox, and the model's only waiting primitive is ending
+its turn. Blocking `wait` was removed after live testing produced a deadlock:
+a parent blocked in `wait` cannot receive its child's `decision` question (a
+follow-up lands between turns, and even a steer only lands at a step boundary a
+blocking call never reaches), while the child blocks on the reply — both
+sides stall until the run timeout. The blocking path also required a family of
+guard rails (self-wait rejection, wait/callback mutual exclusion, callback
+suppression races) that are deleted with it. `waitForRun` survives only as a
+core-internal primitive for `action.type:"task"` chaining and group joins; no
+surface exposes blocking waits — not the model tool, not HTTP.
 
-Waiting for a run targeting the caller's own session remains invalid. A child
-cannot ask a blocking supervisor question when its supervisor invoked it with
-`wait:true`, because the supervisor model is blocked in the tool call. Such a
-request fails immediately with guidance to return `needs_decision` in the child
-result. Interactive supervisor communication is available only to detached
-runs.
+Fan-out joins in core, not in the model. `run` accepts either one `task` or a
+`tasks` array (each entry a draft or `task_id`) plus `join:"all"|"first"`,
+defaulting to `"all"`. Members beyond the active-run limit queue like any
+other run; a group whose size would exceed the cumulative children cap is
+rejected whole before any member starts:
+
+- Core creates one run group — a `task_groups` row holding the join mode and
+  the group's own callback outbox state (attempts, next retry, last error);
+  member runs carry `groupId` and no individual callback — the group owns
+  delivery.
+- `all`: when every member is terminal, one aggregated callback lists each
+  member's name, state, and bounded result text with run ids. Members that
+  ended with an unanswered decision are flagged with their `pendingDecisionId`
+  so the aggregate never swallows a question awaiting the caller's reply.
+- `first`: the first terminal member wins; core cancels the remaining members
+  and delivers the winner in the aggregated callback. Losers are cancelled,
+  not erased: the callback lists their run and session ids, so a caller can
+  still `resume` a loser's session if its partial work turns out to matter.
+- Group callbacks ride the existing outbox semantics: busy targets defer,
+  transcript dedupe keys on the group id, failures retry with backoff, restart
+  recovery re-delivers.
+
+The model never tracks pending run-id lists across turns; a chain is simply
+run → callback → next run.
 
 ### Runtime control
 
@@ -365,15 +425,14 @@ The existing run id is the control handle. New operations are:
 | --------- | -------- |
 | `steer` | Persist a control message and deliver it as a Pi steering custom message to a running child |
 | `follow_up` | Persist and queue guidance for the child's next turn boundary |
-| `wait` | Wait for the first or all selected runs to become terminal |
 | `resume` | Create a linked continuation in the same persisted child session |
-| `cancel` | Existing behavior; queued work is cancelled and a running child is aborted |
+| `cancel` | Cancels a run — or every non-terminal member when given a group id — and cascades to non-terminal descendants; queued work is dropped and running children are aborted. Orphans must not outlive the delegation that wanted them |
 
 Steer/follow-up delivery has a stable message id and reports `queued`,
 `delivered`, `failed`, or `expired`. "Delivered" means Pi accepted the message,
 not that the model obeyed it. Reusing a message id with different content is an
-error. Pier never retries an authored steer automatically; the caller may issue
-a new message linked with `retryOf`.
+error. A failed injection is retried by the delivery sweep with backoff; the
+message id stays stable and the recipient transcript dedupes redelivery.
 
 Queued runs retain guidance in the mailbox and receive it immediately after
 their delegation brief. Terminal runs reject steer/follow-up; use `resume`.
@@ -386,7 +445,7 @@ may call:
 
 ```ts
 task({ operation: "contact", reason: "progress", message: "..." })
-task({ operation: "contact", reason: "decision", message: "...", wait: true })
+task({ operation: "contact", reason: "decision", message: "..." })
 ```
 
 The service derives the active run and immediate supervisor from the caller
@@ -395,19 +454,34 @@ provenance.
 
 - **progress** is fire-and-forget and should only report information that
   changes the supervisor's plan.
-- **decision** creates one pending question and may block the child tool call
-  until the supervisor replies or the run timeout expires.
+- **decision** creates one pending question and returns a message receipt
+  immediately. The child states what it awaits and ends its turn; no tool call
+  ever blocks on the supervisor.
 
 The supervisor receives a persisted `pier.system-input` containing task, run,
-child, message, and reason metadata. It replies with:
+child, message, and reason metadata. A decision is delivered as a steer, a
+progress note as a follow-up: follow-ups land only once the supervisor has no
+tool calls left, which makes a blocked child wait out an entire supervisor turn,
+while a steer arrives at the next step boundary without interrupting the work in
+flight. It replies with:
 
 ```ts
 task({ operation: "reply", message_id: "...", message: "..." })
 ```
 
-The reply resolves the waiting child tool call. There may be only one unresolved
-decision per run. A reply is accepted once; duplicates with the same content are
-idempotent, and different content for the same message id is rejected.
+Reply routing is core's job: if the child run is still active, the reply is
+injected into its session as a follow-up; if the run already finished, core
+auto-resumes it — a linked continuation run in the same session with the reply
+as its prompt, calling back to the replier. A run that ends its turn with an
+unanswered decision becomes terminal but suppresses its completion callback
+(the pending question is the notification) and exposes `pendingDecisionId` in
+run summaries. There may be only one unresolved decision per run. A reply is
+accepted once; duplicates with the same content are idempotent, and different
+content for the same message id is rejected. Decisions have no reply timeout:
+they survive restarts and stay answerable for as long as the child session
+exists. A manual `resume` of a run with an unanswered decision supersedes it:
+the decision becomes `expired` and can no longer be replied to — one
+continuation per run, never two racing ones.
 
 Routine completion never uses this channel. The run result and existing callback
 outbox remain the only completion path, preventing duplicate completion turns.
@@ -425,7 +499,6 @@ interface TaskMessage {
   fromSessionId: string;
   toSessionId: string;
   replyTo: string | null;
-  retryOf: string | null;
   state: "pending" | "delivered" | "answered" | "failed" | "expired";
   content: string;
   createdAt: number;
@@ -440,10 +513,11 @@ KiB. Delivery checks the target transcript for the same message id before
 injecting, using the same idempotency principle as callbacks. Callback storage
 is not migrated into this table in this slice; that would be unrelated churn.
 
-After restart, queued/running runs are interrupted as today. Pending authored
-messages become `expired`; terminal callbacks still retry through their existing
-outbox. A later `resume` starts a new run and new messages rather than pretending
-an old blocked tool call survived the process.
+After restart, queued/running runs are interrupted as today. Pending
+steer/follow-up messages become `expired`; pending decisions persist and remain
+answerable, since a reply to a terminal run resumes it. Terminal callbacks and
+group callbacks still retry through their existing outbox. No tool call ever
+blocks, so a restart never strands a waiting caller.
 
 ### Tool authority
 
@@ -508,15 +582,21 @@ The HTTP additions mirror Task service operations:
 | Route | Behavior |
 | ----- | -------- |
 | `POST /api/task-runs/:id/steer` | Body `{message, mode:"steer"|"followUp"}`; return message receipt |
-| `POST /api/task-runs/wait` | Body `{runIds, mode:"all"|"first"}`; wait for terminal runs |
 | `POST /api/task-runs/:id/resume` | Body `{message, wait?}`; create linked continuation |
+| `GET /api/task-runs/:id` | Run detail plus `pendingDecisionId`, the same view the `task` tool returns |
 | `GET /api/task-runs/:id/messages` | Ordered control/supervisor message ledger |
+| `GET /api/task-groups/:id` | Group join mode, member run states, and callback delivery state |
 | `POST /api/task-messages/:id/reply` | Reply once to a pending decision |
 
-The typed `task` tool adds `wait`, `steer`, `follow_up`, `resume`, `contact`, and
-`reply`. `run` adds optional `session_mode`. It does not add parallel arrays or
-a workflow script; models can launch multiple detached runs and join them with
-`wait`.
+The typed `task` tool adds `steer`, `follow_up`, `resume`, `contact`, and
+`reply`. `run` adds optional `session_mode` and accepts `tasks[]` with
+`join:"all"|"first"` for core-joined fan-out; `get` and `cancel` accept a
+`run_id` or a `group_id`, so a group is observable and cancellable as one unit
+before its callback lands. `get` also accepts a `task_id` for that task's
+recent runs, and every run summary carries `triggerSource` — who fired that
+run, as opposed to the definition's `trigger`, which is only its schedule. It does not add a workflow
+script, and it has no blocking operation: results, group joins, and decision
+replies all arrive as persisted callbacks.
 
 ### Console behavior
 
@@ -553,7 +633,8 @@ Implementation order:
 
 1. Add session policies, lineage fields, `AgentFactory.fork`, and fresh/fork
    execution. Verify migration of existing reused Agent Tasks.
-2. Add concurrency bounds, `wait`, steer/follow-up, resume, and ownership tests.
+2. Add concurrency bounds, run groups with `join:"all"|"first"`,
+   steer/follow-up, resume, and ownership tests.
 3. Add `task_messages`, detached supervisor contact/reply, transcript
    idempotency, and restart expiry.
 4. Add chat controls, Run Messages, and Activity/Fleet projections.
@@ -564,16 +645,21 @@ at a time or explicitly separate project checkouts.
 
 ### Subagent acceptance
 
-- A parent can run the same Reviewer Task three times in fresh mode, observe
-  three child sessions, wait for all results, and retain complete run lineage.
+- A parent can run the same Reviewer Task three times in fresh mode as one
+  group, observe three child sessions, receive exactly one aggregated callback,
+  and retain complete run lineage.
 - A forked child sees the parent's active compacted context, writes only to its
   own future transcript, and links back to the source session and run.
-- A detached child can request one decision; the parent receives a persisted
-  System input, replies once, and the waiting child continues with that reply.
+- A child can request one decision and end its turn; the parent receives a
+  persisted System input, replies once, and core continues the child — follow-up
+  if still active, auto-resume if terminal — with that reply.
+- A parent that is mid-turn can never deadlock a child: no tool operation
+  blocks on another session's progress.
 - A parent can steer or stop only its descendants. Duplicate message delivery
   never produces duplicate System inputs.
-- Restart interrupts live children, expires interactive messages, preserves
-  sessions and run history, and still delivers any pending terminal callback.
+- Restart interrupts live children, expires pending steer/follow-up, keeps
+  decisions answerable, preserves sessions and run history, and still delivers
+  any pending terminal or group callback.
 - Console chat, Task detail, and Activity show the same state from Task Runs,
   Task Messages, and each child's single session event stream.
 
@@ -581,7 +667,8 @@ at a time or explicitly separate project checkouts.
 
 Use one SQLite database under `PIER_HOME`, accessed directly without an ORM.
 `tasks` stores the current definition; `task_runs` stores immutable snapshots
-and results. Scheduling, claiming, and terminal updates are transactions so a
+and results; `task_groups` stores fan-out join state and group callback
+delivery. Scheduling, claiming, and terminal updates are transactions so a
 trigger cannot be claimed twice.
 
 The task service lives in `tasks/` and depends on core seams, never on the Pi
@@ -601,8 +688,9 @@ They must not be exposed remotely until authentication and authorization exist.
   the reused session; every run links to the exact assistant result.
 - A watch can check a PR once a minute, record every probe, and on match run an
   Agent task or another task, with parent/child history visible.
-- An agent can create and invoke an Agent task, wait for its result, or detach it
-  and receive one persisted callback without bypassing the common task service.
+- An agent can create and invoke an Agent task and receive exactly one persisted
+  callback — single run or aggregated group — without bypassing the common task
+  service.
 - Chat shows live background state and persisted system inputs; Activity shows
   active sessions and invocation/callback dependencies.
 - Restarting Pier leaves no run stuck in `running` and does not replay missed

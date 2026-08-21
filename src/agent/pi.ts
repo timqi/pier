@@ -186,6 +186,9 @@ export class PiAgentFactory implements AgentFactory {
     private readonly extraTools: AgentCustomTool[] = [],
     /** Appended as a virtual context file, so Pi's own prompt stays intact. */
     private readonly instructions = "",
+    /** Skills documenting Pier's own tools: loaded per session, never installed
+     * into the user's global or project skill directories. */
+    private readonly skillPaths: string[] = [],
   ) {}
 
   /**
@@ -194,15 +197,15 @@ export class PiAgentFactory implements AgentFactory {
    * file (not a systemPromptOverride) so the user's own instructions still win.
    */
   private async resourceLoader(cwd: string): Promise<DefaultResourceLoader | undefined> {
-    if (!this.instructions) return undefined;
+    if (!this.instructions && !this.skillPaths.length) return undefined;
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(), // same discovery Pi would have done itself
+      additionalSkillPaths: this.skillPaths,
       agentsFilesOverride: (current) => ({
-        agentsFiles: [
-          ...current.agentsFiles,
-          { path: "<pier>/AGENTS.md", content: this.instructions },
-        ],
+        agentsFiles: this.instructions
+          ? [...current.agentsFiles, { path: "<pier>/AGENTS.md", content: this.instructions }]
+          : current.agentsFiles,
       }),
     });
     await loader.reload();

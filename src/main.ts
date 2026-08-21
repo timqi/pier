@@ -1,5 +1,6 @@
 // Wiring only — no logic lives here. See docs/architecture.md.
 
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { PiConfigStore } from "./agent/config.js";
@@ -16,8 +17,11 @@ import { createServer } from "./web/server.js";
 
 let tasks: TaskService;
 const factory = new PiAgentFactory(
-  [taskToolSpec((params, callerSessionId, signal) => tasks.tool(params, callerSessionId, signal))],
+  [taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId))],
   REPLY_SURFACE_PROMPT,
+  // Ships with Pier: documents Pier's own tools, so it loads only inside a
+  // Pier session — not in a bare Pi session that has no task tool.
+  [fileURLToPath(new URL("../skills", import.meta.url))],
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
@@ -43,6 +47,7 @@ app.route("/", createServer({
 }));
 
 const port = Number(process.env.PORT ?? 3141);
-serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-  console.log(`pier: workbench on http://localhost:${port}`);
+const hostname = process.env.HOST ?? "127.0.0.1";
+serve({ fetch: app.fetch, port, hostname }, () => {
+  console.log(`pier: workbench on http://${hostname}:${port}`);
 });

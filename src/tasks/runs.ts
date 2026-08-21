@@ -13,6 +13,7 @@ export interface RunProvenance {
   callbackSessionId?: string | null;
   background?: boolean;
   sessionMode?: "reuse" | "fresh" | "fork";
+  groupId?: string | null;
   resumedFromRunId?: string | null;
   rootRunId?: string;
   depth?: number;
@@ -69,6 +70,7 @@ export class TaskRunQueue {
       taskId: definition.id,
       taskRevision: definition.revision,
       parentRunId,
+      groupId: provenance.groupId ?? null,
       rootRunId,
       depth,
       resumedFromRunId: provenance.resumedFromRunId ?? null,

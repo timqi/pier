@@ -4,7 +4,7 @@ import { TaskDefinitions, record, requiredString } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { TaskDefinition, TaskResult, TaskRun } from "./types.js";
+import type { TaskDefinition, TaskGroup, TaskResult, TaskRun } from "./types.js";
 
 // JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
 const strEnum = <const T extends readonly string[]>(...values: T) =>
@@ -17,11 +17,14 @@ export interface RunSummary {
   taskId: string;
   taskName: string;
   state: TaskRun["state"];
-  background: boolean;
+  /** Who fired this run — the definition's trigger is only its schedule policy. */
+  triggerSource: TaskRun["triggerSource"];
+  groupId: string | null;
   sessionMode: TaskRun["sessionMode"];
   targetSessionId: string | null;
   callbackSessionId: string | null;
   callbackState: TaskRun["callbackState"];
+  pendingDecisionId: string | null;
   depth: number;
   queuedAt: number;
   startedAt: number | null;
@@ -31,16 +34,27 @@ export interface RunSummary {
   skipReason: string | null;
 }
 
-const summarize = (run: TaskRun): RunSummary => ({
+export interface GroupSummary {
+  groupId: string;
+  join: TaskGroup["join"];
+  state: "running" | "finished";
+  callbackState: TaskGroup["callbackState"];
+  winnerRunId: string | null;
+  members: RunSummary[];
+}
+
+const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary => ({
   runId: run.id,
   taskId: run.taskId,
   taskName: run.context.definition.name,
   state: run.state,
-  background: run.background,
+  triggerSource: run.triggerSource,
+  groupId: run.groupId,
   sessionMode: run.sessionMode,
   targetSessionId: run.targetSessionId,
   callbackSessionId: run.callbackSessionId,
   callbackState: run.callbackState,
+  pendingDecisionId,
   depth: run.depth,
   queuedAt: run.queuedAt,
   startedAt: run.startedAt,
@@ -48,6 +62,15 @@ const summarize = (run: TaskRun): RunSummary => ({
   result: run.result,
   error: run.error,
   skipReason: run.skipReason,
+});
+
+const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMessenger): GroupSummary => ({
+  groupId: group.id,
+  join: group.join,
+  state: group.finishedAt ? "finished" : "running",
+  callbackState: group.callbackState,
+  winnerRunId: group.winnerRunId,
+  members: members.map((run) => summarize(run, messages.openDecisionId(run.id))),
 });
 
 // Model-facing draft shape. Guidance only: runtime truth stays in parseDraft,
@@ -75,10 +98,12 @@ const DraftSchema = Type.Object({
         Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
       ]),
       prompt: Type.String(),
+      // No `capabilities` here on purpose: a child gets the same tools as any
+      // Pier session, so the model never spends a decision on it. Read-only
+      // children stay configurable through the Console and HTTP.
       launch: Type.Optional(Type.Object({
         model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
         thinking: Type.Optional(Type.String()),
-        capabilities: Type.Optional(Type.Union([Type.Literal("read"), Type.Literal("write")])),
       })),
     }),
     Type.Object({ type: Type.Literal("bash"), script: Type.String(), cwd: Type.String() }),
@@ -98,23 +123,23 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run executes a stored task by task_id, or pass task (no task_id) to atomically create and run a one-shot subagent. Run detached work with callbacks or wait for results; use wait/steer/follow_up/resume for child control and contact/reply for detached supervisor decisions.",
+      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run executes a stored task by task_id, a one-shot subagent from an inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions.",
     parameters: Type.Object({
       operation: strEnum(
         "list", "create", "update", "run", "get", "cancel",
-        "wait", "steer", "follow_up", "resume", "contact", "reply",
+        "steer", "follow_up", "resume", "contact", "reply",
       ),
       task_id: Type.Optional(Type.String()),
       run_id: Type.Optional(Type.String()),
-      run_ids: Type.Optional(Type.Array(Type.String())),
+      group_id: Type.Optional(Type.String()),
       message_id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
       reason: Type.Optional(strEnum("progress", "decision")),
-      wait_mode: Type.Optional(strEnum("all", "first")),
       session_mode: Type.Optional(strEnum("fresh", "fork")),
       task: Type.Optional(DraftSchema),
+      tasks: Type.Optional(Type.Array(Type.Union([DraftSchema, Type.Object({ task_id: Type.String() })]))),
+      join: Type.Optional(strEnum("all", "first")),
       input: Type.Optional(Type.Unknown()),
-      wait: Type.Optional(Type.Boolean()),
       callback: Type.Optional(strEnum("origin", "none")),
       callback_session_id: Type.Optional(Type.String()),
     }),
@@ -129,7 +154,6 @@ export async function handleTaskTool(
   messages: TaskMessenger,
   raw: unknown,
   callerSessionId: string,
-  signal?: AbortSignal,
 ): Promise<unknown> {
   const input = record(raw);
   if (!input) throw new Error("task tool parameters required");
@@ -147,31 +171,35 @@ export async function handleTaskTool(
     if (active && active.context.definition.action.type === "agent" && active.context.definition.action.launch?.capabilities === "read") {
       throw new Error("read-only subagents cannot delegate nested work");
     }
+    if (Array.isArray(input.tasks)) {
+      // Core-joined fan-out: members run detached, one aggregated callback.
+      if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
+      if (input.session_mode !== undefined) throw new Error("session_mode applies to a single run only");
+      if (input.tasks.length < 2) throw new Error("tasks[] needs at least 2 entries; use task for a single run");
+      const resolved: TaskDefinition[] = [];
+      for (const rawEntry of input.tasks) {
+        const entry = record(rawEntry);
+        if (!entry) throw new Error("invalid tasks[] entry");
+        resolved.push(entry.task_id === undefined
+          ? await resolveDraft(definitions, entry, active, callerSessionId)
+          : resolveStored(definitions, entry.task_id, active));
+      }
+      const { group, runs } = host.runGroup(
+        resolved,
+        input.join === "first" ? "first" : "all",
+        callerSessionId,
+        active?.id ?? null,
+        input.callback === "none" ? null : callerSessionId,
+      );
+      return summarizeGroup(group, runs, messages);
+    }
     const draft = input.task_id === undefined ? record(input.task) : undefined;
-    let task: TaskDefinition;
-    if (draft) {
-      // Inline one-shot subagent: persisted like any task (kind "subagent",
-      // filtered from default lists) so runs stay auditable and resumable.
-      if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
-        throw new Error("inline subagent tasks must use a manual trigger");
-      }
-      if (active) {
-        const action = record(draft.action);
-        if (action?.type !== "agent") throw new Error("subagents may only inline Agent tasks");
-        if (record(action.session)?.mode === "reuse") throw new Error("subagent inline tasks cannot reuse an existing session");
-      }
-      task = await definitions.create({ ...draft, trigger: { type: "manual" } }, `session:${callerSessionId}`, "subagent");
-    } else {
-      task = definitions.get(requiredString(input.task_id, "task_id"));
-    }
-    if (active && task.action.type !== "agent") throw new Error("subagents may only invoke Agent tasks");
-    const wait = input.wait === true;
+    const task = draft
+      ? await resolveDraft(definitions, draft, active, callerSessionId)
+      : resolveStored(definitions, input.task_id, active);
     const sessionMode = input.session_mode === "fresh" || input.session_mode === "fork" ? input.session_mode : undefined;
-    if (wait && task.action.type === "agent" && !sessionMode && task.action.session.mode === "reuse" && task.action.session.sessionId === callerSessionId) {
-      throw new Error("cannot wait for an Agent task targeting the caller's own session");
-    }
-    let callbackSessionId: string | null = wait || input.callback === "none" ? null : callerSessionId;
-    if (!active && !wait && typeof input.callback_session_id === "string") {
+    let callbackSessionId: string | null = input.callback === "none" ? null : callerSessionId;
+    if (!active && callbackSessionId && typeof input.callback_session_id === "string") {
       callbackSessionId = requiredString(input.callback_session_id, "callback_session_id");
       if (!(await definitions.sessionExists(callbackSessionId))) throw new Error(`unknown session: ${callbackSessionId}`);
     }
@@ -179,23 +207,35 @@ export async function handleTaskTool(
       invokedBySessionId: callerSessionId,
       sourceSessionId: callerSessionId,
       callbackSessionId,
-      background: !wait,
+      background: true,
       sessionMode,
     });
-    return wait ? summarize(await host.waitForRun(run.id, signal)) : summarize(run);
+    return summarize(run, null);
   }
-  if (input.operation === "get") return summarize(host.getRun(requiredString(input.run_id, "run_id")));
-  if (input.operation === "wait") {
-    const ids = Array.isArray(input.run_ids)
-      ? input.run_ids.map((id) => requiredString(id, "run_id"))
-      : [requiredString(input.run_id, "run_id")];
-    for (const id of ids) assertOwns(store, callerSessionId, active, host.getRun(id));
-    return (await host.waitForRuns(ids, input.wait_mode === "first" ? "first" : "all", signal)).map(summarize);
+  if (input.operation === "get") {
+    if (typeof input.group_id === "string") {
+      const { group, members } = host.getGroup(input.group_id);
+      return summarizeGroup(group, members, messages);
+    }
+    // Run history by task: without it, checking what a task did (or whether a
+    // cascade landed) means leaving the tool for the database.
+    if (input.run_id === undefined && typeof input.task_id === "string") {
+      return host.listRuns(input.task_id, 10).map((run) => summarize(run, messages.openDecisionId(run.id)));
+    }
+    const run = host.getRun(requiredString(input.run_id, "run_id"));
+    return summarize(run, messages.openDecisionId(run.id));
   }
   if (input.operation === "cancel") {
+    if (typeof input.group_id === "string") {
+      const { group, members } = host.getGroup(input.group_id);
+      for (const member of members) assertOwns(store, callerSessionId, active, member);
+      const cancelled = host.cancelGroup(group.id);
+      return summarizeGroup(cancelled, cancelled.memberRunIds.map((id) => host.getRun(id)), messages);
+    }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(store, callerSessionId, active, run);
-    return summarize(host.cancel(run.id));
+    const cancelled = host.cancel(run.id);
+    return summarize(cancelled, messages.openDecisionId(cancelled.id));
   }
   if (input.operation === "steer" || input.operation === "follow_up") {
     const run = host.getRun(requiredString(input.run_id, "run_id"));
@@ -205,23 +245,53 @@ export async function handleTaskTool(
   if (input.operation === "resume") {
     const prior = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(store, callerSessionId, active, prior);
-    const wait = input.wait === true;
     const run = host.resume(prior.id, requiredString(input.message, "message"), {
       invokedBySessionId: callerSessionId,
-      callbackSessionId: wait ? null : callerSessionId,
-      background: !wait,
+      callbackSessionId: input.callback === "none" ? null : callerSessionId,
+      background: true,
     });
-    return wait ? summarize(await host.waitForRun(run.id, signal)) : summarize(run);
+    return summarize(run, null);
   }
   if (input.operation === "contact") {
     if (!active) throw new Error("contact is only available inside an active Agent run");
     const reason = input.reason === "decision" ? "decision" : "progress";
-    return messages.contact(active, callerSessionId, reason, requiredString(input.message, "message"), input.wait === true, signal);
+    return messages.contact(active, callerSessionId, reason, requiredString(input.message, "message"));
   }
   if (input.operation === "reply") {
     return messages.reply(requiredString(input.message_id, "message_id"), callerSessionId, requiredString(input.message, "message"));
   }
   throw new Error("unknown task operation");
+}
+
+/** Inline one-shot subagent: persisted like any task (kind "subagent",
+ * filtered from default lists) so runs stay auditable and resumable. */
+async function resolveDraft(
+  definitions: TaskDefinitions,
+  draft: Record<string, unknown>,
+  active: TaskRun | undefined,
+  callerSessionId: string,
+): Promise<TaskDefinition> {
+  if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
+    throw new Error("inline subagent tasks must use a manual trigger");
+  }
+  // The draft parser accepts `capabilities` for Console/HTTP definitions; from
+  // the tool it is rejected rather than silently honoured, so a model working
+  // from stale memory learns the field is gone.
+  if (record(record(draft.action)?.launch)?.capabilities !== undefined) {
+    throw new Error("launch.capabilities is configured in Console or HTTP, not by the task tool");
+  }
+  if (active) {
+    const action = record(draft.action);
+    if (action?.type !== "agent") throw new Error("subagents may only inline Agent tasks");
+    if (record(action.session)?.mode === "reuse") throw new Error("subagent inline tasks cannot reuse an existing session");
+  }
+  return definitions.create({ ...draft, trigger: { type: "manual" } }, `session:${callerSessionId}`, "subagent");
+}
+
+function resolveStored(definitions: TaskDefinitions, taskId: unknown, active: TaskRun | undefined): TaskDefinition {
+  const task = definitions.get(requiredString(taskId, "task_id"));
+  if (active && task.action.type !== "agent") throw new Error("subagents may only invoke Agent tasks");
+  return task;
 }
 
 function assertOwns(store: TaskStore, callerSessionId: string, active: TaskRun | undefined, target: TaskRun): void {

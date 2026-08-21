@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { TaskDefinition, TaskMessage, TaskRun } from "./types.js";
+import type { TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
@@ -14,7 +14,12 @@ const parseTask = (json: string): TaskDefinition => {
   task.kind ??= "task";
   return task;
 };
-const parseRun = (json: string): TaskRun => JSON.parse(json) as TaskRun;
+// Rows written before fan-out groups existed default to null.
+const parseRun = (json: string): TaskRun => {
+  const run = JSON.parse(json) as TaskRun;
+  run.groupId ??= null;
+  return run;
+};
 
 export function defaultTaskDbPath(): string {
   return join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "pier.db");
@@ -52,6 +57,13 @@ export class TaskStore {
       );
       CREATE INDEX IF NOT EXISTS task_messages_run_time
         ON task_messages(run_id, created_at);
+      CREATE TABLE IF NOT EXISTS task_groups (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        callback_state TEXT,
+        finished_at INTEGER,
+        json TEXT NOT NULL
+      );
     `);
   }
 
@@ -148,6 +160,32 @@ export class TaskStore {
       .map((row) => parseRun(row.json));
   }
 
+  saveGroup(group: TaskGroup): void {
+    this.db.prepare(`
+      INSERT INTO task_groups(id, created_at, callback_state, finished_at, json)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        callback_state=excluded.callback_state, finished_at=excluded.finished_at, json=excluded.json
+    `).run(group.id, group.createdAt, group.callbackState, group.finishedAt, JSON.stringify(group));
+  }
+
+  getGroup(id: string): TaskGroup | undefined {
+    const row = this.db.prepare("SELECT json FROM task_groups WHERE id = ?").get(id) as JsonRow | undefined;
+    return row ? JSON.parse(row.json) as TaskGroup : undefined;
+  }
+
+  /** Unfinished joins plus deliverable group callbacks, for settle and recovery. */
+  listOpenGroups(now = Date.now()): TaskGroup[] {
+    return (this.db.prepare(`
+      SELECT json FROM task_groups
+      WHERE finished_at IS NULL
+        OR (callback_state IN ('pending', 'failed')
+          AND (json_extract(json, '$.callbackNextAttemptAt') IS NULL
+            OR json_extract(json, '$.callbackNextAttemptAt') <= ?))
+      ORDER BY created_at
+    `).all(now) as unknown as JsonRow[]).map((row) => JSON.parse(row.json) as TaskGroup);
+  }
+
   saveMessage(message: TaskMessage): void {
     this.db.prepare(`
       INSERT INTO task_messages(id, run_id, state, created_at, json)
@@ -174,13 +212,24 @@ export class TaskStore {
       .map((row) => JSON.parse(row.json) as TaskMessage);
   }
 
-  expirePendingMessages(now = Date.now()): TaskMessage[] {
-    const rows = this.db.prepare("SELECT json FROM task_messages WHERE state = 'pending'").all() as unknown as JsonRow[];
+  /** Messages whose injection never landed: the delivery sweep retries these. */
+  listUndeliveredMessages(): TaskMessage[] {
+    return (this.db.prepare(`
+      SELECT json FROM task_messages WHERE state IN ('pending', 'failed') ORDER BY created_at
+    `).all() as unknown as JsonRow[]).map((row) => JSON.parse(row.json) as TaskMessage);
+  }
+
+  /** Decisions are excluded: they have no timeout and stay answerable across
+   * restarts — a reply to a terminal run resumes it. */
+  expirePendingMessages(): TaskMessage[] {
+    const rows = this.db.prepare(`
+      SELECT json FROM task_messages
+      WHERE state = 'pending' AND json_extract(json, '$.kind') != 'decision'
+    `).all() as unknown as JsonRow[];
     return rows.map((row) => {
       const message = JSON.parse(row.json) as TaskMessage;
       message.state = "expired";
       message.error = "Pier restarted before delivery completed";
-      if (message.kind === "decision") message.answeredAt = now;
       this.saveMessage(message);
       return message;
     });

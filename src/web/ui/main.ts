@@ -1115,7 +1115,7 @@ function connectWorkspace(): void {
       void refreshSessions();
       return;
     }
-    if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed") {
+    if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
       tasksView.refresh(e.type === "task-run-changed" ? e.taskId : undefined);
       activityView.refresh();
       return;

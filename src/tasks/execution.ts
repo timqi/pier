@@ -11,6 +11,7 @@ interface ExecutionHost {
   cancel(id: string): void;
   settled(run: TaskRun): void;
   changed(run: TaskRun): void;
+  openDecisionId(runId: string): string | null;
 }
 
 export class TaskExecution {
@@ -61,12 +62,17 @@ export class TaskExecution {
         this.definitions.setEnabled(definition.id, false);
       }
     } catch (error) {
-      run.state = controller.signal.aborted ? (timedOut ? "failed" : "cancelled") : "failed";
-      run.error = timedOut ? "task timed out" : String(error);
+      // A killed child reports `exited null`, not `cancelled`: report why we
+      // aborted instead of how the corpse looked.
+      const aborted = controller.signal.aborted;
+      run.state = aborted ? (timedOut ? "failed" : "cancelled") : "failed";
+      run.error = timedOut ? "task timed out" : aborted ? "cancelled" : String(error);
     } finally {
       clearTimeout(timeout);
       run.finishedAt = Date.now();
-      if (run.callbackSessionId) run.callbackState = "pending";
+      // A run that ends awaiting a supervisor decision suppresses its
+      // completion callback: the pending question is the notification.
+      if (run.callbackSessionId && !this.host.openDecisionId(run.id)) run.callbackState = "pending";
       this.store.saveRun(run);
       this.controllers.delete(run.id);
       this.host.changed(run);

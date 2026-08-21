@@ -5,11 +5,12 @@ import { AgentTaskRunner } from "./agent.js";
 import { TaskCallbacks } from "./callbacks.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
+import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { TaskStore } from "./store.js";
 import { handleTaskTool } from "./tool.js";
-import type { TaskDefinition, TaskMessage, TaskRun } from "./types.js";
+import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 type TriggerSource = TaskRun["triggerSource"];
@@ -22,6 +23,7 @@ export class TaskService {
   private readonly messages: TaskMessenger;
   private readonly definitions: TaskDefinitions;
   private readonly callbacks: TaskCallbacks;
+  private readonly groups: TaskGroups;
   private readonly runs: TaskRunQueue;
   private readonly execution: TaskExecution;
 
@@ -31,9 +33,22 @@ export class TaskService {
     router: Router,
     private readonly hub: EventHub,
   ) {
-    this.messages = new TaskMessenger(store, router, hub);
+    this.messages = new TaskMessenger(store, router, hub, (runId, prompt, fromSessionId) =>
+      this.resume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }));
     this.definitions = new TaskDefinitions(store, factory, router, hub);
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run));
+    this.groups = new TaskGroups(store, router, {
+      getRun: (id) => this.getRun(id),
+      cancel: (id) => { this.cancel(id); },
+      openDecisionId: (runId) => this.messages.openDecisionId(runId),
+      startMember: (taskId, groupId, callerSessionId, parentRunId) => this.run(taskId, null, "agent", parentRunId, {
+        invokedBySessionId: callerSessionId,
+        sourceSessionId: callerSessionId,
+        callbackSessionId: null,
+        background: true,
+        groupId,
+      }),
+    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }));
     const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run));
     this.execution = new TaskExecution(store, this.definitions, this.callbacks, agent, {
       runChild: (taskId, parent) => this.run(taskId, parent.input, "task", parent.id, {
@@ -46,6 +61,7 @@ export class TaskService {
       cancel: (id) => { this.cancel(id); },
       settled: (run) => this.settled(run),
       changed: (run) => this.changed(run),
+      openDecisionId: (runId) => this.messages.openDecisionId(runId),
     });
     this.runs = new TaskRunQueue(
       store,
@@ -63,6 +79,7 @@ export class TaskService {
     this.messages.expirePending();
     this.definitions.resetNextRuns(now);
     this.callbacks.recover(now);
+    this.groups.recover(now);
     this.timer = setInterval(() => void this.tick(), tickMs);
     this.timer.unref();
   }
@@ -117,6 +134,10 @@ export class TaskService {
     return this.messages.list(runId);
   }
 
+  openDecisionId(runId: string): string | null {
+    return this.messages.openDecisionId(runId);
+  }
+
   recentRuns(limit = 100): TaskRun[] {
     return this.store.listRecentRuns(limit);
   }
@@ -142,6 +163,8 @@ export class TaskService {
     provenance: RunProvenance = {},
   ): TaskRun {
     const task = this.get(taskId);
+    // `enabled:false` pauses scheduling only; manual and agent triggers still
+    // run a paused task on demand. Archiving is the terminal state.
     if (task.archived) throw new Error("archived tasks cannot run");
     return this.runs.enqueue(task, input, source, parentRunId, provenance);
   }
@@ -162,17 +185,50 @@ export class TaskService {
     });
   }
 
-  async waitForRuns(ids: string[], mode: "all" | "first" = "all", signal?: AbortSignal): Promise<TaskRun[]> {
-    if (!ids.length) throw new Error("run_ids required");
-    const waits = [...new Set(ids)].map((id) => this.waitForRun(id, signal));
-    return mode === "first" ? [await Promise.race(waits)] : Promise.all(waits);
-  }
-
+  /** Cascades: orphans must not outlive the delegation that wanted them. */
   cancel(id: string): TaskRun {
     const run = this.getRun(id);
-    if (isTerminal(run.state)) return run;
-    this.execution.cancel(id);
+    for (const target of [run, ...this.descendants(run)]) {
+      if (!isTerminal(target.state)) this.execution.cancel(target.id);
+    }
     return this.getRun(id);
+  }
+
+  cancelGroup(id: string): TaskGroup {
+    return this.groups.cancelAll(id);
+  }
+
+  getGroup(id: string): { group: TaskGroup; members: TaskRun[] } {
+    return this.groups.members(id);
+  }
+
+  runGroup(
+    definitions: TaskDefinition[],
+    join: GroupJoinMode,
+    callerSessionId: string,
+    parentRunId: string | null,
+    callbackSessionId: string | null,
+  ): { group: TaskGroup; runs: TaskRun[] } {
+    return this.groups.runAll(definitions, join, callerSessionId, parentRunId, callbackSessionId);
+  }
+
+  private descendants(run: TaskRun): TaskRun[] {
+    const byParent = new Map<string, TaskRun[]>();
+    for (const member of this.store.listRunsByRoot(run.rootRunId, 500)) {
+      if (!member.parentRunId) continue;
+      const siblings = byParent.get(member.parentRunId) ?? [];
+      siblings.push(member);
+      byParent.set(member.parentRunId, siblings);
+    }
+    const collected: TaskRun[] = [];
+    const queue = [run.id];
+    while (queue.length > 0) {
+      for (const child of byParent.get(queue.shift()!) ?? []) {
+        collected.push(child);
+        queue.push(child.id);
+      }
+    }
+    return collected;
   }
 
   async control(id: string, fromSessionId: string, mode: "steer" | "follow_up", message: string): Promise<TaskMessage> {
@@ -197,6 +253,7 @@ export class TaskService {
       throw new Error("only persisted Agent runs can be resumed");
     }
     const prompt = requiredString(message, "message");
+    this.messages.expireDecisions(prior.id, "superseded by a manual resume");
     return this.runs.enqueue(prior.context.definition, null, "agent", null, {
       ...provenance,
       sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId,
@@ -209,8 +266,8 @@ export class TaskService {
     });
   }
 
-  tool(raw: unknown, callerSessionId: string, signal?: AbortSignal): Promise<unknown> {
-    return handleTaskTool(this, this.definitions, this.store, this.messages, raw, callerSessionId, signal);
+  tool(raw: unknown, callerSessionId: string): Promise<unknown> {
+    return handleTaskTool(this, this.definitions, this.store, this.messages, raw, callerSessionId);
   }
 
   private async tick(): Promise<void> {
@@ -222,6 +279,8 @@ export class TaskService {
         this.run(task.id, null, task.trigger.type === "watch" ? "watch" : "cron");
       }
       this.callbacks.recover(now);
+      this.groups.recover(now);
+      this.messages.retryUndelivered(now);
     } finally {
       this.ticking = false;
     }
@@ -231,6 +290,7 @@ export class TaskService {
     const waiters = this.waiters.get(run.id);
     if (waiters) for (const resolve of waiters) resolve(run);
     this.waiters.delete(run.id);
+    this.groups.onSettled(run);
   }
 
   private backgroundRun(run: TaskRun): BackgroundRun {

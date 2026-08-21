@@ -94,7 +94,18 @@ export function registerTaskRoutes(
 
   app.get("/api/task-runs/:id", (c) => {
     try {
-      return c.json(tasks.getRun(c.req.param("id")));
+      const run = tasks.getRun(c.req.param("id"));
+      // Same view as the task tool: a pending decision is the one run fact that
+      // lives on the messages, and HTTP callers need it too.
+      return c.json({ ...run, pendingDecisionId: tasks.openDecisionId(run.id) });
+    } catch (err) {
+      return c.json({ error: String(err) }, 404);
+    }
+  });
+
+  app.get("/api/task-groups/:id", (c) => {
+    try {
+      return c.json(tasks.getGroup(c.req.param("id")));
     } catch (err) {
       return c.json({ error: String(err) }, 404);
     }
@@ -105,17 +116,6 @@ export function registerTaskRoutes(
       return c.json(tasks.listMessages(c.req.param("id")));
     } catch (err) {
       return c.json({ error: String(err) }, 404);
-    }
-  });
-
-  app.post("/api/task-runs/wait", async (c) => {
-    const body = record(await jsonBody(c.req));
-    try {
-      if (!Array.isArray(body?.runIds)) throw new Error("runIds required");
-      const ids = body.runIds.map((id) => requiredString(id, "run id"));
-      return c.json(await tasks.waitForRuns(ids, body.mode === "first" ? "first" : "all"));
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
     }
   });
 

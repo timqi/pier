@@ -49,6 +49,8 @@ export type SystemInputOrigin = {
   taskId: string;
   runId: string;
   sourceSessionId: string | null;
+  /** Batched callback delivery: every run id contained in this input. */
+  runIds?: string[];
 } | {
   kind: "task-message";
   taskId: string;
@@ -109,7 +111,8 @@ export type WorkspaceEvent =
   | { type: "session-state"; sessionId: string; state: SessionState }
   | { type: "tasks-changed" }
   | { type: "task-run-changed"; taskId: string; runId: string }
-  | { type: "task-message-changed"; runId: string; messageId: string };
+  | { type: "task-message-changed"; runId: string; messageId: string }
+  | { type: "task-group-changed"; groupId: string };
 
 /**
  * One step of an assistant turn's activity, reconstructed from the transcript
@@ -196,7 +199,10 @@ export interface AgentSession {
   prompt(text: string, images?: ImageAttachment[]): Promise<void>; // resolves when the turn settles
   steer(text: string, images?: ImageAttachment[]): Promise<void>; // interrupt mid-run
   followUp(text: string, images?: ImageAttachment[]): Promise<void>; // deliver when idle
-  /** Persisted non-user input with provenance; prompt waits, queued modes may not. */
+  /** Persisted non-user input with provenance. Resolves when the turn the input
+   * triggers settles — immediately for a queued mode the recipient is already
+   * streaming through. Resolution is not an acceptance signal: callers that
+   * need "the session took it" must not wait for this promise. */
   systemInput(text: string, origin: SystemInputOrigin, mode: "prompt" | "steer" | "followUp"): Promise<void>;
   abort(): Promise<void>;
   /** Emits payloads only; core/hub.ts owns seq/ts stamping. */

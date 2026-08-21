@@ -4,14 +4,9 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
+import { isTerminal } from "./types.js";
 
 const MAX_MESSAGE_LENGTH = 16 * 1024;
-
-type ReplyWaiter = {
-  resolve: (message: TaskMessage) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-};
 
 function bounded(content: string): string {
   const text = content.trim();
@@ -21,20 +16,38 @@ function bounded(content: string): string {
 }
 
 export class TaskMessenger {
-  private readonly replyWaiters = new Map<string, ReplyWaiter>();
+  /** Retry schedule for failed injections. In-memory on purpose: a restart
+   * expires undelivered control messages and re-offers decisions anyway. */
+  private readonly retries = new Map<string, { attempts: number; nextAt: number }>();
 
   constructor(
     private readonly store: TaskStore,
     private readonly router: Router,
     private readonly hub: EventHub,
+    /** Continues a terminal child with a supervisor reply as its prompt. */
+    private readonly resumeRun: (runId: string, prompt: string, fromSessionId: string) => TaskRun,
   ) {}
 
   expirePending(): void {
     for (const message of this.store.expirePendingMessages()) this.changed(message);
-    for (const [id, waiter] of this.replyWaiters) {
-      clearTimeout(waiter.timer);
-      waiter.reject(new Error("Pier stopped before the supervisor replied"));
-      this.replyWaiters.delete(id);
+  }
+
+  /** The unanswered decision on a run, if any. */
+  openDecisionId(runId: string): string | null {
+    return this.store.listMessages(runId).find((m) =>
+      m.kind === "decision" && (m.state === "pending" || m.state === "delivered"))?.id ?? null;
+  }
+
+  /** A manual continuation supersedes an unanswered decision (design 04):
+   * one continuation per run, never two racing ones. */
+  expireDecisions(runId: string, reason: string): void {
+    for (const message of this.store.listMessages(runId)) {
+      if (message.kind !== "decision" || (message.state !== "pending" && message.state !== "delivered")) continue;
+      message.state = "expired";
+      message.error = reason;
+      message.answeredAt = Date.now();
+      this.store.saveMessage(message);
+      this.changed(message);
     }
   }
 
@@ -51,58 +64,60 @@ export class TaskMessenger {
     fromSessionId: string,
     kind: "steer" | "follow_up",
     content: string,
-    retryOf: string | null = null,
   ): Promise<TaskMessage> {
-    const message = this.create(run, kind, fromSessionId, run.targetSessionId ?? "", content, null, retryOf);
-    if (run.targetSessionId) await this.deliver(message, run, run.targetSessionId, kind);
+    const message = this.create(run, kind, fromSessionId, run.targetSessionId ?? "", content, null);
+    if (run.targetSessionId) this.deliver(message, run, run.targetSessionId);
     return this.require(message.id);
   }
 
-  async deliverPendingControls(run: TaskRun): Promise<void> {
+  deliverPendingControls(run: TaskRun): void {
     if (!run.targetSessionId) return;
     for (const message of this.store.listMessages(run.id)) {
       if (message.state !== "pending" || (message.kind !== "steer" && message.kind !== "follow_up")) continue;
-      try {
-        await this.deliver(message, run, run.targetSessionId, message.kind);
-      } catch (error) {
-        console.warn(`Task control message ${message.id} delivery failed`, error);
-      }
+      this.deliver(message, run, run.targetSessionId);
     }
   }
 
+  /** Injection is fire-and-forget, so this sweep is what closes a failed one.
+   * `inject` dedupes on the recipient transcript, so a retry cannot double
+   * deliver. Controls aimed at a finished run are dead and expire here. */
+  retryUndelivered(now = Date.now()): void {
+    for (const message of this.store.listUndeliveredMessages()) {
+      const run = this.store.getRun(message.runId);
+      if (!run) continue;
+      // Expiring a dead control is not a retry, so it ignores the backoff.
+      if ((message.kind === "steer" || message.kind === "follow_up") && isTerminal(run.state)) {
+        message.state = "expired";
+        message.error = "run finished before delivery completed";
+        this.store.saveMessage(message);
+        this.changed(message);
+        continue;
+      }
+      if ((this.retries.get(message.id)?.nextAt ?? 0) > now) continue;
+      const target = message.toSessionId || run.targetSessionId;
+      if (target) this.deliver(message, run, target);
+    }
+  }
+
+  /** Asynchronous by design: returns the receipt immediately. A decision
+   * child states what it awaits and ends its turn; the reply arrives as a
+   * follow-up (active run) or resumes the session (terminal run).
+   * A decision steers the supervisor: a follow-up only lands once the
+   * supervisor has no tool calls left, so a blocked child would wait out the
+   * whole turn. Progress stays a follow-up — nobody waits on it. */
   async contact(
     run: TaskRun,
     fromSessionId: string,
     reason: "progress" | "decision",
     content: string,
-    wait: boolean,
-    signal?: AbortSignal,
-  ): Promise<{ message: TaskMessage; reply?: TaskMessage }> {
+  ): Promise<TaskMessage> {
     if (!run.invokedBySessionId) throw new Error("run has no supervisor session");
-    if (!run.background) throw new Error("supervisor contact requires a detached run");
-    if (reason === "decision" && this.store.listMessages(run.id).some((m) =>
-      m.kind === "decision" && (m.state === "pending" || m.state === "delivered"))) {
+    if (reason === "decision" && this.openDecisionId(run.id)) {
       throw new Error("run already has a pending supervisor decision");
     }
-    const message = this.create(
-      run,
-      reason,
-      fromSessionId,
-      run.invokedBySessionId,
-      content,
-      null,
-      null,
-    );
-    const replyPromise = reason === "decision" && wait
-      ? this.waitForReply(message, run, signal)
-      : undefined;
-    try {
-      await this.deliver(message, run, run.invokedBySessionId, "follow_up");
-    } catch (error) {
-      this.rejectWaiter(message.id, error);
-      throw error;
-    }
-    return replyPromise ? { message: this.require(message.id), reply: await replyPromise } : { message: this.require(message.id) };
+    const message = this.create(run, reason, fromSessionId, run.invokedBySessionId, content, null);
+    this.deliver(message, run, run.invokedBySessionId);
+    return this.require(message.id);
   }
 
   async reply(questionId: string, fromSessionId: string, content: string): Promise<TaskMessage> {
@@ -120,24 +135,23 @@ export class TaskMessenger {
     }
     const run = this.store.getRun(question.runId);
     if (!run) throw new Error(`unknown task run: ${question.runId}`);
-    const reply = this.create(run, "reply", fromSessionId, question.fromSessionId, text, question.id, null);
-    reply.state = "delivered";
-    reply.deliveredAt = Date.now();
-    this.store.saveMessage(reply);
+    const reply = this.create(run, "reply", fromSessionId, question.fromSessionId, text, question.id);
     question.state = "answered";
     question.answeredAt = Date.now();
     this.store.saveMessage(question);
-    this.changed(reply);
     this.changed(question);
-    const waiter = this.replyWaiters.get(question.id);
-    if (waiter) {
-      clearTimeout(waiter.timer);
-      this.replyWaiters.delete(question.id);
-      waiter.resolve(reply);
-    } else if (run.targetSessionId && (run.state === "queued" || run.state === "running")) {
-      await this.inject(reply, run, run.targetSessionId, "follow_up");
+    // Core routes the reply: follow-up into an active run, auto-resume of a
+    // terminal one — the replier gets the continuation's callback.
+    if (run.targetSessionId && (run.state === "queued" || run.state === "running")) {
+      this.deliver(reply, run, run.targetSessionId);
+    } else if (isTerminal(run.state)) {
+      this.resumeRun(run.id, this.format(reply, run), fromSessionId);
+      reply.state = "delivered";
+      reply.deliveredAt = Date.now();
+      this.store.saveMessage(reply);
+      this.changed(reply);
     }
-    return reply;
+    return this.require(reply.id);
   }
 
   private create(
@@ -147,7 +161,6 @@ export class TaskMessenger {
     toSessionId: string,
     content: string,
     replyTo: string | null,
-    retryOf: string | null,
   ): TaskMessage {
     const message: TaskMessage = {
       id: randomUUID(),
@@ -156,7 +169,6 @@ export class TaskMessenger {
       fromSessionId,
       toSessionId,
       replyTo,
-      retryOf,
       state: "pending",
       content: bounded(content),
       createdAt: Date.now(),
@@ -169,38 +181,39 @@ export class TaskMessenger {
     return message;
   }
 
-  private async deliver(
-    candidate: TaskMessage,
-    run: TaskRun,
-    targetSessionId: string,
-    mode: "steer" | "follow_up",
-  ): Promise<void> {
+  /** Never awaits the recipient: the seam's `systemInput` settles with the turn
+   * the input triggers, so awaiting it would block the sender — a child's
+   * `contact` on its supervisor's whole answer turn — which the design forbids.
+   * Delivery is therefore recorded on hand-off and corrected to `failed` by the
+   * catch; the tick sweep retries from there. */
+  private deliver(candidate: TaskMessage, run: TaskRun, targetSessionId: string): void {
     const message = this.require(candidate.id);
-    if (message.state !== "pending") return;
-    if (message.toSessionId !== targetSessionId) {
-      message.toSessionId = targetSessionId;
-      this.store.saveMessage(message);
-    }
-    try {
-      await this.inject(message, run, targetSessionId, mode);
-      const current = this.require(message.id);
-      if (current.state !== "answered") {
-        current.state = "delivered";
-        current.deliveredAt = Date.now();
-        current.error = null;
-        this.store.saveMessage(current);
-        this.changed(current);
-      }
-    } catch (error) {
-      const current = this.require(message.id);
-      if (current.state !== "answered") {
-        current.state = "failed";
-        current.error = String(error);
-        this.store.saveMessage(current);
-        this.changed(current);
-      }
-      throw error;
-    }
+    if (message.state !== "pending" && message.state !== "failed") return;
+    if (message.toSessionId !== targetSessionId) message.toSessionId = targetSessionId;
+    message.state = "delivered";
+    message.deliveredAt = Date.now();
+    message.error = null;
+    this.store.saveMessage(message);
+    this.changed(message);
+    void this.inject(message, run, targetSessionId, this.mode(message))
+      .catch((error: unknown) => { this.failed(message.id, error); });
+  }
+
+  /** A decision steers — a follow-up would land only after the supervisor runs
+   * out of tool calls, leaving the child waiting out the whole turn. */
+  private mode(message: TaskMessage): "steer" | "follow_up" {
+    return message.kind === "steer" || message.kind === "decision" ? "steer" : "follow_up";
+  }
+
+  private failed(id: string, error: unknown): void {
+    const message = this.store.getMessage(id);
+    if (!message || message.state === "answered" || message.state === "expired") return;
+    message.state = "failed";
+    message.error = String(error);
+    this.store.saveMessage(message);
+    this.changed(message);
+    const attempts = (this.retries.get(id)?.attempts ?? 0) + 1;
+    this.retries.set(id, { attempts, nextAt: Date.now() + Math.min(60_000, 1000 * 2 ** Math.min(attempts, 6)) });
   }
 
   private async inject(
@@ -243,36 +256,6 @@ export class TaskMessenger {
       messageId: message.id,
       messageKind: message.kind,
     };
-  }
-
-  private waitForReply(message: TaskMessage, run: TaskRun, signal?: AbortSignal): Promise<TaskMessage> {
-    const elapsed = Date.now() - run.queuedAt;
-    const timeoutMs = Math.max(1, run.context.definition.timeoutSeconds * 1000 - elapsed);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.replyWaiters.delete(message.id);
-        const current = this.require(message.id);
-        if (current.state !== "answered") {
-          current.state = "expired";
-          current.error = "supervisor reply timed out";
-          current.answeredAt = Date.now();
-          this.store.saveMessage(current);
-          this.changed(current);
-        }
-        reject(new Error("supervisor reply timed out"));
-      }, timeoutMs);
-      timer.unref();
-      this.replyWaiters.set(message.id, { resolve, reject, timer });
-      signal?.addEventListener("abort", () => this.rejectWaiter(message.id, new Error("contact cancelled")), { once: true });
-    });
-  }
-
-  private rejectWaiter(id: string, error: unknown): void {
-    const waiter = this.replyWaiters.get(id);
-    if (!waiter) return;
-    clearTimeout(waiter.timer);
-    this.replyWaiters.delete(id);
-    waiter.reject(error instanceof Error ? error : new Error(String(error)));
   }
 
   private require(id: string): TaskMessage {

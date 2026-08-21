@@ -108,7 +108,13 @@ export class TaskDefinitions {
     return task;
   }
   async create(raw: unknown, creator = "http", kind: TaskDefinition["kind"] = "task"): Promise<TaskDefinition> {
-    const draft = await this.parseDraft(raw);
+    // The tool schema marks trigger optional, so a trigger-less new definition
+    // means manual. Update keeps requiring it: replacing a cron task with a
+    // draft that forgot its trigger must not silently unschedule it.
+    const value = record(raw);
+    const draft = await this.parseDraft(
+      value && value.trigger === undefined ? { ...value, trigger: { type: "manual" } } : raw,
+    );
     const now = Date.now();
     const task: TaskDefinition = {
       id: randomUUID(),
