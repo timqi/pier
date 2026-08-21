@@ -1,14 +1,19 @@
 <!-- Pier's mark: a dock in profile over water. Kept to four solid shapes so it
      still reads at 16px in a browser tab. Source of truth for the PNG icons
-     next to it (favicon fallback, apple-touch, manifest). -->
+     next to it (favicon fallback, apple-touch, manifest).
+
+     The plate is a squircle, not a rect: a superellipse outline (the iOS /
+     Android app-icon silhouette) reads as an app rather than as a coloured
+     tile. Platforms that apply their own mask get the square PNGs instead. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect width="64" height="64" rx="12" fill="#4f46e5" />
+  <path fill="#4f46e5"
+    d="M32 0c16 0 24 0 28 4s4 12 4 28-0 24-4 28-12 4-28 4-24 0-28-4-4-12-4-28 0-24 4-28 12-4 28-4Z" />
   <g fill="#fff">
-    <rect x="8" y="23" width="48" height="7" rx="1.5" />
-    <rect x="13" y="30" width="6" height="17" rx="1" />
-    <rect x="29" y="30" width="6" height="17" rx="1" />
-    <rect x="45" y="30" width="6" height="17" rx="1" />
+    <rect x="11" y="23" width="42" height="6.5" rx="1.5" />
+    <rect x="15" y="29.5" width="5.5" height="16" rx="1" />
+    <rect x="29.25" y="29.5" width="5.5" height="16" rx="1" />
+    <rect x="43.5" y="29.5" width="5.5" height="16" rx="1" />
   </g>
-  <path d="M8 53q8-4.5 16 0t16 0 16 0" fill="none" stroke="#fff" stroke-width="4"
+  <path d="M11 51q7-4 14 0t14 0 14 0" fill="none" stroke="#fff" stroke-width="4"
     stroke-linecap="round" opacity=".85" />
 </svg>
