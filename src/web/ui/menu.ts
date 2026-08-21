@@ -45,21 +45,33 @@ export function closeMenu(): void {
   panel = null;
 }
 
+/** A narrow screen has no room beside the anchor and thumbs reach the bottom,
+ *  so the panel becomes a sheet there — anchoring below is a desktop idea, and
+ *  a sheet's rows are sized for a fingertip rather than a cursor. */
+const isSheet = (): boolean => window.innerWidth < 640;
+
 /** Float arbitrary content under an anchor, clamped to the viewport. */
 export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   closeMenu();
+  const sheet = isSheet();
   panel = h(
     "div",
-    "fixed z-50 min-w-52 max-w-80 rounded-lg border border-neutral-200 bg-white py-1 text-[13px] shadow-lg",
+    `fixed z-50 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg ${
+      sheet
+        ? "inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
+        : "min-w-52 max-w-80 text-[13px]"
+    }`,
   );
   panel.append(content);
   // A modal <dialog> paints in the top layer, above anything in the document —
   // so a panel anchored inside one has to live in that dialog, not on body,
   // or no z-index can bring it in front (the folder picker in New session).
   (anchor.closest("dialog[open]") ?? document.body).append(panel);
-  const r = anchor.getBoundingClientRect();
-  panel.style.top = `${Math.max(8, Math.min(r.bottom + 4, window.innerHeight - panel.offsetHeight - 8))}px`;
-  panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - panel.offsetWidth - 8))}px`;
+  if (!sheet) {
+    const r = anchor.getBoundingClientRect();
+    panel.style.top = `${Math.max(8, Math.min(r.bottom + 4, window.innerHeight - panel.offsetHeight - 8))}px`;
+    panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - panel.offsetWidth - 8))}px`;
+  }
   // Safe to bind now: the pointerdown that opened this already fired.
   document.addEventListener("pointerdown", onOutside, true);
   document.addEventListener("keydown", onKey, true);
@@ -70,7 +82,9 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
 function menuItem(item: MenuItem): HTMLElement {
   const row = h(
     "button",
-    "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100",
+    `flex w-full cursor-pointer items-center gap-2 px-3 text-left hover:bg-neutral-100 active:bg-neutral-100 ${
+      isSheet() ? "py-3" : "py-1.5"
+    }`,
   );
   row.append(
     h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : ""),

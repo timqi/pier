@@ -74,7 +74,7 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   if (kind === "user") {
     const edit = h(
       "button",
-      "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex",
+      "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex",
     );
     edit.title = "Edit — resends from here; this message and later turns leave the context";
     edit.setAttribute("aria-label", "Edit message");
@@ -326,7 +326,7 @@ function addCodeCopy(root: HTMLElement): void {
     wrap.append(
       pre,
       copyBtn(
-        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100",
+        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100 pointer-coarse:opacity-100",
         () => code.textContent ?? "",
       ),
     );
@@ -662,20 +662,70 @@ export function replayActivity(steps: ActivityStep[], durationMs = 0, live = fal
 
 const imageDialog = $<HTMLDialogElement>("#image-dialog");
 const imageFull = $<HTMLImageElement>("#image-full");
-imageDialog.onclick = () => imageDialog.close();
+const imagePrev = $("#image-prev");
+const imageNext = $("#image-next");
+
+/** The transcript's thumbnails in document order. Read at open time rather
+ *  than tracked: what is on screen *is* the gallery, so there is no second
+ *  list to keep in step with the event stream. */
+let gallery: string[] = [];
+let shown = 0;
+
+/** Wraps around, so paging never dead-ends on the first or last image. */
+function step(delta: number): void {
+  if (gallery.length < 2) return;
+  shown = (shown + delta + gallery.length) % gallery.length;
+  imageFull.src = gallery[shown]!;
+}
 
 /** Full-size view of any chat image (transcript, pending, or attachment). */
 export function showImage(src: string): void {
-  imageFull.src = src;
+  // An <img>'s .src is absolute; normalize the caller's to match (a data: URL
+  // is returned unchanged).
+  const absolute = new URL(src, location.href).href;
+  gallery = [...turnsPane.querySelectorAll<HTMLImageElement>("img.thumb")].map((i) => i.src);
+  shown = Math.max(0, gallery.indexOf(absolute));
+  imageFull.src = absolute;
+  // display, not a `hidden` class: `hidden` and `flex` are the same Tailwind
+  // property and which one wins is an ordering accident.
+  const arrows = gallery.length < 2 ? "none" : "flex";
+  imagePrev.style.display = arrows;
+  imageNext.style.display = arrows;
   imageDialog.showModal();
 }
 
-/** Thumbnail in a chat row; click shows the image full size. */
+// Backdrop and image close; the arrows must not, hence stopPropagation.
+imageDialog.onclick = () => imageDialog.close();
+const pageOn = (btn: HTMLElement, delta: number): void => {
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    step(delta);
+  };
+};
+pageOn(imagePrev, -1);
+pageOn(imageNext, 1);
+imageDialog.onkeydown = (ev) => {
+  if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+  ev.preventDefault();
+  step(ev.key === "ArrowLeft" ? -1 : 1);
+};
+
+/** The bubble's thumbnail strip, created on first use: attachments belong in
+ *  their own block under the text, not appended to its last line. */
+export function imageRow(bubble: HTMLElement): HTMLElement {
+  const existing = bubble.querySelector<HTMLElement>(":scope > .thumbs");
+  if (existing) return existing;
+  const row = h("div", "thumbs");
+  bubble.append(row);
+  return row;
+}
+
+/** Thumbnail in a chat row; click opens the lightbox at this image. */
 export function imageThumb(src: string): HTMLImageElement {
   const thumb = document.createElement("img");
   thumb.src = src;
   thumb.loading = "lazy";
-  thumb.className = "mt-1.5 max-h-48 cursor-zoom-in rounded-md border border-black/5";
+  thumb.className = "thumb";
   thumb.onclick = () => showImage(src);
   return thumb;
 }

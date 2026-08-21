@@ -2,15 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- viewport-fit=cover lets the safe-area insets in style.css do their job
+       under an iPhone's home indicator. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#fafafa" />
+  <!-- Installed as a home-screen app, this is also what makes Web Push
+       possible on iOS — notifications there require a standalone web app. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Pier" />
   <title>Pier</title>
 </head>
 <!-- The document never scrolls: this is a fixed-viewport workbench, and every
      scrollable region is an inner pane. h-dvh, not h-screen, because 100vh can
      exceed the visible viewport (mobile chrome, short windows) — that gap is
      what lets the whole app slide up and take the sidebar with it. -->
-<body class="grid h-dvh grid-cols-[230px_minmax(0,1fr)] overflow-hidden text-[16px] leading-[1.45] text-neutral-800 antialiased">
-  <aside class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
+<body class="grid h-dvh grid-cols-1 overflow-hidden text-[16px] leading-[1.45] text-neutral-800 antialiased md:grid-cols-[14.5rem_minmax(0,1fr)]">
+  <!-- Below md the aside leaves the grid and slides in as a drawer (style.css);
+       the scrim is its dismiss target and never paints on desktop. -->
+  <div id="drawer-scrim" class="fixed inset-0 z-30 hidden bg-black/25 md:hidden"></div>
+  <aside id="sidebar" class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
     <header class="flex items-center justify-between gap-2 px-3 py-2">
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
     </header>
@@ -45,17 +57,31 @@
     </div>
     <div id="project-tree" class="flex-1 overflow-y-auto text-[13.5px]"></div>
     <footer class="flex flex-none items-center gap-2 border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400">
-      Pier
+      <button type="button" id="notify-toggle" title="Notify me when a turn finishes"
+        class="cursor-pointer rounded px-1 hover:bg-neutral-200 hover:text-neutral-700">Notify</button>
       <span id="version" class="ml-auto font-mono"></span>
     </footer>
   </aside>
 
   <main class="flex min-w-0 flex-col overflow-hidden">
+    <!-- Mobile top bar: replaces the chat header below md (which hides), so a
+         Console view keeps the same way back to the drawer as a chat does. -->
+    <header id="mobile-bar" class="flex h-12 flex-none items-center gap-1 border-b border-neutral-200 px-1.5 md:hidden">
+      <button type="button" id="drawer-toggle" aria-label="Open sidebar"
+        class="flex h-10 w-10 flex-none cursor-pointer items-center justify-center rounded-md text-neutral-500 active:bg-neutral-200">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" class="h-5 w-5">
+          <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+        </svg>
+      </button>
+      <span id="mobile-title" class="min-w-0 flex-1 truncate text-[16px] font-medium"></span>
+      <button type="button" id="mobile-menu" aria-label="Session actions"
+        class="hidden h-10 w-10 flex-none cursor-pointer items-center justify-center rounded-md text-[20px] leading-none text-neutral-500 active:bg-neutral-200">⋯</button>
+    </header>
     <section id="activity-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="tasks-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="config-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="channels-view" class="hidden min-h-0 flex-1 flex-col"></section>
-    <header id="chat-header" class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
+    <header id="chat-header" class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden">
       <span id="chat-title" class="truncate font-medium"></span>
       <!-- Right cluster: meta chips sit flush against the ⋯ button. Two
            ml-autos would split the free space, so one wrapper owns it. -->
@@ -106,7 +132,7 @@
       </div>
       <!-- Rows wrap, so the list grows with the queue and scrolls past ~5 lines
            (18px leading) rather than shrinking the turns pane any further. -->
-      <ul id="queue-rows" class="flex max-h-[96px] flex-col gap-1 overflow-y-auto overscroll-contain"></ul>
+      <ul id="queue-rows" class="flex max-h-[6rem] flex-col gap-1 overflow-y-auto overscroll-contain"></ul>
     </div>
     <form id="composer" class="border-t border-neutral-200 px-4 py-2">
       <div class="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
@@ -142,7 +168,7 @@
     </form>
   </main>
 
-  <dialog id="new-dialog" class="m-auto w-96 rounded-xl border border-neutral-200 p-4 shadow-xl backdrop:bg-black/20">
+  <dialog id="new-dialog" class="m-auto w-[min(24rem,92vw)] rounded-xl border border-neutral-200 p-4 shadow-xl backdrop:bg-black/20">
     <form id="new-form" method="dialog" class="flex flex-col gap-3">
       <h3 class="font-semibold">New session</h3>
       <label class="flex flex-col gap-1 text-[13px] text-neutral-600">
@@ -160,7 +186,7 @@
     </form>
   </dialog>
 
-  <dialog id="archive-dialog" class="m-auto w-[560px] max-w-[90vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
+  <dialog id="archive-dialog" class="m-auto w-[35rem] max-w-[90vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
     <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
       <input id="archive-search" type="text" placeholder="Search all sessions…"
         class="w-full bg-transparent text-[14px] focus:outline-none" />
@@ -170,13 +196,19 @@
     <ul id="archive-list" class="max-h-[60vh] overflow-y-auto py-1 text-[13.5px]"></ul>
   </dialog>
 
-  <!-- Full-size view of a transcript image; click anywhere (or Esc) closes. -->
+  <!-- Full-size view of a transcript image; click anywhere (or Esc) closes.
+       The arrows page through every thumbnail in the transcript, as do ← / →;
+       they hide when there is only one image to look at. -->
   <dialog id="image-dialog" class="m-auto max-h-[92vh] max-w-[92vw] rounded-xl bg-transparent p-0 backdrop:bg-black/70">
-    <img id="image-full" alt="" class="max-h-[92vh] max-w-[92vw] cursor-zoom-out rounded-xl object-contain" />
+    <div class="relative">
+      <img id="image-full" alt="" class="max-h-[92vh] max-w-[92vw] cursor-zoom-out rounded-xl object-contain" />
+      <button type="button" id="image-prev" aria-label="Previous image" class="lightbox-nav left-2">‹</button>
+      <button type="button" id="image-next" aria-label="Next image" class="lightbox-nav right-2">›</button>
+    </div>
   </dialog>
 
   <!-- Text preview of an agent attachment; download stays one click away. -->
-  <dialog id="file-dialog" class="m-auto w-[720px] max-w-[92vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/40">
+  <dialog id="file-dialog" class="m-auto w-[45rem] max-w-[92vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/40">
     <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
       <span id="file-name" class="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-700"></span>
       <a id="file-download" download class="btn flex-none text-[12px] no-underline">Download</a>

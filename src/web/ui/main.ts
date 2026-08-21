@@ -17,6 +17,7 @@ import {
   completeTurn,
   copyBtn,
   finalizeStreaming,
+  imageRow,
   imageThumb,
   initChat,
   interruptTurn,
@@ -45,6 +46,8 @@ import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
+import { initNotify, noteState } from "./notify.js";
+import { closeDrawer, initShell, setBarTitle } from "./shell.js";
 import { groupByCwd, initSidebar, renderSessions, setPinned, type SessionInfo } from "./sidebar.js";
 import { createTasksView } from "./tasks.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
@@ -127,19 +130,25 @@ async function refreshSessions(): Promise<void> {
 
 // --- chat header -----------------------------------------------------------------
 
-function renderHeader(): void {
-  // A fresh session may not be listed yet (Pi persists on first message) —
-  // synthesize a stub so the ⋯ menu (info, pin, model) works from turn zero.
-  const s =
+/** The listed session, or a stub for one Pi hasn't persisted yet — a fresh
+ *  session must have a working ⋯ menu (info, pin, model) from turn zero. */
+function currentSession(): SessionInfo | undefined {
+  return (
     sessions.find((x) => x.id === currentId) ??
     (currentId
       ? { id: currentId, cwd: "—", createdAt: Date.now(), state: currentState, pinned: false }
-      : undefined);
+      : undefined)
+  );
+}
+
+function renderHeader(): void {
+  const s = currentSession();
   chatTitle.textContent = s ? (s.title ?? "Untitled session") : "no session";
   chatMenu.classList.toggle("hidden", !s);
   // Everything per-session (info, pin, model) lives in the ⋯ menu.
   if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
   renderSessionMeta();
+  syncBar();
 }
 
 /** Percent of the context window used (capped at 100). */
@@ -309,6 +318,9 @@ function connectWorkspace(): void {
       return;
     }
     activityView.refresh();
+    // Every session, selected or not: a finished turn is worth a notification
+    // wherever it ran.
+    noteState(e.sessionId, e.state);
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;
     const s = sessions.find((x) => x.id === e.sessionId);
@@ -364,9 +376,25 @@ const consoleBtns = [openConfigBtn, openChannelsBtn, openActivityBtn];
 // was showing last; the views themselves keep their tab/selection state.
 let lastActivityConsole: ConsoleName = "activity";
 
+const CONSOLE_LABELS: Record<ConsoleName, string> = {
+  config: "Configuration",
+  channels: "Channels",
+  tasks: "Tasks",
+  activity: "Activity",
+};
+
+/** Mobile top bar mirrors the route: a Console view's name, or the chat title
+ *  plus its ⋯ menu (the chat header itself is hidden below md). */
+function syncBar(): void {
+  const open = consoleViews.find((entry) => entry.view.visible);
+  if (open) setBarTitle(CONSOLE_LABELS[open.name], false);
+  else setBarTitle(chatTitle.textContent ?? "", currentSession() !== undefined);
+}
+
 function showConsole(name: ConsoleName, arg?: string): void {
   if (name === "tasks" || name === "activity") lastActivityConsole = name;
   setHash({ kind: "console", name, arg });
+  closeDrawer();
   chatVisible = false;
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
@@ -378,6 +406,7 @@ function showConsole(name: ConsoleName, arg?: string): void {
   openConfigBtn.classList.toggle("bg-indigo-50", name === "config");
   openChannelsBtn.classList.toggle("bg-indigo-50", name === "channels");
   openActivityBtn.classList.toggle("bg-indigo-50", name === "tasks" || name === "activity");
+  syncBar();
 }
 
 const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
@@ -389,6 +418,7 @@ function showChat(): void {
   chatVisible = true;
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
+  syncBar();
 }
 
 // --- routing (the hash is the address bar's copy of "where am I") ---------------------
@@ -449,6 +479,7 @@ function applyRoute(): void {
 
 async function select(id: string): Promise<void> {
   showChat();
+  closeDrawer(); // on mobile the drawer is how you got here
   setHash({ kind: "session", id });
   if (id === currentId) return;
   saveDraft(); // the outgoing session keeps its unsent text
@@ -497,7 +528,7 @@ async function loadSession(id: string): Promise<void> {
       t.role === "assistant" ? appendAssistant(t.text, t.meta) : appendTurn(t.role, t.text);
     // Refs only in the snapshot: each thumbnail pulls its own bytes.
     for (const img of t.images ?? []) {
-      bubble.append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
+      imageRow(bubble).append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
     }
   }
   for (const run of snap.backgroundRuns) renderBackgroundRun(run);
@@ -542,7 +573,7 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
     head.append(
       h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
       copyBtn(
-        "cursor-pointer text-[10.5px] uppercase tracking-wide text-neutral-400 opacity-0 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100",
+        "cursor-pointer text-[10.5px] uppercase tracking-wide text-neutral-400 opacity-0 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100",
         () => value,
       ),
     );
@@ -678,6 +709,13 @@ initComposer({
   setState,
   reload: reloadIfCurrent,
 });
+initShell({
+  sessionMenu: (anchor) => {
+    const s = currentSession();
+    if (s) sessionMenu(anchor, s);
+  },
+});
+initNotify((id) => sessions.find((s) => s.id === id)?.title ?? "Untitled session");
 initSidebar({
   sessions: () => sessions,
   currentId: () => currentId,

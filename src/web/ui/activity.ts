@@ -62,9 +62,11 @@ export function createActivityView(
   }
 
   function render(): void {
-    const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4");
+    // The mobile top bar already names this view, and this header carries
+    // nothing else — below md it would be a duplicate title in its own row.
+    const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden");
     header.append(h("span", "font-medium", "Activity"));
-    const tabs = h("div", "flex items-center gap-1 border-b border-neutral-200 px-4 py-2");
+    const tabs = h("div", "tabstrip");
     tabs.append(
       control("Sessions", tab === "sessions", () => {
         tab = "sessions";
@@ -76,7 +78,8 @@ export function createActivityView(
       control("Tasks", false, () => openTask()),
     );
     if (tab === "dependencies") {
-      const scopeControl = h("div", "ml-auto flex gap-1");
+      // w-full below md forces its own line inside the wrapping .tabstrip.
+      const scopeControl = h("div", "ml-auto flex gap-1 max-md:ml-0 max-md:w-full");
       scopeControl.append(
         control("Active", scope === "active", () => { scope = "active"; void load(); }),
         control("Last hour", scope === "recent", () => { scope = "recent"; void load(); }),
@@ -91,7 +94,9 @@ export function createActivityView(
 
   function renderSessions(body: HTMLElement): void {
     const table = document.createElement("table");
-    table.className = "w-full table-fixed text-left text-[12.5px]";
+    // table-fixed at phone width crushes four columns into each other, so the
+    // table keeps its desktop minimum and the pane scrolls sideways instead.
+    table.className = "w-full min-w-[38rem] table-fixed text-left text-[12.5px]";
     table.innerHTML = `<thead class="bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
       <th class="w-[34%] px-4 py-2 font-semibold">Session</th>
       <th class="w-[38%] px-2 py-2 font-semibold">Project</th>
@@ -159,7 +164,7 @@ export function createActivityView(
     const height = Math.max(420, Math.min(680, nodes.size * 90));
     const graph = svg("svg");
     graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    graph.setAttribute("class", "min-h-[420px] w-full");
+    graph.setAttribute("class", "min-h-[26.25rem] w-full");
     const defs = svg("defs");
     const marker = svg("marker");
     marker.setAttribute("id", "activity-arrow");

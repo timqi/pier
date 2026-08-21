@@ -63,7 +63,7 @@ function thumb(url: string, name: string, openImage: (src: string) => void): HTM
   img.src = url;
   img.alt = name;
   img.loading = "lazy";
-  img.className = "mt-1.5 max-h-48 cursor-zoom-in rounded-md border border-black/5";
+  img.className = "thumb";
   img.onclick = () => openImage(url);
   return img;
 }
@@ -73,7 +73,8 @@ function card(url: string, name: string): HTMLElement {
   const ext = extOf(name);
   const wrap = h(
     "span",
-    "my-1 inline-flex max-w-full items-center gap-2.5 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 align-middle no-underline",
+    // No own margins: the .thumbs strip owns the spacing between attachments.
+    "inline-flex max-w-full items-center gap-2.5 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 no-underline",
   );
   const icon = h(
     "span",
@@ -104,21 +105,49 @@ function card(url: string, name: string): HTMLElement {
 }
 
 /**
+ * Attachments get a row of their own under the prose: a block containing
+ * nothing but attachments becomes the strip, and attachments written into a
+ * sentence are lifted into a strip right after it. Either way a set of them
+ * packs across the row and wraps, rather than trailing the text one per line.
+ */
+function groupAttachments(placed: HTMLElement[]): void {
+  const blocks = new Set<HTMLElement>();
+  for (const node of placed) if (node.parentElement) blocks.add(node.parentElement);
+  for (const block of blocks) {
+    const mine = [...block.children].filter((c) => placed.includes(c as HTMLElement));
+    const bare = [...block.childNodes].every((n) =>
+      n.nodeType === Node.TEXT_NODE ? !n.textContent?.trim() : mine.includes(n as Element),
+    );
+    if (bare) {
+      block.classList.add("thumbs");
+      continue;
+    }
+    const strip = h("div", "thumbs");
+    strip.append(...mine);
+    block.after(strip);
+  }
+}
+
+/**
  * Upgrade every attachment node of a rendered markdown bubble in place. Called
  * after sanitizing, so only URLs the rewrite produced are touched.
  */
 export function renderAttachments(root: HTMLElement, openImage: (src: string) => void): void {
+  const placed: HTMLElement[] = [];
   for (const img of root.querySelectorAll("img")) {
     const src = img.getAttribute("src") ?? "";
     if (!isFileUrl(src)) continue;
-    img.replaceWith(thumb(src, basename(pathOf(src)), openImage));
+    const node = thumb(src, basename(pathOf(src)), openImage);
+    img.replaceWith(node);
+    placed.push(node);
   }
   for (const a of root.querySelectorAll("a")) {
     const href = a.getAttribute("href") ?? "";
     if (!isFileUrl(href)) continue;
     const name = basename(pathOf(href)) || a.textContent?.trim() || "file";
-    a.replaceWith(
-      IMAGE_EXT.has(extOf(name)) ? thumb(href, name, openImage) : card(href, name),
-    );
+    const node = IMAGE_EXT.has(extOf(name)) ? thumb(href, name, openImage) : card(href, name);
+    a.replaceWith(node);
+    placed.push(node);
   }
+  if (placed.length) groupAttachments(placed);
 }

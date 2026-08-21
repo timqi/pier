@@ -310,7 +310,9 @@ export function createChannelsView(root: HTMLElement): ChannelsView {
   // than as flex-none siblings above it: a settings page long enough to scroll
   // is exactly when you still want to see which platform you are editing.
   const header = h("header", "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4");
-  header.append(h("span", "font-medium", "Channels"));
+  // The mobile top bar already names the view; the status box stays, so the
+  // header keeps its h-10 and the tabs' top-10 offset still lines up.
+  header.append(h("span", "font-medium max-md:hidden", "Channels"));
   const statusBox = h("div", "ml-auto flex items-center gap-1.5 text-[11.5px]");
   header.append(statusBox);
 

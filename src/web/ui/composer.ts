@@ -3,7 +3,7 @@
 // reconciles against `user-message` events.
 
 import { $, h } from "./dom.js";
-import { appendTurn, imageThumb, scrollBottom, turnsPane } from "./chat.js";
+import { appendTurn, imageRow, imageThumb, scrollBottom, turnsPane } from "./chat.js";
 import type { ImageAttachment, SessionState } from "../../core/types.js";
 
 /** Everything the composer needs from the orchestrator (main.ts). */
@@ -202,7 +202,9 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
   if (startsTurn || mode === "steer") {
     optimisticUserTexts.push(imageMarker(text, images.length));
     const bubble = appendTurn("user", text);
-    for (const img of images) bubble.append(imageThumb(`data:${img.mimeType};base64,${img.data}`));
+    for (const img of images) {
+      imageRow(bubble).append(imageThumb(`data:${img.mimeType};base64,${img.data}`));
+    }
     scrollBottom(true);
   }
   const res = await fetch(`/api/sessions/${id}/messages`, {
@@ -264,11 +266,14 @@ export function initComposer(d: ComposerDeps): void {
     autosize();
     saveDraft();
   };
+  // A touch keyboard's Enter is the only way to get a newline (there is no
+  // Shift), so there it types one and the send button is the only send.
+  const enterSends = !matchMedia("(pointer: coarse)").matches;
   input.onkeydown = (ev) => {
     // IME guard: Enter that confirms a composition candidate must not send
     // (isComposing covers modern browsers; 229 covers stragglers).
     if (ev.isComposing || ev.keyCode === 229) return;
-    if (ev.key === "Enter" && !ev.shiftKey) {
+    if (enterSends && ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
       void send("auto");
     }

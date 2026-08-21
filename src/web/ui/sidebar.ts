@@ -112,9 +112,11 @@ function sessionRow(s: SessionInfo): HTMLElement {
       active ? "bg-indigo-50 hover:bg-indigo-50" : ""
     }`,
   );
+  // Touch has no hover, so a hover-revealed control there is unreachable —
+  // pointer-coarse makes it resident instead (same trick on the project +).
   const more = h(
     "button",
-    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block",
+    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block",
     "\u22ef",
   );
   more.title = "Session actions";
@@ -138,7 +140,7 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   // the dialog would have asked for.
   const add = h(
     "button",
-    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block",
+    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block",
     "+",
   );
   add.title = `New session in ${cwd}`;
@@ -162,10 +164,32 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   return el;
 }
 
+/** Everything mid-turn, pinned or not, lifted above the projects: on mobile
+ *  this is the whole "what is running right now" surface, and it costs the
+ *  desktop rail nothing while nothing streams. */
+function runningNode(list: SessionInfo[]): HTMLElement {
+  const { el, summary } = detailsRow("border-b border-neutral-200/70", [
+    h(
+      "span",
+      "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-green-700",
+      "Running",
+    ),
+    h("span", "ml-auto flex-none text-[11px] text-neutral-400", String(list.length)),
+  ]);
+  summary.className += " px-3 py-1.5 hover:bg-neutral-100";
+  el.open = true;
+  const rows = h("ul", "pb-1");
+  rows.append(...list.map(sessionRow));
+  el.append(rows);
+  return el;
+}
+
 export function renderSessions(): void {
   const sessions = deps.sessions();
+  const running = sessions.filter((s) => s.state === "streaming");
   const projects = groupByCwd(sessions.filter((s) => s.pinned));
   projectTree.replaceChildren(
+    ...(running.length ? [runningNode(running)] : []),
     ...(projects.size
       ? [...projects].map(([cwd, list]) => projectNode(cwd, list))
       : [

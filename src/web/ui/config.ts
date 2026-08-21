@@ -45,7 +45,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     scopeSelect,
   );
 
-  const header = h("header", "flex h-10 flex-none items-center gap-3 border-b border-neutral-200 px-4");
+  // Title only, and the mobile top bar already says it — below md the whole
+  // row would just be a duplicate.
+  const header = h("header", "flex h-10 flex-none items-center gap-3 border-b border-neutral-200 px-4 max-md:hidden");
   header.append(h("span", "font-medium", "Configuration"));
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1");
   const nav = h("nav", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[13px]");

@@ -111,7 +111,11 @@ export function createTasksView(
 
   function header(title: string | HTMLElement, actions: HTMLElement[]): HTMLElement {
     const el = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4");
-    el.append(typeof title === "string" ? h("span", "truncate font-medium", title) : title);
+    // A plain string title repeats the mobile top bar; a breadcrumb element
+    // (the task detail page) does not, so only the former hides below md.
+    el.append(
+      typeof title === "string" ? h("span", "truncate font-medium max-md:hidden", title) : title,
+    );
     if (actions.length) {
       const box = h("div", "ml-auto flex items-center gap-2");
       box.append(...actions);
@@ -125,7 +129,7 @@ export function createTasksView(
   // Rendered on the list and the detail page alike, so the console tabs never
   // disappear while inside a task.
   function consoleTabs(): HTMLElement {
-    const strip = h("div", "flex flex-none items-center gap-1 border-b border-neutral-200 px-4 py-2");
+    const strip = h("div", "tabstrip");
     const sessionsTab = button("Sessions");
     sessionsTab.onclick = () => openActivity("sessions");
     const depsTab = button("Dependencies");
@@ -146,7 +150,12 @@ export function createTasksView(
     const create = button("New task", true);
     create.onclick = () => editDialog();
     const filters = consoleTabs();
-    const filterBox = h("div", "ml-auto flex items-center gap-1");
+    // w-full below md forces its own line inside the wrapping .tabstrip — six
+    // filters crammed beside the console tabs are unreachable on a phone.
+    const filterBox = h(
+      "div",
+      "ml-auto flex flex-none items-center gap-1 pl-1 max-md:ml-0 max-md:w-full max-md:overflow-x-auto max-md:pl-0",
+    );
     const filterOptions: [string, string][] = [["All", "active"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"], ["Subagents", "subagent"], ["Archived", "archived"]];
     for (const [label, key] of filterOptions) {
       const tab = button(label);
@@ -160,7 +169,9 @@ export function createTasksView(
     }
     filters.append(filterBox);
     const table = document.createElement("table");
-    table.className = "w-full table-fixed text-left text-[12.5px]";
+    // Six table-fixed columns collide at phone width; keep the desktop minimum
+    // and let the pane scroll sideways.
+    table.className = "w-full min-w-[52rem] table-fixed text-left text-[12.5px]";
     table.innerHTML = `<thead class="sticky top-0 bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
       <th class="w-[24%] px-4 py-2 font-semibold">Name</th><th class="w-[10%] px-2 py-2 font-semibold">Action</th>
       <th class="w-[23%] px-2 py-2 font-semibold">Trigger</th><th class="w-[17%] px-2 py-2 font-semibold">Next</th>
@@ -262,7 +273,7 @@ export function createTasksView(
   }
 
   function renderDefinition(pane: HTMLElement, task: TaskDefinition): void {
-    const content = h("div", "grid max-w-4xl grid-cols-[150px_minmax(0,1fr)] gap-x-5 gap-y-3 p-4 text-[13px]");
+    const content = h("div", "grid max-w-4xl grid-cols-[9.375rem_minmax(0,1fr)] gap-x-5 gap-y-3 p-4 text-[13px]");
     const values: [string, string][] = [
       ["Status", task.archived ? "Archived" : task.enabled ? "Enabled" : "Paused"],
       ["Trigger", triggerSummary(task)],
@@ -305,7 +316,7 @@ export function createTasksView(
   function renderRuns(pane: HTMLElement, task: TaskDefinition, runs: TaskRun[]): void {
     const list = h("div", "divide-y divide-neutral-100");
     for (const run of runs) {
-      const row = h("button", "grid w-full cursor-pointer grid-cols-[120px_1fr_120px_100px] gap-3 px-4 py-2.5 text-left text-[12.5px] hover:bg-neutral-50");
+      const row = h("button", "grid w-full cursor-pointer grid-cols-[7.5rem_1fr_7.5rem_6.25rem] gap-3 px-4 py-2.5 text-left text-[12.5px] hover:bg-neutral-50");
       row.append(
         h("span", "font-medium", run.state),
         h("span", "truncate text-neutral-500", dateTime(run.queuedAt)),
@@ -360,7 +371,7 @@ export function createTasksView(
       const ledger = h("div", "border-t border-neutral-200");
       ledger.append(h("div", "px-4 py-2 text-[11px] font-semibold uppercase text-neutral-400", "Messages"));
       for (const message of messages) {
-        const row = h("div", "grid grid-cols-[100px_100px_1fr] gap-3 border-t border-neutral-100 px-4 py-2 text-[12px]");
+        const row = h("div", "grid grid-cols-[6.25rem_6.25rem_1fr] gap-3 border-t border-neutral-100 px-4 py-2 text-[12px]");
         row.append(h("span", "font-medium", message.kind), h("span", "text-neutral-500", message.state), h("span", "whitespace-pre-wrap", message.content));
         ledger.append(row);
       }
@@ -400,7 +411,7 @@ export function createTasksView(
 
   function editDialog(task?: TaskDefinition): void {
     const dialog = document.createElement("dialog");
-    dialog.className = "m-auto w-[620px] max-w-[94vw] rounded-lg border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20";
+    dialog.className = "m-auto w-[38.75rem] max-w-[94vw] rounded-lg border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20";
     const form = document.createElement("form");
     form.className = "flex max-h-[88vh] flex-col";
     const formError = h("span", "mr-auto text-[12px] text-red-600");

@@ -1,7 +1,84 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* Shared button styles — the only custom classes; everything else is utilities. */
+/* --- global UI scale --------------------------------------------------------
+   One knob for how big the whole workbench reads. Tailwind's spacing and sizing
+   utilities are rem-based, so the root size scales padding, row heights and
+   icons along with the type.
+
+   The type itself is written as `text-[13px]` literals in ~170 places, which rem
+   cannot reach — so those utilities are redefined here at their rem equivalent
+   (n/16) instead of being rewritten at every call site. New code should use the
+   named scale (`text-sm`) and this block should shrink, not grow. */
+html {
+  font-size: 112.5%; /* 18px base */
+}
+.text-\[9px\] { font-size: 0.5625rem; }
+.text-\[10px\] { font-size: 0.625rem; }
+.text-\[10\.5px\] { font-size: 0.65625rem; }
+.text-\[11px\] { font-size: 0.6875rem; }
+.text-\[11\.5px\] { font-size: 0.71875rem; }
+.text-\[12px\] { font-size: 0.75rem; }
+.text-\[12\.5px\] { font-size: 0.78125rem; }
+.text-\[13px\] { font-size: 0.8125rem; }
+.text-\[13\.5px\] { font-size: 0.84375rem; }
+.text-\[14px\] { font-size: 0.875rem; }
+.text-\[15px\] { font-size: 0.9375rem; }
+.text-\[16px\] { font-size: 1rem; }
+.text-\[17px\] { font-size: 1.0625rem; }
+.text-\[20px\] { font-size: 1.25rem; }
+
+/* Prose gives every <img> 2em of vertical margin — right for an article, wrong
+   for a 64px tile in a flex strip. Unlayered, so it outranks the prose layer
+   whatever the selectors' specificity. */
+.thumbs > * {
+  margin: 0;
+}
+
+/* Mobile: the sidebar leaves the grid and slides over the workbench. Plain CSS
+   behind one media query rather than a pile of `max-md:` utilities — the open
+   state is a single transform, and Tailwind's class ordering can't flip it. */
+@media (width < 48rem) {
+  #sidebar {
+    position: fixed;
+    inset-block: 0;
+    left: 0;
+    z-index: 40;
+    width: 19rem;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease-out;
+    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+  }
+  #sidebar[data-open] {
+    transform: translateX(0);
+  }
+  /* The drawer is a primary surface on a phone, not a rail: the two lists carry
+     their own size utilities, so naming them is the only way to scale them up. */
+  #sidebar,
+  #console-section ul,
+  #project-tree {
+    font-size: 0.9375rem;
+  }
+  /* Pull-to-refresh would reload the workbench mid-turn; the transcript pane
+     keeps its own scroll chaining. */
+  body {
+    overscroll-behavior: none;
+  }
+  /* Home-indicator gutter for the two elements that sit on the bottom edge. */
+  #composer,
+  #sidebar > footer {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+  /* Thumb-sized rows in the drawer; the desktop rail stays compact. */
+  #project-tree li,
+  #project-tree summary,
+  #console-section li button {
+    padding-block: 0.5rem;
+  }
+}
+
+/* The only custom classes — each one a string that repeats verbatim across
+   modules; everything else is utilities at the call site. */
 @layer components {
   .btn {
     @apply rounded-md border border-neutral-300 bg-white px-3 py-1 hover:bg-neutral-100 active:bg-neutral-200 cursor-pointer;
@@ -12,6 +89,16 @@
   /* Sidebar section actions (search / new). */
   .icon-btn {
     @apply flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700;
+  }
+  /* Console tab strip (Activity, Tasks). Desktop keeps the view's tabs and its
+     right-hand control group on one line; below md the right group takes
+     `w-full` and this wraps to give it a line of its own, within thumb reach. */
+  .tabstrip {
+    @apply flex flex-none items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-neutral-200 px-4 py-2 max-md:flex-wrap max-md:gap-y-2;
+  }
+  /* Lightbox paging arrows; the side comes from a `left-2` / `right-2` beside it. */
+  .lightbox-nav {
+    @apply absolute top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white hover:bg-black/70;
   }
   /* Collapsible rows: hide native markers, rotate our chevron on open. */
   summary {
@@ -28,6 +115,17 @@
   }
   .spinner {
     @apply h-3 w-3 flex-none animate-spin rounded-full border-2 border-current border-t-transparent;
+  }
+  /* Chat attachment thumbnails — the same tile whether the user attached the
+     image or the agent produced it. A small fixed square; object-contain, not
+     cover, because a cropped corner of a chart says nothing about what it is. */
+  .thumb {
+    @apply inline-block h-16 w-16 cursor-zoom-in rounded-md border border-black/5 bg-black/[0.02] object-contain align-middle;
+  }
+  /* The tiles get their own block under the text — packed across the row and
+     wrapping, never trailing the prose on its last line. */
+  .thumbs {
+    @apply mt-1.5 flex flex-wrap items-center gap-1.5;
   }
 
   /* Markdown-rendered chat content: prose rhythm, chat font size.
