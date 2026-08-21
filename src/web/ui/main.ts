@@ -12,7 +12,7 @@ import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
-import { renderSuggestions, resetSuggestions } from "./suggestions.js";
+import { markPicked, renderSuggestions, resetSuggestions } from "./suggestions.js";
 import { createTasksView } from "./tasks.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
@@ -1474,6 +1474,7 @@ async function send(mode: "auto" | "steer", label?: string): Promise<void> {
   if (startsTurn || mode === "steer") {
     optimisticUserTexts.push(imageMarker(text, images.length));
     const bubble = appendTurn("user", text);
+    if (label !== undefined) markPicked(bubble); // came from a next-step button
     for (const img of images) bubble.append(imageThumb(`data:${img.mimeType};base64,${img.data}`));
     scrollBottom(true);
   }

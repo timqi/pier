@@ -13,15 +13,25 @@ const BASE =
   "cursor-pointer rounded-full border px-2.5 py-0.5 text-[12.5px] transition-colors";
 const LIVE = `${BASE} border-indigo-200 bg-indigo-50 text-indigo-700 hover:border-indigo-300 hover:bg-indigo-100`;
 const SPENT = `${BASE} cursor-default border-neutral-200 bg-neutral-50 text-neutral-400`;
-const CHOSEN = `${BASE} cursor-default border-indigo-300 bg-indigo-600 text-white`;
 
 /** Grey a group out and stop it answering. */
-function lock(group: HTMLElement, chosen?: HTMLElement): void {
+function lock(group: HTMLElement): void {
   if (live === group) live = null;
   for (const btn of group.querySelectorAll("button")) {
     btn.disabled = true;
-    btn.className = btn === chosen ? CHOSEN : SPENT;
+    btn.className = SPENT;
   }
+}
+
+/** Mark a user turn as the answer to a clicked option. */
+export function markPicked(body: HTMLElement): void {
+  body.prepend(
+    h(
+      "span",
+      "mr-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 align-middle text-[11px] text-indigo-600",
+      "↩ option",
+    ),
+  );
 }
 
 /** Forget the live group — the transcript it belonged to is gone. */
@@ -42,7 +52,10 @@ export function renderSuggestions(
     const btn = h("button", LIVE, label) as HTMLButtonElement;
     btn.type = "button";
     btn.onclick = () => {
-      lock(group, btn);
+      // The picked row goes away entirely: the answer is about to show up as
+      // the next user turn, so leaving the options behind only repeats it.
+      if (live === group) live = null;
+      group.remove();
       onPick(label);
     };
     group.append(btn);
