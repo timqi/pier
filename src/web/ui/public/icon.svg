@@ -1,0 +1,14 @@
+<!-- Pier's mark: a dock in profile over water. Kept to four solid shapes so it
+     still reads at 16px in a browser tab. Source of truth for the PNG icons
+     next to it (favicon fallback, apple-touch, manifest). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="12" fill="#4f46e5" />
+  <g fill="#fff">
+    <rect x="8" y="23" width="48" height="7" rx="1.5" />
+    <rect x="13" y="30" width="6" height="17" rx="1" />
+    <rect x="29" y="30" width="6" height="17" rx="1" />
+    <rect x="45" y="30" width="6" height="17" rx="1" />
+  </g>
+  <path d="M8 53q8-4.5 16 0t16 0 16 0" fill="none" stroke="#fff" stroke-width="4"
+    stroke-linecap="round" opacity=".85" />
+</svg>

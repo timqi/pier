@@ -9,6 +9,10 @@
   <!-- Installed as a home-screen app, this is also what makes Web Push
        possible on iOS — notifications there require a standalone web app. -->
   <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- SVG first (scales to any tab/bookmark size), 32px PNG for the engines
+       that still ignore it. iOS wants an opaque square and rounds it itself. -->
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Pier" />
