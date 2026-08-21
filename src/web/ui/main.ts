@@ -14,7 +14,6 @@ import {
   activityThinking,
   activityToolEnd,
   activityToolStart,
-  compact,
   completeTurn,
   copyBtn,
   finalizeStreaming,
@@ -40,6 +39,8 @@ import {
   syncQueuePanel,
   updateComposer,
 } from "./composer.js";
+import { createChannelsView } from "./channels.js";
+import { compact } from "../../core/reply.js";
 import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -85,6 +86,7 @@ const composerForm = $<HTMLFormElement>("#composer");
 const consoleSection = $<HTMLDetailsElement>("#console-section");
 const openActivityBtn = $("#open-activity");
 const openConfigBtn = $("#open-config");
+const openChannelsBtn = $("#open-channels");
 const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
 const sessionMeta = $("#session-meta");
@@ -342,25 +344,28 @@ const activityView = createActivityView(
   (taskId) => showTasks(taskId),
 );
 
-type ConsoleName = "config" | "tasks" | "activity";
+const channelsView = createChannelsView($("#channels-view"));
+
+type ConsoleName = "config" | "channels" | "tasks" | "activity";
 
 const consoleViews: {
   name: ConsoleName;
   view: { show(arg?: string): void; hide(): void; visible: boolean };
 }[] = [
   { name: "config", view: configView },
+  { name: "channels", view: channelsView },
   { name: "tasks", view: tasksView },
   { name: "activity", view: activityView },
 ];
 
-const consoleBtns = [openConfigBtn, openActivityBtn];
+const consoleBtns = [openConfigBtn, openChannelsBtn, openActivityBtn];
 
 // The Activity menu item reopens whichever of its views (Activity or Tasks)
 // was showing last; the views themselves keep their tab/selection state.
 let lastActivityConsole: ConsoleName = "activity";
 
 function showConsole(name: ConsoleName, arg?: string): void {
-  if (name !== "config") lastActivityConsole = name;
+  if (name === "tasks" || name === "activity") lastActivityConsole = name;
   setHash({ kind: "console", name, arg });
   chatVisible = false;
   for (const el of chatEls) el.classList.add("hidden");
@@ -371,7 +376,8 @@ function showConsole(name: ConsoleName, arg?: string): void {
   }
   // Tasks lives under the Activity menu item (tab strip inside the views).
   openConfigBtn.classList.toggle("bg-indigo-50", name === "config");
-  openActivityBtn.classList.toggle("bg-indigo-50", name !== "config");
+  openChannelsBtn.classList.toggle("bg-indigo-50", name === "channels");
+  openActivityBtn.classList.toggle("bg-indigo-50", name === "tasks" || name === "activity");
 }
 
 const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
@@ -683,6 +689,7 @@ initSidebar({
 
 openActivityBtn.onclick = () => showConsole(lastActivityConsole);
 openConfigBtn.onclick = () => showConsole("config");
+openChannelsBtn.onclick = () => showConsole("channels");
 consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
 consoleSection.ontoggle = () =>
   localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");

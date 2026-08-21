@@ -30,7 +30,12 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 src/
   core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts
   agent/       pi.ts (the ONLY file importing @earendil-works/pi-*)
-  channels/    telegram.ts, slack.ts, lark.ts   [step 5+]
+  channels/    types.ts (config contract), config.ts (store + permission gate),
+               conversations.ts (durable chat → session map),
+               receipts.ts (durable pending-reaction set), db.ts,
+               runtime.ts (adapter lifecycle), routes.ts,
+               telegram.ts + telegram-api.ts + telegram-markdown.ts
+               [slack.ts, lark.ts: configurable, no adapter yet]
   web/         server.ts, static frontend (ui/ modules)
   tasks/       definitions, runs, groups, execution, callbacks, messages,
                service, store, tool, HTTP routes
@@ -39,6 +44,11 @@ src/
 
 Dependency direction: `channels | web | tasks → core → agent`. Core never
 imports platform SDKs or Pi. Nothing imports sideways between channels.
+
+The IM channel layer has its own living spec: `docs/design/04-im-channels.md`
+covers what is shared versus platform-specific, the checklists a new adapter
+follows, and the traps Telegram already paid for. Read it before writing the
+Slack or Lark adapter.
 
 ## Core Types
 
@@ -49,6 +59,17 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   reply)`, `stop()`. One implementation per platform. `AgentReply` is markdown
   plus next-step labels (`core/reply.ts` parses the agent's trailing `---\n[a] |
   [b]` block once); every surface renders them as buttons that send the label.
+  `send` is called on **every** turn-end, empty text included — that is the
+  turn-settled signal an adapter retires per-turn UI on. `notify` carries a
+  persisted `system-input` (delegation, task callback, supervisor message) to
+  the same conversation: a turn the chat never saw being asked for otherwise
+  reads as the agent talking to itself. `AgentReply` carries the turn's
+  `TurnMeta`, which surfaces without hover render as a footer.
+- Slash commands are parsed once for every platform in `channels/commands.ts`:
+  trim both ends, require a leading `/`, split off an `@target`, keep args
+  verbatim. Channel-level control that is not a prompt (`/stop`) is wired by
+  `channels/runtime.ts`, which owns the router — the `Channel` seam has one
+  inbound path and keeps it.
 - `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (all
   accept optional image attachments), persisted system input, abort, history,
   model get/set/list, clearQueue, create/fork/resume, and a payload-only
@@ -72,15 +93,52 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   fan-out to subscribers. No persistence — pi's session files are the durable
   record. `queued` events are emitted by the router when the queue policy
   defers a message (pi's `queue_update` is dropped at the seam).
-- **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory
-  for v1. Unknown conversation → create a session lazily via `AgentFactory`.
-  Task definitions persist their target session id independently.
+- **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory.
+  Unknown conversation → create a session lazily via the injected resolver.
+  Durability is the caller's business, not core's: web conversation ids already
+  *are* session ids, task definitions persist their target, and IM channels
+  keep `channels/conversations.ts` — without it a restart would hand every
+  chat a fresh session while its visible history says otherwise. A mapping
+  whose session Pi no longer has is dropped and re-created, never retried
+  forever.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel. IM surfaces get turn granularity; only the web
-  workbench gets deltas.
+  workbench gets deltas. Reasoning and tool events never leave core for an IM
+  surface: the Telegram adapter reacts 👀 on each message that entered the turn
+  and clears them all when it settles. The pending set is durable
+  (`channels/receipts.ts`) because the two halves live on the platform, not in
+  Pier: an adapter clears every receipt on the books at startup (none can be
+  its own yet) and sweeps its own stragglers past 30 minutes, so a crash or a
+  message whose turn never started cannot orphan an emoji.
+- **IM permission policy** (`channels/config.ts`): one persisted JSON document
+  per platform holds the token, global defaults, bound users and the chats
+  discovered from inbound traffic. `requireMention` and `requireBind` default
+  to true; a chat overrides a flag only with an explicit boolean, so
+  `undefined` always means "inherit". `gate()` is the whole inbound decision
+  and is platform-blind — denials are silent, never a message in the chat.
+- **Topic mode** (Telegram): a message landing in a forum group's General
+  opens a topic named after its first line, so one group hosts many parallel
+  sessions. Replies and slash commands stay put; a failure falls back to
+  General rather than losing the message. Per-chat, inheriting the global.
+- **IM inbound is `mode: "steer"`**: a human watching a chat window expects
+  the next message to reach the running turn, not to queue behind it.
 - **Errors**: a malformed inbound message is logged and dropped at the seam.
   Agent errors surface as `error` events, never as thrown exceptions across
   a seam.
+
+## Open Questions
+
+- `ChatKind`'s `"forum"` member is a Telegram word sitting in the
+  platform-blind config contract (`channels/types.ts`). `topicMode` itself
+  generalizes fine — "one native thread per request" is Slack threads and Lark
+  topic groups too — but the kind name does not. Resolve it when the Slack
+  adapter lands (likely `"threaded"`), together with whatever else that second
+  platform proves wrong about the contract; renaming it now would be guessing.
+- Nothing in Pier authenticates: the workbench, the task routes and the channel
+  config all trust whoever reaches the loopback port. IM channels raise the
+  stakes (a config write decides who may drive an agent in a group chat) but do
+  not change the shape of the answer. To be handled once, for every surface,
+  with the Show pages — not per-route.
 
 ## Decisions Log
 
@@ -90,8 +148,16 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - Web workbench before IM channels (fastest loop for steering/observability).
 - Show pages: static HTML + optional SSE reload; Pi `export_html` for replay.
 - Persistence: Pi session files own transcripts; one SQLite database owns Task
-  definitions, immutable Run snapshots, callback outbox state, and the bounded
-  Subagent control/supervisor message ledger.
+  definitions, immutable Run snapshots, callback outbox state, the bounded
+  Subagent control/supervisor message ledger, and one config row per IM
+  channel.
+- IM chats are discovered, not registered: Telegram has no "list my chats"
+  API, so a chat appears in the Console after the bot first sees traffic in
+  it. New chats arrive enabled; the mention and bind gates are what keep them
+  harmless until an operator configures them.
+- Telegram over raw Bot API long polling, not a bot framework and not
+  webhooks: the surface Pier needs is HTTP + JSON, and webhooks would add an
+  inbound public-HTTP requirement to a local process.
 - Frontend build: Vite + Tailwind (static CSS, zero runtime). Adopted early by
   explicit decision instead of the original no-bundler plan; still no UI
   framework until componentization is needed.

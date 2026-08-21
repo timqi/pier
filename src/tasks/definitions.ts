@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { Cron } from "croner";
 import type { AgentFactory, ThinkingLevel } from "../core/types.js";
+import { isThinkingLevel } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { TaskStore } from "./store.js";
@@ -18,7 +19,6 @@ import type {
 
 const DEFAULT_TIMEOUT = 900;
 const MIN_WATCH_SECONDS = 5;
-const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -78,7 +78,7 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     };
   }
   if (value.thinking !== undefined) {
-    if (typeof value.thinking !== "string" || !THINKING_LEVELS.has(value.thinking as ThinkingLevel)) {
+    if (!isThinkingLevel(value.thinking)) {
       throw new Error("invalid agent thinking level");
     }
     launch.thinking = value.thinking as ThinkingLevel;

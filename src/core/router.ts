@@ -66,10 +66,25 @@ export class Router {
           state: payload.state,
         });
       }
-      if (payload.type === "turn-end" && payload.text) {
+      // A system input is context the chat did not see being typed. It goes
+      // out before the turn it triggers, so the answer has a visible cause.
+      if (payload.type === "system-input") {
+        const channel = this.channels.get(key.channelId);
+        channel?.notify(key.conversationId, { text: payload.text, origin: payload.origin })
+          .catch((err) => {
+            this.hub.emit(session.id, {
+              type: "error",
+              message: `notify ${key.channelId} failed: ${String(err)}`,
+            });
+          });
+      }
+      // Every turn-end reaches the channel, empty text included: an adapter's
+      // per-turn UI (Telegram's 👀 receipts) is retired here, and a turn that
+      // settled with nothing to say still has to settle.
+      if (payload.type === "turn-end") {
         const channel = this.channels.get(key.channelId);
         if (channel) {
-          channel.send(key.conversationId, splitReply(payload.text)).catch((err) => {
+          channel.send(key.conversationId, splitReply(payload.text, payload.meta)).catch((err) => {
             this.hub.emit(session.id, {
               type: "error",
               message: `outbound to ${key.channelId} failed: ${String(err)}`,
@@ -82,6 +97,18 @@ export class Router {
 
   async abort(sessionId: string): Promise<void> {
     await this.bySession.get(sessionId)?.session.abort();
+  }
+
+  /**
+   * The session already attached to a conversation, if any. Never creates one:
+   * a channel's stop or settings command must not be what opens a session.
+   */
+  sessionOf(key: ConversationKey): AgentSession | undefined {
+    return this.byKey.get(keyOf(key));
+  }
+
+  async abortConversation(key: ConversationKey): Promise<void> {
+    await this.sessionOf(key)?.abort();
   }
 
   /** Session owning a conversation, resolving and attaching it on first use. */

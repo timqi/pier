@@ -24,6 +24,9 @@ export interface ImageAttachment {
 export interface AgentReply {
   text: string;
   suggestions: string[];
+  /** Completion stats of the turn. Surfaces that cannot hover (IM) render
+   * them as a footer; the web shows them on the bubble. */
+  meta?: TurnMeta;
 }
 
 export interface InboundMessage {
@@ -39,8 +42,19 @@ export interface InboundMessage {
 export interface Channel {
   readonly id: string;
   start(onMessage: (msg: InboundMessage) => void): Promise<void>;
-  /** Render the reply (markdown + next-step buttons) and send it. */
+  /**
+   * Render the reply (markdown + next-step buttons) and send it. Called on
+   * every turn-end, including one whose text is empty — that is the signal a
+   * turn settled, and adapters retire per-turn UI (reaction receipts) on it.
+   */
   send(conversationId: string, reply: AgentReply): Promise<void>;
+  /**
+   * Context that entered the session without a human typing it: a task
+   * delegation, a callback, a supervisor message. Rendered as a system note,
+   * never as an assistant turn — the people in the chat otherwise see the
+   * agent answer a question nobody asked.
+   */
+  notify(conversationId: string, note: { text: string; origin: SystemInputOrigin }): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -167,7 +181,14 @@ export interface ModelRef {
   id: string;
 }
 
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+/** Every level Pi accepts, in order. The union is derived so the two cannot
+ *  drift, and boundary validators use isThinkingLevel instead of their own copy. */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export const isThinkingLevel = (v: unknown): v is ThinkingLevel =>
+  typeof v === "string" && (THINKING_LEVELS as readonly string[]).includes(v);
 
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {
@@ -263,6 +284,13 @@ export interface AgentLaunchOptions {
 }
 
 export interface AgentFactory {
+  /**
+   * Models with configured auth, independent of any session. Session-scoped
+   * `availableModels()` cannot answer this: a surface that configures which
+   * model a *future* session launches with (IM chats, task definitions) has no
+   * session to ask.
+   */
+  availableModels(): Promise<ModelRef[]>;
   create(opts: AgentLaunchOptions): Promise<AgentSession>;
   fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;

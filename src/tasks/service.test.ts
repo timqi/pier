@@ -96,6 +96,7 @@ function setup() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
   const session = fakeSession();
   const factory: AgentFactory = {
+    availableModels: vi.fn(async () => []),
     create: vi.fn(async () => session),
     fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
@@ -409,7 +410,8 @@ describe("task service", () => {
     child.setState("streaming");
     const sessions = new Map([[parent.id, parent], [child.id, child]]);
     const factory: AgentFactory = {
-      create: vi.fn(async () => child),
+      availableModels: vi.fn(async () => []),
+    create: vi.fn(async () => child),
       fork: vi.fn(async () => child),
       resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
       list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),

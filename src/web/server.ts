@@ -1,8 +1,9 @@
 // Web workbench backend: REST + SSE, a pure consumer of core.
 // See docs/design/03-web-workbench.md for the route contract.
 
-import { readFile, realpath, stat } from "node:fs/promises";
-import { basename, extname, isAbsolute, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, extname, isAbsolute, resolve, sep } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -17,6 +18,7 @@ import type {
   InboundMessage,
   ThinkingLevel,
 } from "../core/types.js";
+import { isThinkingLevel } from "../core/types.js";
 import type { PinStore } from "./pins.js";
 
 export interface WebDeps {
@@ -30,7 +32,6 @@ export interface WebDeps {
 }
 
 const HEARTBEAT_MS = 15_000;
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const MAX_IMAGES = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
 
@@ -248,6 +249,58 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
     });
   });
 
+  // Directory browsing for the working-directory picker (new session, IM chat
+  // config). Names only, never contents — the file route above stays the only
+  // way to read bytes, and it is scoped to a session's own cwd.
+  app.get("/api/fs/dirs", async (c) => {
+    const raw = c.req.query("path");
+    const path = raw ? resolve(raw) : homedir();
+    if (!isAbsolute(path)) return c.json({ error: "absolute path required" }, 400);
+    let entries: string[] = [];
+    try {
+      const dir = await readdir(path, { withFileTypes: true });
+      entries = dir
+        // Dotfiles are noise in a project picker; a hidden cwd can still be
+        // typed by hand.
+        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+    } catch {
+      return c.json({ error: "cannot read directory" }, 404);
+    }
+    const parent = dirname(path);
+    return c.json({ path, parent: parent === path ? null : parent, entries });
+  });
+
+  // Create a folder while picking one — a new project usually needs a new
+   // directory. A name, never a path: traversal is rejected, not normalized.
+  app.post("/api/fs/dirs", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parent = typeof body?.path === "string" ? body.path : "";
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!isAbsolute(parent)) return c.json({ error: "absolute path required" }, 400);
+    if (!name || name.length > 64 || /[/\\]|^\.\.?$/.test(name)) {
+      return c.json({ error: "invalid folder name" }, 400);
+    }
+    const path = resolve(parent, name);
+    try {
+      await mkdir(path); // no recursive: the parent must already exist
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+    return c.json({ path });
+  });
+
+  // Backend model catalog, no session needed: surfaces that configure what a
+  // *future* session launches with (IM chats) have none to ask.
+  app.get("/api/models", async (c) => {
+    try {
+      return c.json(await factory.availableModels());
+    } catch (err) {
+      return c.json({ error: String(err) }, 500);
+    }
+  });
+
   app.get("/api/sessions/:id/models", async (c) => {
     const id = c.req.param("id");
     try {
@@ -289,7 +342,7 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
   app.post("/api/sessions/:id/thinking", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.level !== "string" || !THINKING_LEVELS.has(body.level)) {
+    if (!body || !isThinkingLevel(body.level)) {
       return c.json({ error: "valid thinking level required" }, 400);
     }
     try {

@@ -5,7 +5,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { splitReply } from "../../core/reply.js";
+import { formatTurnMeta, splitReply } from "../../core/reply.js";
 import { renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { highlightCode } from "./highlight.js";
 import { $, detailsRow, h } from "./dom.js";
@@ -36,10 +36,6 @@ export function initChat(d: ChatDeps): void {
 }
 
 export const turnsPane = $("#turns");
-
-/** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
-export const compact = (n: number): string =>
-  n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K` : String(n);
 
 // --- scrolling -------------------------------------------------------------------
 // Stick to the bottom only when the user is already there (avibe behavior);
@@ -275,8 +271,6 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
 /** Row-hover meta chip on agent turns: completion time · duration · tokens. */
 function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
   if (!meta) return;
-  const secs = Math.max(1, Math.round(meta.durationMs / 1000));
-  const dur = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
   // 24-hour, local timezone.
   const time = new Date(meta.completedAt).toLocaleTimeString([], {
     hour: "2-digit",
@@ -286,7 +280,7 @@ function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
   const chip = h(
     "span",
     "absolute -top-2.5 right-3 z-10 hidden rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] text-neutral-500 shadow-sm group-hover:inline",
-    `${time} · ${dur} · ${compact(meta.tokens)} tok`,
+    `${time} · ${formatTurnMeta(meta)}`,
   );
   (node.parentElement ?? node).append(chip);
 }

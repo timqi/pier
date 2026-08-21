@@ -2,6 +2,7 @@
 // model choice will show up outside chat too (scheduled tasks pick a model).
 
 import type { ModelRef, ThinkingLevel } from "../../core/types.js";
+import { thinkingLabel } from "../../core/reply.js";
 import { h } from "./dom.js";
 
 export interface ModelPickerProps {
@@ -44,9 +45,6 @@ function loadFavorites(): Favorite[] {
     return [];
   }
 }
-
-const thinkingLabel = (level: ThinkingLevel): string =>
-  level === "xhigh" ? "Extra high" : level[0]!.toUpperCase() + level.slice(1);
 
 /** Model row: the label picks, the star toggles the model+reasoning favorite.
  *  Two sibling buttons — nesting one inside the other would be invalid HTML. */

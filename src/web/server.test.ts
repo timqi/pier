@@ -1,6 +1,6 @@
-import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
@@ -131,6 +131,7 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
 function setup(cwd = "/tmp") {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
+    availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
     create: vi.fn(async () => session),
     fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
@@ -166,7 +167,8 @@ describe("workbench server", () => {
     const session = fakeSession("s2");
     const listed: { id: string; cwd: string; createdAt: number }[] = [];
     const factory: AgentFactory = {
-      create: vi.fn(async () => session),
+      availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
+    create: vi.fn(async () => session),
       fork: vi.fn(async () => session),
       resume: vi.fn(async () => session),
       list: vi.fn(async () => listed),
@@ -591,5 +593,48 @@ describe("workbench server", () => {
     expect(chunk).toContain('"seq":2');
     expect(chunk).toContain('"text-delta"');
     expect(chunk).not.toContain('"seq":1,');
+  });
+
+  // Backs the working-directory picker (new session, IM chat config).
+  it("browses directories by name, defaulting to $HOME", async () => {
+    const { app } = setup();
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pier-dirs-")));
+    mkdirSync(join(root, "project"));
+    mkdirSync(join(root, ".hidden"));
+    writeFileSync(join(root, "note.txt"), "x");
+
+    const res = await app.request(`/api/fs/dirs?path=${encodeURIComponent(root)}`);
+    expect(res.status).toBe(200);
+    // Directories only, dotfiles skipped, never any file contents.
+    expect(await res.json()).toEqual({ path: root, parent: dirname(root), entries: ["project"] });
+
+    const home = await (await app.request("/api/fs/dirs")).json() as { path: string };
+    expect(home.path).toBe(homedir());
+    expect((await app.request("/api/fs/dirs?path=/no/such/dir")).status).toBe(404);
+  });
+
+  it("creates a folder by name, and refuses a path", async () => {
+    const { app } = setup();
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pier-mkdir-")));
+    const create = (body: unknown) =>
+      app.request("/api/fs/dirs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const ok = await create({ path: root, name: "new-project" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ path: join(root, "new-project") });
+    expect(statSync(join(root, "new-project")).isDirectory()).toBe(true);
+
+    // Traversal and separators are rejected, never normalized into a write.
+    for (const name of ["../escape", "a/b", "..", ""]) {
+      expect((await create({ path: root, name })).status).toBe(400);
+    }
+    expect((await create({ path: "relative", name: "x" })).status).toBe(400);
+    // Existing folder, and a parent that does not exist: both 400, not 500.
+    expect((await create({ path: root, name: "new-project" })).status).toBe(400);
+    expect((await create({ path: join(root, "nope"), name: "x" })).status).toBe(400);
   });
 });

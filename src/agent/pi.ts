@@ -6,6 +6,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   defineTool,
+  ModelRuntime,
   SessionManager,
   type AgentSession as PiAgentSession,
   type ExtensionAPI,
@@ -208,6 +209,17 @@ export class PiAgentFactory implements AgentFactory {
      * into the user's global or project skill directories. */
     private readonly skillPaths: string[] = [],
   ) {}
+
+  /** One runtime for the whole process; catalogs are global, not per session. */
+  private catalog?: Promise<ModelRuntime>;
+
+  async availableModels(): Promise<ModelRef[]> {
+    this.catalog ??= ModelRuntime.create();
+    const available = await (await this.catalog).getAvailable();
+    return curateModels(
+      available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+    );
+  }
 
   /**
    * Pi discovers AGENTS.md itself; we append one more, in memory, telling the

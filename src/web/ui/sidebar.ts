@@ -2,6 +2,7 @@
 // dialog with pin toggles, and the New-session dialog. main.ts owns the
 // session list; this module renders it and reports interactions back.
 
+import { browseButton } from "./dir-picker.js";
 import { $, detailsRow, h } from "./dom.js";
 import type { SessionState } from "../../core/types.js";
 
@@ -243,6 +244,8 @@ function renderArchive(): void {
 
 export function initSidebar(d: SidebarDeps): void {
   deps = d;
+  // Same picker the channel config uses; the input keeps its own semantics.
+  $("#new-cwd-row").append(browseButton($<HTMLInputElement>("#new-cwd")));
   $("#new-session").onclick = () => {
     $<HTMLInputElement>("#new-cwd").value = "";
     newDialog.showModal();

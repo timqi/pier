@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Pier</title>
 </head>
-<body class="grid h-screen grid-cols-[230px_minmax(0,1fr)] text-[16px] leading-[1.45] text-neutral-800 antialiased">
+<!-- The document never scrolls: this is a fixed-viewport workbench, and every
+     scrollable region is an inner pane. h-dvh, not h-screen, because 100vh can
+     exceed the visible viewport (mobile chrome, short windows) — that gap is
+     what lets the whole app slide up and take the sidebar with it. -->
+<body class="grid h-dvh grid-cols-[230px_minmax(0,1fr)] overflow-hidden text-[16px] leading-[1.45] text-neutral-800 antialiased">
   <aside class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
     <header class="flex items-center justify-between gap-2 px-3 py-2">
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
@@ -19,6 +23,8 @@
           class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Activity</button></li>
         <li><button type="button" id="open-config"
           class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Configuration</button></li>
+        <li><button type="button" id="open-channels"
+          class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Channels</button></li>
       </ul>
     </details>
     <div class="flex items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -48,6 +54,7 @@
     <section id="activity-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="tasks-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="config-view" class="hidden min-h-0 flex-1 flex-col"></section>
+    <section id="channels-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <header id="chat-header" class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4">
       <span id="chat-title" class="truncate font-medium"></span>
       <!-- Right cluster: meta chips sit flush against the ⋯ button. Two
@@ -140,8 +147,10 @@
       <h3 class="font-semibold">New session</h3>
       <label class="flex flex-col gap-1 text-[13px] text-neutral-600">
         Working directory
-        <input id="new-cwd" type="text" required placeholder="/path/to/project" list="known-projects"
-          class="rounded-md border border-neutral-300 px-2 py-1.5 font-mono text-[13px] focus:border-indigo-400 focus:outline-none" />
+        <span id="new-cwd-row" class="flex items-center gap-1.5">
+          <input id="new-cwd" type="text" required placeholder="/path/to/project" list="known-projects"
+            class="min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 font-mono text-[13px] focus:border-indigo-400 focus:outline-none" />
+        </span>
         <datalist id="known-projects"></datalist>
       </label>
       <div class="flex justify-end gap-2">

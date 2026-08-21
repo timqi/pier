@@ -5,9 +5,15 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { PiConfigStore } from "./agent/config.js";
 import { PiAgentFactory } from "./agent/pi.js";
+import { ChannelStore } from "./channels/config.js";
+import { createControl } from "./channels/control.js";
+import { ConversationStore, resolveConversation } from "./channels/conversations.js";
+import { registerChannelRoutes } from "./channels/routes.js";
+import { ChannelRuntime } from "./channels/runtime.js";
 import { EventHub } from "./core/hub.js";
 import { REPLY_SURFACE_PROMPT } from "./core/reply.js";
 import { Router } from "./core/router.js";
+import type { AgentSession, ConversationKey } from "./core/types.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
@@ -16,6 +22,8 @@ import { PinStore } from "./web/pins.js";
 import { createServer } from "./web/server.js";
 
 let tasks: TaskService;
+const conversations = new ConversationStore();
+let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
 const factory = new PiAgentFactory(
   [taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId))],
   REPLY_SURFACE_PROMPT,
@@ -25,18 +33,32 @@ const factory = new PiAgentFactory(
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
-  // Web conversation ids ARE session ids; IM channels create sessions lazily.
+  // Web conversation ids ARE session ids; an IM conversation id is a chat or a
+  // topic, so its session is looked up in the durable map (and created in the
+  // cwd the chat is configured for) — a restart must not re-route a group.
   if (key.channelId === "web" || key.channelId === "task") {
     return factory.resume(key.conversationId);
   }
-  return factory.create({ cwd: process.cwd() });
+  return resolveIm(key);
 });
 tasks = new TaskService(new TaskStore(), factory, router, hub);
 tasks.start();
 
+const channelStore = new ChannelStore();
+const control = createControl({ router, factory, conversations, store: channelStore });
+const channels = new ChannelRuntime(channelStore, router, control);
+resolveIm = resolveConversation(
+  conversations,
+  factory,
+  control.launchFor,
+  (message) => console.warn(`channels: ${message}`),
+);
+void channels.reload();
+
 // Composition happens here so web/ and tasks/ never import each other.
 const app = new Hono();
 registerTaskRoutes(app, tasks, { factory, router });
+registerChannelRoutes(app, channelStore, channels);
 app.route("/", createServer({
   factory,
   router,
