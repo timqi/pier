@@ -374,20 +374,31 @@ const contextLabel = (u: ContextUsage): string =>
 /** Title-row meta: the resident chip shows bare token usage ("12K tok",
  *  quiet → amber ≥ 70% used → red ≥ 90%); hover swaps in the full headroom
  *  reading and unfolds model + reasoning chips. Before the first usage
- *  report the model chip stands in as the resident hover target. */
+ *  report the model chip stands in as the resident hover target. An untitled
+ *  session has no title to read, so it starts unfolded — the chips are then
+ *  the only thing identifying it. */
 function renderSessionMeta(): void {
-  const chip = (cls: string, text: string): HTMLElement =>
-    h("span", `flex-none rounded px-1.5 py-px font-mono ${cls}`, text);
+  const chip = (tag: string, cls: string, text: string): HTMLElement =>
+    h(tag, `flex-none rounded px-1.5 py-px font-mono ${cls}`, text);
   const u = currentContext;
   const tokens = u?.tokens ?? null;
-  const onHover = "hidden group-hover:inline";
+  const id = currentId;
+  const untitled = !sessions.find((x) => x.id === id)?.title;
+  const onHover = untitled ? "" : "hidden group-hover:inline";
   const chips: HTMLElement[] = [];
-  if (currentModel) {
-    const resident = tokens === null ? "" : `${onHover} `;
-    chips.push(chip(`${resident}bg-indigo-50 font-medium text-indigo-700`, currentModel.id));
+  if (currentModel && id) {
+    // Also the shortest path to switching models.
+    const model = chip(
+      "button",
+      `${tokens === null ? "" : onHover} cursor-pointer bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-100`,
+      currentModel.id,
+    );
+    model.title = "Change model";
+    model.onclick = () => void pickModel(model, id);
+    chips.push(model);
   }
   if (currentThinking && currentThinking !== "off") {
-    chips.push(chip(`${onHover} bg-neutral-100 text-neutral-500`, `reasoning ${currentThinking}`));
+    chips.push(chip("span", `${onHover} bg-neutral-100 text-neutral-500`, `reasoning ${currentThinking}`));
   }
   if (u && tokens !== null) {
     const used = contextUsed(tokens, u);
@@ -397,8 +408,13 @@ function renderSessionMeta(): void {
         : used >= 70
           ? "bg-amber-50 text-amber-700"
           : "bg-neutral-100 text-neutral-500";
-    const ctx = chip(tone, "");
-    ctx.append(h("span", "group-hover:hidden", `${compact(tokens)} tok`), h("span", onHover, contextLabel(u)));
+    const ctx = chip("span", tone, "");
+    if (untitled) ctx.textContent = contextLabel(u);
+    else
+      ctx.append(
+        h("span", "group-hover:hidden", `${compact(tokens)} tok`),
+        h("span", onHover, contextLabel(u)),
+      );
     chips.push(ctx);
   }
   sessionMeta.replaceChildren(...chips);
@@ -1292,16 +1308,24 @@ async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
       current: id === currentId ? currentModel : null,
       thinkingLevel: thinking.level,
       thinkingLevels: thinking.levels,
-      onPick: (m) => {
+      onPick: (m, thinking) => {
         closeMenu();
-        void setModel(id, m);
+        void applyModel(id, m, thinking);
       },
       onThinkingPick: (level) => void setThinkingLevel(id, level),
     }),
   );
 }
 
-async function setModel(id: string, model: ModelRef): Promise<void> {
+/** Model, then reasoning — in that order and only on success, because which
+ *  levels exist depends on the model (Pi clamps an unsupported one). */
+async function applyModel(id: string, model: ModelRef, thinking?: ThinkingLevel): Promise<void> {
+  if (!(await setModel(id, model))) return;
+  if (thinking) await setThinkingLevel(id, thinking);
+}
+
+async function setModel(id: string, model: ModelRef): Promise<boolean> {
+  const previous = currentModel;
   if (id === currentId) {
     currentModel = model; // optimistic; the POST response is the truth
     renderHeader();
@@ -1312,16 +1336,24 @@ async function setModel(id: string, model: ModelRef): Promise<void> {
     body: JSON.stringify(model),
   });
   if (!res.ok) {
-    appendTurn("error", `model change failed: ${res.status}`);
-    return;
+    const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+    if (id === currentId) {
+      currentModel = previous; // the optimistic chip was a lie; take it back
+      renderHeader();
+    }
+    appendTurn("error", `model change failed: ${error ?? res.status}`);
+    return false;
   }
   const { model: applied } = (await res.json()) as { model: ModelRef | null };
   if (id === currentId && applied) {
     currentModel = applied;
     renderHeader();
   }
+  return true;
 }
 
+/** Pi clamps an unsupported level, so the response — not the request — is
+ *  what the header reports. */
 async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void> {
   const res = await fetch(`/api/sessions/${id}/thinking`, {
     method: "POST",

@@ -59,7 +59,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   window.addEventListener("resize", closeMenu);
 }
 
-export function menuItem(item: MenuItem): HTMLElement {
+function menuItem(item: MenuItem): HTMLElement {
   const row = h(
     "button",
     "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100",
