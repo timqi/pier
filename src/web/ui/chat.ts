@@ -66,6 +66,7 @@ const ROW_STYLE: Record<string, { row: string; body: string }> = {
 // whether the speaker changed (4px within a run, 6px across one), and the
 // padding is generous — the block breathes, the lines don't.
 export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false): HTMLElement {
+  sealActivity();
   const s = ROW_STYLE[kind]!;
   // Consecutive rows from the same sender read as one block (Slack grouping).
   const grouped = (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
@@ -97,6 +98,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     : origin.kind === "task-message"
       ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
       : "Agent task input";
+  sealActivity();
   const row = h("div", "mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
   row.dataset.kind = "system";
   const head = h("div", "mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase text-cyan-800");
@@ -337,8 +339,9 @@ function addCodeCopy(root: HTMLElement): void {
   }
 }
 
-/** Swap a plain-text bubble to sanitized rendered markdown. */
-function renderMarkdown(node: HTMLElement, raw: string): void {
+/** Swap a plain-text bubble to sanitized rendered markdown. `streaming` marks
+ *  a mid-turn repaint of a block that is still growing. */
+function renderMarkdown(node: HTMLElement, raw: string, streaming = false): void {
   // Attachment links are rewritten to the session's files route first: the
   // sanitizer drops `file:` URLs (rightly), so they'd vanish otherwise.
   const id = deps.sessionId();
@@ -347,6 +350,10 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
   highlightCode(node);
+  // A streaming block is rewritten every frame-ish, so the two upgrades that
+  // own state of their own wait for the final paint: copy buttons would be
+  // recreated mid-click, and attachment cards refetch their bytes.
+  if (streaming) return;
   addCodeCopy(node);
   renderAttachments(node, showImage);
 }
@@ -375,21 +382,53 @@ export const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HT
 // --- streaming text ---------------------------------------------------------------
 
 let streamingEl: HTMLElement | null = null;
+let streamTimer: ReturnType<typeof setTimeout> | null = null;
+let streamDirty = false;
 
-/** Append a text-delta to the in-flight (plain text) streamed block. */
+/** Repaint budget for the in-flight block: parsing, sanitizing and
+ *  highlighting the whole block on every delta janks a long turn, and text
+ *  arrives far faster than it can be read. */
+const STREAM_PAINT_MS = 80;
+
+/** Render what has arrived so far as markdown, leading-edge then coalesced.
+ *  The suggestions block is stripped here too, so a half-typed `[label]` row
+ *  doesn't flash as body text before it becomes buttons. */
+function paintStreaming(): void {
+  if (streamTimer) {
+    streamDirty = true;
+    return;
+  }
+  streamDirty = false;
+  if (streamingEl) {
+    renderMarkdown(streamingEl, splitReply(streamingEl.dataset.raw ?? "").text, true);
+    scrollBottom();
+  }
+  streamTimer = setTimeout(() => {
+    streamTimer = null;
+    if (streamDirty) paintStreaming();
+  }, STREAM_PAINT_MS);
+}
+
+function stopStreamPaint(): void {
+  if (streamTimer) clearTimeout(streamTimer);
+  streamTimer = null;
+  streamDirty = false;
+}
+
+/** Append a text-delta to the in-flight streamed block. */
 export function appendDelta(text: string): void {
   if (!streamingEl) streamingEl = appendTurn("assistant", "");
   streamingEl.dataset.raw = (streamingEl.dataset.raw ?? "") + text;
-  streamingEl.textContent = streamingEl.dataset.raw;
-  scrollBottom();
+  paintStreaming();
 }
 
-/** Finalize the in-flight streamed text block (markdown-render it). */
+/** Finalize the in-flight streamed text block (full markdown render). */
 export function finalizeStreaming(offer = false): void {
   if (!streamingEl) return;
   const node = streamingEl;
   streamingEl = null;
-  renderAssistant(node, node.dataset.raw ?? node.textContent ?? "", undefined, offer);
+  stopStreamPaint();
+  renderAssistant(node, node.dataset.raw ?? "", undefined, offer);
 }
 
 /** turn-end presentation. `text` is the authoritative full turn text — a
@@ -415,6 +454,7 @@ export function interruptTurn(): void {
 export function resetChat(): void {
   turnsPane.replaceChildren();
   streamingEl = null;
+  stopStreamPaint();
   activity = null;
   backgroundRows.clear();
   resetSuggestions();
@@ -447,6 +487,17 @@ interface Activity {
 }
 
 let activity: Activity | null = null; // the live (running) group
+
+/**
+ * Close the live group because a chat row is going in below it. A group is
+ * rendered where it opened, so once anything else follows it on screen the
+ * steps that come next belong to a *new* group underneath — appending them to
+ * this one would show work happening above the answer it came after. A group
+ * still waiting on a tool result stays open, so that tool-end can land.
+ */
+function sealActivity(): void {
+  if (activity && !activity.toolRows.size) finishActivity("done");
+}
 
 const STATUS_STYLE: Record<ActivityStatus, string> = {
   running: "border-green-200 bg-green-50 text-green-800",

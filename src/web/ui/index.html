@@ -97,7 +97,9 @@
           </button>
         </div>
       </div>
-      <ul id="queue-rows" class="flex flex-col"></ul>
+      <!-- Rows wrap, so the list grows with the queue and scrolls past ~5 lines
+           (18px leading) rather than shrinking the turns pane any further. -->
+      <ul id="queue-rows" class="flex max-h-[96px] flex-col gap-1 overflow-y-auto overscroll-contain"></ul>
     </div>
     <form id="composer" class="border-t border-neutral-200 px-4 py-2">
       <div class="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">

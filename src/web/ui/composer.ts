@@ -88,7 +88,11 @@ export function renderQueue(steering: string[], followUp: string[]): void {
   syncQueuePanel();
   queueRows.replaceChildren(
     ...rows.map((r) => {
-      const li = h("li", "flex h-6 items-center gap-2 text-[13px]");
+      // A queued message keeps the shape it was typed in — the composer takes
+      // multi-line input, so the row wraps and grows instead of truncating; the
+      // list scrolls past ~5 lines (see #queue-rows) so the panel can't push
+      // the composer off screen.
+      const li = h("li", "flex items-start gap-2 text-[13px] leading-[18px]");
       // Only "steer" earns a badge: it deviates from the panel's own label,
       // which already says these messages are queued.
       if (r.mode === "steer") {
@@ -100,7 +104,7 @@ export function renderQueue(steering: string[], followUp: string[]): void {
           ),
         );
       }
-      li.append(h("span", "truncate text-neutral-700", r.text));
+      li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", r.text));
       return li;
     }),
   );
