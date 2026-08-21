@@ -60,7 +60,8 @@
           class="icon-btn">⋯</button>
       </div>
     </header>
-    <div id="turns" class="flex-1 overflow-y-auto pb-4 pt-1"></div>
+    <!-- The transcript's own type scale, inherited by rows, chips and markdown. -->
+    <div id="turns" class="flex-1 overflow-y-auto pb-4 text-[15px] leading-[1.35]"></div>
     <!-- Pi's queue primitives are whole-queue (steer / clear), so the actions
          live on the header row and read as "the queue", never per message. -->
     <div id="queue-panel" class="hidden flex-col border-t border-neutral-200 px-3 py-1.5">

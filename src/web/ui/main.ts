@@ -9,6 +9,7 @@ import { splitReply } from "../../core/reply.js";
 import { createActivityView } from "./activity.js";
 import { renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { createConfigView } from "./config.js";
+import { highlightCode } from "./highlight.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
@@ -500,17 +501,20 @@ function renderQueue(steering: string[], followUp: string[]): void {
 // No sender labels: user rows carry an accent bar + tint, agent rows stay plain.
 
 const ROW_STYLE: Record<string, { row: string; body: string }> = {
-  user: { row: "border-l-2 border-indigo-500 bg-indigo-50/60", body: "text-neutral-900" },
-  assistant: { row: "border-l-2 border-transparent", body: "text-neutral-800" },
-  error: { row: "border-l-2 border-red-400 bg-red-50/60", body: "text-red-700" },
-  system: { row: "border-l-2 border-cyan-500 bg-cyan-50/60", body: "text-neutral-800" },
+  user: { row: "border-l-indigo-500 bg-indigo-50", body: "text-neutral-900" },
+  assistant: { row: "border-l-transparent", body: "text-neutral-900" },
+  error: { row: "border-l-red-400 bg-red-50", body: "text-red-700" },
+  system: { row: "border-l-cyan-500 bg-cyan-50", body: "text-neutral-800" },
 };
 
+// No rules between rows: tint and accent say who is speaking, the gap only says
+// whether the speaker changed (4px within a run, 6px across one), and the
+// padding is generous — the block breathes, the lines don't.
 function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false): HTMLElement {
   const s = ROW_STYLE[kind]!;
   // Consecutive rows from the same sender read as one block (Slack grouping).
   const grouped = (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
-  const row = h("div", `group relative px-5 py-1 ${grouped ? "mt-px" : "mt-2"} ${s.row}`);
+  const row = h("div", `group relative border-l-2 px-5 ${grouped ? "pt-1 pb-2.5" : "mt-1.5 py-2.5"} ${s.row}`);
   row.dataset.kind = kind;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, text);
   if (markdown) renderMarkdown(node, text);
@@ -538,7 +542,7 @@ function appendSystemInput(text: string, origin: SystemInputOrigin): void {
     : origin.kind === "task-message"
       ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
       : "Agent task input";
-  const row = h("div", "mt-2 border-l-2 border-cyan-500 bg-cyan-50/60 px-5 py-2");
+  const row = h("div", "mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
   row.dataset.kind = "system";
   const head = h("div", "mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase text-cyan-800");
   head.append(h("span", "", kind));
@@ -606,12 +610,12 @@ async function resumeBackground(runId: string): Promise<void> {
 function renderBackgroundRun(run: BackgroundRun): void {
   let row = backgroundRows.get(run.runId);
   if (!row) {
-    row = h("div", "mx-5 mt-2 border px-3 py-2 text-[13px]");
+    row = h("div", "mx-5 my-1.5 border px-3 py-2 text-[13px]");
     row.dataset.kind = "background-run";
     turnsPane.append(row);
     backgroundRows.set(run.runId, row);
   }
-  row.className = `mx-5 mt-2 border px-3 py-2 text-[13px] ${RUN_STYLE[run.state]}`;
+  row.className = `mx-5 my-1.5 border px-3 py-2 text-[13px] ${RUN_STYLE[run.state]}`;
   const active = run.state === "queued" || run.state === "running";
   const status = active ? h("span", "spinner") : h("span", "w-3 flex-none text-center", run.state === "succeeded" ? "✓" : run.state === "failed" ? "✕" : "·");
   const title = h("button", "min-w-0 truncate text-left font-medium hover:underline", run.taskName);
@@ -725,6 +729,54 @@ function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
   (node.parentElement ?? node).append(chip);
 }
 
+// --- copy to clipboard -----------------------------------------------------------
+
+/** navigator.clipboard is secure-context only and the dev target binds 0.0.0.0,
+ *  so a LAN-IP visit falls back to the legacy selection trick. */
+async function copy(text: string): Promise<void> {
+  if (navigator.clipboard) return navigator.clipboard.writeText(text);
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.className = "fixed opacity-0";
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  if (!ok) throw new Error("clipboard unavailable");
+}
+
+/** Copy affordance whose own label reports the outcome — no toast machinery. */
+function copyBtn(cls: string, text: () => string): HTMLElement {
+  const btn = h("button", cls, "Copy");
+  btn.title = "Copy to clipboard";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  btn.onclick = async (ev) => {
+    ev.stopPropagation(); // copying isn't "activate the row this sits in"
+    btn.textContent = await copy(text()).then(() => "Copied", () => "Failed");
+    clearTimeout(timer);
+    timer = setTimeout(() => (btn.textContent = "Copy"), 1200);
+  };
+  return btn;
+}
+
+/** Wrap each fenced block so a copy button can sit in its corner without
+ *  scrolling away with the code, and copy the source text, not the tokens. */
+function addCodeCopy(root: HTMLElement): void {
+  for (const pre of root.querySelectorAll("pre")) {
+    const code = pre.querySelector("code");
+    if (!code) continue;
+    const wrap = h("div", "group/code relative");
+    pre.replaceWith(wrap);
+    wrap.append(
+      pre,
+      copyBtn(
+        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100",
+        () => code.textContent ?? "",
+      ),
+    );
+  }
+}
+
 /** Swap a plain-text bubble to sanitized rendered markdown. */
 function renderMarkdown(node: HTMLElement, raw: string): void {
   // Attachment links are rewritten to the session's files route first: the
@@ -733,6 +785,8 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   node.innerHTML = DOMPurify.sanitize(marked.parse(md, { async: false }));
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
+  highlightCode(node);
+  addCodeCopy(node);
   renderAttachments(node, showImage);
 }
 
@@ -828,11 +882,12 @@ function ensureActivity(ts: number): Activity {
   const statusIcon = statusIconEl("running");
   const headline = h("span", "truncate", "working…");
   const { el } = detailsRow(
-    `mx-5 mt-2 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`,
+    `mx-5 my-1.5 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`,
     [statusIcon, headline],
   );
   el.dataset.kind = "activity";
-  const rowsEl = h("div", "mt-1.5 flex flex-col gap-1 border-t border-black/5 pt-1.5");
+  // Caps at ~10 step rows, then scrolls: an expanded group can't swallow the chat.
+  const rowsEl = h("div", "mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain border-t border-black/5 pt-1.5");
   el.append(rowsEl);
   turnsPane.append(el);
   scrollBottom();
@@ -849,7 +904,7 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
       : status === "done"
         ? base
         : `${base} · ${status}`;
-  a.el.className = `mx-5 mt-2 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
+  a.el.className = `mx-5 my-1.5 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
   const icon = statusIconEl(status);
   a.statusIcon.replaceWith(icon);
   a.statusIcon = icon;
@@ -890,6 +945,7 @@ function activityToolStart(ts: number, id: string, name: string, args: unknown):
   el.append(body);
   a.toolRows.set(id, { el, statusEl, outputPre });
   a.rowsEl.append(el);
+  a.rowsEl.scrollTop = a.rowsEl.scrollHeight; // capped list: follow the newest step
   activityHeadline(a, "running", name);
   scrollBottom();
 }
@@ -1292,11 +1348,17 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
   }
   const panel = h("div", "flex max-w-80 flex-col gap-1.5 px-3 py-2");
   for (const [label, value] of rows) {
-    const row = h("div", "flex flex-col");
-    row.append(
+    const row = h("div", "group flex flex-col");
+    // Every field is copyable — cheaper than deciding which ones deserve it.
+    const head = h("div", "flex items-center gap-1.5");
+    head.append(
       h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
-      h("span", "break-all font-mono text-[12px] text-neutral-700", value),
+      copyBtn(
+        "cursor-pointer text-[10.5px] uppercase tracking-wide text-neutral-400 opacity-0 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100",
+        () => value,
+      ),
     );
+    row.append(head, h("span", "break-all font-mono text-[12px] text-neutral-700", value));
     panel.append(row);
   }
   openPanel(anchor, panel);
