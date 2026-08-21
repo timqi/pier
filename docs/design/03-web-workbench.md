@@ -3,7 +3,11 @@
 Browser surface for chat + live observability: a consumer of core over
 REST + SSE, no agent logic. Kept current as the workbench evolves.
 
-## Backend (`src/web/server.ts`, Hono, ≤ 300 lines)
+## Backend (`src/web/server.ts`, Hono, ≤ 500 lines)
+
+Budget revised from 300: images, queue control, thinking-level and config
+routes each added a thin table row over core, no logic — the file is a route
+table and growing it past 500 means logic is leaking in.
 
 | Route | Behavior |
 | ----- | -------- |
@@ -107,9 +111,13 @@ per-turn Activity groups):
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
 
-Keep it plain: one `.ts` entry, one `.css`, EventSource + fetch. No state
-library, no router, no components framework. Third repeat rule applies before
-introducing any abstraction.
+Keep it plain: one `.css`, EventSource + fetch, plain modules. `main.ts` is
+the orchestrator (session state, SSE streams, routing, header); rendering
+lives in surface modules — `sidebar.ts`, `chat.ts`, `composer.ts`, and the
+Console views (`tasks.ts`, `activity.ts`, `config.ts`) — that receive explicit
+deps and never import main back. No state library, no router library, no
+components framework. Third repeat rule applies before introducing any
+abstraction.
 
 Selecting a session loads `/history` first (renders completed turns), then
 opens the SSE stream with `?after=lastSeq` so replayed ring-buffer events

@@ -28,11 +28,12 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 
 ```
 src/
-  core/        types.ts, router.ts, hub.ts, queue.ts
+  core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts
   agent/       pi.ts (the ONLY file importing @earendil-works/pi-*)
   channels/    telegram.ts, slack.ts, lark.ts   [step 5+]
-  web/         server.ts, static frontend       [step 3]
-  tasks/       definitions, runs, execution, messages, service, HTTP routes
+  web/         server.ts, static frontend (ui/ modules)
+  tasks/       definitions, runs, groups, execution, callbacks, messages,
+               service, store, tool, HTTP routes
   main.ts      wiring only
 ```
 
