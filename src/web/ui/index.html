@@ -105,9 +105,8 @@
       <!-- Right cluster: meta chips sit flush against the ⋯ button. Two
            ml-autos would split the free space, so one wrapper owns it. -->
       <div class="ml-auto flex flex-none items-center gap-1.5">
-        <!-- Inline session meta: a resident token chip; model + reasoning
-             unfold to its left on hover. Costs the header no extra height. -->
-        <div id="session-meta" class="group hidden flex-none items-center gap-1.5 text-[11px]"></div>
+        <!-- Inline session meta: model · reasoning · current context size. -->
+        <div id="session-meta" class="hidden flex-none items-center gap-1 text-[11px]"></div>
         <button type="button" id="chat-menu" title="Session actions" aria-label="Session actions"
           class="icon-btn">⋯</button>
       </div>

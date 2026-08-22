@@ -77,61 +77,46 @@ export function renderHeader(): void {
 const contextUsed = (tokens: number, u: ContextUsage): number =>
   Math.min(100, Math.round((tokens / u.contextWindow) * 100));
 
-/** Full context reading, shared by the meta chip's hover and the info panel. */
+/** Full context reading for the session info panel. */
 const contextLabel = (u: ContextUsage): string =>
   u.tokens === null
     ? `?/${compact(u.contextWindow)}`
     : `${compact(u.tokens)}/${compact(u.contextWindow)} · ${100 - contextUsed(u.tokens, u)}% left`;
 
-/** Title-row meta: the resident chip shows bare token usage ("12K tok",
- *  quiet → amber ≥ 70% used → red ≥ 90%); hover swaps in the full headroom
- *  reading and unfolds model + reasoning chips. Before the first usage
- *  report the model chip stands in as the resident hover target. An untitled
- *  session has no title to read, so it starts unfolded — the chips are then
- *  the only thing identifying it. */
+/** Title-row meta: model · reasoning · current context size. */
 function renderSessionMeta(): void {
-  const chip = (tag: string, cls: string, text: string): HTMLElement =>
-    h(tag, `flex-none rounded px-1.5 py-px font-mono ${cls}`, text);
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
-  const untitled = !deps.currentSession()?.title;
-  const onHover = untitled ? "" : "hidden group-hover:inline";
-  const chips: HTMLElement[] = [];
-  if (currentModel && id) {
-    // Also the shortest path to switching models.
-    const model = chip(
-      "button",
-      `${tokens === null ? "" : onHover} cursor-pointer bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-100`,
-      currentModel.id,
-    );
-    model.title = "Change model";
-    model.onclick = () => void pickModel(model, id);
-    chips.push(model);
-  }
-  if (currentThinking && currentThinking !== "off") {
-    chips.push(chip("span", `${onHover} bg-neutral-100 text-neutral-500`, `reasoning ${currentThinking}`));
+  const items: HTMLElement[] = [];
+  if (id) {
+    const pickerButton = (text: string, cls: string): HTMLElement => {
+      const button = h("button", `flex-none cursor-pointer font-mono ${cls}`, text);
+      button.title = "Change model or reasoning";
+      button.onclick = () => void pickModel(button, id);
+      return button;
+    };
+    if (currentModel) {
+      items.push(pickerButton(
+        currentModel.id,
+        "rounded bg-indigo-50 px-1.5 py-px font-medium text-indigo-700 hover:bg-indigo-100",
+      ));
+    }
+    if (currentThinking) {
+      items.push(pickerButton(currentThinking, "text-neutral-500 hover:text-indigo-700"));
+    }
   }
   if (u && tokens !== null) {
     const used = contextUsed(tokens, u);
-    const tone =
-      used >= 90
-        ? "bg-red-50 text-red-700"
-        : used >= 70
-          ? "bg-amber-50 text-amber-700"
-          : "bg-neutral-100 text-neutral-500";
-    const ctx = chip("span", tone, "");
-    if (untitled) ctx.textContent = contextLabel(u);
-    else
-      ctx.append(
-        h("span", "group-hover:hidden", `${compact(tokens)} tok`),
-        h("span", onHover, contextLabel(u)),
-      );
-    chips.push(ctx);
+    const tone = used >= 90 ? "text-red-700" : used >= 70 ? "text-amber-700" : "text-neutral-500";
+    items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
   }
-  sessionMeta.replaceChildren(...chips);
-  sessionMeta.classList.toggle("hidden", chips.length === 0);
-  sessionMeta.classList.toggle("flex", chips.length > 0);
+  const children = items.flatMap((item, i) =>
+    i === 0 ? [item] : [h("span", "text-neutral-300", "·"), item],
+  );
+  sessionMeta.replaceChildren(...children);
+  sessionMeta.classList.toggle("hidden", items.length === 0);
+  sessionMeta.classList.toggle("flex", items.length > 0);
 }
 
 /** Read-only details panel: what this session is and how full its context is. */
@@ -163,27 +148,33 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
 }
 
 async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
-  const [modelsRes, thinkingRes] = await Promise.all([
-    fetch(`/api/sessions/${id}/models`),
-    fetch(`/api/sessions/${id}/thinking`),
-  ]);
-  if (!modelsRes.ok || !thinkingRes.ok) return;
-  const models = (await modelsRes.json()) as ModelRef[];
-  const thinking = (await thinkingRes.json()) as { level: ThinkingLevel; levels: ThinkingLevel[] };
-  openPanel(
-    anchor,
-    modelPicker({
-      models,
-      current: id === deps.currentId() ? currentModel : null,
-      thinkingLevel: thinking.level,
-      thinkingLevels: thinking.levels,
-      onPick: (m, thinking) => {
-        closeMenu();
-        void applyModel(id, m, thinking);
-      },
-      onThinkingPick: (level) => void setThinkingLevel(id, level),
-    }),
-  );
+  try {
+    const [modelsRes, thinkingRes] = await Promise.all([
+      fetch(`/api/sessions/${id}/models`),
+      fetch(`/api/sessions/${id}/thinking`),
+    ]);
+    if (!modelsRes.ok || !thinkingRes.ok) {
+      throw new Error(`HTTP ${!modelsRes.ok ? modelsRes.status : thinkingRes.status}`);
+    }
+    const models = (await modelsRes.json()) as ModelRef[];
+    const thinking = (await thinkingRes.json()) as { level: ThinkingLevel; levels: ThinkingLevel[] };
+    openPanel(
+      anchor,
+      modelPicker({
+        models,
+        current: id === deps.currentId() ? currentModel : null,
+        thinkingLevel: thinking.level,
+        thinkingLevels: thinking.levels,
+        onPick: (m, thinking) => {
+          closeMenu();
+          void applyModel(id, m, thinking);
+        },
+        onThinkingPick: (level) => void setThinkingLevel(id, level),
+      }),
+    );
+  } catch (err) {
+    appendTurn("error", `model options failed: ${String(err)}`);
+  }
 }
 
 /** Model, then reasoning — in that order and only on success, because which
