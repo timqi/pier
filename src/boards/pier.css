@@ -44,7 +44,12 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* The page fills a desktop window and reflows down to a phone: the canvas
+   widens with the viewport so tables, KPI rows and split layouts get room,
+   while running prose keeps a readable measure (--measure) instead of
+   stretching into 150-character lines. */
 body {
+  --measure: 46rem;
   margin: 0 auto;
   max-width: 46rem;
   padding: 2rem 1.15rem 5rem;
@@ -52,6 +57,34 @@ body {
   color: var(--fg);
   font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+@media (min-width: 64rem) {
+  body {
+    max-width: 62rem;
+    padding: 2.5rem 2rem 5rem;
+  }
+}
+
+@media (min-width: 100rem) {
+  body {
+    max-width: 76rem;
+  }
+}
+
+/* Top-level prose only — inside a card, callout or column the box is the
+   measure already. */
+body > p,
+body > ul,
+body > ol,
+body > dl,
+body > blockquote {
+  max-width: var(--measure);
+}
+
+.hero .lede,
+.hero > p {
+  max-width: var(--measure);
 }
 
 h1,

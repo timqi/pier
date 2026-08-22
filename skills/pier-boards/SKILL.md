@@ -119,8 +119,13 @@ The habits that make it read as designed, not generated:
 ## What `pier.css` gives you
 
 It styles headings, paragraphs, lists, tables, `pre`/`code`, `blockquote`,
-`details` and `footer` with **no classes at all**, is mobile-first and has a
-dark mode. On top of that:
+`details` and `footer` with **no classes at all**, and has a dark mode. The
+page sizes itself to the window: a wide, comfortable canvas on a desktop
+(62rem, 76rem on a very large screen) that reflows to a single column on a
+phone, with running prose held to a readable measure while tables, `.grid`,
+`.split` and `.hero` use the full width. Don't fight it with your own
+`max-width` — a board should look at home on a laptop, not like a phone screen
+stranded in the middle of one. On top of that:
 
 | Class | Use it for |
 | --- | --- |
@@ -169,7 +174,7 @@ identical tables) communicate worse than number → ask → proof → fold.
 | Long raw output, logs, full lists | `<details>` at the bottom, one line summarising it |
 | Code or config | `<pre><code>`, trimmed to the lines that matter |
 
-Scale to the job: a status or decision board earns one phone-screen before the
+Scale to the job: a status or decision board earns one screenful before the
 first `<details>`; only a narrative (handover, postmortem) earns a long
 scroll, and then the hero carries the recap. Inside a table, order rows by
 what the reader must see first and `<strong>` the one cell that is the point.
@@ -201,8 +206,12 @@ the coloured parts read as signal.
   what the reader thinks or does, it goes in `<details>` or goes away.
 - **Only real data.** Every figure traces to something you saw this session; a
   gap is shown as a gap ("no data"), never estimated into a clean number.
-- **Mobile-first.** No fixed widths, no horizontal scroll, tables wrapped or
-  scrolled inside themselves.
+- **One page, every screen.** Design for the desktop window it will usually be
+  opened in — use the width with `.grid`, `.split` and real tables instead of
+  stacking narrow paragraphs — and let it reflow: no fixed pixel widths, no
+  horizontal scroll, tables wrapped or scrolled inside themselves. The
+  stylesheet handles both ends; adding a viewport meta tag and using its
+  classes is all it takes.
 - One page, top-down: what this is → the answer → supporting detail → raw data
   in `<details>`. Prose in the user's language, short headings, no emoji chrome.
 - **Rewrite in place.** Updating a board means editing its files, not creating
