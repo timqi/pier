@@ -112,6 +112,58 @@ describe("legacy auth.json import", () => {
   });
 });
 
+describe("models.json key sweep", () => {
+  const modelsPath = () => join(dir, "models.json");
+
+  it("moves literal keys into the db, leaves references, keeps a receipt", async () => {
+    writeFileSync(
+      modelsPath(),
+      JSON.stringify({
+        providers: {
+          anthropic: { baseUrl: "https://a", apiKey: "sk-literal" },
+          openai: { apiKey: "$OPENAI_API_KEY" },
+          local: { apiKey: "!pass show llm" },
+        },
+      }),
+    );
+    const s = store();
+    expect(await s.read("anthropic")).toEqual({ type: "api_key", key: "sk-literal" });
+    expect(row("anthropic")).toMatch(/^v1:/);
+    const after = JSON.parse(readFileSync(modelsPath(), "utf8")) as {
+      providers: Record<string, { apiKey?: string; baseUrl?: string }>;
+    };
+    expect(after.providers.anthropic).toEqual({ baseUrl: "https://a" }); // structure stays
+    expect(after.providers.openai?.apiKey).toBe("$OPENAI_API_KEY"); // env reference stays
+    expect(after.providers.local?.apiKey).toBe("!pass show llm"); // command stays
+    const receipt = readFileSync(`${modelsPath()}.imported`, "utf8");
+    expect(receipt).toContain("sk-literal");
+    // References were not imported into the db.
+    expect(await s.read("openai")).toBeUndefined();
+    expect(await s.read("local")).toBeUndefined();
+  });
+
+  it("drops a key shadowed by a stored credential without overwriting it", async () => {
+    await store().modify("anthropic", async () => oauth("tok-live"));
+    writeFileSync(modelsPath(), JSON.stringify({ providers: { anthropic: { apiKey: "sk-dead" } } }));
+    const s = store();
+    expect(await s.read("anthropic")).toEqual(oauth("tok-live")); // store wins, untouched
+    const after = JSON.parse(readFileSync(modelsPath(), "utf8")) as {
+      providers: Record<string, { apiKey?: string }>;
+    };
+    expect(after.providers.anthropic?.apiKey).toBeUndefined();
+    expect(readFileSync(`${modelsPath()}.imported`, "utf8")).toContain("sk-dead");
+  });
+
+  it("leaves a keyless or broken models.json alone", async () => {
+    writeFileSync(modelsPath(), JSON.stringify({ providers: { openai: { baseUrl: "https://x" } } }));
+    await store().read("openai");
+    expect(existsSync(`${modelsPath()}.imported`)).toBe(false); // nothing moved, no receipt
+    writeFileSync(modelsPath(), "{broken");
+    await store().read("openai"); // logged, not thrown — the SDK owns this failure
+    expect(readFileSync(modelsPath(), "utf8")).toBe("{broken");
+  });
+});
+
 describe("locked refusal", () => {
   it("read, modify and assertUnlocked all fail with the reason", async () => {
     await store().modify("anthropic", async () => oauth("tok"));

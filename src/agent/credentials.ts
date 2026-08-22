@@ -1,10 +1,13 @@
-// Provider credentials — what Pi kept in <agentDir>/auth.json — at rest in
-// pier.db, sealed by Secrets. Implements pi-ai's CredentialStore contract
-// structurally (shapes mirrored below, no SDK import: only pi.ts names SDK
-// modules), so ModelRuntime reads through here and an OAuth refresh writes
-// the rotated token back through here instead of a file.
+// Provider credentials — what Pi kept in <agentDir>/auth.json, and the
+// literal API keys models.json used to carry — at rest in pier.db, sealed by
+// Secrets. Implements pi-ai's CredentialStore contract structurally (shapes
+// mirrored below, no SDK import: only pi.ts names SDK modules), so
+// ModelRuntime reads through here and an OAuth refresh writes the rotated
+// token back through here instead of a file. A stored credential wins over a
+// models.json apiKey in pi-ai's resolution order, which is what lets the
+// sweep below leave models.json purely structural — and safely syncable.
 
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "../log.js";
@@ -135,25 +138,75 @@ export class CredentialStore {
   #ensureImported(): void {
     if (this.#imported) return;
     const path = join(this.agentDir, "auth.json");
-    if (!existsSync(path)) {
-      this.#imported = true;
-      return;
+    if (existsSync(path)) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(readFileSync(path, "utf8"));
+      } catch (err) {
+        throw new Error(`${path} exists but is not valid JSON — fix or move it: ${String(err)}`, {
+          cause: err,
+        });
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new Error(`${path} exists but is not an object — fix or move it`);
+      }
+      const entries = Object.entries(parsed as Record<string, ProviderCredential>);
+      for (const [providerId, credential] of entries) this.#put(providerId, credential);
+      renameSync(path, `${path}.imported`);
+      log.info(`imported ${entries.length} provider credential(s) from ${path}, renamed to auth.json.imported`);
     }
+    this.#sweepModelsJson();
+    this.#imported = true;
+  }
+
+  /**
+   * models.json apiKeys are secrets in a file that should be pure structure
+   * (it is what a config repo syncs between hosts). Literal keys move into the
+   * database; `!command` and `$ENV` references are already not plaintext and
+   * stay — the SDK resolves those forms itself, and a sealed copy of a
+   * reference would freeze its meaning. The pre-sweep file is kept whole as
+   * models.json.imported: keys leave the file only with a receipt.
+   */
+  #sweepModelsJson(): void {
+    const path = join(this.agentDir, "models.json");
+    if (!existsSync(path)) return;
+    const raw = readFileSync(path, "utf8");
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(path, "utf8"));
+      parsed = JSON.parse(raw);
     } catch (err) {
-      throw new Error(`${path} exists but is not valid JSON — fix or move it: ${String(err)}`, {
-        cause: err,
-      });
+      // Not this sweep's failure to own: the SDK will refuse the same file
+      // loudly. Named here so "my key is still in the file" has an explanation.
+      log.warn(`${path} is not valid JSON — API keys not swept: ${String(err)}`);
+      return;
     }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error(`${path} exists but is not an object — fix or move it`);
+    const providers =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as { providers?: Record<string, { apiKey?: unknown }> }).providers
+        : undefined;
+    if (!providers) return;
+    const moved: string[] = [];
+    const shadowed: string[] = [];
+    for (const [providerId, provider] of Object.entries(providers)) {
+      const key = provider.apiKey;
+      // Literals only: `!cmd` runs a command, `$` marks env expansion (`$$`
+      // escapes a literal dollar — rare enough to leave in place).
+      if (typeof key !== "string" || !key || key.startsWith("!") || key.includes("$")) continue;
+      if (this.#get(providerId)) {
+        // A stored credential short-circuits resolution, so this file copy was
+        // already dead — removed, not imported, and the receipt keeps it.
+        shadowed.push(providerId);
+      } else {
+        this.#put(providerId, { type: "api_key", key });
+        moved.push(providerId);
+      }
+      delete provider.apiKey;
     }
-    const entries = Object.entries(parsed as Record<string, ProviderCredential>);
-    for (const [providerId, credential] of entries) this.#put(providerId, credential);
-    renameSync(path, `${path}.imported`);
-    this.#imported = true;
-    log.info(`imported ${entries.length} provider credential(s) from ${path}, renamed to auth.json.imported`);
+    if (moved.length === 0 && shadowed.length === 0) return;
+    writeFileSync(`${path}.imported`, raw, { mode: 0o600 });
+    writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`);
+    if (moved.length) log.info(`moved ${moved.length} literal API key(s) from models.json into pier.db: ${moved.join(", ")}`);
+    if (shadowed.length) log.info(`removed ${shadowed.length} shadowed models.json API key(s) (a stored credential already wins): ${shadowed.join(", ")}`);
+    log.info(`pre-sweep models.json kept as ${path}.imported`);
   }
 }
