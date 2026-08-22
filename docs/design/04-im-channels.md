@@ -82,16 +82,17 @@ src/channels/
   control.ts          ChannelControl: session reads/writes an adapter may make — SHARED
   runtime.ts          adapter lifecycle and control wiring — SHARED
   routes.ts           /api/channels/:platform — SHARED
+  panel.ts            the settings panel, minus the platform — SHARED
   telegram.ts         the adapter
   telegram-api.ts     Bot API client (the only file touching api.telegram.org)
   telegram-render.ts  how a reply looks: markdown → HTML, and buttons
-  telegram-panel.ts   the in-chat settings panel
+  telegram-panel.ts   the panel's Telegram half: HTML, keyboard, forced reply
   slack.ts            the adapter
   slack-api.ts        Web API + Socket Mode (the only file touching slack.com)
   slack-render.ts     how a reply looks: markdown → mrkdwn, and Block Kit
-  slack-panel.ts      the in-chat settings panel
+  slack-outbound.ts   how a turn becomes messages: renderer choice + chunking
+  slack-panel.ts      the panel's Slack half: mrkdwn, Block Kit, modal
   slack-tool.ts       the agent-facing tool (intent in, Pier performs it)
-  slack-archive.ts    the tool's message cache + sync-coverage bookkeeping
   slack-directory.ts  channel kind/name + user names, cached for the process
 ```
 
@@ -114,24 +115,37 @@ copy being *subtly different* is a bug rather than a style difference:
 | `Chains.drain` | Bounded on purpose: `reload()` runs on the Console's save, so a stuck handler must not hold that request open. |
 | `chunkText` | Twelve lines of index arithmetic; having it twice is having it wrong once. Per-platform repair (Slack's fence re-balancing) stays with the renderer. |
 
-**The two panels are deliberately still duplicated.** `telegram-panel.ts` and
-`slack-panel.ts` share their whole shape — open, refresh, edit-in-place, model
-paging by index, reasoning list, the cwd action, the `cfg:` dispatch — and
-differ only in rendering primitives (an HTML string against Block Kit objects,
-`force_reply` against a modal). Extracting now would mean inventing a rendering
-abstraction from two data points, which is the thing the rule exists to
-prevent. Lark is what should earn it; the shared part is a state machine, and
-it will be obvious what shape it wants once a third renderer exists.
+**The two panels were duplicated on purpose, until they were not.** The
+standing decision was to wait for Lark rather than invent a rendering
+abstraction from two data points. What overturned it was not a third platform
+but evidence: the copies had begun to drift (the chat line's gates, the note
+placement, the bolding of a sub-view title), the pair had **no tests at all**,
+and the settings vocabulary is in fact repeated a third time in
+`web/ui/channels.ts` — the third repeat had already happened, on a surface
+nobody was counting.
 
-**Budget note.** `channel adapter ≤ 200 lines` is the stated tripwire and both
-adapters exceed it (Telegram ~385 code lines, Slack ~440). The excess is not a
-wrong-layer abstraction: roughly half of each file is the inbound normalization
-and gate-logging that the platform's own event shape forces, and the four-file
-split already puts transport, rendering and the panel elsewhere. Slack's extra
-~55 lines over Telegram are its three envelope types, `event_id` dedup, and the
-`conversations.info` / `users.info` lookups Telegram gets inline on the event.
-Re-splitting further would trade one over-budget file for three files and an
-extra seam, which is the worse deal — but this is the number to watch.
+`panel.ts` now owns the state machine: what the panel says, the `cfg:` dispatch,
+model paging by index, the reasoning list, and "start a session in this
+directory" with its two failures. A platform supplies markup (an escape and a
+code fence), how its one message is sent, edited and deleted, and how it asks
+for one typed answer. `PanelView` is deliberately not a rendering abstraction:
+it is titled groups of lines plus buttons, and `picks` is a list the platform
+*lays out itself* — Slack fits a page of models on one row, Telegram gives each
+a row. 502 lines became 462 with 14 tests behind them; the saving is small
+because a seam costs lines too, and that is the honest number. The reason to
+keep it is that panel behaviour now has one home instead of two that agree by
+coincidence.
+
+**Budget note.** The tripwire is `channel adapter ≤ 400` for the adapter file
+itself. Both are under it — Telegram 356 code lines, Slack 380 — but only
+because Slack's outbound path moved to `slack-outbound.ts` when the adapter hit
+449. That split was worth making: "which renderer, chunked to which limit, and
+what an empty turn still says" is a different decision from routing inbound
+traffic, and it is the half with the test coverage. What remains in each
+adapter is irreducibly per-platform: inbound normalization and gate logging
+that the platform's own event shape forces. Slack's extra lines over Telegram
+are its three envelope types, `event_id` dedup, and the `conversations.info` /
+`users.info` lookups Telegram gets inline on the event.
 
 ## The seam
 
@@ -222,23 +236,40 @@ one skill (`skills/pier-slack/`), and a deliberate shape:
     also why this is not a per-session system prompt.
   - `thread_ts: "none"` is the explicit opt-out that starts a top-level
     message; a `thread_ts` from one channel is never inherited into another.
-- **Transcripts carry `userId` beside `user`.** The name is what makes a
-  transcript readable; the id is the only thing `<@…>` can be built from.
-  Returning only the name is why the agent asked the human for their own user
-  id — a question it should never need to ask.
-- **Reads are cache-first, and the cache is about *coverage*, not rows.** A
-  table of messages cannot distinguish "that window was empty" from "never
-  fetched", so `slack_sync` records the contiguous span each conversation is
-  synced over. Slack history is immutable, so a window inside that span is
-  answered from SQLite forever; only the gap goes out.
-  - The span is widened **only when the new window touches it**. Widening on a
-    disjoint fetch would claim the gap in between and serve a hole as an
-    answer. That invariant has the one test worth keeping in mind here — it
-    fails loudly if the merge is made naive.
-  - An open-ended window (`until` omitted) always fetches: "up to now" is not
-    a cacheable question.
-  - Threads are the exception: they grow, so a cached thread is re-read after a
-    minute. A stale thread is a *wrong* answer, not an incomplete one.
+- **A transcript is lines, not objects.** `<ts> | <time, UTC> | <name>[<id>] |
+  <text>`, declared in the reply's `format` field. Four hundred six-key objects
+  spend most of their tokens on repeated key names. The name is what makes a
+  transcript readable; the id is the only thing `<@…>` can be built from —
+  returning only the name is why the agent once asked a human for their own
+  user id. A thread's `threadTs` is hoisted out of the lines, and a channel
+  read marks parents with `[thread: N replies]` so opening one is a decision
+  rather than a probe.
+- **The agent states an intent; Pier does the API work.** A channel and a
+  range, a thread, or `after: <the last ts I saw>` — paging, cursors, ordering,
+  dedup and the caps are Pier's problem. `after` filters strictly, because
+  Slack's own bounds are inclusive-ish and a boundary message returned twice is
+  a duplicate the agent has to reason about.
+- **A failed page returns what came before it.** Paging is Pier's business, but
+  a partial answer is the agent's: a thrown error looks exactly like a quiet
+  channel. The reply carries `incomplete` with a reason, and Slack's error
+  codes are translated into the action they imply (`not_in_channel` → invite
+  the bot) rather than passed through as jargon.
+- **Every read goes to Slack.** This replaced a cache-first design
+  (`slack-archive.ts`, `slack_messages` + a `slack_sync` coverage span) that
+  rested on "history is immutable once written". It is not: edits, deletions
+  and retention all change it, and nothing invalidated the copy — a covered
+  window served a deleted message forever, labelled `source: "cache"`. The
+  cache was also a second copy of message text at rest, which is the one thing
+  Pier deliberately does not keep.
+  - What it bought was rate limit, and Pier does not need it: as a
+    workspace-internal app `conversations.history`/`replies` are Tier 3 (~50+
+    req/min) and a read is one or two pages. **If Pier is ever distributed as a
+    non-Marketplace app** (1 req/min, 15 objects per response), that arithmetic
+    inverts and a cache has to come back — with invalidation this time.
+  - What SQL used to do and the tool now does in memory: reverse Slack's
+    newest-first order, drop the duplicate on a page seam, slice to `limit`.
+  - Keeping history is an *explicit* act — a file, a Board, memory. An
+    invisible archive nobody asked for is the anti-feature.
 - **Writes are never cached** and never rate-limited by us — posting is the only
   operation with an effect.
 - **`ChannelConfig.agentTool`** gates the whole capability, defaults on, and is
@@ -620,9 +651,10 @@ The facts you build against. Where a fact also cost a mistake, the mistake is in
 - **Reactions are short names.** `reactions.add` rejects 👀 with `invalid_name`;
   it wants `eyes`. `already_reacted` / `no_reaction` are successes.
 - **A `ts` is not a float-safe number** (`1761234567.123456`, 16 significant
-  digits), so it is an opaque string in shared code — hence
-  `channel_msg_receipts.message_id TEXT` — and a REAL column only where range
-  ordering is the point (`slack_messages`).
+  digits), so it is an opaque string everywhere — hence
+  `channel_msg_receipts.message_id TEXT`. The retired archive stored it in a
+  REAL column for range ordering and handed back `…000100` as `…0001`; an id
+  that cannot be reproduced is a reply that lands nowhere.
 - **"Addressed" needs durable state.** A reply in a thread Pier owns is Slack's
   equivalent of Telegram's reply-to-bot, and it is what lets a conversation flow
   without an `@` on every line. Adapter memory cannot answer it across the

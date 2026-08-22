@@ -5,43 +5,36 @@ description: Read and write Slack through Pier's slack tool — a channel's hist
 
 # Reading and writing Slack
 
-Pier holds the bot token and makes every call itself. You state an intent; it
-resolves the channel, serves what it has cached, fetches only the gap, and posts
-on your behalf. You never see a token or a scope.
+Pier holds the bot token and makes every call itself. State what you want; it
+resolves the channel, pages the API and hands back a finished transcript. Reads
+are live and nothing is kept between calls — write down what you need to keep.
 
 ## Where am I
 
-If this conversation reached you *through* Slack you are already standing in a
-channel and a thread, and **omitting `channel` means "here"**:
+If this conversation reached you *through* Slack, omitting `channel` means
+"here":
 
 - `{"operation":"post","text":"..."}` replies in the thread you are in
 - `{"operation":"read_thread"}` reads it
-- `{"operation":"context"}` names it, when you need the ids
+- `{"operation":"context"}` names it: `channel`, `channelName`, `kind`,
+  `threadTs`
 
-```json
-{"inSlack":true,"channel":"C0123456","channelName":"#ops",
- "kind":"group","threadTs":"1717243800.123456"}
-```
+`inSlack:false` from `context` means a task, subagent or web session started
+this: there is no current conversation and `channel` is required.
 
-`inSlack:false` means a task, subagent or web session started this — there is no
-current conversation and `channel` is required.
-
-You only need ids to reach somewhere you are *not*. `{"operation":"channels"}`
-lists what Pier has seen (`id`, `name`, `kind`, `respondsToMessages`); pass
-either an id or a `#name` anywhere a channel is wanted. The bot reaches only
-channels it was invited to — `not_in_channel` means someone must run
-`/invite @Pier`.
+`{"operation":"channels"}` lists what Pier can reach (`id`, `name`, `kind`,
+`respondsToMessages`); pass either an id or a `#name` anywhere a channel is
+wanted. `not_in_channel` means someone must run `/invite @Pier`.
 
 ## Never ask for an id
 
 You already have them:
 
-- **The person talking to you.** A message may start with `[name<id> time]` —
-  that is the sender, added by Pier, not something they typed. It appears only
-  when the speaker or the day changes, so the last one you saw still applies.
-- **Anyone in a transcript.** `read_channel` and `read_thread` return `userId`
-  beside `user` on every message.
-- **This channel and thread.** From `context`, above.
+- **The person talking to you** — a message may start with `[name<id> time]`,
+  added by Pier, not typed by them. It appears only when the speaker or the day
+  changes, so the last one you saw still applies.
+- **Anyone in a transcript** — every line carries `name[id]`.
+- **This channel and thread** — from `context`.
 
 Asking a human to paste their own user ID is never acceptable.
 
@@ -52,22 +45,40 @@ Asking a human to paste their own user ID is never acceptable.
  "since":"2024-06-01T00:00:00Z","until":"2024-06-02T00:00:00Z"}
 ```
 
-- `since` / `until` take **ISO 8601 or epoch seconds**. Omitting `until` reads
-  up to now and always fetches, since "now" cannot be cached.
-- `limit` caps the result (default and max 400). If `truncated` is true, narrow
-  the range rather than raising the limit.
-- Messages arrive oldest-first with `ts`, `at` (ISO), `threadTs`, `user`,
-  `userId` and `text`.
-- A channel read returns thread **parents**, not the replies inside each thread.
-  Follow a message's `threadTs` when the replies matter.
-
 ```json
 {"operation":"read_thread"}
 ```
 
 Omit both arguments for the thread you are in; pass `channel` + `thread_ts` for
-another. Returns the parent plus every reply, oldest first. A cached thread is
-re-read after a minute, because threads grow.
+another. A thread read returns the parent plus every reply, with `threadTs` at
+the top of the reply rather than on each line.
+
+```json
+{"operation":"read_message","channel":"#ops","ts":"1717243800.000100"}
+```
+
+One message and nothing else, when that is the whole question. Add `thread_ts`
+when it was posted inside a thread — a channel read cannot see thread replies,
+and the error will say so.
+
+- `since` / `until` / `after` take **ISO 8601, epoch seconds, or a `ts` from an
+  earlier read**. Omitting `until` reads up to now.
+- `after` returns only what is strictly newer than that message — use it to
+  re-read a channel or thread without seeing what you saw last time.
+- `limit` caps the result (default and max 400). When `truncated` is true,
+  narrow the range rather than raising the limit.
+- Messages are oldest-first, one line each, shaped as the reply's `format`
+  field says — `<ts> | <time, UTC> | <name>[<id>] | <text>`:
+
+  ```
+  1717243800.000100 | 2024-06-01T12:10Z | Ada[U1] | deploy? [thread: 4 replies]
+  ```
+
+  The leading `ts` is Slack's id: pass it back as `thread_ts` or `after`.
+- A channel read returns thread **parents** only; `[thread: N replies]` marks
+  the ones worth opening with `read_thread`.
+- `incomplete` means the read stopped early and its value says why. Retry or
+  work with a partial answer, but do not report it as everything.
 
 ## Posting
 
@@ -81,16 +92,15 @@ re-read after a minute, because threads grow.
 | Reply in a specific thread | `channel` + `thread_ts` |
 | Start a new top-level message | `thread_ts: "none"` |
 
-`"none"` is deliberately explicit: a channel's main flow is visible to everyone
-in it. A `thread_ts` is never inherited across a change of `channel`. The
-response carries `ts` and `threadTs` so you can reply under what you just
-posted.
+Going top-level takes the explicit `"none"`: a channel's main flow is wider
+than a thread. A `thread_ts` is never inherited across a change of `channel`.
+The response carries `ts` and `threadTs` for replying under what you posted.
 
 ## Message syntax
 
 `text` is **standard markdown** and Slack renders it natively: `**bold**`,
 `_italic_`, `` `code` ``, fenced blocks, `# headings`, `- lists`, tables and
-blockquotes. Do not hand-convert to the older `*bold*` mrkdwn — it renders
+blockquotes. Never hand-convert to the older `*bold*` mrkdwn; it renders
 literally.
 
 Four things are Slack syntax, which markdown cannot express:
@@ -104,7 +114,7 @@ Four things are Slack syntax, which markdown cannot express:
 
 - **Never guess an id from a name.** A wrong `<@U…>` either fails or pings a
   stranger, and both look like it worked. With no id, write the person's name
-  as prose instead of a fake mention.
+  as prose.
 - **Escape `&`, `<`, `>`** when they are text and not markup: `&amp;`, `&lt;`,
   `&gt;`.
 - Emoji as `:white_check_mark:`, not the raw glyph.
@@ -115,7 +125,7 @@ Four things are Slack syntax, which markdown cannot express:
 
 - **In a busy thread, say nothing unless you are needed.** You are handed every
   message, including humans talking to each other. `<silent>why</silent>` sends
-  no message at all — prefer it to acknowledging what was not addressed to you.
+  nothing at all — prefer it to acknowledging what was not addressed to you.
 - Read before you write. A summary of the wrong thread is worse than none.
 - Never post credentials, tokens or file contents you were not asked to share:
   a channel is usually wider than the conversation you are in.

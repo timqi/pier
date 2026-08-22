@@ -46,6 +46,13 @@ export class ChannelStore {
         platform TEXT PRIMARY KEY,
         json TEXT NOT NULL
       );
+      -- Retired tables, dropped here because this store is always constructed:
+      -- the Slack message cache (message text at rest is the whole reason it
+      -- went away) and the pre-TEXT receipt ledger superseded by
+      -- channel_msg_receipts. Delete these lines a release from now.
+      DROP TABLE IF EXISTS slack_messages;
+      DROP TABLE IF EXISTS slack_sync;
+      DROP TABLE IF EXISTS channel_receipts;
     `);
   }
 

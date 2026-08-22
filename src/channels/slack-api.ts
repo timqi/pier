@@ -30,6 +30,8 @@ export interface SlackMessageEvent {
   text?: string;
   ts?: string;
   thread_ts?: string;
+  /** Only on a thread parent in `conversations.history`. */
+  reply_count?: number;
   files?: SlackFile[];
 }
 
@@ -453,6 +455,10 @@ export class SlackApi implements SlackClient {
     return this.page("conversations.replies", {
       channel,
       ts,
+      // Slack drops the boundary message unless asked; the caller wants it and
+      // filters for itself, the same as `history` above.
+      oldest: query.oldest,
+      inclusive: true,
       limit: query.limit ?? 200,
       cursor: query.cursor,
     });

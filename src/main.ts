@@ -12,7 +12,6 @@ import { ConversationStore, resolveConversation } from "./channels/conversations
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
 import { SlackApi } from "./channels/slack-api.js";
-import { SlackArchive } from "./channels/slack-archive.js";
 import { SlackDirectory } from "./channels/slack-directory.js";
 import { handleSlackTool, slackToolSpec } from "./channels/slack-tool.js";
 import { parseConversation as parseSlackConversation } from "./channels/slack.js";
@@ -33,7 +32,6 @@ let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
 // Declared before the store exists because the factory is built first; the tool
 // only ever runs long after wiring is done.
 let channelStore: ChannelStore;
-const slackArchive = new SlackArchive();
 // Shared by the adapter and the tool: a display name is looked up once per
 // process, not once per message and again per transcript.
 const slackDirectory = new SlackDirectory((m) => console.warn(`slack: ${m}`));
@@ -43,7 +41,6 @@ const factory = new PiAgentFactory(
     slackToolSpec((params, callerSessionId) =>
       handleSlackTool({
         store: channelStore,
-        archive: slackArchive,
         directory: slackDirectory,
         // Rebuilt per call: the Console can change the token underneath us,
         // and a client captured at boot would keep using the old one.

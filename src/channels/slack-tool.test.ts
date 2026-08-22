@@ -1,39 +1,73 @@
-// The agent-facing Slack tool: cache-first reads, and the gates in front of
-// them. Hermetic — in-memory store and archive, a scripted client.
+// The agent-facing Slack tool: live reads, and the gates in front of them.
+// Hermetic — in-memory store, a scripted client.
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { ChannelStore } from "./config.js";
-import { SlackArchive, toTs } from "./slack-archive.js";
 import { SlackDirectory } from "./slack-directory.js";
 import type { SlackClient, SlackHistoryPage, SlackHistoryQuery, SlackSend } from "./slack-api.js";
-import { handleSlackTool, type SlackToolDeps } from "./slack-tool.js";
+import { handleSlackTool, type SlackToolDeps, toTs } from "./slack-tool.js";
 
 const T = (seconds: number): string => `${seconds}.000100`;
 
+type FakeMessage = {
+  ts: string;
+  user?: string;
+  text?: string;
+  thread_ts?: string;
+  reply_count?: number;
+};
+
 class FakeClient {
   readonly historyCalls: { channel: string; query: SlackHistoryQuery }[] = [];
-  readonly repliesCalls: { channel: string; ts: string }[] = [];
+  readonly repliesCalls: { channel: string; ts: string; cursor?: string }[] = [];
   readonly posted: SlackSend[] = [];
-  /** What `conversations.history` will answer with. */
-  timeline: { ts: string; user?: string; text?: string; thread_ts?: string }[] = [];
-  threadReplies: { ts: string; user?: string; text?: string; thread_ts?: string }[] = [];
+  /**
+   * What `conversations.history` will answer with, in Slack's own order:
+   * newest first. Anything that reverses it is the code under test.
+   */
+  timeline: FakeMessage[] = [];
+  threadReplies: FakeMessage[] = [];
+  /** Cursored pages, when a test is about paging rather than a window. */
+  pages: FakeMessage[][] | null = null;
+  /** Never runs out of pages — for the MAX_PAGES / MAX_MESSAGES caps. */
+  endless = false;
+  /** Page index from which Slack refuses, as it does mid-walk. */
+  failFrom: number | null = null;
+
+  private page(cursor: string | undefined, fallback: FakeMessage[]): SlackHistoryPage {
+    const index = Number(cursor ?? "0");
+    if (this.failFrom !== null && index >= this.failFrom) {
+      throw new Error("slack conversations.history: not_in_channel");
+    }
+    if (this.endless) {
+      const n = Number(cursor ?? "0");
+      return {
+        messages: [{ type: "message", ts: T(1000 + n), text: `m${n}` }],
+        nextCursor: String(n + 1),
+      };
+    }
+    if (!this.pages) return { messages: fallback.map((m) => ({ type: "message", ...m })) };
+    return {
+      messages: (this.pages[index] ?? []).map((m) => ({ type: "message", ...m })),
+      nextCursor: index + 1 < this.pages.length ? String(index + 1) : undefined,
+    };
+  }
 
   history(channel: string, query: SlackHistoryQuery): Promise<SlackHistoryPage> {
     this.historyCalls.push({ channel, query });
     const from = query.oldest ? Number(query.oldest) : 0;
     const to = query.latest ? Number(query.latest) : Number.MAX_SAFE_INTEGER;
-    return Promise.resolve({
-      messages: this.timeline
-        .filter((m) => Number(m.ts) >= from && Number(m.ts) <= to)
-        .map((m) => ({ type: "message", ...m })),
-    });
+    // Slack's bounds are inclusive-ish: the boundary message comes back.
+    const window = this.timeline.filter((m) => Number(m.ts) >= from && Number(m.ts) <= to);
+    return Promise.resolve(this.page(query.cursor, window));
   }
 
-  replies(channel: string, ts: string): Promise<SlackHistoryPage> {
-    this.repliesCalls.push({ channel, ts });
-    return Promise.resolve({
-      messages: this.threadReplies.map((m) => ({ type: "message", ...m })),
-    });
+  replies(channel: string, ts: string, query: SlackHistoryQuery): Promise<SlackHistoryPage> {
+    this.repliesCalls.push({ channel, ts, cursor: query.cursor });
+    // Pier asks Slack for `inclusive`, so the boundary comes back.
+    const from = query.oldest ? Number(query.oldest) : 0;
+    const window = this.threadReplies.filter((m) => Number(m.ts) >= from);
+    return Promise.resolve(this.page(query.cursor, window));
   }
 
   postMessage(payload: SlackSend): Promise<{ ts: string }> {
@@ -47,7 +81,6 @@ class FakeClient {
 }
 
 let store: ChannelStore;
-let archive: SlackArchive;
 let client: FakeClient;
 let deps: SlackToolDeps;
 let logs: string[];
@@ -66,15 +99,19 @@ function configure(over: { agentTool?: boolean; enabled?: boolean; token?: strin
 
 const call = (params: Record<string, unknown>): Promise<unknown> => handleSlackTool(deps, params);
 
+/** A transcript is `<ts> | <time> | <who> | <text>`; these read one column. */
+const column = (out: unknown, index: number): string[] =>
+  (out as { messages: string[] }).messages.map((line) => line.split(" | ")[index]!);
+const texts = (out: unknown): string[] =>
+  (out as { messages: string[] }).messages.map((line) => line.split(" | ").slice(3).join(" | "));
+
 beforeEach(() => {
   store = new ChannelStore(":memory:");
-  archive = new SlackArchive(":memory:");
   client = new FakeClient();
   logs = [];
   at = null;
   deps = {
     store,
-    archive,
     directory: new SlackDirectory((m) => logs.push(m)),
     client: () => client as unknown as SlackClient,
     here: () => at,
@@ -125,56 +162,94 @@ describe("channel resolution", () => {
 describe("channel history", () => {
   beforeEach(() => configure());
 
-  it("fetches, caches, and serves the second identical read from the cache", async () => {
+  it("turns Slack's newest-first answer into a transcript", async () => {
+    // Slack's own order. Nothing between here and the agent re-sorts it now
+    // that no SQL `ORDER BY` does.
     client.timeline = [
-      { ts: T(100), user: "U1", text: "first" },
       { ts: T(150), user: "U2", text: "second" },
+      { ts: T(100), user: "U1", text: "first" },
     ];
-    const window = { operation: "read_channel", channel: "C100", since: T(50), until: T(200) };
-    const first = await call(window) as { source: string; count: number };
-    expect(first).toMatchObject({ source: "slack", count: 2 });
-    expect(client.historyCalls).toHaveLength(1);
-
-    const second = await call(window) as { source: string; count: number };
-    // History is immutable, so a synced window never needs Slack again.
-    expect(second).toMatchObject({ source: "cache", count: 2 });
-    expect(client.historyCalls).toHaveLength(1);
+    const out = await call({
+      operation: "read_channel",
+      channel: "C100",
+      since: T(50),
+      until: T(200),
+    }) as { count: number };
+    expect(out.count).toBe(2);
+    expect(texts(out)).toEqual(["first", "second"]);
   });
 
-  it("remembers that a window was empty instead of re-asking forever", async () => {
+  it("fetches every time, because only Slack knows about an edit", async () => {
+    client.timeline = [{ ts: T(100), user: "U1", text: "first" }];
     const window = { operation: "read_channel", channel: "C100", since: T(50), until: T(200) };
-    expect(await call(window)).toMatchObject({ source: "slack", count: 0 });
-    // The fact a message table cannot record: fetched, and there was nothing.
-    expect(await call(window)).toMatchObject({ source: "cache", count: 0 });
-    expect(client.historyCalls).toHaveLength(1);
-  });
-
-  it("always goes to Slack for an open-ended window", async () => {
-    client.timeline = [{ ts: T(100), user: "U1", text: "hi" }];
-    await call({ operation: "read_channel", channel: "C100", since: T(50) });
-    await call({ operation: "read_channel", channel: "C100", since: T(50) });
-    // "Up to now" cannot be satisfied by anything already on disk.
+    expect(await call(window)).toMatchObject({ count: 1 });
+    expect(await call(window)).toMatchObject({ count: 1 });
     expect(client.historyCalls).toHaveLength(2);
   });
 
-  it("accepts ISO times and reports them back as ISO", async () => {
+  it("walks the cursor and keeps one copy of a message repeated on the seam", async () => {
+    client.pages = [
+      [{ ts: T(150), text: "second" }, { ts: T(100), text: "first" }],
+      [{ ts: T(100), text: "first" }, { ts: T(50), text: "zeroth" }],
+    ];
+    const out = await call({ operation: "read_channel", channel: "C100", until: T(200) });
+    expect(texts(out)).toEqual(["zeroth", "first", "second"]);
+    // Slack's exact string, trailing zeros and all: it is the id a reply has
+    // to match. The retired archive stored it as REAL and rounded it off.
+    expect(column(out, 0)).toEqual([T(50), T(100), T(150)]);
+    expect(client.historyCalls).toHaveLength(2);
+  });
+
+  it("stops walking pages instead of following an endless cursor", async () => {
+    client.endless = true;
+    const out = await call({ operation: "read_channel", channel: "C100" }) as {
+      truncated: boolean;
+    };
+    expect(out.truncated).toBe(true);
+    expect(client.historyCalls).toHaveLength(10);
+    expect(logs.some((l) => /truncated at 10 messages/.test(l))).toBe(true);
+  });
+
+  it("accepts ISO times, and reports the window and each message in UTC", async () => {
     client.timeline = [{ ts: "1717243800.000100", user: "U1", text: "hi" }];
     const out = await call({
       operation: "read_channel",
       channel: "C100",
       since: "2024-06-01T00:00:00Z",
       until: "2024-06-02T00:00:00Z",
-    }) as { messages: { at: string }[]; since: string };
-    expect(out.since).toBe("2024-06-01T00:00:00.000Z");
-    expect(out.messages[0]!.at).toBe("2024-06-01T12:10:00.000Z");
+    }) as { range: string };
+    expect(out.range).toBe("2024-06-01T00:00Z → 2024-06-02T00:00Z");
+    expect(column(out, 1)).toEqual(["2024-06-01T12:10Z"]);
   });
 
-  it("resolves user ids to names, so the transcript is readable", async () => {
-    client.timeline = [{ ts: T(100), user: "U1", text: "hi" }];
-    const out = await call({ operation: "read_channel", channel: "C100", until: T(200) }) as {
-      messages: { user: string }[];
-    };
-    expect(out.messages[0]!.user).toBe("Ada");
+  it("names the speaker and keeps the id a mention needs", async () => {
+    client.timeline = [
+      { ts: T(100), user: "U1", text: "hi" },
+      { ts: T(110), user: "U9", text: "who am i" },
+    ];
+    const out = await call({ operation: "read_channel", channel: "C100", until: T(200) });
+    // An unresolved id is not printed twice.
+    expect(column(out, 2)).toEqual(["Ada[U1]", "[U9]"]);
+  });
+
+  it("says how many replies a thread parent has, so opening it is a choice", async () => {
+    client.timeline = [
+      { ts: T(100), user: "U1", text: "deploy?", reply_count: 4 },
+      { ts: T(110), user: "U1", text: "unrelated" },
+    ];
+    const out = await call({ operation: "read_channel", channel: "C100", until: T(200) });
+    expect(texts(out)).toEqual(["deploy? [thread: 4 replies]", "unrelated"]);
+  });
+
+  it("reads only what is newer than a ts the agent already saw", async () => {
+    client.timeline = [
+      { ts: T(100), text: "seen" },
+      { ts: T(150), text: "new" },
+    ];
+    const out = await call({ operation: "read_channel", channel: "C100", after: T(100) });
+    // Strictly after: Slack's own bounds would have included the boundary.
+    expect(texts(out)).toEqual(["new"]);
+    expect(client.historyCalls[0]!.query.oldest).toBe(T(100));
   });
 
   it("caps the result and says it was truncated", async () => {
@@ -186,17 +261,73 @@ describe("channel history", () => {
       limit: 5,
     }) as { count: number; truncated: boolean };
     expect(out).toMatchObject({ count: 5, truncated: true });
+    // The oldest five: a transcript is read forwards.
+    expect(texts(out)).toEqual(["m0", "m1", "m2", "m3", "m4"]);
   });
 
-  it("does not claim coverage across a gap it never fetched", async () => {
-    client.timeline = [{ ts: T(900), text: "late" }, { ts: T(100), text: "early" }];
-    await call({ operation: "read_channel", channel: "C100", since: T(800), until: T(1000) });
-    await call({ operation: "read_channel", channel: "C100", since: T(50), until: T(150) });
-    // The two windows are disjoint; the middle was never asked for, so a read
-    // spanning it must go back to Slack rather than serve a hole.
-    const before = client.historyCalls.length;
-    await call({ operation: "read_channel", channel: "C100", since: T(50), until: T(1000) });
-    expect(client.historyCalls.length).toBe(before + 1);
+  it("hands back the pages it got when a later one fails, and says why", async () => {
+    client.pages = [[{ ts: T(100), text: "first" }], []];
+    client.failFrom = 1;
+    const out = await call({ operation: "read_channel", channel: "C100" }) as {
+      count: number;
+      incomplete: string;
+    };
+    // A thrown error here is indistinguishable from a quiet channel.
+    expect(out.count).toBe(1);
+    expect(out.incomplete).toMatch(/invite it/);
+  });
+
+  it("turns a Slack error code into something the agent can act on", async () => {
+    client.failFrom = 0;
+    await expect(call({ operation: "read_channel", channel: "C100" }))
+      .rejects.toThrow(/invite it before it can read/);
+  });
+});
+
+describe("one message", () => {
+  beforeEach(() => configure());
+
+  it("returns just the message at a ts, as one line", async () => {
+    client.timeline = [
+      { ts: T(100), user: "U1", text: "the one" },
+      { ts: T(150), user: "U2", text: "not this" },
+    ];
+    const out = await call({ operation: "read_message", channel: "C100", ts: T(100) }) as {
+      message: string;
+    };
+    expect(out.message).toBe(`${T(100)} | 1970-01-01T00:01Z | Ada[U1] | the one`);
+    // Asked for exactly one, with the boundary included on both sides.
+    expect(client.historyCalls[0]!.query).toMatchObject({
+      oldest: T(100),
+      latest: T(100),
+      limit: 1,
+    });
+  });
+
+  it("reads a reply through its thread, and says so", async () => {
+    client.threadReplies = [
+      { ts: T(100), text: "parent" },
+      { ts: T(110), user: "U1", text: "the reply", thread_ts: T(100) },
+    ];
+    const out = await call({
+      operation: "read_message",
+      channel: "C100",
+      ts: T(110),
+      thread_ts: T(100),
+    }) as { message: string; threadTs: string };
+    expect(out.message).toContain("the reply");
+    expect(out.threadTs).toBe(T(100));
+    expect(client.repliesCalls).toHaveLength(1);
+  });
+
+  it("points at thread_ts when a channel read cannot see the message", async () => {
+    await expect(call({ operation: "read_message", channel: "C100", ts: T(110) }))
+      .rejects.toThrow(/needs thread_ts/);
+  });
+
+  it("requires a ts", async () => {
+    await expect(call({ operation: "read_message", channel: "C100" }))
+      .rejects.toThrow(/ts is required/);
   });
 });
 
@@ -210,18 +341,45 @@ describe("threads", () => {
     ];
     const out = await call({ operation: "read_thread", channel: "C100", thread_ts: T(100) }) as {
       count: number;
-      messages: { text: string }[];
+      threadTs: string;
     };
     expect(out.count).toBe(2);
-    expect(out.messages.map((m) => m.text)).toEqual(["parent", "reply"]);
+    // Hoisted once instead of repeated on every line.
+    expect(out.threadTs).toBe(T(100));
+    expect(texts(out)).toEqual(["parent", "reply"]);
   });
 
-  it("serves a fresh thread from the cache", async () => {
+  it("returns only the replies newer than the last one the agent saw", async () => {
+    client.threadReplies = [
+      { ts: T(100), text: "parent" },
+      { ts: T(110), text: "seen", thread_ts: T(100) },
+      { ts: T(120), text: "new", thread_ts: T(100) },
+    ];
+    const out = await call({
+      operation: "read_thread",
+      channel: "C100",
+      thread_ts: T(100),
+      after: T(110),
+    });
+    expect(texts(out)).toEqual(["new"]);
+    // Slack narrows the fetch; the boundary is dropped here.
+    expect(client.repliesCalls).toHaveLength(1);
+  });
+
+  it("re-reads the thread every time, so a new reply is never missed", async () => {
     client.threadReplies = [{ ts: T(100), text: "parent" }];
     const q = { operation: "read_thread", channel: "C100", thread_ts: T(100) };
-    expect(await call(q)).toMatchObject({ source: "slack" });
-    expect(await call(q)).toMatchObject({ source: "cache" });
-    expect(client.repliesCalls).toHaveLength(1);
+    expect(await call(q)).toMatchObject({ count: 1 });
+    client.threadReplies = [{ ts: T(100), text: "parent" }, { ts: T(110), text: "late reply" }];
+    expect(await call(q)).toMatchObject({ count: 2 });
+    expect(client.repliesCalls).toHaveLength(2);
+  });
+
+  it("walks a paged thread", async () => {
+    client.pages = [[{ ts: T(100), text: "parent" }], [{ ts: T(110), text: "reply" }]];
+    const out = await call({ operation: "read_thread", channel: "C100", thread_ts: T(100) });
+    expect(texts(out)).toEqual(["parent", "reply"]);
+    expect(client.repliesCalls.map((c) => c.cursor)).toEqual([undefined, "1"]);
   });
 
   it("keeps two threads in one channel apart", async () => {
@@ -231,10 +389,8 @@ describe("threads", () => {
     ];
     await call({ operation: "read_thread", channel: "C100", thread_ts: T(100) });
     client.threadReplies = [{ ts: T(200), text: "b-parent" }];
-    const b = await call({ operation: "read_thread", channel: "C100", thread_ts: T(200) }) as {
-      messages: { text: string }[];
-    };
-    expect(b.messages.map((m) => m.text)).toEqual(["b-parent"]);
+    const b = await call({ operation: "read_thread", channel: "C100", thread_ts: T(200) });
+    expect(texts(b)).toEqual(["b-parent"]);
   });
 });
 
@@ -331,11 +487,9 @@ describe("the current conversation", () => {
   it("gives every message a userId, which is what a mention needs", async () => {
     at = { channel: "C100", threadTs: T(100) };
     client.threadReplies = [{ ts: T(100), user: "U1", text: "hi" }];
-    const out = await call({ operation: "read_thread" }) as {
-      messages: { user: string; userId: string }[];
-    };
+    const out = await call({ operation: "read_thread" });
     // Both: the name to read, the id to mention.
-    expect(out.messages[0]).toMatchObject({ user: "Ada", userId: "U1" });
+    expect(column(out, 2)).toEqual(["Ada[U1]"]);
   });
 });
 
