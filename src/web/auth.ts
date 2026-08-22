@@ -16,7 +16,6 @@
 // whole revocation story a single-user system needs. A cookie (not a bearer
 // header) because the workbench lives on SSE, and EventSource sends no headers.
 
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import {
   createHash,
   createHmac,
@@ -25,12 +24,11 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
+import { pierDb } from "../db.js";
 import { logger } from "../log.js";
-import { PIER_DB } from "../paths.js";
 
 const log = logger("auth");
 
@@ -72,20 +70,8 @@ export class AuthStore {
   /** HMAC key for cookies: the hash, so rotating the password expires them. */
   #key: string;
 
-  constructor(path = PIER_DB, print: (message: string) => void = (m) => log.info(m)) {
-    // No mode on the directory: another store has already created it by the
-    // time main.ts gets here, and PIER_HOME holds boards this process serves,
-    // not only this secret. The file modes below are what guard the credential.
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-    this.#db = new DatabaseSync(path);
-    this.#db.exec(`PRAGMA journal_mode = WAL;
-      CREATE TABLE IF NOT EXISTS auth (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        salt TEXT NOT NULL,
-        hash TEXT NOT NULL,
-        createdAt INTEGER NOT NULL
-      );
-    `);
+  constructor(db: DatabaseSync = pierDb(), print: (message: string) => void = (m) => log.info(m)) {
+    this.#db = db;
 
     let row = this.#row();
     if (!row) {
@@ -93,32 +79,21 @@ export class AuthStore {
       const salt = randomBytes(16).toString("hex");
       row = { salt, hash: hash(password, salt), createdAt: Date.now() };
       this.#db
-        .prepare("INSERT INTO auth(id, salt, hash, createdAt) VALUES (1, ?, ?, ?)")
+        .prepare("INSERT INTO auth(id, salt, hash, created_at) VALUES (1, ?, ?, ?)")
         .run(row.salt, row.hash, row.createdAt);
       print(
         `\nthis instance had no password, so one was generated:\n\n    ${password}\n\n` +
           `only its hash is stored — it is not printed again. ` +
-          `Lost it? "DELETE FROM auth" in ${path}, then restart.\n`,
+          `Lost it? "DELETE FROM auth" in the database, then restart.\n`,
       );
     }
     this.#key = row.hash;
-
-    // The database now holds a credential, so it stops being world-readable.
-    // Owned by this module because this module is what made it true. After the
-    // insert, not before: the row lands in the -wal sidecar first, and a 0644
-    // sidecar leaks exactly what the 0600 database is hiding. SQLite gives
-    // later sidecars the database's own mode, so this holds after a checkpoint.
-    if (path !== ":memory:") {
-      for (const file of [path, `${path}-wal`, `${path}-shm`]) {
-        if (existsSync(file)) chmodSync(file, 0o600);
-      }
-    }
   }
 
   #row(): { salt: string; hash: string; createdAt: number } | undefined {
-    return this.#db.prepare("SELECT salt, hash, createdAt FROM auth WHERE id = 1").get() as
-      | { salt: string; hash: string; createdAt: number }
-      | undefined;
+    return this.#db
+      .prepare("SELECT salt, hash, created_at AS createdAt FROM auth WHERE id = 1")
+      .get() as { salt: string; hash: string; createdAt: number } | undefined;
   }
 
   /** Whether this is the password, compared in constant time. */
@@ -138,7 +113,7 @@ export class AuthStore {
     const salt = randomBytes(16).toString("hex");
     const next = hash(password, salt);
     this.#db
-      .prepare("UPDATE auth SET salt = ?, hash = ?, createdAt = ? WHERE id = 1")
+      .prepare("UPDATE auth SET salt = ?, hash = ?, created_at = ? WHERE id = 1")
       .run(salt, next, Date.now());
     this.#key = next;
   }
@@ -148,9 +123,6 @@ export class AuthStore {
     return this.#key;
   }
 
-  close(): void {
-    this.#db.close();
-  }
 }
 
 const hash = (password: string, salt: string): string =>

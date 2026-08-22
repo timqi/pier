@@ -2,6 +2,7 @@
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import { ReceiptLedger } from "./receipts.js";
@@ -171,11 +172,11 @@ const FORUM = { ...GROUP, is_forum: true };
 const DM = { id: 42, type: "private" as const };
 
 beforeEach(async () => {
-  store = new ChannelStore(":memory:");
+  store = new ChannelStore(openDb(":memory:"));
   client = new FakeClient();
   inbound = [];
   dropped = [];
-  receipts = new ReceiptLedger("telegram", ":memory:");
+  receipts = new ReceiptLedger("telegram", openDb(":memory:"));
   aborted = [];
   control = fakeControl();
   channel = new TelegramChannel({ store, client, receipts, log: (m) => dropped.push(m), control });

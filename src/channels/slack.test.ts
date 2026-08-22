@@ -2,6 +2,7 @@
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -215,11 +216,11 @@ function fakeControl() {
 }
 
 beforeEach(async () => {
-  store = new ChannelStore(":memory:");
+  store = new ChannelStore(openDb(":memory:"));
   client = new FakeClient();
   inbound = [];
   dropped = [];
-  receipts = new ReceiptLedger("slack", ":memory:");
+  receipts = new ReceiptLedger("slack", openDb(":memory:"));
   aborted = [];
   known = new Set();
   control = fakeControl();

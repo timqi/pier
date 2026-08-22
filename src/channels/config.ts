@@ -5,8 +5,7 @@
 // The shapes live in types.ts; this file is the store and the policy.
 
 import type { DatabaseSync } from "node:sqlite";
-import { PIER_DB } from "../paths.js";
-import { openChannelDb } from "./db.js";
+import { pierDb } from "../db.js";
 import {
   type BindCode,
   type ChannelConfig,
@@ -19,42 +18,12 @@ import {
 
 const BIND_CODE_TTL_MS = 10 * 60_000;
 
-/**
- * Fill in whatever a stored row predates. Chats used to hold `undefined` for
- * "inherit the platform value"; that inheritance is gone, so the platform
- * value is materialised into the chat once, here, on first read.
- */
-function normalize(config: ChannelConfig): ChannelConfig {
-  config.chats = config.chats.map((chat) => ({
-    ...chat,
-    requireMention: chat.requireMention ?? config.requireMention,
-    requireBind: chat.requireBind ?? config.requireBind,
-    topicMode: chat.topicMode ?? config.topicMode,
-    cwd: chat.cwd ?? config.cwd,
-    model: chat.model ?? config.model,
-    thinking: chat.thinking ?? config.thinking,
-  }));
-  return config;
-}
-
 export class ChannelStore {
   private readonly db: DatabaseSync;
   private readonly cache = new Map<ChannelPlatform, ChannelConfig>();
 
-  constructor(path = PIER_DB) {
-    this.db = openChannelDb(path, `
-      CREATE TABLE IF NOT EXISTS channels (
-        platform TEXT PRIMARY KEY,
-        json TEXT NOT NULL
-      );
-      -- Retired tables, dropped here because this store is always constructed:
-      -- the Slack message cache (message text at rest is the whole reason it
-      -- went away) and the pre-TEXT receipt ledger superseded by
-      -- channel_msg_receipts. Delete these lines a release from now.
-      DROP TABLE IF EXISTS slack_messages;
-      DROP TABLE IF EXISTS slack_sync;
-      DROP TABLE IF EXISTS channel_receipts;
-    `);
+  constructor(db: DatabaseSync = pierDb()) {
+    this.db = db;
   }
 
   /**
@@ -69,11 +38,9 @@ export class ChannelStore {
     const row = this.db.prepare("SELECT json FROM channels WHERE platform = ?").get(platform) as
       | { json: string }
       | undefined;
-    const config = normalize(
-      row
-        ? { ...defaultChannelConfig(), ...(JSON.parse(row.json) as Partial<ChannelConfig>) }
-        : defaultChannelConfig(),
-    );
+    const config = row
+      ? { ...defaultChannelConfig(), ...(JSON.parse(row.json) as Partial<ChannelConfig>) }
+      : defaultChannelConfig();
     this.cache.set(platform, config);
     return config;
   }
@@ -177,9 +144,6 @@ export class ChannelStore {
     this.save(platform, config);
   }
 
-  close(): void {
-    this.db.close();
-  }
 }
 
 export interface GateInput {

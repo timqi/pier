@@ -1,66 +1,19 @@
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { PIER_DB } from "../paths.js";
+import type { DatabaseSync } from "node:sqlite";
+import { pierDb } from "../db.js";
 import type { TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
 }
 
-// Rows written before the kind field existed default to "task".
-const parseTask = (json: string): TaskDefinition => {
-  const task = JSON.parse(json) as TaskDefinition;
-  task.kind ??= "task";
-  return task;
-};
-// Rows written before fan-out groups existed default to null.
-const parseRun = (json: string): TaskRun => {
-  const run = JSON.parse(json) as TaskRun;
-  run.groupId ??= null;
-  return run;
-};
+const parseTask = (json: string): TaskDefinition => JSON.parse(json) as TaskDefinition;
+const parseRun = (json: string): TaskRun => JSON.parse(json) as TaskRun;
 
 export class TaskStore {
   private readonly db: DatabaseSync;
 
-  constructor(path = PIER_DB) {
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
-    this.db.exec(`
-      PRAGMA journal_mode = WAL;
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        updated_at INTEGER NOT NULL,
-        json TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS task_runs (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        queued_at INTEGER NOT NULL,
-        state TEXT NOT NULL,
-        callback_state TEXT,
-        json TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS task_runs_task_time
-        ON task_runs(task_id, queued_at DESC);
-      CREATE TABLE IF NOT EXISTS task_messages (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        state TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        json TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS task_messages_run_time
-        ON task_messages(run_id, created_at);
-      CREATE TABLE IF NOT EXISTS task_groups (
-        id TEXT PRIMARY KEY,
-        created_at INTEGER NOT NULL,
-        callback_state TEXT,
-        finished_at INTEGER,
-        json TEXT NOT NULL
-      );
-    `);
+  constructor(db: DatabaseSync = pierDb()) {
+    this.db = db;
   }
 
   listTasks(): TaskDefinition[] {
@@ -256,7 +209,4 @@ export class TaskStore {
     });
   }
 
-  close(): void {
-    this.db.close();
-  }
 }

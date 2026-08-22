@@ -9,8 +9,7 @@
 // own stragglers on a timer.
 
 import type { DatabaseSync } from "node:sqlite";
-import { PIER_DB } from "../paths.js";
-import { openChannelDb } from "./db.js";
+import { pierDb } from "../db.js";
 import type { ChannelPlatform } from "./types.js";
 
 export interface Receipt {
@@ -44,29 +43,15 @@ export class ReceiptLedger {
 
   constructor(
     private readonly platform: ChannelPlatform,
-    path = PIER_DB,
+    db: DatabaseSync = pierDb(),
   ) {
-    // A new table rather than the retired `channel_receipts`, whose message_id
-    // was INTEGER: a Slack ts under that affinity comes back as a lossy float,
-    // and an id we cannot reproduce is a 👀 nobody can ever clear. Nothing is
-    // migrated — every receipt is claimed by the next startup sweep anyway, so
-    // the worst an upgrade costs is one stale emoji from a process that died.
-    this.db = openChannelDb(path, `
-      CREATE TABLE IF NOT EXISTS channel_msg_receipts (
-        platform TEXT NOT NULL,
-        conversation_id TEXT NOT NULL,
-        chat_id TEXT NOT NULL,
-        message_id TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (platform, chat_id, message_id)
-      );
-    `);
+    this.db = db;
   }
 
   /** Re-marking the same message replaces the row rather than duplicating it. */
   add(receipt: Receipt): void {
     this.db.prepare(`
-      INSERT INTO channel_msg_receipts(platform, conversation_id, chat_id, message_id, created_at)
+      INSERT INTO receipts(platform, conversation_id, chat_id, message_id, created_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(platform, chat_id, message_id) DO UPDATE SET
         conversation_id = excluded.conversation_id, created_at = excluded.created_at
@@ -76,10 +61,10 @@ export class ReceiptLedger {
   /** Claim a conversation's receipts: returned once, then gone. */
   take(conversationId: string): Receipt[] {
     const rows = this.db.prepare(`
-      SELECT conversation_id, chat_id, message_id FROM channel_msg_receipts
+      SELECT conversation_id, chat_id, message_id FROM receipts
       WHERE platform = ? AND conversation_id = ?
     `).all(this.platform, conversationId) as unknown as ReceiptRow[];
-    this.db.prepare("DELETE FROM channel_msg_receipts WHERE platform = ? AND conversation_id = ?")
+    this.db.prepare("DELETE FROM receipts WHERE platform = ? AND conversation_id = ?")
       .run(this.platform, conversationId);
     return rows.map(toReceipt);
   }
@@ -88,17 +73,14 @@ export class ReceiptLedger {
   takeStale(ageMs: number, now = Date.now()): Receipt[] {
     const cutoff = now - ageMs;
     const rows = this.db.prepare(`
-      SELECT conversation_id, chat_id, message_id FROM channel_msg_receipts
+      SELECT conversation_id, chat_id, message_id FROM receipts
       WHERE platform = ? AND created_at <= ?
     `).all(this.platform, cutoff) as unknown as ReceiptRow[];
-    this.db.prepare("DELETE FROM channel_msg_receipts WHERE platform = ? AND created_at <= ?")
+    this.db.prepare("DELETE FROM receipts WHERE platform = ? AND created_at <= ?")
       .run(this.platform, cutoff);
     return rows.map(toReceipt);
   }
 
-  close(): void {
-    this.db.close();
-  }
 }
 
 /**

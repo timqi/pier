@@ -12,6 +12,8 @@ there.
 ## Prerequisites
 
 - Node 24 or newer (`node:sqlite` is used unflagged).
+- The `sqlite3` CLI, for the backup and password steps below. Pier itself does
+  not need it.
 - A checkout, built once:
 
 ```sh
@@ -213,9 +215,20 @@ Manually, which is also exactly what an automated update has to do:
 cd ~/pier
 git fetch --tags && git checkout v0.2.0   # a tag, not a branch
 npm ci && npm run build
-cp ~/.pier/pier.db ~/.pier/pier.db.bak    # before any schema change
+# Back up before the schema moves. VACUUM INTO, not cp: in WAL mode the
+# committed tail of the database is in pier.db-wal, so copying the main file
+# alone hands you a snapshot that is missing whatever landed most recently.
+sqlite3 ~/.pier/pier.db "VACUUM INTO '$HOME/.pier/pier.db.bak'"
 systemctl --user restart pier
 ```
+
+A newer Pier brings its own schema up on the next start: the migrations run in
+one transaction before the port opens, and the version they leave behind is
+stamped in the database. **Upgrades only.** Start an older Pier on a database a
+newer one has migrated and it refuses to run rather than write tables it does
+not understand — the way back down is the backup above, so take it before you
+upgrade, not after you regret it. (Delete the `.bak` file first if it exists;
+`VACUUM INTO` will not overwrite.)
 
 ### Can it update itself?
 
@@ -234,7 +247,7 @@ Description=Update Pier to the latest tag
 [Service]
 Type=oneshot
 WorkingDirectory=%h/pier
-ExecStart=/bin/sh -lc 'git fetch --tags && git checkout "$(git describe --tags --abbrev=0 origin/main)" && npm ci && npm run build && cp %h/.pier/pier.db %h/.pier/pier.db.bak'
+ExecStart=/bin/sh -lc 'git fetch --tags && git checkout "$(git describe --tags --abbrev=0 origin/main)" && npm ci && npm run build && rm -f %h/.pier/pier.db.bak && sqlite3 %h/.pier/pier.db "VACUUM INTO '\''%h/.pier/pier.db.bak'\''"'
 ExecStartPost=/bin/sh -lc 'systemctl --user restart pier'
 ```
 
@@ -266,6 +279,8 @@ elsewhere, pick a tunnel rather than a wider bind:
 
 ## Backups
 
-Two paths hold everything: `~/.pier/pier.db` (sessions, tasks, channels, the
-password hash) and `~/.pier/boards/`. Pi's own session history lives under its
+Two paths hold everything: `~/.pier/pier.db` (tasks, channels, the chat →
+session map, workbench state, settings, the password hash) and
+`~/.pier/boards/`. Copy the database with `sqlite3 ... "VACUUM INTO '…'"`
+rather than `cp`, which under WAL can miss the most recent commits. Pi's own session history lives under its
 config directory (`PI_CODING_AGENT_DIR`, `~/.pi/agent` by default).

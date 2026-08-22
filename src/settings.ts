@@ -4,23 +4,19 @@
 // is whatever a proxy chose to pass on, and an agent writing a board has no
 // request at all.
 //
-// A JSON file rather than a row in pier.db, because the agent is a reader too:
-// the boards skill turns a slug into a link someone can click by reading this
-// file. The database is 0600 and needs a SQLite client; a public hostname is
-// not a secret and this needs neither.
+// A key-value table, so the next setting is not the next table and not a third
+// kind of storage. It used to be a JSON file, justified by "the agent reads it
+// too" — the agent is told the URL in its system prompt (core/reply.ts), and
+// nothing outside this process ever opened that file.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { logger } from "./log.js";
-import { pierPath } from "./paths.js";
+import type { DatabaseSync } from "node:sqlite";
+import { pierDb } from "./db.js";
 
 export interface Settings {
   /** Origin (plus path prefix, if Pier is mounted under one) with no trailing
    *  slash — `https://pier.example.com`. Empty when nobody has said. */
   publicUrl: string;
 }
-
-const EMPTY: Settings = { publicUrl: "" };
 
 /**
  * `""` clears it, `null` rejects it. Rejecting rather than repairing: a
@@ -44,46 +40,30 @@ export function normalizePublicUrl(raw: string): string | null {
 }
 
 export class SettingsStore {
-  readonly #file: string;
-  #settings: Settings;
+  readonly #db: DatabaseSync;
 
-  constructor(file = pierPath("settings.json")) {
-    this.#file = file;
-    this.#settings = load(file);
+  constructor(db: DatabaseSync = pierDb()) {
+    this.#db = db;
   }
 
   get(): Settings {
-    return { ...this.#settings };
+    return { publicUrl: this.#value("publicUrl") ?? "" };
   }
 
   /** Store an already-normalized value — validation belongs at the boundary
    *  that received it, so this never has to guess what the caller meant. */
   setPublicUrl(publicUrl: string): Settings {
-    this.#settings = { ...this.#settings, publicUrl };
-    mkdirSync(dirname(this.#file), { recursive: true });
-    writeFileSync(this.#file, `${JSON.stringify(this.#settings, null, 2)}\n`);
+    this.#db.prepare(`
+      INSERT INTO settings(key, value) VALUES ('publicUrl', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(publicUrl);
     return this.get();
   }
-}
 
-/** Missing file = nothing configured yet; a broken one is reported and treated
- *  as empty, never half-read. */
-function load(file: string): Settings {
-  let raw: string;
-  try {
-    raw = readFileSync(file, "utf8");
-  } catch {
-    return { ...EMPTY };
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("expected an object");
-    }
-    const { publicUrl } = parsed as Record<string, unknown>;
-    return { publicUrl: typeof publicUrl === "string" ? publicUrl : "" };
-  } catch (err) {
-    logger("pier").warn(`ignoring unreadable settings file ${file}`, err);
-    return { ...EMPTY };
+  #value(key: string): string | undefined {
+    const row = this.#db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+      | { value: string }
+      | undefined;
+    return row?.value;
   }
 }

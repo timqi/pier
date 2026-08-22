@@ -2,6 +2,7 @@
 // rendering. Hermetic — in-memory store, a recording control, fake clients.
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import type { ConversationKey, ModelRef } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl, ConversationStatus } from "./control.js";
@@ -57,7 +58,7 @@ let control: FakeControl;
 let logs: string[];
 
 beforeEach(() => {
-  store = new ChannelStore(":memory:");
+  store = new ChannelStore(openDb(":memory:"));
   store.discoverChat("telegram", { id: "100", name: "Ops", kind: "group" });
   store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
   control = new FakeControl();

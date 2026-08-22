@@ -12,22 +12,13 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentLaunchOptions, ConversationKey } from "../core/types.js";
-import { PIER_DB } from "../paths.js";
-import { openChannelDb } from "./db.js";
+import { pierDb } from "../db.js";
 
 export class ConversationStore {
   private readonly db: DatabaseSync;
 
-  constructor(path = PIER_DB) {
-    this.db = openChannelDb(path, `
-      CREATE TABLE IF NOT EXISTS conversations (
-        channel_id TEXT NOT NULL,
-        conversation_id TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        PRIMARY KEY (channel_id, conversation_id)
-      );
-    `);
+  constructor(db: DatabaseSync = pierDb()) {
+    this.db = db;
   }
 
   get(key: ConversationKey): string | undefined {
@@ -54,9 +45,6 @@ export class ConversationStore {
     `).run(key.channelId, key.conversationId);
   }
 
-  close(): void {
-    this.db.close();
-  }
 }
 
 /**

@@ -17,16 +17,15 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
-import type { IdSetStore } from "./pins.js";
+import type { SessionStateStore } from "./session-state.js";
 import { normalizePublicUrl, type SettingsStore } from "../settings.js";
 
 export interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;
-  pins: IdSetStore;
-  /** Sessions whose last finished turn no client has viewed yet. */
-  unread: IdSetStore;
+  /** Pinned sessions, and the ones whose last finished turn nobody viewed. */
+  sessions: SessionStateStore;
   config: ConfigStore;
   settings: SettingsStore;
   /** Injected by main.ts; web stays blind to the task service. */
@@ -60,7 +59,9 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
   return images;
 }
 
-export function createServer({ factory, router, hub, pins, unread, config, settings, backgroundRuns }: WebDeps): Hono {
+export function createServer(
+  { factory, router, hub, sessions: state, config, settings, backgroundRuns }: WebDeps,
+): Hono {
   const app = new Hono();
 
   // A finished turn marks its session unread until some client reports it was
@@ -76,7 +77,7 @@ export function createServer({ factory, router, hub, pins, unread, config, setti
       return;
     }
     if (!runningNow.delete(e.sessionId)) return;
-    unread.set(e.sessionId, true);
+    state.set("unread", e.sessionId, true);
     hub.emitWorkspace({ type: "sessions-changed" });
   });
 
@@ -99,8 +100,8 @@ export function createServer({ factory, router, hub, pins, unread, config, setti
       [...[...nascent].map(([id, n]) => ({ id, ...n })), ...sessions].map((s) => ({
         ...s,
         state: router.stateOf(s.id) ?? "idle",
-        pinned: pins.has(s.id),
-        unread: unread.has(s.id),
+        pinned: state.has("pinned", s.id),
+        unread: state.has("unread", s.id),
         activeRuns: activeRuns(s.id),
       })),
     );
@@ -114,7 +115,7 @@ export function createServer({ factory, router, hub, pins, unread, config, setti
     nascent.set(session.id, { cwd: body.cwd, createdAt: Date.now() });
     router.attach({ channelId: "web", conversationId: session.id }, session);
     // Created here = part of the workspace; pinning is what Projects lists.
-    pins.set(session.id, true);
+    state.set("pinned", session.id, true);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
@@ -123,8 +124,8 @@ export function createServer({ factory, router, hub, pins, unread, config, setti
   // here; the broadcast moves every other client's dot back to idle.
   app.post("/api/sessions/:id/read", (c) => {
     const id = c.req.param("id");
-    if (unread.has(id)) {
-      unread.set(id, false);
+    if (state.has("unread", id)) {
+      state.set("unread", id, false);
       hub.emitWorkspace({ type: "sessions-changed" });
     }
     return c.json({ ok: true });
@@ -133,7 +134,7 @@ export function createServer({ factory, router, hub, pins, unread, config, setti
   app.post("/api/sessions/:id/pin", async (c) => {
     const body = await c.req.json().catch(() => null);
     if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
-    pins.set(c.req.param("id"), body.pinned);
+    state.set("pinned", c.req.param("id"), body.pinned);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ pinned: body.pinned });
   });

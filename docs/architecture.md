@@ -33,7 +33,7 @@ src/
   channels/    types.ts (config contract), config.ts (store + permission gate),
                gatekeeper.ts (verdict + drop log), chains.ts (ordering),
                chunk.ts, conversations.ts (durable chat → session map),
-               receipts.ts (durable pending-reaction set), db.ts,
+               receipts.ts (durable pending-reaction set),
                runtime.ts (adapter lifecycle), routes.ts,
                telegram.ts + -api + -render + -panel
                slack.ts + -api + -render + -panel + -tool + -archive + -directory
@@ -44,16 +44,19 @@ src/
                service, store, tool, HTTP routes
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
+  db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   settings.ts  the instance facts a human owns (today: the public URL)
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
 never imports platform SDKs or Pi. Nothing imports sideways between channels.
-`paths.ts` and `log.ts` are the exceptions to "no sideways": leaves every area
-may import and that import nothing, because `$PIER_HOME` is process
-configuration (it had otherwise grown a copy per module that needed a file) and
-a log line is not a seam crossing. Logging goes to stdout/stderr only —
+`paths.ts`, `db.ts` and `log.ts` are the exceptions to "no sideways": leaves
+every area may import and that import nothing (or, for `db.ts`, only the other
+two), because `$PIER_HOME` is process configuration (it had otherwise grown a
+copy per module that needed a file), a schema version is one number per
+database and cannot be owned by five modules, and a log line is not a seam
+crossing. Logging goes to stdout/stderr only —
 journald owns time, history and rotation (docs/deploy.md); `PIER_LOG=debug`
 adds per-message tracing, `PIER_LOG=silent` is what test runs use.
 `boards/` is the thinnest surface of all: a filesystem scan plus a static file
@@ -189,10 +192,17 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   Hand-written static HTML against one shipped classless stylesheet: Pier ships
   no board toolchain and no framework, and a board that needs a build owns it.
   Design: `docs/design/05-boards.md`.
-- Persistence: Pi session files own transcripts; one SQLite database owns Task
-  definitions, immutable Run snapshots, callback outbox state, the bounded
-  Subagent control/supervisor message ledger, and one config row per IM
-  channel.
+- Persistence: Pi session files own transcripts; one SQLite database owns
+  everything else — Task definitions, immutable Run snapshots, callback outbox
+  state, the bounded Subagent control/supervisor message ledger, one config row
+  per IM channel, the chat → session map, pending reaction receipts, the
+  password hash, instance settings and per-session workbench flags. One
+  connection, opened by `db.ts` before any store exists, because `user_version`
+  is one number per database: the schema is an append-only list of migrations
+  applied in a single transaction, upgrades only, and a database from a newer
+  Pier is refused rather than half-served. A store owns its queries, never its
+  own tables or its own handle. Nothing is stored in a JSON file that a
+  restart-safe row can hold.
 - IM chats are discovered, not registered: Telegram has no "list my chats"
   API, so a chat appears in the Console after the bot first sees traffic in
   it. New chats arrive enabled; the mention and bind gates are what keep them

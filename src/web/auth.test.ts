@@ -1,9 +1,10 @@
-import { existsSync, mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import { AuthStore, requireAuth, registerAuthRoutes } from "./auth.js";
 
 /** A store on a throwaway file, plus the password it printed on first boot. */
@@ -11,12 +12,19 @@ function store(path = join(mkdtempSync(join(tmpdir(), "pier-auth-")), "pier.db")
   store: AuthStore;
   password: string;
   path: string;
+  db: DatabaseSync;
 } {
   let printed = "";
-  const s = new AuthStore(path, (m) => {
+  const db = openDb(path);
+  const s = new AuthStore(db, (m) => {
     printed = m;
   });
-  return { store: s, password: printed.match(/[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}/)?.[0] ?? "", path };
+  return {
+    store: s,
+    password: printed.match(/[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}/)?.[0] ?? "",
+    path,
+    db,
+  };
 }
 
 /** A guarded app with the same wiring order main.ts uses. */
@@ -46,22 +54,23 @@ const cookieOf = (res: Response): string => res.headers.get("set-cookie")?.split
 
 describe("AuthStore", () => {
   it("generates a password on first boot and prints it once", () => {
-    const { store: s, password, path } = store();
+    const r = store();
+    const { store: s, password, path } = r;
     expect(password).toMatch(/^[a-z2-9]{5}-[a-z2-9]{5}-[a-z2-9]{5}$/);
     expect(s.verify(password)).toBe(true);
     expect(s.verify("wrong")).toBe(false);
 
     // A restart reuses it, and says nothing.
-    s.close();
+    r.db.close();
     const again = store(path);
     expect(again.password).toBe("");
     expect(again.store.verify(password)).toBe(true);
-    again.store.close();
+    again.db.close();
   });
 
-  it("stores no plaintext, and keeps the database to its owner", () => {
-    const { store: s, password, path } = store();
-    const db = new DatabaseSync(path);
+  // The file modes that keep this hash private are db.ts\'s job, and tested there.
+  it("stores no plaintext", () => {
+    const { password, db } = store();
     const row = db.prepare("SELECT salt, hash FROM auth WHERE id = 1").get() as {
       salt: string;
       hash: string;
@@ -70,13 +79,6 @@ describe("AuthStore", () => {
     expect(row.hash).toHaveLength(64);
     expect(row.salt).toHaveLength(32);
     db.close();
-    // The sidecars too: the row is written to the -wal file before any
-    // checkpoint, so leaving it 0644 would leak what the database hides.
-    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
-      expect(existsSync(file)).toBe(true);
-      expect(statSync(file).mode & 0o777).toBe(0o600);
-    }
-    s.close();
   });
 });
 
@@ -184,7 +186,6 @@ describe("changing the password", () => {
     expect((await a.request("/api/sessions", { headers: { cookie: after } })).status).toBe(200);
     expect((await a.request("/api/sessions", { headers: { cookie: before } })).status).toBe(401);
     expect((await login(a, "correct-horse")).status).toBe(302);
-    s.close();
   });
 
   it("refuses the wrong current password, a short new one, and a guessing run", async () => {
@@ -206,24 +207,21 @@ describe("changing the password", () => {
     }
     expect((await change(a, { current: password, next: "correct-horse" }, client)).status).toBe(429);
     expect(s.verify(password)).toBe(true);
-    s.close();
   });
 });
 
 describe("the cookie", () => {
   it("dies with the password it was signed under", async () => {
-    const { store: s, password, path } = store();
+    const { store: s, password, path, db } = store();
     const cookie = cookieOf(await login(app(s), password));
-    s.close();
 
     // Rotation, the way an operator does it: drop the row, restart, new password.
-    const db = new DatabaseSync(path);
     db.exec("DELETE FROM auth");
     db.close();
     const rotated = store(path);
     expect(rotated.password).not.toBe(password);
     expect((await app(rotated.store).request("/api/sessions", { headers: { cookie } })).status).toBe(401);
-    rotated.store.close();
+    rotated.db.close();
   });
 
   it("is refused when tampered with or expired", async () => {

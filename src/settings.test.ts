@@ -1,10 +1,11 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { openDb } from "./db.js";
 import { normalizePublicUrl, SettingsStore } from "./settings.js";
 
-const file = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "settings.json");
+const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
 
 describe("normalizePublicUrl", () => {
   it("accepts what a link can be built from, and strips what it cannot carry", () => {
@@ -24,28 +25,28 @@ describe("normalizePublicUrl", () => {
 
 describe("SettingsStore", () => {
   it("starts empty, persists a write, and reads it back on restart", () => {
-    const path = file();
-    const store = new SettingsStore(path);
+    const path = dbPath();
+    const db = openDb(path);
+    const store = new SettingsStore(db);
     expect(store.get()).toEqual({ publicUrl: "" });
     expect(store.setPublicUrl("https://pier.example.com")).toEqual({
       publicUrl: "https://pier.example.com",
     });
-    expect(new SettingsStore(path).get()).toEqual({ publicUrl: "https://pier.example.com" });
+    // A restart: the connection is gone, the row is not.
+    db.close();
+    const reopened = openDb(path);
+    expect(new SettingsStore(reopened).get()).toEqual({ publicUrl: "https://pier.example.com" });
+    reopened.close();
   });
 
-  it("reports a broken file and treats it as empty", async () => {
-    const path = file();
-    writeFileSync(path, "{ not json");
-    // Reported through log.ts, so the assertion is on the stream it writes to
-    // (the suite runs at PIER_LOG=silent, hence the threshold below).
-    vi.stubEnv("PIER_LOG", "warn");
-    vi.resetModules();
-    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const { SettingsStore: Fresh } = await import("./settings.js");
-    expect(new Fresh(path).get()).toEqual({ publicUrl: "" });
-    expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
-    vi.unstubAllEnvs();
-    vi.resetModules();
+  it("overwrites rather than accumulating rows", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    store.setPublicUrl("https://one.example.com");
+    store.setPublicUrl("https://two.example.com");
+    expect(store.get()).toEqual({ publicUrl: "https://two.example.com" });
+    const { n } = db.prepare("SELECT count(*) AS n FROM settings").get() as { n: number };
+    expect(n).toBe(1);
+    db.close();
   });
 });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
+import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import type {
@@ -104,7 +105,7 @@ function setup() {
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
-  const store = new TaskStore(":memory:");
+  const store = new TaskStore(openDb(":memory:"));
   const service = new TaskService(store, factory, router, hub);
   return { cwd, session, factory, hub, router, store, service };
 }
@@ -418,7 +419,7 @@ describe("task service", () => {
     };
     const hub = new EventHub();
     const router = new Router(hub, (key) => factory.resume(key.conversationId));
-    const service = new TaskService(new TaskStore(":memory:"), factory, router, hub);
+    const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub);
     const task = await service.create({
       name: "worker",
       trigger: { type: "manual" },

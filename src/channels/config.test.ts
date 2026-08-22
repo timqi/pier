@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import { ChannelStore, gate } from "./config.js";
 import type { ChatPolicy } from "./types.js";
 
 let store: ChannelStore;
 
 beforeEach(() => {
-  store = new ChannelStore(":memory:");
+  store = new ChannelStore(openDb(":memory:"));
 });
 
 describe("channel config store", () => {

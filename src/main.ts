@@ -16,6 +16,7 @@ import { SlackDirectory } from "./channels/slack-directory.js";
 import { handleSlackTool, slackToolSpec } from "./channels/slack-tool.js";
 import { parseConversation as parseSlackConversation } from "./channels/slack.js";
 import { EventHub } from "./core/hub.js";
+import { pierDb } from "./db.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
@@ -24,20 +25,25 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
-import { PIER_HOME, pierPath } from "./paths.js";
+import { PIER_HOME } from "./paths.js";
 import { SettingsStore } from "./settings.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
-import { IdSetStore } from "./web/pins.js";
+import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
 
 const log = logger("pier");
 
+// First, and explicitly: every store below shares this one connection, and a
+// schema that cannot be migrated must stop the process here — before a port is
+// open and before anything has written a row.
+const db = pierDb();
+
 // One store, two readers: the Console writes the public URL, and every session
 // opened after that is told the new one.
-const settings = new SettingsStore();
+const settings = new SettingsStore(db);
 
 let tasks: TaskService;
-const conversations = new ConversationStore();
+const conversations = new ConversationStore(db);
 let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
 // Declared before the store exists because the factory is built first; the tool
 // only ever runs long after wiring is done.
@@ -87,10 +93,10 @@ const router = new Router(hub, (key) => {
   }
   return resolveIm(key);
 });
-tasks = new TaskService(new TaskStore(), factory, router, hub);
+tasks = new TaskService(new TaskStore(db), factory, router, hub);
 tasks.start();
 
-channelStore = new ChannelStore();
+channelStore = new ChannelStore(db);
 const control = createControl({ router, factory, conversations, store: channelStore });
 const channels = new ChannelRuntime(channelStore, router, control);
 resolveIm = resolveConversation(
@@ -113,7 +119,7 @@ app.onError((err, c) => {
 // Before every route on purpose: Hono runs middleware in registration order,
 // so a surface added later is covered without knowing this exists. Built
 // before the listener: a first run generates and prints its password here.
-const auth = new AuthStore();
+const auth = new AuthStore(db);
 registerAuthRoutes(app, auth);
 app.use("*", requireAuth(auth));
 registerTaskRoutes(app, tasks, { factory, router });
@@ -123,8 +129,7 @@ app.route("/", createServer({
   factory,
   router,
   hub,
-  pins: new IdSetStore(pierPath("pins.json")),
-  unread: new IdSetStore(pierPath("unread.json")),
+  sessions: new SessionStateStore(db),
   config: new PiConfigStore(),
   settings,
   backgroundRuns: (id) => tasks.backgroundRuns(id),

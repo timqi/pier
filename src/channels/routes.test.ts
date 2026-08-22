@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import { ChannelStore } from "./config.js";
 import { registerChannelRoutes } from "./routes.js";
 import type { ChannelRuntime } from "./runtime.js";
@@ -10,7 +11,7 @@ let app: Hono;
 let reloads: number;
 
 beforeEach(() => {
-  store = new ChannelStore(":memory:");
+  store = new ChannelStore(openDb(":memory:"));
   reloads = 0;
   app = new Hono();
   const runtime = {

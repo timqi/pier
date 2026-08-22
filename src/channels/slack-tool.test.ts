@@ -2,6 +2,7 @@
 // Hermetic — in-memory store, a scripted client.
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { openDb } from "../db.js";
 import { ChannelStore } from "./config.js";
 import { SlackDirectory } from "./slack-directory.js";
 import type { SlackClient, SlackHistoryPage, SlackHistoryQuery, SlackSend } from "./slack-api.js";
@@ -106,7 +107,7 @@ const texts = (out: unknown): string[] =>
   (out as { messages: string[] }).messages.map((line) => line.split(" | ").slice(3).join(" | "));
 
 beforeEach(() => {
-  store = new ChannelStore(":memory:");
+  store = new ChannelStore(openDb(":memory:"));
   client = new FakeClient();
   logs = [];
   at = null;

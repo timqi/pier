@@ -21,7 +21,8 @@ import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import { SettingsStore } from "../settings.js";
-import { IdSetStore } from "./pins.js";
+import { openDb } from "../db.js";
+import { SessionStateStore } from "./session-state.js";
 import { createServer } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -140,21 +141,20 @@ function setup(cwd = "/tmp") {
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
-  // Hermetic: pins and unread land in a throwaway dir, never the real $HOME.
-  const dir = mkdtempSync(join(tmpdir(), "pier-pins-"));
-  const pins = new IdSetStore(join(dir, "pins.json"));
-  const unread = new IdSetStore(join(dir, "unread.json"));
+  // Hermetic: every store shares one in-memory database, never the real $HOME.
+  const db = openDb(":memory:");
+  const state = new SessionStateStore(db);
   const config = fakeConfig();
-  const settings = new SettingsStore(join(dir, "settings.json"));
-  const tasks = new TaskService(new TaskStore(":memory:"), factory, router, hub);
+  const settings = new SettingsStore(db);
+  const tasks = new TaskService(new TaskStore(db), factory, router, hub);
   // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   app.route("/", createServer({
-    factory, router, hub, pins, unread, config, settings,
+    factory, router, hub, sessions: state, config, settings,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
-  return { app, session, factory, hub, router, pins, unread, config, settings, tasks };
+  return { app, session, factory, hub, router, state, config, settings, tasks };
 }
 
 describe("workbench server", () => {
@@ -168,18 +168,18 @@ describe("workbench server", () => {
   });
 
   it("marks a session unread when a witnessed run settles, until a client acks", async () => {
-    const { app, session, hub, router, unread } = setup();
+    const { app, session, hub, router, state } = setup();
     router.attach({ channelId: "web", conversationId: "s1" }, session);
 
     // Idle without a witnessed start (e.g. boot) never marks unread.
     session.emit({ type: "state", state: "idle" });
-    expect(unread.has("s1")).toBe(false);
+    expect(state.has("unread", "s1")).toBe(false);
 
     const changed = vi.fn();
     hub.subscribeWorkspace(changed);
     session.emit({ type: "state", state: "streaming" });
     session.emit({ type: "state", state: "idle" });
-    expect(unread.has("s1")).toBe(true);
+    expect(state.has("unread", "s1")).toBe(true);
     expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
     const rows = (await (await app.request("/api/sessions")).json()) as { unread: boolean }[];
     expect(rows[0]!.unread).toBe(true);
@@ -187,7 +187,7 @@ describe("workbench server", () => {
     // Seen = read: the ack clears the mark and broadcasts the change.
     changed.mockClear();
     expect((await app.request("/api/sessions/s1/read", { method: "POST" })).status).toBe(200);
-    expect(unread.has("s1")).toBe(false);
+    expect(state.has("unread", "s1")).toBe(false);
     expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
 
     // Acking a session that isn't unread is a no-op, not a broadcast.
@@ -211,10 +211,9 @@ describe("workbench server", () => {
       factory,
       router: new Router(hub, () => factory.resume("s2")),
       hub,
-      pins: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
-      unread: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "unread.json")),
+      sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
-      settings: new SettingsStore(join(mkdtempSync(join(tmpdir(), "pier-settings-")), "settings.json")),
+      settings: new SettingsStore(openDb(":memory:")),
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
@@ -231,16 +230,16 @@ describe("workbench server", () => {
   });
 
   it("pins sessions created here, and toggles pins on demand", async () => {
-    const { app, pins } = setup();
+    const { app, state } = setup();
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
-    expect(pins.has("s1")).toBe(true);
+    expect(state.has("pinned", "s1")).toBe(true);
 
     const off = await app.request("/api/sessions/s1/pin", {
       method: "POST",
       body: JSON.stringify({ pinned: false }),
     });
     expect(off.status).toBe(200);
-    expect(pins.has("s1")).toBe(false);
+    expect(state.has("pinned", "s1")).toBe(false);
 
     const bad = await app.request("/api/sessions/s1/pin", { method: "POST", body: "{}" });
     expect(bad.status).toBe(400);
@@ -356,10 +355,9 @@ describe("workbench server", () => {
       factory,
       router,
       hub,
-      pins: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
-      unread: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "unread.json")),
+      sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
-      settings: new SettingsStore(join(mkdtempSync(join(tmpdir(), "pier-settings-")), "settings.json")),
+      settings: new SettingsStore(openDb(":memory:")),
     });
     const res = await app.request("/api/sessions/nope/history");
     expect(res.status).toBe(404);
