@@ -32,9 +32,10 @@ budgets there override anything here. System contract: `src/core/types.ts` +
 5. **First IM channel: Telegram** — thinnest adapter, validates the
    `Channel` seam. Inbound normalize, outbound markdown render. Default
    queue policy: busy agent → `followUp()`; `!` prefix → `steer()`.
-6. **Show pages** — static HTML output dir + file server + optional SSE
-   auto-reload. No runtime, no client framework. Pi's `export_html` gives
-   session replay for free.
+6. **Boards** (was "Show pages") — a board is a folder of static files under
+   `$PIER_HOME/boards`, served from its `site/` subdir, private until published.
+   Derived by scanning, many-to-many with sessions, no build system.
+   Design: `docs/design/05-boards.md`.
 7. **Slack, Lark channels** — repeat step 5's pattern, ≤ 200 lines each.
 
 ## Status
@@ -44,5 +45,5 @@ budgets there override anything here. System contract: `src/core/types.ts` +
 - [x] 3. Web workbench (verified in daily use)
 - [x] 4. Tasks (`docs/design/04-tasks.md`)
 - [ ] 5. Telegram channel (design doc pending)
-- [ ] 6. Show pages (design doc pending)
+- [x] 6. Boards (`docs/design/05-boards.md`)
 - [ ] 7. Slack + Lark (design doc pending)

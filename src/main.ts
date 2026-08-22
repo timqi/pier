@@ -5,6 +5,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { PiConfigStore } from "./agent/config.js";
 import { PiAgentFactory } from "./agent/pi.js";
+import { registerBoardRoutes } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
@@ -59,6 +60,7 @@ void channels.reload();
 const app = new Hono();
 registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
+registerBoardRoutes(app);
 app.route("/", createServer({
   factory,
   router,

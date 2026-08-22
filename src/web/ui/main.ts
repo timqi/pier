@@ -42,6 +42,7 @@ import {
 } from "./composer.js";
 import { createChannelsView } from "./channels.js";
 import { compact } from "../../core/reply.js";
+import { createBoardsView } from "./boards.js";
 import { createConfigView } from "./config.js";
 import { $, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -90,6 +91,7 @@ const consoleSection = $<HTMLDetailsElement>("#console-section");
 const openActivityBtn = $("#open-activity");
 const openConfigBtn = $("#open-config");
 const openChannelsBtn = $("#open-channels");
+const openBoardsBtn = $("#open-boards");
 const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
 const sessionMeta = $("#session-meta");
@@ -358,7 +360,9 @@ const activityView = createActivityView(
 
 const channelsView = createChannelsView($("#channels-view"));
 
-type ConsoleName = "config" | "channels" | "tasks" | "activity";
+const boardsView = createBoardsView($("#boards-view"), (id) => void select(id));
+
+type ConsoleName = "config" | "channels" | "tasks" | "activity" | "boards";
 
 const consoleViews: {
   name: ConsoleName;
@@ -368,9 +372,10 @@ const consoleViews: {
   { name: "channels", view: channelsView },
   { name: "tasks", view: tasksView },
   { name: "activity", view: activityView },
+  { name: "boards", view: boardsView },
 ];
 
-const consoleBtns = [openConfigBtn, openChannelsBtn, openActivityBtn];
+const consoleBtns = [openConfigBtn, openChannelsBtn, openActivityBtn, openBoardsBtn];
 
 // The Activity menu item reopens whichever of its views (Activity or Tasks)
 // was showing last; the views themselves keep their tab/selection state.
@@ -381,6 +386,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   channels: "Channels",
   tasks: "Tasks",
   activity: "Activity",
+  boards: "Boards",
 };
 
 /** Mobile top bar mirrors the route: a Console view's name, or the chat title
@@ -405,6 +411,7 @@ function showConsole(name: ConsoleName, arg?: string): void {
   // Tasks lives under the Activity menu item (tab strip inside the views).
   openConfigBtn.classList.toggle("bg-indigo-50", name === "config");
   openChannelsBtn.classList.toggle("bg-indigo-50", name === "channels");
+  openBoardsBtn.classList.toggle("bg-indigo-50", name === "boards");
   openActivityBtn.classList.toggle("bg-indigo-50", name === "tasks" || name === "activity");
   syncBar();
 }
@@ -728,6 +735,7 @@ initSidebar({
 openActivityBtn.onclick = () => showConsole(lastActivityConsole);
 openConfigBtn.onclick = () => showConsole("config");
 openChannelsBtn.onclick = () => showConsole("channels");
+openBoardsBtn.onclick = () => showConsole("boards");
 consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
 consoleSection.ontoggle = () =>
   localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");

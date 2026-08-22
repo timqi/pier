@@ -1,0 +1,196 @@
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Hono } from "hono";
+import { beforeEach, describe, expect, it } from "vitest";
+import { listBoards, registerBoardRoutes } from "./boards.js";
+
+let dir: string;
+let app: Hono;
+
+/** Hermetic: every test gets its own boards dir, never $HOME. */
+function makeBoard(
+  slug: string,
+  manifest: Record<string, unknown> | string = {},
+  page = "<h1>hi</h1>",
+): string {
+  const board = join(dir, slug);
+  mkdirSync(join(board, "site"), { recursive: true });
+  writeFileSync(
+    join(board, "board.json"),
+    typeof manifest === "string" ? manifest : JSON.stringify({ title: slug, ...manifest }),
+  );
+  writeFileSync(join(board, "site", "index.html"), page);
+  return board;
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "pier-boards-"));
+  app = new Hono();
+  registerBoardRoutes(app, dir);
+});
+
+describe("scanning", () => {
+  it("lists boards with manifest defaults and skips non-boards", async () => {
+    makeBoard("weekly-digest", { description: "what changed", sessions: ["s1"] });
+    makeBoard("no-title", {});
+    mkdirSync(join(dir, "not-a-board")); // no manifest
+    mkdirSync(join(dir, "_toolchain"));
+
+    const boards = await listBoards(dir);
+    expect(boards.map((b) => b.slug)).toEqual(["no-title", "weekly-digest"]);
+    const digest = boards[1];
+    expect(digest).toMatchObject({
+      title: "weekly-digest",
+      description: "what changed",
+      sessions: ["s1"],
+      public: false,
+    });
+    expect(Date.parse(digest?.updatedAt ?? "")).toBeGreaterThan(0);
+    // A missing title falls back to the slug rather than rendering blank.
+    expect(boards[0]?.title).toBe("no-title");
+  });
+
+  it("skips an unparsable manifest instead of half-listing it", async () => {
+    makeBoard("broken", "{ not json");
+    makeBoard("fine");
+    expect((await listBoards(dir)).map((b) => b.slug)).toEqual(["fine"]);
+  });
+
+  it("ignores directories whose name is not a slug", async () => {
+    makeBoard("weekly-digest.deleted-1700000000000");
+    makeBoard("Upper");
+    expect(await listBoards(dir)).toEqual([]);
+  });
+
+  it("returns nothing when the boards dir does not exist", async () => {
+    expect(await listBoards(join(dir, "missing"))).toEqual([]);
+  });
+});
+
+describe("serving", () => {
+  it("serves a board's page on the operator prefix, public or not", async () => {
+    makeBoard("digest");
+    const res = await app.request("/boards/digest/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await res.text()).toBe("<h1>hi</h1>");
+  });
+
+  it("redirects a missing trailing slash so relative assets resolve", async () => {
+    makeBoard("digest");
+    expect((await app.request("/boards/digest")).headers.get("location")).toBe("/boards/digest/");
+    expect((await app.request("/p/digest")).headers.get("location")).toBe("/p/digest/");
+  });
+
+  it("404s a private board on the public prefix and serves it once published", async () => {
+    makeBoard("digest");
+    expect((await app.request("/p/digest/")).status).toBe(404);
+
+    const patch = await app.request("/api/boards/digest", {
+      method: "PATCH",
+      body: JSON.stringify({ public: true }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(patch.status).toBe(200);
+
+    const res = await app.request("/p/digest/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).toContain("connect-src 'none'");
+  });
+
+  it("keeps everything outside site/ off the wire", async () => {
+    const board = makeBoard("digest", { public: true });
+    writeFileSync(join(board, "README.md"), "secrets");
+    mkdirSync(join(board, "src"));
+    writeFileSync(join(board, "src", "index.html"), "<p>source</p>");
+
+    // Encoded, because a literal `../` is collapsed by URL parsing long before
+    // it reaches us — the escape attempt that actually arrives is this one.
+    for (const prefix of ["/boards", "/p"]) {
+      expect((await app.request(`${prefix}/digest/..%2Fboard.json`)).status).toBe(404);
+      expect((await app.request(`${prefix}/digest/..%2FREADME.md`)).status).toBe(404);
+      expect((await app.request(`${prefix}/digest/..%2Fsrc%2Findex.html`)).status).toBe(404);
+      expect((await app.request(`${prefix}/digest/%2e%2e%2fboard.json`)).status).toBe(404);
+    }
+  });
+
+  it("refuses a slug that is a path or carries a NUL byte", async () => {
+    makeBoard("digest", { public: true });
+    writeFileSync(join(dir, "board.json"), '{"public":true}'); // a decoy above the boards
+    for (const path of ["/p/..%2F..%2Fetc/index.html", "/boards/..%2F/index.html", "/p/a%00b/index.html"]) {
+      expect((await app.request(path)).status).toBe(404);
+    }
+    // The decoy above the boards dir must not be readable *or* writable.
+    const patch = await app.request("/api/boards/..%2F", {
+      method: "PATCH",
+      body: JSON.stringify({ public: false }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(patch.status).toBe(404);
+    expect(readFileSync(join(dir, "board.json"), "utf8")).toBe('{"public":true}');
+  });
+
+  it("refuses symlinks that leave the site dir", async () => {
+    const board = makeBoard("digest", { public: true });
+    writeFileSync(join(dir, "outside.html"), "<p>nope</p>");
+    symlinkSync(join(dir, "outside.html"), join(board, "site", "link.html"));
+    expect((await app.request("/p/digest/link.html")).status).toBe(404);
+  });
+
+  it("serves only whitelisted extensions", async () => {
+    const board = makeBoard("digest", { public: true });
+    writeFileSync(join(board, "site", "style.css"), "body{}");
+    writeFileSync(join(board, "site", "notes.exe"), "x");
+    expect((await app.request("/p/digest/style.css")).status).toBe(200);
+    expect((await app.request("/p/digest/notes.exe")).status).toBe(404);
+  });
+
+  it("serves the shipped stylesheet", async () => {
+    const res = await app.request("/boards/_assets/pier.css");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/css");
+    expect(await res.text()).toContain(".kpi");
+  });
+});
+
+describe("manifest writes", () => {
+  it("rejects a non-boolean public and an unknown slug", async () => {
+    makeBoard("digest");
+    const bad = await app.request("/api/boards/digest", {
+      method: "PATCH",
+      body: JSON.stringify({ public: "yes" }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(bad.status).toBe(400);
+
+    const missing = await app.request("/api/boards/nope", {
+      method: "PATCH",
+      body: JSON.stringify({ public: true }),
+      headers: { "content-type": "application/json" },
+    });
+    expect(missing.status).toBe(404);
+  });
+
+  it("preserves agent-owned fields when publishing", async () => {
+    makeBoard("digest", { description: "keep me", sessions: ["s1"], note: "agent data" });
+    await app.request("/api/boards/digest", {
+      method: "PATCH",
+      body: JSON.stringify({ public: true }),
+      headers: { "content-type": "application/json" },
+    });
+    const boards = await listBoards(dir);
+    expect(boards[0]).toMatchObject({ public: true, description: "keep me", sessions: ["s1"] });
+    const raw = await app.request("/api/boards");
+    expect(await raw.json()).toHaveLength(1);
+  });
+
+  it("deletes by renaming, so the bytes survive and the scan forgets it", async () => {
+    makeBoard("digest");
+    expect((await app.request("/api/boards/digest", { method: "DELETE" })).status).toBe(200);
+    expect(await listBoards(dir)).toEqual([]);
+    expect((await app.request("/boards/digest/")).status).toBe(404);
+    expect((await app.request("/api/boards/digest", { method: "DELETE" })).status).toBe(404);
+  });
+});

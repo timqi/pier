@@ -36,14 +36,17 @@ src/
                runtime.ts (adapter lifecycle), routes.ts,
                telegram.ts + telegram-api.ts + telegram-markdown.ts
                [slack.ts, lark.ts: configurable, no adapter yet]
+  boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         server.ts, static frontend (ui/ modules)
   tasks/       definitions, runs, groups, execution, callbacks, messages,
                service, store, tool, HTTP routes
   main.ts      wiring only
 ```
 
-Dependency direction: `channels | web | tasks → core → agent`. Core never
-imports platform SDKs or Pi. Nothing imports sideways between channels.
+Dependency direction: `channels | web | tasks | boards → core → agent`. Core
+never imports platform SDKs or Pi. Nothing imports sideways between channels.
+`boards/` is the thinnest surface of all: a filesystem scan plus a static file
+handler, importing neither core nor Pi.
 
 The IM channel layer has its own living spec: `docs/design/04-im-channels.md`
 covers what is shared versus platform-specific, the checklists a new adapter
@@ -137,8 +140,13 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - Nothing in Pier authenticates: the workbench, the task routes and the channel
   config all trust whoever reaches the loopback port. IM channels raise the
   stakes (a config write decides who may drive an agent in a group chat) but do
-  not change the shape of the answer. To be handled once, for every surface,
-  with the Show pages — not per-route.
+  not change the shape of the answer. To be handled once, for every surface, in
+  its own step — not per-route. Boards shipped ahead of it, so a board's
+  `public` flag is a data state today, not a security boundary: `/p/*` is the
+  single prefix that will stay exempt when the middleware lands.
+- Remote access and deployment (systemd unit, self-restart, version check) are
+  deliberately unbuilt. Today: loopback bind, reached over an SSH tunnel or a
+  private network.
 
 ## Decisions Log
 
@@ -146,7 +154,13 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - Standalone program, not a Pi extension; Pier registers custom tools into
   the sessions it creates (task tool, step 4).
 - Web workbench before IM channels (fastest loop for steering/observability).
-- Show pages: static HTML + optional SSE reload; Pi `export_html` for replay.
+- Boards (avibe's "Show pages", renamed): a board is a *directory* under
+  `$PIER_HOME/boards`, derived by scanning like Projects are — no table, no
+  store. Only `<board>/site/` is served; sources, README and manifest stay off
+  the wire. Many-to-many with sessions and independent of their lifecycle.
+  Hand-written static HTML against one shipped classless stylesheet: Pier ships
+  no board toolchain and no framework, and a board that needs a build owns it.
+  Design: `docs/design/05-boards.md`.
 - Persistence: Pi session files own transcripts; one SQLite database owns Task
   definitions, immutable Run snapshots, callback outbox state, the bounded
   Subagent control/supervisor message ledger, and one config row per IM

@@ -3,7 +3,7 @@
 // session list; this module renders it and reports interactions back.
 
 import { browseButton } from "./dir-picker.js";
-import { $, detailsRow, h } from "./dom.js";
+import { $, detailsRow, h, relTime } from "./dom.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: AgentFactory.list() entry + live state + pin flag. */
@@ -36,14 +36,6 @@ const archiveSearch = $<HTMLInputElement>("#archive-search");
 const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const knownProjects = $("#known-projects");
-
-function relTime(ts: number): string {
-  const mins = Math.round((Date.now() - ts) / 60_000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h`;
-  return `${Math.round(mins / 1440)}d`;
-}
 
 const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 

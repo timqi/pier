@@ -6,6 +6,16 @@ export const $ = <T extends HTMLElement>(sel: string): T => {
   return el;
 };
 
+/** Compact age of a timestamp ("now", "12m", "3h", "2d"). Shared so the
+ *  sidebar and the Console views age things the same way. */
+export function relTime(ts: number): string {
+  const mins = Math.round((Date.now() - ts) / 60_000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h`;
+  return `${Math.round(mins / 1440)}d`;
+}
+
 export function h(tag: string, cls: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
   if (cls) node.className = cls;

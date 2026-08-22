@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "npm run build:web && tsx watch src/main.ts",
     "dev:web": "vite",
-    "build": "tsc && npm run build:web",
+    "build": "tsc && npm run build:assets && npm run build:web",
+    "build:assets": "mkdir -p dist/boards && cp src/boards/pier.css dist/boards/",
     "build:web": "vite build",
     "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "oxlint src",

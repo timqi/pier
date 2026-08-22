@@ -1,0 +1,412 @@
+/* pier.css — the one stylesheet every Board can link, served at
+   /boards/_assets/pier.css. Classless on purpose: plain semantic HTML must
+   look finished, so a board needs no build step and no framework. A handful of
+   named helpers cover the shapes a report actually asks for. */
+
+:root {
+  --bg: #fbfbfa;
+  --fg: #1f2328;
+  --muted: #6a737d;
+  --line: #e4e4e2;
+  --card: #ffffff;
+  --accent: #4f46e5;
+  --code-bg: #f4f4f3;
+  /* Semantic palette: colour encodes meaning (good / attention / problem),
+     never decoration. Boards are presentations, so these are first-class. */
+  --good: #0f7b4f;
+  --warn: #a25b00;
+  --bad: #b42318;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --fg: #e6e7e9;
+    --muted: #9aa0a6;
+    --line: #2c2f36;
+    --card: #1c1f24;
+    --accent: #8b87f7;
+    --code-bg: #22262c;
+    --good: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 46rem;
+  padding: 2rem 1.15rem 5rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.25;
+  margin: 2.2rem 0 0.6rem;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  margin-top: 0;
+  font-size: 1.75rem;
+}
+h2 {
+  font-size: 1.3rem;
+}
+h3 {
+  font-size: 1.08rem;
+}
+h4 {
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+p,
+ul,
+ol,
+dl,
+pre,
+table,
+blockquote,
+figure {
+  margin: 0 0 1rem;
+}
+
+ul,
+ol {
+  padding-left: 1.35rem;
+}
+li + li {
+  margin-top: 0.25rem;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+strong {
+  font-weight: 640;
+}
+
+hr {
+  height: 0;
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+blockquote {
+  padding: 0.15rem 0 0.15rem 0.9rem;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+
+code,
+kbd,
+samp {
+  padding: 0.1em 0.32em;
+  border-radius: 4px;
+  background: var(--code-bg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.875em;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: var(--code-bg);
+  line-height: 1.5;
+}
+
+pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.85rem;
+}
+
+/* Tables scroll inside themselves rather than widening the page on a phone. */
+table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.94rem;
+}
+
+th,
+td {
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-size: 0.78rem;
+  font-weight: 620;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Zebra rows: a comparison table is the most common board content, and this
+   is what makes a long one scannable. */
+tbody tr:nth-child(even) {
+  background: color-mix(in oklab, var(--fg) 3.5%, transparent);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+td:has(+ td:last-child),
+td:last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+details {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 560;
+}
+
+details[open] summary {
+  margin-bottom: 0.6rem;
+}
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* --- helpers: the shapes a report keeps needing ------------------------- */
+
+.muted {
+  color: var(--muted);
+}
+
+/* One-sentence answer under the title, before any detail. */
+.lede {
+  font-size: 1.08rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.good {
+  color: var(--good);
+}
+.warn {
+  color: var(--warn);
+}
+.bad {
+  color: var(--bad);
+}
+
+/* Right-align and tabulate a numeric column: `<td class="num">`. */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+/* A status card reads at a glance from across the room. */
+.card.good,
+.card.warn,
+.card.bad,
+.card.info {
+  border-left: 3px solid var(--c);
+  background: color-mix(in oklab, var(--c) 7%, var(--card));
+}
+.card.good {
+  --c: var(--good);
+}
+.card.warn {
+  --c: var(--warn);
+}
+.card.bad {
+  --c: var(--bad);
+}
+.card.info {
+  --c: var(--accent);
+}
+
+/* Opening block: title, one-line answer, and the numbers that matter. */
+.hero {
+  margin: 0 0 1.75rem;
+  padding: 1.4rem 1.5rem;
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--accent) 9%, var(--card));
+}
+.hero h1 {
+  margin-bottom: 0.4rem;
+}
+.hero > :last-child {
+  margin-bottom: 0;
+}
+
+/* Two columns that become one on a phone — before/after, text + aside. */
+.split {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  margin: 0 0 1rem;
+}
+
+/* Auto-fitting so a KPI row reflows to one column on a phone with no query. */
+.grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  margin: 0 0 1rem;
+}
+
+.kpi {
+  display: block;
+  font-size: 1.65rem;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.08em 0.5em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Status colour on tags, cards and callouts. Pair it with a word — colour
+   alone fails in print, in dark mode and for colour-blind readers. */
+.tag.good,
+.tag.warn,
+.tag.bad,
+.tag.info {
+  border-color: currentColor;
+  color: var(--c);
+  background: color-mix(in oklab, var(--c) 12%, transparent);
+}
+.tag.good {
+  --c: var(--good);
+}
+.tag.warn {
+  --c: var(--warn);
+}
+.tag.bad {
+  --c: var(--bad);
+}
+.tag.info {
+  --c: var(--accent);
+}
+
+/* The takeaway box: what the reader must not miss. */
+.callout {
+  --c: var(--accent);
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--c);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in oklab, var(--c) 8%, transparent);
+}
+.callout > :last-child {
+  margin-bottom: 0;
+}
+.callout.good {
+  --c: var(--good);
+}
+.callout.warn {
+  --c: var(--warn);
+}
+.callout.bad {
+  --c: var(--bad);
+}
+
+/* Proportion bar — the honest chart for "share of total" inside a table,
+   with no library and no SVG: `<span class="bar" style="--v:62%"></span>`. */
+.bar {
+  display: block;
+  min-width: 3rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--fg) 10%, transparent);
+}
+.bar::after {
+  content: "";
+  display: block;
+  width: var(--v, 0);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c, var(--accent));
+}
+.bar.good {
+  --c: var(--good);
+}
+.bar.warn {
+  --c: var(--warn);
+}
+.bar.bad {
+  --c: var(--bad);
+}
+
+@media print {
+  body {
+    max-width: none;
+    padding: 0;
+    background: #fff;
+  }
+  details {
+    break-inside: avoid;
+  }
+  details:not([open]) > *:not(summary) {
+    display: revert;
+  }
+}
