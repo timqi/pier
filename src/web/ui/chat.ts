@@ -349,10 +349,18 @@ export function renderSnapshot(
   backgroundRuns: BackgroundRun[],
   id: string,
 ): void {
-  // Detached run cards are placed where their result entered the conversation,
-  // not at the end of the transcript: a reload must not sweep every card a
-  // session ever launched to the bottom, below turns that came after it.
+  // Detached run cards are placed where the run entered the conversation, not
+  // at the end of the transcript: a reload must not sweep every card a session
+  // ever launched to the bottom, below turns that came after it.
   const unplacedRuns = new Map(backgroundRuns.map((run) => [run.runId, run]));
+  const placeRuns = (runIds: string[]): void => {
+    for (const runId of runIds) {
+      const run = unplacedRuns.get(runId);
+      if (!run) continue;
+      renderBackgroundRun(run);
+      unplacedRuns.delete(runId);
+    }
+  };
   // The final assistant turn keeps its next-step buttons across reloads and
   // on every client — an idle session is still waiting on exactly that choice.
   const lastAssistant = turns.reduce((acc, t, i) => (t.role === "assistant" ? i : acc), -1);
@@ -363,17 +371,21 @@ export function renderSnapshot(
       state === "streaming" &&
       i === turns.length - 1 &&
       (!t.text || (t.steps?.some((s) => s.kind === "tool" && s.output === undefined) ?? false));
-    if (t.steps?.length) replayActivity(t.steps, t.meta?.durationMs, live);
+    const steps = t.steps;
+    if (steps?.length) {
+      replayActivity(steps, t.meta?.durationMs, live);
+      // A card belongs under the tool call that launched the run — the result
+      // that named its id — because that is where the live stream put it when
+      // the run was queued. Anchoring on the callback instead moved every card
+      // down to the end of the conversation on the next reload.
+      placeRuns([...unplacedRuns.keys()].filter((run) => steps.some((s) => s.output?.includes(run))));
+    }
     if (!t.text && !t.images?.length) continue;
     if (t.role === "system" && t.origin) {
-      // A callback names every run it delivers (batched ones carry `runIds`).
-      const delivered = t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]);
-      for (const runId of delivered) {
-        const run = unplacedRuns.get(runId);
-        if (!run) continue;
-        renderBackgroundRun(run);
-        unplacedRuns.delete(runId);
-      }
+      // Launched elsewhere (cron, another session, an IM turn): the callback
+      // that delivered it is the earliest place it can be shown. A batched one
+      // carries every run id it delivers.
+      placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
       appendSystemInput(t.text, t.origin);
       continue;
     }
@@ -387,8 +399,8 @@ export function renderSnapshot(
       imageRow(bubble).append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
     }
   }
-  // Whatever is left never reported back — still queued or running, so the
-  // bottom is where it belongs.
+  // Whatever is left never appeared in the transcript at all — the bottom is
+  // the only honest place for it.
   for (const run of unplacedRuns.values()) renderBackgroundRun(run);
   scrollBottom(true);
 }
