@@ -78,6 +78,11 @@ export class SenderPrefix {
     return `[${[who, when].filter(Boolean).join(" ")}]`;
   }
 
+  /** Forget a session being evicted. Costs one redundant header if it comes
+   *  back, which is the same price a restart already pays. */
+  forget(sessionId: string): void {
+    this.seen.delete(sessionId);
+  }
 }
 
 /** Put the prefix above the message, or hand the message back untouched. */

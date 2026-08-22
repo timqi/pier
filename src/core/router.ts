@@ -17,6 +17,13 @@ import type {
 
 const log = logger("core");
 
+/** How long a session may sit idle in memory before it is let go. Generous on
+ *  purpose: eviction is a memory measure, and re-opening one costs a Pi
+ *  resume plus the transcript being read back. */
+const IDLE_TTL_MS = 30 * 60_000;
+/** Sweep interval. Nothing here is urgent, so it is coarse. */
+const SWEEP_MS = 5 * 60_000;
+
 /** An error goes into a chat window, so it is trimmed to something readable. */
 const truncate = (message: string): string =>
   message.length > 600 ? `${message.slice(0, 600)}…` : message;
@@ -25,12 +32,21 @@ function keyOf(key: ConversationKey): string {
   return `${key.channelId}:${key.conversationId}`;
 }
 
+interface Attached {
+  session: AgentSession;
+  key: ConversationKey;
+  stateSince: number;
+  /** Last time this session was reached for or ran a turn — what eviction
+   *  ages. Distinct from stateSince, which the UI reads as "idle since". */
+  activeAt: number;
+  /** Its event subscription, so eviction can stop listening to a disposed
+   *  session instead of leaking the closure that holds it. */
+  unsubscribe: () => void;
+}
+
 export class Router {
   private readonly byKey = new Map<string, AgentSession>();
-  private readonly bySession = new Map<
-    string,
-    { session: AgentSession; key: ConversationKey; stateSince: number }
-  >();
+  private readonly bySession = new Map<string, Attached>();
   private readonly channels = new Map<string, Channel>();
   /** Who each session last heard from, so a header costs tokens only on news. */
   private readonly senders = new SenderPrefix();
@@ -73,6 +89,50 @@ export class Router {
       });
   }
 
+  /**
+   * Let go of every session that has been idle too long, so a process serving
+   * IM threads and task runs for weeks does not hold one live Pi runtime per
+   * conversation it ever saw. Only the in-memory attachment goes: the durable
+   * conversation → session mapping stays, so the next message resumes the very
+   * same transcript (channels/conversations.ts).
+   *
+   * Skipped for anything that would notice: a streaming turn, and a session
+   * someone is still watching over SSE.
+   */
+  async evictIdle(ttlMs = IDLE_TTL_MS, now = Date.now()): Promise<number> {
+    let evicted = 0;
+    for (const [id, attached] of [...this.bySession]) {
+      if (attached.session.state === "streaming") continue;
+      if (this.hub.hasSubscribers(id)) continue;
+      if (now - attached.activeAt < ttlMs) continue;
+      this.bySession.delete(id);
+      if (this.byKey.get(keyOf(attached.key)) === attached.session) {
+        this.byKey.delete(keyOf(attached.key));
+      }
+      attached.unsubscribe();
+      this.senders.forget(id);
+      this.hub.dropReplay(id);
+      evicted += 1;
+      log.info(`evicted idle session ${id} (${keyOf(attached.key)})`);
+      // Best-effort: a runtime that will not shut down must not keep the
+      // sweeper from releasing the rest.
+      await attached.session.dispose().catch((err) =>
+        log.error(`disposing session ${id} failed`, err)
+      );
+    }
+    return evicted;
+  }
+
+  /** Run evictIdle on a timer. Returns the stop function (main.ts owns it). */
+  startIdleEviction(): () => void {
+    // Unref'd: a sweep pending is never a reason for the process to stay up.
+    const timer = setInterval(() => {
+      void this.evictIdle().catch((err) => log.error("idle sweep failed", err));
+    }, SWEEP_MS);
+    timer.unref();
+    return () => clearInterval(timer);
+  }
+
   stateOf(sessionId: string): SessionState | undefined {
     return this.bySession.get(sessionId)?.session.state;
   }
@@ -100,15 +160,19 @@ export class Router {
   attach(key: ConversationKey, session: AgentSession): void {
     this.byKey.set(keyOf(key), session);
     const existing = this.bySession.get(session.id);
-    if (existing?.session === session) return;
-    this.bySession.set(session.id, { session, key, stateSince: Date.now() });
+    if (existing?.session === session) {
+      existing.activeAt = Date.now();
+      return;
+    }
     log.info(`attached ${keyOf(key)} → session ${session.id}`);
-    session.subscribe((payload) => {
+    const unsubscribe = session.subscribe((payload) => {
       this.hub.emit(session.id, payload);
       // Run state is workspace-visible: every client's session list shows it.
       if (payload.type === "state") {
         const attached = this.bySession.get(session.id);
-        if (attached) attached.stateSince = Date.now();
+        // Every turn passes through here, so this is also where a session
+        // proves to the sweeper that it is still in use.
+        if (attached) attached.stateSince = attached.activeAt = Date.now();
         this.hub.emitWorkspace({
           type: "session-state",
           sessionId: session.id,
@@ -154,6 +218,13 @@ export class Router {
         }
       }
     });
+    this.bySession.set(session.id, {
+      session,
+      key,
+      stateSince: Date.now(),
+      activeAt: Date.now(),
+      unsubscribe,
+    });
   }
 
   async abort(sessionId: string): Promise<void> {
@@ -192,6 +263,10 @@ export class Router {
       }
       this.attach(key, session);
     }
+    // Reached for, so not idle — every surface that uses a session comes
+    // through here, including the ones that only read it.
+    const attached = this.bySession.get(session.id);
+    if (attached) attached.activeAt = Date.now();
     return session;
   }
 

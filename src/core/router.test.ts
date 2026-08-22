@@ -32,6 +32,10 @@ function fakeSession(id: string) {
     prompt: () => Promise.resolve(),
     steer: () => Promise.resolve(),
     followUp: () => Promise.resolve(),
+    dispose: () => {
+      calls.push("dispose");
+      return Promise.resolve();
+    },
   };
   return {
     // The router reads a handful of members; a full double would be noise.
@@ -179,6 +183,55 @@ describe("channel fan-out", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(notes[0]![1].text).toHaveLength(601);
     expect(notes[0]![1].text.endsWith("\u2026")).toBe(true);
+  });
+});
+
+describe("idle eviction", () => {
+  it("lets an idle session go, and resumes it on the next message", async () => {
+    const opened: string[] = [];
+    router = new Router(hub, (key) => {
+      opened.push(key.conversationId);
+      return Promise.resolve(fake.session);
+    });
+    await router.ensure(KEY);
+    expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(1);
+    expect(fake.calls).toEqual(["dispose"]);
+    // Gone from both directions, so nothing hands out a disposed session.
+    expect(router.sessionOf(KEY)).toBeUndefined();
+    expect(router.conversationOf("s1")).toBeUndefined();
+    await router.ensure(KEY);
+    expect(opened).toEqual([KEY.conversationId, KEY.conversationId]);
+  });
+
+  it("stops listening to what it evicted", async () => {
+    await router.ensure(KEY);
+    await router.evictIdle(60_000, Date.now() + 61_000);
+    fake.emit({ type: "turn-end", text: "late" });
+    expect(tg.sent).toEqual([]);
+  });
+
+  it("keeps a session someone is still watching, or still streaming", async () => {
+    await router.ensure(KEY);
+    const stop = hub.subscribe("s1", () => {});
+    expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(0);
+    stop();
+    Object.assign(fake.session, { state: "streaming" });
+    expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(0);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("keeps a session that was used inside the window", async () => {
+    await router.ensure(KEY);
+    expect(await router.evictIdle(60_000, Date.now() + 30_000)).toBe(0);
+  });
+
+  it("keeps numbering events where it left off, so a reconnect sees new ones", async () => {
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "one" });
+    const before = hub.lastSeq("s1");
+    await router.evictIdle(60_000, Date.now() + 61_000);
+    expect(hub.replay("s1", 0)).toEqual([]); // the ring is what costs memory
+    expect(hub.emit("s1", { type: "turn-end", text: "two" }).seq).toBe(before + 1);
   });
 });
 

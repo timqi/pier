@@ -118,6 +118,9 @@ const router = new Router(hub, (key) => {
   }
   return resolveIm(key);
 });
+// An attached session holds a live Pi runtime and its transcript, and nothing
+// else ever lets one go: without this, one per conversation ever answered.
+const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub);
 tasks.start();
 
@@ -194,6 +197,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // Best-effort, and bounded: a socket an adapter cannot close must not turn
     // `systemctl restart` into a 90-second wait for SIGKILL.
     setTimeout(() => process.exit(0), 3000).unref();
+    stopEviction();
     tasks.stop();
     void channels.stop().finally(() => {
       server.close(() => process.exit(0));

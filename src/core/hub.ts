@@ -7,7 +7,7 @@ const RING_SIZE = 1000;
 
 interface SessionBus {
   seq: number;
-  buffer: SessionEvent[]; // ring, oldest first
+  buffer: SessionEvent[]; // ring, oldest first; emptied once nobody watches
   subscribers: Set<(e: SessionEvent) => void>;
 }
 
@@ -63,5 +63,25 @@ export class EventHub {
   /** Highest seq stamped so far (0 if none). */
   lastSeq(sessionId: string): number {
     return this.buses.get(sessionId)?.seq ?? 0;
+  }
+
+  /** Whether anyone is still watching this session (an open SSE stream). */
+  hasSubscribers(sessionId: string): boolean {
+    return (this.buses.get(sessionId)?.subscribers.size ?? 0) > 0;
+  }
+
+  /**
+   * Release the ring of a session nobody is watching — the memory an evicted
+   * session leaves behind (1000 events of text, per session, forever).
+   *
+   * The bus itself stays, holding its seq: a client that reconnects with a
+   * Last-Event-ID drops anything numbered at or below what it saw, so a
+   * counter restarting at 1 would make every later event invisible to it.
+   * What is left is a number and an empty set.
+   */
+  dropReplay(sessionId: string): void {
+    if (this.hasSubscribers(sessionId)) return;
+    const b = this.buses.get(sessionId);
+    if (b) b.buffer = [];
   }
 }
