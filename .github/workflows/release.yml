@@ -1,0 +1,64 @@
+# A tag becomes a GitHub Release, with the log since the previous tag as its
+# notes. Nothing is published to a registry yet: the package still serves its
+# web assets from a path relative to the working directory, so a global install
+# would not find them.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the previous tag is what the notes are diffed against
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      # The footer shows package.json's version, so a tag that disagrees with it
+      # would put a number on screen that names no commit.
+      - name: Check the tag against package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          test "$tag" = "$pkg" || {
+            echo "tag $GITHUB_REF_NAME does not match package.json $pkg" >&2
+            exit 1
+          }
+
+      # A tag that does not build is not a release, even though CI already ran
+      # on the commit: the tag is what people will check out.
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      - name: Notes from the log
+        run: |
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            if [ -n "$prev" ]; then
+              echo "Changes since $prev:"
+              echo
+              git log --no-merges --pretty='- %s' "$prev..${GITHUB_REF_NAME}"
+            else
+              echo "First tagged release."
+            fi
+            echo
+            echo "Upgrading: back up \`~/.pier/pier.db\` first — schema migrations run"
+            echo "on the next start and are one-way. See \`docs/deploy.md\`."
+          } > notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md

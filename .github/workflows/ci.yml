@@ -1,0 +1,30 @@
+# Everything `just` would run locally, on the one Node version Pier supports.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to a PR makes the first run's answer worthless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      # ci, not install: the lockfile is the dependency review (AGENTS.md 8),
+      # so a run that quietly resolved something else proves nothing.
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      # Last, and not optional: type-checking passes on code vite cannot build.
+      - run: npm run build

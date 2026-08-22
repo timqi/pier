@@ -67,7 +67,11 @@
     <footer class="flex flex-none items-center gap-2 border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400">
       <button type="button" id="notify-toggle" title="Notify me when a turn finishes"
         class="cursor-pointer rounded px-1 hover:bg-neutral-200 hover:text-neutral-700">Notify</button>
-      <span id="version" class="ml-auto font-mono"></span>
+      <!-- A link, not a label: AGPL-3.0 section 13 asks a network service to
+           point its users at the source it is running. -->
+      <a id="version" href="https://github.com/timqi/pier" target="_blank" rel="noreferrer"
+        title="Pier is free software (AGPL-3.0) — the source of what you are using"
+        class="ml-auto font-mono hover:text-neutral-700 hover:underline"></a>
     </footer>
   </aside>
 

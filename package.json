@@ -1,6 +1,12 @@
 {
   "name": "pier",
   "version": "0.0.1",
+  "description": "A self-hosted workspace for coding agents: web workbench and IM channels in front of Pi sessions",
+  "license": "AGPL-3.0-only",
+  "repository": "github:timqi/pier",
+  "engines": {
+    "node": ">=24"
+  },
   "private": true,
   "type": "module",
   "scripts": {
