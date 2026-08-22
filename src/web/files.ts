@@ -66,6 +66,7 @@ export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: F
   };
 
   app.get("/api/config", async (c) => {
+    c.header("cache-control", "no-store");
     const scope = await parseScope(c.req.query("scope"));
     if (!scope) return c.json({ error: "unknown scope" }, 400);
     return c.json({
@@ -77,6 +78,7 @@ export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: F
   });
 
   guarded(app, "GET", "/api/config/files/:name", 400, async (c) => {
+    c.header("cache-control", "no-store");
     const scope = await parseScope(c.req.query("scope"));
     if (!scope) return c.json({ error: "unknown scope" }, 400);
     return c.json({ content: await config.readFile(scope, c.req.param("name")) });
@@ -86,13 +88,17 @@ export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: F
     const scope = await parseScope(c.req.query("scope"));
     if (!scope) return c.json({ error: "unknown scope" }, 400);
     const body = await c.req.json().catch(() => null);
-    if (typeof body?.content !== "string") return c.json({ error: "content required" }, 400);
-    await config.writeFile(scope, c.req.param("name"), body.content);
-    return c.json({ ok: true });
+    if (typeof body?.content !== "string" || typeof body?.expected !== "string") {
+      return c.json({ error: "content and expected content required" }, 400);
+    }
+    const name = c.req.param("name");
+    await config.writeFile(scope, name, body.content, body.expected);
+    return c.json({ ok: true, content: await config.readFile(scope, name) });
   });
 
   // Resource names may contain slashes — query params, not path params.
   guarded(app, "GET", "/api/config/resource", 400, async (c) => {
+    c.header("cache-control", "no-store");
     const scope = await parseScope(c.req.query("scope"));
     if (!scope) return c.json({ error: "unknown scope" }, 400);
     const kind = c.req.query("kind");

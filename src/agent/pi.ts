@@ -4,6 +4,7 @@
 
 import {
   createAgentSession,
+  CredentialSynchronizationError,
   DefaultResourceLoader,
   defineTool,
   ModelRuntime,
@@ -21,6 +22,12 @@ import type {
   ContextUsage,
   ImageAttachment,
   ModelRef,
+  ProviderAuthEvent,
+  ProviderAuthPrompt,
+  ProviderAuthType,
+  ProviderInfo,
+  ProviderManager,
+  ProviderSetup,
   SessionEventPayload,
   SessionState,
   SystemInputOrigin,
@@ -36,8 +43,8 @@ import {
   type PiEvent,
   type PiMessage,
 } from "./events.js";
-import { defaultAgentDir } from "./config.js";
-import type { CredentialStore } from "./credentials.js";
+import { defaultAgentDir, PiConfigStore } from "./config.js";
+import type { CredentialStore, ProviderCredential } from "./credentials.js";
 import { curateModels } from "./models.js";
 
 const log = logger("agent");
@@ -220,7 +227,7 @@ class PiSession implements AgentSession {
   }
 }
 
-export class PiAgentFactory implements AgentFactory {
+export class PiAgentFactory implements AgentFactory, ProviderManager {
   constructor(
     private readonly extraTools: AgentCustomTool[] = [],
     /** Appended as a virtual context file, so Pi's own prompt stays intact.
@@ -236,10 +243,13 @@ export class PiAgentFactory implements AgentFactory {
      * every runtime built here reads and writes through it — an OAuth refresh
      * persists to the database, never to a plaintext file. */
     private readonly credentials?: CredentialStore,
+    private readonly providerConfig: PiConfigStore = new PiConfigStore(),
   ) {}
 
   /** One runtime for the whole process; catalogs are global, not per session. */
   private catalog?: Promise<ModelRuntime>;
+  private refreshQueue: Promise<void> = Promise.resolve();
+  private builtinProviderIds?: Promise<Set<string>>;
 
   /** Structural fit: CredentialStore mirrors pi-ai's interface of the same
    * name, so the SDK accepts it without this file exporting any SDK type. */
@@ -247,12 +257,132 @@ export class PiAgentFactory implements AgentFactory {
     return ModelRuntime.create(this.credentials ? { credentials: this.credentials } : {});
   }
 
+  private authRuntime(): Promise<ModelRuntime> {
+    return (this.catalog ??= this.createRuntime());
+  }
+
+  private refreshedRuntime(): Promise<ModelRuntime> {
+    const result = this.refreshQueue.then(async () => {
+      const runtime = await this.authRuntime();
+      await runtime.refresh({ allowNetwork: false });
+      return runtime;
+    });
+    this.refreshQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private builtinIds(): Promise<Set<string>> {
+    return (this.builtinProviderIds ??= ModelRuntime.create({
+      ...(this.credentials ? { credentials: this.credentials } : {}),
+      modelsPath: null,
+      refreshOnCreate: false,
+    }).then((runtime) => new Set(runtime.getProviders().map((provider) => provider.id))));
+  }
+
   async availableModels(): Promise<ModelRef[]> {
-    this.catalog ??= this.createRuntime();
-    const available = await (await this.catalog).getAvailable();
+    const available = await (await this.refreshedRuntime()).getAvailable();
     return curateModels(
       available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
     );
+  }
+
+  async providers(): Promise<ProviderInfo[]> {
+    const [builtinIds, structures] = await Promise.all([
+      this.builtinIds(),
+      this.providerConfig.providerStructures(),
+    ]);
+    // Refresh after queued config writes settle, so runtime and structure never
+    // combine an older catalog with a newer models.json snapshot.
+    const runtime = await this.refreshedRuntime();
+    const stored = new Map((await runtime.listCredentials()).map((c) => [c.providerId, c.type]));
+    return runtime.getProviders().map((provider) => {
+      const status = runtime.getProviderAuthStatus(provider.id);
+      const methods: ProviderInfo["methods"] = [];
+      if (provider.auth.apiKey?.login) {
+        methods.push({ type: "api_key", name: provider.auth.apiKey.name });
+      }
+      if (provider.auth.oauth) {
+        methods.push({
+          type: "oauth",
+          name: provider.auth.oauth.loginLabel ?? provider.auth.oauth.name,
+          ...(provider.auth.oauth.isSubscription ? { subscription: true } : {}),
+        });
+      }
+      const credential = stored.get(provider.id);
+      const structure = structures[provider.id];
+      return {
+        id: provider.id,
+        name: structure?.name ?? provider.name,
+        builtin: builtinIds.has(provider.id),
+        methods,
+        configured: status.configured,
+        ...(status.label ? { source: status.label } : status.source ? { source: status.source } : {}),
+        ...(credential ? { stored: credential } : {}),
+        ...(structure?.endpoint ? { endpoint: structure.endpoint } : {}),
+        ...(structure?.api ? { api: structure.api } : {}),
+        ...(structure?.models ? { models: structure.models } : {}),
+      };
+    });
+  }
+
+  async setup(input: ProviderSetup): Promise<void> {
+    const builtins = await this.builtinIds();
+    if (input.kind === "builtin" && !builtins.has(input.id)) {
+      throw new Error(`not a built-in provider: ${input.id}`);
+    }
+    if (input.kind === "custom" && builtins.has(input.id)) {
+      throw new Error(`built-in provider must use built-in setup: ${input.id}`);
+    }
+    try {
+      await this.providerConfig.setupProvider(input, async () => {
+        const runtime = await this.refreshedRuntime();
+        const error = runtime.getError();
+        if (error) throw new Error(error);
+        if (!runtime.getProvider(input.id)) throw new Error(`provider did not load: ${input.id}`);
+      });
+    } catch (err) {
+      try {
+        await this.refreshedRuntime();
+      } catch (refreshErr) {
+        log.warn("provider runtime refresh failed after config rollback", refreshErr);
+      }
+      throw err;
+    }
+  }
+
+  async login(
+    providerId: string,
+    type: ProviderAuthType,
+    interaction: {
+      signal: AbortSignal;
+      prompt(prompt: ProviderAuthPrompt): Promise<string>;
+      notify(event: ProviderAuthEvent): void;
+    },
+  ): Promise<() => Promise<void>> {
+    const store = this.credentials;
+    const previous = await store?.read(providerId);
+    const restore = async (committed: ProviderCredential): Promise<void> => {
+      if (store && await store.replaceIfCurrent(providerId, committed, previous)) {
+        await this.refreshedRuntime();
+      }
+    };
+    try {
+      const committed = await (await this.authRuntime()).login(providerId, type, interaction);
+      return () => restore(committed as ProviderCredential);
+    } catch (err) {
+      if (err instanceof CredentialSynchronizationError && err.credential) {
+        try {
+          await restore(err.credential as ProviderCredential);
+        } catch (rollback) {
+          throw new AggregateError([err, rollback], `failed to restore credential for ${providerId}`);
+        }
+      }
+      throw err;
+    }
+  }
+
+  async logout(providerId: string): Promise<void> {
+    await (await this.authRuntime()).logout(providerId, { signal: AbortSignal.timeout(15_000) });
   }
 
   /**

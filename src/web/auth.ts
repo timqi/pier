@@ -25,6 +25,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { pierDb } from "../db.js";
@@ -37,6 +38,9 @@ const TTL_MS = 90 * 24 * 60 * 60_000;
 /** Failed attempts one client may make before it has to wait out the window. */
 const MAX_FAILURES = 10;
 const WINDOW_MS = 15 * 60_000;
+/** Distinct throttle buckets retained at once; the last is shared overflow. */
+const MAX_FAILURE_CLIENTS = 1024;
+const OVERFLOW_CLIENT = "\0overflow";
 /** Shortest password a human may choose. The generated one is longer; this is
  *  the floor under which the throttle above stops being enough. */
 const MIN_LENGTH = 10;
@@ -135,13 +139,10 @@ const hash = (password: string, salt: string): string =>
  * it. `/boards/*` stays behind the boundary; `/p/*` is the published mirror,
  * the single exempt prefix `docs/architecture.md` reserved for this.
  */
-function isPublic(path: string): boolean {
-  return (
-    path === "/login" ||
-    path === "/p" ||
-    path.startsWith("/p/") ||
-    path === "/boards/_assets/pier.css"
-  );
+function isPublic(method: string, path: string): boolean {
+  if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
+  if (method !== "GET" && method !== "HEAD") return false;
+  return path.startsWith("/p/") || path === "/boards/_assets/pier.css";
 }
 
 const sign = (secret: string, expiresAt: number): string =>
@@ -171,39 +172,90 @@ const safeNext = (raw: unknown): string =>
 
 // Failed logins per client, in memory: a restart clearing them is fine, since
 // the window is minutes and the point is to make guessing slow, not to keep
-// books. Bounded by pruning every expired entry on each check.
+// books. Expired entries are pruned, and fresh identities spill into one
+// overflow bucket once the fixed map cap is reached.
 const failures = new Map<string, { count: number; resetAt: number }>();
 
-/**
- * Behind a reverse proxy every request shares one socket address, so the
- * forwarded hop is the only thing separating two clients. It is spoofable when
- * Pier is exposed directly — that is an argument for the proxy, not against
- * the limit: a password is the thing being protected here, the counter only
- * decides how fast someone may guess.
- */
+const loopback = (address: string): boolean =>
+  address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+
+function remoteOf(c: Context): string | undefined {
+  const env = c.env as
+    | { incoming?: unknown; server?: { incoming?: unknown } }
+    | undefined;
+  return env?.incoming || env?.server?.incoming
+    ? getConnInfo(c).remote.address
+    : undefined;
+}
+
+/** Trust a forwarded address only from a local reverse proxy. The rightmost
+ * hop is the address that proxy appended, not one the client put at the front. */
 function clientOf(c: Context): string {
-  return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const remote = remoteOf(c);
+  if (remote && !loopback(remote)) return remote;
+  return c.req.header("x-forwarded-for")?.split(",").at(-1)?.trim() || remote || "local";
+}
+
+function failureClient(client: string): string {
+  if (failures.has(client) || failures.size < MAX_FAILURE_CLIENTS - 1) return client;
+  return OVERFLOW_CLIENT;
 }
 
 function throttled(client: string): boolean {
   const now = Date.now();
   for (const [id, entry] of failures) if (entry.resetAt <= now) failures.delete(id);
-  return (failures.get(client)?.count ?? 0) >= MAX_FAILURES;
+  return (failures.get(failureClient(client))?.count ?? 0) >= MAX_FAILURES;
 }
 
 function noteFailure(client: string): void {
+  client = failureClient(client);
   const entry = failures.get(client);
   if (entry && entry.resetAt > Date.now()) entry.count += 1;
   else failures.set(client, { count: 1, resetAt: Date.now() + WINDOW_MS });
 }
 
+/** Browsers name the source of unsafe requests. Compare hosts rather than
+ * schemes because TLS commonly terminates at the reverse proxy. */
+function sameOrigin(c: Context): boolean {
+  const origin = c.req.header("origin");
+  if (!origin) return true; // curl and other non-browser clients
+  try {
+    const parsed = new URL(origin);
+    const remote = remoteOf(c);
+    const forwarded = remote && loopback(remote)
+      ? c.req.header("x-forwarded-host")?.split(",").at(-1)?.trim()
+      : undefined;
+    const host = forwarded || c.req.header("host") || new URL(c.req.url).host;
+    const external = new URL(`${parsed.protocol}//${host}`);
+    return parsed.origin === origin && external.origin === parsed.origin &&
+      external.pathname === "/" && !external.search && !external.hash;
+  } catch {
+    return false;
+  }
+}
+
 /** Every route, in one place — no per-route opt-in to forget on the next one. */
 export function requireAuth(store: AuthStore): MiddlewareHandler {
   return async (c, next) => {
-    if (isPublic(c.req.path) || valid(store.cookieKey, getCookie(c, COOKIE))) return next();
+    if (isPublic(c.req.method, c.req.path)) return next();
+    const authenticated = valid(store.cookieKey, getCookie(c, COOKIE));
+    const unsafe = c.req.method !== "GET" && c.req.method !== "HEAD";
+    if (authenticated && unsafe && !sameOrigin(c)) {
+      log.warn(`blocked ${c.req.method} ${c.req.path} from origin ${c.req.header("origin")}`);
+      return c.json({ error: "forbidden origin" }, 403);
+    }
+    if (authenticated) {
+      await next();
+      // Cookie-authenticated content must not become public in a shared proxy.
+      if (!c.res.headers.has("cache-control")) {
+        c.header("cache-control", c.req.path.startsWith("/api/") ? "private, no-store" : "private");
+      }
+      c.header("x-frame-options", "DENY");
+      return;
+    }
     // An API caller gets a status it can act on; a navigation gets the form.
     // Anything non-GET is a client call too — never a link worth redirecting.
-    if (c.req.path.startsWith("/api/") || c.req.method !== "GET") {
+    if (c.req.path.startsWith("/api/") || unsafe) {
       return c.json({ error: "unauthorized" }, 401);
     }
     return c.redirect(`/login?next=${encodeURIComponent(c.req.path)}`);
@@ -234,10 +286,8 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     return c.redirect(next);
   });
 
-  // Changing the password is a login — it takes the current one, and it is
-  // throttled by the same counter, because "change" answers the same guess
-  // "sign in" does. So it needs no cookie of its own: whoever knows the current
-  // password can already get one.
+  // Re-authenticate before rotating the credential. The global boundary also
+  // requires a live cookie; knowing a password is not permission to call APIs.
   app.post("/api/password", async (c) => {
     const client = clientOf(c);
     const body = (await c.req.json().catch(() => null)) as
@@ -248,7 +298,7 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     if (throttled(client)) return c.json({ error: "Too many attempts. Wait a few minutes." }, 429);
     if (!store.verify(current)) {
       noteFailure(client);
-      return c.json({ error: "Wrong current password." }, 401);
+      return c.json({ error: "Wrong current password." }, 403);
     }
     if (next.length < MIN_LENGTH) {
       return c.json({ error: `Use at least ${MIN_LENGTH} characters.` }, 400);

@@ -4,8 +4,8 @@
 //
 // Only <board>/site is reachable over HTTP: sources, README and the manifest
 // itself stay off the wire, so a public board leaks nothing about how it was
-// made. `public` is a data state, not yet a security boundary — nothing in
-// Pier authenticates today (docs/architecture.md, Open Questions).
+// made. `/boards/*` is authenticated; `/p/*` additionally requires the
+// manifest's `public` flag and runs as sandboxed active content.
 
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
@@ -51,12 +51,17 @@ const TYPES: Record<string, string> = {
   ".csv": "text/plain; charset=utf-8",
 };
 
-// A published board must not be able to phone home: no third-party fetches, no
-// framing, no beacons. Inline style/script stay allowed — a single-file board
-// is the normal shape.
+// Board HTML is active content on the workbench origin. Scripts stay available
+// for self-contained pages, but the response sandbox removes forms, frames,
+// popups and network access. Public pages omit same-origin too, so their scripts
+// receive an opaque origin and cannot inherit an operator's authority.
 const CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
-  "script-src 'self' 'unsafe-inline'; connect-src 'none'; frame-ancestors 'none'";
+  "script-src 'self' 'unsafe-inline'; connect-src 'none'; frame-src 'none'; " +
+  "worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; " +
+  "frame-ancestors 'none'";
+const PRIVATE_CSP = `sandbox allow-scripts allow-same-origin; ${CSP}`;
+const PUBLIC_CSP = `sandbox allow-scripts; ${CSP}`;
 
 /** Malformed boards are reported once, not on every scan. */
 const warned = new Set<string>();
@@ -162,11 +167,16 @@ async function serveFile(c: Context, dir: string, slug: string, rest: string, pu
   const headers: Record<string, string> = {
     "content-type": type,
     "x-content-type-options": "nosniff",
-    // HTML is the page an agent keeps rewriting; assets are fingerprinted or
-    // rare enough that five minutes is safe.
-    "cache-control": type.startsWith("text/html") ? "no-store" : "max-age=300",
+    // Every public request rechecks the manifest, so unpublishing cannot leave
+    // a shared-cache copy reachable. Private assets may stay in one browser.
+    "cache-control": publicOnly || type.startsWith("text/html")
+      ? "no-store"
+      : "private, max-age=300",
+    "content-security-policy": publicOnly ? PUBLIC_CSP : PRIVATE_CSP,
   };
-  if (publicOnly) headers["content-security-policy"] = CSP;
+  // Public sandboxed pages have an opaque origin. Fonts and module scripts need
+  // CORS even when their URLs are under the same published board.
+  if (publicOnly) headers["access-control-allow-origin"] = "*";
   return c.body(await readFile(file), 200, headers);
 }
 

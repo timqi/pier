@@ -13,6 +13,7 @@ import type {
   ConfigStore,
   ImageAttachment,
   ModelRef,
+  ProviderManager,
   SessionEventPayload,
   SessionState,
   ThinkingLevel,
@@ -23,6 +24,7 @@ import { TaskStore } from "../tasks/store.js";
 import { SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
+import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
 import { createServer, type SecretsControl } from "./server.js";
 
@@ -132,6 +134,40 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
   };
 }
 
+/** Provider-owned prompts/events without a Pi runtime or real credentials. */
+function fakeProviders(): ProviderManager & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    providers: async () => [
+      {
+        id: "anthropic",
+        name: "Anthropic",
+        builtin: true,
+        methods: [
+          { type: "api_key", name: "Anthropic API key" },
+          { type: "oauth", name: "Claude Pro/Max", subscription: true },
+        ],
+        configured: false,
+      },
+    ],
+    setup: async (input) => void calls.push(`setup:${input.kind}:${input.id}:${input.endpoint ?? "default"}`),
+    login: async (providerId, type, interaction) => {
+      calls.push(`login:${providerId}:${type}`);
+      if (type === "oauth") {
+        interaction.notify({ type: "auth_url", url: "https://auth.example/authorize" });
+      }
+      const value = await interaction.prompt({
+        type: type === "api_key" ? "secret" : "manual_code",
+        message: type === "api_key" ? "API key" : "Authorization code",
+      });
+      calls.push(`response:${value}`);
+      return async () => void calls.push(`rollback:${providerId}`);
+    },
+    logout: async (providerId) => void calls.push(`logout:${providerId}`),
+  };
+}
+
 /** Scripted SecretsControl — in memory, never touches disk or vt. */
 function fakeSecrets(opts: { unlockError?: string } = {}): SecretsControl & { calls: string[] } {
   const calls: string[] = [];
@@ -180,6 +216,7 @@ function setup(cwd = "/tmp", secrets = fakeSecrets()) {
   const db = openDb(":memory:");
   const state = new SessionStateStore(db);
   const config = fakeConfig();
+  const providers = fakeProviders();
   const settings = new SettingsStore(db);
   const updates = new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1"));
   const tasks = new TaskService(new TaskStore(db), factory, router, hub);
@@ -188,10 +225,10 @@ function setup(cwd = "/tmp", secrets = fakeSecrets()) {
   registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
   app.route("/", createServer({
-    factory, router, hub, sessions: state, config, settings, updates, secrets, onUnlocked,
+    factory, router, hub, sessions: state, config, providers, settings, updates, secrets, onUnlocked,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
-  return { app, session, factory, hub, router, state, config, settings, tasks, secrets, onUnlocked };
+  return { app, session, factory, hub, router, state, config, providers, settings, tasks, secrets, onUnlocked };
 }
 
 describe("workbench server", () => {
@@ -250,6 +287,7 @@ describe("workbench server", () => {
       hub,
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
+      providers: fakeProviders(),
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
@@ -396,12 +434,194 @@ describe("workbench server", () => {
       hub,
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
+      providers: fakeProviders(),
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
     });
     const res = await app.request("/api/sessions/nope/history");
     expect(res.status).toBe(404);
+  });
+
+  it("relays API-key and OAuth login flows without returning submitted secrets", async () => {
+    const { app, providers } = setup();
+    const start = async (type: "api_key" | "oauth") => {
+      const res = await app.request("/api/providers/setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          setup: { kind: "builtin", id: "anthropic", endpoint: "https://proxy.example/v1" },
+          authType: type,
+        }),
+      });
+      expect(res.status).toBe(202);
+      return (await res.json()) as {
+        id: string;
+        state: string;
+        prompt?: { id: string; type: string };
+        events: { type: string; url?: string }[];
+      };
+    };
+
+    const apiKey = await start("api_key");
+    expect(apiKey.prompt?.type).toBe("secret");
+    const answered = await app.request(`/api/providers/flows/${apiKey.id}/respond`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ promptId: apiKey.prompt!.id, value: "sk-live-secret" }),
+    });
+    expect(answered.status).toBe(204);
+    expect(await answered.text()).toBe("");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const flowStatus = await app.request(`/api/providers/flows/${apiKey.id}`);
+    expect(flowStatus.headers.get("cache-control")).toBe("no-store");
+    expect(await flowStatus.json()).toMatchObject({ state: "succeeded" });
+
+    const oauth = await start("oauth");
+    expect(oauth.events).toContainEqual({ type: "auth_url", url: "https://auth.example/authorize" });
+    expect(oauth.prompt?.type).toBe("manual_code");
+    await app.request(`/api/providers/flows/${oauth.id}/respond`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ promptId: oauth.prompt!.id, value: "oauth-code" }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const providerList = await app.request("/api/providers");
+    expect(providerList.status).toBe(200);
+    expect(providerList.headers.get("cache-control")).toBe("no-store");
+    expect((await app.request("/api/providers/anthropic/logout", { method: "POST" })).status).toBe(200);
+    expect(providers.calls).toEqual([
+      "login:anthropic:api_key",
+      "response:sk-live-secret",
+      "setup:builtin:anthropic:https://proxy.example/v1",
+      "login:anthropic:oauth",
+      "response:oauth-code",
+      "setup:builtin:anthropic:https://proxy.example/v1",
+      "logout:anthropic",
+    ]);
+  });
+
+  it("sanitizes provider-owned flow data and redacts submitted values from failures", async () => {
+    const providers = fakeProviders();
+    providers.login = async (_providerId, _type, interaction) => {
+      interaction.notify({
+        type: "info",
+        message: "Provider message",
+        links: [{ url: "https://auth.example", label: "Open" }],
+        internal: "event-secret",
+      } as Parameters<typeof interaction.notify>[0]);
+      const value = await interaction.prompt({
+        type: "secret",
+        message: "API key",
+        internal: "prompt-secret",
+      } as Parameters<typeof interaction.prompt>[0]);
+      interaction.notify({ type: "progress", message: `checking ${value}` });
+      const confirmation = await interaction.prompt({ type: "text", message: "Continue" });
+      throw new Error(`provider rejected ${value} ${confirmation}`);
+    };
+    const flows = new ProviderFlows(providers);
+    const flow = await flows.start("anthropic", "api_key");
+    expect(JSON.stringify(flow)).not.toContain("event-secret");
+    expect(JSON.stringify(flow)).not.toContain("prompt-secret");
+    flows.respond(flow.id, flow.prompt!.id, "submitted-secret");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const running = flows.get(flow.id)!;
+    expect(running.events).toContainEqual({ type: "progress", message: "checking [redacted]" });
+    expect(JSON.stringify(running)).not.toContain("submitted-secret");
+    flows.respond(flow.id, running.prompt!.id, "x");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const failed = flows.get(flow.id)!;
+    expect(failed.state).toBe("failed");
+    expect(failed.events).toEqual([]);
+    expect(failed.error).toContain("[redacted]");
+    expect(failed.error).not.toContain("submitted-secret");
+    expect(failed.error).not.toContain("x");
+  });
+
+  it("restores a committed credential when provider setup fails", async () => {
+    const providers = fakeProviders();
+    let restored = false;
+    providers.login = async (_providerId, _type, interaction) => {
+      await interaction.prompt({ type: "secret", message: "API key" });
+      return async () => { restored = true; };
+    };
+    const flows = new ProviderFlows(providers);
+    const flow = await flows.start(
+      "anthropic",
+      "api_key",
+      undefined,
+      async () => { throw new Error("models.json changed"); },
+    );
+    flows.respond(flow.id, flow.prompt!.id, "new-secret");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(restored).toBe(true);
+    expect(flows.get(flow.id)).toMatchObject({ state: "failed" });
+  });
+
+  it("expires a stalled authentication flow at its absolute deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const providers = fakeProviders();
+      let aborted = false;
+      providers.login = async (_providerId, _type, interaction) => new Promise<() => Promise<void>>((_resolve, reject) => {
+        interaction.signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      });
+      const flows = new ProviderFlows(providers);
+      const flow = await flows.start("anthropic", "oauth");
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(aborted).toBe(true);
+      expect(flows.get(flow.id)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels an authentication flow and validates unsupported methods", async () => {
+    const { app, providers } = setup();
+    const bad = await app.request("/api/providers/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setup: { kind: "builtin", id: "anthropic" }, authType: "password" }),
+    });
+    expect(bad.status).toBe(400);
+    const unsafeEndpoint = await app.request("/api/providers/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        setup: { kind: "builtin", id: "anthropic", endpoint: "https://proxy.example/v1?key=secret" },
+        authType: "api_key",
+      }),
+    });
+    expect(unsafeEndpoint.status).toBe(400);
+    expect(providers.calls).toEqual([]);
+
+    const started = await app.request("/api/providers/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setup: { kind: "builtin", id: "anthropic" }, authType: "oauth" }),
+    });
+    const flow = (await started.json()) as { id: string };
+    const duplicate = await app.request("/api/providers/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        setup: { kind: "builtin", id: "anthropic", endpoint: "https://other.example/v1" },
+        authType: "oauth",
+      }),
+    });
+    expect(duplicate.status).toBe(400);
+    expect((await duplicate.json()) as { error: string }).toMatchObject({
+      error: expect.stringContaining("authentication already running"),
+    });
+    expect(providers.calls.filter((call) => call.startsWith("setup:"))).toHaveLength(0);
+    const cancelled = await app.request(`/api/providers/flows/${flow.id}/cancel`, { method: "POST" });
+    expect(await cancelled.json()).toMatchObject({ state: "cancelled" });
+    // Existing provider structure is committed only after authentication succeeds.
+    expect(providers.calls.filter((call) => call.startsWith("setup:"))).toHaveLength(0);
   });
 
   it("reports secrets status — state, mode and the locked reason, never key material", async () => {
@@ -463,6 +683,7 @@ describe("workbench server", () => {
     const { app, config } = setup();
     const globalRes = await app.request("/api/config");
     expect(globalRes.status).toBe(200);
+    expect(globalRes.headers.get("cache-control")).toBe("no-store");
     expect(await globalRes.json()).toEqual({
       dir: "/home/t/.pier/pi",
       files: [{ name: "SYSTEM.md", exists: true }],
@@ -480,12 +701,16 @@ describe("workbench server", () => {
   it("reads and writes config files, surfacing store errors as 400", async () => {
     const { app, config } = setup();
     const read = await app.request("/api/config/files/SYSTEM.md?scope=/tmp");
+    expect(read.headers.get("cache-control")).toBe("no-store");
     expect(await read.json()).toEqual({ content: "content" });
+    await app.request("/api/config/files/SYSTEM.md?scope=/tmp");
+    expect(config.calls.filter((call) => call === "read:/tmp/SYSTEM.md")).toHaveLength(2);
     const write = await app.request("/api/config/files/SYSTEM.md", {
       method: "PUT",
-      body: JSON.stringify({ content: "new" }),
+      body: JSON.stringify({ content: "new", expected: "content" }),
     });
     expect(write.status).toBe(200);
+    expect(await write.json()).toEqual({ ok: true, content: "content" });
     expect(config.calls).toContain("write:global/SYSTEM.md=new");
     expect((await app.request("/api/config/files/nope.md")).status).toBe(400);
     const noBody = await app.request("/api/config/files/SYSTEM.md", {
@@ -498,6 +723,7 @@ describe("workbench server", () => {
   it("serves read-only resources and validates kind", async () => {
     const { app, config } = setup();
     const ok = await app.request("/api/config/resource?kind=extensions&name=quiet.ts");
+    expect(ok.headers.get("cache-control")).toBe("no-store");
     expect(await ok.json()).toEqual({ content: "// ext" });
     expect(config.calls).toContain("resource:global/extensions/quiet.ts");
     expect((await app.request("/api/config/resource?kind=themes&name=x")).status).toBe(400);

@@ -276,8 +276,8 @@ export interface ConfigStore {
   listFiles(scope: ConfigScope): Promise<{ name: string; exists: boolean }[]>;
   /** Whitelisted file content, "" if absent. Secrets arrive masked. */
   readFile(scope: ConfigScope, name: string): Promise<string>;
-  /** Masked secrets that come back unchanged keep their stored value. */
-  writeFile(scope: ConfigScope, name: string, content: string): Promise<void>;
+  /** Compare-and-write when `expected` is present; unchanged masks restore stored secrets. */
+  writeFile(scope: ConfigScope, name: string, content: string, expected?: string): Promise<void>;
   /** Absolute path of the global scope's directory — the UI shows where
    *  "Global" actually lives, which moves with PIER_HOME. */
   readonly globalDir: string;
@@ -320,4 +320,77 @@ export interface AgentFactory {
   list(): Promise<
     { id: string; cwd: string; createdAt: number; title?: string }[]
   >;
+}
+
+export type ProviderAuthType = "api_key" | "oauth";
+export const PROVIDER_APIS = [
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+] as const;
+export type ProviderApi = typeof PROVIDER_APIS[number];
+export const isProviderApi = (value: unknown): value is ProviderApi =>
+  typeof value === "string" && (PROVIDER_APIS as readonly string[]).includes(value);
+
+export type ProviderSetup =
+  | { kind: "builtin"; id: string; endpoint?: string }
+  | {
+      kind: "custom";
+      id: string;
+      name?: string;
+      endpoint: string;
+      api: ProviderApi;
+      models: { id: string; reasoning: boolean }[];
+    };
+
+export type ProviderAuthPrompt = { signal?: AbortSignal } & (
+  | { type: "text" | "secret" | "manual_code"; message: string; placeholder?: string }
+  | {
+      type: "select";
+      message: string;
+      options: readonly { id: string; label: string; description?: string }[];
+    }
+);
+
+export type ProviderAuthEvent =
+  | { type: "info"; message: string; links?: readonly { url: string; label?: string }[] }
+  | { type: "auth_url"; url: string; instructions?: string }
+  | {
+      type: "device_code";
+      userCode: string;
+      verificationUri: string;
+      intervalSeconds?: number;
+      expiresInSeconds?: number;
+    }
+  | { type: "progress"; message: string };
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  builtin: boolean;
+  methods: { type: ProviderAuthType; name: string; subscription?: boolean }[];
+  configured: boolean;
+  source?: string;
+  stored?: ProviderAuthType;
+  endpoint?: string;
+  api?: ProviderApi;
+  models?: { id: string; reasoning: boolean }[];
+}
+
+/** Core ↔ Pi provider seam: structural setup plus provider-owned auth flows. */
+export interface ProviderManager {
+  providers(): Promise<ProviderInfo[]>;
+  setup(input: ProviderSetup): Promise<void>;
+  /** Returns a compare-and-restore action until the caller commits setup. */
+  login(
+    providerId: string,
+    type: ProviderAuthType,
+    interaction: {
+      signal: AbortSignal;
+      prompt(prompt: ProviderAuthPrompt): Promise<string>;
+      notify(event: ProviderAuthEvent): void;
+    },
+  ): Promise<() => Promise<void>>;
+  logout(providerId: string): Promise<void>;
 }

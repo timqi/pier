@@ -74,6 +74,17 @@ describe("write-through persistence", () => {
     expect(row("anthropic")).toBe(before);
   });
 
+  it("restores a credential only while the expected value is current", async () => {
+    const s = store();
+    await s.modify("anthropic", async () => oauth("new"));
+    expect(await s.replaceIfCurrent("anthropic", oauth("other"), oauth("old"))).toBe(false);
+    expect(await s.read("anthropic")).toEqual(oauth("new"));
+    expect(await s.replaceIfCurrent("anthropic", oauth("new"), oauth("old"))).toBe(true);
+    expect(await s.read("anthropic")).toEqual(oauth("old"));
+    expect(await s.replaceIfCurrent("anthropic", oauth("old"), undefined)).toBe(true);
+    expect(await s.read("anthropic")).toBeUndefined();
+  });
+
   it("delete removes the row", async () => {
     const s = store();
     await s.modify("anthropic", async () => oauth("tok"));

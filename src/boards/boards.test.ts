@@ -75,6 +75,11 @@ describe("serving", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toContain(
+      "sandbox allow-scripts allow-same-origin",
+    );
+    expect(res.headers.get("content-security-policy")).toContain("frame-src 'none'");
+    expect(res.headers.get("content-security-policy")).toContain("form-action 'none'");
     expect(await res.text()).toBe("<h1>hi</h1>");
   });
 
@@ -97,7 +102,14 @@ describe("serving", () => {
 
     const res = await app.request("/p/digest/");
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-security-policy")).toContain("connect-src 'none'");
+    const csp = res.headers.get("content-security-policy");
+    expect(csp).toContain("sandbox allow-scripts;");
+    expect(csp).not.toContain("sandbox allow-scripts allow-same-origin");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp).toContain("frame-src 'none'");
+    expect(csp).toContain("form-action 'none'");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 
   it("keeps everything outside site/ off the wire", async () => {
@@ -139,11 +151,18 @@ describe("serving", () => {
     expect((await app.request("/p/digest/link.html")).status).toBe(404);
   });
 
-  it("serves only whitelisted extensions", async () => {
+  it("serves only whitelisted extensions and never shares private assets", async () => {
     const board = makeBoard("digest", { public: true });
     writeFileSync(join(board, "site", "style.css"), "body{}");
     writeFileSync(join(board, "site", "notes.exe"), "x");
-    expect((await app.request("/p/digest/style.css")).status).toBe(200);
+    const privateAsset = await app.request("/boards/digest/style.css");
+    const publicAsset = await app.request("/p/digest/style.css");
+    expect(privateAsset.status).toBe(200);
+    expect(privateAsset.headers.get("cache-control")).toBe("private, max-age=300");
+    expect(privateAsset.headers.get("access-control-allow-origin")).toBeNull();
+    expect(publicAsset.status).toBe(200);
+    expect(publicAsset.headers.get("cache-control")).toBe("no-store");
+    expect(publicAsset.headers.get("access-control-allow-origin")).toBe("*");
     expect((await app.request("/p/digest/notes.exe")).status).toBe(404);
   });
 

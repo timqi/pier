@@ -16,6 +16,7 @@ import type {
   ConfigStore,
   ImageAttachment,
   InboundMessage,
+  ProviderManager,
   ThinkingLevel,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
@@ -23,6 +24,7 @@ import type { SessionStateStore } from "./session-state.js";
 import type { SecretsMode } from "../secrets.js";
 import { normalizePublicUrl, type SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
+import { registerProviderRoutes } from "./providers.js";
 
 /** The slice of Secrets the routes need; injectable so tests never touch disk
  *  or spawn vt. Never exposes key material — state, mode and the locked reason
@@ -42,6 +44,7 @@ export interface WebDeps {
   /** Pinned sessions, and the ones whose last finished turn nobody viewed. */
   sessions: SessionStateStore;
   config: ConfigStore;
+  providers: ProviderManager;
   settings: SettingsStore;
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
@@ -88,6 +91,7 @@ export function createServer(
     hub,
     sessions: state,
     config,
+    providers,
     settings,
     secrets,
     onUnlocked,
@@ -447,6 +451,7 @@ export function createServer(
     return c.json(secretsStatus());
   });
 
+  registerProviderRoutes(app, providers);
   registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });
 
   // serveStatic resolves `root` against the *working directory*, and an

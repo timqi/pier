@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { logger } from "../log.js";
 import type { Secrets } from "../secrets.js";
 import { defaultAgentDir } from "./config.js";
@@ -83,6 +84,19 @@ export class CredentialStore {
       if (next === undefined) return this.#get(providerId);
       this.#put(providerId, next);
       return next;
+    });
+  }
+
+  async replaceIfCurrent(
+    providerId: string,
+    current: ProviderCredential,
+    replacement: ProviderCredential | undefined,
+  ): Promise<boolean> {
+    return this.#serialized(undefined, async () => {
+      if (!isDeepStrictEqual(this.#get(providerId), current)) return false;
+      if (replacement) this.#put(providerId, replacement);
+      else this.db.prepare("DELETE FROM credentials WHERE key = ?").run(providerId);
+      return true;
     });
   }
 

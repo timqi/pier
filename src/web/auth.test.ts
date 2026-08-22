@@ -30,13 +30,15 @@ function store(path = join(mkdtempSync(join(tmpdir(), "pier-auth-")), "pier.db")
 /** A guarded app with the same wiring order main.ts uses. */
 function app(s: AuthStore): Hono {
   const a = new Hono();
-  registerAuthRoutes(a, s);
   a.use("*", requireAuth(s));
+  registerAuthRoutes(a, s);
   a.get("/", (c) => c.text("workbench"));
   a.get("/api/sessions", (c) => c.json([]));
   a.post("/api/sessions", (c) => c.json({ ok: true }));
   a.get("/p/report/", (c) => c.text("published"));
+  a.all("/p/report/", (c) => c.text("published write"));
   a.get("/boards/_assets/pier.css", (c) => c.text("css"));
+  a.all("/boards/_assets/pier.css", (c) => c.text("css write"));
   a.get("/boards/report/", (c) => c.text("private"));
   return a;
 }
@@ -100,10 +102,47 @@ describe("requireAuth", () => {
     expect(res.status).toBe(401);
   });
 
-  it("serves published boards and their stylesheet to a logged-out visitor", async () => {
+  it("serves only read methods for published boards and their stylesheet", async () => {
     const a = app(store().store);
-    expect((await a.request("/p/report/")).status).toBe(200);
-    expect((await a.request("/boards/_assets/pier.css")).status).toBe(200);
+    for (const path of ["/p/report/", "/boards/_assets/pier.css"]) {
+      expect((await a.request(path)).status).toBe(200);
+      expect((await a.request(path, { method: "HEAD" })).status).toBe(200);
+      for (const method of ["POST", "PATCH", "DELETE"]) {
+        expect((await a.request(path, { method })).status).toBe(401);
+      }
+    }
+    expect((await a.request("/p")).headers.get("location")).toBe("/login?next=%2Fp");
+    expect((await a.request("/login", { method: "PUT" })).status).toBe(401);
+  });
+
+  it("rejects cross-origin writes with a valid cookie", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    const post = (origin?: string) =>
+      a.request("https://pier.example/api/sessions", {
+        method: "POST",
+        headers: { cookie, ...(origin ? { origin } : {}) },
+      });
+
+    expect((await post("https://other.example")).status).toBe(403);
+    expect((await post("https://pier.example")).status).toBe(200);
+    expect((await post()).status).toBe(200);
+
+    // A local TLS proxy may rewrite Host for its upstream connection. Its
+    // forwarded external host is trusted, and host names are case-insensitive.
+    const proxied = await a.request("http://127.0.0.1:3141/api/sessions", {
+      method: "POST",
+      headers: {
+        cookie,
+        host: "127.0.0.1:3141",
+        origin: "https://pier.example",
+        "x-forwarded-host": "PIER.EXAMPLE:443",
+      },
+    }, {
+      incoming: { socket: { remoteAddress: "127.0.0.1", remotePort: 443, remoteFamily: "IPv4" } },
+    });
+    expect(proxied.status).toBe(200);
   });
 });
 
@@ -117,7 +156,10 @@ describe("login", () => {
     const cookie = cookieOf(res);
     expect(cookie).toMatch(/^pier_session=\d+\./);
     expect(res.headers.get("set-cookie")).toContain("HttpOnly");
-    expect((await a.request("/api/sessions", { headers: { cookie } })).status).toBe(200);
+    const api = await a.request("/api/sessions", { headers: { cookie } });
+    expect(api.status).toBe(200);
+    expect(api.headers.get("cache-control")).toBe("private, no-store");
+    expect(api.headers.get("x-frame-options")).toBe("DENY");
   });
 
   it("rejects the wrong password with the form again", async () => {
@@ -163,20 +205,32 @@ describe("changing the password", () => {
   const change = (
     a: Hono,
     body: Record<string, string>,
+    cookie: string = "",
     client: string = crypto.randomUUID(),
   ): Promise<Response> =>
     Promise.resolve(a.request("/api/password", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-forwarded-for": client },
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": client,
+        ...(cookie ? { cookie } : {}),
+      },
       body: JSON.stringify(body),
     }));
+
+  it("requires a session even when the current password is correct", async () => {
+    const { store: s, password } = store();
+    const res = await change(app(s), { current: password, next: "correct-horse" });
+    expect(res.status).toBe(401);
+    expect(s.verify(password)).toBe(true);
+  });
 
   it("swaps the password, hands back a working cookie, and kills the old ones", async () => {
     const { store: s, password } = store();
     const a = app(s);
     const before = cookieOf(await login(a, password));
 
-    const res = await change(a, { current: password, next: "correct-horse" });
+    const res = await change(a, { current: password, next: "correct-horse" }, before);
     expect(res.status).toBe(200);
     expect(s.verify("correct-horse")).toBe(true);
     expect(s.verify(password)).toBe(false);
@@ -191,10 +245,11 @@ describe("changing the password", () => {
   it("refuses the wrong current password, a short new one, and a guessing run", async () => {
     const { store: s, password } = store();
     const a = app(s);
+    const cookie = cookieOf(await login(a, password));
 
-    const wrong = await change(a, { current: "nope", next: "correct-horse" });
-    expect(wrong.status).toBe(401);
-    const short = await change(a, { current: password, next: "short" });
+    const wrong = await change(a, { current: "nope", next: "correct-horse" }, cookie);
+    expect(wrong.status).toBe(403);
+    const short = await change(a, { current: password, next: "short" }, cookie);
     expect(short.status).toBe(400);
     expect(await short.json()).toEqual({ error: "Use at least 10 characters." });
     // Neither attempt changed anything.
@@ -203,9 +258,9 @@ describe("changing the password", () => {
     // Same throttle as login: "change" answers the same guess "sign in" does.
     const client = "10.0.0.11";
     for (let i = 0; i < 10; i++) {
-      expect((await change(a, { current: "nope", next: "correct-horse" }, client)).status).toBe(401);
+      expect((await change(a, { current: "nope", next: "correct-horse" }, cookie, client)).status).toBe(403);
     }
-    expect((await change(a, { current: password, next: "correct-horse" }, client)).status).toBe(429);
+    expect((await change(a, { current: password, next: "correct-horse" }, cookie, client)).status).toBe(429);
     expect(s.verify(password)).toBe(true);
   });
 });

@@ -74,6 +74,7 @@ let channelStore: ChannelStore;
 // Shared by the adapter and the tool: a display name is looked up once per
 // process, not once per message and again per transcript.
 const slackDirectory = new SlackDirectory((m) => logger("slack").warn(m));
+const piConfig = new PiConfigStore();
 const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
@@ -108,6 +109,7 @@ const factory = new PiAgentFactory(
   // Provider credentials live sealed in pier.db; a leftover auth.json is
   // imported on first use and renamed to auth.json.imported.
   new CredentialStore(db, secrets),
+  piConfig,
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
@@ -155,8 +157,8 @@ app.onError((err, c) => {
 // so a surface added later is covered without knowing this exists. Built
 // before the listener: a first run generates and prints its password here.
 const auth = new AuthStore(db);
-registerAuthRoutes(app, auth);
 app.use("*", requireAuth(auth));
+registerAuthRoutes(app, auth);
 registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
@@ -165,7 +167,8 @@ app.route("/", createServer({
   router,
   hub,
   sessions: new SessionStateStore(db),
-  config: new PiConfigStore(),
+  config: piConfig,
+  providers: factory,
   settings,
   secrets,
   updates: new UpdateCheck(),

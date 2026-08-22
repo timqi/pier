@@ -301,9 +301,10 @@ elsewhere, pick a tunnel rather than a wider bind:
 - `ssh -L 3141:localhost:3141 server` — nothing to configure, nothing exposed.
 - Tailscale, or Cloudflare Tunnel — no open port, and TLS terminates outside.
 - A reverse proxy (Caddy, nginx) if you want a real hostname. Terminate TLS
-  there and pass `X-Forwarded-For`; Pier's login throttle counts per forwarded
-  client, and its session cookie is marked `Secure` when the proxy reports
-  `X-Forwarded-Proto: https`.
+  there, preserve the external `Host` (or pass `X-Forwarded-Host`), and pass
+  `X-Forwarded-For`; Pier uses the external host for write-origin checks and
+  counts login failures per forwarded client. Its session cookie is marked
+  `Secure` when the proxy reports `X-Forwarded-Proto: https`.
 
 ## Backups
 

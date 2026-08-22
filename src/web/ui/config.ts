@@ -5,6 +5,7 @@
 import type { ConfigResource } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
+import { openProviders } from "./providers.js";
 import { setStatus } from "./form.js";
 
 interface ConfigIndex {
@@ -15,11 +16,14 @@ interface ConfigIndex {
 
 type Selection =
   | { type: "file"; name: string }
+  | { type: "providers" }
   | { type: "resource"; kind: "extensions" | "skills"; name: string };
 
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
   let scope = "global";
   let selection: Selection | null = null;
+  let loadRequest = 0;
+  let paneRequest = 0;
   // Where "Global" lives, from the API — PIER_HOME moves it, so no path is
   // hardcoded here. Empty until the first load answers.
   let globalDir = "";
@@ -59,19 +63,24 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   const q = (extra = ""): string => `?scope=${encodeURIComponent(scope)}${extra}`;
 
   async function load(): Promise<void> {
-    const res = await fetch(`/api/config${q()}`);
+    const request = ++loadRequest;
+    paneRequest++;
+    const res = await fetch(`/api/config${q()}`, { cache: "no-store" });
+    if (request !== loadRequest) return;
     if (!res.ok) {
       renderNav(null);
       renderError(`failed to load config: ${res.status}`);
       return;
     }
     const index = (await res.json()) as ConfigIndex;
+    if (request !== loadRequest) return;
     if (scope === "global" && index.dir) {
       globalDir = index.dir;
       renderScopeOptions();
     }
     renderNav(index);
     if (!selection) renderPlaceholder();
+    else if (selection.type === "providers") await showProviders();
   }
 
   // --- nav ---------------------------------------------------------------------
@@ -182,9 +191,16 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       selection = sel;
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name);
+      else if (sel.type === "providers") void showProviders();
       else void openResource(sel.kind, sel.name);
     };
-    const rows: HTMLElement[] = [navSection("Files")];
+    const rows: HTMLElement[] = [];
+    if (scope === "global") {
+      const sel: Selection = { type: "providers" };
+      rows.push(navSection("Models"));
+      rows.push(navRow("Providers", isActive(sel), false, () => open(sel)));
+    }
+    rows.push(navSection("Files"));
     for (const f of index.files) {
       const sel: Selection = { type: "file", name: f.name };
       rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel)));
@@ -220,12 +236,20 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     );
 
   async function openFile(name: string): Promise<void> {
-    const res = await fetch(`/api/config/files/${encodeURIComponent(name)}${q()}`);
-    if (!res.ok) return renderError(`failed to load ${name}: ${res.status}`);
+    const request = ++paneRequest;
+    const res = await fetch(`/api/config/files/${encodeURIComponent(name)}${q()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      if (request === paneRequest) renderError(`failed to load ${name}: ${res.status}`);
+      return;
+    }
     const { content } = (await res.json()) as { content: string };
+    if (request !== paneRequest) return;
+    let expected = content;
 
     const status = h("span", "text-[11.5px] text-neutral-400", "");
-    const save = h("button", "btn btn-primary ml-auto text-[12.5px]", "Save");
+    const save = h("button", "btn btn-primary ml-auto text-[12.5px]", "Save") as HTMLButtonElement;
     const editor = document.createElement("textarea");
     editor.className =
       "block min-h-0 flex-1 resize-none bg-white p-4 font-mono text-[13px] leading-relaxed focus:outline-none";
@@ -233,14 +257,28 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     editor.value = content;
 
     const doSave = async (): Promise<void> => {
+      if (save.disabled) return;
+      const submitted = editor.value;
+      save.disabled = true;
       setStatus(status, "saving", "saving…");
-      const put = await sendJson(
-        `/api/config/files/${encodeURIComponent(name)}${q()}`,
-        { content: editor.value },
-        "PUT",
-      );
-      if (put.ok) setStatus(status, "saved", "saved — applies to new sessions");
-      else setStatus(status, "failed", await failure(put, "save failed"));
+      try {
+        const put = await sendJson(
+          `/api/config/files/${encodeURIComponent(name)}${q()}`,
+          { content: submitted, expected },
+          "PUT",
+        );
+        if (!put.ok) return setStatus(status, "failed", await failure(put, "save failed"));
+        const saved = (await put.json()) as { content: string };
+        expected = saved.content;
+        if (editor.value === submitted) {
+          editor.value = saved.content;
+          setStatus(status, "saved", "saved — applies to new sessions");
+        } else setStatus(status, "idle", "saved; newer changes are unsaved");
+      } catch (err) {
+        setStatus(status, "failed", `save failed: ${String(err)}`);
+      } finally {
+        save.disabled = false;
+      }
     };
     save.onclick = () => void doSave();
     editor.onkeydown = (ev) => {
@@ -258,13 +296,26 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   }
 
   async function openResource(kind: "extensions" | "skills", name: string): Promise<void> {
-    const res = await fetch(`/api/config/resource${q(`&kind=${kind}&name=${encodeURIComponent(name)}`)}`);
-    if (!res.ok) return renderError(`failed to load ${name}: ${res.status}`);
+    const request = ++paneRequest;
+    const res = await fetch(
+      `/api/config/resource${q(`&kind=${kind}&name=${encodeURIComponent(name)}`)}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) {
+      if (request === paneRequest) renderError(`failed to load ${name}: ${res.status}`);
+      return;
+    }
     const { content } = (await res.json()) as { content: string };
+    if (request !== paneRequest) return;
     pane.replaceChildren(
       paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only")),
       h("pre", "min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-[12.5px]", content),
     );
+  }
+
+  function showProviders(): Promise<void> {
+    paneRequest++;
+    return openProviders(pane);
   }
 
   function renderScopeOptions(): void {
