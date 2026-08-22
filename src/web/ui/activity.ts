@@ -53,24 +53,20 @@ export function createActivityView(
     const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden", h("span", "font-medium", "Activity"));
     const tabs = h("div", "tabstrip");
     tabs.append(
-      control("Sessions", tab === "sessions", () => {
-        tab = "sessions";
-        if (scope !== "active") { scope = "active"; void load(); }
-        else render();
-      }),
+      control("Sessions", tab === "sessions", () => { tab = "sessions"; render(); }),
       control("Dependencies", tab === "dependencies", () => { tab = "dependencies"; render(); }),
       // Tasks is the sibling console view; the strip just navigates to it.
       control("Tasks", false, () => openTask()),
     );
-    if (tab === "dependencies") {
-      // w-full below md forces its own line inside the wrapping .tabstrip.
-      const scopeControl = h("div", "ml-auto flex gap-1 max-md:ml-0 max-md:w-full");
-      scopeControl.append(
-        control("Active", scope === "active", () => { scope = "active"; void load(); }),
-        control("Last hour", scope === "recent", () => { scope = "recent"; void load(); }),
-      );
-      tabs.append(scopeControl);
-    }
+    // Scope is one filter over one snapshot, so it applies to both tabs and
+    // survives switching them — Sessions gets the same 24h history the graph
+    // shows. w-full below md forces its own line inside the wrapping .tabstrip.
+    const scopeControl = h("div", "ml-auto flex gap-1 max-md:ml-0 max-md:w-full");
+    scopeControl.append(
+      control("Active", scope === "active", () => { scope = "active"; void load(); }),
+      control("Last 24h", scope === "recent", () => { scope = "recent"; void load(); }),
+    );
+    tabs.append(scopeControl);
     const body = h("div", "min-h-0 flex-1 overflow-auto");
     if (tab === "sessions") renderSessions(body);
     else renderGraph(body);
@@ -106,7 +102,7 @@ export function createActivityView(
     }
     table.append(tbody);
     body.append(table);
-    if (!snapshot.sessions.length) body.append(h("p", "p-4 text-[13px] text-neutral-400", "No active sessions."));
+    if (!snapshot.sessions.length) body.append(h("p", "p-4 text-[13px] text-neutral-400", scope === "active" ? "No active sessions." : "No sessions in the last 24 hours."));
   }
 
   function renderGraph(body: HTMLElement): void {
@@ -138,73 +134,121 @@ export function createActivityView(
       edges.push({ from: message.fromSessionId, to: message.toSessionId, run, kind: "message" });
     }
     if (!nodes.size) {
-      body.append(h("p", "p-4 text-[13px] text-neutral-400", "No active dependencies."));
+      body.append(h("p", "p-4 text-[13px] text-neutral-400", scope === "active" ? "No active dependencies." : "No dependencies in the last 24 hours."));
       return;
     }
 
-    const width = 900;
-    const height = Math.max(420, Math.min(680, nodes.size * 90));
-    const graph = svg("svg", { viewBox: `0 0 ${width} ${height}`, class: "min-h-[26.25rem] w-full" });
+    // Layered left→right by BFS depth from the roots (nodes nothing points
+    // at), so the graph reads as a flow — who invoked whom — instead of the
+    // old circle where every edge crossed the middle.
+    const all = [...nodes.values()];
+    const incoming = new Set(edges.map((edge) => edge.to));
+    const depth = new Map<string, number>();
+    const queue = all.filter((node) => !incoming.has(node.id)).map((node) => node.id);
+    if (!queue.length) queue.push(all[0]!.id); // pure cycle: pick any root
+    for (const id of queue) depth.set(id, 0);
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const edge of edges) {
+        if (edge.from !== id || depth.has(edge.to)) continue;
+        depth.set(edge.to, depth.get(id)! + 1);
+        queue.push(edge.to);
+      }
+    }
+    for (const node of all) if (!depth.has(node.id)) depth.set(node.id, 0);
+
+    const NODE_W = 160, NODE_H = 46, COL_GAP = 110, ROW_GAP = 26, MARGIN = 28;
+    const columns = new Map<number, Node[]>();
+    for (const node of all) {
+      const col = depth.get(node.id)!;
+      columns.set(col, [...(columns.get(col) ?? []), node]);
+    }
+    const colCount = Math.max(...columns.keys()) + 1;
+    const maxRows = Math.max(...[...columns.values()].map((c) => c.length));
+    const width = MARGIN * 2 + colCount * NODE_W + (colCount - 1) * COL_GAP;
+    const height = MARGIN * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
+    const positions = new Map<string, { x: number; y: number }>();
+    for (const [col, colNodes] of columns) {
+      const colHeight = colNodes.length * NODE_H + (colNodes.length - 1) * ROW_GAP;
+      colNodes.forEach((node, row) => positions.set(node.id, {
+        x: MARGIN + col * (NODE_W + COL_GAP) + NODE_W / 2,
+        y: (height - colHeight) / 2 + row * (NODE_H + ROW_GAP) + NODE_H / 2,
+      }));
+    }
+
+    // Real pixel size, not a stretched viewBox: the pane scrolls when the
+    // graph outgrows it instead of shrinking labels into illegibility.
+    const graph = svg("svg", { width: String(width), height: String(height), viewBox: `0 0 ${width} ${height}`, class: "block" });
     const defs = svg("defs");
-    const marker = svg("marker", {
-      id: "activity-arrow",
-      viewBox: "0 0 10 10",
-      refX: "8",
-      refY: "5",
-      markerWidth: "6",
-      markerHeight: "6",
-      orient: "auto-start-reverse",
-    });
-    marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#a3a3a3" }));
-    defs.append(marker);
+    for (const [id, color] of [["activity-arrow", "#a3a3a3"], ["activity-arrow-cb", "#0891b2"], ["activity-arrow-msg", "#d97706"]] as const) {
+      const marker = svg("marker", {
+        id,
+        viewBox: "0 0 10 10",
+        refX: "9",
+        refY: "5",
+        markerWidth: "6",
+        markerHeight: "6",
+        orient: "auto-start-reverse",
+      });
+      marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+      defs.append(marker);
+    }
     graph.append(defs);
 
-    const positions = new Map<string, { x: number; y: number }>();
-    const all = [...nodes.values()];
-    const radius = Math.min(width, height) * 0.34;
-    all.forEach((node, index) => {
-      const angle = -Math.PI / 2 + (index * Math.PI * 2) / all.length;
-      positions.set(node.id, { x: width / 2 + Math.cos(angle) * radius, y: height / 2 + Math.sin(angle) * radius });
-    });
+    // One drawn edge per (from, to, kind): parallel runs overdraw into fuzz.
+    const drawn = new Set<string>();
     for (const edge of edges) {
+      const key = `${edge.from}→${edge.to}:${edge.kind}`;
+      if (drawn.has(key)) continue;
+      drawn.add(key);
       const from = positions.get(edge.from)!;
       const to = positions.get(edge.to)!;
-      const line = svg("line", {
-        x1: String(from.x),
-        y1: String(from.y),
-        x2: String(to.x),
-        y2: String(to.y),
+      const forward = to.x >= from.x;
+      const x1 = from.x + (forward ? NODE_W / 2 : -NODE_W / 2);
+      const x2 = to.x + (forward ? -NODE_W / 2 : NODE_W / 2);
+      const bend = Math.max(36, Math.abs(x2 - x1) * 0.45) * (forward ? 1 : -1);
+      const path = svg("path", {
+        d: `M ${x1} ${from.y} C ${x1 + bend} ${from.y}, ${x2 - bend} ${to.y}, ${x2} ${to.y}`,
+        fill: "none",
         stroke: edge.kind === "callback" ? "#0891b2" : edge.kind === "message" ? "#d97706" : "#a3a3a3",
-        "stroke-width": edge.kind === "invocation" ? "1.5" : "2",
+        "stroke-width": "1.5",
+        "marker-end": edge.kind === "callback" ? "url(#activity-arrow-cb)" : edge.kind === "message" ? "url(#activity-arrow-msg)" : "url(#activity-arrow)",
       });
-      if (edge.kind === "callback") line.setAttribute("stroke-dasharray", "6 5");
-      if (edge.kind === "message") line.setAttribute("stroke-dasharray", "2 5");
-      line.setAttribute("marker-end", "url(#activity-arrow)");
-      line.classList.add("cursor-pointer");
-      line.onclick = () => openTask(edge.run.taskId);
-      graph.append(line);
+      if (edge.kind === "callback") path.setAttribute("stroke-dasharray", "6 5");
+      if (edge.kind === "message") path.setAttribute("stroke-dasharray", "2 5");
+      path.classList.add("cursor-pointer");
+      path.onclick = () => openTask(edge.run.taskId);
+      graph.append(path);
     }
+
     for (const node of all) {
       const p = positions.get(node.id)!;
       const group = svg("g", { transform: `translate(${p.x},${p.y})` });
       if (node.session) group.classList.add("cursor-pointer");
       group.onclick = () => { if (node.session) openSession(node.id); };
-      const circle = svg("circle", {
-        r: "38",
-        fill: node.session ? "#ffffff" : "#f5f5f5",
-        stroke: node.session ? "#737373" : "#d4d4d4",
-      });
+      group.append(svg("rect", {
+        x: String(-NODE_W / 2),
+        y: String(-NODE_H / 2),
+        width: String(NODE_W),
+        height: String(NODE_H),
+        rx: "10",
+        fill: node.session ? "#ffffff" : "#fafafa",
+        stroke: node.session ? "#a3a3a3" : "#d4d4d4",
+      }));
       const text = svg("text", {
         "text-anchor": "middle",
         "dominant-baseline": "middle",
-        "font-size": "11",
-        fill: "#404040",
+        "font-size": "11.5",
+        "font-weight": node.session ? "500" : "400",
+        fill: node.session ? "#262626" : "#737373",
       });
-      text.textContent = node.label.length > 14 ? `${node.label.slice(0, 14)}…` : node.label;
-      group.append(circle, text);
+      text.textContent = node.label.length > 22 ? `${node.label.slice(0, 22)}…` : node.label;
+      const title = svg("title");
+      title.textContent = node.id;
+      group.append(text, title);
       graph.append(group);
     }
-    body.append(graph, h(
+    body.append(h("div", "w-max p-4", graph), h(
       "div",
       "flex gap-5 border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-500",
       h("span", "", "Solid: task invocation"),
@@ -214,9 +258,9 @@ export function createActivityView(
   }
 
   const view = consoleView(root, (arg) => {
-    // No arg → reopen on whatever tab was showing when we left.
+    // No arg → reopen on whatever tab (and scope) was showing when we left.
     if (arg === "dependencies") tab = "dependencies";
-    else if (arg === "sessions") { tab = "sessions"; scope = "active"; }
+    else if (arg === "sessions") tab = "sessions";
     void load();
   });
   return Object.assign(view, { refresh() { if (view.visible) void load(); } });

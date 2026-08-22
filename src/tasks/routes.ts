@@ -15,10 +15,12 @@ export function registerTaskRoutes(
   if (activity) app.get("/api/activity", async (c) => {
     const now = Date.now();
     const recent = c.req.query("scope") === "recent";
+    const windowStart = now - 24 * 60 * 60 * 1000;
+    // "recent" is a superset of "active": a run still going is part of the
+    // last 24h no matter when it was queued, so it never drops a live run.
     const runs = tasks.recentRuns(200).filter((run) =>
-      recent
-        ? run.queuedAt >= now - 60 * 60 * 1000
-        : run.state === "queued" || run.state === "running",
+      run.state === "queued" || run.state === "running" ||
+      (recent && run.queuedAt >= windowStart),
     );
     const listed = await activity.factory.list();
     const byId = new Map(listed.map((session) => [session.id, session]));
@@ -31,7 +33,7 @@ export function registerTaskRoutes(
     for (const session of listed) {
       if (activity.router.stateOf(session.id) === "streaming") linkedIds.add(session.id);
     }
-    const messages = tasks.recentMessages(recent ? now - 60 * 60 * 1000 : now - 24 * 60 * 60 * 1000)
+    const messages = tasks.recentMessages(windowStart)
       .filter((message) => runs.some((run) => run.id === message.runId));
     for (const message of messages) {
       if (message.fromSessionId !== "console") linkedIds.add(message.fromSessionId);

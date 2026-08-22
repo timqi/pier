@@ -26,7 +26,7 @@ table and growing it past 500 means logic is leaking in.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `GET /api/activity` | Active or last-hour sessions, task runs, and Subagent control/supervisor message edges for Console Activity |
+| `GET /api/activity` | Active or last-24h sessions, task runs, and Subagent control/supervisor message edges for Console Activity |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` |
