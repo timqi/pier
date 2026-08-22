@@ -155,16 +155,17 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   always on" instead. Both want resolving together with Lark — probably by
   making "threads per request" an adapter capability rather than a stored flag.
   Two data points is enough to see the shape; a third decides the name.
-- Nothing in Pier authenticates: the workbench, the task routes and the channel
-  config all trust whoever reaches the loopback port. IM channels raise the
-  stakes (a config write decides who may drive an agent in a group chat) but do
-  not change the shape of the answer. To be handled once, for every surface, in
-  its own step — not per-route. Boards shipped ahead of it, so a board's
-  `public` flag is a data state today, not a security boundary: `/p/*` is the
-  single prefix that will stay exempt when the middleware lands.
-- Remote access and deployment (systemd unit, self-restart, version check) are
-  deliberately unbuilt. Today: loopback bind, reached over an SSH tunnel or a
-  private network.
+- One shared password guards every HTTP surface (`web/auth.ts`): a single
+  middleware ahead of all routes, a scrypt hash generated on first boot and
+  printed once, and a cookie signed with that hash. Single-account on purpose —
+  Pier has one workspace, so a boundary is what an exposed instance needs, not
+  identities. `/p/*` and the stylesheet boards link are the only exemptions, so
+  a board's `public` flag is now a real boundary and not just a data state.
+- Remote access and deployment: the loopback bind is still the posture, reached
+  over an SSH tunnel, a private network or a reverse proxy. Keeping Pier
+  running is a systemd recipe in `docs/deploy.md`, not code. Self-restart and
+  the version check are unbuilt — the update runs as its own unit so the
+  restart cannot kill it, and it is never a timer.
 
 ## Decisions Log
 

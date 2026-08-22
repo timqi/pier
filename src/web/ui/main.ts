@@ -7,6 +7,7 @@
 
 import "./style.css";
 import { sendJson } from "./api.js";
+import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
   appendSystemInput,
@@ -229,6 +230,7 @@ function connectWorkspace(): void {
   const src = new EventSource("/api/events");
   // Any (re)connect may follow a gap — re-list instead of replaying.
   src.onopen = () => void refreshSessions();
+  src.onerror = () => streamDied(src, "Workspace");
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;
     if (e.type === "sessions-changed") {
@@ -257,8 +259,10 @@ function connectWorkspace(): void {
 
 function connect(id: string, after: number): void {
   source?.close();
-  source = new EventSource(`/api/sessions/${id}/events?after=${after}`);
-  source.onmessage = (m) => handleEvent(JSON.parse(m.data) as SessionEvent);
+  const stream = new EventSource(`/api/sessions/${id}/events?after=${after}`);
+  stream.onmessage = (m) => handleEvent(JSON.parse(m.data) as SessionEvent);
+  stream.onerror = () => streamDied(stream, "Session");
+  source = stream;
 }
 
 // --- selection --------------------------------------------------------------------
@@ -306,6 +310,10 @@ async function loadSession(id: string): Promise<void> {
 }
 
 // --- wiring ----------------------------------------------------------------------------
+
+// First, before any surface can issue a request: from here on a 401 is the
+// login page and not a per-caller error message.
+guardFetch();
 
 /** Shared by chat + composer deps: reload only if `id` is still selected. */
 const reloadIfCurrent = async (id: string): Promise<void> => {

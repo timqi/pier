@@ -23,6 +23,7 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
+import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { defaultPinFile, defaultUnreadFile, IdSetStore } from "./web/pins.js";
 import { createServer } from "./web/server.js";
 
@@ -91,6 +92,12 @@ void channels.reload();
 
 // Composition happens here so web/ and tasks/ never import each other.
 const app = new Hono();
+// Before every route on purpose: Hono runs middleware in registration order,
+// so a surface added later is covered without knowing this exists. Built
+// before the listener: a first run generates and prints its password here.
+const auth = new AuthStore();
+registerAuthRoutes(app, auth);
+app.use("*", requireAuth(auth));
 registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
