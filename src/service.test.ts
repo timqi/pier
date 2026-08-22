@@ -2,7 +2,15 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { install, limitsPath, renderUnit, uninstall, unitPath } from "./service.js";
+import {
+  install,
+  limitsPath,
+  renderUnit,
+  renderUpdateUnit,
+  startUpdate,
+  uninstall,
+  unitPath,
+} from "./service.js";
 
 const home = (): string => mkdtempSync(join(tmpdir(), "pier-home-"));
 
@@ -97,6 +105,48 @@ describe("install", () => {
   });
 });
 
+describe("update", () => {
+  it("is a second unit, so restarting Pier cannot kill the update doing it", () => {
+    const unit = renderUpdateUnit("/opt/node/bin/node");
+    expect(unit).toContain("Type=oneshot");
+    // npm from beside that node, not whatever a minimal PATH would find.
+    expect(unit).toContain("ExecStart=/opt/node/bin/npm install -g @timqi/pier@latest");
+    expect(unit).toContain("ExecStartPost=systemctl --user restart pier.service");
+  });
+
+  it("refuses when there is no service to update", () => {
+    const h = home();
+    const calls: string[][] = [];
+    expect(
+      startUpdate({ execPath: "/opt/node/bin/node", home: h, say: () => {}, exec: (a) => (calls.push(a), true) }),
+    ).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("writes the unit and starts it detached from the service it restarts", () => {
+    const h = home();
+    install(options({ home: h }).opts);
+    const calls: string[][] = [];
+    const said: string[] = [];
+
+    expect(
+      startUpdate({
+        execPath: "/opt/node/bin/node",
+        home: h,
+        say: (m) => void said.push(m),
+        exec: (a) => (calls.push(a), true),
+      }),
+    ).toBe(true);
+    expect(existsSync(join(dirname(unitPath(h)), "pier-update.service"))).toBe(true);
+    expect(calls.map((c) => c.join(" "))).toEqual([
+      "systemctl --user daemon-reload",
+      // --no-block: the unit restarts the service that would be waiting for it.
+      "systemctl --user start --no-block pier-update.service",
+    ]);
+    expect(said.join(" ")).toMatch(/journalctl --user -u pier-update.service/);
+  });
+});
+
 describe("uninstall", () => {
   it("removes what install wrote and leaves the state alone", () => {
     const h = home();
@@ -108,6 +158,7 @@ describe("uninstall", () => {
 
     expect(existsSync(unitPath(h))).toBe(false);
     expect(existsSync(limitsPath(h))).toBe(false);
+    expect(existsSync(join(dirname(unitPath(h)), "pier-update.service"))).toBe(false);
     expect(calls[0]).toEqual(["systemctl", "--user", "disable", "--now", "pier.service"]);
     expect(said.join(" ")).toMatch(/PIER_HOME is untouched/);
   });

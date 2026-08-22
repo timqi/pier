@@ -17,6 +17,7 @@ import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
 export const UNIT_NAME = "pier.service";
+export const UPDATE_UNIT_NAME = "pier-update.service";
 
 /** `~/.config/systemd/user/pier.service` — where a user unit belongs. */
 export const unitPath = (home = homedir()): string =>
@@ -66,6 +67,29 @@ SyslogIdentifier=pier
 
 [Install]
 WantedBy=default.target
+`;
+}
+
+/**
+ * The updater is a second unit because it must not be a child of the service it
+ * restarts: `systemctl --user restart pier` kills everything in pier.service's
+ * cgroup, so an update spawned by Pier itself would die between "unpacked" and
+ * "restarted" — the one outcome worse than not updating. Started from its own
+ * cgroup, it survives restarting its parent.
+ */
+export function renderUpdateUnit(execPath: string): string {
+  const npm = join(dirname(execPath), "npm");
+  return `[Unit]
+Description=Update Pier to the latest published version
+Documentation=https://github.com/timqi/pier
+
+[Service]
+Type=oneshot
+# The npm beside the node that is running Pier, so a version manager's
+# installation is the one updated.
+ExecStart=${npm} install -g @timqi/pier@latest
+# Its own cgroup, so restarting pier.service does not kill this.
+ExecStartPost=systemctl --user restart ${UNIT_NAME}
 `;
 }
 
@@ -152,6 +176,30 @@ export function install(options: InstallOptions): void {
   }
 }
 
+/**
+ * Update in place: write the oneshot unit and start it. Returns false when
+ * there is no service to update, which is the caller's cue to say so — an
+ * update that silently did nothing is worse than a refusal.
+ */
+export function startUpdate(options: {
+  execPath: string;
+  home?: string;
+  say: (message: string) => void;
+  exec?: Exec;
+}): boolean {
+  const { execPath, home = homedir(), say } = options;
+  const run = options.exec ?? runner(say);
+  if (!existsSync(unitPath(home))) return false;
+
+  const path = join(dirname(unitPath(home)), UPDATE_UNIT_NAME);
+  writeFileSync(path, renderUpdateUnit(execPath), { mode: 0o644 });
+  run(["systemctl", "--user", "daemon-reload"]);
+  if (!run(["systemctl", "--user", "start", "--no-block", UPDATE_UNIT_NAME])) return true;
+  say(`updating in the background — follow it with: journalctl --user -u ${UPDATE_UNIT_NAME} -f`);
+  say(`Pier restarts itself when the install lands; sessions resume, a turn in flight does not.`);
+  return true;
+}
+
 export function uninstall(
   home = homedir(),
   say: (message: string) => void = console.log,
@@ -159,7 +207,7 @@ export function uninstall(
 ): void {
   const run = exec ?? runner(say);
   run(["systemctl", "--user", "disable", "--now", UNIT_NAME]);
-  for (const path of [unitPath(home), limitsPath(home)]) {
+  for (const path of [unitPath(home), limitsPath(home), join(dirname(unitPath(home)), UPDATE_UNIT_NAME)]) {
     if (!existsSync(path)) continue;
     rmSync(path, { force: true });
     say(`removed ${path}`);

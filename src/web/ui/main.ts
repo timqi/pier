@@ -362,7 +362,20 @@ initViews({
   maybeAckRead,
 });
 
-$("#version").textContent = `v${__PIER_VERSION__}`;
+const versionLink = $<HTMLAnchorElement>("#version");
+versionLink.textContent = `v${__PIER_VERSION__}`;
+// News, not an action: the server checked the registry, and applying it is a
+// command someone types. The link keeps pointing at the source either way.
+void fetch("/api/update")
+  .then((r) => r.json() as Promise<{ latest: string | null; available: boolean }>)
+  .then(({ latest, available }) => {
+    if (!available || !latest) return;
+    versionLink.textContent = `v${__PIER_VERSION__} → ${latest}`;
+    versionLink.href = "https://github.com/timqi/pier/releases";
+    versionLink.title = `${latest} is out. Update with: npm i -g @timqi/pier@latest && pier update`;
+    versionLink.classList.add("text-emerald-600", "hover:text-emerald-700");
+  })
+  .catch(() => {}); // an unreachable check must not break the footer
 
 // Coming back to a hidden tab is the other way turns get seen.
 document.addEventListener("visibilitychange", maybeAckRead);

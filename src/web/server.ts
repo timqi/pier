@@ -22,6 +22,7 @@ import { isThinkingLevel } from "../core/types.js";
 import type { SessionStateStore } from "./session-state.js";
 import type { SecretsMode } from "../secrets.js";
 import { normalizePublicUrl, type SettingsStore } from "../settings.js";
+import type { UpdateCheck } from "../update.js";
 
 /** The slice of Secrets the routes need; injectable so tests never touch disk
  *  or spawn vt. Never exposes key material — state, mode and the locked reason
@@ -42,6 +43,9 @@ export interface WebDeps {
   sessions: SessionStateStore;
   config: ConfigStore;
   settings: SettingsStore;
+  /** Whether a newer Pier exists; answered from cache, refreshed in the
+   *  background. */
+  updates: UpdateCheck;
   secrets: SecretsControl;
   /** Ran after a successful unlock; main.ts starts the channels it held back.
    *  A callback because web/ must not import channels/. */
@@ -78,7 +82,18 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
 }
 
 export function createServer(
-  { factory, router, hub, sessions: state, config, settings, secrets, onUnlocked, backgroundRuns }: WebDeps,
+  {
+    factory,
+    router,
+    hub,
+    sessions: state,
+    config,
+    settings,
+    secrets,
+    onUnlocked,
+    updates,
+    backgroundRuns,
+  }: WebDeps,
 ): Hono {
   const app = new Hono();
 
@@ -382,6 +397,11 @@ export function createServer(
   // Instance settings. The password lives behind its own route (web/auth.ts):
   // it is a credential, and changing it takes the old one.
   app.get("/api/settings", (c) => c.json(settings.get()));
+
+  // Read-only on purpose: the workbench says a newer Pier exists, and applying
+  // it stays `pier update` in a terminal. An HTTP route that installs packages
+  // is a supply-chain surface behind one password.
+  app.get("/api/update", (c) => c.json(updates.status()));
 
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null);

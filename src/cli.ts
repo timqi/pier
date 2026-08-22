@@ -20,6 +20,8 @@ Usage
   pier service install        write and start a systemd user unit (Linux)
   pier service uninstall      stop it and remove the unit
   pier service status         what systemd thinks of it
+  pier update                 install the latest release and restart the service
+  pier update --check         only say whether one exists
   pier --version | --help
 
 Options for "service install"
@@ -38,6 +40,7 @@ const { values, positionals } = parseArgs({
   options: {
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
+    check: { type: "boolean" },
     force: { type: "boolean" },
     port: { type: "string" },
     host: { type: "string" },
@@ -56,9 +59,44 @@ if (values.help || command === "help") {
   await import("./main.js");
 } else if (command === "service") {
   await service(subcommand);
+} else if (command === "update") {
+  await update(values.check === true);
 } else {
   process.stderr.write(`pier: unknown command "${command}"\n\n${HELP}`);
   process.exit(2);
+}
+
+/**
+ * Checking is Pier's own code; applying it is npm's. Under systemd the work is
+ * handed to a second unit — this process is about to be restarted, and a child
+ * of the service being restarted dies with it.
+ */
+async function update(checkOnly: boolean): Promise<void> {
+  const { UpdateCheck } = await import("./update.js");
+  const check = new UpdateCheck();
+  await check.refresh();
+  const { current, latest, available } = check.status();
+
+  if (latest === null) {
+    process.stderr.write(`could not reach the registry — running ${current}.\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (!available) {
+    process.stdout.write(`${current} is the latest.\n`);
+    return;
+  }
+  process.stdout.write(`${latest} is out (running ${current}).\n`);
+  if (checkOnly) return;
+
+  const { startUpdate } = await import("./service.js");
+  const say = (message: string): void => void process.stdout.write(`${message}\n`);
+  if (process.platform === "linux" && startUpdate({ execPath: process.execPath, say })) return;
+  // No unit to restart: whoever started Pier owns restarting it, so say the two
+  // steps rather than half-doing them.
+  say(`npm install -g @timqi/pier@latest`);
+  say(`then restart Pier. Its database migrates itself on the next start, taking`);
+  say(`a snapshot beside it first.`);
 }
 
 async function service(action = "status"): Promise<void> {

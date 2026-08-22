@@ -30,6 +30,7 @@ import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath } from "./paths.js";
 import { Secrets } from "./secrets.js";
 import { SettingsStore } from "./settings.js";
+import { UpdateCheck } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
@@ -167,6 +168,7 @@ app.route("/", createServer({
   config: new PiConfigStore(),
   settings,
   secrets,
+  updates: new UpdateCheck(),
   // Unlocked from the Console: start the channels boot held back.
   onUnlocked: () => void channels.reload(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),

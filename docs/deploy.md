@@ -222,7 +222,17 @@ with the stored hash.
 
 ## Updating
 
-Manually, which is also exactly what an automated update has to do:
+```sh
+pier update           # installs the latest release and restarts the service
+pier update --check   # only says whether one exists
+```
+
+The workbench footer says the same thing without being asked: the server checks
+`registry.npmjs.org` every six hours in the background, and the version turns
+into `v0.0.1 → 0.0.2` when there is something newer. A failed check is silent
+by design — an offline box is not a broken one.
+
+From a checkout instead:
 
 ```sh
 cd ~/pier
@@ -259,17 +269,17 @@ in `pier.service`'s cgroup, so an update script spawned by Pier dies halfway
 through — sometimes after unpacking and before restarting, which is the one
 outcome worse than not updating.
 
-So the update runs as its own unit. `~/.config/systemd/user/pier-update.service`:
+So the update runs as its own unit, which is what `pier update` writes and
+starts — `~/.config/systemd/user/pier-update.service`:
 
 ```ini
 [Unit]
-Description=Update Pier to the latest tag
+Description=Update Pier to the latest published version
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/pier
-ExecStart=/bin/sh -lc 'git fetch --tags && git checkout "$(git describe --tags --abbrev=0 origin/main)" && npm ci && npm run build'
-ExecStartPost=/bin/sh -lc 'systemctl --user restart pier'
+ExecStart=/path/to/npm install -g @timqi/pier@latest
+ExecStartPost=systemctl --user restart pier.service
 ```
 
 Pier can then trigger an update with a single call that survives its own

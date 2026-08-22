@@ -49,6 +49,7 @@ Open `http://localhost:3141`, sign in, then:
 pier service install     # --port, --host, --pier-home, --force
 pier service status
 pier service uninstall
+pier update              # latest release, then restart the service
 ```
 
 Linux only, because it is systemd. It writes `~/.config/systemd/user/pier.service`
@@ -83,6 +84,12 @@ npm test          # vitest
 - `docs/design/` — one document per subsystem, written before it was built
 
 ## Releases
+
+Pier checks `registry.npmjs.org` in the background and shows `v0.0.1 → 0.0.2`
+in the footer when a release is out. It never updates itself: this process
+holds provider keys and can run a shell, so rewriting its own code on a timer
+would be a supply-chain surface — and an unattended restart kills whatever turn
+was mid-flight. `pier update` is a command someone types.
 
 `main` is the only development line. `npm version minor` writes the tag, the
 tag builds and publishes a GitHub Release, and the version in the web footer is

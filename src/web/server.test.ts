@@ -21,6 +21,7 @@ import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import { SettingsStore } from "../settings.js";
+import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { SessionStateStore } from "./session-state.js";
 import { createServer, type SecretsControl } from "./server.js";
@@ -180,13 +181,14 @@ function setup(cwd = "/tmp", secrets = fakeSecrets()) {
   const state = new SessionStateStore(db);
   const config = fakeConfig();
   const settings = new SettingsStore(db);
+  const updates = new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1"));
   const tasks = new TaskService(new TaskStore(db), factory, router, hub);
   // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
   app.route("/", createServer({
-    factory, router, hub, sessions: state, config, settings, secrets, onUnlocked,
+    factory, router, hub, sessions: state, config, settings, updates, secrets, onUnlocked,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
   return { app, session, factory, hub, router, state, config, settings, tasks, secrets, onUnlocked };
@@ -249,6 +251,7 @@ describe("workbench server", () => {
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
       settings: new SettingsStore(openDb(":memory:")),
+      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
@@ -394,6 +397,7 @@ describe("workbench server", () => {
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
       settings: new SettingsStore(openDb(":memory:")),
+      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
     });
     const res = await app.request("/api/sessions/nope/history");
