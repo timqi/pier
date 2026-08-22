@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ConfigScope } from "../core/types.js";
 import { PiConfigStore } from "./config.js";
+import { pierSystemPrompt } from "./pi.js";
 
 const GLOBAL: ConfigScope = { kind: "global" };
 
@@ -17,6 +18,16 @@ beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "pier-proj-"));
   store = new PiConfigStore(agentDir);
   project = { kind: "project", cwd };
+});
+
+describe("Pier system prompt", () => {
+  it("puts Pier's baseline before the user-owned SYSTEM.md", () => {
+    const prompt = pierSystemPrompt("# Working style\nUser rules");
+    expect(prompt).toMatch(/^You are a general-purpose agent with a live workspace/);
+    expect(prompt).toContain("read and change files and run shell commands");
+    expect(prompt.indexOf("# Communication")).toBeLessThan(prompt.indexOf("# Working style"));
+    expect(pierSystemPrompt()).not.toContain("undefined");
+  });
 });
 
 describe("config files", () => {

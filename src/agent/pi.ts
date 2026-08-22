@@ -52,6 +52,21 @@ const toImageContent = (images?: ImageAttachment[]) =>
  * killing the whole run. */
 const BASH_DEFAULT_TIMEOUT_SECONDS = 600;
 
+/** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows it. */
+const PIER_SYSTEM_PROMPT = `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work, verify results, and state what you could not check.
+
+# Communication
+- Answer with the conclusion only. Reasons, process, trade-offs, alternatives: only when I ask.
+- Cap per reply: 100 words (or 100 Chinese chars), max 3 bullets; 300 when I explicitly ask why/how. Code blocks, diffs and commands don't count.
+- Never: preamble, restating my question, closing summaries, "I'm going to..." narration, listing changes already visible in the diff.
+- After edits, say only: file(s) touched + one line on the result. Don't explain self-evident code.
+- Show file paths as \`path:line\`.
+- If the honest answer needs more than the cap, give the conclusion plus one short "want the details?" — don't dump it.
+- Blocked on a decision only I can make? Ask one short question. Otherwise pick the sensible default and note it.`;
+
+export const pierSystemPrompt = (userPrompt?: string): string =>
+  userPrompt ? `${PIER_SYSTEM_PROMPT}\n\n${userPrompt}` : PIER_SYSTEM_PROMPT;
+
 /** Patching the call is cheaper than replacing the tool: the built-in keeps its
  * shell settings, and the agent spends no tokens deciding a timeout. */
 const bashTimeoutDefault = (pi: ExtensionAPI) => {
@@ -248,6 +263,9 @@ export class PiAgentFactory implements AgentFactory {
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(), // same discovery Pi would have done itself
+      // SYSTEM.md remains user-owned: append it after Pier's replacement for
+      // Pi's generic default, preserving the user's later instruction layer.
+      systemPromptOverride: pierSystemPrompt,
       additionalSkillPaths: this.skillPaths,
       extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
       agentsFilesOverride: (current) => {
