@@ -27,8 +27,18 @@
        the scrim is its dismiss target and never paints on desktop. -->
   <div id="drawer-scrim" class="fixed inset-0 z-30 hidden bg-black/25 md:hidden"></div>
   <aside id="sidebar" class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
-    <header class="flex items-center justify-between gap-2 px-3 py-2">
+    <header class="flex items-center gap-2 px-3 py-2">
+      <!-- The same mark as the tab and the home-screen icon, so an installed
+           Pier looks like the thing you installed. -->
+      <img src="/icon.svg" alt="" width="20" height="20" class="h-5 w-5 flex-none" />
       <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
+      <!-- A link, not a label: AGPL-3.0 section 13 asks a network service to
+           point its users at the source it is running. Beside the title
+           because a version is something you look up, not something you find
+           by scrolling to the bottom. -->
+      <a id="version" href="https://github.com/timqi/pier" target="_blank" rel="noreferrer"
+        title="Pier is free software (AGPL-3.0) — the source of what you are using"
+        class="font-mono text-[11px] text-neutral-400 hover:text-neutral-700 hover:underline"></a>
     </header>
     <details id="console-section" open class="flex-none border-b border-neutral-200/70">
       <summary class="flex cursor-pointer select-none items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 hover:bg-neutral-100">
@@ -67,11 +77,6 @@
     <footer class="flex flex-none items-center gap-2 border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400">
       <button type="button" id="notify-toggle" title="Notify me when a turn finishes"
         class="cursor-pointer rounded px-1 hover:bg-neutral-200 hover:text-neutral-700">Notify</button>
-      <!-- A link, not a label: AGPL-3.0 section 13 asks a network service to
-           point its users at the source it is running. -->
-      <a id="version" href="https://github.com/timqi/pier" target="_blank" rel="noreferrer"
-        title="Pier is free software (AGPL-3.0) — the source of what you are using"
-        class="ml-auto font-mono hover:text-neutral-700 hover:underline"></a>
     </footer>
   </aside>
 
