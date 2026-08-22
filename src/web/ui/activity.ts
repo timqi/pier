@@ -106,31 +106,34 @@ export function createActivityView(
   }
 
   function renderGraph(body: HTMLElement): void {
-    interface Node { id: string; label: string; session: boolean }
+    type NodeKind = "session" | "scheduler" | "task" | "process" | "console";
+    interface Node { id: string; label: string; kind: NodeKind; state?: SessionState }
     interface Edge { from: string; to: string; run: TaskRun; kind: "invocation" | "callback" | "message" }
     const nodes = new Map<string, Node>();
     const edges: Edge[] = [];
-    const add = (id: string, label: string, session: boolean): void => {
-      if (!nodes.has(id)) nodes.set(id, { id, label, session });
+    const add = (id: string, label: string, kind: NodeKind, state?: SessionState): void => {
+      if (!nodes.has(id)) nodes.set(id, { id, label, kind, state });
     };
-    for (const session of snapshot.sessions) add(session.id, session.title ?? session.id.slice(0, 10), true);
+    // Sessions first: they carry the title and state a later add() must not lose.
+    for (const session of snapshot.sessions) add(session.id, session.title ?? session.id.slice(0, 10), "session", session.state);
     for (const run of snapshot.runs) {
       const source = run.invokedBySessionId ?? "scheduler";
       const target = run.targetSessionId ?? (run.context.definition.action.type === "bash" ? `process:${run.id}` : `task:${run.id}`);
-      add(source, source === "scheduler" ? "Scheduler" : source.slice(0, 10), source !== "scheduler");
-      add(target, run.targetSessionId ? run.targetSessionId.slice(0, 10) : run.context.definition.action.type === "bash" ? "Bash process" : "Task", run.targetSessionId !== null);
+      add(source, source === "scheduler" ? "Scheduler" : source.slice(0, 10), source === "scheduler" ? "scheduler" : "session");
+      add(target, run.targetSessionId ? run.targetSessionId.slice(0, 10) : run.context.definition.action.type === "bash" ? "Bash process" : "Task", run.targetSessionId ? "session" : run.context.definition.action.type === "bash" ? "process" : "task");
       edges.push({ from: source, to: target, run, kind: "invocation" });
       if (run.callbackSessionId) {
-        add(run.callbackSessionId, run.callbackSessionId.slice(0, 10), true);
+        add(run.callbackSessionId, run.callbackSessionId.slice(0, 10), "session");
         edges.push({ from: target, to: run.callbackSessionId, run, kind: "callback" });
       }
     }
     for (const message of snapshot.messages) {
-      if (!message.fromSessionId || !message.toSessionId) continue;
+      if (!message.fromSessionId || !message.toSessionId || message.fromSessionId === message.toSessionId) continue;
       const run = snapshot.runs.find((candidate) => candidate.id === message.runId);
       if (!run) continue;
-      add(message.fromSessionId, message.fromSessionId.slice(0, 10), message.fromSessionId !== "console");
-      add(message.toSessionId, message.toSessionId.slice(0, 10), message.toSessionId !== "console");
+      for (const id of [message.fromSessionId, message.toSessionId]) {
+        add(id, id === "console" ? "Console" : id.slice(0, 10), id === "console" ? "console" : "session");
+      }
       edges.push({ from: message.fromSessionId, to: message.toSessionId, run, kind: "message" });
     }
     if (!nodes.size) {
@@ -157,7 +160,7 @@ export function createActivityView(
     }
     for (const node of all) if (!depth.has(node.id)) depth.set(node.id, 0);
 
-    const NODE_W = 160, NODE_H = 46, COL_GAP = 110, ROW_GAP = 26, MARGIN = 28;
+    const NODE_W = 180, NODE_H = 46, COL_GAP = 110, ROW_GAP = 30, MARGIN = 28;
     const columns = new Map<number, Node[]>();
     for (const node of all) {
       const col = depth.get(node.id)!;
@@ -168,11 +171,12 @@ export function createActivityView(
     const width = MARGIN * 2 + colCount * NODE_W + (colCount - 1) * COL_GAP;
     const height = MARGIN * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
     const positions = new Map<string, { x: number; y: number }>();
+    // Top-aligned rows, not vertically centered columns: a shared top edge
+    // reads as a grid, half-row offsets read as clutter.
     for (const [col, colNodes] of columns) {
-      const colHeight = colNodes.length * NODE_H + (colNodes.length - 1) * ROW_GAP;
       colNodes.forEach((node, row) => positions.set(node.id, {
         x: MARGIN + col * (NODE_W + COL_GAP) + NODE_W / 2,
-        y: (height - colHeight) / 2 + row * (NODE_H + ROW_GAP) + NODE_H / 2,
+        y: MARGIN + row * (NODE_H + ROW_GAP) + NODE_H / 2,
       }));
     }
 
@@ -203,12 +207,19 @@ export function createActivityView(
       drawn.add(key);
       const from = positions.get(edge.from)!;
       const to = positions.get(edge.to)!;
-      const forward = to.x >= from.x;
-      const x1 = from.x + (forward ? NODE_W / 2 : -NODE_W / 2);
-      const x2 = to.x + (forward ? -NODE_W / 2 : NODE_W / 2);
-      const bend = Math.max(36, Math.abs(x2 - x1) * 0.45) * (forward ? 1 : -1);
+      // Same column: leave and re-enter on the right, bowing outward — a
+      // through curve would cut across the cards in between.
+      const d = from.x === to.x
+        ? `M ${from.x + NODE_W / 2} ${from.y} C ${from.x + NODE_W / 2 + 46} ${from.y}, ${to.x + NODE_W / 2 + 46} ${to.y}, ${to.x + NODE_W / 2} ${to.y}`
+        : (() => {
+          const forward = to.x > from.x;
+          const x1 = from.x + (forward ? NODE_W / 2 : -NODE_W / 2);
+          const x2 = to.x + (forward ? -NODE_W / 2 : NODE_W / 2);
+          const bend = Math.max(36, Math.abs(x2 - x1) * 0.45) * (forward ? 1 : -1);
+          return `M ${x1} ${from.y} C ${x1 + bend} ${from.y}, ${x2 - bend} ${to.y}, ${x2} ${to.y}`;
+        })();
       const path = svg("path", {
-        d: `M ${x1} ${from.y} C ${x1 + bend} ${from.y}, ${x2 - bend} ${to.y}, ${x2} ${to.y}`,
+        d,
         fill: "none",
         stroke: edge.kind === "callback" ? "#0891b2" : edge.kind === "message" ? "#d97706" : "#a3a3a3",
         "stroke-width": "1.5",
@@ -221,39 +232,80 @@ export function createActivityView(
       graph.append(path);
     }
 
+    // Per-kind card chrome; a session's state overrides it (green = streaming,
+    // muted = idle) so the graph answers "who is busy" at a glance.
+    const CARD: Record<Exclude<NodeKind, "session">, { fill: string; stroke: string; text: string; dash?: string }> = {
+      scheduler: { fill: "#f5f3ff", stroke: "#a78bfa", text: "#5b21b6" },
+      console: { fill: "#eff6ff", stroke: "#93c5fd", text: "#1d4ed8" },
+      task: { fill: "#fffbeb", stroke: "#fbbf24", text: "#92400e" },
+      process: { fill: "#f5f5f5", stroke: "#a3a3a3", text: "#525252", dash: "4 3" },
+    };
+    // SVG text doesn't clip to its card, so truncate by width: CJK glyphs run
+    // twice as wide as latin at this size.
+    const wide = /[\u1100-\u11FF\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
+    const fit = (label: string, maxUnits: number): string => {
+      let units = 0;
+      for (let i = 0; i < label.length; i++) {
+        units += wide.test(label[i]!) ? 2 : 1;
+        if (units > maxUnits) return `${label.slice(0, i)}…`;
+      }
+      return label;
+    };
     for (const node of all) {
       const p = positions.get(node.id)!;
+      const card = node.kind === "session"
+        ? node.state === "streaming"
+          ? { fill: "#ffffff", stroke: "#10b981", text: "#262626" }
+          : { fill: "#fafafa", stroke: "#d4d4d4", text: "#737373" }
+        : CARD[node.kind];
       const group = svg("g", { transform: `translate(${p.x},${p.y})` });
-      if (node.session) group.classList.add("cursor-pointer");
-      group.onclick = () => { if (node.session) openSession(node.id); };
-      group.append(svg("rect", {
+      if (node.kind === "session") group.classList.add("cursor-pointer");
+      group.onclick = () => { if (node.kind === "session") openSession(node.id); };
+      const rect = svg("rect", {
         x: String(-NODE_W / 2),
         y: String(-NODE_H / 2),
         width: String(NODE_W),
         height: String(NODE_H),
         rx: "10",
-        fill: node.session ? "#ffffff" : "#fafafa",
-        stroke: node.session ? "#a3a3a3" : "#d4d4d4",
-      }));
+        fill: card.fill,
+        stroke: card.stroke,
+        "stroke-width": node.kind === "session" && node.state === "streaming" ? "1.5" : "1",
+      });
+      if (card.dash) rect.setAttribute("stroke-dasharray", card.dash);
+      group.append(rect);
+      let textX = -NODE_W / 2 + 12;
+      if (node.kind === "session") {
+        const dot = svg("circle", { cx: String(-NODE_W / 2 + 15), cy: "0", r: "3.5", fill: node.state === "streaming" ? "#10b981" : "#d4d4d4" });
+        if (node.state === "streaming") {
+          const pulse = svg("animate", { attributeName: "opacity", values: "1;0.3;1", dur: "1.6s", repeatCount: "indefinite" });
+          dot.append(pulse);
+        }
+        group.append(dot);
+        textX = -NODE_W / 2 + 26;
+      }
       const text = svg("text", {
-        "text-anchor": "middle",
+        x: String(textX),
+        "text-anchor": "start",
         "dominant-baseline": "middle",
         "font-size": "11.5",
-        "font-weight": node.session ? "500" : "400",
-        fill: node.session ? "#262626" : "#737373",
+        "font-weight": node.kind === "session" ? "500" : "400",
+        fill: card.text,
       });
-      text.textContent = node.label.length > 22 ? `${node.label.slice(0, 22)}…` : node.label;
+      text.textContent = fit(node.label, node.kind === "session" ? 22 : 25);
       const title = svg("title");
-      title.textContent = node.id;
+      title.textContent = node.label === node.id ? node.id : `${node.label}\n${node.id}`;
       group.append(text, title);
       graph.append(group);
     }
+    const legendDot = (cls: string): HTMLElement => h("span", `inline-block h-2 w-2 rounded-full ${cls}`);
     body.append(h("div", "w-max p-4", graph), h(
       "div",
-      "flex gap-5 border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-500",
+      "flex flex-wrap gap-x-5 gap-y-1 border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-500",
       h("span", "", "Solid: task invocation"),
       h("span", "text-cyan-700", "Dashed: callback"),
       h("span", "text-amber-700", "Dotted: supervisor/control"),
+      h("span", "inline-flex items-center gap-1.5", legendDot("bg-emerald-500"), "streaming"),
+      h("span", "inline-flex items-center gap-1.5", legendDot("bg-neutral-300"), "idle"),
     ));
   }
 
