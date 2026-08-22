@@ -8,12 +8,11 @@
 // Pier authenticates today (docs/architecture.md, Open Questions).
 
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context, Hono } from "hono";
+import { pierPath } from "../paths.js";
 
-export const defaultBoardsDir = (): string =>
-  join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "boards");
+export const defaultBoardsDir = (): string => pierPath("boards");
 
 /** Deleted boards keep their bytes under `<slug>.deleted-<ts>`, which this
  *  pattern excludes from every scan — one rename is the whole delete path. */

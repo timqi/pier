@@ -25,11 +25,11 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
+import { PIER_DB } from "../paths.js";
 
 const COOKIE = "pier_session";
 const TTL_MS = 90 * 24 * 60 * 60_000;
@@ -38,11 +38,6 @@ const MAX_FAILURES = 10;
 const WINDOW_MS = 15 * 60_000;
 // scrypt at Node's defaults (N=16384): ~50ms per attempt, which is the point.
 const KEY_BYTES = 32;
-
-// The path is duplicated from channels/db.ts rather than imported: web/ may
-// depend on core/, never sideways on channels/.
-export const defaultAuthDbPath = (): string =>
-  join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "pier.db");
 
 /**
  * Human-readable and unambiguous: no 0/O, 1/l/I, so it survives being read off
@@ -71,7 +66,7 @@ export class AuthStore {
   /** HMAC key for cookies: the hash, so rotating the password expires them. */
   readonly #key: string;
 
-  constructor(path = defaultAuthDbPath(), log: (message: string) => void = console.log) {
+  constructor(path = PIER_DB, log: (message: string) => void = console.log) {
     // No mode on the directory: another store has already created it by the
     // time main.ts gets here, and PIER_HOME holds boards this process serves,
     // not only this secret. The file modes below are what guard the credential.

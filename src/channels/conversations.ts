@@ -12,12 +12,13 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentLaunchOptions, ConversationKey } from "../core/types.js";
-import { defaultChannelDbPath, openChannelDb } from "./db.js";
+import { PIER_DB } from "../paths.js";
+import { openChannelDb } from "./db.js";
 
 export class ConversationStore {
   private readonly db: DatabaseSync;
 
-  constructor(path = defaultChannelDbPath()) {
+  constructor(path = PIER_DB) {
     this.db = openChannelDb(path, `
       CREATE TABLE IF NOT EXISTS conversations (
         channel_id TEXT NOT NULL,

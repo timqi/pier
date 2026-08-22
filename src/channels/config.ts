@@ -5,7 +5,8 @@
 // The shapes live in types.ts; this file is the store and the policy.
 
 import type { DatabaseSync } from "node:sqlite";
-import { defaultChannelDbPath, openChannelDb } from "./db.js";
+import { PIER_DB } from "../paths.js";
+import { openChannelDb } from "./db.js";
 import {
   type BindCode,
   type ChannelConfig,
@@ -40,7 +41,7 @@ export class ChannelStore {
   private readonly db: DatabaseSync;
   private readonly cache = new Map<ChannelPlatform, ChannelConfig>();
 
-  constructor(path = defaultChannelDbPath()) {
+  constructor(path = PIER_DB) {
     this.db = openChannelDb(path, `
       CREATE TABLE IF NOT EXISTS channels (
         platform TEXT PRIMARY KEY,

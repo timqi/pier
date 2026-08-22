@@ -23,8 +23,9 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
+import { pierPath } from "./paths.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
-import { defaultPinFile, defaultUnreadFile, IdSetStore } from "./web/pins.js";
+import { IdSetStore } from "./web/pins.js";
 import { createServer } from "./web/server.js";
 
 let tasks: TaskService;
@@ -105,8 +106,8 @@ app.route("/", createServer({
   factory,
   router,
   hub,
-  pins: new IdSetStore(defaultPinFile()),
-  unread: new IdSetStore(defaultUnreadFile()),
+  pins: new IdSetStore(pierPath("pins.json")),
+  unread: new IdSetStore(pierPath("unread.json")),
   config: new PiConfigStore(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
 }));

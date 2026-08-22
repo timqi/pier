@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { PIER_DB } from "../paths.js";
 import type { TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -21,14 +21,10 @@ const parseRun = (json: string): TaskRun => {
   return run;
 };
 
-export function defaultTaskDbPath(): string {
-  return join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "pier.db");
-}
-
 export class TaskStore {
   private readonly db: DatabaseSync;
 
-  constructor(path = defaultTaskDbPath()) {
+  constructor(path = PIER_DB) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`

@@ -9,7 +9,8 @@
 // own stragglers on a timer.
 
 import type { DatabaseSync } from "node:sqlite";
-import { defaultChannelDbPath, openChannelDb } from "./db.js";
+import { PIER_DB } from "../paths.js";
+import { openChannelDb } from "./db.js";
 import type { ChannelPlatform } from "./types.js";
 
 export interface Receipt {
@@ -43,7 +44,7 @@ export class ReceiptLedger {
 
   constructor(
     private readonly platform: ChannelPlatform,
-    path = defaultChannelDbPath(),
+    path = PIER_DB,
   ) {
     // A new table rather than the retired `channel_receipts`, whose message_id
     // was INTEGER: a Slack ts under that affinity comes back as a lossy float,

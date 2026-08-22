@@ -43,10 +43,14 @@ src/
   tasks/       definitions, runs, groups, execution, callbacks, messages,
                service, store, tool, HTTP routes
   main.ts      wiring only
+  paths.ts     where PIER_HOME resolves, once
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
 never imports platform SDKs or Pi. Nothing imports sideways between channels.
+`paths.ts` is the one exception to "no sideways": a leaf every area may import
+and that imports nothing, because `$PIER_HOME` is process configuration and
+had otherwise grown a copy per module that needed a file.
 `boards/` is the thinnest surface of all: a filesystem scan plus a static file
 handler, importing neither core nor Pi.
 

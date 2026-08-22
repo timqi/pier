@@ -5,14 +5,7 @@
 // any seam.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-
-export const defaultPinFile = (): string =>
-  join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "pins.json");
-
-export const defaultUnreadFile = (): string =>
-  join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "unread.json");
+import { dirname } from "node:path";
 
 export class IdSetStore {
   readonly #file: string;
