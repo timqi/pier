@@ -8,6 +8,7 @@ import { basename, consoleView, h, type ConsoleView } from "./dom.js";
 import { setStatus } from "./form.js";
 
 interface ConfigIndex {
+  dir: string;
   files: { name: string; exists: boolean }[];
   resources: { extensions: ConfigResource[]; skills: ConfigResource[] };
 }
@@ -19,6 +20,9 @@ type Selection =
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
   let scope = "global";
   let selection: Selection | null = null;
+  // Where "Global" lives, from the API — PIER_HOME moves it, so no path is
+  // hardcoded here. Empty until the first load answers.
+  let globalDir = "";
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
@@ -61,7 +65,12 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       renderError(`failed to load config: ${res.status}`);
       return;
     }
-    renderNav((await res.json()) as ConfigIndex);
+    const index = (await res.json()) as ConfigIndex;
+    if (scope === "global" && index.dir) {
+      globalDir = index.dir;
+      renderScopeOptions();
+    }
+    renderNav(index);
     if (!selection) renderPlaceholder();
   }
 
@@ -258,13 +267,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     );
   }
 
-  return consoleView(root, () => {
+  function renderScopeOptions(): void {
     scopeSelect.replaceChildren(
-      new Option("Global (~/.pier/pi)", "global"),
+      new Option(globalDir ? `Global (${globalDir})` : "Global", "global"),
       ...getCwds().map((cwd) => new Option(`${basename(cwd)} — ${cwd}`, cwd)),
     );
     if (![...scopeSelect.options].some((o) => o.value === scope)) scope = "global";
     scopeSelect.value = scope;
+  }
+
+  return consoleView(root, () => {
+    renderScopeOptions();
     void load();
   });
 }

@@ -69,6 +69,8 @@ export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: F
     const scope = await parseScope(c.req.query("scope"));
     if (!scope) return c.json({ error: "unknown scope" }, 400);
     return c.json({
+      // Where this scope's files live on disk — the UI labels "Global" with it.
+      dir: scope.kind === "global" ? config.globalDir : scope.cwd,
       files: await config.listFiles(scope),
       resources: await config.listResources(scope),
     });

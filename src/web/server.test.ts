@@ -107,6 +107,7 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
   const at = (s: ConfigScope) => (s.kind === "global" ? "global" : s.cwd);
   return {
     calls,
+    globalDir: "/home/t/.pier/pi",
     listFiles: async (s) => {
       calls.push(`listFiles:${at(s)}`);
       return [{ name: "SYSTEM.md", exists: true }];
@@ -459,11 +460,15 @@ describe("workbench server", () => {
     const globalRes = await app.request("/api/config");
     expect(globalRes.status).toBe(200);
     expect(await globalRes.json()).toEqual({
+      dir: "/home/t/.pier/pi",
       files: [{ name: "SYSTEM.md", exists: true }],
       resources: { extensions: [{ name: "quiet.ts", link: false }], skills: [] },
     });
-    // /tmp is a session cwd (factory.list); anything else is rejected.
-    expect((await app.request("/api/config?scope=/tmp")).status).toBe(200);
+    // /tmp is a session cwd (factory.list); anything else is rejected — and a
+    // project scope's dir is its own cwd.
+    const projectRes = await app.request("/api/config?scope=/tmp");
+    expect(projectRes.status).toBe(200);
+    expect(((await projectRes.json()) as { dir: string }).dir).toBe("/tmp");
     expect((await app.request("/api/config?scope=/etc")).status).toBe(400);
     expect(config.calls).toContain("listFiles:/tmp");
   });

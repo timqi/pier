@@ -33,6 +33,10 @@ interface ModelsJson {
 export class PiConfigStore implements ConfigStore {
   constructor(private readonly agentDir: string = defaultAgentDir()) {}
 
+  get globalDir(): string {
+    return this.agentDir;
+  }
+
   /** Whitelist is the security boundary — nothing outside it is reachable. */
   private fileNames(scope: ConfigScope): string[] {
     return scope.kind === "global" ? GLOBAL_FILES : PROJECT_FILES;

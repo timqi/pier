@@ -278,6 +278,9 @@ export interface ConfigStore {
   readFile(scope: ConfigScope, name: string): Promise<string>;
   /** Masked secrets that come back unchanged keep their stored value. */
   writeFile(scope: ConfigScope, name: string, content: string): Promise<void>;
+  /** Absolute path of the global scope's directory — the UI shows where
+   *  "Global" actually lives, which moves with PIER_HOME. */
+  readonly globalDir: string;
   /** Files under each resource dir, symlinks followed (read-only surface). */
   listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, ConfigResource[]>>;
   readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string>;
