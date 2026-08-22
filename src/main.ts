@@ -11,6 +11,11 @@ import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
+import { SlackApi } from "./channels/slack-api.js";
+import { SlackArchive } from "./channels/slack-archive.js";
+import { SlackDirectory } from "./channels/slack-directory.js";
+import { handleSlackTool, slackToolSpec } from "./channels/slack-tool.js";
+import { parseConversation as parseSlackConversation } from "./channels/slack.js";
 import { EventHub } from "./core/hub.js";
 import { REPLY_SURFACE_PROMPT } from "./core/reply.js";
 import { Router } from "./core/router.js";
@@ -25,8 +30,39 @@ import { createServer } from "./web/server.js";
 let tasks: TaskService;
 const conversations = new ConversationStore();
 let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
+// Declared before the store exists because the factory is built first; the tool
+// only ever runs long after wiring is done.
+let channelStore: ChannelStore;
+const slackArchive = new SlackArchive();
+// Shared by the adapter and the tool: a display name is looked up once per
+// process, not once per message and again per transcript.
+const slackDirectory = new SlackDirectory((m) => console.warn(`slack: ${m}`));
 const factory = new PiAgentFactory(
-  [taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId))],
+  [
+    taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
+    slackToolSpec((params, callerSessionId) =>
+      handleSlackTool({
+        store: channelStore,
+        archive: slackArchive,
+        directory: slackDirectory,
+        // Rebuilt per call: the Console can change the token underneath us,
+        // and a client captured at boot would keep using the old one.
+        client: () => {
+          const config = channelStore.get("slack");
+          return config.token ? new SlackApi(config.token, config.appToken) : null;
+        },
+        // Which Slack thread this session is answering, so "post here" needs no
+        // ids. Looked up per call: the mapping is durable, the session is not.
+        here: (sessionId) => {
+          const key = router.conversationOf(sessionId);
+          if (key?.channelId !== "slack") return null;
+          const { channel, threadTs } = parseSlackConversation(key.conversationId);
+          return channel && threadTs ? { channel, threadTs } : null;
+        },
+        log: (m) => console.warn(`slack tool: ${m}`),
+      }, params, callerSessionId)
+    ),
+  ],
   REPLY_SURFACE_PROMPT,
   // Ships with Pier: documents Pier's own tools, so it loads only inside a
   // Pier session — not in a bare Pi session that has no task tool.
@@ -45,7 +81,7 @@ const router = new Router(hub, (key) => {
 tasks = new TaskService(new TaskStore(), factory, router, hub);
 tasks.start();
 
-const channelStore = new ChannelStore();
+channelStore = new ChannelStore();
 const control = createControl({ router, factory, conversations, store: channelStore });
 const channels = new ChannelRuntime(channelStore, router, control);
 resolveIm = resolveConversation(

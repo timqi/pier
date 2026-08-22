@@ -5,7 +5,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { formatTurnMeta, splitReply } from "../../core/reply.js";
+import { formatTurnMeta, silentReason, splitReply } from "../../core/reply.js";
 import { renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { highlightCode } from "./highlight.js";
 import { $, detailsRow, h } from "./dom.js";
@@ -362,12 +362,30 @@ function renderAssistant(
   offer = false,
 ): HTMLElement {
   const { text, suggestions } = splitReply(raw);
-  renderMarkdown(node, text);
+  // A deliberate non-answer still happened, and an empty bubble reads as a
+  // bug. IM surfaces post nothing at all; the workbench says so instead, with
+  // the reason the agent gave, because this is the view the operator debugs in.
+  // A turn that is only its options is not silence — the buttons are the reply.
+  if (text) renderMarkdown(node, text);
+  else if (suggestions.length) renderMarkdown(node, "");
+  else renderSilence(node, silentReason(raw));
   setMetaHint(node, meta);
   if (offer) {
     renderSuggestions(node.parentElement ?? node, suggestions, (label) => deps.send("auto", label));
   }
   return node;
+}
+
+/** The placeholder for a turn that chose to say nothing. */
+function renderSilence(node: HTMLElement, reason: string | undefined): void {
+  node.classList.remove("md", "whitespace-pre-wrap");
+  node.replaceChildren(
+    h(
+      "span",
+      "text-[12.5px] italic text-black/40",
+      reason ? `Stayed silent — ${reason}` : "Stayed silent.",
+    ),
+  );
 }
 
 export const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>

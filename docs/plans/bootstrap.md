@@ -28,22 +28,25 @@ budgets there override anything here. System contract: `src/core/types.ts` +
    runs; manual/cron/watch triggers; Agent/Bash/Task actions. Agent Tasks support
    reused, fresh, and forked persisted Sessions, bounded fan-out, control,
    continuation, and supervisor messages through Console + HTTP + one Pi tool.
-   Design: `docs/design/04-tasks.md`.
-5. **First IM channel: Telegram** — thinnest adapter, validates the
-   `Channel` seam. Inbound normalize, outbound markdown render. Default
-   queue policy: busy agent → `followUp()`; `!` prefix → `steer()`.
+   Its design doc is gone, per the rule above — the code and tests carry it.
+5. **First IM channel: Telegram** — done. Validated the `Channel` seam.
+   IM inbound steers by default (a human watching a chat expects the next
+   message to reach the running turn), not the follow-up policy planned here.
 6. **Boards** (was "Show pages") — a board is a folder of static files under
    `$PIER_HOME/boards`, served from its `site/` subdir, private until published.
    Derived by scanning, many-to-many with sessions, no build system.
    Design: `docs/design/05-boards.md`.
-7. **Slack, Lark channels** — repeat step 5's pattern, ≤ 200 lines each.
+7. **Slack, Lark channels** — Slack done; Lark pending. The "≤ 200 lines each"
+   estimate did not survive contact: see `06-design-review.md` for the revised
+   budgets and why.
 
 ## Status
 
 - [x] 1. Skeleton
 - [x] 2. Agent seam
 - [x] 3. Web workbench (verified in daily use)
-- [x] 4. Tasks (`docs/design/04-tasks.md`)
-- [ ] 5. Telegram channel (design doc pending)
+- [x] 4. Tasks (design doc retired; code and tests carry it)
+- [x] 5. Telegram channel (`docs/design/04-im-channels.md`)
 - [x] 6. Boards (`docs/design/05-boards.md`)
-- [ ] 7. Slack + Lark (design doc pending)
+- [x] 7a. Slack channel (`docs/design/04-im-channels.md`)
+- [ ] 7b. Lark channel

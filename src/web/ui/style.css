@@ -132,6 +132,17 @@ html {
      Prose's default 1.75 line-height reads airy in chat — #turns sets a tighter
      one and we inherit it, with block gaps kept wider than the line gap so
      paragraph breaks read louder than line breaks. */
+  /* Inline prose in a help bubble: the walkthroughs are markdown strings, so
+     `code` and links need the styling their hand-built versions carried. */
+  .help code {
+    @apply rounded bg-neutral-100 px-1 py-px font-mono text-[11.5px] text-neutral-700;
+  }
+  .help a {
+    @apply text-indigo-600 underline;
+  }
+  .help em {
+    @apply italic;
+  }
   .md {
     @apply prose prose-neutral max-w-none;
     font-size: inherit;

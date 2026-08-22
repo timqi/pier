@@ -17,6 +17,16 @@ scheduled tasks, live observability, and static Show pages.
    only `channels/` imports platform SDKs.
 5. **One event stream per session.** Web UI, logs, Show pages are all
    consumers of it — never parallel bookkeeping.
+5b. **Nothing that happened may look like nothing happening.** Every turn is
+   observable on the surface it came from, including the turns with no content:
+   an empty reply still posts its footer and says which kind of nothing it was
+   (`stayed silent — <reason>` / `no reply`), and every failure is delivered to
+   the conversation, not only to the web timeline. Total silence is
+   indistinguishable from a crash, a dropped connection or a bug, and the person
+   waiting has no way to tell them apart — so "send nothing" is never the
+   answer, and a silent `catch` is a bug even when the fallback works. This cost
+   two rounds of debugging to learn: the surface being debugged from was not the
+   surface showing the problem.
 6. **No speculative generality.** The third repeat earns an abstraction.
    Show pages stay static HTML (+ SSE reload at most), no runtime.
 7. **Fast by default.** Web interactions must feel instant: optimistic
@@ -42,7 +52,26 @@ scheduled tasks, live observability, and static Show pages.
 
 ## Budgets (tripwires — exceeding needs a written diagnosis in the PR)
 
-- channel adapter ≤ 200 lines; core module ≤ 300; repo ~5k → design review
+Measured in non-blank, non-comment lines, excluding tests. A budget only earns
+its place by being able to fail *meaningfully*: one that is always over is a
+comment, not a tripwire. Revised after the Slack adapter — see
+`docs/design/06-design-review.md` for the numbers behind each.
+
+- **`core/` ≤ 500 total** — the constraint that has actually shaped the design.
+  Core is platform-blind and Pi-blind; if it is growing, something leaked in.
+- **any one module ≤ 300** — still the right unit. A file over this is either
+  two concerns or a wrong-layer abstraction.
+- **channel adapter ≤ 400** per platform, across its four files' *adapter* file
+  (transport, render and panel are budgeted as ordinary modules). Inbound
+  normalization and gate logging are irreducibly per-platform; 200 was wishful.
+- **`web/` ≤ 4.5k** — the largest area and the least tested, so it gets the
+  budget that is closest to biting. Growth here should come with a reason why a
+  surface, not a shared primitive, is the right home.
+- **`tasks/` ≤ 2.5k**, **`channels/` ≤ 3.5k** — near their current size on
+  purpose: the next feature in either should be visibly worth it.
+
+No repo-wide number. It fired unconditionally and therefore said nothing; the
+per-area budgets above are what a diagnosis can be written against.
 
 ## Bug Prevention
 

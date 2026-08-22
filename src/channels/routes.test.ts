@@ -38,7 +38,9 @@ const put = async (body: unknown, path = "/api/channels/telegram"): Promise<Resp
 describe("channel config routes", () => {
   it("rejects an unknown platform, serves the planned ones", async () => {
     expect((await app.request("/api/channels/discord")).status).toBe(404);
-    expect((await get("/api/channels/slack")).supported).toBe(false);
+    // Lark is configurable but has no adapter; Telegram and Slack have one.
+    expect((await get("/api/channels/lark")).supported).toBe(false);
+    expect((await get("/api/channels/slack")).supported).toBe(true);
     expect((await get()).supported).toBe(true);
   });
 

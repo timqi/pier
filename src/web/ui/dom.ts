@@ -1,5 +1,8 @@
 // The DOM helpers every UI module shares. Nothing else belongs here.
 
+import DOMPurify from "dompurify";
+import { marked } from "marked";
+
 export const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
   if (!el) throw new Error(`missing element: ${sel}`);
@@ -21,6 +24,24 @@ export function h(tag: string, cls: string, text?: string): HTMLElement {
   if (cls) node.className = cls;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/**
+ * A line of prose with inline markup — `code`, **bold**, [links](url).
+ *
+ * Setup walkthroughs are *content*, and building them out of `h()` calls and
+ * `append()` costs roughly five lines per sentence while making the wording
+ * hard to read in the source. `marked` and DOMPurify are already in the bundle
+ * for the chat transcript, so prose can just be prose.
+ */
+export function prose(markdown: string): HTMLElement {
+  const el = h("span", "help");
+  el.innerHTML = DOMPurify.sanitize(marked.parseInline(markdown, { async: false }));
+  for (const a of el.querySelectorAll("a")) {
+    a.target = "_blank";
+    a.rel = "noreferrer";
+  }
+  return el;
 }
 
 /** Chevron + summary skeleton shared by activity groups and project nodes. */

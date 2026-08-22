@@ -69,11 +69,12 @@ export function registerChannelRoutes(
     const platform = c.req.param("platform");
     if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
     const config = store.get(platform);
-    // Never hand the token back: the client only needs to know one is set.
+    // Never hand a token back: the client only needs to know one is set.
     return c.json({
       ...config,
       token: maskToken(config.token),
-      supported: platform === "telegram",
+      appToken: maskToken(config.appToken),
+      supported: platform === "telegram" || platform === "slack",
     });
   });
 
@@ -83,12 +84,17 @@ export function registerChannelRoutes(
     const body = (await c.req.json().catch(() => null)) as Partial<ChannelConfig> | null;
     if (!body || typeof body !== "object") return c.json({ error: "invalid body" }, 400);
     const current = store.get(platform);
-    const incoming = asString(body.token);
+    // A token that comes back masked is the stored one, untouched.
+    const kept = (incoming: string, stored: string): string =>
+      !incoming || incoming === maskToken(stored) ? stored : incoming;
     const next: ChannelConfig = {
       ...defaultChannelConfig(),
       enabled: asBool(body.enabled),
-      // A token that comes back masked is the stored one, untouched.
-      token: !incoming || incoming === maskToken(current.token) ? current.token : incoming,
+      token: kept(asString(body.token), current.token),
+      appToken: kept(asString(body.appToken), current.appToken),
+      // Absent means "on": a client that predates the field must not silently
+      // switch off a capability the operator never touched.
+      agentTool: body.agentTool === undefined ? current.agentTool : asBool(body.agentTool),
       requireMention: asBool(body.requireMention),
       requireBind: asBool(body.requireBind),
       topicMode: asBool(body.topicMode),

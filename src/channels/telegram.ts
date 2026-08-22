@@ -21,10 +21,12 @@ import type {
   SystemInputOrigin,
   TurnMeta,
 } from "../core/types.js";
-import { formatTurnMeta } from "../core/reply.js";
+import { formatTurnMeta, originLabel } from "../core/reply.js";
+import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
-import { type ChannelStore, gate } from "./config.js";
+import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
+import { Gatekeeper } from "./gatekeeper.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 import { TelegramPanel } from "./telegram-panel.js";
 import { chunk, escapeHtml, keyboard, offeredLabel, toTelegramHtml } from "./telegram-render.js";
@@ -45,9 +47,6 @@ const MAX_ACTIVE_CHATS = 16;
 // Longest a 👀 may sit before we assume its turn will never settle (a dispatch
 // that failed, a session that died). Generous: a real coding turn can be long.
 const RECEIPT_STALE_MS = 30 * 60_000;
-// How often one unbound DM sender may be told how to bind. Without a floor the
-// bot is an echo amplifier for anyone who keeps typing.
-const BIND_HINT_EVERY_MS = 10 * 60_000;
 // Longest stop() waits for in-flight handlers before letting reload() proceed.
 const DRAIN_TIMEOUT_MS = 5000;
 const TOPIC_TITLE_MAX = 60;
@@ -98,15 +97,10 @@ export class TelegramChannel implements Channel {
   private readonly log: (message: string) => void;
   /** 👀 lifecycle, durable; see receipts.ts for why it is not just a Map. */
   private readonly receipts: Receipts;
-  /**
-   * One promise chain per chat: updates from different chats are handled
-   * concurrently (a photo download must not stall another group), updates
-   * within one chat strictly in arrival order — a steer overtaking the message
-   * it interrupts would reorder the conversation.
-   */
-  private readonly chains = new Map<string, Promise<void>>();
-  /** Last time each unbound DM sender was told how to bind. */
-  private readonly bindHints = new Map<string, number>();
+  /** Ordering per chat, concurrency across them; see chains.ts. */
+  private readonly chains: Chains;
+  /** The inbound gate and the bind-hint throttle; see gatekeeper.ts. */
+  private readonly gate: Gatekeeper;
   /** The in-chat settings panel; absent when no control was wired (tests). */
   private readonly panel?: TelegramPanel;
   private me?: { id: number; username: string };
@@ -116,8 +110,15 @@ export class TelegramChannel implements Channel {
   constructor(private readonly deps: TelegramDeps) {
     this.api = deps.client ?? new TelegramApi(deps.store.get("telegram").token);
     this.log = deps.log ?? ((m) => console.warn(`telegram: ${m}`));
+    // No cap here: the poll loop applies backpressure itself, before advancing
+    // the ack cursor past an update it has not accepted.
+    this.chains = new Chains(this.log);
+    this.gate = new Gatekeeper(deps.store, "telegram", this.log);
     this.receipts = new Receipts(
-      this.api,
+      // The ledger keeps message ids as opaque strings (a Slack ts is not a
+      // number); Telegram's own are numeric, so the cast happens right here at
+      // the API boundary rather than leaking a platform's id type into shared code.
+      { setReaction: (chatId, messageId, emoji) => this.api.setReaction(chatId, Number(messageId), emoji) },
       deps.receipts ?? new ReceiptLedger("telegram"),
       this.log,
       WORKING,
@@ -153,10 +154,7 @@ export class TelegramChannel implements Channel {
     // and two adapters handling one message would prompt the session twice.
     // Bounded, because reload() runs on the Console's save request — a stuck
     // handler must not hold that open.
-    await Promise.race([
-      Promise.allSettled(this.chains.values()),
-      new Promise((r) => setTimeout(r, DRAIN_TIMEOUT_MS)),
-    ]);
+    await this.chains.drain(DRAIN_TIMEOUT_MS);
   }
 
   // --- inbound ---------------------------------------------------------------
@@ -176,13 +174,11 @@ export class TelegramChannel implements Channel {
         }
         for (const update of updates) {
           if (!this.running) return;
-          while (this.chains.size >= MAX_ACTIVE_CHATS) {
-            await Promise.race(this.chains.values());
-          }
+          while (this.chains.size >= MAX_ACTIVE_CHATS) await this.chains.oldest();
           this.offset = update.update_id + 1;
           const chat = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
           if (chat === undefined) continue; // malformed: no chat to answer in
-          this.schedule(String(chat), async () => {
+          this.chains.run(String(chat), async () => {
             try {
               if (update.callback_query) await this.onCallback(update.callback_query, onMessage);
               else if (update.message) await this.onMessage(update.message, onMessage);
@@ -197,21 +193,6 @@ export class TelegramChannel implements Channel {
         await new Promise((r) => setTimeout(r, 3000));
       }
     }
-  }
-
-  /**
-   * Append to a chat's chain and drop the entry once it drains. The catch is
-   * load-bearing: a rejected link would poison every message queued behind it,
-   * silencing that chat for the life of the process.
-   */
-  private schedule(chatId: string, run: () => Promise<void>): void {
-    const next = (this.chains.get(chatId) ?? Promise.resolve())
-      .then(run)
-      .catch((err) => this.log(`handler failed in chat ${chatId}: ${String(err)}`));
-    this.chains.set(chatId, next);
-    void next.then(() => {
-      if (this.chains.get(chatId) === next) this.chains.delete(chatId);
-    });
   }
 
   private async onMessage(msg: TgMessage, onMessage: (msg: InboundMessage) => void): Promise<void> {
@@ -230,7 +211,7 @@ export class TelegramChannel implements Channel {
     // A command aimed at another bot in the same group is not ours to answer.
     const mine = !command?.target || command.target.toLowerCase() === this.me?.username.toLowerCase();
     const bindRequest = mine && command?.name === "bind" && isDm;
-    const admitted = this.admit("message", chatId, {
+    const admitted = this.gate.admit("message", chatId, {
       isDm,
       addressed: this.addressed(raw, msg),
       userId: String(msg.from.id),
@@ -260,28 +241,19 @@ export class TelegramChannel implements Channel {
     const images = await this.photos(msg);
     const topicId = await this.routeTopic(msg, text);
     const key = { channelId: this.id, conversationId: conversationId(chatId, topicId) };
-    this.receipts.mark(key.conversationId, chatId, msg.message_id);
+    this.receipts.mark(key.conversationId, chatId, String(msg.message_id));
     // IM messages steer by default: a follow-up that waits for the turn to end
     // is the wrong default when the human is watching a 👀 in a chat window.
-    onMessage({ key, senderId: String(msg.from.id), text, images, mode: "steer" });
-  }
-
-  /** The gate plus the drop log both entry points owe. */
-  private admit(
-    what: "message" | "callback",
-    chatId: string,
-    opts: { isDm: boolean; addressed: boolean; userId: string; bindRequest?: boolean },
-  ): boolean {
-    const verdict = gate({
-      policy: this.deps.store.policy("telegram", chatId),
-      isDm: opts.isDm,
-      addressed: opts.addressed,
-      bound: this.deps.store.isBound("telegram", opts.userId),
-      bindRequest: opts.bindRequest ?? false,
+    onMessage({
+      key,
+      senderId: String(msg.from.id),
+      // A group is many people talking into one session; the update already
+      // carries the name, so no lookup is needed here.
+      sender: { id: String(msg.from.id), name: senderName(msg.from) },
+      text,
+      images,
+      mode: "steer",
     });
-    if (verdict === "allow") return true;
-    this.log(`dropped ${what} in chat ${chatId}: ${verdict}`);
-    return false;
   }
 
   /** Quick-reply buttons send their own label back as an ordinary message. */
@@ -293,7 +265,7 @@ export class TelegramChannel implements Channel {
     const msg = query.message;
     if (!msg || !query.data) return;
     const chatId = String(msg.chat.id);
-    const admitted = this.admit("callback", chatId, {
+    const admitted = this.gate.admit("callback", chatId, {
       isDm: msg.chat.type === "private",
       addressed: true, // pressing the bot's own button is addressing it
       userId: String(query.from.id),
@@ -333,7 +305,7 @@ export class TelegramChannel implements Channel {
     });
     // The receipt goes on the echo, not on the bot message that held the
     // buttons: the eyes mean "this input is being worked on".
-    if (echo) this.receipts.mark(key.conversationId, chatId, echo.message_id);
+    if (echo) this.receipts.mark(key.conversationId, chatId, String(echo.message_id));
     onMessage({ key, senderId: String(query.from.id), text, mode: "steer" });
   }
 
@@ -360,16 +332,7 @@ export class TelegramChannel implements Channel {
    * a DM that swallows every message looks broken rather than locked.
    */
   private async hintBind(msg: TgMessage): Promise<void> {
-    const user = String(msg.from?.id ?? "");
-    const now = Date.now();
-    const last = this.bindHints.get(user) ?? 0;
-    if (now - last < BIND_HINT_EVERY_MS) return;
-    // Anyone can DM a bot, so this map is fed by strangers: drop entries whose
-    // throttle has expired instead of keeping one per sender forever.
-    for (const [id, at] of this.bindHints) {
-      if (now - at >= BIND_HINT_EVERY_MS) this.bindHints.delete(id);
-    }
-    this.bindHints.set(user, now);
+    if (!this.gate.mayHint(String(msg.from?.id ?? ""))) return;
     await this.api.sendMessage({
       chat_id: msg.chat.id,
       text: "You are not bound yet. Ask the operator for a bind code, then send /bind <code>.",
@@ -378,7 +341,7 @@ export class TelegramChannel implements Channel {
 
   private async bind(msg: TgMessage, code: string): Promise<void> {
     const user = msg.from!;
-    const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || String(user.id);
+    const name = senderName(user);
     const ok = this.deps.store.redeemBindCode("telegram", code, { id: String(user.id), name });
     await this.api.sendMessage({
       chat_id: msg.chat.id,
@@ -479,23 +442,37 @@ export class TelegramChannel implements Channel {
   async send(conversation: string, reply: AgentReply): Promise<void> {
     const { chatId, topicId } = parseConversation(conversation);
     const text = reply.text.trim();
-    // A turn may be nothing but its options; the footer alone still carries
-    // them, and Telegram will not accept an empty message.
-    const body = (text ? toTelegramHtml(text) : "") + turnFooter(reply.meta);
-    if (body.trim()) {
-      const parts = chunk(body);
-      for (const [i, part] of parts.entries()) {
-        await this.api.sendMessage({
-          chat_id: chatId,
-          message_thread_id: topicId,
-          text: part,
-          parse_mode: "HTML",
-          // Next-step buttons ride the last chunk; a click sends the label.
-          reply_markup: i === parts.length - 1 ? keyboard(reply.suggestions) : undefined,
-        });
+    // A turn that produced no text still posts its footer, and says which kind
+    // of nothing it was: total silence is indistinguishable from a crash, and
+    // the person waiting cannot tell. See AGENTS.md — an empty turn is still an
+    // event, and an event nobody can see is not observable.
+    const buttons = keyboard(reply.suggestions);
+    // Options count as a reply: the buttons are the answer.
+    const quiet = text || buttons
+      ? ""
+      : reply.silence
+      ? `<i>stayed silent \u2014 ${escapeHtml(reply.silence)}</i>`
+      : "<i>no reply</i>";
+    const body = (text ? toTelegramHtml(text) : quiet) + turnFooter(reply.meta);
+    try {
+      if (body.trim()) {
+        const parts = chunk(body);
+        for (const [i, part] of parts.entries()) {
+          await this.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: topicId,
+            text: part,
+            parse_mode: "HTML",
+            // Next-step buttons ride the last chunk; a click sends the label.
+            reply_markup: i === parts.length - 1 ? buttons : undefined,
+          });
+        }
       }
+    } finally {
+      // Always: a 👀 left up because the reply failed would sit there until the
+      // stale sweep, looking like the agent is still working.
+      await this.receipts.settle(conversation);
     }
-    await this.receipts.settle(conversation);
   }
 
   /**
@@ -518,6 +495,10 @@ export class TelegramChannel implements Channel {
 
 }
 
+/** Display name from an update, which always carries enough to build one. */
+const senderName = (user: NonNullable<TgMessage["from"]>): string =>
+  [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || String(user.id);
+
 /**
  * Deep link to a forum topic. A public supergroup links by username; a private
  * one uses the `/c/<internal id>` form, which is the chat id with its `-100`
@@ -530,20 +511,6 @@ function topicLink(chat: TgChat, topicId: number): string {
   return `https://t.me/c/${internal}/${topicId}`;
 }
 
-/** Where a system input came from, in the fewest words that still say it. */
-function originLabel(origin: SystemInputOrigin): string {
-  if (origin.kind !== "task-message") {
-    return origin.kind === "task-delegation" ? "\u25b6 delegated task" : "\u21a9 task callback";
-  }
-  const kinds: Record<string, string> = {
-    steer: "\u270e steer",
-    follow_up: "\uff0b follow-up",
-    progress: "\u25c7 progress",
-    decision: "\u2753 decision needed",
-    reply: "\u21a9 reply",
-  };
-  return `from a subagent \u00b7 ${kinds[origin.messageKind] ?? origin.messageKind}`;
-}
 
 /**
  * The web shows a turn's cost on hover; IM has none, so it becomes a footer.

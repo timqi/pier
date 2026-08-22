@@ -149,3 +149,23 @@ never duplicate history.
 - While a long turn streams: plain send queues (queue panel updates via `queue-state`),
   `!text` visibly interrupts the run.
 - Kill/restart server, tab reconnects and replays without duplicates.
+
+## Shared UI vocabulary
+
+`ui/form.ts` owns the Console's controls — card, field, toggle, inputs, select,
+textarea, badge, empty, `helpBadge` — and `.btn`/`.btn-primary` from
+`style.css` are its button. Channels and Tasks each grew their own set first,
+which is why the two tabs used to read as different apps; a new Console surface
+starts from `form.ts` and adds to it rather than beside it.
+
+`ui/dom.ts` is `h()`, `$()`, `detailsRow()` and `prose()`. `prose()` renders
+inline markdown with the `marked`/DOMPurify already bundled for the transcript,
+so walkthrough copy is written as strings instead of `h()` call chains.
+
+Two rules the Console inherited the hard way:
+
+- **A turn that says nothing still renders something.** An empty assistant turn
+  shows `Stayed silent — <reason>`; an empty bubble reads as a bug. See
+  `AGENTS.md` principle 5b.
+- **`overflow-hidden` on a card clips any popover inside it.** The document
+  never scrolls; every scrollable region is an inner pane with sticky headers.

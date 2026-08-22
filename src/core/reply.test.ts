@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compact, formatTurnMeta, splitReply } from "./reply.js";
+import { cjkFriendly, compact, formatTurnMeta, silentReason, splitReply } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -63,5 +63,92 @@ describe("compact counts", () => {
     expect(compact(9990)).toBe("10K");
     expect(compact(12_000)).toBe("12K");
     expect(compact(32_140)).toBe("32K");
+  });
+});
+
+describe("staying silent", () => {
+  it("drops a silent-only turn to nothing, so adapters post nothing", () => {
+    // The adapters already treat an empty turn as "settled with nothing to
+    // say", so silence needs no new concept below this line.
+    expect(splitReply("<silent>two humans talking</silent>")).toMatchObject({
+      text: "",
+      suggestions: [],
+    });
+  });
+
+  it("keeps the visible part when the agent both spoke and annotated", () => {
+    expect(splitReply("<silent>noted</silent>\n\nOn it.").text).toBe("On it.");
+  });
+
+  it("strips several blocks, case-insensitively", () => {
+    expect(splitReply("<SILENT>a</SILENT>x<silent>b</silent>").text).toBe("x");
+  });
+
+  it("still finds the options block after stripping", () => {
+    const reply = splitReply("<silent>ctx</silent>\nPick one\n\n---\n[Yes] | [No]");
+    expect(reply.text).toBe("Pick one");
+    expect(reply.suggestions).toEqual(["Yes", "No"]);
+  });
+
+  it("leaves an unclosed tag alone rather than eating the reply", () => {
+    expect(splitReply("<silent>oops").text).toBe("<silent>oops");
+  });
+});
+
+describe("silentReason", () => {
+  it("hands the reason to the workbench, which is the operator's own view", () => {
+    expect(silentReason("<silent>two humans talking</silent>")).toBe("two humans talking");
+  });
+
+  it("joins several blocks", () => {
+    expect(silentReason("<silent>a</silent>x<silent>b</silent>")).toBe("a · b");
+  });
+
+  it("is undefined when there is nothing to explain", () => {
+    expect(silentReason("hello")).toBeUndefined();
+    expect(silentReason("<silent>  </silent>")).toBeUndefined();
+  });
+
+  it("does not leave regex state behind between calls", () => {
+    // A /g regex reused with exec would skip every other call.
+    const raw = "<silent>why</silent>";
+    expect(silentReason(raw)).toBe("why");
+    expect(silentReason(raw)).toBe("why");
+    expect(splitReply(raw).text).toBe("");
+  });
+});
+
+describe("cjkFriendly", () => {
+  it("is applied by splitReply, so every surface benefits", () => {
+    // Slack's parser and the web's `marked` fail on different halves of the
+    // same rule; repairing it once here covers both.
+    expect(splitReply('**"怎么做"**：x').text).toBe('"**怎么做**"：x');
+  });
+
+  it("closes a bold run whose quotes sit against CJK punctuation", () => {
+    // The reported bug: rendered as literal ** on both sides.
+    expect(cjkFriendly('**"怎么做一个编程助手"**：')).toBe('"**怎么做一个编程助手**"：');
+  });
+
+  it("leaves a run that already closes alone", () => {
+    expect(cjkFriendly("**闲聊 + 边界**：")).toBe("**闲聊 + 边界**：");
+    expect(cjkFriendly("**bold** and more")).toBe("**bold** and more");
+  });
+
+  it("lifts fullwidth brackets too", () => {
+    expect(cjkFriendly("**（括号）**文字")).toBe("（**括号**）文字");
+  });
+
+  it("never rewrites asterisks inside code", () => {
+    expect(cjkFriendly('```\n**"x"**：\n```')).toBe('```\n**"x"**：\n```');
+    expect(cjkFriendly('`**"x"**：`')).toBe('`**"x"**：`');
+  });
+
+  it("leaves a run that is only punctuation", () => {
+    expect(cjkFriendly('**"**')).toBe('**"**');
+  });
+
+  it("handles several runs in one line", () => {
+    expect(cjkFriendly('**"a"**、**"b"**')).toBe('"**a**"、"**b**"');
   });
 });

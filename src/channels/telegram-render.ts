@@ -1,3 +1,4 @@
+import { chunkText } from "./chunk.js";
 import type { InlineKeyboard, TgMessage } from "./telegram-api.js";
 
 // How a reply looks on Telegram: text and buttons.
@@ -49,25 +50,12 @@ export function toTelegramHtml(markdown: string): string {
 }
 
 /**
- * Split rendered HTML into sendable chunks at the last blank line or newline
- * that fits. A turn long enough to need this can still be cut inside a <pre>
- * block; Telegram closes the tag on its own and the text survives, which beats
- * dropping the turn.
+ * Split rendered HTML into sendable chunks. A turn long enough to need this can
+ * still be cut inside a <pre> block; Telegram closes the tag on its own and the
+ * text survives, which beats dropping the turn. (Slack cannot do that, which is
+ * why its renderer re-balances fences after the cut.)
  */
-export function chunk(html: string): string[] {
-  if (html.length <= MAX_CHARS) return [html];
-  const parts: string[] = [];
-  let rest = html;
-  while (rest.length > MAX_CHARS) {
-    const window = rest.slice(0, MAX_CHARS);
-    const cut = Math.max(window.lastIndexOf("\n\n"), window.lastIndexOf("\n"));
-    const at = cut > MAX_CHARS / 2 ? cut : MAX_CHARS;
-    parts.push(rest.slice(0, at).trimEnd());
-    rest = rest.slice(at).trimStart();
-  }
-  if (rest) parts.push(rest);
-  return parts;
-}
+export const chunk = (html: string): string[] => chunkText(html, MAX_CHARS);
 
 // --- next-step buttons -------------------------------------------------------
 

@@ -1,5 +1,6 @@
 import type { TaskDefinition, TaskDraft, TaskMessage, TaskRun } from "../../tasks/types.js";
 import { h } from "./dom.js";
+import { button, field, input, select, textarea } from "./form.js";
 
 interface SessionChoice {
   id: string;
@@ -38,45 +39,6 @@ const actionSummary = (task: TaskDefinition): string => {
   if (task.action.type === "agent") return `Agent · ${task.action.session.mode}`;
   if (task.action.type === "bash") return "Bash";
   return "Task";
-};
-
-const button = (label: string, primary = false): HTMLButtonElement => {
-  const el = document.createElement("button");
-  el.type = "button";
-  el.className = `${primary ? "btn btn-primary" : "btn"} text-[12.5px]`;
-  el.textContent = label;
-  return el;
-};
-
-const field = (label: string, control: HTMLElement): HTMLElement => {
-  const wrapper = h("label", "flex flex-col gap-1 text-[12.5px] text-neutral-600", label);
-  wrapper.append(control);
-  return wrapper;
-};
-
-const input = (value = "", type = "text"): HTMLInputElement => {
-  const el = document.createElement("input");
-  el.type = type;
-  el.value = value;
-  el.className = "rounded-md border border-neutral-300 px-2 py-1.5 text-[13px] focus:border-indigo-400 focus:outline-none";
-  return el;
-};
-
-const select = (options: [string, string][], value: string): HTMLSelectElement => {
-  const el = document.createElement("select");
-  el.className = "rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-[13px] focus:border-indigo-400 focus:outline-none";
-  el.append(...options.map(([label, key]) => new Option(label, key)));
-  el.value = value;
-  return el;
-};
-
-const textarea = (value = "", rows = 4): HTMLTextAreaElement => {
-  const el = document.createElement("textarea");
-  el.value = value;
-  el.rows = rows;
-  el.spellcheck = false;
-  el.className = "resize-y rounded-md border border-neutral-300 px-2 py-1.5 font-mono text-[12.5px] focus:border-indigo-400 focus:outline-none";
-  return el;
 };
 
 export function createTasksView(

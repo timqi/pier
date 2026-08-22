@@ -24,6 +24,12 @@ export interface ImageAttachment {
 export interface AgentReply {
   text: string;
   suggestions: string[];
+  /**
+   * Set when the turn deliberately said nothing (`<silent>`), carrying the
+   * reason. Distinguishes a chosen silence from a turn that produced nothing,
+   * which look identical on the wire and must not look identical on screen.
+   */
+  silence?: string;
   /** Completion stats of the turn. Surfaces that cannot hover (IM) render
    * them as a footer; the web shows them on the bubble. */
   meta?: TurnMeta;
@@ -32,6 +38,12 @@ export interface AgentReply {
 export interface InboundMessage {
   key: ConversationKey;
   senderId: string;
+  /**
+   * Who sent it, for the prompt. The adapter resolves the display name because
+   * that is platform-specific; core decides whether it is worth the tokens
+   * (see `core/identity.ts`). Absent for surfaces with one obvious author.
+   */
+  sender?: { id: string; name: string };
   text: string;
   images?: ImageAttachment[];
   /** How to deliver when the agent is busy. "auto" = queue policy decides. */
@@ -54,9 +66,17 @@ export interface Channel {
    * never as an assistant turn — the people in the chat otherwise see the
    * agent answer a question nobody asked.
    */
-  notify(conversationId: string, note: { text: string; origin: SystemInputOrigin }): Promise<void>;
+  notify(conversationId: string, note: { text: string; origin: NoteOrigin }): Promise<void>;
   stop(): Promise<void>;
 }
+
+/**
+ * Why a note is being posted into a conversation. A system input is one reason;
+ * a failure is the other, and it must reach the chat rather than only the web
+ * timeline — an IM user who sees the eyes come off with no reply has no way to
+ * tell a crash from a deliberate silence.
+ */
+export type NoteOrigin = SystemInputOrigin | { kind: "error" };
 
 export type SystemInputOrigin = {
   kind: "task-delegation" | "task-callback";

@@ -52,6 +52,19 @@ export interface BindCode {
 export interface ChannelConfig {
   enabled: boolean;
   token: string;
+  /**
+   * Second credential, for platforms whose event transport is authenticated
+   * separately from their Web API. Slack Socket Mode needs an app-level token
+   * (`xapp-`) beside the bot token (`xoxb-`); Telegram leaves this empty.
+   */
+  appToken: string;
+  /**
+   * May agent sessions read and post through this platform's tool? Separate
+   * from `enabled`, which only governs whether the adapter answers inbound
+   * messages: this one decides whether an agent can reach *out*. Default on,
+   * and moot until the platform has a token.
+   */
+  agentTool: boolean;
   requireMention: boolean;
   requireBind: boolean;
   topicMode: boolean;
@@ -70,6 +83,8 @@ export type ChatPolicy = Omit<ChatConfig, "id" | "name" | "kind">;
 export const defaultChannelConfig = (): ChannelConfig => ({
   enabled: false,
   token: "",
+  appToken: "",
+  agentTool: true,
   requireMention: true,
   requireBind: true,
   topicMode: true,

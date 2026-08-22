@@ -28,16 +28,18 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 
 ```
 src/
-  core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts
+  core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts, identity.ts
   agent/       pi.ts (the ONLY file importing @earendil-works/pi-*)
   channels/    types.ts (config contract), config.ts (store + permission gate),
-               conversations.ts (durable chat → session map),
+               gatekeeper.ts (verdict + drop log), chains.ts (ordering),
+               chunk.ts, conversations.ts (durable chat → session map),
                receipts.ts (durable pending-reaction set), db.ts,
                runtime.ts (adapter lifecycle), routes.ts,
-               telegram.ts + telegram-api.ts + telegram-markdown.ts
-               [slack.ts, lark.ts: configurable, no adapter yet]
+               telegram.ts + -api + -render + -panel
+               slack.ts + -api + -render + -panel + -tool + -archive + -directory
+               [lark.ts: configurable, no adapter yet]
   boards/      boards.ts (scan + manifest + static serving), pier.css
-  web/         server.ts, static frontend (ui/ modules)
+  web/         server.ts, ui/ modules (form.ts + dom.ts are the shared vocabulary)
   tasks/       definitions, runs, groups, execution, callbacks, messages,
                service, store, tool, HTTP routes
   main.ts      wiring only
@@ -48,10 +50,23 @@ never imports platform SDKs or Pi. Nothing imports sideways between channels.
 `boards/` is the thinnest surface of all: a filesystem scan plus a static file
 handler, importing neither core nor Pi.
 
+`docs/design/06-design-review.md` is the written diagnosis the repo-size
+tripwire asks for, with the measured breakdown and which budgets to revise.
+
 The IM channel layer has its own living spec: `docs/design/04-im-channels.md`
 covers what is shared versus platform-specific, the checklists a new adapter
-follows, and the traps Telegram already paid for. Read it before writing the
-Slack or Lark adapter.
+follows, and the traps Telegram and Slack already paid for. Read it before
+writing the Lark adapter.
+
+### Markdown is repaired once, at the seam
+
+`splitReply()` normalizes the agent's markdown for every surface: it strips
+`<silent>` blocks and runs `cjkFriendly()`, which repairs `**strong**` runs that
+CommonMark refuses to close when a delimiter sits against punctuation next to a
+CJK character. Every parser has some version of that hole and they disagree on
+which half — Slack's markdown block and the web's `marked` fail on different
+inputs — so the repair belongs where the syntax is already owned, not per
+adapter. See `docs/design/04-im-channels.md` for the rule itself.
 
 ## Core Types
 
@@ -132,11 +147,14 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 ## Open Questions
 
 - `ChatKind`'s `"forum"` member is a Telegram word sitting in the
-  platform-blind config contract (`channels/types.ts`). `topicMode` itself
-  generalizes fine — "one native thread per request" is Slack threads and Lark
-  topic groups too — but the kind name does not. Resolve it when the Slack
-  adapter lands (likely `"threaded"`), together with whatever else that second
-  platform proves wrong about the contract; renaming it now would be guessing.
+  platform-blind config contract (`channels/types.ts`), and Slack confirmed it
+  does not generalize — the adapter reports every channel as `"group"` because
+  a Slack channel is *always* threaded, so `"forum"` would be either always or
+  never right. `topicMode` turned out not to generalize either: it is a real
+  switch on Telegram and a constant on Slack, which now shows "Thread mode:
+  always on" instead. Both want resolving together with Lark — probably by
+  making "threads per request" an adapter capability rather than a stored flag.
+  Two data points is enough to see the shape; a third decides the name.
 - Nothing in Pier authenticates: the workbench, the task routes and the channel
   config all trust whoever reaches the loopback port. IM channels raise the
   stakes (a config write decides who may drive an agent in a group chat) but do

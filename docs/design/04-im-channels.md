@@ -1,9 +1,14 @@
 # IM Channels (living spec)
 
-Platform adapters in front of Pi sessions. Telegram is the first one; Slack and
-Lark are configurable in the Console but have no adapter yet. This document is
-for whoever writes the second adapter: what is already shared, what is genuinely
+Platform adapters in front of Pi sessions. Telegram and Slack have adapters;
+Lark is configurable in the Console but has none yet. This document is for
+whoever writes the next adapter: what is already shared, what is genuinely
 platform-specific, and which mistakes are already paid for.
+
+Slack was the second adapter and cost four new files plus one branch in
+`runtime.ts` — the shared layer needed two additions (`ChannelConfig.appToken`,
+`ChannelControl.knows`) and one fix (receipt ids are strings, not numbers).
+Both additions are noted where they matter below.
 
 `docs/architecture.md` owns the rules. This file owns the *how*.
 
@@ -16,23 +21,31 @@ detect something itself.
 
 | Feature | Behaviour | Shared / adapter | TG | Slack | Lark |
 | --- | --- | --- | :-: | :-: | :-: |
-| Session per conversation | One chat (or thread) is one persisted Pi session, stable across restarts | shared (`conversations.ts`) | ✅ | — | — |
-| Thread-per-request | A message in the parent chat opens a native thread and its own session; replies and commands stay put | shared policy, adapter creates the thread | ✅ | — | — |
-| Steer by default | Inbound joins the running turn rather than queueing behind it | shared (`mode: "steer"`) | ✅ | — | — |
-| Progress receipts | Every message that entered a turn wears 👀 until it settles; no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | — | — |
-| Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | — | — |
-| Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as an ordinary message | shared parse, adapter renders + feeds back | ✅ | — | — |
-| Image attachments | Inbound images reach the agent | adapter (download after the gate) | ✅ | — | — |
-| System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers | shared (`Channel.notify`) | ✅ | — | — |
-| `/stop` | Abort the conversation's running turn | shared (`runtime` → `abortConversation`) | ✅ | — | — |
-| `/bind <code>` | Redeem a Console-issued single-use code in a DM | shared | ✅ | — | — |
-| Permissions | Chat enable · require mention (groups) · bind (always in DMs) | shared (`gate()`) | ✅ | — | — |
-| Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | — | — |
-| Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ⬜ | ⬜ |
-| Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | — | — |
-| `@bot` / `/settings` panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | — | — |
+| Session per conversation | One chat (or thread) is one persisted Pi session, stable across restarts | shared (`conversations.ts`) | ✅ | ✅ | — |
+| Thread-per-request | A message in the parent chat opens a native thread and its own session; replies and commands stay put | shared policy, adapter creates the thread | ✅ | ✅ | — |
+| Steer by default | Inbound joins the running turn rather than queueing behind it | shared (`mode: "steer"`) | ✅ | ✅ | — |
+| Progress receipts | Every message that entered a turn wears 👀 until it settles; no intermediate reasoning is ever posted | shared ledger, adapter calls the reaction API | ✅ | ✅ | — |
+| Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | ✅ | — |
+| Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as an ordinary message | shared parse, adapter renders + feeds back | ✅ | ✅ | — |
+| Image attachments | Inbound images reach the agent | adapter (download after the gate) | ✅ | ✅ | — |
+| System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers | shared (`Channel.notify`) | ✅ | ✅ | — |
+| Failure notices | Any error reaches the conversation, not just the web timeline | shared (`Router.report`) | ✅ | ✅ | — |
+| Visible empty turns | A turn with no text still posts one muted line saying why | shared (`AgentReply.silence`), adapter renders | ✅ | ✅ | — |
+| Speaker identity | `[name<id> time]` above a message, only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ | — |
+| Deliberate silence | `<silent>` sends no reply, so a group thread is bearable | shared (`splitReply`) | ✅ | ✅ | — |
+| Stop | Abort the conversation's running turn | shared (`runtime` → `abortConversation`) | ✅ | ✅ | — |
+| Bind | Redeem a Console-issued single-use code in a DM | shared | ✅ | ✅ | — |
+| Permissions | Chat enable · require mention (groups) · bind (always in DMs) | shared (`gate()`) | ✅ | ✅ | — |
+| Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | ✅ | — |
+| Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ | ⬜ |
+| Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ | — |
+| Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ | — |
 
 ✅ done · ⬜ configurable, no adapter · — not started
+
+Command *spelling* is per-platform, not shared: Telegram takes `/stop`,
+`/settings`, `/bind <code>`, and Slack takes the same words without the slash
+(see Slack specifics). The behaviour behind them is identical.
 
 ### Deliberately not features
 
@@ -45,6 +58,10 @@ Rejected on purpose; re-adding any of them is a design decision, not a gap.
   inherits its group and nothing else.
 - **Admin / bind management from chat** — that is the Console's job.
 - **Webhook inbound** — a local process should not require public inbound HTTP.
+- **Registered Slack slash commands** — manifest setup for a second, weaker way
+  to say what a bare word in the thread already says.
+- **Posting in a Slack channel's main flow** — every reply lives in a thread,
+  so there is no "reply here instead" mode to configure.
 - **Editing a live session's cwd** — Pi fixes cwd at creation, so "change the
   working directory" is "start a new session there", and says so.
 
@@ -54,6 +71,10 @@ Rejected on purpose; re-adding any of them is a design decision, not a gap.
 src/channels/
   types.ts            config contract; type-only imported by web/ui — no node builtins
   config.ts           ChannelStore (one JSON doc per platform) + gate() — SHARED
+  gatekeeper.ts       the inbound verdict + its drop log, and the bind-hint
+                      throttle — SHARED
+  chains.ts           one promise chain per conversation, and a bounded drain — SHARED
+  chunk.ts            cut a long turn at the last break that fits — SHARED
   commands.ts         parseCommand() — SHARED
   conversations.ts    durable conversation → session map — SHARED
   receipts.ts         the reaction-receipt lifecycle, storage included — SHARED
@@ -65,11 +86,52 @@ src/channels/
   telegram-api.ts     Bot API client (the only file touching api.telegram.org)
   telegram-render.ts  how a reply looks: markdown → HTML, and buttons
   telegram-panel.ts   the in-chat settings panel
+  slack.ts            the adapter
+  slack-api.ts        Web API + Socket Mode (the only file touching slack.com)
+  slack-render.ts     how a reply looks: markdown → mrkdwn, and Block Kit
+  slack-panel.ts      the in-chat settings panel
+  slack-tool.ts       the agent-facing tool (intent in, Pier performs it)
+  slack-archive.ts    the tool's message cache + sync-coverage bookkeeping
+  slack-directory.ts  channel kind/name + user names, cached for the process
 ```
 
-Everything but the last four is shared. A second adapter should add four files
-and touch nothing else except `runtime.ts` (one branch) and the Console's
-`supported` flag.
+Everything but the per-platform quartets is shared. A third adapter should add
+four files and touch nothing else except `runtime.ts` (one entry in `ADAPTERS`)
+and the Console's `supported` flag.
+
+### What was extracted, and what deliberately was not
+
+The rule is "the third repeat earns an abstraction", so two adapters mostly do
+not justify one. Five things were pulled out anyway, because in each the second
+copy being *subtly different* is a bug rather than a style difference:
+
+| Extracted | Why it could not wait for a third |
+| --- | --- |
+| `originLabel` → `core/reply.ts` | Byte-identical, and it is *wording*: every surface must spell a system input the same way, which is what that file already owns. |
+| `Gatekeeper.admit` | A drop that does not name its verdict is indistinguishable from a bug — the contract is "log every drop", and it has to hold per platform. |
+| `Gatekeeper.mayHint` | The throttle map is fed by strangers. Pruning is the invariant; a copy that only sets and never deletes is a slow leak nobody notices. |
+| `Chains.run` | Every link needs its own `catch`, or one rejection silences that chat for the life of the process. Fails closed, permanently, and silently. |
+| `Chains.drain` | Bounded on purpose: `reload()` runs on the Console's save, so a stuck handler must not hold that request open. |
+| `chunkText` | Twelve lines of index arithmetic; having it twice is having it wrong once. Per-platform repair (Slack's fence re-balancing) stays with the renderer. |
+
+**The two panels are deliberately still duplicated.** `telegram-panel.ts` and
+`slack-panel.ts` share their whole shape — open, refresh, edit-in-place, model
+paging by index, reasoning list, the cwd action, the `cfg:` dispatch — and
+differ only in rendering primitives (an HTML string against Block Kit objects,
+`force_reply` against a modal). Extracting now would mean inventing a rendering
+abstraction from two data points, which is the thing the rule exists to
+prevent. Lark is what should earn it; the shared part is a state machine, and
+it will be obvious what shape it wants once a third renderer exists.
+
+**Budget note.** `channel adapter ≤ 200 lines` is the stated tripwire and both
+adapters exceed it (Telegram ~385 code lines, Slack ~440). The excess is not a
+wrong-layer abstraction: roughly half of each file is the inbound normalization
+and gate-logging that the platform's own event shape forces, and the four-file
+split already puts transport, rendering and the panel elsewhere. Slack's extra
+~55 lines over Telegram are its three envelope types, `event_id` dedup, and the
+`conversations.info` / `users.info` lookups Telegram gets inline on the event.
+Re-splitting further would trade one over-budget file for three files and an
+extra seam, which is the worse deal — but this is the number to watch.
 
 ## The seam
 
@@ -79,8 +141,9 @@ and touch nothing else except `runtime.ts` (one branch) and the Console's
 - `send(conversationId, reply)` — an assistant turn. **Called on every
   `turn-end`, empty text included.** Empty means "the turn settled with nothing
   to say", which is when per-turn UI (reaction receipts) must come off.
-- `notify(conversationId, {text, origin})` — a persisted `system-input`: task
-  delegation, callback, supervisor message. Sent *before* the turn it triggers,
+- `notify(conversationId, {text, origin})` — a note the chat should see that is
+  not an assistant turn. Two origins: a persisted `system-input` (task
+  delegation, callback, supervisor message), and **`{kind:"error"}`**. Sent *before* the turn it triggers,
   so an answer nobody asked for has a visible cause. Never rendered as an
   assistant turn, and it must not retire the receipts — that turn is still running.
 - `stop()` — must **drain in-flight work**, because `runtime.reload()` starts a
@@ -91,17 +154,33 @@ and touch nothing else except `runtime.ts` (one branch) and the Console's
 `formatTurnMeta()` from `core/reply.ts` — the wording and units live there so
 web and every adapter agree (`45s · 32K tok`).
 
+**A failure the chat cannot see is a failure nobody can debug.** `Router` posts
+every error into the conversation as a `{kind:"error"}` note — session errors
+(a tool that threw, a lost connection), a prompt that was rejected, and a
+delivery that failed. This is shared and automatic: an adapter that implements
+`notify` gets it, and must not reimplement it.
+
+The failure mode it exists for: the receipts come off on turn-end, so an IM user
+sees the eyes disappear and no reply arrive, which is indistinguishable from a
+deliberate silence. The web had the error in its timeline all along, which is
+exactly why this went unnoticed — the surface being debugged from was not the
+surface that showed the problem. Notes are trimmed to 600 characters, and a
+notify that itself fails is reported to the hub once, never retried into a loop.
+
 **Control that is not a prompt does not go through the seam.** `ChannelControl`
 (`control.ts`) is a narrow, platform-blind wrapper over the router and the
-factory — abort, read status, list/set model, set reasoning, start a new session
-— injected by `runtime.ts`, which owns both. The seam keeps exactly one inbound
-path (`onMessage`); add the next control here, not there.
+factory — abort, read status, list/set model, set reasoning, start a new
+session, ask whether a conversation is already known — injected by `runtime.ts`,
+which owns both. The seam keeps exactly one inbound path (`onMessage`); add the
+next control here, not there. Slack's arrival added exactly one method
+(`knows()`, for "is this thread already mine?"), which is the size a second
+adapter should expect to add.
 
 ## The in-chat panel
 
 `@bot` on its own (the text is empty once the mention is stripped) and
-`/settings` are the same request. `telegram-panel.ts` is the reference
-implementation; the parts a second adapter should copy rather than reinvent:
+`settings` are the same request. Both panels implement the same contract; the
+parts a third adapter should copy rather than reinvent:
 
 - **One message, edited in place.** A new message per tap buries the chat.
 - **Namespaced payloads.** Panel buttons are `cfg:<action>[:<arg>]` and are
@@ -114,15 +193,102 @@ implementation; the parts a second adapter should copy rather than reinvent:
   is the only honest recovery, and it costs one tap.
 - **Changing the directory is one action, and it says so.** Pi fixes cwd at
   session creation, so the button reads "New session in…", asks for one typed
-  answer (Telegram `force_reply`), and rejects a relative path without changing
-  anything. That typed answer must be consumed before the prompt path — it is
-  an answer to us, not a message for the agent.
+  answer, and rejects a relative path without changing anything. Telegram uses
+  `force_reply` and must consume that answer *before* the prompt path — it is an
+  answer to us, not a message for the agent. Slack uses a modal and carries the
+  conversation id in `private_metadata`, which sidesteps the problem entirely:
+  prefer a modal wherever the platform has one.
+
+## Agent access: the platform as a tool, not just a surface
+
+Everything above is Pier *receiving*. `slack-tool.ts` is the other direction: an
+agent session asking Pier to read or write Slack. Two files, one config flag,
+one skill (`skills/pier-slack/`), and a deliberate shape:
+
+- **The agent states an intent; Pier performs it.** The bot token never reaches
+  the model, and the tool takes a `#name` and an ISO time rather than a channel
+  id and a Slack `ts`. If the agent had to know what a `ts` is, this would be a
+  documented API instead of a tool — and the skill would be a Slack manual
+  rather than five operations.
+- **"Here" is the default target.** Omitting `channel` acts on the conversation
+  the calling session is answering, resolved through
+  `Router.conversationOf(sessionId)`. Without this the agent could read and post
+  anywhere *except* the thread it was standing in, and had to ask the human to
+  paste a channel id and their own user id — which is what shipping it without
+  this actually did. `context` reports the same thing explicitly.
+  - Resolved **per call**, never captured at session creation: a Slack thread
+    outlives the process and `AgentFactory.resume()` takes no launch options,
+    so anything baked in at creation is gone after the first restart. That is
+    also why this is not a per-session system prompt.
+  - `thread_ts: "none"` is the explicit opt-out that starts a top-level
+    message; a `thread_ts` from one channel is never inherited into another.
+- **Transcripts carry `userId` beside `user`.** The name is what makes a
+  transcript readable; the id is the only thing `<@…>` can be built from.
+  Returning only the name is why the agent asked the human for their own user
+  id — a question it should never need to ask.
+- **Reads are cache-first, and the cache is about *coverage*, not rows.** A
+  table of messages cannot distinguish "that window was empty" from "never
+  fetched", so `slack_sync` records the contiguous span each conversation is
+  synced over. Slack history is immutable, so a window inside that span is
+  answered from SQLite forever; only the gap goes out.
+  - The span is widened **only when the new window touches it**. Widening on a
+    disjoint fetch would claim the gap in between and serve a hole as an
+    answer. That invariant has the one test worth keeping in mind here — it
+    fails loudly if the merge is made naive.
+  - An open-ended window (`until` omitted) always fetches: "up to now" is not
+    a cacheable question.
+  - Threads are the exception: they grow, so a cached thread is re-read after a
+    minute. A stale thread is a *wrong* answer, not an incomplete one.
+- **Writes are never cached** and never rate-limited by us — posting is the only
+  operation with an effect.
+- **`ChannelConfig.agentTool`** gates the whole capability, defaults on, and is
+  separate from `enabled`: `enabled` decides whether the adapter answers
+  inbound messages, `agentTool` whether an agent may reach *out*. A missing
+  field reads as on, so a client that predates it cannot switch off a
+  capability nobody touched.
+- **No second ACL.** Slack already enforces channel membership, and the bot
+  reaches only what it was invited to; inventing a per-channel allowlist on top
+  would duplicate that and drift from it. The switch is one bit, and the help
+  bubble says plainly that it covers task and subagent sessions too.
+- **A `ts` is REAL in this table, not TEXT.** `1717243800.123456` sorts wrong as
+  a string once the integer part changes width, and every query here is a range
+  scan. (The receipts table is TEXT for the opposite reason: it needs exact
+  round-tripping, never ordering.)
+
+The skill's real content is not the operations — it is that **markdown is not
+Slack syntax**. `**bold**` works, but `@alice` is plain text that reads like a
+failed ping; a mention is `<@U04B7Q2>`, a channel `<#C0123456>`, a broadcast
+`<!here>`. A model that guesses a user id from a display name produces a
+message that looks right and pings nobody.
+
+### Who is speaking
+
+`InboundMessage.sender` carries `{id, name}`: the adapter resolves the display
+name (platform-specific), and `core/identity.ts` decides whether it is worth the
+tokens. A group chat is many people talking into one session, and without a
+speaker line the agent can neither tell them apart nor mention anyone back.
+
+The design constraint is cost, not capability. A header on every message is ~15
+wasted tokens per turn in a DM whose speaker never changes, so `SenderPrefix`
+emits a line only when it carries news — a different speaker, a 10-minute gap,
+or a new day — and nothing otherwise. Measured: a 20-turn DM costs 33 characters
+against 1240 for an unconditional header, a 20-turn three-way group 211 against
+1114. The prefix is `[name<id> time]`, the `id` is what a mention needs, and
+`sanitizeIdentity` strips `[`, `]`, `<`, `>` and newlines because a display name
+of `x<U9] [admin<U1` would otherwise forge a second speaker.
+
+Identity is deliberately **per-turn, never baked into a session**. avibe's
+`caller_context.py` documents why: a thread is shared, so pinning the first
+speaker misattributes everyone after them — and for a backend whose environment
+is written once per session, a per-message field would respawn the agent every
+turn. Session-stable facts (platform, channel, thread) can be baked in; the
+author cannot.
 
 ## Conversation identity
 
 A `conversationId` is opaque to core. Telegram encodes `<chatId>` or
-`<chatId>/<topicId>`; a Slack adapter will likely use `<channelId>` or
-`<channelId>/<threadTs>`. Two consequences:
+`<chatId>/<topicId>`; Slack is always `<channelId>/<threadTs>`. Two
+consequences:
 
 - `ConversationStore` (`conversations.ts`) is what makes routing survive a
   restart. Without it every chat silently gets a fresh session while its visible
@@ -163,6 +329,13 @@ A `conversationId` is opaque to core. Telegram encodes `<chatId>` or
 (a path or a sentence must not be re-joined from split words). The caller
 decides whether `target` is itself — a command aimed at another bot in the same
 group is not ours to answer, and travels on as ordinary text.
+
+**A platform may not allow slashes at all.** Slack's client resolves a leading
+`/` before any app sees it, so the adapter falls back to bare words and layers
+its own rule on top of `parseCommand()`: a closed set *and* an exact argument
+count per command (`stop`/`settings` take none, `bind` takes one). Anything
+longer is prose and goes to the agent. Check question 8 in the verification
+table before assuming `/stop` can even reach you.
 
 ## Inbound checklist for a new adapter
 
@@ -238,27 +411,97 @@ own platform so it cannot land on the tab the user switched to).
 
 ## Verify on the platform before writing the adapter
 
-Every one of these produced a bug in Telegram. Answer them first:
+Every one of these produced a bug in Telegram. Answer them first — the Slack
+column is filled in because answering them up front is what made that adapter
+mostly mechanical.
 
-1. **How big may an interactive payload be, in bytes?** Telegram: 64 — about 21
-   CJK characters. Assume Latin test data will hide the problem.
-2. **Does the platform echo the interactive component back** on the message a
-   tap came from? If yes, resolve labels from there and keep no state at all.
-3. **Can a bot add _and remove_ its own reactions**, and react to its own
-   messages? The whole receipt lifecycle depends on it.
-4. **Is there a thread primitive**, and can the bot create one? What right does
-   that need?
-5. **Message length cap, and rate limits per chat.** Both bite a long turn split
-   into chunks.
-6. **What counts as "addressed to the bot"**, and does the platform strip the
-   mention for you?
-7. **Does it have small or muted text?** Telegram does not, which constrains
-   every footer and label.
+| # | Question | Telegram | Slack |
+| - | -------- | -------- | ----- |
+| 1 | **Interactive payload size?** | `callback_data` 64 **bytes** (~21 CJK chars) | `action_id` 255 chars, `value` 2000 |
+| 2 | **Does it echo the component back** on the message a click came from? | yes, `reply_markup` | yes, `message.blocks` |
+| 3 | **Can a bot add _and remove_ its own reactions?** | yes, one per message | yes, but by **short name** (`eyes`), never the codepoint |
+| 4 | **Thread primitive, and what right to create one?** | forum topics; needs admin + `Manage Topics` | `thread_ts`; no right at all, no setup |
+| 5 | **Length cap and rate limit** | 4096 chars, ~1 msg/s per chat (`429` + `retry_after`) | 3000 per section block, ~1 msg/s per channel (`429` + `Retry-After`) |
+| 6 | **What is "addressed", and is the mention stripped?** | mention entity / reply-to-bot; not stripped | `<@BOTID>` anywhere in text; not stripped |
+| 7 | **Small or muted text?** | none — footers must be italics | yes, the `context` block |
+
+Two more that Slack added to the list:
+
+8. **Can the user even send a `/command`?** Slack's client resolves a leading
+   `/` itself and never delivers an unregistered one, so slash commands are not
+   a free feature the way they are on Telegram.
+9. **Is delivery exactly-once, and is one user action one event?** Slack
+   redelivers anything it did not see acked *and* sends `app_mention` alongside
+   `message.channels` for the same mention — with a different `event_id`, so
+   dedup cannot save you. Ignore one of the two at the source.
 
 ## Traps already paid for
 
-Ordered by how much time each cost.
+Ordered by how much time each cost. The Slack ones are marked `[slack]`; the
+rest were paid for on Telegram and every one of them still applied.
 
+- `[slack]` **A platform id is not a number just because it looks like one.**
+  A Slack `ts` in an `INTEGER` column round-trips through a double, and an id you
+  cannot reproduce exactly is a 👀 nobody can ever clear. Opaque strings in
+  shared code; convert at the adapter's API boundary.
+- `[slack]` **A closed command set is not enough without an arity.** Matching
+  the first bare word against `{stop, settings, bind}` still turned "settings
+  are broken, please help" into a panel and would have turned "stop the deploy
+  and tell me why" into an abort. A bare command must be the *whole* message.
+  Caught by a test, not by review.
+- `[slack]` **One user action can be two events**, with different `event_id`s,
+  so dedup cannot save you. Ignore one at the source and log that you did.
+- `[slack]` **Ack is not handling.** At-least-once delivery plus a turn that
+  outlives the deadline means acking after the work runs every slow turn twice.
+- `[slack]` **A push transport needs the same anti-spin floor as a poll loop,
+  and it is easier to miss.** Telegram's floor is obvious because the hot loop
+  is right there in `poll()`. Socket Mode's is not: Slack answers "too many
+  connections" by *accepting* the socket and closing it immediately, so the
+  await resolves **normally** and skips the `catch` that held the backoff —
+  reopening at one `apps.connections.open` per event-loop tick. The fix is to
+  time the connection, not to trust how it ended: anything that died younger
+  than ~5s was a failed attempt, however it ended. Measured at 6 calls in 5ms
+  before the fix, 2 after.
+- `[slack]` **A reconnect loop must re-check the stop flag after every await.**
+  `stop()` landing while `apps.connections.open` is in flight otherwise opens a
+  socket nobody holds a reference to — and `reload()` on the Console's save is
+  exactly that race, once per config change.
+- `[slack]` **mrkdwn spells bold with markdown's italic star**, so emitting `*`
+  early lets the italic pass eat it again. Sentinel, substitute last.
+- `[slack]` **A comment that says "this is fine" was fine on the other
+  platform.** `telegram-render.ts` documents that a cut mid-`<pre>` is harmless
+  because Telegram closes the tag itself. Slack does not, so the same code
+  silently mangled every split code block. Copying logic means re-testing its
+  *conclusions*, not just its lines. Chunking needs a golden test with a block
+  longer than one chunk.
+- `[slack]` **Layout has no local oracle.** Every golden test passed while the
+  client hid most of every long reply behind "Show more" — the assertions check
+  the blocks Pier builds, not how Slack draws them. Only a screenshot caught it.
+  A new adapter needs one real end-to-end look at a long reply, a split code
+  block and a link-heavy reply before it is believed.
+- `[slack]` **Ask what the platform renders natively before building a
+  renderer.** Two rounds went into making `section` behave — paragraph
+  splitting, fence balancing, a size budget — for a problem the `markdown` block
+  does not have; the mrkdwn layer is now fallback-only. avibe had answered it in
+  one line of comment (`slack.py:631`), which is an argument for reading a
+  reference implementation's *render* path early, not just its transport.
+- **An empty turn must still say something.** The first fix here was to post
+  *nothing* when a turn had no text — which produced exactly the failure mode
+  the receipts were meant to prevent: the eyes come off, no message arrives, and
+  nobody can tell a deliberate silence from a crash. The rule is the opposite:
+  an empty turn posts one muted line naming which kind of nothing it was
+  (`stayed silent — <reason>` or `no reply`) plus the footer. `AgentReply.silence`
+  carries the reason so the adapter can tell the two apart; a turn that is only
+  its options is *not* nothing, because the buttons are the reply.
+- `[slack]` **A block cap must fold, not slice.** The first fix for the above
+  ended `sections()` with `groups.slice(0, MAX_BLOCKS)`, which silently drops
+  the end of a long answer — a worse failure than the one being fixed, and
+  invisible without a test that counts paragraphs in *and* out.
+- `[slack]` **A conversation id you did not mint is a message in the wrong
+  place.** `parseConversation("C100")` yields an empty thread, and posting with
+  `thread_ts: ""` puts an agent turn in the channel's main flow — exactly what
+  the adapter promises never to do. Refuse it loudly and still settle the
+  receipts, so a malformed id costs a log line instead of a stranded 👀.
 - **A payload cap bites non-Latin first.** Using a next-step label as the
   callback payload passed every English test and dropped *every* button on a
   Chinese reply — and because the parser had already stripped the block from the
@@ -318,18 +561,109 @@ Ordered by how much time each cost.
   `https://t.me/c/<chat id without its -100 prefix>/<topicId>` for a private
   one. Both resolve for members only, which is the audience that needs them.
 
-## What Slack and Lark will change
+## Slack specifics worth knowing
+
+The facts you build against. Where a fact also cost a mistake, the mistake is in
+**Traps** and not repeated here.
+
+- **Threads are the whole design.** Pier never posts into a channel's main flow:
+  a channel message is answered in *its own* thread (`thread_ts` = that
+  message's `ts`), a thread message in its thread. A conversation is always
+  `<channel>/<threadTs>` and a thread *is* a session. Threads need no admin
+  right and no group conversion, so what Telegram must negotiate for is simply
+  how this adapter always works — which is why `topicMode` has no meaning here
+  and the Console shows "Thread mode: always on".
+- **A DM follows the same rule, deliberately.** `threadOf` is `thread_ts ?? ts`
+  with no DM case, so every top-level DM opens its own thread and its own
+  session; only a reply *inside* one continues it. Telegram does the opposite (a
+  DM is one session forever), so this reads as a bug from that side. It was
+  checked and kept: on Slack a DM is where you *start* pieces of work, and the
+  thread is the unit of work everywhere. Give Lark the same rule.
+- **Two credentials.** An app-level token (`xapp-`, `connections:write`) opens
+  the Socket Mode socket; the bot token (`xoxb-`) signs every Web API call.
+  Hence `ChannelConfig.appToken`, masked by the same "masked means unchanged"
+  rule as `token`.
+- **Setup is a manifest, not a checklist.** Twelve scopes and four event
+  subscriptions across four config pages is where a setup goes wrong, and it
+  fails late as one `missing_scope` at runtime. The Console offers one button to
+  `api.slack.com/apps?new_app=1&manifest_json=…` with `SLACK_MANIFEST`
+  prefilled, plus a copy fallback. Two steps remain that no manifest can do: an
+  app-level token must be **minted by hand** (`Basic Information → App-Level
+  Tokens` — missed precisely because Socket Mode is already on), and the bot must
+  be invited to a channel. Borrowed from avibe.
+- **The manifest is least-privilege and every scope is load-bearing.** Absent on
+  purpose: `app_mentions:read` (duplicate event), `reactions:read` (receipts only
+  write), `commands` (no slash commands), `files:write` (nothing is uploaded),
+  `im:read` (a `D`-prefixed id is a DM by construction). `mpim:read` *is* needed:
+  a button click carries no `channel_type` and an mpim id is not `D`-prefixed.
+  12 scopes / 4 events against avibe's 18 / 7.
+- **Socket Mode, no SDK.** `apps.connections.open` plus Node's built-in
+  `WebSocket` is the entire transport; `@slack/socket-mode` would add a
+  dependency tree to wrap ~60 lines. Reconnection lives in `slack-api.ts`
+  because Slack recycles a connection every few hours with
+  `disconnect: refresh_requested` — protocol, not adapter policy. The loop sits
+  behind a one-interface seam (`SocketLike`) so it can be tested without a real
+  socket. **Envelopes are acked by the transport before handling**, because a
+  turn outlives the ack deadline by minutes.
+- **JSON bodies are for write methods only.** A read method (`users.info`,
+  `conversations.info|history|replies`) ignores a JSON body and then answers for
+  the missing parameter, so reads go form-encoded (`SlackApi.read`).
+- **Commands have no slash.** Slack's client intercepts a leading `/` and
+  refuses an unregistered command before an app sees it, so `stop`, `settings`
+  and `bind <code>` are bare words matched against a closed set *with an exact
+  argument count*. Registered slash commands are deliberately not a feature:
+  manifest setup for a second, weaker path (Slack only sends `thread_ts` for a
+  command typed inside a thread).
+- **`app_mention` is a duplicate** of `message.channels` with its own
+  `event_id`, so the adapter ignores the type and the walkthrough says not to
+  subscribe.
+- **Reactions are short names.** `reactions.add` rejects 👀 with `invalid_name`;
+  it wants `eyes`. `already_reacted` / `no_reaction` are successes.
+- **A `ts` is not a float-safe number** (`1761234567.123456`, 16 significant
+  digits), so it is an opaque string in shared code — hence
+  `channel_msg_receipts.message_id TEXT` — and a REAL column only where range
+  ordering is the point (`slack_messages`).
+- **"Addressed" needs durable state.** A reply in a thread Pier owns is Slack's
+  equivalent of Telegram's reply-to-bot, and it is what lets a conversation flow
+  without an `@` on every line. Adapter memory cannot answer it across the
+  Console's reload, so it asks `ChannelControl.knows()`.
+- **The body is a `markdown` block, not `section`/mrkdwn.** The single most
+  useful thing to copy. It takes standard markdown unmodified — tables,
+  headers, nested lists, none of which mrkdwn can express — and the client does
+  not collapse it behind "Show more", which a tall `section` always is. 12,000
+  chars per message against 3000 per section, so a normal turn is one message,
+  one block, no chunking.
+  - A workspace that refuses it (`invalid_blocks` / `unsupported_block_type`)
+    degrades to the translated mrkdwn path, which **latches off** so the failed
+    round trip is paid once per process. `invalid_arguments` deliberately does
+    *not* trigger it.
+  - `toMrkdwn()`, `sections()` and fence balancing exist only on that path —
+    which is why the mrkdwn renderer still earns its tests. There, one section
+    block per paragraph is required, and paragraphs must not be packed back
+    together to fill a budget.
+- **Link previews are off on every send.** `unfurl_links`/`unfurl_media` default
+  to `false` in `slack-api.ts` rather than per call site, so nothing can forget.
+  avibe carries the same switch.
+- **The footer gets a real block.** `context` is genuinely small muted text, so
+  `formatTurnMeta` needs none of Telegram's italic hack.
+- **The cwd prompt is a modal.** No `force_reply` on Slack, so `views.open` asks
+  for the path and `private_metadata` carries the conversation id — so the
+  submission needs no adapter-side state, strictly better than the Map
+  Telegram's force-reply path keeps.
+
+## What Lark will change
 
 Expectations, not facts — revisit when the code exists:
 
-- **Transport**: Socket Mode / Events API instead of a poll loop. The receive
-  loop is adapter-local; everything downstream of `onMessage` is not.
-- **Threads**: `topicMode` generalizes — "one native thread per request" is a
-  Slack thread and a Lark topic. `ChatKind`'s `"forum"` member does not
-  generalize and should be renamed then (see architecture.md → Open Questions).
-- **Rendering**: Slack Block Kit and Lark cards instead of an HTML subset;
-  `telegram-markdown.ts` has no shared part worth extracting yet.
-- **Buttons**: both have richer payloads than 64 bytes, so the label-as-payload
-  shortcut may stay or may become an id map.
-- **Reactions**: verify each platform actually allows a bot to add *and remove*
-  its own reaction before relying on the receipt lifecycle.
+- **Transport**: a long-lived WebSocket or webhook, closer to Slack than to a
+  poll loop. Everything downstream of `onMessage` is unaffected either way.
+- **Threads**: Lark topics should map the way Slack threads did. `ChatKind`'s
+  `"forum"` member is still Telegram-shaped and now clearly wants renaming
+  (Slack reports every channel as `"group"`); see architecture.md → Open
+  Questions.
+- **Rendering**: interactive cards. Two renderers exist and still share nothing
+  but `chunk()`'s shape — the third earns the abstraction, not the second. Ask
+  first whether Lark renders markdown natively the way Slack's `markdown` block
+  does; if it does, most of a renderer never needs writing.
+- **Credentials**: an app id / secret pair rather than one token, so `appToken`
+  may want to become a more general "second credential" or a per-platform bag.

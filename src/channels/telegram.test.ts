@@ -212,6 +212,7 @@ describe("gating", () => {
     expect(inbound).toEqual([{
       key: { channelId: "telegram", conversationId: "-100" },
       senderId: "42",
+      sender: { id: "42", name: "Q" },
       text: "ship it",
       images: [],
       mode: "steer",
@@ -414,16 +415,22 @@ describe("reaction receipts", () => {
     ]);
   });
 
-  it("clears receipts on a turn that ended with nothing to say", async () => {
+  it("says an empty turn happened, and clears its receipts", async () => {
     await feed(message({ chat: DM, text: "one" }));
-    await channel.send("42", { text: "", suggestions: [] });
-    expect(client.sent).toEqual([]);
+    // Total silence is indistinguishable from a crash, so an empty turn still
+    // posts one muted line saying which kind of nothing it was.
+    await channel.send("42", {
+      text: "",
+      suggestions: [],
+      meta: { completedAt: Date.now(), durationMs: 3000, tokens: 7900 },
+    });
+    expect(client.sent.at(-1)!.text).toContain("no reply");
     expect(client.reactions.at(-1)).toEqual({ chatId: "42", messageId: 10, emoji: null });
   });
 
   it("clears receipts a dead process left behind, at startup", async () => {
     // What a crash between 👀 and turn-end leaves on the books.
-    receipts.add({ conversationId: "-100/5", chatId: "-100", messageId: 88 });
+    receipts.add({ conversationId: "-100/5", chatId: "-100", messageId: "88" });
     const reborn = new TelegramChannel({ store, client, receipts, log: (m) => dropped.push(m) });
     await reborn.start(() => {});
     await new Promise((r) => setTimeout(r, 10));

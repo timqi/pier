@@ -17,7 +17,8 @@ import type {
 } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
-import { parseConversation } from "./telegram.js";
+import { parseConversation as parseSlack } from "./slack.js";
+import { parseConversation as parseTelegram } from "./telegram.js";
 import type { ChannelPlatform } from "./types.js";
 
 /** Everything an in-chat panel reads out. Absent when nothing is attached. */
@@ -35,6 +36,16 @@ export interface ConversationStatus {
 export interface ChannelControl {
   /** Launch options for a conversation's session, from its chat config. */
   launchFor(key: ConversationKey): Partial<AgentLaunchOptions>;
+  /**
+   * Has this conversation ever had a session? Durable, so it still answers
+   * after a restart.
+   *
+   * Slack needs it to decide whether a message is *addressed*: a reply inside
+   * a thread Pier already owns is continuing a conversation, which is Slack's
+   * equivalent of Telegram's "replying to the bot". Adapter-instance memory
+   * cannot answer that question across the reload the Console triggers.
+   */
+  knows(key: ConversationKey): boolean;
   abort(key: ConversationKey): Promise<void>;
   status(key: ConversationKey): Promise<ConversationStatus | null>;
   models(): Promise<ModelRef[]>;
@@ -58,10 +69,15 @@ export interface ControlDeps {
 export function createControl({ router, factory, conversations, store }: ControlDeps): ChannelControl {
   const launchFor = (key: ConversationKey): Partial<AgentLaunchOptions> => {
     const platform = key.channelId as ChannelPlatform;
-    // Only Telegram encodes a chat id in its conversation id today; a second
-    // adapter adds its own branch here, never in core.
-    if (platform !== "telegram") return {};
-    const policy = store.policy(platform, parseConversation(key.conversationId).chatId);
+    // Decoding a conversation id back to a chat id is the adapter layer's
+    // business, never core's — so each platform's own parser is used here.
+    const chatId = platform === "telegram"
+      ? parseTelegram(key.conversationId).chatId
+      : platform === "slack"
+      ? parseSlack(key.conversationId).channel
+      : undefined;
+    if (chatId === undefined) return {};
+    const policy = store.policy(platform, chatId);
     return {
       cwd: policy.cwd || undefined,
       model: policy.model ?? undefined,
@@ -71,6 +87,8 @@ export function createControl({ router, factory, conversations, store }: Control
 
   return {
     launchFor,
+
+    knows: (key) => conversations.get(key) !== undefined,
 
     abort: (key) => router.abortConversation(key),
 

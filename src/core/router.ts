@@ -2,6 +2,7 @@
 // persistence arrives with task storage (docs/plans/bootstrap.md step 4).
 
 import { EventHub } from "./hub.js";
+import { SenderPrefix, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
 import { splitReply } from "./reply.js";
 import type {
@@ -12,6 +13,10 @@ import type {
   ModelRef,
   SessionState,
 } from "./types.js";
+
+/** An error goes into a chat window, so it is trimmed to something readable. */
+const truncate = (message: string): string =>
+  message.length > 600 ? `${message.slice(0, 600)}…` : message;
 
 function keyOf(key: ConversationKey): string {
   return `${key.channelId}:${key.conversationId}`;
@@ -24,6 +29,8 @@ export class Router {
     { session: AgentSession; key: ConversationKey; stateSince: number }
   >();
   private readonly channels = new Map<string, Channel>();
+  /** Who each session last heard from, so a header costs tokens only on news. */
+  private readonly senders = new SenderPrefix();
 
   constructor(
     private readonly hub: EventHub,
@@ -33,6 +40,28 @@ export class Router {
 
   registerChannel(channel: Channel): void {
     this.channels.set(channel.id, channel);
+  }
+
+  /**
+   * Tell the conversation something went wrong, then the event stream.
+   *
+   * Applies to every channel, because the failure mode is the same everywhere:
+   * an IM user watching the eyes come off with no reply cannot tell a crash
+   * from a deliberate silence, and the operator cannot debug what they never
+   * saw. The web reads errors off the hub already, so only a registered channel
+   * gets a note; `notify` is used rather than `send` so it is never mistaken
+   * for an assistant turn.
+   */
+  private report(sessionId: string, key: ConversationKey, message: string): void {
+    this.hub.emit(sessionId, { type: "error", message });
+    const channel = this.channels.get(key.channelId);
+    // Best-effort and never recursive: if telling the chat also fails, the hub
+    // already has the original.
+    channel?.notify(key.conversationId, { text: truncate(message), origin: { kind: "error" } })
+      .catch((err) => this.hub.emit(sessionId, {
+        type: "error",
+        message: `could not report the failure to ${key.channelId}: ${String(err)}`,
+      }));
   }
 
   stateOf(sessionId: string): SessionState | undefined {
@@ -46,6 +75,16 @@ export class Router {
   /** Current in-memory model of a live session (undefined when not attached). */
   modelOf(sessionId: string): ModelRef | undefined {
     return this.bySession.get(sessionId)?.session.model;
+  }
+
+  /**
+   * Which conversation a session is answering, if any. The inverse of
+   * `sessionOf`, and what lets a tool act on "here" — an agent reached through
+   * a Slack thread otherwise has no way to name the thread it is replying in.
+   * A task or subagent session is attached to nothing and answers undefined.
+   */
+  conversationOf(sessionId: string): ConversationKey | undefined {
+    return this.bySession.get(sessionId)?.key;
   }
 
   /** Attach an existing session to a conversation and wire its events. */
@@ -66,6 +105,16 @@ export class Router {
           state: payload.state,
         });
       }
+      // An error the session itself reported (a tool that threw, a model
+      // refusal, a lost connection). Without this it lands only in the web
+      // timeline and the IM side goes quiet for no visible reason.
+      if (payload.type === "error") {
+        const channel = this.channels.get(key.channelId);
+        channel?.notify(key.conversationId, {
+          text: truncate(payload.message),
+          origin: { kind: "error" },
+        }).catch(() => {});
+      }
       // A system input is context the chat did not see being typed. It goes
       // out before the turn it triggers, so the answer has a visible cause.
       if (payload.type === "system-input") {
@@ -85,10 +134,7 @@ export class Router {
         const channel = this.channels.get(key.channelId);
         if (channel) {
           channel.send(key.conversationId, splitReply(payload.text, payload.meta)).catch((err) => {
-            this.hub.emit(session.id, {
-              type: "error",
-              message: `outbound to ${key.channelId} failed: ${String(err)}`,
-            });
+            this.report(session.id, key, `outbound to ${key.channelId} failed: ${String(err)}`);
           });
         }
       }
@@ -130,10 +176,14 @@ export class Router {
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
     const session = await this.ensure(msg.key);
     const { action, text } = decide(msg, session.state);
+    // A group chat is many people talking into one session; without a speaker
+    // line the agent cannot tell them apart or mention anyone back. Emitted
+    // only when the speaker or the clock says something new.
+    const prompt = withPrefix(this.senders.next(session.id, msg.sender), text);
     // Turn outcomes flow through the event stream; a rejected call surfaces
     // there too, never as a thrown exception across the seam.
-    session[action](text, msg.images).catch((err) => {
-      this.hub.emit(session.id, { type: "error", message: String(err) });
+    session[action](prompt, msg.images).catch((err) => {
+      this.report(session.id, msg.key, String(err));
     });
     return { sessionId: session.id };
   }

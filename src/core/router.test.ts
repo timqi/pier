@@ -10,6 +10,7 @@ import type {
   AgentSession,
   Channel,
   SessionEventPayload,
+  NoteOrigin,
   SystemInputOrigin,
 } from "./types.js";
 
@@ -44,7 +45,7 @@ function fakeSession(id: string) {
 
 function fakeChannel(id: string) {
   const sent: [string, AgentReply][] = [];
-  const notes: [string, { text: string; origin: SystemInputOrigin }][] = [];
+  const notes: [string, { text: string; origin: NoteOrigin }][] = [];
   const channel: Channel = {
     id,
     start: () => Promise.resolve(),
@@ -135,7 +136,49 @@ describe("channel fan-out", () => {
     expect(errors).toEqual([
       "notify telegram failed: Error: network",
       "outbound to telegram failed: Error: 429",
+      // The failure is also pushed at the chat, and that attempt failing is
+      // itself reported — but only once, never recursively.
+      "could not report the failure to telegram: Error: network",
     ]);
+  });
+
+  it("tells the conversation when the session itself reports an error", async () => {
+    const { channel, notes } = fakeChannel("telegram");
+    router.registerChannel(channel);
+    await router.ensure(KEY);
+    fake.emit({ type: "error", message: "tool exploded" });
+    await new Promise((r) => setTimeout(r, 0));
+    // Otherwise the eyes come off with no reply and nothing says why.
+    expect(notes).toEqual([[KEY.conversationId, {
+      text: "tool exploded",
+      origin: { kind: "error" },
+    }]]);
+  });
+
+  it("tells the conversation when the prompt itself fails", async () => {
+    const { channel, notes } = fakeChannel("telegram");
+    router.registerChannel(channel);
+    // The double is cast to AgentSession; reach the real object to break it.
+    Object.assign(fake.session, { prompt: () => Promise.reject(new Error("session gone")) });
+    await router.dispatch({
+      key: KEY,
+      senderId: "u",
+      text: "hi",
+      mode: "auto",
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(notes[0]?.[1]).toMatchObject({ origin: { kind: "error" } });
+    expect(notes[0]?.[1].text).toContain("session gone");
+  });
+
+  it("trims a long error to something a chat window can hold", async () => {
+    const { channel, notes } = fakeChannel("telegram");
+    router.registerChannel(channel);
+    await router.ensure(KEY);
+    fake.emit({ type: "error", message: "x".repeat(2000) });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(notes[0]![1].text).toHaveLength(601);
+    expect(notes[0]![1].text.endsWith("\u2026")).toBe(true);
   });
 });
 

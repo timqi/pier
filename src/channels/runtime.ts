@@ -1,13 +1,29 @@
 // Channel lifecycle: which adapters are running, and where their sessions
 // live. Keeps main.ts wiring-only and gives the Console one call to apply a
-// config change. Slack and Lark are configurable but have no adapter yet.
+// config change. Lark is configurable but has no adapter yet.
 
 import type { Router } from "../core/router.js";
 import type { Channel } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
+import { SlackChannel } from "./slack.js";
 import { TelegramChannel } from "./telegram.js";
 import type { ChannelPlatform } from "./types.js";
+
+/** Platforms with an adapter, and what each needs before it can start. */
+const ADAPTERS: {
+  platform: ChannelPlatform;
+  /** Slack authenticates its event socket separately from its Web API. */
+  needsAppToken: boolean;
+  build(deps: {
+    store: ChannelStore;
+    log: (m: string) => void;
+    control: ChannelControl;
+  }): Channel;
+}[] = [
+  { platform: "telegram", needsAppToken: false, build: (deps) => new TelegramChannel(deps) },
+  { platform: "slack", needsAppToken: true, build: (deps) => new SlackChannel(deps) },
+];
 
 export class ChannelRuntime {
   private readonly live = new Map<ChannelPlatform, Channel>();
@@ -21,17 +37,28 @@ export class ChannelRuntime {
 
   /** (Re)start every platform whose config says it should run. Idempotent. */
   async reload(): Promise<void> {
-    const existing = this.live.get("telegram");
+    for (const adapter of ADAPTERS) await this.restart(adapter);
+  }
+
+  private async restart(adapter: (typeof ADAPTERS)[number]): Promise<void> {
+    const { platform, needsAppToken, build } = adapter;
+    const existing = this.live.get(platform);
     if (existing) {
-      this.live.delete("telegram");
+      this.live.delete(platform);
       await existing.stop().catch(() => {});
     }
-    const config = this.store.get("telegram");
+    const config = this.store.get(platform);
     if (!config.enabled || !config.token) return;
-    const channel = new TelegramChannel({
+    if (needsAppToken && !config.appToken) {
+      // Named, not silent: "enabled but nothing happens" is otherwise
+      // indistinguishable from a broken adapter.
+      this.log(`${platform}: enabled but no app token, not starting`);
+      return;
+    }
+    const channel = build({
       store: this.store,
-      log: (m) => this.log(`telegram: ${m}`),
-      // The runtime owns the router, so channel control (/stop, the settings
+      log: (m) => this.log(`${platform}: ${m}`),
+      // The runtime owns the router, so channel control (stop, the settings
       // panel) is wired here instead of widening the Channel seam.
       control: this.control,
     });
@@ -40,11 +67,11 @@ export class ChannelRuntime {
         void this.router.dispatch(msg).catch((err) => this.log(`dispatch failed: ${String(err)}`));
       });
     } catch (err) {
-      this.log(`telegram failed to start: ${String(err)}`);
+      this.log(`${platform} failed to start: ${String(err)}`);
       return;
     }
     this.router.registerChannel(channel);
-    this.live.set("telegram", channel);
+    this.live.set(platform, channel);
   }
 
   async stop(): Promise<void> {

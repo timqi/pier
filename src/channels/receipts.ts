@@ -16,19 +16,26 @@ export interface Receipt {
   /** The conversation whose turn-end clears this receipt. */
   conversationId: string;
   chatId: string;
-  messageId: number;
+  /**
+   * Opaque platform message token. A string, not a number: Telegram numbers
+   * its messages but a Slack `ts` is `1761234567.123456`, which no float holds
+   * exactly. Adapters convert at their own API boundary.
+   */
+  messageId: string;
 }
 
 interface ReceiptRow {
   conversation_id: string;
   chat_id: string;
-  message_id: number;
+  message_id: string;
 }
 
 const toReceipt = (row: ReceiptRow): Receipt => ({
   conversationId: row.conversation_id,
   chatId: row.chat_id,
-  messageId: row.message_id,
+  // SQLite hands back whatever affinity it stored; the column is TEXT, but
+  // coercing keeps a numeric-looking id from arriving as a number.
+  messageId: String(row.message_id),
 });
 
 export class ReceiptLedger {
@@ -38,12 +45,17 @@ export class ReceiptLedger {
     private readonly platform: ChannelPlatform,
     path = defaultChannelDbPath(),
   ) {
+    // A new table rather than the retired `channel_receipts`, whose message_id
+    // was INTEGER: a Slack ts under that affinity comes back as a lossy float,
+    // and an id we cannot reproduce is a 👀 nobody can ever clear. Nothing is
+    // migrated — every receipt is claimed by the next startup sweep anyway, so
+    // the worst an upgrade costs is one stale emoji from a process that died.
     this.db = openChannelDb(path, `
-      CREATE TABLE IF NOT EXISTS channel_receipts (
+      CREATE TABLE IF NOT EXISTS channel_msg_receipts (
         platform TEXT NOT NULL,
         conversation_id TEXT NOT NULL,
         chat_id TEXT NOT NULL,
-        message_id INTEGER NOT NULL,
+        message_id TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         PRIMARY KEY (platform, chat_id, message_id)
       );
@@ -53,7 +65,7 @@ export class ReceiptLedger {
   /** Re-marking the same message replaces the row rather than duplicating it. */
   add(receipt: Receipt): void {
     this.db.prepare(`
-      INSERT INTO channel_receipts(platform, conversation_id, chat_id, message_id, created_at)
+      INSERT INTO channel_msg_receipts(platform, conversation_id, chat_id, message_id, created_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(platform, chat_id, message_id) DO UPDATE SET
         conversation_id = excluded.conversation_id, created_at = excluded.created_at
@@ -63,10 +75,10 @@ export class ReceiptLedger {
   /** Claim a conversation's receipts: returned once, then gone. */
   take(conversationId: string): Receipt[] {
     const rows = this.db.prepare(`
-      SELECT conversation_id, chat_id, message_id FROM channel_receipts
+      SELECT conversation_id, chat_id, message_id FROM channel_msg_receipts
       WHERE platform = ? AND conversation_id = ?
     `).all(this.platform, conversationId) as unknown as ReceiptRow[];
-    this.db.prepare("DELETE FROM channel_receipts WHERE platform = ? AND conversation_id = ?")
+    this.db.prepare("DELETE FROM channel_msg_receipts WHERE platform = ? AND conversation_id = ?")
       .run(this.platform, conversationId);
     return rows.map(toReceipt);
   }
@@ -75,10 +87,10 @@ export class ReceiptLedger {
   takeStale(ageMs: number, now = Date.now()): Receipt[] {
     const cutoff = now - ageMs;
     const rows = this.db.prepare(`
-      SELECT conversation_id, chat_id, message_id FROM channel_receipts
+      SELECT conversation_id, chat_id, message_id FROM channel_msg_receipts
       WHERE platform = ? AND created_at <= ?
     `).all(this.platform, cutoff) as unknown as ReceiptRow[];
-    this.db.prepare("DELETE FROM channel_receipts WHERE platform = ? AND created_at <= ?")
+    this.db.prepare("DELETE FROM channel_msg_receipts WHERE platform = ? AND created_at <= ?")
       .run(this.platform, cutoff);
     return rows.map(toReceipt);
   }
@@ -88,9 +100,13 @@ export class ReceiptLedger {
   }
 }
 
-/** The one platform call the lifecycle needs; `null` clears the reaction. */
+/**
+ * The one platform call the lifecycle needs; `null` clears the reaction.
+ * Ids are opaque strings — an adapter converts to whatever its API wants, and
+ * names the emoji itself (Slack's remove call needs the short name back).
+ */
 export interface ReactionApi {
-  setReaction(chatId: string | number, messageId: number, emoji: string | null): Promise<void>;
+  setReaction(chatId: string, messageId: string, emoji: string | null): Promise<void>;
 }
 
 /**
@@ -113,7 +129,7 @@ export class Receipts {
     private readonly staleMs: number,
   ) {}
 
-  mark(conversationId: string, chatId: string, messageId: number): void {
+  mark(conversationId: string, chatId: string, messageId: string): void {
     this.applying.set(
       `${chatId}:${messageId}`,
       this.api.setReaction(chatId, messageId, this.emoji)
