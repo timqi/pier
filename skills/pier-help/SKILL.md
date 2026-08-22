@@ -27,9 +27,11 @@ operator's source of truth.
 
 ## Messages while you are working
 
-- A message sent mid-turn queues as a follow-up and lands after the turn.
-- A leading `!` interrupts instead: `!wrong file, stop` is injected into the
-  running turn as a steer.
+- On the web, a message sent mid-turn queues as a follow-up and lands after
+  the turn; a leading `!` interrupts instead — `!wrong file, stop` is injected
+  into the running turn as a steer.
+- From an IM chat, every mid-turn message steers the running turn directly —
+  no `!` needed, and a leading `!` is just content.
 - `/stop` aborts the current turn outright.
 
 ## In-chat commands and the settings panel

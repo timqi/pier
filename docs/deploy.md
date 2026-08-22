@@ -169,7 +169,9 @@ journalctl --user -u pier --since -1h | grep 'tasks:'   # one area
 ```
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
-`channels`, `web`, `auth`, `boards`, `client`, `pier` — so an area is a grep
+`channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `secrets`,
+`settings`, `credentials`, `update`, `web.providers`, `pier` — so an area is a
+grep
 and a level is a `-p`. The level reaches journald as a syslog priority prefix, which Pier
 emits only when systemd says the output is a journal (`$JOURNAL_STREAM`); run
 in a terminal, the same lines carry a timestamp and a level word instead.
@@ -292,7 +294,7 @@ Description=Update Pier to the latest published version
 Type=oneshot
 ExecStart=systemctl --user stop pier.service
 ExecStart=/path/to/node /path/to/pier/dist/cli.js backup
-ExecStart=/recorded/path/to/npm install -g @timqi/pier@latest
+ExecStart=/path/to/node /recorded/path/to/npm install -g @timqi/pier@latest
 ExecStopPost=systemctl --user start pier.service
 ```
 

@@ -44,9 +44,12 @@ src/
                slack.ts + -api + -render + -panel + -tool + -outbound + -directory
                [lark.ts: configurable, no adapter yet]
   boards/      boards.ts (scan + manifest + static serving), pier.css
-  web/         server.ts, auth.ts, files.ts, session-state.ts,
+  web/         server.ts (sessions + events), instance.ts (settings, update,
+               secrets, client error reports), providers.ts + provider-flows.ts,
+               auth.ts, files.ts, session-state.ts,
                ui/ modules (form.ts + dom.ts are the shared vocabulary)
-  tasks/       definitions, runs, groups, agent (the child-run runner),
+  tasks/       types (incl. the shared callback-outbox semantics), definitions,
+               runs, groups, agent (the child-run runner),
                execution, callbacks, messages, command, service, store, tool,
                HTTP routes
   main.ts      wiring only
@@ -54,16 +57,17 @@ src/
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
-  settings.ts  the instance facts a human owns (today: the public URL)
+  settings.ts  the instance facts a human owns (the public URL, the model menu)
   update.ts    whether a newer release exists; checking only, never applying
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
 never imports platform SDKs or Pi. Nothing imports sideways between channels.
-`paths.ts`, `db.ts` and `log.ts` are the exceptions to "no sideways": leaves
-every area may import and that import nothing (or, for `db.ts`, only the other
-two), because `$PIER_HOME` is process configuration (it had otherwise grown a
+`paths.ts`, `db.ts`, `log.ts`, `secrets.ts` and `settings.ts` are the
+exceptions to "no sideways": leaves every area may import and that import
+nothing outside the root layer (`settings.ts` also names types from
+`core/types.ts`, type-only), because `$PIER_HOME` is process configuration (it had otherwise grown a
 copy per module that needed a file), a schema version is one number per
 database and cannot be owned by five modules, and a log line is not a seam
 crossing. Logging goes to stdout/stderr only —
@@ -71,9 +75,6 @@ journald owns time, history and rotation (docs/deploy.md); `PIER_LOG=debug`
 adds per-message tracing, `PIER_LOG=silent` is what test runs use.
 `boards/` is the thinnest surface of all: a filesystem scan plus a static file
 handler, importing neither core nor Pi.
-
-`docs/design/06-design-review.md` is the written diagnosis the repo-size
-tripwire asks for, with the measured breakdown and which budgets to revise.
 
 The IM channel layer has its own living spec: `docs/design/04-im-channels.md`
 covers what is shared versus platform-specific, the checklists a new adapter
@@ -133,8 +134,8 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
   fan-out to subscribers. No persistence — pi's session files are the durable
-  record. `queued` events are emitted by the router when the queue policy
-  defers a message (pi's `queue_update` is dropped at the seam).
+  record. Pi's `queue_update` is translated to a `queue-state` event at the
+  seam (`agent/events.ts`), so surfaces can show what is waiting.
 - **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory.
   Unknown conversation → create a session lazily via the injected resolver.
   Durability is the caller's business, not core's: web conversation ids already
@@ -153,11 +154,13 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   its own yet) and sweeps its own stragglers past 30 minutes, so a crash or a
   message whose turn never started cannot orphan an emoji.
 - **IM permission policy** (`channels/config.ts`): one persisted JSON document
-  per platform holds the token, global defaults, bound users and the chats
-  discovered from inbound traffic. `requireMention` and `requireBind` default
-  to true; a chat overrides a flag only with an explicit boolean, so
-  `undefined` always means "inherit". `gate()` is the whole inbound decision
-  and is platform-blind — denials are silent, never a message in the chat.
+  per platform holds the token, platform-level seed values, bound users and
+  the chats discovered from inbound traffic. `requireMention` and
+  `requireBind` default to true; a newly discovered chat *copies* the platform
+  values once and owns its flags from then on — there is no runtime
+  inheritance, so changing a platform default never silently reconfigures an
+  existing chat. `gate()` is the whole inbound decision and is platform-blind
+  — denials are silent, never a message in the chat.
 - **Topic mode** (Telegram): a message landing in a forum group's General
   opens a topic named after its first line, so one group hosts many parallel
   sessions. Replies and slash commands stay put; a failure falls back to

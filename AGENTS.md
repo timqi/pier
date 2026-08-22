@@ -42,13 +42,19 @@ scheduled tasks, live observability, and static Show pages.
 
 ## Architecture
 
-- `core/` routing, steer/follow-up policy, scheduler, event fan-out
+- `core/` routing, steer/follow-up policy, event fan-out
 - `channels/` one file per platform: normalize inbound, render outbound
 - `agent/` Pi SDK behind `AgentSession`
 - `web/` chat + observability timeline, an event-stream consumer
-- `tasks/` cron + prompt + session config; one custom tool is the entire
-  agent-collaboration surface
-- Dependency direction: `channels/ | web/ | tasks/ → core/ → agent/`. Never sideways.
+- `tasks/` scheduler; cron + prompt + session config; one custom tool is the
+  entire agent-collaboration surface
+- `boards/` static Show pages: a filesystem scan plus a file handler
+- Root `src/*.ts` is the instance layer — entry points (`main.ts`, `cli.ts`),
+  ops (`service.ts`, `update.ts`) and the leaves any area may import
+  (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`); one reason per
+  file, named in docs/architecture.md
+- Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
+  Never sideways.
 
 ## Budgets
 
@@ -87,10 +93,11 @@ answer is allowed to be "the right things":
 
 | Area | Now | Second look past |
 | --- | --- | --- |
-| `core/` | ~595 | 650 — platform-blind and Pi-blind. The shared presentation vocabulary (reply.ts) and the sender prefix (identity.ts) live here *on purpose*, each replacing a copy per surface; growth anywhere else means something leaked in |
+| `core/` | ~700 | 750 — platform-blind and Pi-blind. The shared presentation vocabulary (reply.ts), the sender prefix (identity.ts) and the seam declarations in types.ts (including the provider seam and its shared validation, which web/ and agent/ must not each own) live here *on purpose*; growth anywhere else means something leaked in |
 | `channels/` | ~3.0k | 3.5k |
-| `web/` | ~5.1k | 5.5k — largest and least tested |
+| `web/` | ~6.3k | 6.5k — largest and least tested. The jump from 5.1k bought the password boundary (auth.ts), secure provider configuration (providers/provider-flows + their UI) and the Settings console; the next growth needs its own sentence |
 | `tasks/` | ~2.4k | 2.5k |
+| root `src/*.ts` | ~1.1k | 1.3k — instance layer: db, secrets, settings, service/update, cli, log, paths, main |
 | one module | — | 300 — see rule 2 before splitting |
 | channel adapter file | — | 400 — transport, render and panel budgeted separately |
 

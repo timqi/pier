@@ -78,7 +78,6 @@ src/channels/
   commands.ts         parseCommand() — SHARED
   conversations.ts    durable conversation → session map — SHARED
   receipts.ts         the reaction-receipt lifecycle, storage included — SHARED
-  db.ts               path + WAL + mkdir for the above
   control.ts          ChannelControl: session reads/writes an adapter may make — SHARED
   runtime.ts          adapter lifecycle and control wiring — SHARED
   routes.ts           /api/channels/:platform — SHARED
@@ -137,7 +136,7 @@ keep it is that panel behaviour now has one home instead of two that agree by
 coincidence.
 
 **Budget note.** The tripwire is `channel adapter ≤ 400` for the adapter file
-itself. Both are under it — Telegram 356 code lines, Slack 380 — but only
+itself. Both sit just under it — but only
 because Slack's outbound path moved to `slack-outbound.ts` when the adapter hit
 449. That split was worth making: "which renderer, chunked to which limit, and
 what an empty turn still says" is a different decision from routing inbound
@@ -281,10 +280,10 @@ one skill (`skills/pier-slack/`), and a deliberate shape:
   reaches only what it was invited to; inventing a per-channel allowlist on top
   would duplicate that and drift from it. The switch is one bit, and the help
   bubble says plainly that it covers task and subagent sessions too.
-- **A `ts` is REAL in this table, not TEXT.** `1717243800.123456` sorts wrong as
-  a string once the integer part changes width, and every query here is a range
-  scan. (The receipts table is TEXT for the opposite reason: it needs exact
-  round-tripping, never ordering.)
+- **A `ts` stays TEXT everywhere.** A Slack ts has 16 significant digits; a
+  REAL column hands back `…000100` as `…0001`, and an id that cannot be
+  reproduced is a reply that lands nowhere. The receipts table stores it TEXT
+  for exactly that round-tripping.
 
 The skill's real content is not the operations — it is that **markdown is not
 Slack syntax**. `**bold**` works, but `@alice` is plain text that reads like a
@@ -326,7 +325,7 @@ consequences:
   history says otherwise. A mapping whose session Pi no longer has is dropped
   and re-created, never retried forever.
 - Per-chat launch options (cwd, model, thinking) are resolved by
-  `ChannelRuntime.launchFor(key)` — parsing the chat id back out of the
+  `ChannelControl.launchFor(key)` — parsing the chat id back out of the
   conversation id is the adapter layer's business, never core's.
 
 ## Permission model (shared, platform-blind)
@@ -387,7 +386,7 @@ table before assuming `/stop` can even reach you.
 ## Outbound checklist
 
 1. Render markdown to the platform's accepted subset and **escape first**
-   (`telegram-markdown.ts` extracts code, escapes, then re-introduces exactly
+   (`telegram-render.ts` extracts code, escapes, then re-introduces exactly
    the six tags Telegram documents).
 2. Chunk to the platform's message limit; put interactive elements on the last
    chunk only.
@@ -614,7 +613,7 @@ The facts you build against. Where a fact also cost a mistake, the mistake is in
   the Socket Mode socket; the bot token (`xoxb-`) signs every Web API call.
   Hence `ChannelConfig.appToken`, masked by the same "masked means unchanged"
   rule as `token`.
-- **Setup is a manifest, not a checklist.** Twelve scopes and four event
+- **Setup is a manifest, not a checklist.** Thirteen scopes and four event
   subscriptions across four config pages is where a setup goes wrong, and it
   fails late as one `missing_scope` at runtime. The Console offers one button to
   `api.slack.com/apps?new_app=1&manifest_json=…` with `SLACK_MANIFEST`
@@ -627,7 +626,7 @@ The facts you build against. Where a fact also cost a mistake, the mistake is in
   write), `commands` (no slash commands), `files:write` (nothing is uploaded),
   `im:read` (a `D`-prefixed id is a DM by construction). `mpim:read` *is* needed:
   a button click carries no `channel_type` and an mpim id is not `D`-prefixed.
-  12 scopes / 4 events against avibe's 18 / 7.
+  13 scopes / 4 events against avibe's 18 / 7.
 - **Socket Mode, no SDK.** `apps.connections.open` plus Node's built-in
   `WebSocket` is the entire transport; `@slack/socket-mode` would add a
   dependency tree to wrap ~60 lines. Reconnection lives in `slack-api.ts`
@@ -652,7 +651,7 @@ The facts you build against. Where a fact also cost a mistake, the mistake is in
   it wants `eyes`. `already_reacted` / `no_reaction` are successes.
 - **A `ts` is not a float-safe number** (`1761234567.123456`, 16 significant
   digits), so it is an opaque string everywhere — hence
-  `channel_msg_receipts.message_id TEXT`. The retired archive stored it in a
+  `receipts.message_id TEXT`. The retired archive stored it in a
   REAL column for range ordering and handed back `…000100` as `…0001`; an id
   that cannot be reproduced is a reply that lands nowhere.
 - **"Addressed" needs durable state.** A reply in a thread Pier owns is Slack's

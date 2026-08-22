@@ -14,9 +14,13 @@ table and growing it past 500 means logic is leaking in.
 | `GET /api/sessions` | `AgentFactory.list()` + live state from router + `pinned` from the pin store |
 | `POST /api/sessions` | body `{cwd?}` → create session (auto-pinned), returns `{id}` |
 | `POST /api/sessions/:id/pin` | body `{pinned}` → add/remove from Projects, returns `{pinned}` |
+| `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
+| `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn and re-dispatch the new text; 409 while streaming |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
+| `GET /api/models` | the same list without a session, for pickers |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
+| `GET/POST /api/sessions/:id/thinking` | read or set the reasoning level (history also carries `thinkingLevel`) |
 | `POST /api/sessions/:id/messages` | body `{text, mode, images?}` (`mode` defaults `auto`; images = base64 `{data, mimeType}`, max 8 × 8MB, validated at the seam; text or images required) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
 | `GET /api/sessions/:id/images/:ordinal` | bytes of the ordinal-th transcript image (`content-type` from the message), 404 past the end |
 | `POST /api/sessions/:id/abort` | abort the current run |
@@ -33,8 +37,9 @@ force it — SSE already delivers outbound content, so `send()` may be a no-op.
 ## Frontend (`src/web/ui/`, Vite + Tailwind, vanilla TS, no framework)
 
 `src/web/ui/` (index.html + main.ts + style.css) builds via Vite to
-`src/web/public/` (gitignored). Tailwind utilities carry the styling; the only
-custom classes are `.btn`/`.btn-primary`. `npm run dev:web` gives HMR with an
+`src/web/public/` (gitignored). Tailwind utilities carry the styling; the few
+custom classes live in `style.css` (`.btn`, `.select`, `.md`, … — the file is
+the list). `npm run dev:web` gives HMR with an
 `/api` proxy to :3141. `tsconfig.web.json` stays as the typecheck gate.
 
 Single page, with chat plus Console views (the raw timeline pane was folded into
@@ -50,8 +55,9 @@ per-turn Activity groups):
   "New session" dialog with cwd input + known-project suggestions.
 - **All sessions** (search icon → modal): everything `AgentFactory.list()`
   knows about, searchable over title + cwd, grouped by project, each row with a
-  pin toggle; click opens the session. Pins are the only UI-owned persisted
-  state — a flag on the `session_state` table (`src/web/session-state.ts`),
+  pin toggle; click opens the session. Pins and the unread dot are the only
+  UI-owned persisted state — flags on the `session_state` table
+  (`src/web/session-state.ts`),
   outside the seams, injected into `createServer` so tests stay hermetic.
 - **Snapshot then deltas**: the stream carries deltas only, so a fresh client
   starts from `/history` — transcript (including each assistant turn's `steps`,
@@ -114,7 +120,8 @@ per-turn Activity groups):
 Keep it plain: one `.css`, EventSource + fetch, plain modules. `main.ts` is
 the orchestrator (session state, SSE streams, routing, header); rendering
 lives in surface modules — `sidebar.ts`, `chat.ts`, `composer.ts`, and the
-Console views (`tasks.ts`, `activity.ts`, `config.ts`) — that receive explicit
+Console views (tasks, activity, boards and the tabbed Settings — the `ui/`
+directory is the list) — that receive explicit
 deps and never import main back. No state library, no router library, no
 components framework. Third repeat rule applies before introducing any
 abstraction.

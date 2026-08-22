@@ -4,12 +4,10 @@ Renames avibe's "Show pages". A **Board** is a folder of static files that an
 agent writes to present something — a report, a dashboard, a digest, a handover
 note — at a stable URL, readable on a phone, with no runtime.
 
-Scope of this version: boards only. No authentication, no deployment story
-(both backlogged). Consequence to state plainly: **`private` is a data state,
-not a security boundary yet** — with no auth, anyone who reaches the port can
-read `/boards/<slug>/`. The `public` flag and the separate `/p/*` prefix exist
-now so that the future auth middleware is one line with one exemption, not a
-redesign.
+Authentication has since shipped (`src/web/auth.ts`): every surface is behind
+the instance password, `/p/*` and the board stylesheet are the only
+exemptions, so `public` is a real security boundary — the design below
+predates that and holds unchanged.
 
 ## Product decisions
 
@@ -132,13 +130,12 @@ connect-src 'none'; frame-ancestors 'none'` — a public board cannot phone home
 
 One module owns scan, manifest read/write, rename-delete and the routes; at this
 size splitting store from routes would be copying `tasks/`'s shape rather than
-answering a need. It lands at 163 lines of code (215 with this repo's comment
-density). `readManifest` is the single place a slug becomes a path, so it is the
+answering a need. `readManifest` is the single place a slug becomes a path, so it is the
 single place a slug is validated — every route reaches the filesystem through
 it. `src/boards/` depends on `node:fs` and core types only;
 `main.ts` registers it next to the task routes.
 
-## Console surface (`src/web/ui/boards.ts`, ~140 lines of code)
+## Console surface (`src/web/ui/boards.ts`)
 
 One table, nothing else: public boards in a section at the top with their
 copyable `/p/<slug>/` URL, then the private ones — title · slug · linked sessions
