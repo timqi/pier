@@ -117,8 +117,33 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   if (origin.kind === "task-message" && origin.messageKind === "decision") {
     head.append(decisionReplyBtn(origin.messageId));
   }
-  row.append(head, h("div", "whitespace-pre-wrap break-words text-[14px] text-neutral-800", text));
+  const collapsed = ["max-h-[min(18rem,40dvh)]", "overflow-hidden"];
+  const content = h("div", `whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
+  row.append(head, content);
   turnsPane.append(row);
+  // Hidden chat panes cannot be measured, so an approximate text gate catches
+  // inputs likely to exceed the cap; visible panes use their rendered height.
+  const long = text.length > 800 || text.split("\n").length > 12;
+  const clipped = content.clientHeight
+    ? content.scrollHeight > content.clientHeight + 1
+    : long;
+  if (clipped) {
+    const reveal = h(
+      "button",
+      "mx-auto mt-1.5 block w-fit rounded border border-cyan-200 bg-white px-2 py-1 text-[12px] font-medium text-cyan-800 shadow-sm hover:bg-cyan-100 pointer-coarse:py-3.5",
+      "Show full message",
+    );
+    reveal.setAttribute("type", "button");
+    reveal.onclick = () => {
+      content.classList.remove(...collapsed);
+      content.tabIndex = -1;
+      reveal.remove();
+      content.focus({ preventScroll: true });
+    };
+    row.append(reveal);
+  } else {
+    content.classList.remove(...collapsed);
+  }
   scrollBottom();
 }
 
