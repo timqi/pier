@@ -9,6 +9,18 @@ That is also why this document is Linux-only. A laptop closes its lid; the
 machine you want always-on is a server, and on that machine systemd is already
 there.
 
+## The short version
+
+```sh
+npm install -g @timqi/pier
+pier service install
+journalctl --user -u pier -e     # the password, printed once
+```
+
+That writes the unit below, enables linger, and starts the service. The rest of
+this page is what it wrote and why — read it before widening the bind, and when
+you want the unit to say something different.
+
 ## Prerequisites
 
 - Node 24 or newer (`node:sqlite` is used unflagged).
@@ -31,7 +43,8 @@ configuration, and drives sessions in your own directories. Running it as root
 or as a dedicated system user means an agent that cannot touch the files you
 wanted it to work on.
 
-`~/.config/systemd/user/pier.service`:
+`~/.config/systemd/user/pier.service` — what `pier service install` generates,
+with your node and your entry point filled in:
 
 ```ini
 [Unit]

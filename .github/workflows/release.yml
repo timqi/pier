@@ -1,7 +1,6 @@
-# A tag becomes a GitHub Release, with the log since the previous tag as its
-# notes. Nothing is published to a registry yet: the package still serves its
-# web assets from a path relative to the working directory, so a global install
-# would not find them.
+# A tag becomes a published npm package and a GitHub Release, with the log
+# since the previous tag as its notes. npm first: a release pointing at a
+# version nobody can install is worse than a tag with no release.
 name: Release
 
 on:
@@ -10,6 +9,9 @@ on:
 
 permissions:
   contents: write
+  # Provenance: npm records that this tarball was built by this workflow from
+  # this commit, which is the only part of "trust the package" we can automate.
+  id-token: write
 
 jobs:
   release:
@@ -22,6 +24,7 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+          registry-url: https://registry.npmjs.org
 
       # The footer shows package.json's version, so a tag that disagrees with it
       # would put a number on screen that names no commit.
@@ -57,6 +60,13 @@ jobs:
             echo "Upgrading: back up \`~/.pier/pier.db\` first — schema migrations run"
             echo "on the next start and are one-way. See \`docs/deploy.md\`."
           } > notes.md
+
+      # `prepack` rebuilds inside the pack, so what ships is what this job just
+      # verified. Access and provenance come from publishConfig in package.json.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
 
       - name: Publish the release
         env:

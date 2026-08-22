@@ -10,9 +10,9 @@ One instance, one account, your own machine. The agent runs shell commands in
 directories you name, so Pier is meant for a machine you own and a boundary you
 control — not for a shared host.
 
-**Status: pre-release.** The version is `0.0.x`, there is no npm package yet,
-and the database schema is versioned from `0.0.1` on — earlier databases are
-not migrated. Read `docs/deploy.md` before putting it anywhere reachable.
+**Status: pre-release.** The version is `0.0.x` and the database schema is
+versioned from `0.0.1` on — earlier databases are not migrated. Read
+`docs/deploy.md` before putting it anywhere reachable.
 
 ## Requirements
 
@@ -24,10 +24,8 @@ not migrated. Read `docs/deploy.md` before putting it anywhere reachable.
 ## Run it
 
 ```sh
-git clone https://github.com/timqi/pier.git ~/pier
-cd ~/pier
-npm ci && npm run build
-node dist/main.js
+npm install -g @timqi/pier
+pier
 ```
 
 It listens on `127.0.0.1:3141` (`PORT`, `HOST`) and keeps everything under
@@ -47,11 +45,21 @@ Open `http://localhost:3141`, sign in, then:
 
 ## Run it as a service
 
-`docs/deploy.md` is the whole story for Linux: a systemd user unit with
-`Restart=always` and linger, memory limits that protect the machine rather than
-the service, how updates work (and why the updater is a second unit), how to
-read the first-run password out of the journal, and what to back up. macOS has
-no recipe — run it in the foreground.
+```sh
+pier service install     # --port, --host, --pier-home, --force
+pier service status
+pier service uninstall
+```
+
+Linux only, because it is systemd. It writes `~/.config/systemd/user/pier.service`
+with the absolute path of the node you installed with (systemd's PATH would not
+find a version-managed one), a memory drop-in it never rewrites afterwards, and
+turns on linger so scheduled tasks survive your logout. On macOS run `pier` in
+a terminal, or under whatever supervisor you already use.
+
+`docs/deploy.md` is the same thing written out by hand, plus what the memory
+limits mean, how updates work (and why the updater is a second unit), how to
+read the first-run password out of the journal, and what to back up.
 
 Exposing it needs two things: a reverse proxy or tunnel that terminates TLS
 (Pier binds the loopback and expects `X-Forwarded-For`/`-Proto`), and the
@@ -60,6 +68,9 @@ understanding that whoever gets past the password gets a shell.
 ## Develop
 
 ```sh
+git clone https://github.com/timqi/pier.git ~/pier
+cd ~/pier && npm ci && npm run build
+
 just dev          # build the web bundle, then tsx watch on PIER_HOME=~/.pier_test
 npm run check     # tsc, server and web
 npm run lint      # oxlint

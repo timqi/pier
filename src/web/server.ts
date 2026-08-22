@@ -1,6 +1,8 @@
 // Web workbench backend: REST + SSE, a pure consumer of core.
 // See docs/design/03-web-workbench.md for the route contract.
 
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -427,6 +429,12 @@ export function createServer(
 
   registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });
 
-  app.use("/*", serveStatic({ root: "./src/web/public" }));
+  // serveStatic resolves `root` against the *working directory*, and an
+  // installed Pier is started from wherever the operator happens to be. The
+  // bundle sits beside this module in both trees — src/web/public when tsx
+  // runs the source, dist/web/public in a build — so the path is derived from
+  // the module and handed over as the relative form the option wants.
+  const bundle = fileURLToPath(new URL("./public", import.meta.url));
+  app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || "." }));
   return app;
 }

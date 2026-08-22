@@ -1,5 +1,5 @@
 {
-  "name": "pier",
+  "name": "@timqi/pier",
   "version": "0.0.1",
   "description": "A self-hosted workspace for coding agents: web workbench and IM channels in front of Pi sessions",
   "license": "AGPL-3.0-only",
@@ -7,13 +7,26 @@
   "engines": {
     "node": ">=24"
   },
-  "private": true,
   "type": "module",
+  "bin": {
+    "pier": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.js",
+    "skills",
+    "docs/deploy.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "dev": "npm run build:web && tsx watch src/main.ts",
     "dev:web": "vite",
-    "build": "tsc && npm run build:assets && npm run build:web",
-    "build:assets": "mkdir -p dist/boards && cp src/boards/pier.css dist/boards/",
+    "build": "tsc && npm run build:web && npm run build:assets",
+    "build:assets": "mkdir -p dist/boards dist/web && cp src/boards/pier.css dist/boards/ && rm -rf dist/web/public && cp -r src/web/public dist/web/public",
+    "prepack": "npm run build",
     "build:web": "vite build",
     "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "oxlint src",
