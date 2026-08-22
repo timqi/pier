@@ -5,20 +5,18 @@ description: Publish a Board — a folder of static HTML Pier serves at a stable
 
 # Building a Pier board
 
-A **board** is a directory under `~/.pier/boards/<slug>/` (or
-`$PIER_HOME/boards/<slug>/`). Pier serves `<board>/site/` and nothing else.
-Boards outlive sessions: any session may read or rewrite any board, and closing
-this session changes nothing.
+A **board** is a directory in the boards folder `<pier>/AGENTS.md` names under
+"This Pier instance" — use that path verbatim; `~/.pier` is only the default.
+Pier serves `<board>/site/` and nothing else. Boards outlive sessions: any
+session may read or rewrite any board, and closing this one changes nothing.
 
 ## Create one
 
 ```
-~/.pier/boards/weekly-digest/
+<boards folder>/weekly-digest/
   board.json
   site/index.html
 ```
-
-`board.json` — exactly these fields:
 
 ```json
 {
@@ -29,30 +27,39 @@ this session changes nothing.
 }
 ```
 
-- `slug`: `[a-z0-9][a-z0-9-]{0,63}`, and it is the URL, so keep it short and
-  stable.
-- `description` is what a human sees in the Console list — write it for someone
-  who has forgotten this conversation.
-- `sessions`: add your own session id (append, never replace — other sessions'
-  ids are provenance too).
-- Tell the user the board's path and its URL, `/boards/<slug>/`, when you are
-  done.
+Those four fields are the whole manifest.
 
-## Publishing
+- `slug`: `[a-z0-9][a-z0-9-]{0,63}`, and it is the URL — short and stable.
+- `description` is the Console list entry: write it for someone who has
+  forgotten this conversation.
+- `sessions`: append your own id, never replace — other ids are provenance too.
 
-`"public": true` makes the board readable at `/p/<slug>/` **without any
-authentication**. Set it only when the user asked for a public or shareable
-board *in this request*. Otherwise leave it `false` and say the board is
-private; the user can flip it in Console → Boards. Never publish a board that
-contains credentials, internal paths, personal data or anything the user has
-not seen.
+## Publish, then hand over the link
+
+`"public": true` serves the board at `/p/<slug>/` **with no password**. Set it
+only if the user asked for a public or shareable board *in this request*;
+otherwise leave it `false`, say the board is private, and mention that Console →
+Boards flips it. Never publish credentials, internal paths, personal data or
+anything the user has not seen.
+
+The message announcing the board carries **one clickable link** — a bare path is
+not something a person can open, and a board nobody reached was not delivered.
+`<pier>/AGENTS.md` gives you the address, so there is nothing to look up:
+
+| The user asked for | Send |
+| --- | --- |
+| a board, nothing about sharing | `[Weekly digest](https://pier.example.com/boards/weekly-digest/)` — behind the Pier password |
+| a **public** board | `[Weekly digest](https://pier.example.com/p/weekly-digest/)` — no password |
+
+Never both: the pair invites pasting the password-free URL of a board that was
+never meant to leave the workspace, and `/p/<slug>/` 404s unless the manifest
+says `"public": true`. No address configured? Give the path, say Console →
+Settings turns it into a link, and never guess a host.
 
 ## Writing the page
 
 A board is a **presentation**, not a text file: someone opens it to get an
-answer fast. Lead with the verdict, prove it with structure — a headline
-number, a coloured status, a scannable table — and fold raw detail into
-`<details>`. Link the shipped stylesheet and write plain semantic HTML — no
+answer fast. Link the shipped stylesheet and write plain semantic HTML — no
 build, no npm, no framework:
 
 ```html
@@ -102,30 +109,29 @@ build, no npm, no framework:
 </html>
 ```
 
-The habits that make it read as designed, not generated:
+What makes it read as designed rather than generated:
 
-- **The lede is the verdict, not the topic.** "Two migrations need a decision
-  by Friday" answers; "This digest covers infra activity" restates the prompt.
-  A reader who stops after the hero must still leave with the point.
+- **The lede is the verdict, not the topic.** "Two migrations need a decision by
+  Friday" answers; "This digest covers infra activity" restates the prompt. A
+  reader who stops after the hero must still leave with the point.
 - **Headings are findings.** "Payments is the only degraded service", not
-  "Services". If a heading could top any report — Overview, Summary, Details,
-  Conclusion — it says nothing about this one.
+  "Services". A heading that could top any report — Overview, Summary, Details —
+  says nothing about this one.
 - **Every number carries its unit and its baseline**: "142 ms p95, was 120",
-  "12 of 40". A bare number is decoration; so is fake precision — round to
-  what changes the reader's decision (98.8724% → 98.9%).
-- **End at the last useful block.** No closing summary. The footer holds
-  provenance: data as-of, source, how to refresh.
+  "12 of 40". A bare number is decoration; so is fake precision (98.8724% →
+  98.9%).
+- **End at the last useful block.** No closing summary, no filler section. The
+  footer holds provenance: data as-of, source, how to refresh.
 
 ## What `pier.css` gives you
 
-It styles headings, paragraphs, lists, tables, `pre`/`code`, `blockquote`,
-`details` and `footer` with **no classes at all**, and has a dark mode. The
-page sizes itself to the window: a wide, comfortable canvas on a desktop
-(62rem, 76rem on a very large screen) that reflows to a single column on a
-phone, with running prose held to a readable measure while tables, `.grid`,
-`.split` and `.hero` use the full width. Don't fight it with your own
-`max-width` — a board should look at home on a laptop, not like a phone screen
-stranded in the middle of one. On top of that:
+Headings, paragraphs, lists, tables, `pre`/`code`, `blockquote`, `details` and
+`footer` are styled with **no classes at all**, dark mode included. The page
+sizes itself: a wide desktop canvas (62rem, 76rem on a very large screen) that
+reflows to one column on a phone, prose held to a readable measure while tables,
+`.grid`, `.split` and `.hero` use the full width — don't add a `max-width` of
+your own. Zebra striping, tables that scroll inside themselves, and `<details>`
+that print open are free. On top of that:
 
 | Class | Use it for |
 | --- | --- |
@@ -142,91 +148,63 @@ stranded in the middle of one. On top of that:
 | `.split` | two columns that stack on a phone: before/after, text + aside |
 | `.muted` | secondary text: dates, deltas, units, scope |
 
-For free, with no classes: zebra-striped tables that scroll inside themselves
-on a phone, `<details>` that print open, automatic dark mode.
+Need something it lacks? A `<style>` block or your own CSS file inside `site/`
+is normal, and so is a custom colour or a hand-written layout when the content
+calls for one.
 
-Need something it lacks? Add a `<style>` block or your own CSS file inside
-`site/` — that is normal, and so is a custom colour, a gradient, or a
-hand-written layout when the content calls for one.
-
-## Patterns that carry a message
-
-Pick the form from the content, and vary the forms so the page has rhythm —
-never two blocks of the same kind in a row. Six identical paragraphs (or six
-identical tables) communicate worse than number → ask → proof → fold.
+## Pick the form from the content
 
 | What you have | How to present it |
 | --- | --- |
 | The single most important fact | `.hero` lede, or one `.kpi` on its own |
 | 2–4 headline metrics | `.grid` of `.card`s, each with `.kpi` + a `.muted` delta |
 | Something the reader must act on | `.callout warn` near the top, naming the deadline |
-| Items with a state | table with `.tag` status pills, worst rows first |
+| Items with a state | table with `.tag` pills, worst rows first |
 | Ranked or compared numbers | table, `.num` columns, `.bar` for share of total |
-| Two alternatives | `.split` with a `.card` each, verdict in the lede above |
 | Progress toward a goal | `.bar` per row, or `.kpi` + "of 40 done" in `.muted` |
+| Two alternatives | `.split` with a `.card` each, verdict in the lede above |
 | A sequence of events | ordered list, date in `.muted` at the start of each item |
-| A recommendation | `.callout` with the recommendation as its first sentence |
 | A trend over time | first/last + delta in words; inline SVG only if the shape *is* the news |
 | 200 rows | aggregate, show the 5–10 that matter, rest in `<details>` with the count in its summary |
 | 1–2 data points | a sentence or a `.callout` — a one-row table is a table costume |
+| Long raw output, logs, code | `<details>` at the bottom, or `<pre><code>` trimmed to the lines that matter |
 | Nothing to report | say so in the lede ("all 14 checks green") and stop — short is finished, not thin |
-| An estimate, a gap | mark it: "~3 weeks", "n=3", "no data since Tue" — never smooth over or invent |
-| Long raw output, logs, full lists | `<details>` at the bottom, one line summarising it |
-| Code or config | `<pre><code>`, trimmed to the lines that matter |
 
-Scale to the job: a status or decision board earns one screenful before the
-first `<details>`; only a narrative (handover, postmortem) earns a long
-scroll, and then the hero carries the recap. Inside a table, order rows by
-what the reader must see first and `<strong>` the one cell that is the point.
-
-Colour is part of the message: green for healthy/done/up, amber for attention
-or pending, red for broken/blocked/down, `.info` (indigo, tags and cards) for
-neutral emphasis. Put it on the numbers and status cells that carry the point,
-and leave ordinary prose in the default colour — that contrast is what makes
-the coloured parts read as signal.
+Vary the forms: never two blocks of the same kind in a row, and prefer number →
+ask → proof → fold over six paragraphs. A status or decision board earns one
+screenful before the first `<details>`; only a handover or postmortem earns a
+long scroll. Colour is part of the message — green healthy/done, amber
+attention/pending, red broken/blocked, `.info` neutral emphasis — on the numbers
+and status cells that carry the point, never on ordinary prose; that contrast is
+what makes it read as signal.
 
 ## Rules
 
 - **Static and self-contained.** Everything the page needs lives under `site/`
-  with relative paths. No CDN links, no external fonts, no analytics, no
-  `fetch()` to anywhere — a published board is served with a CSP that blocks all
-  of it, so an external reference is a broken page, not a slow one.
-- **Content, not an app.** Interaction is `<details>` and anchors. Keep the page
-  readable with JavaScript off.
-- **Show, don't narrate.** If a sentence describes numbers, make it a KPI row or
-  a table instead. Prose is for judgement — what it means, what to do — not for
-  reciting data the page can display.
+  with relative paths. No CDN, no external fonts, no analytics, no `fetch()` —
+  a published board is served under a CSP that blocks all of it, so an external
+  reference is a broken page, not a slow one.
+- **Content, not an app.** Interaction is `<details>` and anchors; the page
+  stays readable with JavaScript off.
+- **Show, don't narrate.** A sentence describing numbers should have been a KPI
+  row or a table. Prose is for judgement — what it means, what to do.
 - **Structure before graphics.** A chart is inline SVG (no library) and only
-  when the *shape* of the data is the message — a trend, a distribution, a
-  breakdown. `.bar` covers most "how much of the total" cases already, and a
-  three-row table beats any picture of three numbers. No chart is better than a
-  decorative one.
-- **Presentation, not padding.** Every block earns its place: no filler
-  sections, no restating the title, no "in conclusion". If it does not change
-  what the reader thinks or does, it goes in `<details>` or goes away.
-- **Only real data.** Every figure traces to something you saw this session; a
-  gap is shown as a gap ("no data"), never estimated into a clean number.
-- **One page, every screen.** Design for the desktop window it will usually be
-  opened in — use the width with `.grid`, `.split` and real tables instead of
-  stacking narrow paragraphs — and let it reflow: no fixed pixel widths, no
-  horizontal scroll, tables wrapped or scrolled inside themselves. The
-  stylesheet handles both ends; adding a viewport meta tag and using its
-  classes is all it takes.
-- One page, top-down: what this is → the answer → supporting detail → raw data
-  in `<details>`. Prose in the user's language, short headings, no emoji chrome.
+  when the *shape* of the data is the message. A three-row table beats any
+  picture of three numbers; no chart beats a decorative one.
+- **Only real data.** Every figure traces to something you saw this session, and
+  a gap is shown as a gap ("no data since Tue", "~3 weeks", "n=3") — never
+  smoothed into a clean number.
 - **Rewrite in place.** Updating a board means editing its files, not creating
   `weekly-digest-v2`. The URL is the point.
+- Top-down — what this is → the answer → detail → raw data in `<details>` —
+  prose in the user's language, short headings, no emoji chrome.
 
-## If a board really needs a build
+## If a board needs a build
 
-Pier ships no toolchain — the default is no build at all. If a board genuinely
-needs one (a bundled charting library, a component-based layout), you own it:
-
-- keep sources outside `site/` (e.g. `<board>/src/`), emit into `site/`;
-- write `<board>/README.md` that a future session can follow cold: install
-  command, build command, output path, where the data came from;
-- never leave `site/` inconsistent with its sources.
-
-Before editing an existing board, look for `README.md` and a sources
-directory — if they exist, change the sources and rebuild. Hand-patching
-`site/` is lost on the next build.
+Pier ships no toolchain and the default is no build. If one is genuinely needed
+(a bundled charting library, a component layout), you own it: keep sources
+outside `site/` (e.g. `<board>/src/`), emit into `site/`, and write a
+`<board>/README.md` a future session can follow cold — install command, build
+command, output path, where the data came from. Never leave `site/`
+inconsistent with its sources; on an existing board look for that README first
+and rebuild, because hand-patching `site/` is lost on the next build.

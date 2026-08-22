@@ -1,5 +1,5 @@
 // Chat ↔ Console switching and the hash router. Owns the Console views
-// (Configuration, Channels, Tasks, Activity, Boards), which chat elements hide
+// (Configuration, Channels, Tasks, Activity, Boards, Settings), which chat elements hide
 // while one is open, and the address bar's copy of "where am I" — so refresh,
 // bookmarks and back/forward land where the user was. main.ts owns sessions
 // and selection and feeds them in through init.
@@ -12,6 +12,7 @@ import { syncQueuePanel } from "./composer.js";
 import { createConfigView } from "./config.js";
 import { $, type ConsoleView } from "./dom.js";
 import { renderHeader } from "./session-header.js";
+import { createSettingsView } from "./settings.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { groupByCwd, type SessionInfo } from "./sidebar.js";
 import { createTasksView, type TasksView } from "./tasks.js";
@@ -38,7 +39,7 @@ let chatVisible = true;
 
 export const isChatVisible = (): boolean => chatVisible;
 
-type ConsoleName = "config" | "channels" | "tasks" | "activity" | "boards";
+type ConsoleName = "config" | "channels" | "tasks" | "activity" | "boards" | "settings";
 
 let tasksView: TasksView;
 let activityView: ActivityView;
@@ -55,6 +56,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   tasks: "Tasks",
   activity: "Activity",
   boards: "Boards",
+  settings: "Settings",
 };
 
 // Workspace events fan into whichever of these views is open.
@@ -176,9 +178,10 @@ export function initViews(d: ViewsDeps): void {
     { name: "tasks", view: tasksView },
     { name: "activity", view: activityView },
     { name: "boards", view: createBoardsView($("#boards-view"), d.select) },
+    { name: "settings", view: createSettingsView($("#settings-view")) },
   ];
   // The Activity button reopens whichever of its two views was showing last.
-  for (const name of ["config", "channels", "activity", "boards"] as const) {
+  for (const name of ["config", "channels", "activity", "boards", "settings"] as const) {
     const btn = $(`#open-${name}`);
     consoleBtns.set(name, btn);
     btn.onclick = () => showConsole(name === "activity" ? lastActivityConsole : name);

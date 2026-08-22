@@ -6,6 +6,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { logger } from "../log.js";
 
 export class IdSetStore {
   readonly #file: string;
@@ -42,7 +43,7 @@ function load(file: string): string[] {
     if (!Array.isArray(parsed)) throw new Error("expected an array of session ids");
     return parsed.filter((id): id is string => typeof id === "string");
   } catch (err) {
-    console.warn(`pier: ignoring unreadable pin file ${file}: ${String(err)}`);
+    logger("web").warn(`ignoring unreadable pin file ${file}`, err);
     return [];
   }
 }

@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "../core/router.js";
+import { logger } from "../log.js";
 import { runResultText } from "./callbacks.js";
 import { TaskStore } from "./store.js";
 import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
+
+const log = logger("tasks");
 
 interface GroupHost {
   getRun(id: string): TaskRun;
@@ -40,6 +43,7 @@ export class TaskGroups {
         runs.push(this.host.startMember(definition.id, group.id, callerSessionId, parentRunId));
       }
     } catch (error) {
+      log.warn(`group ${group.id} rolled back after ${String(runs.length)} members`, error);
       for (const run of runs) this.host.cancel(run.id);
       throw error;
     }
@@ -155,6 +159,7 @@ export class TaskGroups {
       this.changed(group);
       await sent;
     } catch (error) {
+      log.warn(`group ${candidate.id} callback failed, will retry`, error);
       const group = this.store.getGroup(candidate.id);
       if (!group) return;
       group.callbackState = "failed";

@@ -15,7 +15,7 @@ import {
 } from "./channel-help.js";
 import { dirInput } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, btn, button, card, empty, field, textInput, toggle } from "./form.js";
+import { badge, btn, button, card, empty, field, STATUS_TONE, textInput, toggle } from "./form.js";
 import { launchField } from "./model-picker.js";
 
 type Loaded = ChannelConfig & { supported: boolean };
@@ -95,8 +95,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   function showStatus(state: "clean" | "saving" | "saved" | "failed"): void {
     statusBox.replaceChildren();
     if (state === "clean") return;
-    const tone = state === "saving" ? "text-neutral-400" : state === "saved" ? "text-emerald-600" : "text-red-600";
-    statusBox.className = `ml-auto flex items-center gap-1.5 text-[11.5px] ${tone}`;
+    statusBox.className = `ml-auto flex items-center gap-1.5 text-[11.5px] ${STATUS_TONE[state]}`;
     if (state === "saving") {
       statusBox.append(h("span", "spinner"), h("span", "", "Saving…"));
     } else if (state === "saved") {

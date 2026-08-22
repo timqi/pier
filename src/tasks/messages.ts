@@ -2,9 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { SystemInputOrigin } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
+import { logger } from "../log.js";
 import { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
+
+const log = logger("tasks");
 
 const MAX_MESSAGE_LENGTH = 16 * 1024;
 
@@ -208,6 +211,9 @@ export class TaskMessenger {
   private failed(id: string, error: unknown): void {
     const message = this.store.getMessage(id);
     if (!message || message.state === "answered" || message.state === "expired") return;
+    // Both ends are waiting on this one: the sender for an answer, the
+    // recipient for a message it never got told about.
+    log.warn(`${message.kind} ${id} to session ${message.toSessionId} failed`, error);
     message.state = "failed";
     message.error = String(error);
     this.store.saveMessage(message);

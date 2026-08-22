@@ -33,6 +33,7 @@ import {
 } from "./composer.js";
 import { $ } from "./dom.js";
 import { initNotify, noteState } from "./notify.js";
+import { initReport } from "./report.js";
 import {
   initHeader,
   noteContextTokens,
@@ -312,7 +313,9 @@ async function loadSession(id: string): Promise<void> {
 // --- wiring ----------------------------------------------------------------------------
 
 // First, before any surface can issue a request: from here on a 401 is the
-// login page and not a per-caller error message.
+// login page and not a per-caller error message, and anything that throws on
+// the way reaches the server's log instead of only the browser console.
+initReport();
 guardFetch();
 
 /** Shared by chat + composer deps: reload only if `id` is still selected. */

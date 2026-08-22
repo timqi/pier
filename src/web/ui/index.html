@@ -43,6 +43,8 @@
           class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Channels</button></li>
         <li><button type="button" id="open-boards"
           class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Boards</button></li>
+        <li><button type="button" id="open-settings"
+          class="block w-full cursor-pointer py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">Settings</button></li>
       </ul>
     </details>
     <div class="flex items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -88,6 +90,7 @@
     <section id="config-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="channels-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="boards-view" class="hidden min-h-0 flex-1 flex-col"></section>
+    <section id="settings-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <header id="chat-header" class="flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden">
       <span id="chat-title" class="truncate font-medium"></span>
       <!-- Right cluster: meta chips sit flush against the ⋯ button. Two
@@ -224,6 +227,20 @@
     <pre id="file-text" class="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-[12.5px] leading-relaxed"></pre>
   </dialog>
 
+  <!-- Before the bundle, and only until it loads: a module that throws while
+       evaluating leaves a blank page, no handler installed and nothing in the
+       server's log. ui/report.ts takes over by setting the flag below.
+       Signed-in only, like every other /api route: this page is not served to
+       anyone else, and a stranger who could write the journal would own it. -->
+  <script>
+    addEventListener("error", function (e) {
+      // A throw inside an error handler is reported as another error: anything
+      // missing here has to be a silent return, not an exception.
+      if (window.__pierReporting || !navigator.sendBeacon) return;
+      var body = JSON.stringify({ message: "boot error: " + e.message, view: location.hash });
+      navigator.sendBeacon("/api/client-log", new Blob([body], { type: "application/json" }));
+    });
+  </script>
   <script type="module" src="/main.ts"></script>
 </body>
 </html>

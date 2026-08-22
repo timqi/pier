@@ -4,6 +4,7 @@
 
 import type { Router } from "../core/router.js";
 import type { Channel } from "../core/types.js";
+import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { SlackChannel } from "./slack.js";
@@ -25,6 +26,10 @@ const ADAPTERS: {
   { platform: "slack", needsAppToken: true, build: (deps) => new SlackChannel(deps) },
 ];
 
+// Lifecycle news, which is not what the injected sink below is for: that one
+// is a warning sink the adapters share, and "slack started" is not a warning.
+const log = logger("channels");
+
 export class ChannelRuntime {
   private readonly live = new Map<ChannelPlatform, Channel>();
 
@@ -32,7 +37,7 @@ export class ChannelRuntime {
     private readonly store: ChannelStore,
     private readonly router: Router,
     private readonly control: ChannelControl,
-    private readonly log: (message: string) => void = (m) => console.warn(`channels: ${m}`),
+    private readonly log: (message: string) => void = (m) => logger("channels").warn(m),
   ) {}
 
   /** (Re)start every platform whose config says it should run. Idempotent. */
@@ -45,7 +50,10 @@ export class ChannelRuntime {
     const existing = this.live.get(platform);
     if (existing) {
       this.live.delete(platform);
-      await existing.stop().catch(() => {});
+      // Never fatal — the config still has to be applied — but a socket that
+      // refuses to close is exactly what makes the next start behave oddly.
+      await existing.stop().catch((err: unknown) =>
+        this.log(`${platform} did not stop cleanly: ${String(err)}`));
     }
     const config = this.store.get(platform);
     if (!config.enabled || !config.token) return;
@@ -72,10 +80,14 @@ export class ChannelRuntime {
     }
     this.router.registerChannel(channel);
     this.live.set(platform, channel);
+    log.info(`${platform} started`);
   }
 
   async stop(): Promise<void> {
-    for (const channel of this.live.values()) await channel.stop().catch(() => {});
+    for (const channel of this.live.values()) {
+      await channel.stop().catch((err: unknown) =>
+        this.log(`${channel.id} did not stop cleanly: ${String(err)}`));
+    }
     this.live.clear();
   }
 }

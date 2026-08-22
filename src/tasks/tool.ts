@@ -19,19 +19,19 @@ export interface RunSummary {
   state: TaskRun["state"];
   /** Who fired this run — the definition's trigger is only its schedule policy. */
   triggerSource: TaskRun["triggerSource"];
-  groupId: string | null;
+  groupId?: string;
   sessionMode: TaskRun["sessionMode"];
-  targetSessionId: string | null;
-  callbackSessionId: string | null;
+  targetSessionId?: string;
+  callbackSessionId?: string;
   callbackState: TaskRun["callbackState"];
-  pendingDecisionId: string | null;
+  pendingDecisionId?: string;
   depth: number;
   queuedAt: number;
-  startedAt: number | null;
-  finishedAt: number | null;
-  result: TaskResult | null;
-  error: string | null;
-  skipReason: string | null;
+  startedAt?: number;
+  finishedAt?: number;
+  result?: TaskResult;
+  error?: string;
+  skipReason?: string;
 }
 
 export interface GroupSummary {
@@ -39,11 +39,27 @@ export interface GroupSummary {
   join: TaskGroup["join"];
   state: "running" | "finished";
   callbackState: TaskGroup["callbackState"];
-  winnerRunId: string | null;
+  winnerRunId?: string;
   members: RunSummary[];
 }
 
-const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary => ({
+/**
+ * Drop the fields with nothing in them instead of sending `null`.
+ *
+ * A run summary has eighteen fields and most are empty for most of a run's
+ * life; a model reads "absent" and "null" the same way. On a `get` that lists
+ * several runs this is a third of the payload.
+ *
+ * The input names every field — a summary that forgot one would otherwise pass
+ * as "that field was empty" — and the result is the type with the empty ones
+ * gone, which is why those are declared optional above.
+ */
+const defined = <T extends object>(value: { [K in keyof T]-?: T[K] | null }): T =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, v]) => v !== null && v !== undefined),
+  ) as T;
+
+const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary => defined({
   runId: run.id,
   taskId: run.taskId,
   taskName: run.context.definition.name,
@@ -64,7 +80,7 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   skipReason: run.skipReason,
 });
 
-const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMessenger): GroupSummary => ({
+const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMessenger): GroupSummary => defined({
   groupId: group.id,
   join: group.join,
   state: group.finishedAt ? "finished" : "running",
@@ -137,7 +153,14 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       reason: Type.Optional(strEnum("progress", "decision")),
       session_mode: Type.Optional(strEnum("fresh", "fork")),
       task: Type.Optional(DraftSchema),
-      tasks: Type.Optional(Type.Array(Type.Union([DraftSchema, Type.Object({ task_id: Type.String() })]))),
+      // The same draft again, spelled out, cost more tokens in every session
+      // than the whole rest of this contract. One copy is the guidance; this
+      // one points at it, and `parseDraft` is what actually validates either.
+      tasks: Type.Optional(Type.Unsafe<unknown[]>({
+        type: "array",
+        description: "2+ entries, each either a task draft shaped exactly like `task`, or {task_id}.",
+        items: { type: "object" },
+      })),
       join: Type.Optional(strEnum("all", "first")),
       input: Type.Optional(Type.Unknown()),
       callback: Type.Optional(strEnum("origin", "none")),

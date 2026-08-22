@@ -157,6 +157,59 @@ describe("login", () => {
   });
 });
 
+describe("changing the password", () => {
+  const change = (
+    a: Hono,
+    body: Record<string, string>,
+    client: string = crypto.randomUUID(),
+  ): Promise<Response> =>
+    Promise.resolve(a.request("/api/password", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": client },
+      body: JSON.stringify(body),
+    }));
+
+  it("swaps the password, hands back a working cookie, and kills the old ones", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const before = cookieOf(await login(a, password));
+
+    const res = await change(a, { current: password, next: "correct-horse" });
+    expect(res.status).toBe(200);
+    expect(s.verify("correct-horse")).toBe(true);
+    expect(s.verify(password)).toBe(false);
+
+    // The caller keeps working; every cookie signed under the old hash does not.
+    const after = cookieOf(res);
+    expect((await a.request("/api/sessions", { headers: { cookie: after } })).status).toBe(200);
+    expect((await a.request("/api/sessions", { headers: { cookie: before } })).status).toBe(401);
+    expect((await login(a, "correct-horse")).status).toBe(302);
+    s.close();
+  });
+
+  it("refuses the wrong current password, a short new one, and a guessing run", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+
+    const wrong = await change(a, { current: "nope", next: "correct-horse" });
+    expect(wrong.status).toBe(401);
+    const short = await change(a, { current: password, next: "short" });
+    expect(short.status).toBe(400);
+    expect(await short.json()).toEqual({ error: "Use at least 10 characters." });
+    // Neither attempt changed anything.
+    expect(s.verify(password)).toBe(true);
+
+    // Same throttle as login: "change" answers the same guess "sign in" does.
+    const client = "10.0.0.11";
+    for (let i = 0; i < 10; i++) {
+      expect((await change(a, { current: "nope", next: "correct-horse" }, client)).status).toBe(401);
+    }
+    expect((await change(a, { current: password, next: "correct-horse" }, client)).status).toBe(429);
+    expect(s.verify(password)).toBe(true);
+    s.close();
+  });
+});
+
 describe("the cookie", () => {
   it("dies with the password it was signed under", async () => {
     const { store: s, password, path } = store();

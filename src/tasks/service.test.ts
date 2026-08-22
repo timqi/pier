@@ -713,7 +713,9 @@ describe("task service", () => {
     const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name } });
     const group = await service.tool({ operation: "run", tasks: [draft("angle-a"), draft("angle-b")] }, "s1") as GroupSummary;
     expect(group).toMatchObject({ join: "all", state: "running" });
-    expect(group.members.map((member) => member.callbackSessionId)).toEqual([null, null]);
+    // No per-member callback — the group delivers one. Absent rather than
+    // null: the model-facing summary drops its empty fields.
+    expect(group.members.every((member) => member.callbackSessionId === undefined)).toBe(true);
     await Promise.all(group.members.map((member) => service.waitForRun(member.runId)));
     await vi.waitFor(() => expect(service.getGroup(group.groupId).group.callbackState).toBe("delivered"));
     const callback = session.systemInputs.at(-1)!;

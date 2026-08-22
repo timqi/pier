@@ -10,6 +10,7 @@
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context, Hono } from "hono";
+import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
 
 export const defaultBoardsDir = (): string => pierPath("boards");
@@ -78,7 +79,7 @@ async function readManifest(
     // Missing file = not a board; unparsable = a board someone broke.
     if ((err as { code?: string }).code !== "ENOENT" && !warned.has(file)) {
       warned.add(file);
-      console.warn(`boards: ignoring unreadable manifest ${file}: ${String(err)}`);
+      logger("boards").warn(`ignoring unreadable manifest ${file}`, err);
     }
     return null;
   }

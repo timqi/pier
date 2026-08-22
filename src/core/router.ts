@@ -1,6 +1,7 @@
 // Conversation → session routing plus event wiring. In-memory for v1;
 // persistence arrives with task storage (docs/plans/bootstrap.md step 4).
 
+import { logger } from "../log.js";
 import { EventHub } from "./hub.js";
 import { SenderPrefix, withPrefix } from "./identity.js";
 import { decide } from "./queue.js";
@@ -13,6 +14,8 @@ import type {
   ModelRef,
   SessionState,
 } from "./types.js";
+
+const log = logger("core");
 
 /** An error goes into a chat window, so it is trimmed to something readable. */
 const truncate = (message: string): string =>
@@ -53,15 +56,21 @@ export class Router {
    * for an assistant turn.
    */
   private report(sessionId: string, key: ConversationKey, message: string): void {
+    // Three surfaces, one failure: the chat that is waiting, the web timeline,
+    // and the log the operator greps once it is reported to them.
+    log.error(`${keyOf(key)} session ${sessionId}: ${message}`);
     this.hub.emit(sessionId, { type: "error", message });
     const channel = this.channels.get(key.channelId);
     // Best-effort and never recursive: if telling the chat also fails, the hub
     // already has the original.
     channel?.notify(key.conversationId, { text: truncate(message), origin: { kind: "error" } })
-      .catch((err) => this.hub.emit(sessionId, {
-        type: "error",
-        message: `could not report the failure to ${key.channelId}: ${String(err)}`,
-      }));
+      .catch((err) => {
+        log.error(`could not report the failure to ${key.channelId}`, err);
+        this.hub.emit(sessionId, {
+          type: "error",
+          message: `could not report the failure to ${key.channelId}: ${String(err)}`,
+        });
+      });
   }
 
   stateOf(sessionId: string): SessionState | undefined {
@@ -93,6 +102,7 @@ export class Router {
     const existing = this.bySession.get(session.id);
     if (existing?.session === session) return;
     this.bySession.set(session.id, { session, key, stateSince: Date.now() });
+    log.info(`attached ${keyOf(key)} → session ${session.id}`);
     session.subscribe((payload) => {
       this.hub.emit(session.id, payload);
       // Run state is workspace-visible: every client's session list shows it.
@@ -109,11 +119,12 @@ export class Router {
       // refusal, a lost connection). Without this it lands only in the web
       // timeline and the IM side goes quiet for no visible reason.
       if (payload.type === "error") {
+        log.error(`${keyOf(key)} session ${session.id} reported: ${payload.message}`);
         const channel = this.channels.get(key.channelId);
         channel?.notify(key.conversationId, {
           text: truncate(payload.message),
           origin: { kind: "error" },
-        }).catch(() => {});
+        }).catch((err) => log.error(`notify ${key.channelId} failed`, err));
       }
       // A system input is context the chat did not see being typed. It goes
       // out before the turn it triggers, so the answer has a visible cause.
@@ -121,6 +132,7 @@ export class Router {
         const channel = this.channels.get(key.channelId);
         channel?.notify(key.conversationId, { text: payload.text, origin: payload.origin })
           .catch((err) => {
+            log.error(`notify ${key.channelId} failed`, err);
             this.hub.emit(session.id, {
               type: "error",
               message: `notify ${key.channelId} failed: ${String(err)}`,
@@ -131,6 +143,9 @@ export class Router {
       // per-turn UI (Telegram's 👀 receipts) is retired here, and a turn that
       // settled with nothing to say still has to settle.
       if (payload.type === "turn-end") {
+        log.info(
+          `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
+        );
         const channel = this.channels.get(key.channelId);
         if (channel) {
           channel.send(key.conversationId, splitReply(payload.text, payload.meta)).catch((err) => {
@@ -167,7 +182,14 @@ export class Router {
       if (session) this.byKey.set(keyOf(key), session);
     }
     if (!session) {
-      session = await this.resolve(key);
+      try {
+        session = await this.resolve(key);
+      } catch (err) {
+        // The one failure with nowhere to report itself: there is no session id
+        // to emit under yet, and every caller only sees a rejected promise.
+        log.error(`could not open a session for ${keyOf(key)}`, err);
+        throw err;
+      }
       this.attach(key, session);
     }
     return session;
@@ -180,6 +202,10 @@ export class Router {
     // line the agent cannot tell them apart or mention anyone back. Emitted
     // only when the speaker or the clock says something new.
     const prompt = withPrefix(this.senders.next(session.id, msg.sender), text);
+    log.debug(
+      `${action} ${keyOf(msg.key)} → session ${session.id}` +
+        ` (${String(prompt.length)} chars, ${String(msg.images?.length ?? 0)} images)`,
+    );
     // Turn outcomes flow through the event stream; a rejected call surfaces
     // there too, never as a thrown exception across the seam.
     session[action](prompt, msg.images).catch((err) => {

@@ -20,6 +20,7 @@ import type {
 import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
+import { SettingsStore } from "../settings.js";
 import { IdSetStore } from "./pins.js";
 import { createServer } from "./server.js";
 
@@ -144,15 +145,16 @@ function setup(cwd = "/tmp") {
   const pins = new IdSetStore(join(dir, "pins.json"));
   const unread = new IdSetStore(join(dir, "unread.json"));
   const config = fakeConfig();
+  const settings = new SettingsStore(join(dir, "settings.json"));
   const tasks = new TaskService(new TaskStore(":memory:"), factory, router, hub);
   // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   app.route("/", createServer({
-    factory, router, hub, pins, unread, config,
+    factory, router, hub, pins, unread, config, settings,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
-  return { app, session, factory, hub, router, pins, unread, config, tasks };
+  return { app, session, factory, hub, router, pins, unread, config, settings, tasks };
 }
 
 describe("workbench server", () => {
@@ -212,6 +214,7 @@ describe("workbench server", () => {
       pins: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
       unread: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "unread.json")),
       config: fakeConfig(),
+      settings: new SettingsStore(join(mkdtempSync(join(tmpdir(), "pier-settings-")), "settings.json")),
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
@@ -322,6 +325,27 @@ describe("workbench server", () => {
     expect(seen).toHaveBeenCalledOnce();
   });
 
+  it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {
+    const { app, settings } = setup();
+    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "" });
+
+    const put = (publicUrl: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ publicUrl }),
+      });
+    const ok = await put("pier.example.com/");
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com" });
+    expect(settings.get().publicUrl).toBe("https://pier.example.com");
+
+    expect((await put("not a url")).status).toBe(400);
+    expect((await put(42)).status).toBe(400);
+    // A rejected write leaves the stored value alone.
+    expect(settings.get().publicUrl).toBe("https://pier.example.com");
+  });
+
   it("returns 404 for unknown sessions", async () => {
     const { factory } = setup();
     const hub = new EventHub();
@@ -335,6 +359,7 @@ describe("workbench server", () => {
       pins: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
       unread: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "unread.json")),
       config: fakeConfig(),
+      settings: new SettingsStore(join(mkdtempSync(join(tmpdir(), "pier-settings-")), "settings.json")),
     });
     const res = await app.request("/api/sessions/nope/history");
     expect(res.status).toBe(404);
@@ -598,6 +623,28 @@ describe("workbench server", () => {
       body: JSON.stringify({ mode: "nope" }),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("logs a client report, rejects an empty one, and caps the rate", async () => {
+    // What the line looks like is log.ts's test; what this route owes is
+    // validation, a cap, and never an error the browser has to handle.
+    const { app } = setup();
+    const post = (body: unknown) =>
+      app.request("/api/client-log", {
+        method: "POST",
+        headers: { "user-agent": "TestBrowser/1.0" },
+        body: JSON.stringify(body),
+      });
+
+    expect((await post({ message: "boom", view: "#/session/s1", stack: "at x" })).status).toBe(204);
+    expect((await post({ message: "   " })).status).toBe(400);
+
+    // The cap is the whole point: a looping browser must not own the journal.
+    let capped = 0;
+    for (let i = 0; i < 70; i++) {
+      if ((await post({ message: `distinct ${String(i)}` })).status === 429) capped += 1;
+    }
+    expect(capped).toBeGreaterThan(0);
   });
 
   it("aborts via the router", async () => {

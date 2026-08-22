@@ -1,6 +1,7 @@
 import type { AgentFactory, BackgroundRun } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
+import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
 import { TaskCallbacks } from "./callbacks.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
@@ -12,6 +13,8 @@ import { TaskStore } from "./store.js";
 import { handleTaskTool } from "./tool.js";
 import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
+
+const log = logger("tasks");
 
 type TriggerSource = TaskRun["triggerSource"];
 type Waiter = (run: TaskRun) => void;
@@ -75,12 +78,21 @@ export class TaskService {
   start(tickMs = 1000): void {
     if (this.timer) return;
     const now = Date.now();
-    for (const run of this.store.interruptRunning(now)) this.changed(run);
+    // A run that was running when the process died: it is being written off
+    // here, and the previous boot's log is where its work stopped.
+    for (const run of this.store.interruptRunning(now)) {
+      log.warn(`run ${run.id} (${run.context.definition.name}) interrupted by a restart`);
+      this.changed(run);
+    }
     this.messages.expirePending();
     this.definitions.resetNextRuns(now);
     this.callbacks.recover(now);
     this.groups.recover(now);
-    this.timer = setInterval(() => void this.tick(), tickMs);
+    this.timer = setInterval(() => {
+      // The scheduler's own loop: a throw here would stop nothing (the next
+      // tick still fires) and say nothing, so due tasks would just stop.
+      void this.tick().catch((err: unknown) => log.error("scheduler tick failed", err));
+    }, tickMs);
     this.timer.unref();
   }
 

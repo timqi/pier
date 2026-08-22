@@ -1,9 +1,12 @@
+import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
 import { TaskCallbacks } from "./callbacks.js";
 import { runBash } from "./command.js";
 import { TaskDefinitions } from "./definitions.js";
 import { TaskStore } from "./store.js";
 import type { TaskResult, TaskRun } from "./types.js";
+
+const log = logger("tasks");
 
 interface ExecutionHost {
   runChild(taskId: string, parent: TaskRun): TaskRun;
@@ -34,6 +37,7 @@ export class TaskExecution {
   }
 
   cancel(id: string): void {
+    log.info(`run ${id} cancel requested`);
     this.controllers.get(id)?.abort();
   }
 
@@ -41,6 +45,7 @@ export class TaskExecution {
     const controller = new AbortController();
     this.controllers.set(run.id, controller);
     let timedOut = false;
+    let cause: unknown;
     const timeout = setTimeout(() => {
       timedOut = true;
       controller.abort();
@@ -67,9 +72,19 @@ export class TaskExecution {
       const aborted = controller.signal.aborted;
       run.state = aborted ? (timedOut ? "failed" : "cancelled") : "failed";
       run.error = timedOut ? "task timed out" : aborted ? "cancelled" : String(error);
+      cause = timedOut ? run.error : error;
     } finally {
       clearTimeout(timeout);
       run.finishedAt = Date.now();
+      const seconds = ((run.finishedAt - (run.startedAt ?? run.queuedAt)) / 1000).toFixed(1);
+      const settled = `run ${run.id} (${run.context.definition.name}) ${run.state} in ${seconds}s`;
+      // A scheduled run has no one watching it: the run row is the only other
+      // place this exists, and nobody opens the Console to find out it failed.
+      // A watch probe that did not match is the opposite case — it fires on
+      // every interval and at info would be most of the journal.
+      if (run.state === "failed") log.error(settled, cause);
+      else if (run.matched === false) log.debug(`${settled} (watch did not match)`);
+      else log.info(settled);
       // A run that ends awaiting a supervisor decision suppresses its
       // completion callback: the pending question is the notification.
       if (run.callbackSessionId && !this.host.openDecisionId(run.id)) run.callbackState = "pending";

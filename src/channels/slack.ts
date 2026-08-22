@@ -31,6 +31,7 @@ import type {
   InboundMessage,
   SystemInputOrigin,
 } from "../core/types.js";
+import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
 import type { ChannelStore } from "./config.js";
@@ -180,7 +181,7 @@ export class SlackChannel implements Channel {
 
   constructor(private readonly deps: SlackDeps) {
     const config = deps.store.get("slack");
-    this.log = deps.log ?? ((m) => console.warn(`slack: ${m}`));
+    this.log = deps.log ?? ((m) => logger("slack").warn(m));
     this.chains = new Chains(this.log, MAX_ACTIVE_CHATS);
     this.directory = deps.directory ?? new SlackDirectory(this.log);
     this.gate = new Gatekeeper(deps.store, "slack", this.log, "channel");

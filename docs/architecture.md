@@ -44,13 +44,18 @@ src/
                service, store, tool, HTTP routes
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
+  log.ts       what a log line looks like, and where it goes
+  settings.ts  the instance facts a human owns (today: the public URL)
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
 never imports platform SDKs or Pi. Nothing imports sideways between channels.
-`paths.ts` is the one exception to "no sideways": a leaf every area may import
-and that imports nothing, because `$PIER_HOME` is process configuration and
-had otherwise grown a copy per module that needed a file.
+`paths.ts` and `log.ts` are the exceptions to "no sideways": leaves every area
+may import and that import nothing, because `$PIER_HOME` is process
+configuration (it had otherwise grown a copy per module that needed a file) and
+a log line is not a seam crossing. Logging goes to stdout/stderr only —
+journald owns time, history and rotation (docs/deploy.md); `PIER_LOG=debug`
+adds per-message tracing, `PIER_LOG=silent` is what test runs use.
 `boards/` is the thinnest surface of all: a filesystem scan plus a static file
 handler, importing neither core nor Pi.
 

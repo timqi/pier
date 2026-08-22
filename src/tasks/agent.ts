@@ -32,8 +32,12 @@ export class AgentTaskRunner {
       return await this.withSession(session.id, async () => {
         await this.waitUntilIdle(session, signal);
         start();
-        const input = JSON.stringify(run.input ?? null, null, 2);
-        const prompt = run.context.resumePrompt ?? `${action.prompt}\n\n<task_input>\n${input}\n</task_input>`;
+        // No input is no block: `<task_input>\nnull\n</task_input>` is four
+        // lines telling the agent nothing, on every run that has no input.
+        const input = run.input === undefined || run.input === null
+          ? ""
+          : `\n\n<task_input>\n${JSON.stringify(run.input, null, 2)}\n</task_input>`;
+        const prompt = run.context.resumePrompt ?? `${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
         run.context.renderedPrompt = prompt;

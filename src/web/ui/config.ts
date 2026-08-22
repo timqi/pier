@@ -3,8 +3,9 @@
 // scope choices come from the session list (global + each project cwd).
 
 import type { ConfigResource } from "../../core/types.js";
-import { sendJson } from "./api.js";
+import { failure, sendJson } from "./api.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
+import { setStatus } from "./form.js";
 
 interface ConfigIndex {
   files: { name: string; exists: boolean }[];
@@ -214,7 +215,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     if (!res.ok) return renderError(`failed to load ${name}: ${res.status}`);
     const { content } = (await res.json()) as { content: string };
 
-    const status = h("span", "text-[12px] text-neutral-400", "");
+    const status = h("span", "text-[11.5px] text-neutral-400", "");
     const save = h("button", "btn btn-primary ml-auto text-[12.5px]", "Save");
     const editor = document.createElement("textarea");
     editor.className =
@@ -223,19 +224,14 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     editor.value = content;
 
     const doSave = async (): Promise<void> => {
-      status.textContent = "saving…";
+      setStatus(status, "saving", "saving…");
       const put = await sendJson(
         `/api/config/files/${encodeURIComponent(name)}${q()}`,
         { content: editor.value },
         "PUT",
       );
-      if (put.ok) {
-        status.className = "text-[12px] text-green-700";
-        status.textContent = "saved — applies to new sessions";
-      } else {
-        status.className = "text-[12px] text-red-600";
-        status.textContent = `save failed: ${((await put.json()) as { error?: string }).error ?? put.status}`;
-      }
+      if (put.ok) setStatus(status, "saved", "saved — applies to new sessions");
+      else setStatus(status, "failed", await failure(put, "save failed"));
     };
     save.onclick = () => void doSave();
     editor.onkeydown = (ev) => {
@@ -245,8 +241,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       }
     };
     editor.oninput = () => {
-      status.className = "text-[12px] text-neutral-400";
-      status.textContent = "unsaved changes";
+      setStatus(status, "idle", "unsaved changes");
     };
 
     pane.replaceChildren(paneBar(name, status, save), editor);

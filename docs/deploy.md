@@ -56,6 +56,8 @@ RestartSec=2
 # The journal is where the first-run password is printed, so keep it readable.
 StandardOutput=journal
 StandardError=journal
+# Otherwise every line is tagged "node"; this makes `journalctl -t pier` work.
+SyslogIdentifier=pier
 
 [Install]
 WantedBy=default.target
@@ -135,6 +137,53 @@ systemd-cgtop --depth=3 "user.slice/user-$(id -u).slice"
 A limit that fires during ordinary work is worse than none: the turn dies with
 a signal and the cause is a kernel message nobody reads. Set it to protect the
 machine, then raise it the first time it kills something legitimate.
+
+## Logs
+
+Pier writes to stdout and stderr and to nothing else — no log file, no
+rotation, no log configuration. Under the unit above that *is* the log:
+journald stamps the time, keeps the history and rotates it, which is why
+nothing in Pier reimplements any of that.
+
+```sh
+journalctl --user -u pier -f            # follow
+journalctl --user -u pier -p warning    # only what went wrong
+journalctl --user -u pier --since -1h | grep 'tasks:'   # one area
+```
+
+Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
+`channels`, `web`, `auth`, `boards`, `client`, `pier` — so an area is a grep
+and a level is a `-p`. The level reaches journald as a syslog priority prefix, which Pier
+emits only when systemd says the output is a journal (`$JOURNAL_STREAM`); run
+in a terminal, the same lines carry a timestamp and a level word instead.
+
+What is logged by default: process start and shutdown, sessions opening,
+conversation → session routing, every turn ending, every task run queued and
+settled, callback and message delivery failures with their retries, adapters
+starting (and failing to start or stop), dropped inbound messages, failed
+logins, and any request that threw. A watch probe that matched nothing is the
+one routine event kept at `debug` — it fires on every interval.
+
+`client:` is the browser's half, posted back by the workbench (`ui/report.ts`)
+and written into this same stream: script errors, unhandled rejections and a
+dead SSE stream, each with the view and the user agent. It comes from signed-in
+tabs only — the route sits behind the password like the rest of `/api`, so
+nobody who cannot already reach Pier can write into this journal. The person sees the
+same sentence in the chat pane, so "I clicked and nothing happened" has a line
+on both ends:
+
+```sh
+journalctl --user -u pier | grep 'client:'
+```
+
+```sh
+systemctl --user set-environment PIER_LOG=debug   # + per-message tracing
+systemctl --user restart pier
+```
+
+`PIER_LOG` takes `debug`, `info` (default), `warn`, `error` or `silent`. Prefer
+turning `debug` on for a session and back off: it logs one line per inbound
+message and per tool call.
 
 ## First login
 

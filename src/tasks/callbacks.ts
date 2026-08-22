@@ -1,6 +1,9 @@
 import { Router } from "../core/router.js";
+import { logger } from "../log.js";
 import { TaskStore } from "./store.js";
 import type { TaskCallback, TaskRun } from "./types.js";
+
+const log = logger("tasks");
 
 export function runResultText(run: TaskRun): string {
   let result = run.error ?? "No result";
@@ -95,8 +98,14 @@ export class TaskCallbacks {
         this.store.saveRun(run);
         this.changed(run);
       }
+      if (fresh.length > 0) {
+        log.debug(`callback for ${fresh.map((run) => run.id).join(", ")} → session ${sessionId}`);
+      }
       await sent;
     } catch (error) {
+      // The delegating agent is waiting for an answer that is now late: the
+      // retry is silent, so this line is the only sign it is being retried.
+      log.warn(`callback to session ${sessionId} failed, will retry`, error);
       for (const stale of batch) {
         const run = this.store.getRun(stale.id);
         if (!run) continue;

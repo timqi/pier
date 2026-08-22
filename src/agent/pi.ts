@@ -27,6 +27,7 @@ import type {
   ThinkingLevel,
   TurnMeta,
 } from "../core/types.js";
+import { logger } from "../log.js";
 import {
   imageAt,
   toChatTurns,
@@ -37,6 +38,8 @@ import {
 } from "./events.js";
 import { defaultAgentDir } from "./config.js";
 import { curateModels } from "./models.js";
+
+const log = logger("agent");
 
 const toImageContent = (images?: ImageAttachment[]) =>
   images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
@@ -203,8 +206,11 @@ class PiSession implements AgentSession {
 export class PiAgentFactory implements AgentFactory {
   constructor(
     private readonly extraTools: AgentCustomTool[] = [],
-    /** Appended as a virtual context file, so Pi's own prompt stays intact. */
-    private readonly instructions = "",
+    /** Appended as a virtual context file, so Pi's own prompt stays intact.
+     * Read per session, not captured once: it carries settings a user can
+     * change while the process runs, and the next session must say the new
+     * ones. */
+    private readonly instructions: () => string = () => "",
     /** Skills documenting Pier's own tools: loaded per session, never installed
      * into the user's global or project skill directories. */
     private readonly skillPaths: string[] = [],
@@ -232,11 +238,14 @@ export class PiAgentFactory implements AgentFactory {
       agentDir: defaultAgentDir(), // same discovery Pi would have done itself
       additionalSkillPaths: this.skillPaths,
       extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
-      agentsFilesOverride: (current) => ({
-        agentsFiles: this.instructions
-          ? [...current.agentsFiles, { path: "<pier>/AGENTS.md", content: this.instructions }]
-          : current.agentsFiles,
-      }),
+      agentsFilesOverride: (current) => {
+        const content = this.instructions();
+        return {
+          agentsFiles: content
+            ? [...current.agentsFiles, { path: "<pier>/AGENTS.md", content }]
+            : current.agentsFiles,
+        };
+      },
     });
     await loader.reload();
     return loader;
@@ -251,15 +260,28 @@ export class PiAgentFactory implements AgentFactory {
         label: tool.label,
         description: tool.description,
         parameters: tool.parameters as TSchema,
-        execute: async (_id, params, signal) => ({
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(await tool.execute(params, live?.sessionId ?? "unknown", signal), null, 2),
-            },
-          ],
-          details: {},
-        }),
+        execute: async (_id, params, signal) => {
+          const caller = live?.sessionId ?? "unknown";
+          log.debug(`tool ${tool.name} called by ${caller}`);
+          try {
+            return {
+              content: [
+                {
+                  type: "text",
+                  // Compact, not indented: pretty-printing a nested result
+                  // costs ~20% more tokens and buys the model nothing.
+                  text: JSON.stringify(await tool.execute(params, caller, signal)),
+                },
+              ],
+              details: {},
+            };
+          } catch (err) {
+            // Pi turns this into tool-result text the model reads, which is the
+            // right recovery and the wrong record: rethrown, but logged first.
+            log.warn(`tool ${tool.name} failed for ${caller}`, err);
+            throw err;
+          }
+        },
       }),
     );
     if (opts.name) sessionManager.appendSessionInfo(opts.name);
@@ -277,6 +299,7 @@ export class PiAgentFactory implements AgentFactory {
     const session = new PiSession(live);
     if (opts.model) await session.setModel(opts.model);
     if (opts.thinking) session.setThinkingLevel(opts.thinking);
+    log.info(`session ${session.id} open in ${cwd}${opts.name ? ` (${opts.name})` : ""}`);
     return session;
   }
 

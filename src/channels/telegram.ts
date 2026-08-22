@@ -22,6 +22,7 @@ import type {
   TurnMeta,
 } from "../core/types.js";
 import { formatTurnMeta, originLabel } from "../core/reply.js";
+import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
 import type { ChannelStore } from "./config.js";
@@ -109,7 +110,7 @@ export class TelegramChannel implements Channel {
 
   constructor(private readonly deps: TelegramDeps) {
     this.api = deps.client ?? new TelegramApi(deps.store.get("telegram").token);
-    this.log = deps.log ?? ((m) => console.warn(`telegram: ${m}`));
+    this.log = deps.log ?? ((m) => logger("telegram").warn(m));
     // No cap here: the poll loop applies backpressure itself, before advancing
     // the ack cursor past an update it has not accepted.
     this.chains = new Chains(this.log);

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { logger } from "../log.js";
 import { TaskCallbacks } from "./callbacks.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
+
+const log = logger("tasks");
 
 const MAX_DEPTH = 2;
 const MAX_CHILDREN_PER_ROOT = 16;
@@ -102,6 +105,14 @@ export class TaskRunQueue {
     };
     this.store.saveRun(run);
     this.changed(run);
+    // Why a run exists is the first question asked of a surprising one, and it
+    // is answerable only here: the row keeps the ids, not the reason. A watch
+    // probe queues on every interval and mostly matches nothing, so it says so
+    // at debug and lets its settled line (execution.ts) carry the news.
+    const queued = `run ${id} ${run.state}: ${definition.name} via ${source}` +
+      `${overlapped ? " (overlapped)" : ""}${depth > 0 ? ` depth ${String(depth)}` : ""}`;
+    if (source === "watch" && !overlapped) log.debug(queued);
+    else log.info(queued);
     if (run.state === "queued") this.execute(run);
     else if (run.callbackState === "pending") void this.callbacks.deliver(run);
     return run;

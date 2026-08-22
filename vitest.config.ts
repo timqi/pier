@@ -3,5 +3,7 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  test: { include: ["src/**/*.test.ts"] },
+  // Only failures are worth reading in a test run; a suite that logs its happy
+  // path buries the one assertion that broke. `PIER_LOG=info npx vitest` back.
+  test: { include: ["src/**/*.test.ts"], env: { PIER_LOG: process.env.PIER_LOG ?? "silent" } },
 });

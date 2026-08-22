@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
+import { logger } from "../log.js";
 import { guarded, registerFileRoutes } from "./files.js";
 import type {
   AgentFactory,
@@ -17,6 +18,7 @@ import type {
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import type { IdSetStore } from "./pins.js";
+import { normalizePublicUrl, type SettingsStore } from "../settings.js";
 
 export interface WebDeps {
   factory: AgentFactory;
@@ -26,11 +28,15 @@ export interface WebDeps {
   /** Sessions whose last finished turn no client has viewed yet. */
   unread: IdSetStore;
   config: ConfigStore;
+  settings: SettingsStore;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
 }
 
 const HEARTBEAT_MS = 15_000;
+/** Client reports per minute, for the whole server: a browser bug can fire in
+ *  a loop, and the journal is shared with everything else Pier says. */
+const CLIENT_LOG_PER_MINUTE = 60;
 const MAX_IMAGES = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
 
@@ -54,7 +60,7 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
   return images;
 }
 
-export function createServer({ factory, router, hub, pins, unread, config, backgroundRuns }: WebDeps): Hono {
+export function createServer({ factory, router, hub, pins, unread, config, settings, backgroundRuns }: WebDeps): Hono {
   const app = new Hono();
 
   // A finished turn marks its session unread until some client reports it was
@@ -282,6 +288,37 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
     return c.json({ messages: [...steering, ...followUp] });
   });
 
+  // The browser's half of the log. A workbench that threw after the response
+  // left the server is otherwise invisible here (ui/report.ts) — this is the
+  // one route whose entire purpose is to make it visible.
+  const clientLog = logger("client");
+  let reports: number[] = [];
+  app.post("/api/client-log", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      message?: unknown;
+      stack?: unknown;
+      view?: unknown;
+    } | null;
+    if (typeof body?.message !== "string" || !body.message.trim()) {
+      return c.json({ error: "message required" }, 400);
+    }
+    const now = Date.now();
+    reports = reports.filter((at) => now - at < 60_000);
+    if (reports.length >= CLIENT_LOG_PER_MINUTE) return c.body(null, 429);
+    reports.push(now);
+    const cap = (value: unknown, max: number): string =>
+      typeof value === "string" ? value.slice(0, max) : "";
+    const where = cap(body.view, 120);
+    const stack = cap(body.stack, 2000);
+    // One line, ua included: "only on iOS" is the answer half these questions
+    // have, and the report is the only place it exists.
+    clientLog.warn(
+      `${cap(body.message, 500)} [${where || "/"}] ${cap(c.req.header("user-agent"), 160)}` +
+        (stack ? `\n${stack}` : ""),
+    );
+    return c.body(null, 204);
+  });
+
   app.post("/api/sessions/:id/abort", async (c) => {
     const id = c.req.param("id");
     await router.abort(id);
@@ -321,6 +358,20 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
         await stream.write(": ping\n\n");
       }
     });
+  });
+
+  // Instance settings. The password lives behind its own route (web/auth.ts):
+  // it is a credential, and changing it takes the old one.
+  app.get("/api/settings", (c) => c.json(settings.get()));
+
+  app.put("/api/settings", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.publicUrl !== "string") return c.json({ error: "publicUrl required" }, 400);
+    const publicUrl = normalizePublicUrl(body.publicUrl);
+    if (publicUrl === null) {
+      return c.json({ error: "not a URL: expected http(s)://host, no query or fragment" }, 400);
+    }
+    return c.json(settings.setPublicUrl(publicUrl));
   });
 
   registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });

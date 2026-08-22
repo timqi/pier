@@ -29,13 +29,19 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
+import { logger } from "../log.js";
 import { PIER_DB } from "../paths.js";
+
+const log = logger("auth");
 
 const COOKIE = "pier_session";
 const TTL_MS = 90 * 24 * 60 * 60_000;
 /** Failed attempts one client may make before it has to wait out the window. */
 const MAX_FAILURES = 10;
 const WINDOW_MS = 15 * 60_000;
+/** Shortest password a human may choose. The generated one is longer; this is
+ *  the floor under which the throttle above stops being enough. */
+const MIN_LENGTH = 10;
 // scrypt at Node's defaults (N=16384): ~50ms per attempt, which is the point.
 const KEY_BYTES = 32;
 
@@ -64,9 +70,9 @@ function generatePassword(): string {
 export class AuthStore {
   readonly #db: DatabaseSync;
   /** HMAC key for cookies: the hash, so rotating the password expires them. */
-  readonly #key: string;
+  #key: string;
 
-  constructor(path = PIER_DB, log: (message: string) => void = console.log) {
+  constructor(path = PIER_DB, print: (message: string) => void = (m) => log.info(m)) {
     // No mode on the directory: another store has already created it by the
     // time main.ts gets here, and PIER_HOME holds boards this process serves,
     // not only this secret. The file modes below are what guard the credential.
@@ -89,9 +95,9 @@ export class AuthStore {
       this.#db
         .prepare("INSERT INTO auth(id, salt, hash, createdAt) VALUES (1, ?, ?, ?)")
         .run(row.salt, row.hash, row.createdAt);
-      log(
-        `\npier: this instance had no password, so one was generated:\n\n    ${password}\n\n` +
-          `pier: only its hash is stored — it is not printed again. ` +
+      print(
+        `\nthis instance had no password, so one was generated:\n\n    ${password}\n\n` +
+          `only its hash is stored — it is not printed again. ` +
           `Lost it? "DELETE FROM auth" in ${path}, then restart.\n`,
       );
     }
@@ -119,6 +125,22 @@ export class AuthStore {
   verify(password: string): boolean {
     const row = this.#row();
     return row ? sameSecret(hash(password, row.salt), row.hash) : false;
+  }
+
+  /**
+   * Replace the password, salt and all.
+   *
+   * The new hash becomes the cookie key, so every cookie signed with the old
+   * one — every other browser, and the caller's own — stops verifying. That is
+   * the point: a password is changed because the old one may be known.
+   */
+  setPassword(password: string): void {
+    const salt = randomBytes(16).toString("hex");
+    const next = hash(password, salt);
+    this.#db
+      .prepare("UPDATE auth SET salt = ?, hash = ?, createdAt = ? WHERE id = 1")
+      .run(salt, next, Date.now());
+    this.#key = next;
   }
 
   /** Cookie signing key. Never the password: that is not stored anywhere. */
@@ -224,25 +246,62 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     const form = await c.req.parseBody();
     const next = safeNext(form.next);
     if (throttled(client)) {
+      // The one surface strangers can reach: a burst here is the only warning
+      // an operator gets that the port is being knocked on.
+      log.warn(`login throttled for ${client}`);
       return c.html(loginPage(next, "Too many attempts. Wait a few minutes."), 429);
     }
     if (!store.verify(typeof form.password === "string" ? form.password : "")) {
       noteFailure(client);
+      log.warn(`wrong password from ${client}`);
       return c.html(loginPage(next, "Wrong password."), 401);
     }
     failures.delete(client);
-    const expiresAt = Date.now() + TTL_MS;
-    setCookie(c, COOKIE, `${expiresAt}.${sign(store.cookieKey, expiresAt)}`, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "Lax",
-      // Set only over TLS: a Secure cookie on plain http is dropped, which
-      // would lock out the loopback and SSH-tunnel setups.
-      secure: c.req.header("x-forwarded-proto") === "https" ||
-        new URL(c.req.url).protocol === "https:",
-      maxAge: TTL_MS / 1000,
-    });
+    log.info(`login from ${client}`);
+    issueCookie(c, store);
     return c.redirect(next);
+  });
+
+  // Changing the password is a login — it takes the current one, and it is
+  // throttled by the same counter, because "change" answers the same guess
+  // "sign in" does. So it needs no cookie of its own: whoever knows the current
+  // password can already get one.
+  app.post("/api/password", async (c) => {
+    const client = clientOf(c);
+    const body = (await c.req.json().catch(() => null)) as
+      | { current?: unknown; next?: unknown }
+      | null;
+    const current = typeof body?.current === "string" ? body.current : "";
+    const next = typeof body?.next === "string" ? body.next : "";
+    if (throttled(client)) return c.json({ error: "Too many attempts. Wait a few minutes." }, 429);
+    if (!store.verify(current)) {
+      noteFailure(client);
+      return c.json({ error: "Wrong current password." }, 401);
+    }
+    if (next.length < MIN_LENGTH) {
+      return c.json({ error: `Use at least ${MIN_LENGTH} characters.` }, 400);
+    }
+    failures.delete(client);
+    store.setPassword(next);
+    // The rotation just killed this caller's cookie too; re-issue rather than
+    // bounce the person who is holding the new password to the login form.
+    issueCookie(c, store);
+    return c.json({ ok: true });
+  });
+}
+
+/** The signed-in cookie, set the same way by login and by a password change. */
+function issueCookie(c: Context, store: AuthStore): void {
+  const expiresAt = Date.now() + TTL_MS;
+  setCookie(c, COOKIE, `${expiresAt}.${sign(store.cookieKey, expiresAt)}`, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "Lax",
+    // Set only over TLS: a Secure cookie on plain http is dropped, which
+    // would lock out the loopback and SSH-tunnel setups.
+    secure: c.req.header("x-forwarded-proto") === "https" ||
+      new URL(c.req.url).protocol === "https:",
+    maxAge: TTL_MS / 1000,
   });
 }
 

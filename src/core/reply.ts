@@ -18,30 +18,49 @@ import type { AgentReply, NoteOrigin, ThinkingLevel, TurnMeta } from "./types.js
  */
 export const REPLY_SURFACE_PROMPT = `## Pier chat surface
 
-Your replies are rendered in a chat UI (web now, IM later). Two optional
-markdown conventions are recognized:
+Your replies render in a chat UI (web and IM). Three optional markdown
+conventions:
 
-- **Next-step buttons.** A last line of \`---\` then up to 5 \`[label]\` tokens
-  separated by \`|\` renders as buttons; a click sends that label as the user's
-  next message. Example last two lines: \`---\` / \`[Run it] | [Show the diff]\`.
-  Offer them only when the likely next moves are short and obvious, and never
+- **Next-step buttons** — a last line of \`---\`, then up to 5 \`[label]\` tokens
+  separated by \`|\`: \`---\` / \`[Run it] | [Show the diff]\`. A click sends that
+  label as the user's next message. Only for short, obvious next moves, never
   for anything destructive.
+- **Attachments** — link a file you produced by absolute \`file://\` URL:
+  \`[report.md](file:///abs/path/report.md)\`. Images render as thumbnails,
+  other files as a download card; only files inside the session's working
+  directory are readable.
+- **Staying silent** — \`<silent>why</silent>\` is stripped, and if nothing else
+  remains no message is sent. In a group chat you are handed every message,
+  including humans talking to each other: stay silent rather than acknowledge
+  what was not addressed to you.
 
-- **Attachments.** Link a file you produced by absolute \`file://\` URL —
-  \`[report.md](file:///abs/path/report.md)\` — images render as thumbnails,
-  other files as a download card. Only files inside the session's working
-  directory are readable by the client.
-
-- **Staying silent.** \`<silent>why</silent>\` is stripped before sending; if
-  nothing else remains, no message is sent at all. In a group chat you are
-  handed every message, including humans talking to each other — use this
-  instead of acknowledging what was not addressed to you.
-
-A message may start with \`[name<id> time]\`. That is the sender, added by Pier,
-not part of what they typed. It appears only when the speaker or the day
-changes, so the last one you saw still applies. Use that \`id\` when you need to
-mention someone back; never ask a person for their own id.
+A message may start with \`[name<id> time]\` — the sender, added by Pier, not
+typed by them. It appears only when the speaker or the day changes, so the last
+one still applies. Use that \`id\` to mention someone; never ask for their own.
 `;
+
+/**
+ * The contract above plus the two facts about *this* deployment that an agent
+ * cannot work out for itself.
+ *
+ * Told, not discovered. Pier knows both — the home is its own startup argument
+ * and the address is a file it wrote — while an agent can only guess at a
+ * path and shell out to look. The guess is wrong on every instance that moves
+ * `PIER_HOME`, and it fails as "nothing is configured": indistinguishable from
+ * the truth, and reported to the user as such. Which is what happened.
+ */
+export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }): string {
+  const reach = instance.publicUrl
+    ? `Address: ${instance.publicUrl} — a board's link is that plus ` +
+      "`/boards/<slug>/`, or `/p/<slug>/` once published."
+    : "No public address is configured (the user sets one in Console → Settings), " +
+      "so give paths and never guess a host.";
+  return `${REPLY_SURFACE_PROMPT}
+## This Pier instance
+
+Boards: \`${instance.boardsDir}/<slug>/\` — this path, not \`~/.pier\`. ${reach}
+`;
+}
 
 /**
  * Where a system input came from, in the fewest words that still say it.

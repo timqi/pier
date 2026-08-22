@@ -147,6 +147,26 @@ export function toggle(
   return row;
 }
 
+/**
+ * What a write is doing, in one spelling. Config, Channels and Settings had
+ * each grown their own tone table — three greens for the same "saved".
+ * Channels wraps its own chrome (spinner, ✓, Retry, fade) around these states
+ * and takes the tone alone.
+ */
+export type SaveState = "idle" | "saving" | "saved" | "failed";
+
+export const STATUS_TONE: Record<SaveState, string> = {
+  idle: "text-neutral-400",
+  saving: "text-neutral-400",
+  saved: "text-green-700",
+  failed: "text-red-600",
+};
+
+export function setStatus(el: HTMLElement, state: SaveState, text: string): void {
+  el.className = `text-[11.5px] ${STATUS_TONE[state]}`;
+  el.textContent = text;
+}
+
 export const badge = (text: string, cls: string): HTMLElement =>
   h("span", `flex-none rounded-full px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ring-1 ${cls}`, text);
 
