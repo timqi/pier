@@ -1,8 +1,10 @@
 // Next-step buttons under an assistant turn: core/reply.ts parsed the labels,
 // this renders them and a click sends the label as an ordinary user message.
 //
-// Only the turn that just finished offers options — an older group would answer
-// a question the conversation has already moved past, so it is removed rather
+// Only the latest assistant turn offers options — live after a turn ends, and
+// again on replay while the session sits idle, so a reload or another client
+// still sees the choice it is waiting on. An older group would answer a
+// question the conversation has already moved past, so it is removed rather
 // than greyed out. The choice is not recorded anywhere: history renders the
 // reply text without its options block and user turns carry no marker.
 

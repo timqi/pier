@@ -19,13 +19,15 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
-import type { PinStore } from "./pins.js";
+import type { IdSetStore } from "./pins.js";
 
 export interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;
-  pins: PinStore;
+  pins: IdSetStore;
+  /** Sessions whose last finished turn no client has viewed yet. */
+  unread: IdSetStore;
   config: ConfigStore;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
@@ -76,8 +78,29 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
   return images;
 }
 
-export function createServer({ factory, router, hub, pins, config, backgroundRuns }: WebDeps): Hono {
+export function createServer({ factory, router, hub, pins, unread, config, backgroundRuns }: WebDeps): Hono {
   const app = new Hono();
+
+  // A finished turn marks its session unread until some client reports it was
+  // seen (session selected + tab visible → POST read below). Server-side so
+  // every client shows the same attention state. Streaming → idle is the
+  // trigger — same transition the client notification uses — and it needs a
+  // start we witnessed, so a session that boots idle stays untouched.
+  const runningNow = new Set<string>();
+  hub.subscribeWorkspace((e) => {
+    if (e.type !== "session-state") return;
+    if (e.state === "streaming") {
+      runningNow.add(e.sessionId);
+      return;
+    }
+    if (!runningNow.delete(e.sessionId)) return;
+    unread.set(e.sessionId, true);
+    hub.emitWorkspace({ type: "sessions-changed" });
+  });
+
+  /** Background runs this session launched that are still in flight. */
+  const activeRuns = (id: string): number =>
+    backgroundRuns?.(id).filter((r) => r.state === "queued" || r.state === "running").length ?? 0;
 
   // Scope comes from the client as "global" or a project cwd; only cwds Pi
   // already knows (the session list) are accepted — never an arbitrary path.
@@ -148,6 +171,8 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
         ...s,
         state: router.stateOf(s.id) ?? "idle",
         pinned: pins.has(s.id),
+        unread: unread.has(s.id),
+        activeRuns: activeRuns(s.id),
       })),
     );
   });
@@ -163,6 +188,17 @@ export function createServer({ factory, router, hub, pins, config, backgroundRun
     pins.set(session.id, true);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
+  });
+
+  // Seen = read: a client with the session selected and the tab visible acks
+  // here; the broadcast moves every other client's dot back to idle.
+  app.post("/api/sessions/:id/read", (c) => {
+    const id = c.req.param("id");
+    if (unread.has(id)) {
+      unread.set(id, false);
+      hub.emitWorkspace({ type: "sessions-changed" });
+    }
+    return c.json({ ok: true });
   });
 
   app.post("/api/sessions/:id/pin", async (c) => {

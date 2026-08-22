@@ -352,9 +352,10 @@ function renderMarkdown(node: HTMLElement, raw: string, streaming = false): void
   renderAttachments(node, showImage);
 }
 
-/** An assistant turn: markdown bubble, hover meta, and — only for the turn
- *  that just ended (`offer`) — next-step buttons. A mid-turn text block or a
- *  replayed history turn never offers them: the run has moved on. */
+/** An assistant turn: markdown bubble, hover meta, and — for the turn that
+ *  just ended or the transcript's last assistant turn on replay (`offer`) —
+ *  next-step buttons. A mid-turn text block or an older history turn never
+ *  offers them: the run has moved on. */
 function renderAssistant(
   node: HTMLElement,
   raw: string,

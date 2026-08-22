@@ -20,7 +20,7 @@ import type {
 import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
-import { PinStore } from "./pins.js";
+import { IdSetStore } from "./pins.js";
 import { createServer } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -139,18 +139,20 @@ function setup(cwd = "/tmp") {
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
-  // Hermetic: pins land in a throwaway dir, never the real $HOME.
-  const pins = new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json"));
+  // Hermetic: pins and unread land in a throwaway dir, never the real $HOME.
+  const dir = mkdtempSync(join(tmpdir(), "pier-pins-"));
+  const pins = new IdSetStore(join(dir, "pins.json"));
+  const unread = new IdSetStore(join(dir, "unread.json"));
   const config = fakeConfig();
   const tasks = new TaskService(new TaskStore(":memory:"), factory, router, hub);
   // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   app.route("/", createServer({
-    factory, router, hub, pins, config,
+    factory, router, hub, pins, unread, config,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
-  return { app, session, factory, hub, router, pins, config, tasks };
+  return { app, session, factory, hub, router, pins, unread, config, tasks };
 }
 
 describe("workbench server", () => {
@@ -159,8 +161,37 @@ describe("workbench server", () => {
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false },
+      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false, unread: false, activeRuns: 0 },
     ]);
+  });
+
+  it("marks a session unread when a witnessed run settles, until a client acks", async () => {
+    const { app, session, hub, router, unread } = setup();
+    router.attach({ channelId: "web", conversationId: "s1" }, session);
+
+    // Idle without a witnessed start (e.g. boot) never marks unread.
+    session.emit({ type: "state", state: "idle" });
+    expect(unread.has("s1")).toBe(false);
+
+    const changed = vi.fn();
+    hub.subscribeWorkspace(changed);
+    session.emit({ type: "state", state: "streaming" });
+    session.emit({ type: "state", state: "idle" });
+    expect(unread.has("s1")).toBe(true);
+    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
+    const rows = (await (await app.request("/api/sessions")).json()) as { unread: boolean }[];
+    expect(rows[0]!.unread).toBe(true);
+
+    // Seen = read: the ack clears the mark and broadcasts the change.
+    changed.mockClear();
+    expect((await app.request("/api/sessions/s1/read", { method: "POST" })).status).toBe(200);
+    expect(unread.has("s1")).toBe(false);
+    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
+
+    // Acking a session that isn't unread is a no-op, not a broadcast.
+    changed.mockClear();
+    await app.request("/api/sessions/s1/read", { method: "POST" });
+    expect(changed).not.toHaveBeenCalled();
   });
 
   it("lists a created session before Pi persists it, without duplicating later", async () => {
@@ -178,7 +209,8 @@ describe("workbench server", () => {
       factory,
       router: new Router(hub, () => factory.resume("s2")),
       hub,
-      pins: new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+      pins: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+      unread: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "unread.json")),
       config: fakeConfig(),
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
@@ -186,13 +218,13 @@ describe("workbench server", () => {
     // Not on disk yet — the nascent entry fills the gap.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: true },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: true, unread: false, activeRuns: 0 },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
     listed.push({ id: "s2", cwd: "/tmp", createdAt: 1 });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
-    expect(rows).toEqual([{ id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", pinned: true }]);
+    expect(rows).toEqual([{ id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", pinned: true, unread: false, activeRuns: 0 }]);
   });
 
   it("pins sessions created here, and toggles pins on demand", async () => {
@@ -300,7 +332,8 @@ describe("workbench server", () => {
       factory,
       router,
       hub,
-      pins: new PinStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+      pins: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "pins.json")),
+      unread: new IdSetStore(join(mkdtempSync(join(tmpdir(), "pier-pins-")), "unread.json")),
       config: fakeConfig(),
     });
     const res = await app.request("/api/sessions/nope/history");

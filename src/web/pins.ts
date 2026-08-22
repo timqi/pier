@@ -1,7 +1,8 @@
-// Workbench organization state: which sessions show up under Projects.
-// Sessions created in Pier are pinned on creation; everything Pi knows about
-// stays in the All-sessions list until the user pins it. Plain JSON file —
-// this is UI bookkeeping, not part of any seam.
+// Workbench organization state, one persisted session-id set per concern:
+// pins (which sessions show up under Projects — created in Pier means pinned,
+// everything else waits in All sessions) and unread (turn finished, no client
+// has viewed it yet). Plain JSON files — this is UI bookkeeping, not part of
+// any seam.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -10,11 +11,14 @@ import { dirname, join } from "node:path";
 export const defaultPinFile = (): string =>
   join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "pins.json");
 
-export class PinStore {
+export const defaultUnreadFile = (): string =>
+  join(process.env.PIER_HOME ?? join(homedir(), ".pier"), "unread.json");
+
+export class IdSetStore {
   readonly #file: string;
   readonly #ids: Set<string>;
 
-  constructor(file: string = defaultPinFile()) {
+  constructor(file: string) {
     this.#file = file;
     this.#ids = new Set(load(file));
   }

@@ -24,7 +24,7 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
-import { PinStore } from "./web/pins.js";
+import { defaultPinFile, defaultUnreadFile, IdSetStore } from "./web/pins.js";
 import { createServer } from "./web/server.js";
 
 let tasks: TaskService;
@@ -101,7 +101,8 @@ app.route("/", createServer({
   factory,
   router,
   hub,
-  pins: new PinStore(),
+  pins: new IdSetStore(defaultPinFile()),
+  unread: new IdSetStore(defaultUnreadFile()),
   config: new PiConfigStore(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
 }));

@@ -14,6 +14,10 @@ export interface SessionInfo {
   title?: string;
   state: SessionState;
   pinned: boolean;
+  /** Turn finished, no client has viewed it yet (server-side, all clients agree). */
+  unread: boolean;
+  /** Background runs this session launched that are still in flight. */
+  activeRuns: number;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -71,13 +75,21 @@ export function groupByCwd(list: SessionInfo[]): Map<string, SessionInfo[]> {
   return groups;
 }
 
-const stateDot = (s: SessionInfo): HTMLElement =>
-  h(
-    "span",
-    `h-2 w-2 flex-none rounded-full ${
-      s.state === "streaming" ? "bg-green-500 animate-pulse" : "bg-neutral-300"
-    }`,
-  );
+/** Attention dot: green = running, amber = finished and waiting for a look,
+ *  sky = idle itself but subagents still in flight, grey = idle. */
+function stateDot(s: SessionInfo): HTMLElement {
+  const [cls, title] =
+    s.state === "streaming"
+      ? ["bg-green-500 animate-pulse", "working…"]
+      : s.unread
+        ? ["bg-amber-500", "turn finished — not viewed yet"]
+        : s.activeRuns > 0
+          ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
+          : ["bg-neutral-300", "idle"];
+  const dot = h("span", `h-2 w-2 flex-none rounded-full ${cls}`);
+  dot.title = title;
+  return dot;
+}
 
 /** Unpin keeps the session — it just moves back into the All-sessions list. */
 export async function setPinned(s: SessionInfo, pinned: boolean): Promise<void> {

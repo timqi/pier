@@ -128,6 +128,20 @@ async function refreshSessions(): Promise<void> {
   sessions = (await (await fetch("/api/sessions")).json()) as SessionInfo[];
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
+  maybeAckRead();
+}
+
+/** Seen = read: the selected session's chat is on screen in a visible tab.
+ *  The ack clears the server-side unread mark, and the resulting broadcast
+ *  moves every other client's dot back too. Optimistic locally — the dot
+ *  must not stay amber while the user is literally looking at the turn. */
+function maybeAckRead(): void {
+  if (document.hidden || !chatVisible) return;
+  const s = sessions.find((x) => x.id === currentId);
+  if (!s?.unread) return;
+  s.unread = false;
+  renderSessions();
+  void fetch(`/api/sessions/${s.id}/read`, { method: "POST" });
 }
 
 // --- chat header -----------------------------------------------------------------
@@ -138,7 +152,7 @@ function currentSession(): SessionInfo | undefined {
   return (
     sessions.find((x) => x.id === currentId) ??
     (currentId
-      ? { id: currentId, cwd: "—", createdAt: Date.now(), state: currentState, pinned: false }
+      ? { id: currentId, cwd: "—", createdAt: Date.now(), state: currentState, pinned: false, unread: false, activeRuns: 0 }
       : undefined)
   );
 }
@@ -317,6 +331,8 @@ function connectWorkspace(): void {
     if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
       tasksView.refresh(e.type === "task-run-changed" ? e.taskId : undefined);
       activityView.refresh();
+      // A run starting or settling changes its launcher's activeRuns dot.
+      if (e.type === "task-run-changed") void refreshSessions();
       return;
     }
     activityView.refresh();
@@ -426,6 +442,7 @@ function showChat(): void {
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
   syncBar();
+  maybeAckRead(); // the selected session's turns just came (back) on screen
 }
 
 // --- routing (the hash is the address bar's copy of "where am I") ---------------------
@@ -495,6 +512,7 @@ async function select(id: string): Promise<void> {
   restoreDraft(id);
   renderSessions();
   renderHeader();
+  maybeAckRead(); // selecting an unread session is looking at it
   await loadSession(id);
 }
 
@@ -521,6 +539,9 @@ async function loadSession(id: string): Promise<void> {
   // not at the end of the transcript: a reload must not sweep every card a
   // session ever launched to the bottom, below turns that came after it.
   const unplacedRuns = new Map(snap.backgroundRuns.map((run) => [run.runId, run]));
+  // The final assistant turn keeps its next-step buttons across reloads and
+  // on every client — an idle session is still waiting on exactly that choice.
+  const lastAssistant = snap.turns.reduce((acc, t, i) => (t.role === "assistant" ? i : acc), -1);
   for (const [i, t] of snap.turns.entries()) {
     // The in-flight turn is the trailing one, recognisable while streaming by a
     // tool call without a result or by activity with no answer yet.
@@ -544,7 +565,9 @@ async function loadSession(id: string): Promise<void> {
     }
     // meta is assistant-only (core/types.ts), so plain turns need no hint.
     const bubble =
-      t.role === "assistant" ? appendAssistant(t.text, t.meta) : appendTurn(t.role, t.text);
+      t.role === "assistant"
+        ? appendAssistant(t.text, t.meta, snap.state === "idle" && i === lastAssistant)
+        : appendTurn(t.role, t.text);
     // Refs only in the snapshot: each thumbnail pulls its own bytes.
     for (const img of t.images ?? []) {
       imageRow(bubble).append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
@@ -754,6 +777,9 @@ consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
 consoleSection.ontoggle = () =>
   localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");
 $("#version").textContent = `v${__PIER_VERSION__}`;
+
+// Coming back to a hidden tab is the other way turns get seen.
+document.addEventListener("visibilitychange", maybeAckRead);
 
 connectWorkspace();
 window.onhashchange = applyRoute; // Back/forward and hand-edited URLs
