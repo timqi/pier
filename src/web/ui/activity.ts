@@ -168,7 +168,10 @@ export function createActivityView(
     }
     const colCount = Math.max(...columns.keys()) + 1;
     const maxRows = Math.max(...[...columns.values()].map((c) => c.length));
-    const width = MARGIN * 2 + colCount * NODE_W + (colCount - 1) * COL_GAP;
+    // Same-column edges bow ~35px past the cards' right edge; without this
+    // headroom the canvas clips them mid-curve.
+    const bowRoom = edges.some((edge) => edge.from !== edge.to && depth.get(edge.from) === depth.get(edge.to)) ? 40 : 0;
+    const width = MARGIN * 2 + colCount * NODE_W + (colCount - 1) * COL_GAP + bowRoom;
     const height = MARGIN * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
     const positions = new Map<string, { x: number; y: number }>();
     // Top-aligned rows, not vertically centered columns: a shared top edge
