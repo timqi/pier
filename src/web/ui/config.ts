@@ -3,7 +3,8 @@
 // scope choices come from the session list (global + each project cwd).
 
 import type { ConfigResource } from "../../core/types.js";
-import { h } from "./dom.js";
+import { sendJson } from "./api.js";
+import { basename, consoleView, h, type ConsoleView } from "./dom.js";
 
 interface ConfigIndex {
   files: { name: string; exists: boolean }[];
@@ -14,18 +15,9 @@ type Selection =
   | { type: "file"; name: string }
   | { type: "resource"; kind: "extensions" | "skills"; name: string };
 
-export interface ConfigView {
-  show(): void;
-  hide(): void;
-  readonly visible: boolean;
-}
-
-const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
-
-export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConfigView {
+export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
   let scope = "global";
   let selection: Selection | null = null;
-  let visible = false;
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
@@ -208,6 +200,15 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     pane.replaceChildren(h("p", "px-4 py-3 text-[13px] text-red-600", message));
   }
 
+  /** The pane's title bar: file name plus whatever the mode adds. */
+  const paneBar = (name: string, ...rest: HTMLElement[]): HTMLElement =>
+    h(
+      "div",
+      "flex flex-none items-center gap-3 border-b border-neutral-200 px-4 py-2",
+      h("span", "font-mono text-[12.5px] text-neutral-500", name),
+      ...rest,
+    );
+
   async function openFile(name: string): Promise<void> {
     const res = await fetch(`/api/config/files/${encodeURIComponent(name)}${q()}`);
     if (!res.ok) return renderError(`failed to load ${name}: ${res.status}`);
@@ -223,11 +224,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
     const doSave = async (): Promise<void> => {
       status.textContent = "saving…";
-      const put = await fetch(`/api/config/files/${encodeURIComponent(name)}${q()}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: editor.value }),
-      });
+      const put = await sendJson(
+        `/api/config/files/${encodeURIComponent(name)}${q()}`,
+        { content: editor.value },
+        "PUT",
+      );
       if (put.ok) {
         status.className = "text-[12px] text-green-700";
         status.textContent = "saved — applies to new sessions";
@@ -248,9 +249,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       status.textContent = "unsaved changes";
     };
 
-    const bar = h("div", "flex flex-none items-center gap-3 border-b border-neutral-200 px-4 py-2");
-    bar.append(h("span", "font-mono text-[12.5px] text-neutral-500", name), status, save);
-    pane.replaceChildren(bar, editor);
+    pane.replaceChildren(paneBar(name, status, save), editor);
     editor.focus();
   }
 
@@ -258,40 +257,19 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     const res = await fetch(`/api/config/resource${q(`&kind=${kind}&name=${encodeURIComponent(name)}`)}`);
     if (!res.ok) return renderError(`failed to load ${name}: ${res.status}`);
     const { content } = (await res.json()) as { content: string };
-    const bar = h("div", "flex flex-none items-center gap-3 border-b border-neutral-200 px-4 py-2");
-    bar.append(
-      h("span", "font-mono text-[12.5px] text-neutral-500", name),
-      h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only"),
-    );
     pane.replaceChildren(
-      bar,
+      paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only")),
       h("pre", "min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-[12.5px]", content),
     );
   }
 
-  // --- visibility ----------------------------------------------------------------
-
-  return {
-    get visible() {
-      return visible;
-    },
-    show() {
-      visible = true;
-      root.classList.remove("hidden");
-      root.classList.add("flex");
-      const cwds = getCwds();
-      scopeSelect.replaceChildren(
-        new Option("Global (~/.pi/agent)", "global"),
-        ...cwds.map((cwd) => new Option(`${basename(cwd)} — ${cwd}`, cwd)),
-      );
-      if (![...scopeSelect.options].some((o) => o.value === scope)) scope = "global";
-      scopeSelect.value = scope;
-      void load();
-    },
-    hide() {
-      visible = false;
-      root.classList.add("hidden");
-      root.classList.remove("flex");
-    },
-  };
+  return consoleView(root, () => {
+    scopeSelect.replaceChildren(
+      new Option("Global (~/.pi/agent)", "global"),
+      ...getCwds().map((cwd) => new Option(`${basename(cwd)} — ${cwd}`, cwd)),
+    );
+    if (![...scopeSelect.options].some((o) => o.value === scope)) scope = "global";
+    scopeSelect.value = scope;
+    void load();
+  });
 }

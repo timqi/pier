@@ -10,11 +10,6 @@ export interface MenuItem {
   onSelect: () => void;
 }
 
-export interface MenuSection {
-  title?: string;
-  items: MenuItem[];
-}
-
 let panel: HTMLElement | null = null;
 
 function onOutside(ev: Event): void {
@@ -85,8 +80,6 @@ function menuItem(item: MenuItem): HTMLElement {
     `flex w-full cursor-pointer items-center gap-2 px-3 text-left hover:bg-neutral-100 active:bg-neutral-100 ${
       isSheet() ? "py-3" : "py-1.5"
     }`,
-  );
-  row.append(
     h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : ""),
     h("span", "truncate", item.label),
   );
@@ -95,20 +88,7 @@ function menuItem(item: MenuItem): HTMLElement {
   return row;
 }
 
-/** Section title + items; call from a click handler with the trigger element. */
-export function openMenu(anchor: HTMLElement, sections: MenuSection[]): void {
-  const content = h("div", "");
-  for (const section of sections) {
-    if (section.title) {
-      content.append(
-        h(
-          "div",
-          "px-3 pb-0.5 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400",
-          section.title,
-        ),
-      );
-    }
-    content.append(...section.items.map(menuItem));
-  }
-  openPanel(anchor, content);
+/** A list of actions; call from a click handler with the trigger element. */
+export function openMenu(anchor: HTMLElement, items: MenuItem[]): void {
+  openPanel(anchor, h("div", "", ...items.map(menuItem)));
 }

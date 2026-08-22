@@ -1,6 +1,7 @@
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
-import { h } from "./dom.js";
+import { consoleView, fmtDuration, h, type ConsoleView } from "./dom.js";
+import { tabButton as control } from "./form.js";
 
 interface ActivitySession {
   id: string;
@@ -16,28 +17,22 @@ interface ActivitySnapshot {
   messages: TaskMessage[];
 }
 
-export interface ActivityView {
-  show(arg?: string): void;
-  hide(): void;
-  refresh(): void;
-  readonly visible: boolean;
-}
+export type ActivityView = ConsoleView & { refresh(): void };
 
-const svg = (name: string): SVGElement =>
-  document.createElementNS("http://www.w3.org/2000/svg", name);
-
-const elapsed = (since: number | null): string => {
-  if (since === null) return "-";
-  const seconds = Math.max(0, Math.round((Date.now() - since) / 1000));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+const svg = (name: string, attrs: Record<string, string> = {}): SVGElement => {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
 };
+
+const elapsed = (since: number | null): string =>
+  since === null ? "-" : fmtDuration(Date.now() - since);
 
 export function createActivityView(
   root: HTMLElement,
   openSession: (id: string) => void,
   openTask: (id?: string) => void,
 ): ActivityView {
-  let visible = false;
   let tab: "sessions" | "dependencies" = "sessions";
   let scope: "active" | "recent" = "active";
   let snapshot: ActivitySnapshot = { sessions: [], runs: [], messages: [] };
@@ -52,20 +47,10 @@ export function createActivityView(
     render();
   }
 
-  function control(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `btn text-[12.5px] ${active ? "bg-neutral-200" : ""}`;
-    button.textContent = label;
-    button.onclick = onClick;
-    return button;
-  }
-
   function render(): void {
     // The mobile top bar already names this view, and this header carries
     // nothing else — below md it would be a duplicate title in its own row.
-    const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden");
-    header.append(h("span", "font-medium", "Activity"));
+    const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden", h("span", "font-medium", "Activity"));
     const tabs = h("div", "tabstrip");
     tabs.append(
       control("Sessions", tab === "sessions", () => {
@@ -107,19 +92,16 @@ export function createActivityView(
       const tr = document.createElement("tr");
       tr.className = "cursor-pointer border-b border-neutral-100 hover:bg-neutral-50";
       tr.onclick = () => openSession(session.id);
-      const name = document.createElement("td");
-      name.className = "px-4 py-2.5";
-      name.append(
-        h("div", "truncate font-medium", session.title ?? "Untitled session"),
-        h("div", "truncate font-mono text-[11px] text-neutral-400", session.id),
+      tr.append(
+        h("td", "px-4 py-2.5",
+          h("div", "truncate font-medium", session.title ?? "Untitled session"),
+          h("div", "truncate font-mono text-[11px] text-neutral-400", session.id)),
+        h("td", "truncate px-2 py-2.5 font-mono text-[11.5px]", session.cwd || "-"),
+        h("td", "px-2 py-2.5",
+          h("span", `mr-2 inline-block h-2 w-2 rounded-full ${session.state === "streaming" ? "animate-pulse bg-green-500" : "bg-neutral-300"}`),
+          session.state),
+        h("td", "px-2 py-2.5 text-neutral-500", elapsed(session.stateSince)),
       );
-      const project = h("td", "truncate px-2 py-2.5 font-mono text-[11.5px]", session.cwd || "-");
-      const state = h("td", "px-2 py-2.5");
-      state.append(
-        h("span", `mr-2 inline-block h-2 w-2 rounded-full ${session.state === "streaming" ? "animate-pulse bg-green-500" : "bg-neutral-300"}`),
-        document.createTextNode(session.state),
-      );
-      tr.append(name, project, state, h("td", "px-2 py-2.5 text-neutral-500", elapsed(session.stateSince)));
       tbody.append(tr);
     }
     table.append(tbody);
@@ -162,22 +144,18 @@ export function createActivityView(
 
     const width = 900;
     const height = Math.max(420, Math.min(680, nodes.size * 90));
-    const graph = svg("svg");
-    graph.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    graph.setAttribute("class", "min-h-[26.25rem] w-full");
+    const graph = svg("svg", { viewBox: `0 0 ${width} ${height}`, class: "min-h-[26.25rem] w-full" });
     const defs = svg("defs");
-    const marker = svg("marker");
-    marker.setAttribute("id", "activity-arrow");
-    marker.setAttribute("viewBox", "0 0 10 10");
-    marker.setAttribute("refX", "8");
-    marker.setAttribute("refY", "5");
-    marker.setAttribute("markerWidth", "6");
-    marker.setAttribute("markerHeight", "6");
-    marker.setAttribute("orient", "auto-start-reverse");
-    const arrow = svg("path");
-    arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
-    arrow.setAttribute("fill", "#a3a3a3");
-    marker.append(arrow);
+    const marker = svg("marker", {
+      id: "activity-arrow",
+      viewBox: "0 0 10 10",
+      refX: "8",
+      refY: "5",
+      markerWidth: "6",
+      markerHeight: "6",
+      orient: "auto-start-reverse",
+    });
+    marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#a3a3a3" }));
     defs.append(marker);
     graph.append(defs);
 
@@ -191,13 +169,14 @@ export function createActivityView(
     for (const edge of edges) {
       const from = positions.get(edge.from)!;
       const to = positions.get(edge.to)!;
-      const line = svg("line");
-      line.setAttribute("x1", String(from.x));
-      line.setAttribute("y1", String(from.y));
-      line.setAttribute("x2", String(to.x));
-      line.setAttribute("y2", String(to.y));
-      line.setAttribute("stroke", edge.kind === "callback" ? "#0891b2" : edge.kind === "message" ? "#d97706" : "#a3a3a3");
-      line.setAttribute("stroke-width", edge.kind === "invocation" ? "1.5" : "2");
+      const line = svg("line", {
+        x1: String(from.x),
+        y1: String(from.y),
+        x2: String(to.x),
+        y2: String(to.y),
+        stroke: edge.kind === "callback" ? "#0891b2" : edge.kind === "message" ? "#d97706" : "#a3a3a3",
+        "stroke-width": edge.kind === "invocation" ? "1.5" : "2",
+      });
       if (edge.kind === "callback") line.setAttribute("stroke-dasharray", "6 5");
       if (edge.kind === "message") line.setAttribute("stroke-dasharray", "2 5");
       line.setAttribute("marker-end", "url(#activity-arrow)");
@@ -207,44 +186,38 @@ export function createActivityView(
     }
     for (const node of all) {
       const p = positions.get(node.id)!;
-      const group = svg("g");
-      group.setAttribute("transform", `translate(${p.x},${p.y})`);
+      const group = svg("g", { transform: `translate(${p.x},${p.y})` });
       if (node.session) group.classList.add("cursor-pointer");
       group.onclick = () => { if (node.session) openSession(node.id); };
-      const circle = svg("circle");
-      circle.setAttribute("r", "38");
-      circle.setAttribute("fill", node.session ? "#ffffff" : "#f5f5f5");
-      circle.setAttribute("stroke", node.session ? "#737373" : "#d4d4d4");
-      const text = svg("text");
-      text.setAttribute("text-anchor", "middle");
-      text.setAttribute("dominant-baseline", "middle");
-      text.setAttribute("font-size", "11");
-      text.setAttribute("fill", "#404040");
+      const circle = svg("circle", {
+        r: "38",
+        fill: node.session ? "#ffffff" : "#f5f5f5",
+        stroke: node.session ? "#737373" : "#d4d4d4",
+      });
+      const text = svg("text", {
+        "text-anchor": "middle",
+        "dominant-baseline": "middle",
+        "font-size": "11",
+        fill: "#404040",
+      });
       text.textContent = node.label.length > 14 ? `${node.label.slice(0, 14)}…` : node.label;
       group.append(circle, text);
       graph.append(group);
     }
-    const legend = h("div", "flex gap-5 border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-500");
-    legend.append(
+    body.append(graph, h(
+      "div",
+      "flex gap-5 border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-500",
       h("span", "", "Solid: task invocation"),
       h("span", "text-cyan-700", "Dashed: callback"),
       h("span", "text-amber-700", "Dotted: supervisor/control"),
-    );
-    body.append(graph, legend);
+    ));
   }
 
-  return {
-    get visible() { return visible; },
-    show(arg) {
-      visible = true;
-      // No arg → reopen on whatever tab was showing when we left.
-      if (arg === "dependencies") tab = "dependencies";
-      else if (arg === "sessions") { tab = "sessions"; scope = "active"; }
-      root.classList.remove("hidden");
-      root.classList.add("flex");
-      void load();
-    },
-    hide() { visible = false; root.classList.add("hidden"); root.classList.remove("flex"); },
-    refresh() { if (visible) void load(); },
-  };
+  const view = consoleView(root, (arg) => {
+    // No arg → reopen on whatever tab was showing when we left.
+    if (arg === "dependencies") tab = "dependencies";
+    else if (arg === "sessions") { tab = "sessions"; scope = "active"; }
+    void load();
+  });
+  return Object.assign(view, { refresh() { if (view.visible) void load(); } });
 }

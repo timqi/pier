@@ -1,9 +1,12 @@
-// Grouped model list, provider by provider. A standalone component because
-// model choice will show up outside chat too (scheduled tasks pick a model).
+// Grouped model list, provider by provider, plus the launch-config field that
+// wraps it. A standalone component because model choice shows up outside chat
+// too (IM chat defaults, scheduled tasks).
 
-import type { ModelRef, ThinkingLevel } from "../../core/types.js";
+import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { h } from "./dom.js";
+import { btn, CONTROL, field } from "./form.js";
+import { closeMenu, openPanel } from "./menu.js";
 
 export interface ModelPickerProps {
   models: ModelRef[];
@@ -56,9 +59,9 @@ function modelRow(opts: {
   onSelect: () => void;
   onStar: () => void;
 }): HTMLElement {
-  const row = h("div", "group/row flex w-full items-center hover:bg-neutral-100");
-  const pick = h("button", "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left");
-  pick.append(
+  const pick = h(
+    "button",
+    "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 py-1.5 text-left",
     h("span", "w-3 flex-none text-indigo-600", opts.checked ? "\u2713" : ""),
     h("span", "truncate", opts.label),
   );
@@ -76,8 +79,7 @@ function modelRow(opts: {
     ev.stopPropagation();
     opts.onStar();
   };
-  row.append(pick, star);
-  return row;
+  return h("div", "group/row flex w-full items-center hover:bg-neutral-100", pick, star);
 }
 
 export function modelPicker({
@@ -195,8 +197,6 @@ export function modelPicker({
       const summary = h(
         "summary",
         "flex cursor-pointer select-none items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400 hover:bg-neutral-100",
-      );
-      summary.append(
         h("span", "chev", "\u25b6"),
         h("span", "truncate", provider),
         h("span", "ml-auto flex-none normal-case text-neutral-300", String(list.length)),
@@ -222,4 +222,64 @@ export function modelPicker({
   wrap.append(controls, listWrap);
   queueMicrotask(() => search.focus());
   return wrap;
+}
+
+export interface LaunchChoice {
+  model: ModelRef | null;
+  thinking: ThinkingLevel | null;
+}
+
+/**
+ * Model + reasoning for the sessions a surface launches, reusing the chat
+ * composer's picker: same grouping, same search, same starred model+reasoning
+ * combos. "Pi default" means passing neither, so a new session starts on
+ * whatever the project and Pi would have chosen.
+ */
+export function launchField(
+  label: string,
+  choice: LaunchChoice,
+  models: ModelRef[],
+  onChange: (next: LaunchChoice) => void,
+): HTMLElement {
+  const summary = choice.model
+    ? `${choice.model.id}${choice.thinking ? ` · ${thinkingLabel(choice.thinking)}` : ""}`
+    : choice.thinking
+    ? `Pi default · ${thinkingLabel(choice.thinking)}`
+    : "Pi default";
+  // Not a button: a dropdown trigger that must read as the input beside it, so
+  // it wears the shared control skin rather than a copy of it.
+  const open = btn(
+    summary,
+    `${CONTROL} flex cursor-pointer items-center gap-1.5 truncate text-left hover:bg-neutral-50 ${
+      choice.model ? "text-neutral-700" : "text-neutral-400"
+    }`,
+  );
+  open.title = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Whatever the project and Pi pick";
+  open.onclick = () => {
+    const panel = modelPicker({
+      models,
+      current: choice.model,
+      // Unset reads as Medium in the selector; it is only written once the
+      // user actually picks one, so "Pi default" survives choosing a model.
+      thinkingLevel: choice.thinking ?? "medium",
+      // No session to ask for a model's supported subset — this configures a
+      // launch, not a live turn — and Pi clamps a level a model cannot do.
+      thinkingLevels: [...THINKING_LEVELS],
+      // A starred combo carries its own reasoning level; apply both at once.
+      onPick: (model, thinking) => {
+        closeMenu();
+        onChange({ model, thinking: thinking ?? choice.thinking });
+      },
+      onThinkingPick: (thinking) => onChange({ ...choice, thinking }),
+    });
+    const clear = btn("Pi default", "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
+    clear.onclick = () => {
+      closeMenu();
+      onChange({ model: null, thinking: null });
+    };
+    const wrap = h("div", "flex flex-col");
+    wrap.append(panel, h("div", "border-t border-neutral-200"), clear);
+    openPanel(open, wrap);
+  };
+  return field(label, open);
 }

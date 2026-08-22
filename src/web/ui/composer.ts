@@ -2,8 +2,10 @@
 // pending queue panel. Owns the optimistic user-turn ledger that main.ts
 // reconciles against `user-message` events.
 
+import { sendJson } from "./api.js";
 import { $, h } from "./dom.js";
-import { appendTurn, imageRow, imageThumb, scrollBottom, turnsPane } from "./chat.js";
+import { imageRow, imageThumb } from "./attachments.js";
+import { appendTurn, scrollBottom, turnsPane } from "./chat.js";
 import type { ImageAttachment, SessionState } from "../../core/types.js";
 
 /** Everything the composer needs from the orchestrator (main.ts). */
@@ -96,13 +98,7 @@ export function renderQueue(steering: string[], followUp: string[]): void {
       // Only "steer" earns a badge: it deviates from the panel's own label,
       // which already says these messages are queued.
       if (r.mode === "steer") {
-        li.append(
-          h(
-            "span",
-            "flex-none rounded bg-indigo-100 px-1 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-indigo-700",
-            r.mode,
-          ),
-        );
+        li.append(h("span", "flex-none rounded bg-indigo-100 px-1 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-indigo-700", r.mode));
       }
       li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", r.text));
       return li;
@@ -117,21 +113,15 @@ function renderImageStrip(): void {
   imageStrip.classList.toggle("flex", pendingImages.length > 0);
   imageStrip.replaceChildren(
     ...pendingImages.map((img, i) => {
-      const wrap = h("div", "relative");
       const thumb = document.createElement("img");
       thumb.src = `data:${img.mimeType};base64,${img.data}`;
       thumb.className = "h-16 w-16 rounded-md border border-neutral-200 object-cover";
-      const remove = h(
-        "button",
-        "absolute -right-1.5 -top-1.5 h-4 w-4 cursor-pointer rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600",
-        "×",
-      );
+      const remove = h("button", "absolute -right-1.5 -top-1.5 h-4 w-4 cursor-pointer rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", "×");
       remove.onclick = () => {
         pendingImages.splice(i, 1);
         renderImageStrip();
       };
-      wrap.append(thumb, remove);
-      return wrap;
+      return h("div", "relative", thumb, remove);
     }),
   );
 }
@@ -207,10 +197,10 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     }
     scrollBottom(true);
   }
-  const res = await fetch(`/api/sessions/${id}/messages`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, mode, images: images.length ? images : undefined }),
+  const res = await sendJson(`/api/sessions/${id}/messages`, {
+    text,
+    mode,
+    images: images.length ? images : undefined,
   });
   if (!res.ok) {
     appendTurn("error", `send failed: ${res.status}`);
@@ -223,11 +213,7 @@ async function deliverQueue(mode: "steer" | "restart"): Promise<void> {
   const id = deps.sessionId();
   if (!id) return;
   renderQueue([], []); // optimistic; queue-state snapshots reconcile
-  const res = await fetch(`/api/sessions/${id}/queue/deliver`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ mode }),
-  });
+  const res = await sendJson(`/api/sessions/${id}/queue/deliver`, { mode });
   if (!res.ok) appendTurn("error", `queue ${mode} failed: ${res.status}`);
 }
 

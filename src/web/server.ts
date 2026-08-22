@@ -1,18 +1,15 @@
 // Web workbench backend: REST + SSE, a pure consumer of core.
 // See docs/design/03-web-workbench.md for the route contract.
 
-import { mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, extname, isAbsolute, resolve, sep } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
+import { guarded, registerFileRoutes } from "./files.js";
 import type {
   AgentFactory,
   BackgroundRun,
-  ConfigScope,
   ConfigStore,
   ImageAttachment,
   InboundMessage,
@@ -36,27 +33,6 @@ export interface WebDeps {
 const HEARTBEAT_MS = 15_000;
 const MAX_IMAGES = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
-
-// Content types for the attachment route. Anything unlisted downloads as
-// bytes — guessing a type we can't vouch for is how a file starts executing.
-const FILE_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".bmp": "image/bmp",
-  ".pdf": "application/pdf",
-  ".txt": "text/plain; charset=utf-8",
-  ".md": "text/plain; charset=utf-8",
-  ".log": "text/plain; charset=utf-8",
-  ".json": "text/plain; charset=utf-8",
-  ".csv": "text/plain; charset=utf-8",
-  ".yaml": "text/plain; charset=utf-8",
-  ".yml": "text/plain; charset=utf-8",
-};
-const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 /** Validate at the seam: malformed attachments are rejected, never half-sent. */
 function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
@@ -102,61 +78,8 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
   const activeRuns = (id: string): number =>
     backgroundRuns?.(id).filter((r) => r.state === "queued" || r.state === "running").length ?? 0;
 
-  // Scope comes from the client as "global" or a project cwd; only cwds Pi
-  // already knows (the session list) are accepted — never an arbitrary path.
-  const parseScope = async (raw: string | undefined): Promise<ConfigScope | null> => {
-    if (!raw || raw === "global") return { kind: "global" };
-    const known = await factory.list();
-    return known.some((s) => s.cwd === raw) ? { kind: "project", cwd: raw } : null;
-  };
-
-  app.get("/api/config", async (c) => {
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
-    return c.json({
-      files: await config.listFiles(scope),
-      resources: await config.listResources(scope),
-    });
-  });
-
-  app.get("/api/config/files/:name", async (c) => {
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
-    try {
-      return c.json({ content: await config.readFile(scope, c.req.param("name")) });
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
-  });
-
-  app.put("/api/config/files/:name", async (c) => {
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.content !== "string") return c.json({ error: "content required" }, 400);
-    try {
-      await config.writeFile(scope, c.req.param("name"), body.content);
-      return c.json({ ok: true });
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
-  });
-
-  // Resource names may contain slashes — query params, not path params.
-  app.get("/api/config/resource", async (c) => {
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
-    const kind = c.req.query("kind");
-    const name = c.req.query("name");
-    if ((kind !== "extensions" && kind !== "skills") || !name) {
-      return c.json({ error: "kind and name required" }, 400);
-    }
-    try {
-      return c.json({ content: await config.readResource(scope, kind, name) });
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
-  });
+  /** The web channel's session for `id` — every session route resolves here. */
+  const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id });
 
   // Sessions created here that Pi doesn't list yet — it persists a session
   // only once the first assistant message lands. Merged into the list below
@@ -211,120 +134,33 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
 
   // Snapshot: everything a fresh client needs before it starts consuming
   // deltas from SSE — transcript, live state, pending queue, model.
-  app.get("/api/sessions/:id/history", async (c) => {
+  guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      return c.json({
-        turns: await session.history(),
-        lastSeq: hub.lastSeq(id),
-        model: session.model ?? null,
-        state: session.state,
-        context: session.contextUsage ?? null,
-        thinkingLevel: session.thinkingLevel,
-        queue: await session.pendingQueue(),
-        backgroundRuns: backgroundRuns?.(id) ?? [],
-      });
-    } catch (err) {
-      return c.json({ error: String(err) }, 404);
-    }
+    const session = await ensure(id);
+    return c.json({
+      turns: await session.history(),
+      lastSeq: hub.lastSeq(id),
+      model: session.model ?? null,
+      state: session.state,
+      context: session.contextUsage ?? null,
+      thinkingLevel: session.thinkingLevel,
+      queue: await session.pendingQueue(),
+      backgroundRuns: backgroundRuns?.(id) ?? [],
+    });
   });
 
   // Transcript images by their history ordinal: the snapshot ships refs, the
   // browser pulls (and caches) the bytes only for what it renders.
-  app.get("/api/sessions/:id/images/:ordinal", async (c) => {
+  guarded(app, "GET", "/api/sessions/:id/images/:ordinal", 404, async (c) => {
     const ordinal = Number(c.req.param("ordinal"));
     if (!Number.isInteger(ordinal) || ordinal < 0) return c.json({ error: "bad ordinal" }, 400);
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: c.req.param("id") });
-      const image = await session.image(ordinal);
-      if (!image) return c.json({ error: "no such image" }, 404);
-      return c.body(Buffer.from(image.data, "base64"), 200, {
-        "content-type": image.mimeType,
-        "cache-control": "private, max-age=3600",
-      });
-    } catch (err) {
-      return c.json({ error: String(err) }, 404);
-    }
-  });
-
-  /** Real path of a file a session may expose: inside its cwd, nothing else. */
-  const resolveFile = async (id: string, raw: string): Promise<string | null> => {
-    const cwd = nascent.get(id)?.cwd ?? (await factory.list()).find((s) => s.id === id)?.cwd;
-    if (!cwd || !isAbsolute(raw)) return null;
-    try {
-      // realpath both ends, so neither `..` nor a symlink can step outside.
-      const root = await realpath(cwd);
-      const target = await realpath(resolve(root, raw));
-      if (target !== root && !target.startsWith(root + sep)) return null;
-      return (await stat(target)).isFile() ? target : null;
-    } catch {
-      return null; // missing, unreadable, or not a file
-    }
-  };
-
-  // Agent attachments: the agent links a file it produced (`file:///abs/path`)
-  // and the client fetches the bytes here — read-only, and only from within
-  // the session's own working directory.
-  app.get("/api/sessions/:id/files", async (c) => {
-    const raw = c.req.query("path");
-    if (!raw) return c.json({ error: "path required" }, 400);
-    const file = await resolveFile(c.req.param("id"), raw);
-    if (!file) return c.json({ error: "no such file" }, 404);
-    const { size } = await stat(file);
-    if (size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
-    const name = basename(file);
-    // Unknown extension → octet-stream: never let the browser guess a type we
-    // can't vouch for (that is how an attachment starts executing).
-    const type = FILE_TYPES[extname(file).toLowerCase()] ?? "application/octet-stream";
-    const disposition = c.req.query("download") === "1" ? "attachment" : "inline";
-    return c.body(await readFile(file), 200, {
-      "content-type": type,
-      "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(name)}`,
-      "cache-control": "private, max-age=60",
+    const session = await ensure(c.req.param("id"));
+    const image = await session.image(ordinal);
+    if (!image) return c.json({ error: "no such image" }, 404);
+    return c.body(Buffer.from(image.data, "base64"), 200, {
+      "content-type": image.mimeType,
+      "cache-control": "private, max-age=3600",
     });
-  });
-
-  // Directory browsing for the working-directory picker (new session, IM chat
-  // config). Names only, never contents — the file route above stays the only
-  // way to read bytes, and it is scoped to a session's own cwd.
-  app.get("/api/fs/dirs", async (c) => {
-    const raw = c.req.query("path");
-    const path = raw ? resolve(raw) : homedir();
-    if (!isAbsolute(path)) return c.json({ error: "absolute path required" }, 400);
-    let entries: string[] = [];
-    try {
-      const dir = await readdir(path, { withFileTypes: true });
-      entries = dir
-        // Dotfiles are noise in a project picker; a hidden cwd can still be
-        // typed by hand.
-        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b));
-    } catch {
-      return c.json({ error: "cannot read directory" }, 404);
-    }
-    const parent = dirname(path);
-    return c.json({ path, parent: parent === path ? null : parent, entries });
-  });
-
-  // Create a folder while picking one — a new project usually needs a new
-   // directory. A name, never a path: traversal is rejected, not normalized.
-  app.post("/api/fs/dirs", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    const parent = typeof body?.path === "string" ? body.path : "";
-    const name = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!isAbsolute(parent)) return c.json({ error: "absolute path required" }, 400);
-    if (!name || name.length > 64 || /[/\\]|^\.\.?$/.test(name)) {
-      return c.json({ error: "invalid folder name" }, 400);
-    }
-    const path = resolve(parent, name);
-    try {
-      await mkdir(path); // no recursive: the parent must already exist
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
-    return c.json({ path });
   });
 
   // Backend model catalog, no session needed: surfaces that configure what a
@@ -337,57 +173,37 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
     }
   });
 
-  app.get("/api/sessions/:id/models", async (c) => {
-    const id = c.req.param("id");
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      return c.json(await session.availableModels());
-    } catch (err) {
-      return c.json({ error: String(err) }, 404);
-    }
+  guarded(app, "GET", "/api/sessions/:id/models", 404, async (c) => {
+    const session = await ensure(c.req.param("id"));
+    return c.json(await session.availableModels());
   });
 
-  app.get("/api/sessions/:id/thinking", async (c) => {
-    const id = c.req.param("id");
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      return c.json({
-        level: session.thinkingLevel,
-        levels: session.availableThinkingLevels(),
-      });
-    } catch (err) {
-      return c.json({ error: String(err) }, 404);
-    }
+  guarded(app, "GET", "/api/sessions/:id/thinking", 404, async (c) => {
+    const session = await ensure(c.req.param("id"));
+    return c.json({
+      level: session.thinkingLevel,
+      levels: session.availableThinkingLevels(),
+    });
   });
 
-  app.post("/api/sessions/:id/model", async (c) => {
-    const id = c.req.param("id");
+  guarded(app, "POST", "/api/sessions/:id/model", 400, async (c) => {
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.provider !== "string" || typeof body.id !== "string") {
       return c.json({ error: "provider and id required" }, 400);
     }
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      await session.setModel({ provider: body.provider, id: body.id });
-      return c.json({ model: session.model });
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
+    const session = await ensure(c.req.param("id"));
+    await session.setModel({ provider: body.provider, id: body.id });
+    return c.json({ model: session.model });
   });
 
-  app.post("/api/sessions/:id/thinking", async (c) => {
-    const id = c.req.param("id");
+  guarded(app, "POST", "/api/sessions/:id/thinking", 400, async (c) => {
     const body = await c.req.json().catch(() => null);
     if (!body || !isThinkingLevel(body.level)) {
       return c.json({ error: "valid thinking level required" }, 400);
     }
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      session.setThinkingLevel(body.level as ThinkingLevel);
-      return c.json({ level: session.thinkingLevel });
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
+    const session = await ensure(c.req.param("id"));
+    session.setThinkingLevel(body.level as ThinkingLevel);
+    return c.json({ level: session.thinkingLevel });
   });
 
   app.post("/api/sessions/:id/messages", async (c) => {
@@ -416,67 +232,54 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
   // Edit a user turn: rewind the transcript to just before it, then re-send
   // the edited text as a fresh dispatch. Pi keeps the old branch in the
   // session file but out of context — the "deleted" message stops polluting.
-  app.post("/api/sessions/:id/turns/:index/edit", async (c) => {
+  guarded(app, "POST", "/api/sessions/:id/turns/:index/edit", 400, async (c) => {
     const id = c.req.param("id");
     const index = Number(c.req.param("index"));
     const body = await c.req.json().catch(() => null);
     if (!Number.isInteger(index) || index < 0 || typeof body?.text !== "string" || !body.text.trim()) {
       return c.json({ error: "index and text required" }, 400);
     }
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-      await session.rewindToUserTurn(index);
-      await router.dispatch({
-        key: { channelId: "web", conversationId: id },
-        senderId: "web",
-        text: body.text,
-        mode: "auto",
-      });
-      return c.json({ ok: true }, 202);
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
+    const session = await ensure(id);
+    if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
+    await session.rewindToUserTurn(index);
+    await router.dispatch({
+      key: { channelId: "web", conversationId: id },
+      senderId: "web",
+      text: body.text,
+      mode: "auto",
+    });
+    return c.json({ ok: true }, 202);
   });
 
   // Promote queued messages: "steer" delivers them into the running turn,
   // "restart" aborts the turn and sends them as a fresh prompt. Pi has no
   // promote primitive, so this is clear-queue + re-dispatch through core.
-  app.post("/api/sessions/:id/queue/deliver", async (c) => {
+  guarded(app, "POST", "/api/sessions/:id/queue/deliver", 404, async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
     const mode: unknown = body?.mode;
     if (mode !== "steer" && mode !== "restart") {
       return c.json({ error: "mode must be steer or restart" }, 400);
     }
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      const { steering, followUp } = await session.clearQueue();
-      const text = [...steering, ...followUp].join("\n").trim();
-      if (!text) return c.json({ error: "queue is empty" }, 409);
-      if (mode === "restart") await router.abort(id); // resolves once idle
-      await router.dispatch({
-        key: { channelId: "web", conversationId: id },
-        senderId: "web",
-        text,
-        mode: mode === "steer" ? "steer" : "auto",
-      });
-      return c.json({ delivered: text }, 202);
-    } catch (err) {
-      return c.json({ error: String(err) }, 404);
-    }
+    const session = await ensure(id);
+    const { steering, followUp } = await session.clearQueue();
+    const text = [...steering, ...followUp].join("\n").trim();
+    if (!text) return c.json({ error: "queue is empty" }, 409);
+    if (mode === "restart") await router.abort(id); // resolves once idle
+    await router.dispatch({
+      key: { channelId: "web", conversationId: id },
+      senderId: "web",
+      text,
+      mode: mode === "steer" ? "steer" : "auto",
+    });
+    return c.json({ delivered: text }, 202);
   });
 
   // Recall: drop all pending queued messages and hand them back (composer restore).
-  app.post("/api/sessions/:id/queue/recall", async (c) => {
-    const id = c.req.param("id");
-    try {
-      const session = await router.ensure({ channelId: "web", conversationId: id });
-      const { steering, followUp } = await session.clearQueue();
-      return c.json({ messages: [...steering, ...followUp] });
-    } catch (err) {
-      return c.json({ error: String(err) }, 404);
-    }
+  guarded(app, "POST", "/api/sessions/:id/queue/recall", 404, async (c) => {
+    const session = await ensure(c.req.param("id"));
+    const { steering, followUp } = await session.clearQueue();
+    return c.json({ messages: [...steering, ...followUp] });
   });
 
   app.post("/api/sessions/:id/abort", async (c) => {
@@ -519,6 +322,8 @@ export function createServer({ factory, router, hub, pins, unread, config, backg
       }
     });
   });
+
+  registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });
 
   app.use("/*", serveStatic({ root: "./src/web/public" }));
   return app;

@@ -2,8 +2,9 @@
 // dialog with pin toggles, and the New-session dialog. main.ts owns the
 // session list; this module renders it and reports interactions back.
 
+import { sendJson } from "./api.js";
 import { browseButton } from "./dir-picker.js";
-import { $, detailsRow, h, relTime } from "./dom.js";
+import { $, basename, detailsRow, h, relTime } from "./dom.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: AgentFactory.list() entry + live state + pin flag. */
@@ -41,8 +42,6 @@ const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const knownProjects = $("#known-projects");
 
-const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
-
 // --- projects (pinned sessions, grouped by cwd) ------------------------------------
 // Projects lists pinned sessions only — those created in Pier (auto-pinned) or
 // pinned from the All-sessions dialog — so Pi history never floods the sidebar.
@@ -75,6 +74,10 @@ export function groupByCwd(list: SessionInfo[]): Map<string, SessionInfo[]> {
   return groups;
 }
 
+/** Row action revealed on hover (resident on touch, which has no hover). */
+const HOVER_BTN =
+  "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block";
+
 /** Attention dot: green = running, amber = finished and waiting for a look,
  *  sky = idle itself but subagents still in flight, grey = idle. */
 function stateDot(s: SessionInfo): HTMLElement {
@@ -96,11 +99,7 @@ export async function setPinned(s: SessionInfo, pinned: boolean): Promise<void> 
   s.pinned = pinned;
   renderSessions();
   deps.onPinsChanged();
-  const res = await fetch(`/api/sessions/${s.id}/pin`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pinned }),
-  });
+  const res = await sendJson(`/api/sessions/${s.id}/pin`, { pinned });
   if (!res.ok) {
     s.pinned = !pinned; // reconcile: the server is the truth
     renderSessions();
@@ -118,11 +117,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
   );
   // Touch has no hover, so a hover-revealed control there is unreachable —
   // pointer-coarse makes it resident instead (same trick on the project +).
-  const more = h(
-    "button",
-    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block",
-    "\u22ef",
-  );
+  const more = h("button", HOVER_BTN, "\u22ef");
   more.title = "Session actions";
   more.onclick = (ev) => {
     ev.stopPropagation();
@@ -142,11 +137,7 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   );
   // Hover shortcut: new session in this cwd, no dialog — the cwd is the answer
   // the dialog would have asked for.
-  const add = h(
-    "button",
-    "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block",
-    "+",
-  );
+  const add = h("button", HOVER_BTN, "+");
   add.title = `New session in ${cwd}`;
   add.onclick = (ev) => {
     ev.preventDefault(); // a click inside <summary> would toggle the project
@@ -196,7 +187,6 @@ export function renderSessions(): void {
 // --- all sessions (everything Pi knows about, pin from here) -----------------------
 
 function archiveRow(s: SessionInfo): HTMLElement {
-  const li = h("li", "flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-neutral-100");
   const pin = h(
     "button",
     `flex-none rounded px-1.5 py-0.5 text-[11.5px] ${
@@ -211,7 +201,9 @@ function archiveRow(s: SessionInfo): HTMLElement {
     ev.stopPropagation();
     void setPinned(s, !s.pinned);
   };
-  li.append(
+  const li = h(
+    "li",
+    "flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-neutral-100",
     stateDot(s),
     h("span", "truncate", s.title ?? "untitled"),
     h("span", "ml-auto flex-none text-[11px] text-neutral-400", relTime(s.createdAt)),

@@ -3,7 +3,9 @@
 // description, session links, content — belongs to the agent that wrote it, so
 // this view reads /api/boards and writes only `public`.
 
-import { h, relTime } from "./dom.js";
+import { sendJson } from "./api.js";
+import { consoleView, h, relTime, type ConsoleView } from "./dom.js";
+import { btn } from "./form.js";
 
 interface Board {
   slug: string;
@@ -14,47 +16,46 @@ interface Board {
   updatedAt: string;
 }
 
-export interface BoardsView {
-  show(): void;
-  hide(): void;
-  readonly visible: boolean;
-}
-
-export function createBoardsView(root: HTMLElement, openSession: (id: string) => void): BoardsView {
-  let visible = false;
+export function createBoardsView(root: HTMLElement, openSession: (id: string) => void): ConsoleView {
   let boards: Board[] = [];
+  /**
+   * The last write that did not take. A view that silently re-renders the old
+   * state is indistinguishable from one where the click never landed.
+   */
+  let problem = "";
 
-  const header = h("header", "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4");
-  header.append(h("span", "font-medium max-md:hidden", "Boards"));
+  const header = h(
+    "header",
+    "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4",
+    h("span", "font-medium max-md:hidden", "Boards"),
+  );
   const pane = h("div", "px-4 py-5");
-  const scroll = h("div", "min-h-0 flex-1 overflow-y-auto");
-  scroll.append(header, pane);
-  root.append(scroll);
+  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, pane));
 
   async function patch(slug: string, isPublic: boolean): Promise<void> {
-    const res = await fetch(`/api/boards/${slug}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ public: isPublic }),
-    });
-    if (!res.ok) await load();
+    const res = await sendJson(`/api/boards/${slug}`, { public: isPublic }, "PATCH");
+    if (res.ok) return;
+    // The toggle already flipped optimistically; reloading puts it back, and
+    // the line says why it moved on its own.
+    problem = `Could not change ${slug}: ${res.status}`;
+    await load();
   }
 
   async function remove(slug: string): Promise<void> {
-    await fetch(`/api/boards/${slug}`, { method: "DELETE" });
+    const res = await fetch(`/api/boards/${slug}`, { method: "DELETE" });
+    if (!res.ok) problem = `Could not delete ${slug}: ${res.status}`;
     await load();
   }
 
   function row(board: Board): HTMLElement {
     const el = h("div", "group flex flex-col gap-1 border-b border-neutral-200/70 px-1 py-2.5 last:border-b-0");
-    const top = h("div", "flex items-center gap-2");
     const link = document.createElement("a");
     link.className = "truncate font-medium text-neutral-800 hover:text-indigo-700";
     link.href = `/boards/${board.slug}/`;
     link.target = "_blank";
     link.rel = "noreferrer";
     link.textContent = board.title;
-    top.append(link, h("span", "flex-none font-mono text-[11.5px] text-neutral-400", board.slug));
+    const top = h("div", "flex items-center gap-2", link, h("span", "flex-none font-mono text-[11.5px] text-neutral-400", board.slug));
 
     // The toggle carries its own consequence: a public board needs no session,
     // no cookie and no invitation to read.
@@ -66,23 +67,19 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
       board.public = toggle.checked;
       void patch(board.slug, toggle.checked);
     };
-    const label = h("label", "ml-auto flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500");
-    label.append(
+    const label = h(
+      "label",
+      "ml-auto flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500",
       toggle,
-      h(
-        "span",
-        "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200",
-      ),
+      h("span", "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200"),
       h("span", "", "Public"),
     );
     // Hover-revealed, like the channel user rows: deleting only renames the
     // folder, so the undo is on disk and a modal would be theatre.
-    const del = h(
-      "button",
-      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100",
+    const del = btn(
       "Delete",
-    ) as HTMLButtonElement;
-    del.type = "button";
+      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100",
+    );
     del.title = "Renames the folder on disk; nothing is erased";
     del.onclick = () => void remove(board.slug);
     top.append(label, del);
@@ -92,8 +89,7 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     if (board.description) meta.append(h("span", "min-w-0 truncate", board.description));
     meta.append(h("span", "flex-none text-neutral-400", relTime(Date.parse(board.updatedAt))));
     for (const id of board.sessions) {
-      const chip = h("button", "flex-none cursor-pointer font-mono text-indigo-600 hover:underline", id.slice(0, 8));
-      (chip as HTMLButtonElement).type = "button";
+      const chip = btn(id.slice(0, 8), "flex-none cursor-pointer font-mono text-indigo-600 hover:underline");
       chip.title = `Open session ${id}`;
       chip.onclick = () => openSession(id);
       meta.append(chip);
@@ -135,36 +131,30 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
       el.append(box);
       column.append(el);
     }
-    pane.replaceChildren(column);
+    pane.replaceChildren(
+      ...(problem ? [h("p", "mb-3 text-[13px] text-red-600", problem)] : []),
+      column,
+    );
   }
 
   async function load(): Promise<void> {
     const res = await fetch("/api/boards");
-    if (!res.ok) return;
+    if (!res.ok) {
+      problem = `Could not load boards: ${res.status}`;
+      return render();
+    }
     boards = (await res.json()) as Board[];
     render();
+    // Cleared only after a good render, so the reason survives the reload it
+    // triggered and disappears on the next clean one.
+    problem = "";
   }
 
+  const view = consoleView(root, () => void load());
   // No SSE for boards: they change when an agent writes files, and a refetch on
   // focus is closer to free than a second event stream.
   window.addEventListener("focus", () => {
-    if (visible) void load();
+    if (view.visible) void load();
   });
-
-  return {
-    show() {
-      visible = true;
-      root.classList.remove("hidden");
-      root.classList.add("flex");
-      void load();
-    },
-    hide() {
-      visible = false;
-      root.classList.add("hidden");
-      root.classList.remove("flex");
-    },
-    get visible() {
-      return visible;
-    },
-  };
+  return view;
 }

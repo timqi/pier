@@ -32,6 +32,14 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
   return el;
 };
 
+/** A tab in a Console tab strip: house button chrome plus the active tint. */
+export function tabButton(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
+  const el = button(label);
+  if (active) el.classList.add("bg-neutral-200");
+  el.onclick = onClick;
+  return el;
+}
+
 /** A titled panel. The subtitle carries the "why", so fields need fewer words. */
 // No overflow-hidden: help bubbles escape their card, so the header rounds its
 // own top corners instead of being clipped into shape by the section.
@@ -40,9 +48,7 @@ export function card(title: string, subtitle: string, ...body: HTMLElement[]): H
   const head = h("div", "rounded-t-xl border-b border-neutral-200/70 bg-neutral-50/70 px-4 py-2.5");
   head.append(h("h2", "text-[13px] font-semibold text-neutral-700", title));
   if (subtitle) head.append(h("p", "mt-0.5 text-[11.5px] leading-snug text-neutral-500", subtitle));
-  const inner = h("div", "flex flex-col gap-4 px-4 py-3.5");
-  inner.append(...body);
-  el.append(head, inner);
+  el.append(head, h("div", "flex flex-col gap-4 px-4 py-3.5", ...body));
   return el;
 }
 
@@ -60,8 +66,7 @@ export interface FieldOptions {
  */
 export function field(label: string, control: HTMLElement, opts: FieldOptions = {}): HTMLElement {
   const box = h("div", "flex flex-col gap-1.5");
-  const head = h("div", "flex items-center gap-1.5");
-  head.append(h("span", LABEL, label));
+  const head = h("div", "flex items-center gap-1.5", h("span", LABEL, label));
   if (opts.help) head.append(opts.help);
   box.append(head, control);
   if (opts.hint) box.append(h("span", "text-[11.5px] leading-snug text-neutral-400", opts.hint));
@@ -133,11 +138,9 @@ export function toggle(
   const row = h("label", `flex cursor-pointer gap-2.5 ${label ? "items-start" : "items-center"}`);
   row.append(box, track);
   if (label) {
-    const text = h("span", "flex min-w-0 flex-col");
-    const head = h("span", "flex items-center gap-1.5");
-    head.append(h("span", "text-[13px] text-neutral-700", label));
+    const head = h("span", "flex items-center gap-1.5", h("span", "text-[13px] text-neutral-700", label));
     if (help) head.append(help);
-    text.append(head);
+    const text = h("span", "flex min-w-0 flex-col", head);
     if (hint) text.append(h("span", "text-[11.5px] leading-snug text-neutral-400", hint));
     row.append(text);
   }
@@ -209,8 +212,5 @@ export function helpBadge(
 }
 
 /** A walkthrough step whose prose is followed by a control. */
-export function withControl(markdown: string, control: HTMLElement): HTMLElement {
-  const box = h("span", "flex flex-col gap-1");
-  box.append(prose(markdown), control);
-  return box;
-}
+export const withControl = (markdown: string, control: HTMLElement): HTMLElement =>
+  h("span", "flex flex-col gap-1", prose(markdown), control);

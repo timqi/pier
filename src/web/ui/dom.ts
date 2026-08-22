@@ -19,11 +19,51 @@ export function relTime(ts: number): string {
   return `${Math.round(mins / 1440)}d`;
 }
 
-export function h(tag: string, cls: string, text?: string): HTMLElement {
+export function h(tag: string, cls: string, ...children: (Node | string)[]): HTMLElement {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
+  node.append(...children);
   return node;
+}
+
+/** Last path segment — how every surface names a cwd or a file. */
+export const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
+
+/** "42s" under a minute, "3m 12s" over — run durations everywhere. */
+export function fmtDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** What main.ts's view switcher needs from every Console view. */
+export interface ConsoleView {
+  show(arg?: string): void;
+  hide(): void;
+  visible: boolean;
+}
+
+/** The show/hide plumbing every Console view repeated verbatim: flip the
+ *  root's classes, track visibility, load on show, optionally flush on hide. */
+export function consoleView(
+  root: HTMLElement,
+  load: (arg?: string) => void,
+  onHide?: () => void,
+): ConsoleView {
+  return {
+    visible: false,
+    show(arg) {
+      this.visible = true;
+      root.classList.remove("hidden");
+      root.classList.add("flex");
+      load(arg);
+    },
+    hide() {
+      onHide?.();
+      this.visible = false;
+      root.classList.add("hidden");
+      root.classList.remove("flex");
+    },
+  };
 }
 
 /**
@@ -42,6 +82,34 @@ export function prose(markdown: string): HTMLElement {
     a.rel = "noreferrer";
   }
   return el;
+}
+
+/** navigator.clipboard is secure-context only and the dev target binds 0.0.0.0,
+ *  so a LAN-IP visit falls back to the legacy selection trick. */
+async function copy(text: string): Promise<void> {
+  if (navigator.clipboard) return navigator.clipboard.writeText(text);
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.className = "fixed opacity-0";
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  if (!ok) throw new Error("clipboard unavailable");
+}
+
+/** Copy affordance whose own label reports the outcome — no toast machinery. */
+export function copyBtn(cls: string, text: () => string): HTMLElement {
+  const btn = h("button", cls, "Copy");
+  btn.title = "Copy to clipboard";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  btn.onclick = async (ev) => {
+    ev.stopPropagation(); // copying isn't "activate the row this sits in"
+    btn.textContent = await copy(text()).then(() => "Copied", () => "Failed");
+    clearTimeout(timer);
+    timer = setTimeout(() => (btn.textContent = "Copy"), 1200);
+  };
+  return btn;
 }
 
 /** Chevron + summary skeleton shared by activity groups and project nodes. */

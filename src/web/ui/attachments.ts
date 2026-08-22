@@ -1,10 +1,85 @@
-// Agent attachments in a chat bubble. The agent links a file it produced as
+// Images and file attachments in a chat bubble: the lightbox, the thumbnail
+// strip, and agent attachments. The agent links a file it produced as
 // `[label](file:///abs/path)`; the link is rewritten to the session's files
 // route before sanitizing (DOMPurify drops `file:` URLs, and rightly so), then
 // the rendered node is upgraded: images become thumbnails, everything else an
 // attachment card with preview + download.
 
-import { $, h } from "./dom.js";
+import { $, basename, h } from "./dom.js";
+
+// --- image lightbox + thumbnails ---------------------------------------------------
+
+const imageDialog = $<HTMLDialogElement>("#image-dialog");
+const imageFull = $<HTMLImageElement>("#image-full");
+const imagePrev = $("#image-prev");
+const imageNext = $("#image-next");
+
+/** The transcript's thumbnails in document order. Read at open time rather
+ *  than tracked: what is on screen *is* the gallery, so there is no second
+ *  list to keep in step with the event stream. */
+let gallery: string[] = [];
+let shown = 0;
+
+/** Wraps around, so paging never dead-ends on the first or last image. */
+function step(delta: number): void {
+  if (gallery.length < 2) return;
+  shown = (shown + delta + gallery.length) % gallery.length;
+  imageFull.src = gallery[shown]!;
+}
+
+/** Full-size view of any chat image (transcript, pending, or attachment). */
+function showImage(src: string): void {
+  // An <img>'s .src is absolute; normalize the caller's to match (a data: URL
+  // is returned unchanged).
+  const absolute = new URL(src, location.href).href;
+  gallery = [...$("#turns").querySelectorAll<HTMLImageElement>("img.thumb")].map((i) => i.src);
+  shown = Math.max(0, gallery.indexOf(absolute));
+  imageFull.src = absolute;
+  // display, not a `hidden` class: `hidden` and `flex` are the same Tailwind
+  // property and which one wins is an ordering accident.
+  const arrows = gallery.length < 2 ? "none" : "flex";
+  imagePrev.style.display = arrows;
+  imageNext.style.display = arrows;
+  imageDialog.showModal();
+}
+
+// Backdrop and image close; the arrows must not, hence stopPropagation.
+imageDialog.onclick = () => imageDialog.close();
+const pageOn = (btn: HTMLElement, delta: number): void => {
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    step(delta);
+  };
+};
+pageOn(imagePrev, -1);
+pageOn(imageNext, 1);
+imageDialog.onkeydown = (ev) => {
+  if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+  ev.preventDefault();
+  step(ev.key === "ArrowLeft" ? -1 : 1);
+};
+
+/** The bubble's thumbnail strip, created on first use: attachments belong in
+ *  their own block under the text, not appended to its last line. */
+export function imageRow(bubble: HTMLElement): HTMLElement {
+  const existing = bubble.querySelector<HTMLElement>(":scope > .thumbs");
+  if (existing) return existing;
+  const row = h("div", "thumbs");
+  bubble.append(row);
+  return row;
+}
+
+/** Thumbnail in a chat row; click opens the lightbox at this image. */
+export function imageThumb(src: string): HTMLImageElement {
+  const thumb = document.createElement("img");
+  thumb.src = src;
+  thumb.loading = "lazy";
+  thumb.className = "thumb";
+  thumb.onclick = () => showImage(src);
+  return thumb;
+}
+
+// --- agent attachments -------------------------------------------------------------
 
 // No svg: it is served as octet-stream on purpose (inline markup is a script
 // vector), so it renders as a card rather than an image.
@@ -20,7 +95,6 @@ const fileDownload = $<HTMLAnchorElement>("#file-download");
 $("#file-close").onclick = () => fileDialog.close();
 
 const extOf = (name: string): string => name.split(".").pop()?.toLowerCase() ?? "";
-const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 
 const fileUrl = (sessionId: string, path: string, download = false): string =>
   `/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(path)}${
@@ -58,13 +132,9 @@ async function preview(url: string, name: string): Promise<void> {
     body.length > MAX_PREVIEW_BYTES ? `${body.slice(0, MAX_PREVIEW_BYTES)}\n…` : body;
 }
 
-function thumb(url: string, name: string, openImage: (src: string) => void): HTMLElement {
-  const img = document.createElement("img");
-  img.src = url;
+function thumb(url: string, name: string): HTMLElement {
+  const img = imageThumb(url);
   img.alt = name;
-  img.loading = "lazy";
-  img.className = "thumb";
-  img.onclick = () => openImage(url);
   return img;
 }
 
@@ -132,12 +202,12 @@ function groupAttachments(placed: HTMLElement[]): void {
  * Upgrade every attachment node of a rendered markdown bubble in place. Called
  * after sanitizing, so only URLs the rewrite produced are touched.
  */
-export function renderAttachments(root: HTMLElement, openImage: (src: string) => void): void {
+export function renderAttachments(root: HTMLElement): void {
   const placed: HTMLElement[] = [];
   for (const img of root.querySelectorAll("img")) {
     const src = img.getAttribute("src") ?? "";
     if (!isFileUrl(src)) continue;
-    const node = thumb(src, basename(pathOf(src)), openImage);
+    const node = thumb(src, basename(pathOf(src)));
     img.replaceWith(node);
     placed.push(node);
   }
@@ -145,7 +215,7 @@ export function renderAttachments(root: HTMLElement, openImage: (src: string) =>
     const href = a.getAttribute("href") ?? "";
     if (!isFileUrl(href)) continue;
     const name = basename(pathOf(href)) || a.textContent?.trim() || "file";
-    const node = IMAGE_EXT.has(extOf(name)) ? thumb(href, name, openImage) : card(href, name);
+    const node = IMAGE_EXT.has(extOf(name)) ? thumb(href, name) : card(href, name);
     a.replaceWith(node);
     placed.push(node);
   }
