@@ -7,11 +7,11 @@
 // commands and four flags do not earn a dependency (AGENTS.md 8).
 
 import { execFileSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { currentVersion, UpdateCheck } from "./update.js";
 
-const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
+const version = currentVersion();
 
 const HELP = `pier ${version} — a self-hosted workspace for coding agents
 
@@ -72,8 +72,7 @@ if (values.help || command === "help") {
  * of the service being restarted dies with it.
  */
 async function update(checkOnly: boolean): Promise<void> {
-  const { UpdateCheck } = await import("./update.js");
-  const check = new UpdateCheck();
+  const check = new UpdateCheck(version);
   await check.refresh();
   const { current, latest, available } = check.status();
 

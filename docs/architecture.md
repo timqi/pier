@@ -47,6 +47,8 @@ src/
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   settings.ts  the instance facts a human owns (today: the public URL)
+  update.ts    whether a newer release exists; checking only, never applying
+  cli.ts       what `pier` does when typed; service.ts is the unit it writes
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core

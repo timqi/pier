@@ -10,6 +10,7 @@ import {
   startUpdate,
   uninstall,
   unitPath,
+  updateUnitPath,
 } from "./service.js";
 
 const home = (): string => mkdtempSync(join(tmpdir(), "pier-home-"));
@@ -137,7 +138,7 @@ describe("update", () => {
         exec: (a) => (calls.push(a), true),
       }),
     ).toBe(true);
-    expect(existsSync(join(dirname(unitPath(h)), "pier-update.service"))).toBe(true);
+    expect(existsSync(updateUnitPath(h))).toBe(true);
     expect(calls.map((c) => c.join(" "))).toEqual([
       "systemctl --user daemon-reload",
       // --no-block: the unit restarts the service that would be waiting for it.
@@ -158,7 +159,7 @@ describe("uninstall", () => {
 
     expect(existsSync(unitPath(h))).toBe(false);
     expect(existsSync(limitsPath(h))).toBe(false);
-    expect(existsSync(join(dirname(unitPath(h)), "pier-update.service"))).toBe(false);
+    expect(existsSync(updateUnitPath(h))).toBe(false);
     expect(calls[0]).toEqual(["systemctl", "--user", "disable", "--now", "pier.service"]);
     expect(said.join(" ")).toMatch(/PIER_HOME is untouched/);
   });

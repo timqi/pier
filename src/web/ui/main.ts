@@ -31,7 +31,6 @@ import {
   send,
   updateComposer,
 } from "./composer.js";
-import { $ } from "./dom.js";
 import { initNotify, noteState } from "./notify.js";
 import { initReport } from "./report.js";
 import {
@@ -43,6 +42,7 @@ import {
   setHeaderState,
 } from "./session-header.js";
 import { closeDrawer, initShell } from "./shell.js";
+import { initVersion } from "./version.js";
 import { initSidebar, renderSessions, type SessionInfo } from "./sidebar.js";
 import {
   activityThinking,
@@ -362,32 +362,7 @@ initViews({
   maybeAckRead,
 });
 
-const versionLink = $<HTMLAnchorElement>("#version");
-versionLink.textContent = `v${__PIER_VERSION__}`;
-// News, not an action: the server checked the registry, and applying it is a
-// command someone types. The link keeps pointing at the source either way.
-void fetch("/api/update")
-  .then((r) => r.json() as Promise<{ latest: string | null; available: boolean }>)
-  .then(({ latest, available }) => {
-    if (!available || !latest) return;
-    // Quiet grey becomes a badge: the number is no longer a fact about this
-    // instance, it is something to act on.
-    versionLink.textContent = `v${__PIER_VERSION__} → ${latest}`;
-    versionLink.href = "https://github.com/timqi/pier/releases";
-    versionLink.title = `${latest} is out. Update with: pier update`;
-    versionLink.classList.remove("text-neutral-400", "hover:text-neutral-700");
-    versionLink.classList.add(
-      "rounded-full",
-      "bg-emerald-50",
-      "px-1.5",
-      "text-emerald-700",
-      "ring-1",
-      "ring-inset",
-      "ring-emerald-600/20",
-      "hover:bg-emerald-100",
-    );
-  })
-  .catch(() => {}); // an unreachable check must not break the header
+initVersion(__PIER_VERSION__);
 
 // Coming back to a hidden tab is the other way turns get seen.
 document.addEventListener("visibilitychange", maybeAckRead);

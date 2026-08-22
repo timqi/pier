@@ -28,6 +28,10 @@ export const unitPath = (home = homedir()): string =>
 export const limitsPath = (home = homedir()): string =>
   join(dirname(unitPath(home)), `${UNIT_NAME}.d`, "limits.conf");
 
+/** The oneshot that installs a new version, beside the unit it restarts. */
+export const updateUnitPath = (home = homedir()): string =>
+  join(dirname(unitPath(home)), UPDATE_UNIT_NAME);
+
 export interface UnitOptions {
   /** The node that is running us, by absolute path. */
   execPath: string;
@@ -191,8 +195,7 @@ export function startUpdate(options: {
   const run = options.exec ?? runner(say);
   if (!existsSync(unitPath(home))) return false;
 
-  const path = join(dirname(unitPath(home)), UPDATE_UNIT_NAME);
-  writeFileSync(path, renderUpdateUnit(execPath), { mode: 0o644 });
+  writeFileSync(updateUnitPath(home), renderUpdateUnit(execPath), { mode: 0o644 });
   run(["systemctl", "--user", "daemon-reload"]);
   if (!run(["systemctl", "--user", "start", "--no-block", UPDATE_UNIT_NAME])) return true;
   say(`updating in the background — follow it with: journalctl --user -u ${UPDATE_UNIT_NAME} -f`);
@@ -207,7 +210,7 @@ export function uninstall(
 ): void {
   const run = exec ?? runner(say);
   run(["systemctl", "--user", "disable", "--now", UNIT_NAME]);
-  for (const path of [unitPath(home), limitsPath(home), join(dirname(unitPath(home)), UPDATE_UNIT_NAME)]) {
+  for (const path of [unitPath(home), limitsPath(home), updateUnitPath(home)]) {
     if (!existsSync(path)) continue;
     rmSync(path, { force: true });
     say(`removed ${path}`);
