@@ -6,6 +6,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
+import type { Secrets } from "../secrets.js";
 import {
   type BindCode,
   type ChannelConfig,
@@ -18,11 +19,18 @@ import {
 
 const BIND_CODE_TTL_MS = 10 * 60_000;
 
+/** Envelope from secrets.ts. A token that matches was sealed by us; anything
+ *  else is legacy plaintext, still honored and re-sealed on the next save. */
+const SEALED = /^v1:[0-9a-f]{8}:/;
+
 export class ChannelStore {
   private readonly db: DatabaseSync;
   private readonly cache = new Map<ChannelPlatform, ChannelConfig>();
 
-  constructor(db: DatabaseSync = pierDb()) {
+  /** Without `secrets`, tokens persist as given — tests and one-off tools.
+   *  With it, tokens are sealed at rest; a locked store throws on both paths
+   *  rather than serving a token it cannot read. */
+  constructor(db: DatabaseSync = pierDb(), private readonly secrets?: Secrets) {
     this.db = db;
   }
 
@@ -41,6 +49,11 @@ export class ChannelStore {
     const config = row
       ? { ...defaultChannelConfig(), ...(JSON.parse(row.json) as Partial<ChannelConfig>) }
       : defaultChannelConfig();
+    if (this.secrets) {
+      for (const key of ["token", "appToken"] as const) {
+        if (SEALED.test(config[key])) config[key] = this.secrets.decrypt(config[key]);
+      }
+    }
     this.cache.set(platform, config);
     return config;
   }
@@ -54,10 +67,18 @@ export class ChannelStore {
     // Clone on the way in too, so the caller keeping its object and mutating
     // it later cannot reach into the cache behind save()'s back.
     this.cache.set(platform, structuredClone(config));
+    // The cache holds plaintext (it is what adapters connect with); only the
+    // row is sealed.
+    const stored = this.secrets ? structuredClone(config) : config;
+    if (this.secrets) {
+      for (const key of ["token", "appToken"] as const) {
+        if (stored[key]) stored[key] = this.secrets.encrypt(stored[key]);
+      }
+    }
     this.db.prepare(`
       INSERT INTO channels(platform, json) VALUES (?, ?)
       ON CONFLICT(platform) DO UPDATE SET json = excluded.json
-    `).run(platform, JSON.stringify(config));
+    `).run(platform, JSON.stringify(stored));
   }
 
   chat(platform: ChannelPlatform, chatId: string): ChatConfig | undefined {

@@ -1,5 +1,9 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { Secrets } from "../secrets.js";
 import { ChannelStore, gate } from "./config.js";
 import type { ChatPolicy } from "./types.js";
 
@@ -7,6 +11,54 @@ let store: ChannelStore;
 
 beforeEach(() => {
   store = new ChannelStore(openDb(":memory:"));
+});
+
+describe("sealed tokens", () => {
+  let secrets: Secrets;
+
+  beforeEach(async () => {
+    secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-ch-")), "master.key"));
+    await secrets.unlock();
+  });
+
+  it("seals tokens in the row, serves plaintext from get()", () => {
+    const db = openDb(":memory:");
+    const sealed = new ChannelStore(db, secrets);
+    const config = sealed.get("slack");
+    config.token = "xoxb-bot";
+    config.appToken = "xapp-socket";
+    sealed.save("slack", config);
+    const row = db.prepare("SELECT json FROM channels WHERE platform = 'slack'").get() as { json: string };
+    expect(row.json).not.toContain("xoxb-bot");
+    expect(row.json).not.toContain("xapp-socket");
+    // The same store and a fresh one (cold cache) both serve plaintext.
+    expect(sealed.get("slack").token).toBe("xoxb-bot");
+    const fresh = new ChannelStore(db, secrets);
+    expect(fresh.get("slack")).toMatchObject({ token: "xoxb-bot", appToken: "xapp-socket" });
+  });
+
+  it("honors a legacy plaintext row and re-seals it on the next save", () => {
+    const db = openDb(":memory:");
+    const plain = new ChannelStore(db); // pre-secrets Pier wrote plaintext
+    const config = plain.get("telegram");
+    config.token = "12345:legacy";
+    plain.save("telegram", config);
+    const sealed = new ChannelStore(db, secrets);
+    expect(sealed.get("telegram").token).toBe("12345:legacy");
+    sealed.save("telegram", sealed.get("telegram"));
+    const row = db.prepare("SELECT json FROM channels WHERE platform = 'telegram'").get() as { json: string };
+    expect(row.json).not.toContain("12345:legacy");
+  });
+
+  it("a locked store refuses rather than serving ciphertext", () => {
+    const db = openDb(":memory:");
+    const sealed = new ChannelStore(db, secrets);
+    const config = sealed.get("slack");
+    config.token = "xoxb-bot";
+    sealed.save("slack", config);
+    const locked = new ChannelStore(db, new Secrets(join(tmpdir(), "nonexistent", "master.key")));
+    expect(() => locked.get("slack")).toThrow(/secrets locked/);
+  });
 });
 
 describe("channel config store", () => {

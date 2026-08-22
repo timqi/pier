@@ -1,10 +1,10 @@
 // Pi configuration on disk, behind the ConfigStore seam. Knows Pi's directory
-// conventions (~/.pi/agent globally; <cwd>/AGENTS.md and <cwd>/.pi per
+// conventions (the Pier-managed global dir; <cwd>/AGENTS.md and <cwd>/.pi per
 // project) but not the Pi SDK — pure filesystem, unit-testable in a tmp dir.
 
 import { promises as fs } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import { pierPath } from "../paths.js";
 import type {
   ConfigResource,
   ConfigResourceKind,
@@ -16,9 +16,11 @@ const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
 const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
-/** Same resolution Pi uses (see its config.js getAgentDir). */
+/** Pier owns the Pi runtime dir: config lives in the syncable `~/.pier/pi`
+ * repo, not `~/.pi`. main.ts exports this as PI_CODING_AGENT_DIR so the SDK's
+ * own path resolution (auth.json, sessions, bin) lands in the same place. */
 export const defaultAgentDir = (): string =>
-  process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+  process.env.PI_CODING_AGENT_DIR ?? pierPath("pi");
 
 /** Stable mask: recomputable at write time, so "unchanged" is detectable. */
 const maskKey = (key: string): string =>

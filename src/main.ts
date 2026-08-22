@@ -27,12 +27,18 @@ import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath } from "./paths.js";
+import { Secrets } from "./secrets.js";
 import { SettingsStore } from "./settings.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
 
 const log = logger("pier");
+
+// Pier owns the Pi runtime dir. Set before any SDK call resolves a path, so
+// everything Pi derives from its agent dir (auth.json, models.json, sessions,
+// bin) lands under PIER_HOME instead of ~/.pi. An operator override wins.
+process.env.PI_CODING_AGENT_DIR ??= pierPath("pi");
 
 // First, and explicitly: every store below shares this one connection, and a
 // schema that cannot be migrated must stop the process here — before a port is
@@ -51,6 +57,11 @@ for (const stale of ["settings.json", "pins.json", "unread.json"]) {
 // One store, two readers: the Console writes the public URL, and every session
 // opened after that is told the new one.
 const settings = new SettingsStore(db);
+
+// Layer-1 credential encryption (channel tokens today). Constructed here,
+// unlocked below: file mode is instant, vt mode waits on a human approval, and
+// nothing that needs a token may run before the key arrives.
+const secrets = new Secrets();
 
 let tasks: TaskService;
 const conversations = new ConversationStore(db);
@@ -106,7 +117,7 @@ const router = new Router(hub, (key) => {
 tasks = new TaskService(new TaskStore(db), factory, router, hub);
 tasks.start();
 
-channelStore = new ChannelStore(db);
+channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
 const channels = new ChannelRuntime(channelStore, router, control);
 resolveIm = resolveConversation(
@@ -115,7 +126,13 @@ resolveIm = resolveConversation(
   control.launchFor,
   (message) => logger("channels").warn(message),
 );
-void channels.reload();
+// Channels connect only once tokens are readable. A refused unlock (vt denial,
+// corrupt master.key) must not take the web surface down — it is where the
+// operator goes to repair — but it is named loudly, not served as silence.
+void secrets.unlock().then(
+  () => channels.reload(),
+  (err) => log.error("secrets locked — channels not started; repair master.key (or vt) and restart", err),
+);
 
 // Composition happens here so web/ and tasks/ never import each other.
 const app = new Hono();

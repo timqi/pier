@@ -260,7 +260,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   return consoleView(root, () => {
     scopeSelect.replaceChildren(
-      new Option("Global (~/.pi/agent)", "global"),
+      new Option("Global (~/.pier/pi)", "global"),
       ...getCwds().map((cwd) => new Option(`${basename(cwd)} — ${cwd}`, cwd)),
     );
     if (![...scopeSelect.options].some((o) => o.value === scope)) scope = "global";
