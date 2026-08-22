@@ -215,12 +215,12 @@ const STATUS_STYLE: Record<ActivityStatus, string> = {
  */
 function styleGroup(el: HTMLElement, status: ActivityStatus): void {
   el.dataset.status = status;
-  // Front, not end: the steps ran before the message, and a fixed-width
-  // right-aligned gutter makes them a dim column the eye can skip — every
-  // message then starts at the same x instead of wherever "9 steps · 119s"
-  // happened to end.
+  // Front, not end: the steps ran before the message, and a gutter of them is
+  // a dim column the eye can skip. The label stays one left-aligned unit and
+  // the gutter's min width does the aligning, so the slack falls between the
+  // label and the message instead of splitting the chevron off it.
   const placement = el.dataset.adopted
-    ? "float-left min-w-[6.5rem] pr-2 tabular-nums mt-[3px] [&>summary]:justify-end open:float-none open:mt-0 open:mb-1.5 open:min-w-0 open:pr-0 open:[&>summary]:justify-start"
+    ? "float-left min-w-[6.5rem] pr-3 tabular-nums mt-[3px] open:float-none open:mt-0 open:mb-1.5 open:min-w-0 open:pr-0"
     : "mx-5 my-1.5";
   el.className = `${placement} rounded-md text-[11.5px] leading-[1.35] open:border open:border-black/[0.06] open:px-2 open:py-1.5 ${STATUS_STYLE[status]}`;
 }
