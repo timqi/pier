@@ -170,6 +170,13 @@ html {
   .md :first-child {
     margin-top: 0;
   }
+  /* A turn's step line floats into the first line of its message
+     (turn-activity.ts). Prose wraps around it, but a block that paints its own
+     background — code, quote, table — would slide underneath, so it starts
+     below instead. */
+  .md > :first-child:not(p, h1, h2, h3, h4, h5, h6) {
+    clear: left;
+  }
   .md :last-child {
     margin-bottom: 0;
   }

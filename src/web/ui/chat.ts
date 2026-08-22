@@ -19,6 +19,7 @@ import {
   replayActivity,
   resetActivity,
   sealActivity,
+  takeActivityGroup,
 } from "./turn-activity.js";
 import type {
   BackgroundRun,
@@ -73,6 +74,10 @@ const ROW_STYLE: Record<string, { row: string; body: string }> = {
 // padding is generous — the block breathes, the lines don't.
 export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false): HTMLElement {
   sealActivity();
+  // The steps that just ran are this message's own: they move inside the row
+  // as its caption line. Detaching first also restores sender grouping, which
+  // a group sitting between two agent rows used to break.
+  const steps = kind === "assistant" ? takeActivityGroup() : null;
   const s = ROW_STYLE[kind]!;
   // Consecutive rows from the same sender read as one block (Slack grouping).
   const grouped = (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
@@ -80,6 +85,13 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   row.dataset.kind = kind;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, text);
   if (markdown) renderMarkdown(node, text);
+  // flow-root: the step line floats into the message's first line, and a row
+  // that doesn't contain its float leaks it over whatever comes next while the
+  // text is still empty.
+  if (steps) {
+    row.classList.add("flow-root");
+    row.append(steps);
+  }
   row.append(node);
   if (kind === "user") {
     const edit = h("button", "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex");

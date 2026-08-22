@@ -163,44 +163,93 @@ export function sealActivity(): void {
   if (activity && !activity.toolRows.size) finishActivity("done");
 }
 
+/** The most recent group, live or just closed, until a row takes it. */
+let lastGroup: HTMLElement | null = null;
+
 /** Reset before a session snapshot re-render (chat.ts resetChat). */
 export function resetActivity(): void {
   activity = null;
+  lastGroup = null;
   backgroundRows.clear();
 }
 
+/**
+ * Hand the pending group to the assistant row about to be appended, which is
+ * the message those steps produced.
+ */
+export function takeActivityGroup(): HTMLElement | null {
+  const el = lastGroup;
+  // A group still collecting steps stays put: what it is about to receive
+  // happened *after* this message, so it cannot be its caption.
+  if (!el || activity?.el === el) return null;
+  lastGroup = null;
+  // Anything appended after the group — an error row, a background-run card —
+  // means moving it now would reorder the transcript.
+  if (el !== turns.el.lastElementChild) return null;
+  el.remove();
+  el.dataset.adopted = "1";
+  styleGroup(el, el.dataset.status as ActivityStatus);
+  return el;
+}
+
+/**
+ * The steps ran *for* the message that follows them, so the group is adopted
+ * into that row as its caption line (`takeActivityGroup`) and styled as one:
+ * no card, no colour of its own once it is done — a card between two rows read
+ * as a third speaker and left "whose steps are these?" unanswerable. Only the
+ * states worth a glance keep a tint, and opening any of them draws a box
+ * around the steps.
+ */
 const STATUS_STYLE: Record<ActivityStatus, string> = {
-  running: "border-green-200 bg-green-50 text-green-800",
-  done: "border-neutral-200 bg-neutral-50 text-neutral-500",
-  failed: "border-red-200 bg-red-50 text-red-700",
-  interrupted: "border-amber-200 bg-amber-50 text-amber-800",
+  running: "text-green-700 open:bg-green-50",
+  done: "text-neutral-400 hover:text-neutral-600 open:bg-black/[0.02] open:text-neutral-500",
+  failed: "text-red-600 open:bg-red-50",
+  interrupted: "text-amber-700 open:bg-amber-50",
 };
 
-const STATUS_ICON: Record<Exclude<ActivityStatus, "running">, string> = {
-  done: "✓",
+/**
+ * An adopted group floats into the first line of its own message, so the
+ * transcript is messages and nothing else: closed, it costs no line at all.
+ * Opening it drops the float and gives the steps their own block. A group
+ * still waiting for its message keeps the pane's gutter and rhythm.
+ */
+function styleGroup(el: HTMLElement, status: ActivityStatus): void {
+  el.dataset.status = status;
+  // Front, not end: the steps ran before the message, and a fixed-width
+  // right-aligned gutter makes them a dim column the eye can skip — every
+  // message then starts at the same x instead of wherever "9 steps · 119s"
+  // happened to end.
+  const placement = el.dataset.adopted
+    ? "float-left min-w-[6.5rem] pr-2 tabular-nums mt-[3px] [&>summary]:justify-end open:float-none open:mt-0 open:mb-1.5 open:min-w-0 open:pr-0 open:[&>summary]:justify-start"
+    : "mx-5 my-1.5";
+  el.className = `${placement} rounded-md text-[11.5px] leading-[1.35] open:border open:border-black/[0.06] open:px-2 open:py-1.5 ${STATUS_STYLE[status]}`;
+}
+
+const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, string> = {
   failed: "✕",
   interrupted: "⏸",
 };
 
 function statusIconEl(status: ActivityStatus): HTMLElement {
-  return status === "running"
-    ? h("span", "spinner")
-    : h("span", "flex-none text-[12px] font-bold", STATUS_ICON[status]);
+  if (status === "running") return h("span", "spinner");
+  // Done is the common case and has nothing to say — the step count is the
+  // whole message, so only the states that want attention carry a glyph.
+  if (status === "done") return h("span", "hidden");
+  return h("span", "flex-none text-[12px] font-bold", STATUS_ICON[status]);
 }
 
 function ensureActivity(ts: number): Activity {
   if (activity) return activity;
   const statusIcon = statusIconEl("running");
   const headline = h("span", "truncate", "working…");
-  const { el } = detailsRow(
-    `mx-5 my-1.5 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE.running}`,
-    [statusIcon, headline],
-  );
+  const { el } = detailsRow("", [statusIcon, headline]);
   el.dataset.kind = "activity";
+  styleGroup(el, "running");
   // Caps at ~10 step rows, then scrolls: an expanded group can't swallow the chat.
   const rowsEl = h("div", "mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain border-t border-black/5 pt-1.5");
   el.append(rowsEl);
   turns.el.append(el);
+  lastGroup = el;
   turns.scroll();
   activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };
   return activity;
@@ -215,7 +264,7 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
       : status === "done"
         ? base
         : `${base} · ${status}`;
-  a.el.className = `mx-5 my-1.5 rounded-lg border px-3 py-1.5 text-[13px] ${STATUS_STYLE[status]}`;
+  styleGroup(a.el, status);
   const icon = statusIconEl(status);
   a.statusIcon.replaceWith(icon);
   a.statusIcon = icon;
