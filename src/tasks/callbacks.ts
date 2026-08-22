@@ -11,7 +11,7 @@ export function runResultText(run: TaskRun): string {
   if (run.result?.type === "bash") result = run.result.stdout || run.result.stderr || `exit ${String(run.result.exitCode)}`;
   if (run.result?.type === "task") result = JSON.stringify(run.result.result);
   if (run.result?.type === "watch") result = "Watch condition did not match";
-  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated; open run ${run.id}]`;
+  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated — task tool get run_id ${run.id} returns the full text]`;
   return result;
 }
 

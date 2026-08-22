@@ -17,8 +17,9 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 ## Requirements
 
 - Node 24 or newer (`node:sqlite` is used unflagged)
-- A Pi provider key (Anthropic, OpenAI, …) — Pi's own config, in
-  `~/.pi/agent/settings.json`, editable from Console → Configuration
+- A provider key (Anthropic, OpenAI, …) — set from Console → Configuration
+  (Pi's files, kept under `~/.pier/pi`); stored credentials live sealed in
+  Pier's database, and a leftover Pi `auth.json` is imported once
 - Optional: the `sqlite3` CLI, for backups and password resets
 
 ## Run it
@@ -29,11 +30,14 @@ pier
 ```
 
 It listens on `127.0.0.1:3141` (`PORT`, `HOST`) and keeps everything under
-`~/.pier` (`PIER_HOME`): one SQLite database and the boards it serves.
+`~/.pier` (`PIER_HOME`): one SQLite database, the boards it serves, the
+`master.key` that seals stored credentials, and the Pi runtime with its
+session transcripts (`~/.pier/pi`, unless `PI_CODING_AGENT_DIR` says
+otherwise).
 
 **The first start generates a password and prints it once.** Every HTTP surface
 is behind it — there is no default password and no unclaimed window. Lost it?
-`sqlite3 ~/.pier/pier.db 'DELETE FROM auth'` and restart; a new one is printed.
+`sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'` and restart; a new one is printed.
 
 Open `http://localhost:3141`, sign in, then:
 

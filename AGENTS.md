@@ -87,9 +87,9 @@ answer is allowed to be "the right things":
 
 | Area | Now | Second look past |
 | --- | --- | --- |
-| `core/` | ~505 | 500 — platform-blind and Pi-blind; growth means something leaked in |
+| `core/` | ~595 | 650 — platform-blind and Pi-blind. The shared presentation vocabulary (reply.ts) and the sender prefix (identity.ts) live here *on purpose*, each replacing a copy per surface; growth anywhere else means something leaked in |
 | `channels/` | ~3.0k | 3.5k |
-| `web/` | ~4.5k | 4.5k — largest and least tested |
+| `web/` | ~5.1k | 5.5k — largest and least tested |
 | `tasks/` | ~2.4k | 2.5k |
 | one module | — | 300 — see rule 2 before splitting |
 | channel adapter file | — | 400 — transport, render and panel budgeted separately |

@@ -20,8 +20,11 @@ describe("queue policy", () => {
     expect(decide({ text: "!stop that", mode: "auto" }, "streaming")).toEqual({ action: "steer", text: "stop that" });
   });
 
-  it("streaming + explicit mode wins over prefix", () => {
+  it("an explicit mode takes the text verbatim — a leading ! is content", () => {
     expect(decide({ text: "now", mode: "steer" }, "streaming")).toEqual({ action: "steer", text: "now" });
-    expect(decide({ text: "!now", mode: "followUp" }, "streaming")).toEqual({ action: "followUp", text: "now" });
+    expect(decide({ text: "!now", mode: "followUp" }, "streaming")).toEqual({ action: "followUp", text: "!now" });
+    // IM sends steer for every message; "!important" must arrive as typed.
+    expect(decide({ text: "!important", mode: "steer" }, "streaming")).toEqual({ action: "steer", text: "!important" });
+    expect(decide({ text: "!important", mode: "steer" }, "idle")).toEqual({ action: "prompt", text: "!important" });
   });
 });

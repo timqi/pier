@@ -80,13 +80,26 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   skipReason: run.skipReason,
 });
 
+/** A list echoes many results at once, so each is capped; a single-run `get`
+ * stays whole — it is the escape hatch every truncation note points at. */
+const trimResult = (summary: RunSummary): RunSummary => {
+  if (summary.result?.type !== "agent" || summary.result.text.length <= 2000) return summary;
+  return {
+    ...summary,
+    result: {
+      ...summary.result,
+      text: `${summary.result.text.slice(0, 2000)}\n[truncated — get run_id ${summary.runId} for the full text]`,
+    },
+  };
+};
+
 const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMessenger): GroupSummary => defined({
   groupId: group.id,
   join: group.join,
   state: group.finishedAt ? "finished" : "running",
   callbackState: group.callbackState,
   winnerRunId: group.winnerRunId,
-  members: members.map((run) => summarize(run, messages.openDecisionId(run.id))),
+  members: members.map((run) => trimResult(summarize(run, messages.openDecisionId(run.id)))),
 });
 
 // Model-facing draft shape. Guidance only: runtime truth stays in parseDraft,
@@ -243,7 +256,7 @@ export async function handleTaskTool(
     // Run history by task: without it, checking what a task did (or whether a
     // cascade landed) means leaving the tool for the database.
     if (input.run_id === undefined && typeof input.task_id === "string") {
-      return host.listRuns(input.task_id, 10).map((run) => summarize(run, messages.openDecisionId(run.id)));
+      return host.listRuns(input.task_id, 10).map((run) => trimResult(summarize(run, messages.openDecisionId(run.id))));
     }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
     return summarize(run, messages.openDecisionId(run.id));

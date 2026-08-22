@@ -21,7 +21,7 @@ import type {
   SystemInputOrigin,
   TurnMeta,
 } from "../core/types.js";
-import { formatTurnMeta, originLabel } from "../core/reply.js";
+import { formatTurnMeta, originLabel, quietLabel } from "../core/reply.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
@@ -451,9 +451,7 @@ export class TelegramChannel implements Channel {
     // Options count as a reply: the buttons are the answer.
     const quiet = text || buttons
       ? ""
-      : reply.silence
-      ? `<i>stayed silent \u2014 ${escapeHtml(reply.silence)}</i>`
-      : "<i>no reply</i>";
+      : `<i>${quietLabel(reply.silence && escapeHtml(reply.silence))}</i>`;
     const body = (text ? toTelegramHtml(text) : quiet) + turnFooter(reply.meta);
     try {
       if (body.trim()) {

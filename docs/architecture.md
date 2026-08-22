@@ -29,23 +29,31 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 ```
 src/
   core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts, identity.ts
-  agent/       pi.ts (the ONLY file importing @earendil-works/pi-*)
+  agent/       pi.ts (the ONLY file importing @earendil-works/pi-*), events.ts
+               (Pi → Pier event translation, no SDK imports), config.ts
+               (provider/model files), credentials.ts (sealed store + auth.json
+               import), models.ts (catalog curation)
   channels/    types.ts (config contract), config.ts (store + permission gate),
                gatekeeper.ts (verdict + drop log), chains.ts (ordering),
-               chunk.ts, conversations.ts (durable chat → session map),
+               chunk.ts, commands.ts (slash-command parse), control.ts,
+               conversations.ts (durable chat → session map),
                receipts.ts (durable pending-reaction set),
+               panel.ts (shared in-chat settings panel),
                runtime.ts (adapter lifecycle), routes.ts,
                telegram.ts + -api + -render + -panel
-               slack.ts + -api + -render + -panel + -tool + -archive + -directory
+               slack.ts + -api + -render + -panel + -tool + -outbound + -directory
                [lark.ts: configurable, no adapter yet]
   boards/      boards.ts (scan + manifest + static serving), pier.css
-  web/         server.ts, ui/ modules (form.ts + dom.ts are the shared vocabulary)
-  tasks/       definitions, runs, groups, execution, callbacks, messages,
-               service, store, tool, HTTP routes
+  web/         server.ts, auth.ts, files.ts, session-state.ts,
+               ui/ modules (form.ts + dom.ts are the shared vocabulary)
+  tasks/       definitions, runs, groups, agent (the child-run runner),
+               execution, callbacks, messages, command, service, store, tool,
+               HTTP routes
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
+  secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   settings.ts  the instance facts a human owns (today: the public URL)
   update.ts    whether a newer release exists; checking only, never applying
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
@@ -117,9 +125,11 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 ## Fixed Behavioral Rules
 
 - **Queue policy** (`core/queue.ts`): `mode:"auto"` → if session idle,
-  `prompt`; if streaming, `followUp`. Text starting with `!` → strip the
-  prefix and `steer`. Explicit `mode` always wins. This is the whole policy;
-  do not add options.
+  `prompt`; if streaming, `followUp`. On auto, text starting with `!` → strip
+  the prefix and `steer` (idle: prompt — the prefix is consumed either way).
+  Explicit `mode` always wins and takes the text verbatim: IM sends steer for
+  every message, so a `!` there is content. This is the whole policy; do not
+  add options.
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
   fan-out to subscribers. No persistence — pi's session files are the durable
@@ -169,20 +179,21 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   always on" instead. Both want resolving together with Lark — probably by
   making "threads per request" an adapter capability rather than a stored flag.
   Two data points is enough to see the shape; a third decides the name.
+
+## Decisions Log
+
 - One shared password guards every HTTP surface (`web/auth.ts`): a single
   middleware ahead of all routes, a scrypt hash generated on first boot and
   printed once, and a cookie signed with that hash. Single-account on purpose —
   Pier has one workspace, so a boundary is what an exposed instance needs, not
   identities. `/p/*` and the stylesheet boards link are the only exemptions, so
-  a board's `public` flag is now a real boundary and not just a data state.
-- Remote access and deployment: the loopback bind is still the posture, reached
-  over an SSH tunnel, a private network or a reverse proxy. Keeping Pier
-  running is a systemd recipe in `docs/deploy.md`, not code. Self-restart and
-  the version check are unbuilt — the update runs as its own unit so the
+  a board's `public` flag is a real boundary and not just a data state.
+- Remote access and deployment: the loopback bind is the posture, reached over
+  an SSH tunnel, a private network or a reverse proxy. `pier service install`
+  (cli.ts/service.ts) writes the systemd unit `docs/deploy.md` explains; the
+  version check exists (update.ts, the workbench footer) but applying an
+  update stays a typed command — `pier update` runs as its own unit so the
   restart cannot kill it, and it is never a timer.
-
-## Decisions Log
-
 - Pi **SDK** over RPC; seam kept RPC-compatible (no Pi types leak out of `agent/`).
 - Standalone program, not a Pi extension; Pier registers custom tools into
   the sessions it creates (task tool, step 4).

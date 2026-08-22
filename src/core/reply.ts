@@ -35,8 +35,9 @@ conventions:
   what was not addressed to you.
 
 A message may start with \`[name<id> time]\` — the sender, added by Pier, not
-typed by them. It appears only when the speaker or the day changes, so the last
-one still applies. Use that \`id\` to mention someone; never ask for their own.
+typed by them. It appears only on a change — new speaker, a ~10-minute gap, a
+new day — so the last one still applies; a gap alone shows as time only, like
+\`[14:23]\`. Use that \`id\` to mention someone; never ask for their own.
 `;
 
 /**
@@ -130,6 +131,15 @@ export function cjkFriendly(markdown: string): string {
   });
   return out.replace(/\uE010(\d+)\uE011/g, (_m, i: string) => stash[Number(i)] ?? "");
 }
+
+/**
+ * The one wording for a turn that said nothing, wherever it is shown — the
+ * chat surfaces and the task result path. The reason arrives pre-escaped
+ * because each surface escapes for its own markup; the label itself contains
+ * nothing any of them escape.
+ */
+export const quietLabel = (silence?: string): string =>
+  silence ? `stayed silent — ${silence}` : "no reply";
 
 /** How a reasoning level is spelled wherever a human reads it. */
 export const thinkingLabel = (level: ThinkingLevel): string =>

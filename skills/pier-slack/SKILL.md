@@ -31,8 +31,9 @@ wanted. `not_in_channel` means someone must run `/invite @Pier`.
 You already have them:
 
 - **The person talking to you** — a message may start with `[name<id> time]`,
-  added by Pier, not typed by them. It appears only when the speaker or the day
-  changes, so the last one you saw still applies.
+  added by Pier, not typed by them. It appears only on a change — new speaker,
+  a time gap, a new day — so the last one you saw still applies (a gap alone
+  shows as time only, like `[14:23]`).
 - **Anyone in a transcript** — every line carries `name[id]`.
 - **This channel and thread** — from `context`.
 

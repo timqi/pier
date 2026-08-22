@@ -6,7 +6,7 @@
 // receipts, because those are about the turn ending, not about what was said.
 
 import type { AgentReply, SystemInputOrigin, TurnMeta } from "../core/types.js";
-import { formatTurnMeta, originLabel } from "../core/reply.js";
+import { formatTurnMeta, originLabel, quietLabel } from "../core/reply.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
 import {
   actions,
@@ -56,9 +56,7 @@ export class SlackOutbound {
     // only its options is not "nothing".
     const quiet = text || row
       ? ""
-      : reply.silence
-      ? `_stayed silent — ${escapeMrkdwn(reply.silence)}_`
-      : "_no reply_";
+      : `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`;
     if (!(text || row || footer || quiet)) return;
     const parts = text ? chunk(text, this.budget()) : [""];
     for (const [i, part] of parts.entries()) {

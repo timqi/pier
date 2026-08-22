@@ -26,15 +26,11 @@ you want the unit to say something different.
 - Node 24 or newer (`node:sqlite` is used unflagged).
 - The `sqlite3` CLI, for the off-machine backup and password steps below. Pier
   itself does not need it.
-- A checkout, built once:
-
-```sh
-git clone git@github.com:timqi/pier.git ~/pier
-cd ~/pier && npm ci && npm run build
-```
-
-The unit below runs the build output, so a deploy is always "update the
-checkout, rebuild, restart" — never "run from source".
+- Pier installed globally: `npm install -g @timqi/pier`. The unit runs that
+  installed entry point, so a deploy is `pier update`. A checkout
+  (`git clone` + `npm ci && npm run build`) is the *develop* path; point the
+  unit's `ExecStart` at its `dist/main.js` if you run one as the service, and
+  update it with the "From a checkout" steps under Updating.
 
 ## The unit
 
@@ -55,10 +51,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/pier
-# An absolute path on purpose: systemd starts with a minimal PATH, so a node
-# installed by nvm/fnm/asdf is not on it. `command -v node` gives you this.
-ExecStart=/usr/bin/node dist/main.js
+WorkingDirectory=%h
+# Absolute paths on purpose: systemd starts with a minimal PATH, so a node
+# installed by nvm/fnm/asdf is not on it — the installer fills in the node
+# that installed Pier and the globally installed entry point.
+ExecStart=/usr/bin/node /usr/lib/node_modules/@timqi/pier/dist/main.js
 Environment=NODE_ENV=production
 # Loopback by default. Put a reverse proxy in front before widening this —
 # whoever reaches this port can drive an agent that runs a shell.
@@ -291,9 +288,9 @@ systemctl --user start pier-update.service
 
 Deliberately **not** a `systemd.timer`. An unattended update is a machine that
 rewrites its own code from the network while holding your API keys, and it
-interrupts whatever session was mid-turn to do it. The intended shape is that
-Pier notices a newer release and says so (not built yet), while starting the
-update stays a decision someone makes. `Restart=always` above is what makes
+interrupts whatever session was mid-turn to do it. Pier notices a newer
+release and says so in the workbench footer; starting the update stays a
+decision someone makes. `Restart=always` above is what makes
 that decision cheap — the service comes back on its own.
 
 ## Remote access
@@ -310,8 +307,11 @@ elsewhere, pick a tunnel rather than a wider bind:
 
 ## Backups
 
-Two paths hold everything: `~/.pier/db/pier.db` (tasks, channels, the chat →
-session map, workbench state, settings, the password hash) and
+Three paths hold everything: `~/.pier/db/pier.db` (tasks, channels, the chat →
+session map, workbench state, settings, the password hash, and the sealed
+provider credentials and channel tokens), `~/.pier/master.key` (the key that
+seals them — without it the database's sealed values are unreadable), and
 `~/.pier/boards/`. Copy the database with `sqlite3 ... "VACUUM INTO '…'"`
-rather than `cp`, which under WAL can miss the most recent commits. Pi's own session history lives under its
-config directory (`PI_CODING_AGENT_DIR`, `~/.pi/agent` by default).
+rather than `cp`, which under WAL can miss the most recent commits. Pi's own
+session history lives under `~/.pier/pi` (Pier sets `PI_CODING_AGENT_DIR`
+there unless the environment already names another directory).

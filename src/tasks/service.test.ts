@@ -22,7 +22,7 @@ import type { GroupSummary, RunSummary } from "./tool.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskMessage, TaskRun } from "./types.js";
 
-function fakeSession(id = "s1"): AgentSession & {
+function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
   prompts: string[];
   systemInputs: { text: string; origin: SystemInputOrigin; mode: "prompt" | "steer" | "followUp" }[];
   setState(state: SessionState): void;
@@ -37,7 +37,7 @@ function fakeSession(id = "s1"): AgentSession & {
     state = "streaming";
     listeners.forEach((fn) => fn({ type: "turn-start" }));
     await Promise.resolve();
-    listeners.forEach((fn) => fn({ type: "turn-end", text: "agent result" }));
+    listeners.forEach((fn) => fn({ type: "turn-end", text: reply }));
     state = "idle";
     listeners.forEach((fn) => fn({ type: "state", state: "idle" }));
   };
@@ -57,7 +57,7 @@ function fakeSession(id = "s1"): AgentSession & {
     contextUsage: undefined,
     history: async (): Promise<ChatTurn[]> => [
       ...systemInputs.map(({ text, origin }) => ({ role: "system" as const, text, origin })),
-      { role: "assistant", text: "agent result" },
+      { role: "assistant", text: reply },
     ],
     setModel: async () => {},
     availableModels: async () => [model],
@@ -93,9 +93,8 @@ function hangingSession(id: string): ReturnType<typeof fakeSession> {
   return session;
 }
 
-function setup() {
+function setup(session = fakeSession()) {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
-  const session = fakeSession();
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => []),
     create: vi.fn(async () => session),
@@ -166,12 +165,73 @@ describe("task service", () => {
     expect(run.state).toBe("succeeded");
     expect(run.result).toEqual({ type: "agent", text: "agent result", sessionId: "s1" });
     expect(run.context.model).toEqual({ provider: "test", id: "model" });
-    expect(run.context.renderedPrompt).toContain('"pr": 7');
+    expect(run.context.renderedPrompt).toContain('"pr":7');
     expect(session.prompts).toHaveLength(1);
     expect(session.systemInputs[0]).toMatchObject({
       origin: { kind: "task-delegation", taskId: task.id, runId: run.id, sourceSessionId: null },
       mode: "prompt",
     });
+  });
+
+  it("prefixes delegation with the run contract, naming contact only when supervised", async () => {
+    const { cwd, service, session } = setup();
+    const task = await service.create({
+      name: "review",
+      trigger: { type: "manual" },
+      action: { type: "agent", sessionId: session.id, prompt: "Review the PR" },
+    });
+    const manual = await service.waitForRun(service.run(task.id).id);
+    expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
+    expect(manual.context.renderedPrompt).toContain("read by the operator");
+    expect(manual.context.renderedPrompt).not.toContain("contact");
+
+    const delegated = await service.tool({
+      operation: "run",
+      task: { name: "child", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review the PR" } },
+    }, "s9") as RunSummary;
+    const done = await service.waitForRun(delegated.runId);
+    expect(done.context.renderedPrompt).toContain("read by the agent that delegated this run");
+    expect(done.context.renderedPrompt).toContain("contact");
+  });
+
+  it("strips chat-only markup from a child result", async () => {
+    const { service, session } = setup(fakeSession("s1", "Done.\n\n---\n[Merge it] | [Show diff]"));
+    const task = await service.create({
+      name: "buttons",
+      trigger: { type: "manual" },
+      action: { type: "agent", sessionId: session.id, prompt: "Go" },
+    });
+    const run = await service.waitForRun(service.run(task.id).id);
+    expect(run.result).toEqual({ type: "agent", text: "Done.", sessionId: "s1" });
+  });
+
+  it("caps a chatty result in run lists, but not in a single-run get", async () => {
+    const long = `start ${"x".repeat(3000)}`;
+    const { service, session } = setup(fakeSession("s1", long));
+    const task = await service.create({
+      name: "chatty",
+      trigger: { type: "manual" },
+      action: { type: "agent", sessionId: session.id, prompt: "Go" },
+    });
+    const run = await service.waitForRun(service.run(task.id).id);
+    const listed = await service.tool({ operation: "get", task_id: task.id }, "s1") as RunSummary[];
+    expect(listed[0]!.result).toMatchObject({ type: "agent" });
+    const listedText = (listed[0]!.result as { text: string }).text;
+    expect(listedText.length).toBeLessThan(2200);
+    expect(listedText).toContain(`get run_id ${run.id} for the full text`);
+    const single = await service.tool({ operation: "get", run_id: run.id }, "s1") as RunSummary;
+    expect((single.result as { text: string }).text).toBe(long);
+  });
+
+  it("names a silent child turn instead of storing an empty result", async () => {
+    const { service, session } = setup(fakeSession("s1", "<silent>humans talking</silent>"));
+    const task = await service.create({
+      name: "quiet",
+      trigger: { type: "manual" },
+      action: { type: "agent", sessionId: session.id, prompt: "Watch" },
+    });
+    const run = await service.waitForRun(service.run(task.id).id);
+    expect(run.result).toEqual({ type: "agent", text: "stayed silent — humans talking", sessionId: "s1" });
   });
 
   it("tracks the invoking session and durably calls back for background work", async () => {

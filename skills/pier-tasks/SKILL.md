@@ -70,18 +70,22 @@ history) — every prompt must be self-contained: paths, acceptance criteria,
 expected output format. Branching and retries are your own logic between
 turns.
 
-## Choosing a model
+## Choosing a model and thinking level
 
-Omit `launch.model` to inherit your own model — the right default. Override
-only when the task profile clearly differs:
+Omit `launch.model` to inherit your own model — the right default. When the
+task profile clearly differs, adjust in this order:
 
-- `anthropic/claude-opus-5` — hardest reasoning: architecture, gnarly debugging
-- `anthropic/claude-fable-5` — long autonomous implementation runs
-- `anthropic/claude-sonnet-5` — balanced default: implementation, review
-- `anthropic/claude-haiku-5` — cheap and fast: listings, extraction, simple checks
-- `openai/gpt-5.6` series (e.g. `gpt-5.6-sol`) — cross-vendor second opinion
+- **Harder reasoning → raise `launch.thinking` first**, on the inherited
+  model (`off` … `minimal` `low` `medium` `high` `xhigh` `max`). It needs no
+  model name and is usually cheaper than switching models.
+- **Cheap bulk work** (listings, extraction, simple checks) → the same
+  provider's smallest current model, with thinking low or off.
+- **Cross-vendor second opinion** → another vendor's flagship.
 
-An unknown id fails with the available models listed in the error.
+Never write a model id from memory — catalogs move under you. The live list
+is the authority: an unknown id fails with the available models in the error,
+so a wrong pick costs one call and self-corrects. Choose current-generation
+ids from that list.
 
 ## Mid-run control
 

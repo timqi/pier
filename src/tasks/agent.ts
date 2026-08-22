@@ -1,4 +1,5 @@
 import type { AgentFactory, AgentSession } from "../core/types.js";
+import { quietLabel, splitReply } from "../core/reply.js";
 import { Router } from "../core/router.js";
 import { TaskMessenger } from "./messages.js";
 import { TaskStore } from "./store.js";
@@ -6,6 +7,22 @@ import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
 
 const MAX_ACTIVE_AGENTS = 4;
 const MAX_ACTIVE_PER_ROOT = 4;
+
+/** What a child cannot know unless told. Every session gets the chat-surface
+ * contract (<pier>/AGENTS.md), task runs included — so the delegation prompt
+ * says which of it does not apply here, and a supervised run how to reach the
+ * agent that is waiting on it. Skipped on resume: the session already saw it. */
+const preamble = (run: TaskRun): string => {
+  const audience = run.invokedBySessionId
+    ? "read by the agent that delegated this run"
+    : "read by the operator";
+  const contact = run.invokedBySessionId
+    ? ' Mid-run, the task tool\'s contact operation reaches that agent: reason "progress" is fire-and-forget, "decision" waits for a reply — state what you await and end your turn.'
+    : "";
+  return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
+    `Your final reply is recorded verbatim as the run result, ${audience}; ` +
+    `next-step buttons and file:// attachments do not render there.${contact}\n\n`;
+};
 
 export class AgentTaskRunner {
   private readonly active = new Set<string>();
@@ -34,10 +51,12 @@ export class AgentTaskRunner {
         start();
         // No input is no block: `<task_input>\nnull\n</task_input>` is four
         // lines telling the agent nothing, on every run that has no input.
+        // Compact for the same reason tool results are (agent/pi.ts), and
+        // `<\/` is the same JSON — a value cannot close the fence early.
         const input = run.input === undefined || run.input === null
           ? ""
-          : `\n\n<task_input>\n${JSON.stringify(run.input, null, 2)}\n</task_input>`;
-        const prompt = run.context.resumePrompt ?? `${action.prompt}${input}`;
+          : `\n\n<task_input>\n${JSON.stringify(run.input).replaceAll("</task_input>", "<\\/task_input>")}\n</task_input>`;
+        const prompt = run.context.resumePrompt ?? `${preamble(run)}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
         run.context.renderedPrompt = prompt;
@@ -70,7 +89,13 @@ export class AgentTaskRunner {
             const history = await session.history();
             text = [...history].reverse().find((turn) => turn.role === "assistant")?.text ?? "";
           }
-          return { type: "agent", text, sessionId: session.id };
+          // The chat contract is injected into task sessions too, so a child's
+          // reply may carry chat-only markup. The result is read by a
+          // supervisor or the Console, never a chat renderer: buttons are
+          // dropped, and a turn that said nothing names which kind of nothing
+          // it was (principle 5b) instead of storing an empty result.
+          const reply = splitReply(text);
+          return { type: "agent", text: reply.text || quietLabel(reply.silence), sessionId: session.id };
         } finally {
           signal.removeEventListener("abort", abort);
           unsubscribe();
