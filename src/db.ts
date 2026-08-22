@@ -12,7 +12,7 @@
 // transaction before any store exists. A store receives the handle and owns
 // only its queries.
 
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { logger } from "./log.js";
@@ -122,14 +122,16 @@ let shared: DatabaseSync | undefined;
  */
 export const pierDb = (): DatabaseSync => (shared ??= openDb(PIER_DB));
 
-/** Open a database, bring it to the current schema, and lock down its files. */
-export function openDb(path: string): DatabaseSync {
+/** Open a database, bring it to the current schema, and lock down its files.
+ *  `migrations` is injectable only so tests can exercise an upgrade — there is
+ *  exactly one real list. */
+export function openDb(path: string, migrations: readonly string[] = MIGRATIONS): DatabaseSync {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path);
   // Outside the transaction below: journal_mode is a property of the file, and
   // SQLite refuses to change it inside one.
   db.exec("PRAGMA journal_mode = WAL");
-  migrate(db, path);
+  migrate(db, path, migrations);
   if (path !== ":memory:") restrict(path);
   return db;
 }
@@ -138,25 +140,44 @@ export function openDb(path: string): DatabaseSync {
  * Upgrades only. `user_version` counts up and nothing counts it back down, so a
  * database from a newer Pier is refused rather than served: the old code would
  * happily write the new schema's tables and lose whatever it did not know
- * about. The way back is the backup taken before the upgrade.
+ * about. The way back is the `.bak` this function writes before upgrading.
  */
-function migrate(db: DatabaseSync, path: string): void {
+function migrate(db: DatabaseSync, path: string, migrations: readonly string[]): void {
   const { user_version: at } = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  const target = MIGRATIONS.length;
+  const target = migrations.length;
   if (at > target) {
     throw new Error(
       `${path} is at schema ${at}, this Pier speaks ${target}: a database is ` +
-        `never downgraded. Restore the backup taken before the upgrade, or run the newer Pier.`,
+        `never downgraded. Restore ${path}.v*.bak, or run the newer Pier.`,
+    );
+  }
+  // Version 0 with tables is a database from before versioning existed.
+  // Migration 1 assumes an empty file, so the collision it would hit says
+  // "table already exists" — this says what is actually wrong and what to do.
+  if (at === 0 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1").get()) {
+    throw new Error(
+      `${path} predates schema versioning and cannot be upgraded — nothing was changed. ` +
+        `Move the file aside and restart; channel credentials, tasks and the password start over.`,
     );
   }
   if (at === target) return;
+  // The transaction below only protects against a *failed* migration; the way
+  // back from a successful one you regret is this snapshot. VACUUM INTO, not
+  // cp: under WAL the committed tail lives in the -wal sidecar.
+  if (at > 0 && path !== ":memory:") {
+    const bak = `${path}.v${at}.bak`;
+    rmSync(bak, { force: true }); // VACUUM INTO refuses to overwrite
+    db.exec(`VACUUM INTO '${bak.replaceAll("'", "''")}'`);
+    chmodSync(bak, 0o600); // it holds everything the 0600 database holds
+    log.info(`pre-migration backup: ${bak}`);
+  }
   // One transaction for the statements *and* the version number: a crash
   // between them would leave a database whose version describes a schema it
   // does not have, which is worse than a crash.
   db.exec("BEGIN IMMEDIATE");
   let step = at;
   try {
-    for (; step < target; step++) db.exec(MIGRATIONS[step]!);
+    for (; step < target; step++) db.exec(migrations[step]!);
     db.exec(`PRAGMA user_version = ${target}`);
     db.exec("COMMIT");
   } catch (err) {
@@ -177,6 +198,9 @@ function migrate(db: DatabaseSync, path: string): void {
  * neither are the sidecars, where a 0644 `-wal` would leak exactly what the
  * 0600 database is hiding. Done after the migration, so the sidecars that
  * writing created exist by now; SQLite gives later ones the database's mode.
+ * The directory too: it exists only to hold this database and its sidecars
+ * (paths.ts puts them under their own `db/`, away from the boards PIER_HOME
+ * also holds), so nothing else needs to see into it.
  */
 function restrict(path: string): void {
   for (const file of [path, `${path}-wal`, `${path}-shm`]) {

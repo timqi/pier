@@ -10,9 +10,24 @@
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
 
-/** One durable boolean per session, two of them. Also the column name — a
- *  two-member union, so nothing but these two strings reaches the SQL below. */
+/** One durable boolean per session, two of them. */
 export type SessionFlag = "pinned" | "unread";
+
+// Written out per flag rather than interpolated: the union type only holds at
+// compile time, and a cast at some future route is all it would take to put
+// request text into SQL.
+const SQL = {
+  pinned: {
+    has: "SELECT pinned AS on_ FROM session_state WHERE session_id = ?",
+    set: `INSERT INTO session_state(session_id, pinned) VALUES (?, ?)
+          ON CONFLICT(session_id) DO UPDATE SET pinned = excluded.pinned`,
+  },
+  unread: {
+    has: "SELECT unread AS on_ FROM session_state WHERE session_id = ?",
+    set: `INSERT INTO session_state(session_id, unread) VALUES (?, ?)
+          ON CONFLICT(session_id) DO UPDATE SET unread = excluded.unread`,
+  },
+} as const satisfies Record<SessionFlag, { has: string; set: string }>;
 
 export class SessionStateStore {
   readonly #db: DatabaseSync;
@@ -22,18 +37,13 @@ export class SessionStateStore {
   }
 
   has(flag: SessionFlag, sessionId: string): boolean {
-    const row = this.#db
-      .prepare(`SELECT ${flag} AS on_ FROM session_state WHERE session_id = ?`)
-      .get(sessionId) as { on_: number } | undefined;
+    const row = this.#db.prepare(SQL[flag].has).get(sessionId) as { on_: number } | undefined;
     return row?.on_ === 1;
   }
 
   set(flag: SessionFlag, sessionId: string, on: boolean): void {
     // Upsert on the flag alone: the row may already exist for the other one,
     // and a session's two flags are set from unrelated places.
-    this.#db.prepare(`
-      INSERT INTO session_state(session_id, ${flag}) VALUES (?, ?)
-      ON CONFLICT(session_id) DO UPDATE SET ${flag} = excluded.${flag}
-    `).run(sessionId, on ? 1 : 0);
+    this.#db.prepare(SQL[flag].set).run(sessionId, on ? 1 : 0);
   }
 }

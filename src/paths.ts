@@ -15,5 +15,7 @@ export const PIER_HOME = process.env.PIER_HOME ?? join(homedir(), ".pier");
 /** A path inside it — `pierPath("boards")`. */
 export const pierPath = (...parts: string[]): string => join(PIER_HOME, ...parts);
 
-/** The one SQLite file; every store opens this same path. */
-export const PIER_DB = pierPath("pier.db");
+/** The one SQLite file; every store opens this same path. In its own
+ *  directory so db.ts can lock that directory down to 0700 without touching
+ *  the boards PIER_HOME also holds. */
+export const PIER_DB = pierPath("db", "pier.db");

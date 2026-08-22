@@ -56,17 +56,45 @@ describe("openDb", () => {
     expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 1/);
   });
 
-  it("names the migration that failed and leaves the database untouched", () => {
+  it("tells a pre-versioning database what it is instead of colliding with it", () => {
     const path = dbPath();
-    // Anything migration 1 collides with: a pre-0.0.1 database, in practice.
+    // Version 0 with tables: a database from before migrations existed.
     const seed = new DatabaseSync(path);
     seed.exec("CREATE TABLE auth (whatever TEXT)");
     seed.close();
 
-    expect(() => openDb(path)).toThrow(/migration 1 failed .* nothing was changed/s);
+    expect(() => openDb(path)).toThrow(/predates schema versioning .* nothing was changed/s);
     const after = new DatabaseSync(path);
     expect(version(after)).toBe(0);
     expect(tables(after)).toEqual(["auth"]);
+    after.close();
+  });
+
+  it("backs up before upgrading, and the backup is the pre-upgrade schema", () => {
+    const path = dbPath();
+    openDb(path, ["CREATE TABLE a (x)"]).close();
+
+    const db = openDb(path, ["CREATE TABLE a (x)", "CREATE TABLE b (y)"]);
+    expect(version(db)).toBe(2);
+    db.close();
+
+    const bak = new DatabaseSync(`${path}.v1.bak`);
+    expect(version(bak)).toBe(1);
+    expect(tables(bak)).toEqual(["a"]); // no b: taken before migration 2 ran
+    bak.close();
+    // The backup holds everything the 0600 database holds.
+    expect(statSync(`${path}.v1.bak`).mode & 0o777).toBe(0o600);
+  });
+
+  it("names the migration that failed and rolls the database back", () => {
+    const path = dbPath();
+    openDb(path, ["CREATE TABLE a (x)"]).close();
+
+    expect(() => openDb(path, ["CREATE TABLE a (x)", "CREATE TABLE a (x)"]))
+      .toThrow(/migration 2 failed .* nothing was changed/s);
+    const after = new DatabaseSync(path);
+    expect(version(after)).toBe(1);
+    expect(tables(after)).toEqual(["a"]);
     after.close();
   });
 

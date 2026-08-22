@@ -51,7 +51,7 @@ per-turn Activity groups):
 - **All sessions** (search icon → modal): everything `AgentFactory.list()`
   knows about, searchable over title + cwd, grouped by project, each row with a
   pin toggle; click opens the session. Pins are the only UI-owned persisted
-  state — a plain id array in `$PIER_HOME|~/.pier/pins.json` (`src/web/pins.ts`),
+  state — a flag on the `session_state` table (`src/web/session-state.ts`),
   outside the seams, injected into `createServer` so tests stay hermetic.
 - **Snapshot then deltas**: the stream carries deltas only, so a fresh client
   starts from `/history` — transcript (including each assistant turn's `steps`,

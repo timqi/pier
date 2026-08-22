@@ -1,5 +1,6 @@
 // Wiring only — no logic lives here. See docs/architecture.md.
 
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
@@ -25,7 +26,7 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
-import { PIER_HOME } from "./paths.js";
+import { PIER_HOME, pierPath } from "./paths.js";
 import { SettingsStore } from "./settings.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { SessionStateStore } from "./web/session-state.js";
@@ -37,6 +38,15 @@ const log = logger("pier");
 // schema that cannot be migrated must stop the process here — before a port is
 // open and before anything has written a row.
 const db = pierDb();
+
+// Files earlier versions kept beside the database. Their values live in
+// pier.db now, and a setting that silently stops being read is a 5b violation:
+// the operator who wrote it deserves to hear that it no longer applies.
+for (const stale of ["settings.json", "pins.json", "unread.json"]) {
+  if (existsSync(pierPath(stale))) {
+    log.warn(`${pierPath(stale)} is no longer read — its value lives in pier.db now; re-enter it in the Console and delete the file`);
+  }
+}
 
 // One store, two readers: the Console writes the public URL, and every session
 // opened after that is told the new one.
