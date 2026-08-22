@@ -17,9 +17,8 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 ## Requirements
 
 - Node 24 or newer (`node:sqlite` is used unflagged)
-- A provider key (Anthropic, OpenAI, …) — set from Console → Configuration
-  (Pi's files, kept under `~/.pier/pi`); stored credentials live sealed in
-  Pier's database, and a leftover Pi `auth.json` is imported once
+- A provider account (Anthropic, OpenAI, …) — configure its API key or OAuth
+  login from Console → Configuration after signing in
 - Optional: the `sqlite3` CLI, for backups and password resets
 
 ## Run it
@@ -41,11 +40,43 @@ is behind it — there is no default password and no unclaimed window. Lost it?
 
 Open `http://localhost:3141`, sign in, then:
 
-- **Console → Configuration** — provider keys and model defaults (Pi's files)
+- **Console → Configuration** — providers and Pi configuration
 - **Console → Channels** — Slack (Socket Mode) or Telegram bot tokens; chats
   are discovered when the bot first sees traffic, and stay gated by the
   mention/bind rules you set
 - **New session** — pick a directory; that is where the agent's shell runs
+
+## Configure Pi
+
+Pier gives Pi a dedicated agent directory instead of changing your normal Pi
+installation. By default it is `$PIER_HOME/pi` (`~/.pier/pi`). Set
+`PI_CODING_AGENT_DIR` before starting Pier to use another directory, including
+an existing Pi setup:
+
+```sh
+PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier
+```
+
+Console → Configuration is the normal setup path:
+
+- **Providers** configures built-in or custom endpoints and API-key/OAuth login.
+  Stored credentials are sealed in Pier's SQLite database; they are not written
+  back to `models.json`.
+- **Global files** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
+  `models.json` structure in the Pi agent directory.
+- **Project files** edits that project's `AGENTS.md` and shows its `.pi/skills`
+  and `.pi/extensions` resources. Configuration changes apply to new sessions.
+
+On first credential access, Pier imports an existing `auth.json` into its sealed
+store and renames the source to `auth.json.imported`. Literal provider keys left
+in `models.json` are moved the same way, with the original retained as
+`models.json.imported`. Use Providers for new secrets; the advanced editor will
+not accept plaintext keys or header values.
+
+Provider environment variables supported by Pi are inherited from the Pier
+process. A service installed with `pier service install` does not inherit your
+interactive shell, so put non-secret Pi environment settings in a systemd unit
+override; for API keys, prefer the sealed Providers UI.
 
 ## Run it as a service
 
