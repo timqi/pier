@@ -152,11 +152,11 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run executes a stored task by task_id, a one-shot subagent from an inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions.",
+      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run executes a stored task by task_id, a one-shot subagent from an inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
     parameters: Type.Object({
       operation: strEnum(
         "list", "create", "update", "run", "get", "cancel",
-        "steer", "follow_up", "resume", "contact", "reply",
+        "steer", "follow_up", "resume", "contact", "reply", "models",
       ),
       task_id: Type.Optional(Type.String()),
       run_id: Type.Optional(Type.String()),
@@ -195,6 +195,7 @@ export async function handleTaskTool(
   if (!input) throw new Error("task tool parameters required");
   const active = store.findActiveRunForTarget(callerSessionId);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
+  if (input.operation === "models") return host.models();
   if (input.operation === "create") {
     if (active) throw new Error("subagents cannot create task definitions");
     return definitions.create(input.task, `session:${callerSessionId}`);

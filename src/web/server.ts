@@ -22,7 +22,7 @@ import type {
 import { isThinkingLevel } from "../core/types.js";
 import type { SessionStateStore } from "./session-state.js";
 import type { SecretsMode } from "../secrets.js";
-import { normalizePublicUrl, type SettingsStore } from "../settings.js";
+import { normalizeModelMenu, normalizePublicUrl, type SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
 import { registerProviderRoutes } from "./providers.js";
 
@@ -407,14 +407,31 @@ export function createServer(
   // is a supply-chain surface behind one password.
   app.get("/api/update", (c) => c.json(updates.status()));
 
+  // Partial on purpose: each surface sends only the setting it edits, and a
+  // malformed field is rejected before anything is written.
   app.put("/api/settings", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.publicUrl !== "string") return c.json({ error: "publicUrl required" }, 400);
-    const publicUrl = normalizePublicUrl(body.publicUrl);
-    if (publicUrl === null) {
-      return c.json({ error: "not a URL: expected http(s)://host, no query or fragment" }, 400);
+    const body = await c.req.json().catch(() => null) as
+      | { publicUrl?: unknown; modelMenu?: unknown }
+      | null;
+    if (!body || (body.publicUrl === undefined && body.modelMenu === undefined)) {
+      return c.json({ error: "publicUrl or modelMenu required" }, 400);
     }
-    return c.json(settings.setPublicUrl(publicUrl));
+    if (body.publicUrl !== undefined) {
+      if (typeof body.publicUrl !== "string") return c.json({ error: "publicUrl must be a string" }, 400);
+      const publicUrl = normalizePublicUrl(body.publicUrl);
+      if (publicUrl === null) {
+        return c.json({ error: "not a URL: expected http(s)://host, no query or fragment" }, 400);
+      }
+      settings.setPublicUrl(publicUrl);
+    }
+    if (body.modelMenu !== undefined) {
+      const menu = normalizeModelMenu(body.modelMenu);
+      if (menu === null) {
+        return c.json({ error: "modelMenu must be [{provider, id, note?}] (≤32 entries)" }, 400);
+      }
+      settings.setModelMenu(menu);
+    }
+    return c.json(settings.get());
   });
 
   // Layer-1 key status and control (Console → Settings → Security). The GET

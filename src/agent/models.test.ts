@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { curateModels } from "./models.js";
+import { curateModels, pinFirst } from "./models.js";
 
 const m = (id: string, reasoning = true, provider = "anthropic") => ({ provider, id, reasoning });
+
+describe("pinFirst", () => {
+  const a = { provider: "anthropic", id: "claude-opus-4-5" };
+  const b = { provider: "anthropic", id: "claude-haiku-4-5" };
+  const c = { provider: "openai", id: "gpt-5.2" };
+
+  it("moves pins to the front in menu order, rest untouched", () => {
+    expect(pinFirst([a, b, c], [c, b])).toEqual([c, b, a]);
+  });
+
+  it("skips a pin the catalog no longer has, and never invents entries", () => {
+    expect(pinFirst([a, b], [{ provider: "openai", id: "gone" }, b])).toEqual([b, a]);
+  });
+
+  it("no pins, no change", () => {
+    const list = [a, b];
+    expect(pinFirst(list, [])).toBe(list);
+  });
+});
 
 describe("curateModels", () => {
   it("drops non-reasoning legacy models", () => {

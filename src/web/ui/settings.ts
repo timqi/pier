@@ -1,15 +1,32 @@
-// Console → Settings view: the instance-level facts a human owns and nothing
-// else can derive, one tab per topic. "Instance" holds the password in front
-// of every HTTP surface and the URL the instance is reached at from outside;
-// "Security" holds the master key that seals every stored credential. A pure
-// consumer of /api/settings, /api/password and /api/secrets.
+// Console → Settings: the one place the instance is configured, one tab per
+// topic. Instance (URL, password), Providers (model auth), Models (the
+// operator's menu), Channels and Agent files host their own modules; this
+// file owns the topic strip and the two cards small enough to live here
+// (Instance, Security). Storage is not the split — a db row and a Pi file are
+// both "settings" to the person opening this page.
 
 import { failure, sendJson } from "./api.js";
+import { createChannelsView } from "./channels.js";
+import { createConfigView } from "./config.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, btn, button, card, empty, field, input, setStatus } from "./form.js";
+import { badge, button, card, empty, field, input, pill, setStatus } from "./form.js";
+import { createModelMenuPane } from "./model-menu.js";
+import { openProviders } from "./providers.js";
 
-type Topic = "instance" | "security";
-const TOPICS: [Topic, string][] = [["instance", "Instance"], ["security", "Security"]];
+type Topic = "instance" | "providers" | "models" | "channels" | "files" | "security";
+// Setup order: what you need first sits first — auth, then what to run, then
+// where it talks, then the instance's own facts.
+const TOPICS: [Topic, string][] = [
+  ["providers", "Providers"],
+  ["models", "Models"],
+  ["files", "Agent files"],
+  ["channels", "Channels"],
+  ["instance", "Instance"],
+  ["security", "Security"],
+];
+const isTopic = (v: string | undefined): v is Topic => TOPICS.some(([id]) => id === v);
+/** Where you left off, so reopening Settings lands on the tab you were on. */
+const TOPIC_KEY = "pier.settingsTopic";
 
 /** What /api/secrets answers — never key material. */
 interface SecretsStatus {
@@ -18,37 +35,27 @@ interface SecretsStatus {
   reason?: string;
 }
 
-export function createSettingsView(root: HTMLElement): ConsoleView {
-  let topic: Topic = "instance";
+export function createSettingsView(
+  root: HTMLElement,
+  getCwds: () => string[],
+  /** Tab clicks route (#/settings/<topic>) so refresh and Back keep the tab. */
+  onTopic: (topic: string) => void,
+): ConsoleView {
+  const stored = localStorage.getItem(TOPIC_KEY) ?? undefined;
+  let topic: Topic = isTopic(stored) ? stored : "providers";
 
-  // Same sticky pattern as Channels: header and tabs are sticky rows inside
-  // the scroll container, so a page long enough to scroll still names the
-  // topic being edited. top-10 == the header's h-10, so the two rows stack.
+  // Header and tabs sit above the topic host, which scrolls (or lays out) on
+  // its own — the strip stays visible however long a topic page gets.
   const header = h(
     "header",
-    "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4",
-    h("span", "font-medium max-md:hidden", "Settings"),
+    "flex h-10 flex-none items-center gap-3 border-b border-neutral-200 bg-white px-4 max-md:hidden",
+    h("span", "font-medium", "Settings"),
   );
-  const tabs = h("div", "sticky top-10 z-30 flex items-center gap-1 border-b border-neutral-200 bg-white px-4 py-2");
-  const pane = h("div", "px-4 py-5");
-  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, tabs, pane));
+  const tabs = h("div", "tabstrip bg-white");
 
   function renderTabs(): void {
     tabs.replaceChildren(
-      ...TOPICS.map(([id, label]) => {
-        const active = id === topic;
-        const tab = btn(
-          label,
-          `cursor-pointer rounded-md px-2.5 py-1 text-[13px] transition-colors ${
-            active ? "bg-indigo-50 font-medium text-indigo-700" : "text-neutral-600 hover:bg-neutral-100"
-          }`,
-        );
-        tab.onclick = () => {
-          topic = id;
-          show();
-        };
-        return tab;
-      }),
+      ...TOPICS.map(([id, label]) => pill(label, id === topic, () => onTopic(id))),
     );
   }
 
@@ -126,6 +133,23 @@ export function createSettingsView(root: HTMLElement): ConsoleView {
   );
 
   const instanceColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6", urlCard, pwCard);
+
+  // --- topic hosts -----------------------------------------------------------------
+  // Simple topics share one scroll wrapper each; Channels and Agent files are
+  // whole modules that manage their own layout, hosted as child console views
+  // and shown/hidden with the tab. The tint behind the cards is what keeps a
+  // page of white cards from reading as one flat sheet.
+
+  const wrap = (content: HTMLElement): HTMLElement =>
+    h("div", "hidden min-h-0 flex-1 overflow-y-auto bg-neutral-50/60", h("div", "px-4 py-5", content));
+
+  const modelMenu = createModelMenuPane();
+  const providersBox = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
+
+  const channelsHost = h("section", "hidden min-h-0 flex-1 flex-col");
+  const channelsChild = createChannelsView(channelsHost);
+  const filesHost = h("section", "hidden min-h-0 flex-1 flex-col");
+  const filesChild = createConfigView(filesHost, getCwds);
 
   function loadInstance(): void {
     pwStatus.textContent = "";
@@ -224,15 +248,32 @@ export function createSettingsView(root: HTMLElement): ConsoleView {
 
   // --- view ----------------------------------------------------------------------
 
-  function show(): void {
+  const instancePane = wrap(instanceColumn);
+  const providersPane = wrap(providersBox);
+  const modelsPane = wrap(modelMenu.el);
+  const securityPane = wrap(securityColumn);
+  const simplePanes: [Topic, HTMLElement, () => void][] = [
+    ["instance", instancePane, loadInstance],
+    ["providers", providersPane, () => void openProviders(providersBox)],
+    ["models", modelsPane, () => modelMenu.load()],
+    ["security", securityPane, () => void loadSecurity()],
+  ];
+
+  root.append(header, tabs, instancePane, providersPane, modelsPane, channelsHost, filesHost, securityPane);
+
+  function show(arg?: string): void {
+    if (isTopic(arg)) topic = arg;
+    localStorage.setItem(TOPIC_KEY, topic);
     renderTabs();
-    if (topic === "instance") {
-      pane.replaceChildren(instanceColumn);
-      loadInstance();
-    } else {
-      pane.replaceChildren(securityColumn);
-      void loadSecurity();
+    for (const [id, pane, load] of simplePanes) {
+      const active = id === topic;
+      pane.classList.toggle("hidden", !active);
+      if (active) load();
     }
+    if (topic === "channels") channelsChild.show();
+    else channelsChild.hide();
+    if (topic === "files") filesChild.show();
+    else filesChild.hide();
   }
 
   return consoleView(root, show);

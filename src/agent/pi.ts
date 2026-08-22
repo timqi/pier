@@ -45,7 +45,7 @@ import {
 } from "./events.js";
 import { defaultAgentDir, PiConfigStore } from "./config.js";
 import type { CredentialStore, ProviderCredential } from "./credentials.js";
-import { curateModels } from "./models.js";
+import { curateModels, pinFirst } from "./models.js";
 
 const log = logger("agent");
 
@@ -86,7 +86,11 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
 };
 
 class PiSession implements AgentSession {
-  constructor(private readonly pi: PiAgentSession) {}
+  constructor(
+    private readonly pi: PiAgentSession,
+    /** Operator pins, read per call — the menu can change while we run. */
+    private readonly pinned: () => ModelRef[] = () => [],
+  ) {}
 
   get id(): string {
     return this.pi.sessionId;
@@ -123,8 +127,11 @@ class PiSession implements AgentSession {
 
   async availableModels(): Promise<ModelRef[]> {
     const available = await this.pi.modelRuntime.getAvailable();
-    const curated = curateModels(
-      available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+    const curated = pinFirst(
+      curateModels(
+        available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+      ),
+      this.pinned(),
     );
     // The session's active model must stay selectable even when curation
     // (or an older catalog) would hide it.
@@ -244,6 +251,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
      * persists to the database, never to a plaintext file. */
     private readonly credentials?: CredentialStore,
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
+    /** Operator-pinned models (Console → Settings → Models), surfaced first in
+     * every picker. A getter for the same reason `instructions` is one. */
+    private readonly pinned: () => ModelRef[] = () => [],
   ) {}
 
   /** One runtime for the whole process; catalogs are global, not per session. */
@@ -281,8 +291,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   async availableModels(): Promise<ModelRef[]> {
     const available = await (await this.refreshedRuntime()).getAvailable();
-    return curateModels(
-      available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+    return pinFirst(
+      curateModels(
+        available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
+      ),
+      this.pinned(),
     );
   }
 
@@ -461,7 +474,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       resourceLoader: await this.resourceLoader(cwd),
     });
     live = created.session;
-    const session = new PiSession(live);
+    const session = new PiSession(live, this.pinned);
     if (opts.model) await session.setModel(opts.model);
     if (opts.thinking) session.setThinkingLevel(opts.thinking);
     log.info(`session ${session.id} open in ${cwd}${opts.name ? ` (${opts.name})` : ""}`);

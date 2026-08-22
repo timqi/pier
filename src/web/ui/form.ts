@@ -40,11 +40,26 @@ export function tabButton(label: string, active: boolean, onClick: () => void): 
   return el;
 }
 
+/** A pill tab — the topic strips (Settings, Channels platforms). One chrome,
+ * so two strips on the same page read as the same control. */
+export function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
+  const el = btn(
+    label,
+    `flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[13px] transition-colors ${
+      active
+        ? "bg-indigo-50 font-medium text-indigo-700 ring-1 ring-indigo-200/70"
+        : "text-neutral-600 hover:bg-neutral-100"
+    }`,
+  );
+  el.onclick = onClick;
+  return el;
+}
+
 /** A titled panel. The subtitle carries the "why", so fields need fewer words. */
 // No overflow-hidden: help bubbles escape their card, so the header rounds its
 // own top corners instead of being clipped into shape by the section.
 export function card(title: string, subtitle: string, ...body: HTMLElement[]): HTMLElement {
-  const el = h("section", "rounded-xl border border-neutral-200 bg-white");
+  const el = h("section", "rounded-xl border border-neutral-200 bg-white shadow-xs");
   const head = h("div", "rounded-t-xl border-b border-neutral-200/70 bg-neutral-50/70 px-4 py-2.5");
   head.append(h("h2", "text-[13px] font-semibold text-neutral-700", title));
   if (subtitle) head.append(h("p", "mt-0.5 text-[11.5px] leading-snug text-neutral-500", subtitle));
@@ -103,7 +118,7 @@ export const input = (value = "", type = "text"): HTMLInputElement => {
 
 export const select = (options: [string, string][], value: string): HTMLSelectElement => {
   const el = document.createElement("select");
-  el.className = CONTROL;
+  el.className = `${CONTROL} select`;
   el.append(...options.map(([label, key]) => new Option(label, key)));
   el.value = value;
   return el;

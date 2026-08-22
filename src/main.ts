@@ -110,6 +110,8 @@ const factory = new PiAgentFactory(
   // imported on first use and renamed to auth.json.imported.
   new CredentialStore(db, secrets),
   piConfig,
+  // Operator pins ride ahead of the curated catalog in every model picker.
+  () => settings.get().modelMenu,
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
@@ -124,7 +126,9 @@ const router = new Router(hub, (key) => {
 // An attached session holds a live Pi runtime and its transcript, and nothing
 // else ever lets one go: without this, one per conversation ever answered.
 const stopEviction = router.startIdleEviction();
-tasks = new TaskService(new TaskStore(db), factory, router, hub);
+tasks = new TaskService(new TaskStore(db), factory, router, hub, {
+  modelMenu: () => settings.get().modelMenu,
+});
 tasks.start();
 
 channelStore = new ChannelStore(db, secrets);

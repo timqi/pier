@@ -141,21 +141,21 @@ function openSetup(
   dialog.className =
     "m-auto w-[min(32rem,92vw)] rounded-lg border border-neutral-200 bg-white p-0 shadow-xl backdrop:bg-black/30";
   const providerSelect = document.createElement("select");
-  providerSelect.className = CONTROL;
+  providerSelect.className = `${CONTROL} select`;
   if (!existing) providerOptions(providerSelect, providers);
 
   const customId = input();
   const customName = input();
   const endpoint = input();
   const api = document.createElement("select");
-  api.className = CONTROL;
+  api.className = `${CONTROL} select`;
   api.append(...APIS.map(([label, value]) => new Option(label, value)));
   const models = textarea("", 4);
   models.placeholder = "model-id\nanother-model-id";
   const reasoning = document.createElement("input");
   reasoning.type = "checkbox";
   const auth = document.createElement("select");
-  auth.className = CONTROL;
+  auth.className = `${CONTROL} select`;
   const fields = h("div", "flex flex-col gap-4");
   const status = h("span", "text-[11.5px] text-red-600", "");
   const cancel = button("Cancel");

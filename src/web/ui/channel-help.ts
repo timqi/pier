@@ -1,4 +1,4 @@
-// Console → Channels: the setup content — the Slack app manifest and every
+// Settings → Channels: the setup content — the Slack app manifest and every
 // help bubble's walkthrough prose. Pure content with no view state, kept apart
 // so channels.ts is the settings page and this file is what it explains.
 

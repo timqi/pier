@@ -1,4 +1,4 @@
-// Console → Channels view: one tab per IM platform, and everything that
+// Settings → Channels tab: one tab per IM platform, and everything that
 // platform needs on that one tab — token, global defaults, bound users,
 // discovered chats with their per-chat overrides. A pure consumer of
 // /api/channels/:platform.
@@ -15,7 +15,7 @@ import {
 } from "./channel-help.js";
 import { dirInput } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, btn, button, card, empty, field, STATUS_TONE, textInput, toggle } from "./form.js";
+import { badge, btn, button, card, empty, field, pill, STATUS_TONE, textInput, toggle } from "./form.js";
 import { launchField } from "./model-picker.js";
 
 type Loaded = ChannelConfig & { supported: boolean };
@@ -34,49 +34,39 @@ const KIND_STYLE: Record<ChatKind, string> = {
 
 // --- view ---------------------------------------------------------------------
 
+const PLATFORM_KEY = "pier.channelsPlatform";
+
 export function createChannelsView(root: HTMLElement): ConsoleView {
-  let platform: ChannelPlatform = "telegram";
+  const stored = localStorage.getItem(PLATFORM_KEY);
+  let platform: ChannelPlatform = PLATFORMS.some(([id]) => id === stored)
+    ? (stored as ChannelPlatform)
+    : "telegram";
   let config: Loaded | null = null;
   let models: ModelRef[] = [];
 
-  // Header and tabs live *inside* the scroll container as sticky rows rather
-  // than as flex-none siblings above it: a settings page long enough to scroll
-  // is exactly when you still want to see which platform you are editing.
-  // The mobile top bar already names the view; the status box stays, so the
-  // header keeps its h-10 and the tabs' top-10 offset still lines up.
+  // Embedded under Settings → Channels, so the platform strip is the only
+  // chrome this view owns. Sticky inside its own scroll container: a config
+  // page long enough to scroll still names the platform being edited, and the
+  // save status rides the strip where the header used to carry it.
   const statusBox = h("div", "ml-auto flex items-center gap-1.5 text-[11.5px]");
-  const header = h(
-    "header",
-    "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4",
-    h("span", "font-medium max-md:hidden", "Channels"),
+  const tabs = h(
+    "div",
+    "sticky top-0 z-30 flex items-center gap-1 border-b border-neutral-200 bg-white px-4 py-2",
     statusBox,
   );
-
-  // top-10 == the header's h-10, so the two stack instead of overlapping.
-  const tabs = h("div", "sticky top-10 z-30 flex items-center gap-1 border-b border-neutral-200 bg-white px-4 py-2");
   const pane = h("div", "px-4 py-5");
-  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, tabs, pane));
+  root.append(h("div", "min-h-0 flex-1 overflow-y-auto bg-neutral-50/60", tabs, pane));
 
   function renderTabs(): void {
     tabs.replaceChildren(
-      ...PLATFORMS.map(([id, label]) => {
-        const active = id === platform;
-        const tab = btn(
-          "",
-          `flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] transition-colors ${
-            active ? "bg-indigo-50 font-medium text-indigo-700" : "text-neutral-600 hover:bg-neutral-100"
-          }`,
-        );
-        // The dot answers "is this one live?" without opening the tab.
-        const live = active && config ? config.enabled && !!config.token : false;
-        tab.append(h("span", `h-1.5 w-1.5 flex-none rounded-full ${live ? "bg-emerald-500" : "bg-neutral-300"}`), h("span", "", label));
-        tab.onclick = () => {
+      ...PLATFORMS.map(([id, label]) =>
+        pill(label, id === platform, () => {
           if (saveTimer) flush();
           platform = id;
+          localStorage.setItem(PLATFORM_KEY, id);
           void load();
-        };
-        return tab;
-      }),
+        })),
+      statusBox,
     );
   }
 

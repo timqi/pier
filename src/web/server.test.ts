@@ -403,7 +403,7 @@ describe("workbench server", () => {
 
   it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {
     const { app, settings } = setup();
-    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "" });
+    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "", modelMenu: [] });
 
     const put = (publicUrl: unknown) =>
       app.request("/api/settings", {
@@ -413,13 +413,40 @@ describe("workbench server", () => {
       });
     const ok = await put("pier.example.com/");
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com" });
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: [] });
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
 
     expect((await put("not a url")).status).toBe(400);
     expect((await put(42)).status).toBe(400);
     // A rejected write leaves the stored value alone.
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
+  });
+
+  it("writes the model menu without disturbing the URL, and rejects a bad one", async () => {
+    const { app, settings } = setup();
+    settings.setPublicUrl("https://pier.example.com");
+    const put = (modelMenu: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelMenu }),
+      });
+    const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hard problems" }];
+    const ok = await put(menu);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: menu });
+
+    expect((await put("nope")).status).toBe(400);
+    expect((await put([{ provider: "a" }])).status).toBe(400);
+    expect(settings.get().modelMenu).toEqual(menu);
+
+    // Neither field is also "no request".
+    const empty = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(empty.status).toBe(400);
   });
 
   it("returns 404 for unknown sessions", async () => {

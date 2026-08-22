@@ -32,9 +32,14 @@ export class TaskService {
 
   constructor(
     readonly store: TaskStore,
-    factory: AgentFactory,
+    private readonly factory: AgentFactory,
     router: Router,
     private readonly hub: EventHub,
+    /** Structural on purpose: tasks/ must not import settings.ts — main.ts
+     *  hands in a closure over the store instead. Absent in bare test rigs. */
+    private readonly instance?: {
+      modelMenu(): { provider: string; id: string; thinking?: string; note?: string }[];
+    },
   ) {
     this.messages = new TaskMessenger(store, router, hub, (runId, prompt, fromSessionId) =>
       this.resume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }));
@@ -280,6 +285,18 @@ export class TaskService {
 
   tool(raw: unknown, callerSessionId: string): Promise<unknown> {
     return handleTaskTool(this, this.definitions, this.store, this.messages, raw, callerSessionId);
+  }
+
+  /** The deployment's model advice: the operator's pinned menu when one is
+   * set, the curated live catalog otherwise — an agent picks from names that
+   * exist right now, never from memory (docs/plans/07-model-menu.md). */
+  async models(): Promise<{
+    source: "menu" | "catalog";
+    models: { provider: string; id: string; thinking?: string; note?: string }[];
+  }> {
+    const menu = this.instance?.modelMenu() ?? [];
+    if (menu.length) return { source: "menu", models: menu };
+    return { source: "catalog", models: await this.factory.availableModels() };
   }
 
   private async tick(): Promise<void> {

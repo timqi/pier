@@ -18,7 +18,7 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 
 - Node 24 or newer (`node:sqlite` is used unflagged)
 - A provider account (Anthropic, OpenAI, …) — configure its API key or OAuth
-  login from Console → Configuration after signing in
+  login from Console → Settings → Providers after signing in
 - A user-writable global npm prefix if `pier update` should update a service
 - Optional: the `sqlite3` CLI, for backups and password resets
 
@@ -41,10 +41,12 @@ is behind it — there is no default password and no unclaimed window. Lost it?
 
 Open `http://localhost:3141`, sign in, then:
 
-- **Console → Configuration** — providers and Pi configuration
-- **Console → Channels** — Slack (Socket Mode) or Telegram bot tokens; chats
-  are discovered when the bot first sees traffic, and stay gated by the
-  mention/bind rules you set
+- **Console → Settings** — everything the instance is configured with, one
+  tab per topic: Providers (API-key/OAuth logins), Models (the menu of
+  favored models agents are advised with), Channels (Slack Socket-Mode or
+  Telegram bot tokens; chats are discovered when the bot first sees traffic,
+  gated by the mention/bind rules you set), Agent files (Pi configuration),
+  plus the public URL, password and master key
 - **New session** — pick a directory; that is where the agent's shell runs
 
 ## Configure Pi
@@ -58,15 +60,15 @@ an existing Pi setup:
 PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier
 ```
 
-Console → Configuration is the normal setup path:
+Console → Settings is the normal setup path:
 
 - **Providers** configures built-in or custom endpoints and API-key/OAuth login.
   Stored credentials are sealed in Pier's SQLite database; they are not written
   back to `models.json`.
-- **Global files** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
-  `models.json` structure in the Pi agent directory.
-- **Project files** edits that project's `AGENTS.md` and shows its `.pi/skills`
-  and `.pi/extensions` resources. Configuration changes apply to new sessions.
+- **Agent files** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
+  `models.json` structure in the Pi agent directory — globally, or per project
+  scope, where it also shows that project's `.pi/skills` and `.pi/extensions`
+  resources. Changes apply to new sessions.
 
 On first credential access, Pier imports an existing `auth.json` into its sealed
 store and renames the source to `auth.json.imported`. Literal provider keys left

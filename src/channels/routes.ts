@@ -1,4 +1,4 @@
-// Console → Channels HTTP surface. One document per platform: credentials,
+// Settings → Channels HTTP surface. One document per platform: credentials,
 // global defaults, bound users and discovered chats travel together, so the
 // UI never has to stitch two half-configs.
 

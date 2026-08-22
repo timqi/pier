@@ -8,6 +8,18 @@ export interface CatalogModel extends ModelRef {
   reasoning: boolean;
 }
 
+/** Operator-pinned models first, menu order, without inventing entries: a
+ * pin that is not in the list (stale menu, logged-out provider) is skipped
+ * rather than offered as a model that would only fail on selection. */
+export function pinFirst(models: ModelRef[], pins: ModelRef[]): ModelRef[] {
+  if (!pins.length) return models;
+  const key = (m: ModelRef): string => `${m.provider}/${m.id}`;
+  const listed = new Map(models.map((m) => [key(m), m]));
+  const pinned = pins.map((p) => listed.get(key(p))).filter((m): m is ModelRef => !!m);
+  const picked = new Set(pinned.map(key));
+  return [...pinned, ...models.filter((m) => !picked.has(key(m)))];
+}
+
 export function curateModels(models: CatalogModel[]): ModelRef[] {
   const ids = new Set(models.map((m) => `${m.provider}/${m.id}`));
   return models

@@ -81,10 +81,20 @@ html {
    modules; everything else is utilities at the call site. */
 @layer components {
   .btn {
-    @apply rounded-md border border-neutral-300 bg-white px-3 py-1 hover:bg-neutral-100 active:bg-neutral-200 cursor-pointer;
+    @apply rounded-md border border-neutral-300 bg-white px-3 py-1 shadow-2xs transition-colors hover:bg-neutral-100 active:bg-neutral-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white;
   }
   .btn-primary {
-    @apply border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700;
+    @apply border-indigo-600 bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-500 active:bg-indigo-700;
+  }
+  /* The one <select> skin: native chrome off, house chevron on. Sits beside
+     whatever size utilities the call site adds; the right padding keeps text
+     off the arrow. */
+  .select {
+    @apply cursor-pointer appearance-none bg-white pr-8 transition-colors;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23737373' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 6.25 8 9.75l3.5-3.5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 0.9rem;
   }
   /* Sidebar section actions (search / new). */
   .icon-btn {

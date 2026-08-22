@@ -82,10 +82,13 @@ task profile clearly differs, adjust in this order:
   provider's smallest current model, with thinking low or off.
 - **Cross-vendor second opinion** → another vendor's flagship.
 
-Never write a model id from memory — catalogs move under you. The live list
-is the authority: an unknown id fails with the available models in the error,
-so a wrong pick costs one call and self-corrects. Choose current-generation
-ids from that list.
+Never write a model id from memory — catalogs move under you.
+`{"operation":"models"}` is the authority: it returns the deployment's menu —
+operator-pinned models when set (`source:"menu"`), each with an intent note
+and often a usual `thinking` level, the curated live catalog otherwise
+(`source:"catalog"`). Prefer a pinned entry whose note matches the task and
+start from its thinking level. A wrong id still fails with the available
+list in the error, so a stale guess costs one call.
 
 ## Mid-run control
 

@@ -106,7 +106,7 @@ export function modelPicker({
     const reasoning = h("label", "flex items-center gap-2 px-1 text-[12px] text-neutral-500");
     const select = document.createElement("select");
     select.className =
-      "ml-auto rounded-md border border-neutral-300 bg-white px-2 py-1 text-[12px] text-neutral-700 focus:border-indigo-400 focus:outline-none";
+      "select ml-auto rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-700 focus:border-indigo-400 focus:outline-none";
     select.setAttribute("aria-label", "Reasoning level");
     for (const l of thinkingLevels) {
       const option = document.createElement("option");

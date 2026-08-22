@@ -139,7 +139,7 @@ export function openAuthFlow(
       control = field;
     }
     control.className =
-      "w-full rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-[12.5px] focus:border-indigo-400 focus:outline-none";
+      `${control.tagName === "SELECT" ? "select " : ""}w-full rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-[12.5px] focus:border-indigo-400 focus:outline-none`;
     const submit = button("Continue", true);
     submit.type = "submit";
     const form = h(

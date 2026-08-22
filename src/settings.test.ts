@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "./db.js";
-import { normalizePublicUrl, SettingsStore } from "./settings.js";
+import { normalizeModelMenu, normalizePublicUrl, SettingsStore } from "./settings.js";
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
 
@@ -28,14 +28,18 @@ describe("SettingsStore", () => {
     const path = dbPath();
     const db = openDb(path);
     const store = new SettingsStore(db);
-    expect(store.get()).toEqual({ publicUrl: "" });
+    expect(store.get()).toEqual({ publicUrl: "", modelMenu: [] });
     expect(store.setPublicUrl("https://pier.example.com")).toEqual({
       publicUrl: "https://pier.example.com",
+      modelMenu: [],
     });
     // A restart: the connection is gone, the row is not.
     db.close();
     const reopened = openDb(path);
-    expect(new SettingsStore(reopened).get()).toEqual({ publicUrl: "https://pier.example.com" });
+    expect(new SettingsStore(reopened).get()).toEqual({
+      publicUrl: "https://pier.example.com",
+      modelMenu: [],
+    });
     reopened.close();
   });
 
@@ -44,9 +48,47 @@ describe("SettingsStore", () => {
     const store = new SettingsStore(db);
     store.setPublicUrl("https://one.example.com");
     store.setPublicUrl("https://two.example.com");
-    expect(store.get()).toEqual({ publicUrl: "https://two.example.com" });
+    expect(store.get().publicUrl).toBe("https://two.example.com");
     const { n } = db.prepare("SELECT count(*) AS n FROM settings").get() as { n: number };
     expect(n).toBe(1);
     db.close();
+  });
+
+  it("round-trips the model menu and ignores a corrupt row rather than crashing", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hardest reasoning" }];
+    expect(store.setModelMenu(menu).modelMenu).toEqual(menu);
+    // A hand-edited row must not take get() down with it.
+    db.prepare("UPDATE settings SET value = 'not json' WHERE key = 'modelMenu'").run();
+    expect(store.get().modelMenu).toEqual([]);
+    db.prepare("UPDATE settings SET value = '{\"provider\":1}' WHERE key = 'modelMenu'").run();
+    expect(store.get().modelMenu).toEqual([]);
+    db.close();
+  });
+});
+
+describe("normalizeModelMenu", () => {
+  it("accepts entries, trims, and drops an empty note", () => {
+    expect(
+      normalizeModelMenu([{ provider: " anthropic ", id: " claude-opus-4-5 ", note: "  " }]),
+    ).toEqual([{ provider: "anthropic", id: "claude-opus-4-5" }]);
+    expect(
+      normalizeModelMenu([{ provider: "a", id: "x", thinking: "high", note: "hard" }]),
+    ).toEqual([{ provider: "a", id: "x", thinking: "high", note: "hard" }]);
+  });
+
+  it("rejects rather than repairs anything mis-shaped", () => {
+    for (const bad of [
+      "not a list",
+      [{ provider: "a" }],
+      [{ provider: "a", id: 42 }],
+      [{ provider: "", id: "x" }],
+      [{ provider: "a", id: "x", note: 7 }],
+      [{ provider: "a", id: "x", thinking: "warp" }],
+      Array.from({ length: 33 }, () => ({ provider: "a", id: "x" })),
+    ]) {
+      expect(normalizeModelMenu(bad)).toBeNull();
+    }
   });
 });

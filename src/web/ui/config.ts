@@ -1,11 +1,10 @@
-// Console → Configuration view: scoped Pi config editing (whitelisted files)
-// plus read-only extension/skill browsing. A pure consumer of /api/config;
-// scope choices come from the session list (global + each project cwd).
+// Settings → Agent files: scoped Pi config editing (whitelisted files) plus
+// read-only extension/skill browsing. A pure consumer of /api/config; scope
+// choices come from the session list (global + each project cwd).
 
 import type { ConfigResource } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { openProviders } from "./providers.js";
 import { setStatus } from "./form.js";
 
 interface ConfigIndex {
@@ -16,7 +15,6 @@ interface ConfigIndex {
 
 type Selection =
   | { type: "file"; name: string }
-  | { type: "providers" }
   | { type: "resource"; kind: "extensions" | "skills"; name: string };
 
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
@@ -33,7 +31,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   // Scope sits at the top of the nav, right above the files it switches.
   const scopeSelect = document.createElement("select");
   scopeSelect.className =
-    "w-full rounded-md border border-neutral-300 bg-white px-2 py-1 text-[12.5px] focus:border-indigo-400 focus:outline-none";
+    "select w-full rounded-md border border-neutral-300 px-2 py-1 text-[12.5px] focus:border-indigo-400 focus:outline-none";
   scopeSelect.onchange = () => {
     scope = scopeSelect.value;
     selection = null;
@@ -46,17 +44,15 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     scopeSelect,
   );
 
-  // Title only, and the mobile top bar already says it — below md the whole
-  // row would just be a duplicate.
-  const header = h("header", "flex h-10 flex-none items-center gap-3 border-b border-neutral-200 px-4 max-md:hidden");
-  header.append(h("span", "font-medium", "Configuration"));
+  // No header of its own: embedded under Settings → Agent files, whose strip
+  // already names it.
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1");
   const nav = h("nav", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[13px]");
   nav.append(scopeBox, navList);
   const pane = h("div", "flex min-w-0 flex-1 flex-col");
   const body = h("div", "flex min-h-0 flex-1");
   body.append(nav, pane);
-  root.append(header, body);
+  root.append(body);
 
   // --- data -------------------------------------------------------------------
 
@@ -80,7 +76,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     renderNav(index);
     if (!selection) renderPlaceholder();
-    else if (selection.type === "providers") await showProviders();
   }
 
   // --- nav ---------------------------------------------------------------------
@@ -191,15 +186,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       selection = sel;
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name);
-      else if (sel.type === "providers") void showProviders();
       else void openResource(sel.kind, sel.name);
     };
     const rows: HTMLElement[] = [];
-    if (scope === "global") {
-      const sel: Selection = { type: "providers" };
-      rows.push(navSection("Models"));
-      rows.push(navRow("Providers", isActive(sel), false, () => open(sel)));
-    }
     rows.push(navSection("Files"));
     for (const f of index.files) {
       const sel: Selection = { type: "file", name: f.name };
@@ -311,11 +300,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only")),
       h("pre", "min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-[12.5px]", content),
     );
-  }
-
-  function showProviders(): Promise<void> {
-    paneRequest++;
-    return openProviders(pane);
   }
 
   function renderScopeOptions(): void {

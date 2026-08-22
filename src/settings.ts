@@ -10,12 +10,29 @@
 // nothing outside this process ever opened that file.
 
 import type { DatabaseSync } from "node:sqlite";
+import { isThinkingLevel, type ThinkingLevel } from "./core/types.js";
 import { pierDb } from "./db.js";
+import { logger } from "./log.js";
+
+const log = logger("settings");
+
+/** One operator-pinned model: what to reach for, and one line of why. */
+export interface ModelMenuEntry {
+  provider: string;
+  id: string;
+  /** The reasoning level this pin is usually run at — advice, not a lock. */
+  thinking?: ThinkingLevel;
+  /** Intent, not documentation — "hardest reasoning", "cheap bulk". */
+  note?: string;
+}
 
 export interface Settings {
   /** Origin (plus path prefix, if Pier is mounted under one) with no trailing
    *  slash — `https://pier.example.com`. Empty when nobody has said. */
   publicUrl: string;
+  /** The deployment's model advice (docs/plans/07-model-menu.md). Empty means
+   *  "no advice": every consumer falls back to the curated catalog. */
+  modelMenu: ModelMenuEntry[];
 }
 
 /**
@@ -39,6 +56,33 @@ export function normalizePublicUrl(raw: string): string | null {
   return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
 }
 
+/**
+ * Boundary check for a menu, rejecting rather than repairing (same contract as
+ * `normalizePublicUrl`): a silently "fixed" entry would advertise a model the
+ * operator never picked. Notes are capped — they are one line of intent, and
+ * every session that asks for the menu pays for their tokens.
+ */
+export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
+  if (!Array.isArray(raw) || raw.length > 32) return null;
+  const menu: ModelMenuEntry[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) return null;
+    const { provider, id, thinking, note } = item as Record<string, unknown>;
+    if (typeof provider !== "string" || !provider.trim()) return null;
+    if (typeof id !== "string" || !id.trim()) return null;
+    if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
+    if (note !== undefined && typeof note !== "string") return null;
+    const cleaned = note?.trim().slice(0, 200);
+    menu.push({
+      provider: provider.trim(),
+      id: id.trim(),
+      ...(thinking !== undefined ? { thinking } : {}),
+      ...(cleaned ? { note: cleaned } : {}),
+    });
+  }
+  return menu;
+}
+
 export class SettingsStore {
   readonly #db: DatabaseSync;
 
@@ -47,17 +91,46 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { publicUrl: this.#value("publicUrl") ?? "" };
+    return { publicUrl: this.#value("publicUrl") ?? "", modelMenu: this.#menu() };
+  }
+
+  #menu(): ModelMenuEntry[] {
+    const raw = this.#value("modelMenu");
+    if (!raw) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Only a hand-edited row can get here; named, not silently served as [].
+      log.warn("settings.modelMenu is not JSON — ignoring it");
+      return [];
+    }
+    const menu = normalizeModelMenu(parsed);
+    if (!menu) {
+      log.warn("settings.modelMenu is not a valid menu — ignoring it");
+      return [];
+    }
+    return menu;
   }
 
   /** Store an already-normalized value — validation belongs at the boundary
    *  that received it, so this never has to guess what the caller meant. */
   setPublicUrl(publicUrl: string): Settings {
-    this.#db.prepare(`
-      INSERT INTO settings(key, value) VALUES ('publicUrl', ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(publicUrl);
+    this.#set("publicUrl", publicUrl);
     return this.get();
+  }
+
+  /** Same contract: hand this `normalizeModelMenu`'s output, not raw input. */
+  setModelMenu(menu: ModelMenuEntry[]): Settings {
+    this.#set("modelMenu", JSON.stringify(menu));
+    return this.get();
+  }
+
+  #set(key: string, value: string): void {
+    this.#db.prepare(`
+      INSERT INTO settings(key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(key, value);
   }
 
   #value(key: string): string | undefined {

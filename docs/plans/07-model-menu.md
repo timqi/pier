@@ -1,8 +1,9 @@
 # Model menu — operator-pinned recommendations
 
-Status: planned. Follows the pier-tasks skill dropping its hardcoded model
-list (branch task-prompt-surface): rules replaced the ids, but "which few
-models this deployment actually uses" still lives nowhere.
+Status: shipped (branch model-menu). Follows the pier-tasks skill dropping
+its hardcoded model list (branch task-prompt-surface): rules replaced the
+ids, and the menu now carries "which few models this deployment actually
+uses".
 
 ## Problem
 
@@ -18,14 +19,18 @@ skill that drifts.
 One source, three consumers.
 
 - **Settings**: a `modelMenu` list in `SettingsStore` — entries of
-  `{ provider, id, note? }`, the note one line of intent ("hardest
-  reasoning", "cheap bulk"). Empty menu = today's behavior everywhere.
-- **Console**: edit the menu next to the provider config; picking from the
-  curated list, not free-typing ids.
-- **Consumers**:
-  1. `availableModels` orders pins first (web picker, IM panel).
-  2. task tool gains a `models` operation returning the menu (pins + notes,
-     curated list as fallback) — on-demand, zero standing tokens.
+  `{ provider, id, thinking?, note? }`: the usual reasoning level as advice,
+  the note one line of intent ("hardest reasoning", "cheap bulk"). Empty
+  menu = prior behavior everywhere. Boundary-checked by `normalizeModelMenu`
+  (≤32 entries, notes ≤200 chars, thinking a real level).
+- **Console**: Settings → Models edits the menu; entries are picked from the
+  live catalog, never free-typed.
+- **Consumers** (all shipped):
+  1. `pinFirst` (agent/models.ts) orders pins first in every picker — the
+     factory and session lists both read the menu per call, so the web
+     picker, the IM panel and `/api/models` agree.
+  2. task tool `models` operation returns `{source: "menu"|"catalog",
+     models}` — on-demand, zero standing tokens.
   3. pier-tasks skill points at the `models` operation instead of naming ids.
 
 ## Non-goals

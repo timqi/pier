@@ -1,15 +1,14 @@
 // Chat ↔ Console switching and the hash router. Owns the Console views
-// (Configuration, Channels, Tasks, Activity, Boards, Settings), which chat elements hide
-// while one is open, and the address bar's copy of "where am I" — so refresh,
-// bookmarks and back/forward land where the user was. main.ts owns sessions
-// and selection and feeds them in through init.
+// (Tasks, Activity, Boards, Settings — which hosts Providers, Models,
+// Channels and Agent files as tabs), which chat elements hide while one is
+// open, and the address bar's copy of "where am I" — so refresh, bookmarks
+// and back/forward land where the user was. main.ts owns sessions and
+// selection and feeds them in through init.
 
 import { createActivityView, type ActivityView } from "./activity.js";
 import { createBoardsView } from "./boards.js";
-import { createChannelsView } from "./channels.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
-import { createConfigView } from "./config.js";
 import { $, type ConsoleView } from "./dom.js";
 import { renderHeader } from "./session-header.js";
 import { createSettingsView } from "./settings.js";
@@ -39,7 +38,7 @@ let chatVisible = true;
 
 export const isChatVisible = (): boolean => chatVisible;
 
-type ConsoleName = "config" | "channels" | "tasks" | "activity" | "boards" | "settings";
+type ConsoleName = "tasks" | "activity" | "boards" | "settings";
 
 let tasksView: TasksView;
 let activityView: ActivityView;
@@ -51,8 +50,6 @@ const consoleBtns = new Map<ConsoleName, HTMLElement>();
 let lastActivityConsole: ConsoleName = "activity";
 
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
-  config: "Configuration",
-  channels: "Channels",
   tasks: "Tasks",
   activity: "Activity",
   boards: "Boards",
@@ -116,8 +113,12 @@ const hashOf = (r: Route): string =>
     ? `#/session/${encodeURIComponent(r.id)}`
     : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}`;
 
+/** Pre-fold bookmarks still land: the old top-level views are Settings tabs now. */
+const FOLDED: Record<string, string> = { config: "files", channels: "channels", providers: "providers" };
+
 function parseHash(): Route | null {
   const [head = "", arg] = location.hash.replace(/^#\/?/, "").split("/");
+  if (FOLDED[head]) return { kind: "console", name: "settings", arg: FOLDED[head] };
   const name = consoleViews.find((v) => v.name === head)?.name;
   if (name) return { kind: "console", name, arg: arg ? decodeURIComponent(arg) : undefined };
   if (head === "session" && arg) return { kind: "session", id: decodeURIComponent(arg) };
@@ -173,15 +174,22 @@ export function initViews(d: ViewsDeps): void {
   );
   activityView = createActivityView($("#activity-view"), d.select, showTasks);
   consoleViews = [
-    { name: "config", view: createConfigView($("#config-view"), () => [...groupByCwd(deps.sessions()).keys()]) },
-    { name: "channels", view: createChannelsView($("#channels-view")) },
     { name: "tasks", view: tasksView },
     { name: "activity", view: activityView },
     { name: "boards", view: createBoardsView($("#boards-view"), d.select) },
-    { name: "settings", view: createSettingsView($("#settings-view")) },
+    {
+      name: "settings",
+      view: createSettingsView(
+        $("#settings-view"),
+        () => [...groupByCwd(deps.sessions()).keys()],
+        // Through the router, not a local re-render: the hash is the one
+        // copy of "where am I", and Back should walk tabs too.
+        (t) => showConsole("settings", t),
+      ),
+    },
   ];
   // The Activity button reopens whichever of its two views was showing last.
-  for (const name of ["config", "channels", "activity", "boards", "settings"] as const) {
+  for (const name of ["activity", "boards", "settings"] as const) {
     const btn = $(`#open-${name}`);
     consoleBtns.set(name, btn);
     btn.onclick = () => showConsole(name === "activity" ? lastActivityConsole : name);
