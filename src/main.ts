@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { PiConfigStore } from "./agent/config.js";
+import { CredentialStore } from "./agent/credentials.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
@@ -103,6 +104,9 @@ const factory = new PiAgentFactory(
   // Ships with Pier: documents Pier's own tools, so it loads only inside a
   // Pier session — not in a bare Pi session that has no task tool.
   [fileURLToPath(new URL("../skills", import.meta.url))],
+  // Provider credentials live sealed in pier.db; a leftover auth.json is
+  // imported on first use and renamed to auth.json.imported.
+  new CredentialStore(db, secrets),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {

@@ -37,6 +37,7 @@ import {
   type PiMessage,
 } from "./events.js";
 import { defaultAgentDir } from "./config.js";
+import type { CredentialStore } from "./credentials.js";
 import { curateModels } from "./models.js";
 
 const log = logger("agent");
@@ -214,13 +215,24 @@ export class PiAgentFactory implements AgentFactory {
     /** Skills documenting Pier's own tools: loaded per session, never installed
      * into the user's global or project skill directories. */
     private readonly skillPaths: string[] = [],
+    /** Provider credentials from pier.db instead of <agentDir>/auth.json.
+     * Optional only for bare test factories; main.ts always passes one, and
+     * every runtime built here reads and writes through it — an OAuth refresh
+     * persists to the database, never to a plaintext file. */
+    private readonly credentials?: CredentialStore,
   ) {}
 
   /** One runtime for the whole process; catalogs are global, not per session. */
   private catalog?: Promise<ModelRuntime>;
 
+  /** Structural fit: CredentialStore mirrors pi-ai's interface of the same
+   * name, so the SDK accepts it without this file exporting any SDK type. */
+  private createRuntime(): Promise<ModelRuntime> {
+    return ModelRuntime.create(this.credentials ? { credentials: this.credentials } : {});
+  }
+
   async availableModels(): Promise<ModelRef[]> {
-    this.catalog ??= ModelRuntime.create();
+    this.catalog ??= this.createRuntime();
     const available = await (await this.catalog).getAvailable();
     return curateModels(
       available.map((m) => ({ provider: m.provider, id: m.id, reasoning: m.reasoning })),
@@ -285,6 +297,9 @@ export class PiAgentFactory implements AgentFactory {
       }),
     );
     if (opts.name) sessionManager.appendSessionInfo(opts.name);
+    // Locked Secrets is a refusal with a reason, here — not "provider is not
+    // configured" three calls later, and never a fall back to auth.json.
+    this.credentials?.assertUnlocked();
     const tools = opts.capabilities === "read"
       ? ["read", "grep", "find", "ls", ...this.extraTools.map((tool) => tool.name)]
       : undefined;
@@ -293,6 +308,7 @@ export class PiAgentFactory implements AgentFactory {
       sessionManager,
       customTools,
       tools,
+      modelRuntime: await this.createRuntime(),
       resourceLoader: await this.resourceLoader(cwd),
     });
     live = created.session;

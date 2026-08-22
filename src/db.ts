@@ -123,6 +123,15 @@ const MIGRATIONS: readonly string[] = [
     json TEXT NOT NULL
   );
   `,
+  // 2 — provider credentials move from <agentDir>/auth.json into the database.
+  `
+  -- One row per provider (key = provider id), value sealed by secrets.ts.
+  -- Owned by agent/credentials.ts.
+  CREATE TABLE credentials (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 let shared: DatabaseSync | undefined;
