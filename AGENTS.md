@@ -50,28 +50,51 @@ scheduled tasks, live observability, and static Show pages.
   agent-collaboration surface
 - Dependency direction: `channels/ | web/ | tasks/ → core/ → agent/`. Never sideways.
 
-## Budgets (tripwires — exceeding needs a written diagnosis in the PR)
+## Budgets
 
-Measured in non-blank, non-comment lines, excluding tests. A budget only earns
-its place by being able to fail *meaningfully*: one that is always over is a
-comment, not a tripwire. Revised after the Slack adapter — see
-`docs/design/06-design-review.md` for the numbers behind each.
+The target is disordered growth and duplication. Line counts are a *proxy* for
+both, and a proxy optimized against stops measuring: the first version of this
+section was an absolute ceiling per area, and what it actually produced was one
+file split into three with the same total, and pressure to leave a failure
+silent because reporting it cost lines. So the rules below are written to fail
+on the thing, not on the number.
 
-- **`core/` ≤ 500 total** — the constraint that has actually shaped the design.
-  Core is platform-blind and Pi-blind; if it is growing, something leaked in.
-- **any one module ≤ 300** — still the right unit. A file over this is either
-  two concerns or a wrong-layer abstraction.
-- **channel adapter ≤ 400** per platform, across its four files' *adapter* file
-  (transport, render and panel are budgeted as ordinary modules). Inbound
-  normalization and gate logging are irreducibly per-platform; 200 was wishful.
-- **`web/` ≤ 4.5k** — the largest area and the least tested, so it gets the
-  budget that is closest to biting. Growth here should come with a reason why a
-  surface, not a shared primitive, is the right home.
-- **`tasks/` ≤ 2.5k**, **`channels/` ≤ 3.5k** — near their current size on
-  purpose: the next feature in either should be visibly worth it.
+**1. Growth is a claim, and a claim gets a sentence.** A change that adds net
+lines to an area names what it bought. "A feature was requested" is not the
+answer; what the feature could not have been without those lines is. Nothing to
+say → the lines should not be there.
 
-No repo-wide number. It fired unconditionally and therefore said nothing; the
-per-area budgets above are what a diagnosis can be written against.
+**2. Splitting a file is not a reduction.** Moving 300 lines into a new module
+changes one number and no facts. It is worth doing when a module has two
+reasons to exist — and *that*, not a line count, is the test. Name the single
+reason each module exists in its header comment; a header that needs "and" is
+the tripwire.
+
+**3. The third copy is a bug.** Duplication is what the budget was always
+reaching for, so it gets a rule of its own: the same logic in three places is
+fixed or deleted, not counted — and a copy-paste pair longer than ~30 lines is
+reported even at two. Count the copies on *all* surfaces: the Slack and
+Telegram panels drifted for months while the same vocabulary sat in the Console
+as a third copy nobody was counting.
+
+**4. Three things are never traded for a number.** Tests; the failure paths
+principle 5b requires; type and seam declarations. If an area is over because
+of these, it is not over.
+
+**5. Sizes worth a second look, not a gate.** Non-blank, non-comment lines,
+excluding tests. Crossing one is a prompt to ask "what is in there?", and the
+answer is allowed to be "the right things":
+
+| Area | Now | Second look past |
+| --- | --- | --- |
+| `core/` | ~505 | 500 — platform-blind and Pi-blind; growth means something leaked in |
+| `channels/` | ~3.0k | 3.5k |
+| `web/` | ~4.5k | 4.5k — largest and least tested |
+| `tasks/` | ~2.4k | 2.5k |
+| one module | — | 300 — see rule 2 before splitting |
+| channel adapter file | — | 400 — transport, render and panel budgeted separately |
+
+No repo-wide number: it fired unconditionally and therefore said nothing.
 
 ## Bug Prevention
 

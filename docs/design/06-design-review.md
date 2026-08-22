@@ -56,6 +56,34 @@ exceeded is not a tripwire, it is a comment.
 Left over-budget on purpose rather than raising the number to fit: the point of
 400 is that a third adapter should feel it too.
 
+### Amendment: what the numbers did next
+
+The outbound split above happened — `slack-outbound.ts`, and `slack.ts` is 380
+— but for Slack alone, against this section's advice to wait for symmetry.
+Telegram is 356 and has one reason to exist; splitting it to match would be a
+split for a number's sake, which is now explicitly a violation rather than
+compliance.
+
+That rewrite is the larger point. `AGENTS.md` no longer carries absolute
+ceilings, because two rounds of using them showed the proxy failing in both
+directions:
+
+- **They rewarded shuffling.** `web/ui/main.ts` 638 → 296 + 209 + 144 satisfied
+  the per-module number without deleting a line. The genuine −150 in the same
+  pass came from finding duplication (17 hand-rolled fetch triples, five copies
+  of console-view boilerplate), which no line count pointed at.
+- **They penalized correctness.** The only thing that pushed `web/` past 4.5k
+  was adding the failure reporting principle 5b requires to three controls that
+  had been failing silently.
+- **They missed the actual duplication.** The two in-chat panels were 502 lines
+  of near-identical logic with zero tests, and every per-file number was green.
+  What found it was counting *copies*, including the third one in
+  `web/ui/channels.ts` that nobody had counted because it lives in another area.
+
+The replacement keeps the sizes as prompts and moves the teeth to: net growth
+owes a sentence, a split is not a reduction, the third copy is a bug, and
+tests, 5b failure paths and seam declarations are never traded for a number.
+
 ## Where the weight actually is
 
 **`web/` is 39% of the code and has no tests worth the name.** That is the real
