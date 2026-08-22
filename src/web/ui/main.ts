@@ -517,6 +517,10 @@ async function loadSession(id: string): Promise<void> {
     appendTurn("error", `failed to load session: ${res.status}`);
     return;
   }
+  // Detached run cards are placed where their result entered the conversation,
+  // not at the end of the transcript: a reload must not sweep every card a
+  // session ever launched to the bottom, below turns that came after it.
+  const unplacedRuns = new Map(snap.backgroundRuns.map((run) => [run.runId, run]));
   for (const [i, t] of snap.turns.entries()) {
     // The in-flight turn is the trailing one, recognisable while streaming by a
     // tool call without a result or by activity with no answer yet.
@@ -527,6 +531,14 @@ async function loadSession(id: string): Promise<void> {
     if (t.steps?.length) replayActivity(t.steps, t.meta?.durationMs, live);
     if (!t.text && !t.images?.length) continue;
     if (t.role === "system" && t.origin) {
+      // A callback names every run it delivers (batched ones carry `runIds`).
+      const delivered = t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]);
+      for (const runId of delivered) {
+        const run = unplacedRuns.get(runId);
+        if (!run) continue;
+        renderBackgroundRun(run);
+        unplacedRuns.delete(runId);
+      }
       appendSystemInput(t.text, t.origin);
       continue;
     }
@@ -538,7 +550,9 @@ async function loadSession(id: string): Promise<void> {
       imageRow(bubble).append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
     }
   }
-  for (const run of snap.backgroundRuns) renderBackgroundRun(run);
+  // Whatever is left never reported back — still queued or running, so the
+  // bottom is where it belongs.
+  for (const run of unplacedRuns.values()) renderBackgroundRun(run);
   scrollBottom(true);
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
