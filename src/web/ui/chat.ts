@@ -140,19 +140,20 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     ? content.scrollHeight > content.clientHeight + 1
     : long;
   if (clipped) {
-    const reveal = h(
+    const toggle = h(
       "button",
       "mx-auto mt-1.5 block w-fit rounded border border-cyan-200 bg-white px-2 py-1 text-[12px] font-medium text-cyan-800 shadow-sm hover:bg-cyan-100 pointer-coarse:py-3.5",
       "Show full message",
     );
-    reveal.setAttribute("type", "button");
-    reveal.onclick = () => {
-      content.classList.remove(...collapsed);
+    toggle.setAttribute("type", "button");
+    toggle.onclick = () => {
+      const clamped = content.classList.toggle(collapsed[0]!);
+      content.classList.toggle(collapsed[1]!, clamped);
+      toggle.textContent = clamped ? "Show full message" : "Collapse message";
       content.tabIndex = -1;
-      reveal.remove();
       content.focus({ preventScroll: true });
     };
-    row.append(reveal);
+    row.append(toggle);
   } else {
     content.classList.remove(...collapsed);
   }
