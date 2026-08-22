@@ -19,6 +19,7 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 - Node 24 or newer (`node:sqlite` is used unflagged)
 - A provider account (Anthropic, OpenAI, …) — configure its API key or OAuth
   login from Console → Configuration after signing in
+- A user-writable global npm prefix if `pier update` should update a service
 - Optional: the `sqlite3` CLI, for backups and password resets
 
 ## Run it
@@ -84,14 +85,18 @@ override; for API keys, prefer the sealed Providers UI.
 pier service install     # --port, --host, --pier-home, --force
 pier service status
 pier service uninstall
+pier backup              # snapshot the database before a manual update
 pier update              # latest release, then restart the service
 ```
 
 Linux only, because it is systemd. It writes `~/.config/systemd/user/pier.service`
 with the absolute path of the node you installed with (systemd's PATH would not
 find a version-managed one), a memory drop-in it never rewrites afterwards, and
-turns on linger so scheduled tasks survive your logout. On macOS run `pier` in
-a terminal, or under whatever supervisor you already use.
+turns on linger so scheduled tasks survive your logout. Install also records the
+exact npm executable in a separate updater unit. Re-run `pier service install
+--force` after changing the service settings or its Node/npm installation; this
+rewrites both units and restarts Pier. On macOS run `pier` in a terminal, or
+under whatever supervisor you already use.
 
 `docs/deploy.md` is the same thing written out by hand, plus what the memory
 limits mean, how updates work (and why the updater is a second unit), how to
@@ -124,13 +129,16 @@ Pier checks `registry.npmjs.org` in the background and shows `v0.0.1 → 0.0.2`
 in the footer when a release is out. It never updates itself: this process
 holds provider keys and can run a shell, so rewriting its own code on a timer
 would be a supply-chain surface — and an unattended restart kills whatever turn
-was mid-flight. `pier update` is a command someone types.
+was mid-flight. `pier update` is a command someone types. It stops the service,
+writes `~/.pier/db/pier.db.release.bak`, updates the npm installation recorded
+when the service was installed, and starts Pier again.
 
 `main` is the only development line. `npm version minor` writes the tag, the
 tag builds and publishes a GitHub Release, and the version in the web footer is
 the one from `package.json` — so the number on screen always names a commit.
 Schema upgrades are one-way: a database migrated by a newer Pier is refused by
-an older one, so take the backup `docs/deploy.md` describes before upgrading.
+an older one. The release backup above is the way back; `docs/deploy.md` has the
+restore procedure and the additional snapshots taken before schema migrations.
 
 ## License
 

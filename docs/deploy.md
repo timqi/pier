@@ -24,8 +24,10 @@ you want the unit to say something different.
 ## Prerequisites
 
 - Node 24 or newer (`node:sqlite` is used unflagged).
-- The `sqlite3` CLI, for the off-machine backup and password steps below. Pier
-  itself does not need it.
+- A user-writable global npm prefix. The updater runs as you, so an initial
+  install that needed `sudo npm install -g` cannot later update itself.
+- The `sqlite3` CLI is optional, for the off-machine backup and password steps
+  below. Pier itself and its automatic update backup do not need it.
 - Pier installed globally: `npm install -g @timqi/pier`. The unit runs that
   installed entry point, so a deploy is `pier update`. A checkout
   (`git clone` + `npm ci && npm run build`) is the *develop* path; point the
@@ -40,7 +42,7 @@ or as a dedicated system user means an agent that cannot touch the files you
 wanted it to work on.
 
 `~/.config/systemd/user/pier.service` — what `pier service install` generates,
-with your node and your entry point filled in:
+with your absolute Node and package paths filled in:
 
 ```ini
 [Unit]
@@ -55,25 +57,28 @@ WorkingDirectory=%h
 # Absolute paths on purpose: systemd starts with a minimal PATH, so a node
 # installed by nvm/fnm/asdf is not on it — the installer fills in the node
 # that installed Pier and the globally installed entry point.
-ExecStart=/usr/bin/node /usr/lib/node_modules/@timqi/pier/dist/main.js
-Environment=NODE_ENV=production
+ExecStart="/absolute/path/to/node" "/absolute/npm/prefix/lib/node_modules/@timqi/pier/dist/main.js"
+Environment="NODE_ENV=production"
 # Loopback by default. Put a reverse proxy in front before widening this —
 # whoever reaches this port can drive an agent that runs a shell.
-Environment=HOST=127.0.0.1
-Environment=PORT=3141
-# Where the database, the boards and the generated password hash live.
-Environment=PIER_HOME=%h/.pier
+Environment="HOST=127.0.0.1"
+Environment="PORT=3141"
 Restart=always
 RestartSec=2
-# The journal is where the first-run password is printed, so keep it readable.
 StandardOutput=journal
 StandardError=journal
-# Otherwise every line is tagged "node"; this makes `journalctl -t pier` work.
 SyslogIdentifier=pier
 
 [Install]
 WantedBy=default.target
 ```
+
+`--pier-home` adds a quoted `PIER_HOME` environment line. Paths with spaces and
+literal systemd `%` specifiers are escaped. `pier service install` also writes an
+updater unit containing the exact npm executable currently on `PATH`. Re-run with
+`--force` after changing service settings or the Node/npm installation; it
+rewrites both units and restarts the running service. The limits drop-in remains
+operator-owned and is never overwritten.
 
 Enable it, and tell logind to keep your user manager alive after you log out —
 without lingering, every scheduled task stops when your SSH session ends:
@@ -229,34 +234,42 @@ The workbench footer says the same thing without being asked: the server checks
 into `v0.0.1 → 0.0.2` when there is something newer. A failed check is silent
 by design — an offline box is not a broken one.
 
-From a checkout instead:
-
-```sh
-cd ~/pier
-git fetch --tags && git checkout v0.2.0   # a tag, not a branch
-npm ci && npm run build
-systemctl --user restart pier
-```
-
-A newer Pier brings its own schema up on the next start: the migrations run in
-one transaction before the port opens, and the version they leave behind is
-stamped in the database. Before touching an existing database it snapshots it
-to `~/.pier/db/pier.db.v<N>.bak` (`N` = the schema it was at), so the step you
-cannot forget is the one you never take. **Upgrades only.** Start an older Pier
-on a database a newer one has migrated and it refuses to run rather than write
-tables it does not understand — the way back down is that `.bak`:
+From a checkout instead, stop and back up before replacing the build:
 
 ```sh
 systemctl --user stop pier
-cd ~/.pier/db && rm -f pier.db pier.db-wal pier.db-shm && cp pier.db.v1.bak pier.db
-# then check out the Pier that speaks schema 1 again
+pier backup
+cd ~/pier
+git fetch --tags && git checkout v0.2.0   # a tag, not a branch
+npm ci && npm run build
+systemctl --user start pier
 ```
 
-The three newest snapshots are kept and older ones removed as later upgrades
-supersede them; each is a full copy of the database, so size grows with the
-database, not with the number of releases. They sit next to the database and
-therefore protect against a bad upgrade, not against a lost disk — an
-off-machine copy is still yours to take.
+For a service install, `pier update` stops Pier first and snapshots the database
+to `~/.pier/db/pier.db.release.bak` before npm touches the package. This happens
+for every release, including releases with no schema change. If installation or
+backup fails, the updater unit still tries to start the previously installed
+service and reports the failure in its journal.
+
+A newer Pier brings its own schema up on the next start: the migrations run in
+one transaction before the port opens, and the version they leave behind is
+stamped in the database. It also snapshots the immediately preceding schema to
+`~/.pier/db/pier.db.v<N>.bak` (`N` = the schema it was at). **Upgrades only.**
+Start an older Pier on a database a newer one has migrated and it refuses to run
+rather than write tables it does not understand — the way back down is either
+the release backup or that schema snapshot:
+
+```sh
+systemctl --user stop pier
+cd ~/.pier/db && rm -f pier.db pier.db-wal pier.db-shm && cp pier.db.release.bak pier.db
+# then reinstall the Pier release that created that backup
+```
+
+The release backup is replaced atomically on each update. The three newest
+schema snapshots are also kept and older ones removed as later migrations
+supersede them. Each is a full copy of the database. They sit next to the
+database and therefore protect against a bad upgrade, not against a lost disk —
+an off-machine copy is still yours to take.
 
 ### Can it update itself?
 
@@ -266,8 +279,10 @@ in `pier.service`'s cgroup, so an update script spawned by Pier dies halfway
 through — sometimes after unpacking and before restarting, which is the one
 outcome worse than not updating.
 
-So the update runs as its own unit, which is what `pier update` writes and
-starts — `~/.config/systemd/user/pier-update.service`:
+So installation writes a second unit and `pier update` starts it after recording
+the running service's effective `PIER_HOME` in a runtime drop-in. That includes
+an operator environment override, so the updater cannot back up one database and
+migrate another. `~/.config/systemd/user/pier-update.service`:
 
 ```ini
 [Unit]
@@ -275,23 +290,22 @@ Description=Update Pier to the latest published version
 
 [Service]
 Type=oneshot
-ExecStart=/path/to/npm install -g @timqi/pier@latest
-ExecStartPost=systemctl --user restart pier.service
+ExecStart=systemctl --user stop pier.service
+ExecStart=/path/to/node /path/to/pier/dist/cli.js backup
+ExecStart=/recorded/path/to/npm install -g @timqi/pier@latest
+ExecStopPost=systemctl --user start pier.service
 ```
 
-Pier can then trigger an update with a single call that survives its own
-restart, because the work happens in a different cgroup:
-
-```sh
-systemctl --user start pier-update.service
-```
+`pier update` triggers that unit with a call that survives Pier's restart because
+the work happens in a different cgroup. Starting the unit directly is unsupported:
+the command first records the effective database home used by the running service.
 
 Deliberately **not** a `systemd.timer`. An unattended update is a machine that
 rewrites its own code from the network while holding your API keys, and it
-interrupts whatever session was mid-turn to do it. Pier notices a newer
-release and says so in the workbench footer; starting the update stays a
-decision someone makes. `Restart=always` above is what makes
-that decision cheap — the service comes back on its own.
+interrupts whatever session was mid-turn to do it. Pier notices a newer release
+and says so in the workbench footer; starting the update stays a decision someone
+makes. The updater's `ExecStopPost` is what brings the service back after both
+success and failure.
 
 ## Remote access
 
@@ -312,7 +326,8 @@ Three paths hold everything: `~/.pier/db/pier.db` (tasks, channels, the chat →
 session map, workbench state, settings, the password hash, and the sealed
 provider credentials and channel tokens), `~/.pier/master.key` (the key that
 seals them — without it the database's sealed values are unreadable), and
-`~/.pier/boards/`. Copy the database with `sqlite3 ... "VACUUM INTO '…'"`
-rather than `cp`, which under WAL can miss the most recent commits. Pi's own
-session history lives under `~/.pier/pi` (Pier sets `PI_CODING_AGENT_DIR`
-there unless the environment already names another directory).
+`~/.pier/boards/`. `pier.db.release.bak` is the latest automatic pre-update copy.
+For off-machine backups, use `sqlite3 ... "VACUUM INTO '…'"` rather than `cp`,
+which under WAL can miss the most recent commits. Pi's own session history lives
+under `~/.pier/pi` (Pier sets `PI_CODING_AGENT_DIR` there unless the environment
+already names another directory).

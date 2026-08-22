@@ -31,6 +31,9 @@ export interface UpdateStatus {
   available: boolean;
 }
 
+export const isValidVersion = (version: string): boolean =>
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version);
+
 /**
  * `1.2.3` against `1.10.0`, numerically per field: a string compare would call
  * the second one older. A prerelease suffix loses to the release it precedes,
@@ -99,6 +102,8 @@ export async function fetchLatestVersion(): Promise<string> {
   });
   if (!res.ok) throw new Error(`registry answered ${res.status}`);
   const body = (await res.json()) as { version?: unknown };
-  if (typeof body.version !== "string") throw new Error("registry answered without a version");
+  if (typeof body.version !== "string" || !isValidVersion(body.version)) {
+    throw new Error("registry answered without a valid version");
+  }
   return body.version;
 }

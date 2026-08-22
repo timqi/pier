@@ -57,8 +57,8 @@ jobs:
               echo "First tagged release."
             fi
             echo
-            echo "Upgrading: back up \`~/.pier/pier.db\` first — schema migrations run"
-            echo "on the next start and are one-way. See \`docs/deploy.md\`."
+            echo "\`pier update\` stops the service and writes \`~/.pier/db/pier.db.release.bak\`"
+            echo "before installing. Schema migrations are one-way. See \`docs/deploy.md\`."
           } > notes.md
 
       # `prepack` rebuilds inside the pack, so what ships is what this job just

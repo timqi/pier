@@ -142,6 +142,17 @@ let shared: DatabaseSync | undefined;
  */
 export const pierDb = (): DatabaseSync => (shared ??= openDb(PIER_DB));
 
+/** A release-level restore point, taken while the service is stopped even when
+ * the release has no schema migration. The previous complete copy stays put if
+ * writing its replacement fails. */
+export function backupDb(path = PIER_DB): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const bak = `${path}.release.bak`;
+  copyDatabase(path, bak);
+  log.info(`pre-update backup: ${bak}`);
+  return bak;
+}
+
 /** Open a database, bring it to the current schema, and lock down its files.
  *  `migrations` is injectable only so tests can exercise an upgrade — there is
  *  exactly one real list. */
@@ -185,7 +196,6 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
     );
   }
   if (at === target) return;
-  if (at > 0 && path !== ":memory:") snapshot(db, path, at);
   // One transaction for the statements *and* the version number: a crash
   // between them would leave a database whose version describes a schema it
   // does not have, which is worse than a crash.
@@ -199,8 +209,22 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
   };
   if (locked >= target) {
     db.exec("ROLLBACK");
+    if (locked > target) {
+      throw new Error(`${path} advanced to schema ${locked} while this Pier was waiting; it speaks ${target}`);
+    }
     log.info(`schema already at ${locked}, migrated by another process`);
     return;
+  }
+  // Keep the write lock while a second, read-only connection copies the last
+  // committed state. That connection may VACUUM while this one holds a RESERVED
+  // lock; other Pier starts wait here instead of racing on the shared .tmp.
+  if (locked > 0 && path !== ":memory:") {
+    try {
+      snapshot(path, locked);
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
   }
   let step = locked;
   try {
@@ -233,14 +257,23 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
  * old snapshot nor a complete new one. A rename is atomic: the `.bak` name only
  * ever refers to a finished copy.
  */
-function snapshot(db: DatabaseSync, path: string, at: number): void {
+function snapshot(path: string, at: number): void {
   const bak = `${path}.v${at}.bak`;
+  copyDatabase(path, bak);
+  log.info(`pre-migration backup: ${bak}`);
+}
+
+function copyDatabase(path: string, bak: string): void {
   const tmp = `${bak}.tmp`;
   rmSync(tmp, { force: true }); // a previous crash may have left one
-  db.exec(`VACUUM INTO '${tmp.replaceAll("'", "''")}'`);
+  const source = new DatabaseSync(path, { readOnly: true });
+  try {
+    source.exec(`VACUUM INTO '${tmp.replaceAll("'", "''")}'`);
+  } finally {
+    source.close();
+  }
   chmodSync(tmp, 0o600); // it holds everything the 0600 database holds
   renameSync(tmp, bak);
-  log.info(`pre-migration backup: ${bak}`);
 }
 
 /** Snapshots beside the database, newest schema first. */

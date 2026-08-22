@@ -1,9 +1,10 @@
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { openDb } from "./db.js";
+import { backupDb, openDb } from "./db.js";
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-db-")), "pier.db");
 
@@ -85,6 +86,51 @@ describe("openDb", () => {
     bak.close();
     // The backup holds everything the 0600 database holds.
     expect(statSync(`${path}.v1.bak`).mode & 0o777).toBe(0o600);
+  });
+
+  it("takes a release backup even when the schema does not change", () => {
+    const path = dbPath();
+    const db = openDb(path);
+    db.prepare("INSERT INTO settings(key, value) VALUES ('publicUrl', 'before')").run();
+    db.close();
+
+    expect(backupDb(path)).toBe(`${path}.release.bak`);
+    const after = openDb(path);
+    after.prepare("UPDATE settings SET value = 'after'").run();
+    after.close();
+
+    const bak = new DatabaseSync(`${path}.release.bak`, { readOnly: true });
+    expect(bak.prepare("SELECT value FROM settings").get()).toEqual({ value: "before" });
+    bak.close();
+    expect(statSync(`${path}.release.bak`).mode & 0o777).toBe(0o600);
+  });
+
+  it("serializes the snapshot as well as the migration across processes", { timeout: 15_000 }, async () => {
+    const path = dbPath();
+    const first = "CREATE TABLE a (x TEXT)";
+    const second = "CREATE TABLE b (y TEXT)";
+    const seed = openDb(path, [first]);
+    seed.exec(
+      "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50000) " +
+      "INSERT INTO a SELECT printf('%0200d', x) FROM n",
+    );
+    seed.close();
+
+    const module = new URL("./db.ts", import.meta.url).href;
+    const script = `import { openDb } from ${JSON.stringify(module)}; ` +
+      `const db = openDb(process.argv[1], ${JSON.stringify([first, second])}); db.close();`;
+    const run = (): Promise<number | null> => new Promise((resolve) => {
+      const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, path], {
+        stdio: "ignore",
+      });
+      child.once("close", resolve);
+    });
+
+    expect(await Promise.all([run(), run()])).toEqual([0, 0]);
+    const after = new DatabaseSync(path, { readOnly: true });
+    expect(version(after)).toBe(2);
+    expect(tables(after)).toEqual(["a", "b"]);
+    after.close();
   });
 
   it("keeps the three newest snapshots and removes what they supersede", () => {

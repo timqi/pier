@@ -190,10 +190,9 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   a board's `public` flag is a real boundary and not just a data state.
 - Remote access and deployment: the loopback bind is the posture, reached over
   an SSH tunnel, a private network or a reverse proxy. `pier service install`
-  (cli.ts/service.ts) writes the systemd unit `docs/deploy.md` explains; the
-  version check exists (update.ts, the workbench footer) but applying an
-  update stays a typed command — `pier update` runs as its own unit so the
-  restart cannot kill it, and it is never a timer.
+  writes the documented service and updater units. Version checks are read-only;
+  an explicit `pier update` runs backup, package install and restart in the
+  updater's cgroup, never from a timer.
 - Pi **SDK** over RPC; seam kept RPC-compatible (no Pi types leak out of `agent/`).
 - Standalone program, not a Pi extension; Pier registers custom tools into
   the sessions it creates (task tool, step 4).

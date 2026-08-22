@@ -10,6 +10,7 @@ import {
   startUpdate,
   uninstall,
   unitPath,
+  updateRuntimePath,
   updateUnitPath,
 } from "./service.js";
 
@@ -23,6 +24,7 @@ const options = (over: Partial<Parameters<typeof install>[0]> = {}) => {
     said,
     opts: {
       execPath: "/home/x/.local/share/fnm/node-v24.0.0/bin/node",
+      npmPath: "/home/x/.npm-global/bin/npm",
       entry: "/home/x/.npm-global/lib/node_modules/@timqi/pier/dist/main.js",
       host: "127.0.0.1",
       port: 3141,
@@ -38,15 +40,16 @@ describe("renderUnit", () => {
   it("starts the node that installed it, by absolute path", () => {
     const unit = renderUnit({
       execPath: "/opt/node/bin/node",
+      npmPath: "/opt/node/bin/npm",
       entry: "/opt/pier/dist/main.js",
       host: "127.0.0.1",
       port: 3141,
     });
     // The whole reason this is generated: systemd's PATH would not find a
     // version-managed node, and a checkout-relative entry does not exist.
-    expect(unit).toContain("ExecStart=/opt/node/bin/node /opt/pier/dist/main.js");
-    expect(unit).toContain("Environment=HOST=127.0.0.1");
-    expect(unit).toContain("Environment=PORT=3141");
+    expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/pier/dist/main.js"');
+    expect(unit).toContain('Environment="HOST=127.0.0.1"');
+    expect(unit).toContain('Environment="PORT=3141"');
     expect(unit).toContain("Restart=always");
     expect(unit).toContain("SyslogIdentifier=pier");
     // Unset means "let Pier use its own default", not "write an empty value".
@@ -56,13 +59,27 @@ describe("renderUnit", () => {
   it("carries a PIER_HOME only when one was asked for", () => {
     const unit = renderUnit({
       execPath: "/usr/bin/node",
+      npmPath: "/usr/bin/npm",
       entry: "/opt/pier/dist/main.js",
       host: "0.0.0.0",
       port: 8080,
       pierHome: "/srv/pier-state",
     });
-    expect(unit).toContain("Environment=PIER_HOME=/srv/pier-state");
-    expect(unit).toContain("Environment=HOST=0.0.0.0");
+    expect(unit).toContain('Environment="PIER_HOME=/srv/pier-state"');
+    expect(unit).toContain('Environment="HOST=0.0.0.0"');
+  });
+
+  it("quotes spaces and escapes systemd expansion in paths", () => {
+    const unit = renderUnit({
+      execPath: "/opt/Node $Runtime/%v/bin/node",
+      npmPath: "/opt/Npm $Runtime/%v/bin/npm",
+      entry: "/opt/Pier App/dist/main.js",
+      host: "::1",
+      port: 3141,
+      pierHome: "/srv/Pier State/%i/$data",
+    });
+    expect(unit).toContain('ExecStart="/opt/Node $$Runtime/%%v/bin/node" "/opt/Pier App/dist/main.js"');
+    expect(unit).toContain('Environment="PIER_HOME=/srv/Pier State/%%i/$data"');
   });
 });
 
@@ -73,6 +90,7 @@ describe("install", () => {
     install(opts);
 
     expect(readFileSync(unitPath(h), "utf8")).toContain("ExecStart=");
+    expect(readFileSync(updateUnitPath(h), "utf8")).toContain("@timqi/pier@latest");
     expect(readFileSync(limitsPath(h), "utf8")).toContain("MemoryMax=75%");
     expect(calls.map((c) => c.join(" "))).toEqual([
       "systemctl --user daemon-reload",
@@ -104,51 +122,123 @@ describe("install", () => {
     install(options({ home: h, force: true }).opts);
     expect(readFileSync(limitsPath(h), "utf8")).toContain("MemoryMax=2G");
   });
+
+  it("restarts an existing service when --force replaces its settings", () => {
+    const h = home();
+    mkdirSync(dirname(unitPath(h)), { recursive: true });
+    writeFileSync(unitPath(h), "# old\n");
+    const { calls, opts } = options({ home: h, force: true });
+    expect(install(opts)).toBe(true);
+    expect(calls.slice(-2)).toEqual([
+      ["systemctl", "--user", "enable", "pier.service"],
+      ["systemctl", "--user", "restart", "pier.service"],
+    ]);
+  });
+
+  it("returns failure and stops when daemon-reload fails", () => {
+    const h = home();
+    const calls: string[][] = [];
+    expect(install(options({ home: h, exec: (argv) => (calls.push(argv), false) }).opts)).toBe(false);
+    expect(calls).toEqual([["systemctl", "--user", "daemon-reload"]]);
+  });
 });
 
 describe("update", () => {
-  it("is a second unit, so restarting Pier cannot kill the update doing it", () => {
-    const unit = renderUpdateUnit("/opt/node/bin/node");
+  it("stops, backs up, updates the recorded npm installation, and always starts again", () => {
+    const unit = renderUpdateUnit({
+      execPath: "/opt/node/bin/node",
+      npmPath: "/opt/npm-global/bin/npm",
+      entry: "/opt/npm-global/lib/node_modules/@timqi/pier/dist/main.js",
+      host: "127.0.0.1",
+      port: 3141,
+    });
     expect(unit).toContain("Type=oneshot");
-    // npm from beside that node, not whatever a minimal PATH would find.
-    expect(unit).toContain("ExecStart=/opt/node/bin/npm install -g @timqi/pier@latest");
-    expect(unit).toContain("ExecStartPost=systemctl --user restart pier.service");
+    expect(unit).toContain("ExecStart=systemctl --user stop pier.service");
+    expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/lib/node_modules/@timqi/pier/dist/cli.js" backup');
+    expect(unit).toContain('ExecStart="/opt/npm-global/bin/npm" install -g @timqi/pier@latest');
+    expect(unit).toContain("ExecStopPost=systemctl --user start pier.service");
+    expect(unit).not.toContain("refresh");
   });
 
   it("refuses when there is no service to update", () => {
     const h = home();
     const calls: string[][] = [];
-    expect(
-      startUpdate({ execPath: "/opt/node/bin/node", home: h, say: () => {}, exec: (a) => (calls.push(a), true) }),
-    ).toBe(false);
+    expect(startUpdate({ home: h, say: () => {}, exec: (a) => (calls.push(a), true) }))
+      .toBe("not-installed");
     expect(calls).toEqual([]);
   });
 
-  it("writes the unit and starts it detached from the service it restarts", () => {
+  it("uses recorded npm and the running service's effective PIER_HOME", () => {
     const h = home();
     install(options({ home: h }).opts);
     const calls: string[][] = [];
     const said: string[] = [];
 
-    expect(
-      startUpdate({
-        execPath: "/opt/node/bin/node",
-        home: h,
-        say: (m) => void said.push(m),
-        exec: (a) => (calls.push(a), true),
-      }),
-    ).toBe(true);
-    expect(existsSync(updateUnitPath(h))).toBe(true);
+    expect(startUpdate({
+      home: h,
+      say: (m) => void said.push(m),
+      exec: (a) => (calls.push(a), true),
+      effectiveHome: () => "/effective/Pier State/%literal",
+    })).toBe("started");
+    expect(readFileSync(updateUnitPath(h), "utf8")).toContain('ExecStart="/home/x/.npm-global/bin/npm"');
+    expect(readFileSync(updateRuntimePath(h), "utf8"))
+      .toContain('Environment="PIER_HOME=/effective/Pier State/%%literal"');
     expect(calls.map((c) => c.join(" "))).toEqual([
       "systemctl --user daemon-reload",
-      // --no-block: the unit restarts the service that would be waiting for it.
       "systemctl --user start --no-block pier-update.service",
     ]);
-    expect(said.join(" ")).toMatch(/journalctl --user -u pier-update.service/);
+    expect(said.join(" ")).toMatch(/pier.db.release.bak/);
+  });
+
+  it("bridges a legacy unit once, naming its npm-path limitation", () => {
+    const h = home();
+    mkdirSync(dirname(unitPath(h)), { recursive: true });
+    writeFileSync(unitPath(h), [
+      "ExecStart=/old/node/bin/node /old/node/lib/node_modules/@timqi/pier/dist/main.js",
+      "Environment=HOST=127.0.0.1",
+      "Environment=PORT=3141",
+      "",
+    ].join("\n"));
+    const said: string[] = [];
+
+    expect(startUpdate({
+      home: h,
+      say: (m) => void said.push(m),
+      exec: () => true,
+      effectiveHome: () => "/srv/pier",
+    })).toBe("started");
+    expect(readFileSync(updateUnitPath(h), "utf8"))
+      .toContain('ExecStart="/old/node/bin/npm" install -g @timqi/pier@latest');
+    expect(said.join(" ")).toMatch(/legacy updater.*exact npm path/);
+  });
+
+  it("refuses when effective state cannot be read or systemd cannot start", () => {
+    const h = home();
+    install(options({ home: h }).opts);
+    expect(startUpdate({ home: h, say: () => {}, exec: () => true, effectiveHome: () => { throw new Error("stopped"); } }))
+      .toBe("failed");
+    expect(startUpdate({ home: h, say: () => {}, exec: () => false, effectiveHome: () => "/srv/pier" }))
+      .toBe("failed");
+
+    let calls = 0;
+    expect(startUpdate({
+      home: h,
+      say: () => {},
+      exec: () => ++calls === 1,
+      effectiveHome: () => "/srv/pier",
+    })).toBe("failed");
+    expect(calls).toBe(2);
   });
 });
 
 describe("uninstall", () => {
+  it("does not remove the unit when stopping it fails", () => {
+    const h = home();
+    install(options({ home: h }).opts);
+    expect(uninstall(h, () => {}, () => false)).toBe(false);
+    expect(existsSync(unitPath(h))).toBe(true);
+  });
+
   it("removes what install wrote and leaves the state alone", () => {
     const h = home();
     install(options({ home: h }).opts);

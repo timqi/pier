@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { isNewer, UpdateCheck } from "./update.js";
+import { isNewer, isValidVersion, UpdateCheck } from "./update.js";
+
+describe("isValidVersion", () => {
+  it("accepts semver and rejects text that cannot enter a unit or npm argument", () => {
+    expect(isValidVersion("1.2.3")).toBe(true);
+    expect(isValidVersion("1.2.3-rc.1+build.5")).toBe(true);
+    expect(isValidVersion("1.2.3\nExecStart=bad")).toBe(false);
+    expect(isValidVersion("01.2.3")).toBe(false);
+  });
+});
 
 describe("isNewer", () => {
   it("compares fields as numbers, which is where a string compare fails", () => {
