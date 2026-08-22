@@ -88,8 +88,16 @@ export class TaskExecution {
       // A run that ends awaiting a supervisor decision suppresses its
       // completion callback: the pending question is the notification.
       if (run.callbackSessionId && !this.host.openDecisionId(run.id)) run.callbackState = "pending";
-      this.store.saveRun(run);
       this.controllers.delete(run.id);
+      try {
+        this.store.saveRun(run);
+      } catch (err) {
+        // Waiters settle from the in-memory run below; the callback and any
+        // group join read the stale row and wait — the next boot's interrupt
+        // sweep re-marks it and delivers then. Named here so that delay has
+        // an explanation.
+        log.error(`run ${run.id} final save failed — callback/join deferred to next boot`, err);
+      }
       this.host.changed(run);
       this.host.settled(run);
       if (run.callbackState === "pending") void this.callbacks.deliver(run);

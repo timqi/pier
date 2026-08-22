@@ -17,6 +17,9 @@ const MAX_TEXT = 4_096;
 
 interface PendingPrompt {
   id: string;
+  /** Select answers are option ids, not secrets — scrubbing a short common
+   *  id like "1" would splatter [redacted] through every later message. */
+  redact: boolean;
   resolve(value: string): void;
   reject(error: Error): void;
   cleanup(): void;
@@ -173,7 +176,7 @@ export class ProviderFlows {
     flow.pending = undefined;
     flow.prompt = undefined;
     pending.cleanup();
-    if (value) flow.redactions.push(value.slice(0, 64 * 1024));
+    if (value && pending.redact) flow.redactions.push(value.slice(0, 64 * 1024));
     pending.resolve(value);
   }
 
@@ -183,7 +186,9 @@ export class ProviderFlows {
     if (flow.committing) return null;
     flow.controller.abort();
     this.#settlePrompt(flow, new Error("Login cancelled"));
-    await flow.run;
+    // A provider that ignores its abort signal must not park this request —
+    // the flow then settles (or expires) in the background instead.
+    await Promise.race([flow.run, new Promise((r) => setTimeout(r, 2_000).unref())]);
     return snapshot(flow);
   }
 
@@ -240,7 +245,7 @@ export class ProviderFlows {
         reject(new Error("Prompt cancelled"));
       };
       const cleanup = () => signal?.removeEventListener("abort", onAbort);
-      flow.pending = { id, resolve, reject, cleanup };
+      flow.pending = { id, redact: visible.type !== "select", resolve, reject, cleanup };
       signal?.addEventListener("abort", onAbort, { once: true });
       if (signal?.aborted) onAbort();
     });

@@ -23,9 +23,6 @@ export const MARKDOWN_MAX = 11_000;
 export const MRKDWN_MAX = 2800;
 // Slack truncates a button label past this, mid-word.
 const BUTTON_MAX = 75;
-// Slack's cap on one actions block. `MAX_SUGGESTIONS` in core/reply.ts already
-// holds the agent to 5, so this only guards a caller that bypasses it.
-const MAX_BUTTONS = 25;
 
 /** Shared: the adapter and the panel escape plain text with this too. */
 export const escapeMrkdwn = (s: string): string =>
@@ -207,7 +204,7 @@ const truncate = (label: string): string =>
  */
 export function actions(labels: string[]): SlackBlock | undefined {
   if (!labels.length) return undefined;
-  const elements: SlackButton[] = labels.slice(0, MAX_BUTTONS).map((label, index) => ({
+  const elements: SlackButton[] = labels.map((label, index) => ({
     type: "button",
     action_id: `${OFFER_PREFIX}${index}`,
     text: { type: "plain_text", text: truncate(label), emoji: true },

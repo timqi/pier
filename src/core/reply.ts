@@ -16,7 +16,7 @@ import type { AgentReply, NoteOrigin, ThinkingLevel, TurnMeta } from "./types.js
  * into the factory). Both halves of the feature live in this file: the syntax
  * the agent is told to emit, and the parser that reads it back.
  */
-export const REPLY_SURFACE_PROMPT = `## Pier chat surface
+const REPLY_SURFACE_PROMPT = `## Pier chat surface
 
 Your replies render in a chat UI (web and IM). Three optional markdown
 conventions:
@@ -141,6 +141,12 @@ export function cjkFriendly(markdown: string): string {
 export const quietLabel = (silence?: string): string =>
   silence ? `stayed silent — ${silence}` : "no reply";
 
+/** One policy for "did this turn actually reply": options count as a reply —
+ *  the buttons are the answer, so a turn that is only its options is not
+ *  "nothing". Every surface decides through here. */
+export const isSilentReply = (reply: { text: string; suggestions: string[] }): boolean =>
+  !reply.text.trim() && reply.suggestions.length === 0;
+
 /** How a reasoning level is spelled wherever a human reads it. */
 export const thinkingLabel = (level: ThinkingLevel): string =>
   level === "xhigh" ? "Extra high" : level[0]!.toUpperCase() + level.slice(1);
@@ -182,7 +188,6 @@ const BLOCK = /(?:^|\n)[ \t]*-{3,}[ \t]*\r?\n((?:[ \t]*\[[^\]\r\n]+\][ \t]*(?:[|
 const TOKEN = /\[([^\]\r\n]+)\]/g;
 const MAX_SUGGESTIONS = 5;
 
-/** Split an assistant turn's markdown into renderable text + next-step labels. */
 /**
  * A deliberate non-answer. In a group thread the agent is handed every message,
  * and most of them are two humans talking; a bot that replies to each one is
@@ -208,6 +213,7 @@ export function silentReason(markdown: string): string | undefined {
   return reasons.length ? reasons.join(" · ") : undefined;
 }
 
+/** Split an assistant turn's markdown into renderable text + next-step labels. */
 export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
   // Every surface that renders this goes through here, and every CommonMark
   // parser has some version of the CJK emphasis hole — so the repair belongs

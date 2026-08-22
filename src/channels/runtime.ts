@@ -29,20 +29,37 @@ const ADAPTERS: {
 // Lifecycle news, which is not what the injected sink below is for: that one
 // is a warning sink the adapters share, and "slack started" is not a warning.
 const log = logger("channels");
+// The parameter below shadows `log` inside its own default expression.
+const warn = (m: string): void => log.warn(m);
 
 export class ChannelRuntime {
   private readonly live = new Map<ChannelPlatform, Channel>();
+  private reloading: Promise<void> = Promise.resolve();
+  private stopped = false;
 
   constructor(
     private readonly store: ChannelStore,
     private readonly router: Router,
     private readonly control: ChannelControl,
-    private readonly log: (message: string) => void = (m) => logger("channels").warn(m),
+    private readonly log: (message: string) => void = warn,
   ) {}
 
-  /** (Re)start every platform whose config says it should run. Idempotent. */
-  async reload(): Promise<void> {
-    for (const adapter of ADAPTERS) await this.restart(adapter);
+  /** (Re)start every platform whose config says it should run. Idempotent.
+   *  Serialized — two concurrent Console saves raced into duplicate live
+   *  adapters; platforms restart in parallel so a hung start on one cannot
+   *  stall the other, and a failure is logged, never swallowed. */
+  reload(): Promise<void> {
+    const run = this.reloading.catch(() => {}).then(async () => {
+      if (this.stopped) return;
+      const results = await Promise.allSettled(ADAPTERS.map((a) => this.restart(a)));
+      results.forEach((result, i) => {
+        if (result.status === "rejected") {
+          this.log(`${ADAPTERS[i]!.platform} reload failed: ${String(result.reason)}`);
+        }
+      });
+    });
+    this.reloading = run;
+    return run;
   }
 
   private async restart(adapter: (typeof ADAPTERS)[number]): Promise<void> {
@@ -84,6 +101,10 @@ export class ChannelRuntime {
   }
 
   async stop(): Promise<void> {
+    // Join the reload queue first: an in-flight restart could otherwise
+    // register an adapter after `live` was cleared — running, unstoppable.
+    this.stopped = true;
+    await this.reloading.catch(() => {});
     for (const channel of this.live.values()) {
       await channel.stop().catch((err: unknown) =>
         this.log(`${channel.id} did not stop cleanly: ${String(err)}`));

@@ -24,12 +24,6 @@ export interface TgChat {
   is_forum?: boolean;
 }
 
-export interface TgEntity {
-  type: string;
-  offset: number;
-  length: number;
-}
-
 export interface InlineKeyboard {
   inline_keyboard: { text: string; callback_data: string }[][];
 }
@@ -41,8 +35,6 @@ export interface TgMessage {
   from?: TgUser;
   text?: string;
   caption?: string;
-  entities?: TgEntity[];
-  caption_entities?: TgEntity[];
   reply_to_message?: TgMessage;
   photo?: { file_id: string; file_size?: number }[];
   /** Telegram echoes the inline keyboard back on the message it belongs to. */
@@ -75,7 +67,6 @@ export interface TgSend {
 export interface ForceReply {
   force_reply: true;
   input_field_placeholder?: string;
-  selective?: true;
 }
 
 export interface TgEdit {

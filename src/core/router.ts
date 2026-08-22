@@ -1,5 +1,5 @@
-// Conversation → session routing plus event wiring. In-memory for v1;
-// persistence arrives with task storage (docs/plans/bootstrap.md step 4).
+// Conversation → session routing plus event wiring. In-memory on purpose:
+// the durable chat → session map lives in channels/conversations.ts.
 
 import { logger } from "../log.js";
 import { EventHub } from "./hub.js";

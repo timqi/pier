@@ -17,10 +17,6 @@ import { defaultAgentDir } from "./config.js";
 
 const log = logger("credentials");
 
-/** Envelope from secrets.ts. A value that matches was sealed by us; anything
- *  else is legacy plaintext, still honored and re-sealed on the next write. */
-const SEALED = /^v1:[0-9a-f]{8}:/;
-
 /** Mirror of pi-ai's Credential — the one shape an auth.json entry had. */
 export type ProviderCredential =
   | { type: "api_key"; key?: string; env?: Record<string, string> }
@@ -107,19 +103,12 @@ export class CredentialStore {
   }
 
   #serialized<T>(options: OperationOptions | undefined, run: () => Promise<T>): Promise<T> {
-    const op = this.#chain.then(
-      () => {
-        options?.signal?.throwIfAborted();
-        this.#ensureImported();
-        return run();
-      },
-      // The chain only sequences; a predecessor's failure is its caller's news.
-      () => {
-        options?.signal?.throwIfAborted();
-        this.#ensureImported();
-        return run();
-      },
-    );
+    // The chain only sequences; a predecessor's failure is its caller's news.
+    const op = this.#chain.catch(() => {}).then(() => {
+      options?.signal?.throwIfAborted();
+      this.#ensureImported();
+      return run();
+    });
     this.#chain = op.catch(() => {});
     return op;
   }
@@ -132,8 +121,8 @@ export class CredentialStore {
   }
 
   #parse(value: string): ProviderCredential {
-    const plain = SEALED.test(value) ? this.secrets.decrypt(value) : value;
-    return JSON.parse(plain) as ProviderCredential;
+    // Every row was sealed by #put — the table has never held plaintext.
+    return JSON.parse(this.secrets.decrypt(value)) as ProviderCredential;
   }
 
   #put(providerId: string, credential: ProviderCredential): void {
@@ -218,7 +207,9 @@ export class CredentialStore {
     }
     if (moved.length === 0 && shadowed.length === 0) return;
     writeFileSync(`${path}.imported`, raw, { mode: 0o600 });
-    writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`);
+    // Atomic swap: a crash mid-write must not truncate the file Pi reads.
+    writeFileSync(`${path}.tmp`, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
+    renameSync(`${path}.tmp`, path);
     if (moved.length) log.info(`moved ${moved.length} literal API key(s) from models.json into pier.db: ${moved.join(", ")}`);
     if (shadowed.length) log.info(`removed ${shadowed.length} shadowed models.json API key(s) (a stored credential already wins): ${shadowed.join(", ")}`);
     log.info(`pre-sweep models.json kept as ${path}.imported`);

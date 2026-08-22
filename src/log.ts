@@ -12,7 +12,7 @@
 
 import { homedir } from "node:os";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+type LogLevel = "debug" | "info" | "warn" | "error";
 
 const ORDER: LogLevel[] = ["debug", "info", "warn", "error"];
 

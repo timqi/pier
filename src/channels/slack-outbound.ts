@@ -6,7 +6,7 @@
 // receipts, because those are about the turn ending, not about what was said.
 
 import type { AgentReply, SystemInputOrigin, TurnMeta } from "../core/types.js";
-import { formatTurnMeta, originLabel, quietLabel } from "../core/reply.js";
+import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
 import {
   actions,
@@ -52,11 +52,9 @@ export class SlackOutbound {
     // indistinguishable from a crash, a dropped connection or a bug, and the
     // person waiting has no way to tell. A muted one-liner is the cheapest
     // honest answer.
-    // Options count as a reply: the buttons are the answer, so a turn that is
-    // only its options is not "nothing".
-    const quiet = text || row
-      ? ""
-      : `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`;
+    const quiet = isSilentReply(reply)
+      ? `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`
+      : "";
     if (!(text || row || footer || quiet)) return;
     const parts = text ? chunk(text, this.budget()) : [""];
     for (const [i, part] of parts.entries()) {

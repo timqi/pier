@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { isProviderApi } from "../core/types.js";
+import { isProviderApi, validateEndpoint, validateProviderSetup } from "../core/types.js";
 import { pierPath } from "../paths.js";
 import type {
   ConfigResource,
@@ -210,10 +210,12 @@ export class PiConfigStore implements ConfigStore {
       try {
         await verify?.();
       } catch (err) {
+        // Decided outside the restore try: a concurrent edit is not a failed
+        // restore, and must not be reported as one.
+        if (await readOptional(path) !== candidate) {
+          throw new Error(`${path} changed while provider setup was being validated`, { cause: err });
+        }
         try {
-          if (await readOptional(path) !== candidate) {
-            throw new Error(`${path} changed while provider setup was being validated`);
-          }
           if (existed) await atomicWrite(path, raw, 0o600);
           else await fs.unlink(path);
         } catch (rollback) {
@@ -243,44 +245,6 @@ export class PiConfigStore implements ConfigStore {
     // Containment check — the listing is relative paths, reject anything else.
     if (!path.startsWith(root + sep)) throw new Error(`invalid resource path: ${name}`);
     return fs.readFile(path, "utf8");
-  }
-}
-
-function validateEndpoint(endpoint: string): void {
-  let url: URL;
-  try {
-    url = new URL(endpoint);
-  } catch {
-    throw new Error("endpoint must be an http(s) URL");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("endpoint must be an http(s) URL");
-  }
-  if (url.username || url.password || url.search || url.hash) {
-    throw new Error("endpoint must not contain credentials, query or fragment");
-  }
-}
-
-function validateProviderSetup(input: ProviderSetup): void {
-  if (input.id.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(input.id)) {
-    throw new Error("invalid provider id");
-  }
-  if (input.endpoint) {
-    if (input.endpoint.length > 2048 || input.endpoint !== input.endpoint.trim()) {
-      throw new Error("invalid endpoint");
-    }
-    validateEndpoint(input.endpoint);
-  }
-  if (input.kind === "builtin") return;
-  if (!input.endpoint) throw new Error("custom provider endpoint required");
-  if (input.name && (input.name.length > 200 || input.name !== input.name.trim())) {
-    throw new Error("invalid provider name");
-  }
-  if (!isProviderApi(input.api)) throw new Error("unsupported provider API");
-  if (!input.models.length || input.models.length > 100) throw new Error("1-100 models required");
-  const ids = input.models.map((model) => model.id);
-  if (ids.some((id) => !id || id.length > 200 || id !== id.trim()) || new Set(ids).size !== ids.length) {
-    throw new Error("model ids must be non-empty, trimmed and unique");
   }
 }
 

@@ -6,8 +6,7 @@ interface JsonRow {
   json: string;
 }
 
-const parseTask = (json: string): TaskDefinition => JSON.parse(json) as TaskDefinition;
-const parseRun = (json: string): TaskRun => JSON.parse(json) as TaskRun;
+const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1), cap);
 
 export class TaskStore {
   private readonly db: DatabaseSync;
@@ -16,16 +15,25 @@ export class TaskStore {
     this.db = db;
   }
 
+  // Every table is one JSON column plus query columns; these two are the only
+  // readers, and the one seam where a future schema change normalizes old rows
+  // (pre-v1 databases are refused outright in db.ts).
+  #one<T>(sql: string, ...params: (string | number)[]): T | undefined {
+    const row = this.db.prepare(sql).get(...params) as JsonRow | undefined;
+    return row ? JSON.parse(row.json) as T : undefined;
+  }
+
+  #many<T>(sql: string, ...params: (string | number)[]): T[] {
+    return (this.db.prepare(sql).all(...params) as unknown as JsonRow[])
+      .map((row) => JSON.parse(row.json) as T);
+  }
+
   listTasks(): TaskDefinition[] {
-    return (this.db.prepare("SELECT json FROM tasks ORDER BY updated_at DESC").all() as unknown as JsonRow[])
-      .map((r) => parseTask(r.json));
+    return this.#many("SELECT json FROM tasks ORDER BY updated_at DESC");
   }
 
   getTask(id: string): TaskDefinition | undefined {
-    const row = this.db.prepare("SELECT json FROM tasks WHERE id = ?").get(id) as
-      | JsonRow
-      | undefined;
-    return row ? parseTask(row.json) : undefined;
+    return this.#one("SELECT json FROM tasks WHERE id = ?", id);
   }
 
   saveTask(task: TaskDefinition): void {
@@ -36,18 +44,14 @@ export class TaskStore {
   }
 
   listRuns(taskId: string, limit = 50, offset = 0): TaskRun[] {
-    return (this.db.prepare(`
+    return this.#many(`
       SELECT json FROM task_runs WHERE task_id = ?
       ORDER BY queued_at DESC LIMIT ? OFFSET ?
-    `).all(taskId, limit, offset) as unknown as JsonRow[])
-      .map((r) => parseRun(r.json));
+    `, taskId, limit, offset);
   }
 
   getRun(id: string): TaskRun | undefined {
-    const row = this.db.prepare("SELECT json FROM task_runs WHERE id = ?").get(id) as
-      | JsonRow
-      | undefined;
-    return row ? parseRun(row.json) : undefined;
+    return this.#one("SELECT json FROM task_runs WHERE id = ?", id);
   }
 
   saveRun(run: TaskRun): void {
@@ -67,46 +71,42 @@ export class TaskStore {
   }
 
   listRecentRuns(limit = 100): TaskRun[] {
-    return (this.db.prepare(`
-      SELECT json FROM task_runs ORDER BY queued_at DESC LIMIT ?
-    `).all(Math.min(Math.max(limit, 1), 500)) as unknown as JsonRow[])
-      .map((row) => parseRun(row.json));
+    return this.#many(
+      "SELECT json FROM task_runs ORDER BY queued_at DESC LIMIT ?",
+      clamp(limit, 500),
+    );
   }
 
   listRunsByRoot(rootRunId: string, limit = 100): TaskRun[] {
-    return (this.db.prepare(`
+    return this.#many(`
       SELECT json FROM task_runs
       WHERE json_extract(json, '$.rootRunId') = ?
       ORDER BY queued_at LIMIT ?
-    `).all(rootRunId, Math.min(Math.max(limit, 1), 500)) as unknown as JsonRow[])
-      .map((row) => parseRun(row.json));
+    `, rootRunId, clamp(limit, 500));
   }
 
   findActiveRun(taskId: string): TaskRun | undefined {
-    const row = this.db.prepare(`
+    return this.#one(`
       SELECT json FROM task_runs
       WHERE task_id = ? AND state IN ('queued', 'running') LIMIT 1
-    `).get(taskId) as JsonRow | undefined;
-    return row ? parseRun(row.json) : undefined;
+    `, taskId);
   }
 
   findActiveRunForTarget(sessionId: string): TaskRun | undefined {
-    const row = this.db.prepare(`
+    return this.#one(`
       SELECT json FROM task_runs
       WHERE state IN ('queued', 'running')
         AND json_extract(json, '$.targetSessionId') = ?
       ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END, queued_at DESC LIMIT 1
-    `).get(sessionId) as JsonRow | undefined;
-    return row ? parseRun(row.json) : undefined;
+    `, sessionId);
   }
 
   listRunsForSession(sessionId: string, limit = 50): TaskRun[] {
-    return (this.db.prepare(`
+    return this.#many(`
       SELECT json FROM task_runs
       WHERE json_extract(json, '$.invokedBySessionId') = ?
       ORDER BY queued_at DESC LIMIT ?
-    `).all(sessionId, Math.min(Math.max(limit, 1), 200)) as unknown as JsonRow[])
-      .map((row) => parseRun(row.json));
+    `, sessionId, clamp(limit, 200));
   }
 
   saveGroup(group: TaskGroup): void {
@@ -119,20 +119,19 @@ export class TaskStore {
   }
 
   getGroup(id: string): TaskGroup | undefined {
-    const row = this.db.prepare("SELECT json FROM task_groups WHERE id = ?").get(id) as JsonRow | undefined;
-    return row ? JSON.parse(row.json) as TaskGroup : undefined;
+    return this.#one("SELECT json FROM task_groups WHERE id = ?", id);
   }
 
   /** Unfinished joins plus deliverable group callbacks, for settle and recovery. */
   listOpenGroups(now = Date.now()): TaskGroup[] {
-    return (this.db.prepare(`
+    return this.#many(`
       SELECT json FROM task_groups
       WHERE finished_at IS NULL
         OR (callback_state IN ('pending', 'failed')
           AND (json_extract(json, '$.callbackNextAttemptAt') IS NULL
             OR json_extract(json, '$.callbackNextAttemptAt') <= ?))
       ORDER BY created_at
-    `).all(now) as unknown as JsonRow[]).map((row) => JSON.parse(row.json) as TaskGroup);
+    `, now);
   }
 
   saveMessage(message: TaskMessage): void {
@@ -144,39 +143,34 @@ export class TaskStore {
   }
 
   getMessage(id: string): TaskMessage | undefined {
-    const row = this.db.prepare("SELECT json FROM task_messages WHERE id = ?").get(id) as JsonRow | undefined;
-    return row ? JSON.parse(row.json) as TaskMessage : undefined;
+    return this.#one("SELECT json FROM task_messages WHERE id = ?", id);
   }
 
   listMessages(runId: string): TaskMessage[] {
-    return (this.db.prepare(`
-      SELECT json FROM task_messages WHERE run_id = ? ORDER BY created_at
-    `).all(runId) as unknown as JsonRow[]).map((row) => JSON.parse(row.json) as TaskMessage);
+    return this.#many("SELECT json FROM task_messages WHERE run_id = ? ORDER BY created_at", runId);
   }
 
-  listRecentMessages(since: number, limit = 200): TaskMessage[] {
-    return (this.db.prepare(`
-      SELECT json FROM task_messages WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?
-    `).all(since, Math.min(Math.max(limit, 1), 500)) as unknown as JsonRow[])
-      .map((row) => JSON.parse(row.json) as TaskMessage);
+  listRecentMessages(since: number): TaskMessage[] {
+    return this.#many(
+      "SELECT json FROM task_messages WHERE created_at >= ? ORDER BY created_at DESC LIMIT 200",
+      since,
+    );
   }
 
   /** Messages whose injection never landed: the delivery sweep retries these. */
   listUndeliveredMessages(): TaskMessage[] {
-    return (this.db.prepare(`
-      SELECT json FROM task_messages WHERE state IN ('pending', 'failed') ORDER BY created_at
-    `).all() as unknown as JsonRow[]).map((row) => JSON.parse(row.json) as TaskMessage);
+    return this.#many(
+      "SELECT json FROM task_messages WHERE state IN ('pending', 'failed') ORDER BY created_at",
+    );
   }
 
   /** Decisions are excluded: they have no timeout and stay answerable across
    * restarts — a reply to a terminal run resumes it. */
   expirePendingMessages(): TaskMessage[] {
-    const rows = this.db.prepare(`
+    return this.#many<TaskMessage>(`
       SELECT json FROM task_messages
       WHERE state = 'pending' AND json_extract(json, '$.kind') != 'decision'
-    `).all() as unknown as JsonRow[];
-    return rows.map((row) => {
-      const message = JSON.parse(row.json) as TaskMessage;
+    `).map((message) => {
       message.state = "expired";
       message.error = "Pier restarted before delivery completed";
       this.saveMessage(message);
@@ -185,21 +179,19 @@ export class TaskStore {
   }
 
   listPendingCallbacks(now = Date.now()): TaskRun[] {
-    return (this.db.prepare(`
+    return this.#many(`
       SELECT json FROM task_runs
       WHERE callback_state IN ('pending', 'failed')
         AND (json_extract(json, '$.callbackNextAttemptAt') IS NULL
           OR json_extract(json, '$.callbackNextAttemptAt') <= ?)
       ORDER BY queued_at
-    `).all(now) as unknown as JsonRow[]).map((row) => parseRun(row.json));
+    `, now);
   }
 
   interruptRunning(now = Date.now()): TaskRun[] {
-    const rows = this.db.prepare(
+    return this.#many<TaskRun>(
       "SELECT json FROM task_runs WHERE state IN ('queued', 'running')",
-    ).all() as unknown as JsonRow[];
-    return rows.map((row) => {
-      const run = parseRun(row.json);
+    ).map((run) => {
       run.state = "interrupted";
       run.error = "Pier restarted while the run was active";
       run.finishedAt = now;
@@ -208,5 +200,4 @@ export class TaskStore {
       return run;
     });
   }
-
 }

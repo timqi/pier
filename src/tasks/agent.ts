@@ -13,9 +13,12 @@ const MAX_ACTIVE_PER_ROOT = 4;
  * says which of it does not apply here, and a supervised run how to reach the
  * agent that is waiting on it. Skipped on resume: the session already saw it. */
 const preamble = (run: TaskRun): string => {
+  // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
     ? "read by the agent that delegated this run"
-    : "read by the operator";
+    : run.callbackSessionId
+      ? "read by the agent session it is delivered to"
+      : "read by the operator";
   const contact = run.invokedBySessionId
     ? ' Mid-run, the task tool\'s contact operation reaches that agent: reason "progress" is fire-and-forget, "decision" waits for a reply — state what you await and end your turn.'
     : "";
@@ -65,7 +68,16 @@ export class AgentTaskRunner {
         const unsubscribe = session.subscribe((event) => {
           if (event.type === "turn-end") text = event.text;
         });
-        const abort = (): void => void session.abort();
+        // The race below also settles this attempt if Pi ignores the abort:
+        // a hung turn must not hold one of the 4 slots (and its waiters)
+        // forever — the same guard execution.ts gives task-type children.
+        let rejectAborted: (reason: Error) => void = () => {};
+        const abortedTurn = new Promise<never>((_, reject) => { rejectAborted = reject; });
+        abortedTurn.catch(() => {}); // handled via the race; never unhandled
+        const abort = (): void => {
+          void session.abort();
+          rejectAborted(new Error("cancelled"));
+        };
         signal.addEventListener("abort", abort, { once: true });
         // A pre-aborted signal never fires the listener: check before the
         // prompt starts or a cancelled run would hang until its timeout.
@@ -83,7 +95,7 @@ export class AgentTaskRunner {
           );
           await Promise.resolve();
           this.messages.deliverPendingControls(run);
-          await turn;
+          await Promise.race([turn, abortedTurn]);
           if (signal.aborted) throw new Error("cancelled");
           if (!text) {
             const history = await session.history();

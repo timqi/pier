@@ -165,6 +165,39 @@ export interface TaskMessage {
   error: string | null;
 }
 
+/** The one callback-outbox semantics, shared by runs and groups (their
+ *  callback* columns are the same shape). Deferring on a busy target is not
+ *  an attempt; backoff caps at 60s. */
+export interface CallbackFields {
+  callbackState: "pending" | "delivered" | "failed" | null;
+  callbackAttempts: number;
+  callbackError: string | null;
+  callbackNextAttemptAt: number | null;
+}
+
+export const retryDelay = (attempts: number): number =>
+  Math.min(60_000, 1000 * 2 ** Math.min(attempts, 6));
+
+export const outbox = {
+  defer(t: CallbackFields): void {
+    t.callbackNextAttemptAt = Date.now() + 1000;
+  },
+  attempt(t: CallbackFields): void {
+    t.callbackAttempts += 1;
+    t.callbackState = "pending";
+    t.callbackError = null;
+  },
+  delivered(t: CallbackFields): void {
+    t.callbackState = "delivered";
+    t.callbackNextAttemptAt = null;
+  },
+  failed(t: CallbackFields, error: unknown): void {
+    t.callbackState = "failed";
+    t.callbackError = String(error);
+    t.callbackNextAttemptAt = Date.now() + retryDelay(t.callbackAttempts);
+  },
+};
+
 export const isTerminal = (state: TaskRunState): boolean =>
   state === "succeeded" ||
   state === "failed" ||

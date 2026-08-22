@@ -12,7 +12,7 @@
 // installed entry point.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -124,7 +124,9 @@ Documentation=https://github.com/timqi/pier
 Type=oneshot
 ${pierHome ? `${environment("PIER_HOME", pierHome)}\n` : ""}ExecStart=systemctl --user stop ${UNIT_NAME}
 ExecStart=${quote(execPath, true)} ${quote(cli, true)} backup
-ExecStart=${quote(npmPath, true)} install -g @timqi/pier@latest
+# npm runs under the recorded node: its shebang needs a node on PATH, and
+# systemd's minimal PATH has none for fnm/nvm installs.
+ExecStart=${quote(execPath, true)} ${quote(npmPath, true)} install -g @timqi/pier@latest
 # ExecStopPost runs on success and failure, so a failed backup or npm install
 # does not leave the previously working service stopped.
 ExecStopPost=systemctl --user start ${UNIT_NAME}
@@ -228,13 +230,21 @@ function runningPierHome(home: string): string {
     ["--user", "show", UNIT_NAME, "--property=MainPID", "--value"],
     { encoding: "utf8" },
   ).trim());
-  if (!Number.isInteger(pid) || pid < 1) throw new Error(`${UNIT_NAME} is not running`);
-  const value = readFileSync(`/proc/${pid}/environ`)
-    .toString()
-    .split("\0")
-    .find((item) => item.startsWith("PIER_HOME="))
-    ?.slice("PIER_HOME=".length);
-  return value || join(home, ".pier");
+  if (Number.isInteger(pid) && pid >= 1) {
+    const value = readFileSync(`/proc/${pid}/environ`)
+      .toString()
+      .split("\0")
+      .find((item) => item.startsWith("PIER_HOME="))
+      ?.slice("PIER_HOME=".length);
+    return value || join(home, ".pier");
+  }
+  // Installed but stopped: the unit file records any override (quoted and
+  // escaped since 0.0.2, bare in the 0.0.1 shape) — undo quote()'s escaping
+  // or the drop-in would carry `%%`/`\\"` into a real path.
+  const raw = readFileSync(unitPath(home), "utf8")
+    .match(/^Environment="?PIER_HOME=((?:\\.|[^"\r\n])+)"?$/m)?.[1];
+  const fromUnit = raw?.replaceAll("%%", "%").replace(/\\(.)/g, "$1");
+  return fromUnit || join(home, ".pier");
 }
 
 /** Start the updater recorded at install time. Its tiny drop-in captures the
@@ -280,8 +290,13 @@ export function uninstall(
     rmSync(path, { force: true });
     say(`removed ${path}`);
   }
-  rmSync(dirname(limitsPath(home)), { force: true, recursive: true });
-  rmSync(dirname(updateRuntimePath(home)), { force: true, recursive: true });
+  for (const dir of [dirname(limitsPath(home)), dirname(updateRuntimePath(home))]) {
+    try {
+      rmdirSync(dir); // non-recursive: drop-ins the operator added are not ours to delete
+    } catch {
+      if (existsSync(dir)) say(`kept ${dir} — it has files Pier did not write`);
+    }
+  }
   const ok = run(["systemctl", "--user", "daemon-reload"]);
   // Left alone on purpose: the database, the boards, and linger — none of them
   // are this command's to decide about.

@@ -228,7 +228,8 @@ describe("provider setup", () => {
         writeFileSync(path, concurrent);
         throw new Error("invalid composed provider");
       },
-    )).rejects.toThrow(/failed to restore/);
+    // Named as what happened — a concurrent edit — not as a failed restore.
+    )).rejects.toThrow(/changed while provider setup was being validated/);
     expect(readFileSync(path, "utf8")).toBe(concurrent);
   });
 

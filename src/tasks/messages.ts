@@ -5,7 +5,7 @@ import { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
-import { isTerminal } from "./types.js";
+import { isTerminal, retryDelay } from "./types.js";
 
 const log = logger("tasks");
 
@@ -58,8 +58,8 @@ export class TaskMessenger {
     return this.store.listMessages(runId);
   }
 
-  recent(since: number, limit = 200): TaskMessage[] {
-    return this.store.listRecentMessages(since, limit);
+  recent(since: number): TaskMessage[] {
+    return this.store.listRecentMessages(since);
   }
 
   async control(
@@ -196,6 +196,7 @@ export class TaskMessenger {
     message.state = "delivered";
     message.deliveredAt = Date.now();
     message.error = null;
+    this.retries.delete(message.id); // a redelivery starts its backoff fresh
     this.store.saveMessage(message);
     this.changed(message);
     void this.inject(message, run, targetSessionId, this.mode(message))
@@ -219,7 +220,7 @@ export class TaskMessenger {
     this.store.saveMessage(message);
     this.changed(message);
     const attempts = (this.retries.get(id)?.attempts ?? 0) + 1;
-    this.retries.set(id, { attempts, nextAt: Date.now() + Math.min(60_000, 1000 * 2 ** Math.min(attempts, 6)) });
+    this.retries.set(id, { attempts, nextAt: Date.now() + retryDelay(attempts) });
   }
 
   private async inject(

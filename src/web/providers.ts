@@ -1,49 +1,32 @@
 // HTTP boundary for provider configuration.
 
 import type { Hono } from "hono";
-import { isProviderApi } from "../core/types.js";
+import { isProviderApi, validateProviderSetup } from "../core/types.js";
 import type { ProviderInfo, ProviderManager, ProviderSetup } from "../core/types.js";
 import { ProviderFlows } from "./provider-flows.js";
 
-function safeEndpoint(endpoint: string): boolean {
-  if (!endpoint) return true;
-  try {
-    const url = new URL(endpoint);
-    return (url.protocol === "http:" || url.protocol === "https:") &&
-      !url.username && !url.password && !url.search && !url.hash;
-  } catch {
-    return false;
-  }
-}
-
+/** Unknown JSON into a trimmed, validated ProviderSetup. Shape lives here;
+ *  the rules (id charset, endpoint safety, model limits) are the shared
+ *  validateProviderSetup in core — web/ cannot import agent/ to reuse its
+ *  copy, and must not re-implement them. */
 function setupFrom(raw: unknown): ProviderSetup | null {
   if (typeof raw !== "object" || raw === null) return null;
   const input = raw as Record<string, unknown>;
   const id = typeof input.id === "string" ? input.id.trim() : "";
   const name = typeof input.name === "string" ? input.name.trim() : "";
   const endpoint = typeof input.endpoint === "string" ? input.endpoint.trim() : "";
-  if (
-    !id || id.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(id) ||
-    name.length > 200 || endpoint.length > 2048 || !safeEndpoint(endpoint)
-  ) return null;
+  if (!id) return null;
   if (input.kind === "builtin") return { kind: "builtin", id, ...(endpoint ? { endpoint } : {}) };
-  if (
-    input.kind !== "custom" || !endpoint || typeof input.api !== "string" ||
-    !Array.isArray(input.models) || input.models.length > 100
-  ) {
-    return null;
+  if (input.kind !== "custom" || !isProviderApi(input.api) || !Array.isArray(input.models)) return null;
+  const models: { id: string; reasoning: boolean }[] = [];
+  for (const model of input.models) {
+    const modelId = typeof model === "object" && model !== null &&
+      typeof (model as { id?: unknown }).id === "string"
+      ? (model as { id: string }).id.trim()
+      : "";
+    if (!modelId) return null;
+    models.push({ id: modelId, reasoning: (model as { reasoning?: unknown }).reasoning === true });
   }
-  const models = input.models.flatMap((model) => {
-    if (typeof model !== "object" || model === null || typeof (model as { id?: unknown }).id !== "string") {
-      return [];
-    }
-    const modelId = (model as { id: string }).id.trim();
-    if (!modelId || modelId.length > 200) return [];
-    return [{ id: modelId, reasoning: (model as { reasoning?: unknown }).reasoning === true }];
-  });
-  if (models.length !== input.models.length || !models.length) return null;
-  if (new Set(models.map((model) => model.id)).size !== models.length) return null;
-  if (!isProviderApi(input.api)) return null;
   return {
     kind: "custom",
     id,
@@ -53,6 +36,7 @@ function setupFrom(raw: unknown): ProviderSetup | null {
     models,
   };
 }
+
 
 export function registerProviderRoutes(app: Hono, providers: ProviderManager): void {
   const flows = new ProviderFlows(providers);
@@ -81,6 +65,7 @@ export function registerProviderRoutes(app: Hono, providers: ProviderManager): v
       return c.json({ error: "valid setup and authType required" }, 400);
     }
     try {
+      validateProviderSetup(setup); // before any flow starts — the throw is the 400
       if (setup.kind === "custom" && authType === "oauth") {
         return c.json({ error: "custom providers support API-key authentication" }, 400);
       }

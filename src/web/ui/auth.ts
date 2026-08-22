@@ -10,7 +10,7 @@ const nativeFetch = window.fetch.bind(window);
 
 /** The hash goes along: it addresses the view, so dropping it would land the
  *  re-login somewhere the person was not. */
-export const toLogin = (): void => {
+const toLogin = (): void => {
   location.assign(`/login?next=${encodeURIComponent(location.pathname + location.hash)}`);
 };
 

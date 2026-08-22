@@ -237,6 +237,9 @@ function sameOrigin(c: Context): boolean {
 /** Every route, in one place — no per-route opt-in to forget on the next one. */
 export function requireAuth(store: AuthStore): MiddlewareHandler {
   return async (c, next) => {
+    // On every response, public ones included: the login form is the one page
+    // strangers reach, and it must not be frameable either.
+    c.header("x-frame-options", "DENY");
     if (isPublic(c.req.method, c.req.path)) return next();
     const authenticated = valid(store.cookieKey, getCookie(c, COOKIE));
     const unsafe = c.req.method !== "GET" && c.req.method !== "HEAD";
@@ -250,7 +253,6 @@ export function requireAuth(store: AuthStore): MiddlewareHandler {
       if (!c.res.headers.has("cache-control")) {
         c.header("cache-control", c.req.path.startsWith("/api/") ? "private, no-store" : "private");
       }
-      c.header("x-frame-options", "DENY");
       return;
     }
     // An API caller gets a status it can act on; a navigation gets the form.

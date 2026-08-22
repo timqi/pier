@@ -21,7 +21,7 @@ import type {
   SystemInputOrigin,
   TurnMeta,
 } from "../core/types.js";
-import { formatTurnMeta, originLabel, quietLabel } from "../core/reply.js";
+import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
@@ -207,7 +207,7 @@ export class TelegramChannel implements Channel {
     const name = msg.chat.title ?? [msg.from.first_name, msg.from.last_name].filter(Boolean).join(" ");
     this.deps.store.discoverChat("telegram", { id: chatId, name: name || chatId, kind });
 
-    const text = this.stripMention(raw, msg);
+    const text = this.stripMention(raw);
     const command = parseCommand(text);
     // A command aimed at another bot in the same group is not ours to answer.
     const mine = !command?.target || command.target.toLowerCase() === this.me?.username.toLowerCase();
@@ -422,13 +422,9 @@ export class TelegramChannel implements Channel {
   }
 
   /** A leading @bot is addressing, not content — the agent should not see it. */
-  private stripMention(text: string, msg: TgMessage): string {
+  private stripMention(text: string): string {
     const handle = `@${this.me?.username ?? ""}`;
     if (!this.me?.username) return text;
-    const mention = msg.entities?.find((e) => e.type === "mention" && e.offset === 0);
-    if (mention && text.slice(0, mention.length).toLowerCase() === handle.toLowerCase()) {
-      return text.slice(mention.length).replace(/^[\s,:-]+/, "");
-    }
     return text.toLowerCase().startsWith(handle.toLowerCase())
       ? text.slice(handle.length).replace(/^[\s,:-]+/, "")
       : text;
@@ -448,10 +444,9 @@ export class TelegramChannel implements Channel {
     // the person waiting cannot tell. See AGENTS.md — an empty turn is still an
     // event, and an event nobody can see is not observable.
     const buttons = keyboard(reply.suggestions);
-    // Options count as a reply: the buttons are the answer.
-    const quiet = text || buttons
-      ? ""
-      : `<i>${quietLabel(reply.silence && escapeHtml(reply.silence))}</i>`;
+    const quiet = isSilentReply(reply)
+      ? `<i>${quietLabel(reply.silence && escapeHtml(reply.silence))}</i>`
+      : "";
     const body = (text ? toTelegramHtml(text) : quiet) + turnFooter(reply.meta);
     try {
       if (body.trim()) {

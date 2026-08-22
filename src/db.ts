@@ -159,10 +159,11 @@ export function backupDb(path = PIER_DB): string | undefined {
 export function openDb(path: string, migrations: readonly string[] = MIGRATIONS): DatabaseSync {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path);
-  // Outside the transaction below: journal_mode is a property of the file, and
-  // SQLite refuses to change it inside one.
-  db.exec("PRAGMA journal_mode = WAL");
+  // Timeout first: two processes booting together contend on the WAL switch
+  // itself. Outside the transaction below: journal_mode is a property of the
+  // file, and SQLite refuses to change it inside one.
   db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+  db.exec("PRAGMA journal_mode = WAL");
   migrate(db, path, migrations);
   if (path !== ":memory:") restrict(path);
   return db;

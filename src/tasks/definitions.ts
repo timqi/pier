@@ -58,6 +58,8 @@ function parseTrigger(raw: unknown): TaskTrigger {
   throw new Error("unknown trigger type");
 }
 
+/** Always computed from `from` (boot recomputes from *now*): cron runs missed
+ *  while Pier was down are skipped, never caught up — no double fire. */
 export function nextRunAt(trigger: TaskTrigger, from: number): number | null {
   if (trigger.type === "manual") return null;
   if (trigger.type === "watch") return from + trigger.intervalSeconds * 1000;
@@ -261,10 +263,6 @@ export class TaskDefinitions {
       const cwd = typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : undefined;
       if (cwd) await this.assertDirectory(cwd);
       session = { mode: "fork", ...(cwd ? { cwd } : {}) };
-    } else if (typeof raw.sessionId === "string" && raw.sessionId.trim()) {
-      const sessionId = raw.sessionId.trim();
-      if (!(await this.sessionExists(sessionId))) throw new Error(`unknown session: ${sessionId}`);
-      session = { mode: "reuse", sessionId };
     } else {
       // Validation never mutates: a dedicated session is created explicitly
       // (POST /api/sessions) and then referenced with mode:"reuse".

@@ -54,7 +54,7 @@ const toImageContent = (images?: ImageAttachment[]) =>
 
 /** Pi's bash tool has no default timeout, so a hung command holds the turn
  * until someone aborts it — nobody is watching in a scheduled task. Kept below
- * the task-run timeout (tasks/definitions.ts) so a stuck command comes back as
+ * the default task-run timeout so a stuck command comes back as
  * a tool error the agent can retry with an explicit longer timeout, instead of
  * killing the whole run. */
 const BASH_DEFAULT_TIMEOUT_SECONDS = 600;
@@ -458,10 +458,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
         },
       }),
     );
-    if (opts.name) sessionManager.appendSessionInfo(opts.name);
     // Locked Secrets is a refusal with a reason, here — not "provider is not
-    // configured" three calls later, and never a fall back to auth.json.
+    // configured" three calls later, and never a fall back to auth.json. Before
+    // appendSessionInfo, so the refused open writes nothing to disk.
     this.credentials?.assertUnlocked();
+    if (opts.name) sessionManager.appendSessionInfo(opts.name);
     const tools = opts.capabilities === "read"
       ? ["read", "grep", "find", "ls", ...this.extraTools.map((tool) => tool.name)]
       : undefined;

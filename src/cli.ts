@@ -37,6 +37,8 @@ The workbench is behind a password generated on first run and printed once.
 Under systemd that print lands in the journal: journalctl --user -u pier -e
 `;
 
+const say = (message: string): void => void process.stdout.write(`${message}\n`);
+
 const fail = (message: string): never => {
   process.stderr.write(`pier: ${message}\n`);
   process.exit(2);
@@ -115,7 +117,6 @@ async function update(checkOnly: boolean): Promise<void> {
   if (checkOnly) return;
 
   const { startUpdate } = await import("./service.js");
-  const say = (message: string): void => void process.stdout.write(`${message}\n`);
   if (process.platform === "linux") {
     const started = startUpdate({ say });
     if (started === "started") return;
@@ -153,7 +154,6 @@ function commandPath(name: string): string {
 
 async function service(action = "status"): Promise<void> {
   const { install, uninstall, UNIT_NAME } = await import("./service.js");
-  const say = (message: string): void => void process.stdout.write(`${message}\n`);
   const systemdAction = action === "install" || action === "uninstall";
 
   if (systemdAction && process.platform !== "linux") {
@@ -197,7 +197,12 @@ async function service(action = "status"): Promise<void> {
         // Inherited, not captured: systemctl's own output is the answer, and
         // its exit code is nonzero for a service that is merely stopped.
         execFileSync("systemctl", ["--user", "status", UNIT_NAME], { stdio: "inherit" });
-      } catch {
+      } catch (err) {
+        // A stopped service already printed its status; a missing systemctl
+        // printed nothing, so name it.
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          process.stderr.write(`pier: systemctl is not on PATH — no systemd here.\n`);
+        }
         process.exitCode = 1;
       }
       return;

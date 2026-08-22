@@ -5,7 +5,7 @@
 
 import { sendJson } from "./api.js";
 import { consoleView, h, relTime, type ConsoleView } from "./dom.js";
-import { btn } from "./form.js";
+import { btn, toggle } from "./form.js";
 
 interface Board {
   slug: string;
@@ -58,22 +58,14 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     const top = h("div", "flex items-center gap-2", link, h("span", "flex-none font-mono text-[11.5px] text-neutral-400", board.slug));
 
     // The toggle carries its own consequence: a public board needs no session,
-    // no cookie and no invitation to read.
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.className = "peer sr-only";
-    toggle.checked = board.public;
-    toggle.onchange = () => {
-      board.public = toggle.checked;
-      void patch(board.slug, toggle.checked);
-    };
-    const label = h(
-      "label",
-      "ml-auto flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500",
-      toggle,
-      h("span", "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200"),
-      h("span", "", "Public"),
-    );
+    // no cookie and no invitation to read. Reuses the one switch (form.ts),
+    // restyled to sit inline in the row.
+    const label = toggle("", "", board.public, (v) => {
+      board.public = v;
+      void patch(board.slug, v);
+    });
+    label.className = "ml-auto flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500";
+    label.append(h("span", "", "Public"));
     // Hover-revealed, like the channel user rows: deleting only renames the
     // folder, so the undo is on disk and a modal would be theatre.
     const del = btn(

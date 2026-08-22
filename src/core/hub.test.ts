@@ -8,10 +8,30 @@ describe("EventHub", () => {
     hub.subscribe("s1", (e) => seen.push(e.seq));
     hub.emit("s1", { type: "turn-start" });
     hub.emit("s2", { type: "turn-start" }); // independent counter
-    const e = hub.emit("s1", { type: "state", state: "idle" });
+    hub.emit("s1", { type: "state", state: "idle" });
     expect(seen).toEqual([1, 2]);
-    expect(e.sessionId).toBe("s1");
+    expect(hub.replay("s1", 0).at(-1)?.sessionId).toBe("s1");
     expect(hub.replay("s2", 0).map((x) => x.seq)).toEqual([1]);
+  });
+
+  it("a throwing subscriber does not stop later subscribers or unwind emit", () => {
+    // emit() runs on the emitter's stack — Pi's dispatch path for session
+    // events — so a bad consumer must cost only itself.
+    const hub = new EventHub();
+    const good = vi.fn();
+    hub.subscribe("s", () => {
+      throw new Error("boom");
+    });
+    hub.subscribe("s", good);
+    expect(() => hub.emit("s", { type: "turn-start" })).not.toThrow();
+    expect(good).toHaveBeenCalledTimes(1);
+    const workspace = vi.fn();
+    hub.subscribeWorkspace(() => {
+      throw new Error("boom");
+    });
+    hub.subscribeWorkspace(workspace);
+    expect(() => hub.emitWorkspace({ type: "sessions-changed" })).not.toThrow();
+    expect(workspace).toHaveBeenCalledTimes(1);
   });
 
   it("replays only events after the given seq", () => {

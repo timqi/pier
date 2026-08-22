@@ -155,7 +155,8 @@ describe("update", () => {
     expect(unit).toContain("Type=oneshot");
     expect(unit).toContain("ExecStart=systemctl --user stop pier.service");
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/lib/node_modules/@timqi/pier/dist/cli.js" backup');
-    expect(unit).toContain('ExecStart="/opt/npm-global/bin/npm" install -g @timqi/pier@latest');
+    // npm under the recorded node: its shebang cannot resolve on systemd's PATH.
+    expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/bin/npm" install -g @timqi/pier@latest');
     expect(unit).toContain("ExecStopPost=systemctl --user start pier.service");
     expect(unit).not.toContain("refresh");
   });
@@ -180,7 +181,8 @@ describe("update", () => {
       exec: (a) => (calls.push(a), true),
       effectiveHome: () => "/effective/Pier State/%literal",
     })).toBe("started");
-    expect(readFileSync(updateUnitPath(h), "utf8")).toContain('ExecStart="/home/x/.npm-global/bin/npm"');
+    expect(readFileSync(updateUnitPath(h), "utf8"))
+      .toContain('ExecStart="/home/x/.local/share/fnm/node-v24.0.0/bin/node" "/home/x/.npm-global/bin/npm"');
     expect(readFileSync(updateRuntimePath(h), "utf8"))
       .toContain('Environment="PIER_HOME=/effective/Pier State/%%literal"');
     expect(calls.map((c) => c.join(" "))).toEqual([
@@ -208,7 +210,7 @@ describe("update", () => {
       effectiveHome: () => "/srv/pier",
     })).toBe("started");
     expect(readFileSync(updateUnitPath(h), "utf8"))
-      .toContain('ExecStart="/old/node/bin/npm" install -g @timqi/pier@latest');
+      .toContain('ExecStart="/old/node/bin/node" "/old/node/bin/npm" install -g @timqi/pier@latest');
     expect(said.join(" ")).toMatch(/legacy updater.*exact npm path/);
   });
 

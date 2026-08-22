@@ -46,7 +46,6 @@ interface KeyFile {
 
 export class Secrets {
   #dek?: Buffer;
-  #kek?: Buffer;
   #file?: KeyFile;
   /** Why decrypt is refused right now — "" once unlocked. */
   #lockedReason = "unlock() has not run";
@@ -82,18 +81,22 @@ export class Secrets {
       let raw: string;
       try {
         raw = readFileSync(this.path, "utf8");
-      } catch {
+      } catch (err) {
+        // Only a missing file means first boot. Any other read error (EACCES,
+        // EISDIR…) must not fall through to #create(), which would rename a
+        // fresh key over the existing one and destroy every sealed credential.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         this.#file = this.#create();
         log.info(`created ${this.path} (file mode)`);
         raw = readFileSync(this.path, "utf8");
       }
       const file = JSON.parse(raw) as KeyFile;
       if (!file.kek || !file.dek || !file.dekId) throw new Error(`${this.path} is malformed`);
-      this.#kek = file.kek.startsWith("vt://")
+      const kek = file.kek.startsWith("vt://")
         ? Buffer.from(await this.vt.read(file.kek), "base64")
         : Buffer.from(file.kek, "base64");
-      if (this.#kek.length !== KEY_BYTES) throw new Error(`${this.path} KEK is not ${KEY_BYTES} bytes`);
-      this.#dek = open(this.#kek, file.dek, `kek:${file.dekId}`);
+      if (kek.length !== KEY_BYTES) throw new Error(`${this.path} KEK is not ${KEY_BYTES} bytes`);
+      this.#dek = open(kek, file.dek, `kek:${file.dekId}`);
       this.#file = file;
       this.#lockedReason = "";
       log.info(`secrets unlocked (${this.mode} mode, dek ${file.dekId})`);
@@ -134,7 +137,6 @@ export class Secrets {
       throw new Error("vt create did not return a vt:// record");
     }
     this.#write(next);
-    this.#kek = kek;
     this.#file = next;
     log.info(`KEK rotated (${mode} mode, dek ${file.dekId} unchanged)`);
   }
@@ -208,6 +210,7 @@ function run(cmd: string, args: string[], stdin?: string): Promise<string> {
       if (code === 0) resolvePromise(out.trim());
       else reject(new Error(`${cmd} ${args[0]} exited ${code}: ${err.trim() || out.trim()}`));
     });
+    child.stdin.on("error", reject); // EPIPE if vt exits before reading
     if (stdin !== undefined) child.stdin.write(stdin);
     child.stdin.end();
   });

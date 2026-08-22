@@ -234,7 +234,8 @@ export class SlackChannel implements Channel {
 
   async stop(): Promise<void> {
     this.running = false;
-    await this.socket?.close().catch(() => {});
+    await this.socket?.close().catch((err: unknown) =>
+      this.log(`slack socket did not close cleanly: ${String(err)}`));
     this.socket = undefined;
     await this.chains.drain(DRAIN_TIMEOUT_MS);
   }

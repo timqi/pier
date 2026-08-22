@@ -1,9 +1,23 @@
 // Per-session event fan-out with a replay ring buffer. The single stamping
 // point for seq/ts — nothing else in the system numbers events.
 
+import { logger } from "../log.js";
 import type { SessionEvent, SessionEventPayload, WorkspaceEvent } from "./types.js";
 
+const log = logger("core");
 const RING_SIZE = 1000;
+
+/** A throwing subscriber costs only itself — emit() runs on the emitter's
+ *  stack (Pi's dispatch path, for session events), which must not unwind. */
+function fanOut<E>(subscribers: Iterable<(e: E) => void>, event: E): void {
+  for (const fn of subscribers) {
+    try {
+      fn(event);
+    } catch (err) {
+      log.warn(`event subscriber threw: ${String(err)}`);
+    }
+  }
+}
 
 interface SessionBus {
   seq: number;
@@ -26,7 +40,7 @@ export class EventHub {
     return b;
   }
 
-  emit(sessionId: string, payload: SessionEventPayload): SessionEvent {
+  emit(sessionId: string, payload: SessionEventPayload): void {
     const b = this.bus(sessionId);
     const event: SessionEvent = {
       seq: ++b.seq,
@@ -36,8 +50,7 @@ export class EventHub {
     };
     b.buffer.push(event);
     if (b.buffer.length > RING_SIZE) b.buffer.shift();
-    for (const fn of b.subscribers) fn(event);
-    return event;
+    fanOut(b.subscribers, event);
   }
 
   subscribe(sessionId: string, fn: (e: SessionEvent) => void): () => void {
@@ -52,7 +65,7 @@ export class EventHub {
   }
 
   emitWorkspace(event: WorkspaceEvent): void {
-    for (const fn of this.workspace) fn(event);
+    fanOut(this.workspace, event);
   }
 
   subscribeWorkspace(fn: (e: WorkspaceEvent) => void): () => void {

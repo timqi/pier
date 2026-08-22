@@ -3,7 +3,6 @@
 // reasoning", "cheap bulk"). Agents read it through the task tool's `models`
 // operation, and every picker lists pinned entries first. Empty menu = no
 // advice; everything falls back to the curated catalog.
-// Design: docs/plans/07-model-menu.md.
 
 import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";

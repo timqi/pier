@@ -5,7 +5,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { formatTurnMeta, silentReason, splitReply } from "../../core/reply.js";
+import { formatTurnMeta, isSilentReply, silentReason, splitReply } from "../../core/reply.js";
 import { sendJson } from "./api.js";
 import { imageRow, imageThumb, renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { highlightCode } from "./highlight.js";
@@ -277,10 +277,8 @@ function renderAssistant(
   // A deliberate non-answer still happened, and an empty bubble reads as a
   // bug. IM surfaces post nothing at all; the workbench says so instead, with
   // the reason the agent gave, because this is the view the operator debugs in.
-  // A turn that is only its options is not silence — the buttons are the reply.
-  if (text) renderMarkdown(node, text);
-  else if (suggestions.length) renderMarkdown(node, "");
-  else renderSilence(node, silentReason(raw));
+  if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
+  else renderMarkdown(node, text);
   setMetaHint(node, meta);
   if (offer) {
     renderSuggestions(node.parentElement ?? node, suggestions, (label) => deps.send("auto", label));
@@ -296,7 +294,7 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
   );
 }
 
-export const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>
+const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>
   renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
 
 // --- streaming text ---------------------------------------------------------------

@@ -3,7 +3,7 @@
 import type { ProviderAuthEvent, ProviderAuthPrompt, ProviderAuthType } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { copyBtn, h } from "./dom.js";
-import { button, input } from "./form.js";
+import { button, input, STATUS_TONE, type SaveState } from "./form.js";
 
 type FlowPrompt = ProviderAuthPrompt & { id: string };
 export interface AuthFlow {
@@ -44,6 +44,11 @@ export function openAuthFlow(
   const promptPane = h("div", "flex flex-col gap-2");
   const status = h("p", "text-[12.5px] text-neutral-400", "Starting…");
   const cancel = button("Cancel");
+  // One spelling for the status tones — the same table Config/Settings use.
+  const setFlowStatus = (state: SaveState, text: string): void => {
+    status.className = `text-[12.5px] ${STATUS_TONE[state]}`;
+    status.textContent = text;
+  };
   dialog.append(
     h("div", "border-b border-neutral-200 px-4 py-2.5 text-[14px] font-semibold", providerName),
     h("div", "flex max-h-[65vh] flex-col gap-3 overflow-y-auto px-4 py-3", events, promptPane, status),
@@ -67,14 +72,14 @@ export function openAuthFlow(
       cancel.disabled = true;
       try {
         const res = await sendJson(`/api/providers/flows/${flowId}/cancel`, {});
-        if (!res.ok) {
-          status.className = "text-[12.5px] text-red-600";
-          status.textContent = await failure(res, "Could not cancel authentication flow");
+        // 404 means the server already forgot the flow — nothing left to
+        // cancel, so fall through and let the dialog close.
+        if (!res.ok && res.status !== 404) {
+          setFlowStatus("failed", await failure(res, "Could not cancel authentication flow"));
           return;
         }
       } catch (err) {
-        status.className = "text-[12.5px] text-red-600";
-        status.textContent = `Could not cancel authentication flow: ${String(err)}`;
+        setFlowStatus("failed", `Could not cancel authentication flow: ${String(err)}`);
         return;
       } finally {
         closing = false;
@@ -159,20 +164,15 @@ export function openAuthFlow(
           });
           if (closed) return;
           if (!res.ok) {
-            status.className = "text-[12.5px] text-red-600";
-            status.textContent = await failure(res, "Could not submit response");
+            setFlowStatus("failed", await failure(res, "Could not submit response"));
             return;
           }
           answeredPrompts.add(prompt.id);
           currentPromptId = undefined;
           promptPane.replaceChildren();
-          status.className = "text-[12.5px] text-neutral-400";
-          status.textContent = "Waiting for provider…";
+          setFlowStatus("saving", "Waiting for provider…");
         } catch (err) {
-          if (!closed) {
-            status.className = "text-[12.5px] text-red-600";
-            status.textContent = `Could not submit response: ${String(err)}`;
-          }
+          if (!closed) setFlowStatus("failed", `Could not submit response: ${String(err)}`);
         } finally {
           submit.disabled = false;
         }
@@ -194,16 +194,13 @@ export function openAuthFlow(
       }
     }
     if (flow.state === "running") {
-      status.className = "text-[12.5px] text-neutral-400";
-      status.textContent = prompt ? "Waiting for your response." : "Waiting for provider…";
+      setFlowStatus("saving", prompt ? "Waiting for your response." : "Waiting for provider…");
       return;
     }
     clearTimeout(timer);
     promptPane.replaceChildren();
-    status.className = `text-[12.5px] ${flow.state === "succeeded" ? "text-green-700" : "text-red-600"}`;
-    status.textContent = flow.state === "succeeded"
-      ? `${methodName} configured.`
-      : flow.state === "cancelled" ? "Cancelled." : flow.error ?? "Authentication failed.";
+    if (flow.state === "succeeded") setFlowStatus("saved", `${methodName} configured.`);
+    else setFlowStatus("failed", flow.state === "cancelled" ? "Cancelled." : flow.error ?? "Authentication failed.");
     cancel.textContent = "Close";
     cancel.onclick = () => void close(false);
     if (flow.state === "succeeded") onSuccess();
@@ -215,17 +212,17 @@ export function openAuthFlow(
       const res = await fetch(`/api/providers/flows/${flowId}`, { cache: "no-store" });
       if (closed) return;
       if (!res.ok) {
-        status.className = "text-[12.5px] text-red-600";
-        status.textContent = await failure(res, "Authentication status unavailable");
-        if (res.status !== 404) timer = setTimeout(() => void poll(), 1_000);
+        setFlowStatus("failed", await failure(res, "Authentication status unavailable"));
+        // 404: the server expired the flow; stop polling and let Close close.
+        if (res.status === 404) flowState = "failed";
+        else timer = setTimeout(() => void poll(), 1_000);
         return;
       }
       render((await res.json()) as AuthFlow);
       if (flowState === "running") timer = setTimeout(() => void poll(), 500);
     } catch (err) {
       if (closed) return;
-      status.className = "text-[12.5px] text-red-600";
-      status.textContent = `Authentication status unavailable: ${String(err)}`;
+      setFlowStatus("failed", `Authentication status unavailable: ${String(err)}`);
       timer = setTimeout(() => void poll(), 1_000);
     }
   };

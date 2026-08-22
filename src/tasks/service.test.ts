@@ -20,7 +20,7 @@ import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
 import type { GroupSummary, RunSummary } from "./tool.js";
 import { TaskStore } from "./store.js";
-import type { TaskDefinition, TaskMessage, TaskRun } from "./types.js";
+import { retryDelay, type TaskDefinition, type TaskMessage, type TaskRun } from "./types.js";
 
 function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
   prompts: string[];
@@ -116,6 +116,12 @@ const bashDraft = (cwd: string, script: string) => ({
   timeoutSeconds: 5,
 });
 
+describe("outbox backoff", () => {
+  it("doubles from 1s and caps at 60s", () => {
+    expect([0, 1, 2, 6, 7, 99].map(retryDelay)).toEqual([1000, 2000, 4000, 60000, 60000, 60000]);
+  });
+});
+
 describe("task service", () => {
   it("records Bash input, context, output and timestamps", async () => {
     const { cwd, service } = setup();
@@ -159,7 +165,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "review",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Review the PR" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Review the PR" },
     });
     const run = await service.waitForRun(service.run(task.id, { pr: 7 }).id);
     expect(run.state).toBe("succeeded");
@@ -178,7 +184,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "review",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Review the PR" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Review the PR" },
     });
     const manual = await service.waitForRun(service.run(task.id).id);
     expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
@@ -199,7 +205,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "buttons",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Go" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Go" },
     });
     const run = await service.waitForRun(service.run(task.id).id);
     expect(run.result).toEqual({ type: "agent", text: "Done.", sessionId: "s1" });
@@ -226,7 +232,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "chatty",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Go" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Go" },
     });
     const run = await service.waitForRun(service.run(task.id).id);
     const listed = await service.tool({ operation: "get", task_id: task.id }, "s1") as RunSummary[];
@@ -243,7 +249,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "quiet",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Watch" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Watch" },
     });
     const run = await service.waitForRun(service.run(task.id).id);
     expect(run.result).toEqual({ type: "agent", text: "stayed silent — humans talking", sessionId: "s1" });
@@ -456,7 +462,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "controlled agent",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Start" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Start" },
     });
     session.setState("streaming");
     const queued = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner" });
@@ -498,7 +504,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "worker",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: child.id, prompt: "Work" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: child.id }, prompt: "Work" },
     });
     const run = service.run(task.id, null, "agent", null, {
       invokedBySessionId: parent.id,
@@ -559,7 +565,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "superseded",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Work" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
     });
     session.setState("streaming");
     const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner", background: true });
@@ -633,7 +639,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "watch agent",
       trigger: { type: "watch", cwd, script: "exit 1", intervalSeconds: 60, mode: "repeat" },
-      action: { type: "agent", sessionId: session.id, prompt: "Handle match" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Handle match" },
     });
     const first = await service.waitForRun(service.run(task.id).id);
     expect(first.result).toEqual({ type: "watch", matched: false });
@@ -651,7 +657,7 @@ describe("task service", () => {
     const task = await service.create({
       name: "queued agent",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "later" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "later" },
     });
     session.setState("streaming");
     const queued = service.run(task.id);
@@ -745,6 +751,53 @@ describe("task service", () => {
 
     service.archive(task.id);
     expect(() => service.run(task.id)).toThrow("archived tasks cannot run");
+  });
+
+  it("a run whose final save throws still settles its waiters", async () => {
+    const { cwd, store, service } = setup();
+    const original = store.saveRun.bind(store);
+    vi.spyOn(store, "saveRun").mockImplementation((run) => {
+      if (run.finishedAt) throw new Error("disk full");
+      original(run);
+    });
+    const task = await service.create(bashDraft(cwd, "echo ok"));
+    const queued = service.run(task.id);
+    // A regression hangs waitForRun forever (and group joins with it): fail
+    // fast instead of at the suite timeout.
+    const run = await Promise.race([
+      service.waitForRun(queued.id),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("waiter never settled")), 2_000)),
+    ]);
+    expect(run.state).toBe("succeeded");
+    // The throw really fired: the stored row is one save behind.
+    expect(store.getRun(queued.id)?.finishedAt).toBeNull();
+  });
+
+  it("cancelling a turn Pi never settles still releases the agent slot", async () => {
+    const { cwd, service, factory } = setup();
+    // A session that ignores its abort: systemInput never settles.
+    const deaf = fakeSession("deaf");
+    deaf.systemInput = async (text, origin, mode) => {
+      deaf.systemInputs.push({ text, origin, mode });
+      await new Promise<void>(() => {});
+    };
+    deaf.abort = async () => {};
+    vi.mocked(factory.create)
+      .mockResolvedValueOnce(deaf)
+      .mockResolvedValueOnce(fakeSession("second"));
+    const task = await service.create({
+      name: "deaf child",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" },
+    });
+    const first = service.run(task.id);
+    await vi.waitFor(() => expect(deaf.systemInputs.length).toBe(1));
+    service.cancel(first.id);
+    // The abortedTurn race, not the (never-settling) turn, settles the run…
+    expect((await service.waitForRun(first.id)).state).toBe("cancelled");
+    // …and the slot is free again: a second run on the same task succeeds.
+    const second = await service.waitForRun(service.run(task.id).id);
+    expect(second.state).toBe("succeeded");
   });
 
   it("refuses nested delegation from a read-only subagent", async () => {
@@ -873,7 +926,7 @@ describe("task service", () => {
       const task = await service.create({
         name: "cron agent",
         trigger: { type: "cron", expression: "* * * * *", timezone: "UTC" },
-        action: { type: "agent", sessionId: session.id, prompt: "tick" },
+        action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "tick" },
       });
       service.start(1000);
       expect(service.get(task.id).nextRunAt).toBe(Date.parse("2026-01-01T00:01:00.000Z"));
@@ -936,7 +989,7 @@ describe("task HTTP routes", () => {
     const task = await service.create({
       name: "http agent",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: session.id, prompt: "Work" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
     });
     session.setState("streaming");
     const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner" });

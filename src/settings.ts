@@ -1,8 +1,6 @@
 // Instance settings: the facts about *this* Pier that are neither a credential
-// nor per-session. Today there is one — the URL it is reached at from outside,
-// which nothing in the process can discover for itself: a request's Host header
-// is whatever a proxy chose to pass on, and an agent writing a board has no
-// request at all.
+// nor per-session — the public URL (nothing in the process can discover it:
+// a Host header is whatever a proxy passed on) and the operator's model menu.
 //
 // A key-value table, so the next setting is not the next table and not a third
 // kind of storage. It used to be a JSON file, justified by "the agent reads it
@@ -30,8 +28,8 @@ export interface Settings {
   /** Origin (plus path prefix, if Pier is mounted under one) with no trailing
    *  slash — `https://pier.example.com`. Empty when nobody has said. */
   publicUrl: string;
-  /** The deployment's model advice (docs/plans/07-model-menu.md). Empty means
-   *  "no advice": every consumer falls back to the curated catalog. */
+  /** The deployment's model advice — pinned models with one line of intent
+   *  each. Empty means "no advice": consumers fall back to the catalog. */
   modelMenu: ModelMenuEntry[];
 }
 

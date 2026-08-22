@@ -92,9 +92,14 @@ describe("requireAuth", () => {
   });
 
   it("sends a navigation to the login form, remembering where it was going", async () => {
-    const res = await app(store().store).request("/boards/report/");
+    const a = app(store().store);
+    const res = await a.request("/boards/report/");
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/login?next=%2Fboards%2Freport%2F");
+    // The login form is the one page strangers reach — not frameable either.
+    const form = await a.request("/login");
+    expect(form.status).toBe(200);
+    expect(form.headers.get("x-frame-options")).toBe("DENY");
   });
 
   it("refuses a write without redirecting it", async () => {

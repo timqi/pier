@@ -4,7 +4,7 @@ import { logger } from "../log.js";
 import { runResultText } from "./callbacks.js";
 import { TaskStore } from "./store.js";
 import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
-import { isTerminal } from "./types.js";
+import { isTerminal, outbox } from "./types.js";
 
 const log = logger("tasks");
 
@@ -136,13 +136,11 @@ export class TaskGroups {
         turn.role === "system" && turn.origin?.kind === "task-callback" && turn.origin.runId === group.id);
       // Busy target: waiting is not an attempt (see TaskCallbacks.deliver).
       if (!alreadyDelivered && session.state === "streaming") {
-        group.callbackNextAttemptAt = Date.now() + 1000;
+        outbox.defer(group);
         this.store.saveGroup(group);
         return;
       }
-      group.callbackAttempts += 1;
-      group.callbackState = "pending";
-      group.callbackError = null;
+      outbox.attempt(group);
       this.store.saveGroup(group);
       // Delivered means Pi accepted the input, not that the recipient's turn
       // ended (see TaskCallbacks.deliver); a rejection flips it to failed.
@@ -153,8 +151,7 @@ export class TaskGroups {
           { kind: "task-callback", taskId: group.id, runId: group.id, sourceSessionId: null },
           "followUp",
         );
-      group.callbackState = "delivered";
-      group.callbackNextAttemptAt = null;
+      outbox.delivered(group);
       this.store.saveGroup(group);
       this.changed(group);
       await sent;
@@ -162,9 +159,7 @@ export class TaskGroups {
       log.warn(`group ${candidate.id} callback failed, will retry`, error);
       const group = this.store.getGroup(candidate.id);
       if (!group) return;
-      group.callbackState = "failed";
-      group.callbackError = String(error);
-      group.callbackNextAttemptAt = Date.now() + Math.min(60_000, 1000 * 2 ** Math.min(group.callbackAttempts, 6));
+      outbox.failed(group, error);
       this.store.saveGroup(group);
       this.changed(group);
     } finally {

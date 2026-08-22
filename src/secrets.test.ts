@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -31,6 +31,18 @@ beforeEach(() => {
 });
 
 describe("first boot", () => {
+  it("a read error other than ENOENT throws and never recreates the key file", async () => {
+    // EISDIR stands in for EACCES: any non-missing read failure must refuse,
+    // not rename a fresh key over the existing one — that would destroy the
+    // DEK and every sealed credential.
+    mkdirSync(path);
+    const s = new Secrets(path, fakeVt());
+    await expect(s.unlock()).rejects.toThrow(/EISDIR/);
+    expect(s.state).toBe("locked");
+    expect(statSync(path).isDirectory()).toBe(true); // nothing written over it
+    expect(() => s.encrypt("x")).toThrow(/EISDIR/); // the reason is remembered
+  });
+
   it("creates master.key in file mode, 0600, and round-trips", async () => {
     const s = new Secrets(path, fakeVt());
     expect(s.state).toBe("locked");

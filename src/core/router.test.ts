@@ -231,7 +231,8 @@ describe("idle eviction", () => {
     const before = hub.lastSeq("s1");
     await router.evictIdle(60_000, Date.now() + 61_000);
     expect(hub.replay("s1", 0)).toEqual([]); // the ring is what costs memory
-    expect(hub.emit("s1", { type: "turn-end", text: "two" }).seq).toBe(before + 1);
+    hub.emit("s1", { type: "turn-end", text: "two" });
+    expect(hub.lastSeq("s1")).toBe(before + 1);
   });
 });
 

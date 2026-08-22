@@ -26,7 +26,8 @@ import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
-import { createServer, type SecretsControl } from "./server.js";
+import { createServer } from "./server.js";
+import type { SecretsControl } from "./instance.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
 function fakeSession(id: string): AgentSession & {
@@ -775,7 +776,7 @@ describe("workbench server", () => {
     const task = await tasks.create({
       name: "delegate",
       trigger: { type: "manual" },
-      action: { type: "agent", sessionId: "s1", prompt: "work" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "work" },
     });
     const run = tasks.run(task.id, null, "agent", null, {
       invokedBySessionId: "source-session",

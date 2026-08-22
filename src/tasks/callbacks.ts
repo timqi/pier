@@ -1,7 +1,7 @@
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { TaskStore } from "./store.js";
-import type { TaskCallback, TaskRun } from "./types.js";
+import { outbox, type TaskCallback, type TaskRun } from "./types.js";
 
 const log = logger("tasks");
 
@@ -64,15 +64,13 @@ export class TaskCallbacks {
       // backoff straight to its ceiling.
       if (fresh.length > 0 && session.state === "streaming") {
         for (const run of batch) {
-          run.callbackNextAttemptAt = Date.now() + 1000;
+          outbox.defer(run);
           this.store.saveRun(run);
         }
         return;
       }
       for (const run of batch) {
-        run.callbackAttempts += 1;
-        run.callbackState = "pending";
-        run.callbackError = null;
+        outbox.attempt(run);
         this.store.saveRun(run);
       }
       // `systemInput` resolves when the turn it triggers settles, not when Pi
@@ -93,8 +91,7 @@ export class TaskCallbacks {
         )
         : Promise.resolve();
       for (const run of batch) {
-        run.callbackState = "delivered";
-        run.callbackNextAttemptAt = null;
+        outbox.delivered(run);
         this.store.saveRun(run);
         this.changed(run);
       }
@@ -109,9 +106,7 @@ export class TaskCallbacks {
       for (const stale of batch) {
         const run = this.store.getRun(stale.id);
         if (!run) continue;
-        run.callbackState = "failed";
-        run.callbackError = String(error);
-        run.callbackNextAttemptAt = Date.now() + Math.min(60_000, 1000 * 2 ** Math.min(run.callbackAttempts, 6));
+        outbox.failed(run, error);
         this.store.saveRun(run);
         this.changed(run);
       }

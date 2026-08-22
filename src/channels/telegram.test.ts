@@ -205,11 +205,7 @@ describe("gating", () => {
 
   it("accepts a mentioned bound sender, stripping the handle", async () => {
     store.redeemBindCode("telegram", store.issueBindCode("telegram").code, { id: "42", name: "Q" });
-    await feed(message({
-      chat: GROUP,
-      text: "@pierbot ship it",
-      entities: [{ type: "mention", offset: 0, length: 8 }],
-    }));
+    await feed(message({ chat: GROUP, text: "@pierbot ship it" }));
     expect(inbound).toEqual([{
       key: { channelId: "telegram", conversationId: "-100" },
       senderId: "42",
@@ -254,7 +250,7 @@ describe("gating", () => {
   });
 
   it("a group stays silent when it denies", async () => {
-    await feed(message({ chat: GROUP, text: "@pierbot hello", entities: [{ type: "mention", offset: 0, length: 8 }] }));
+    await feed(message({ chat: GROUP, text: "@pierbot hello" }));
     expect(dropped).toEqual(["dropped message in chat -100: not-bound"]);
     expect(client.sent).toEqual([]);
   });
@@ -685,11 +681,7 @@ describe("settings panel", () => {
     });
 
   it("opens on a bare @mention and on /settings, never prompting the agent", async () => {
-    await feed(message({
-      chat: GROUP,
-      text: "@pierbot",
-      entities: [{ type: "mention", offset: 0, length: 8 }],
-    }));
+    await feed(message({ chat: GROUP, text: "@pierbot" }));
     await feed(message({ chat: DM, text: "/settings" }));
     expect(inbound).toEqual([]);
     expect(client.sent).toHaveLength(2);
@@ -703,11 +695,7 @@ describe("settings panel", () => {
   });
 
   it("a mention with real text is still a prompt", async () => {
-    await feed(message({
-      chat: GROUP,
-      text: "@pierbot ship it",
-      entities: [{ type: "mention", offset: 0, length: 8 }],
-    }));
+    await feed(message({ chat: GROUP, text: "@pierbot ship it" }));
     expect(inbound.map((m) => m.text)).toEqual(["ship it"]);
     expect(client.sent).toEqual([]);
   });

@@ -323,6 +323,8 @@ export interface AgentFactory {
 }
 
 export type ProviderAuthType = "api_key" | "oauth";
+// Wire-protocol names, not SDK types — but they are pi-ai's spellings, and a
+// non-Pi backend is bound to them by this seam.
 export const PROVIDER_APIS = [
   "openai-completions",
   "openai-responses",
@@ -343,6 +345,47 @@ export type ProviderSetup =
       api: ProviderApi;
       models: { id: string; reasoning: boolean }[];
     };
+
+/** The rules of the ProviderSetup seam, in one place: agent/ enforces them on
+ *  write and web/ pre-checks them at its HTTP boundary, and neither may import
+ *  the other. Throws the message the surface shows. */
+export function validateProviderSetup(input: ProviderSetup): void {
+  if (input.id.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(input.id)) {
+    throw new Error("invalid provider id");
+  }
+  if (input.endpoint) {
+    if (input.endpoint.length > 2048 || input.endpoint !== input.endpoint.trim()) {
+      throw new Error("invalid endpoint");
+    }
+    validateEndpoint(input.endpoint);
+  }
+  if (input.kind === "builtin") return;
+  if (!input.endpoint) throw new Error("custom provider endpoint required");
+  if (input.name && (input.name.length > 200 || input.name !== input.name.trim())) {
+    throw new Error("invalid provider name");
+  }
+  if (!isProviderApi(input.api)) throw new Error("unsupported provider API");
+  if (!input.models.length || input.models.length > 100) throw new Error("1-100 models required");
+  const ids = input.models.map((model) => model.id);
+  if (ids.some((id) => !id || id.length > 200 || id !== id.trim()) || new Set(ids).size !== ids.length) {
+    throw new Error("model ids must be non-empty, trimmed and unique");
+  }
+}
+
+export function validateEndpoint(endpoint: string): void {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error("endpoint must be an http(s) URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("endpoint must be an http(s) URL");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("endpoint must not contain credentials, query or fragment");
+  }
+}
 
 export type ProviderAuthPrompt = { signal?: AbortSignal } & (
   | { type: "text" | "secret" | "manual_code"; message: string; placeholder?: string }

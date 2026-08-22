@@ -41,14 +41,9 @@ describe("seal and unseal", () => {
     expect(await s.list()).toEqual([{ providerId: "anthropic", type: "api_key" }]);
   });
 
-  it("honors a legacy plaintext row and re-seals it on the next write", async () => {
-    db.prepare("INSERT INTO credentials(key, value) VALUES (?, ?)").run(
-      "openai",
-      JSON.stringify({ type: "api_key", key: "sk-plain" }),
-    );
+  it("stores every row sealed — never plaintext at rest", async () => {
     const s = store();
-    expect(await s.read("openai")).toEqual({ type: "api_key", key: "sk-plain" });
-    await s.modify("openai", async (current) => current && { ...current, key: "sk-new" });
+    await s.modify("openai", async () => ({ type: "api_key", key: "sk-new" }));
     expect(row("openai")).toMatch(/^v1:/);
     expect(await s.read("openai")).toEqual({ type: "api_key", key: "sk-new" });
   });
