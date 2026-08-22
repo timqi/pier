@@ -64,6 +64,12 @@ export class Secrets {
     return this.#file ? (this.#file.kek.startsWith("vt://") ? "vt" : "file") : undefined;
   }
 
+  /** Why decrypt is refused right now — "" once unlocked. Shown in the
+   *  Console's Security tab, which is where a refused unlock gets repaired. */
+  get lockedReason(): string {
+    return this.#lockedReason;
+  }
+
   /**
    * Load master.key — created on first boot, file mode, so an unattended
    * start needs no ceremony; vt mode is entered later via rotate. Throws on a

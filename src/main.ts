@@ -131,7 +131,7 @@ resolveIm = resolveConversation(
 // operator goes to repair — but it is named loudly, not served as silence.
 void secrets.unlock().then(
   () => channels.reload(),
-  (err) => log.error("secrets locked — channels not started; repair master.key (or vt) and restart", err),
+  (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
 );
 
 // Composition happens here so web/ and tasks/ never import each other.
@@ -159,6 +159,9 @@ app.route("/", createServer({
   sessions: new SessionStateStore(db),
   config: new PiConfigStore(),
   settings,
+  secrets,
+  // Unlocked from the Console: start the channels boot held back.
+  onUnlocked: () => void channels.reload(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
 }));
 

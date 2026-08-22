@@ -1,23 +1,58 @@
-// Console → Settings view: the two things about this Pier instance a human
-// owns and nothing else can derive — the password in front of every HTTP
-// surface, and the URL the instance is reached at from outside. Neither belongs
-// to a session, a channel or a board, which is why they are not in those views.
+// Console → Settings view: the instance-level facts a human owns and nothing
+// else can derive, one tab per topic. "Instance" holds the password in front
+// of every HTTP surface and the URL the instance is reached at from outside;
+// "Security" holds the master key that seals every stored credential. A pure
+// consumer of /api/settings, /api/password and /api/secrets.
 
 import { failure, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { button, card, field, input, setStatus } from "./form.js";
+import { badge, btn, button, card, empty, field, input, setStatus } from "./form.js";
+
+type Topic = "instance" | "security";
+const TOPICS: [Topic, string][] = [["instance", "Instance"], ["security", "Security"]];
+
+/** What /api/secrets answers — never key material. */
+interface SecretsStatus {
+  state: "locked" | "unlocked";
+  mode: "vt" | "file" | null;
+  reason?: string;
+}
 
 export function createSettingsView(root: HTMLElement): ConsoleView {
+  let topic: Topic = "instance";
+
+  // Same sticky pattern as Channels: header and tabs are sticky rows inside
+  // the scroll container, so a page long enough to scroll still names the
+  // topic being edited. top-10 == the header's h-10, so the two rows stack.
   const header = h(
     "header",
-    "flex h-10 flex-none items-center gap-3 border-b border-neutral-200 px-4 max-md:hidden",
-    h("span", "font-medium", "Settings"),
+    "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4",
+    h("span", "font-medium max-md:hidden", "Settings"),
   );
-  const column = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
-  const pane = h("div", "px-4 py-5", column);
-  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, pane));
+  const tabs = h("div", "sticky top-10 z-30 flex items-center gap-1 border-b border-neutral-200 bg-white px-4 py-2");
+  const pane = h("div", "px-4 py-5");
+  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, tabs, pane));
 
-  // --- public URL ---------------------------------------------------------------
+  function renderTabs(): void {
+    tabs.replaceChildren(
+      ...TOPICS.map(([id, label]) => {
+        const active = id === topic;
+        const tab = btn(
+          label,
+          `cursor-pointer rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+            active ? "bg-indigo-50 font-medium text-indigo-700" : "text-neutral-600 hover:bg-neutral-100"
+          }`,
+        );
+        tab.onclick = () => {
+          topic = id;
+          show();
+        };
+        return tab;
+      }),
+    );
+  }
+
+  // --- Instance: public URL ------------------------------------------------------
 
   const urlInput = input();
   urlInput.placeholder = "https://pier.example.com";
@@ -53,7 +88,7 @@ export function createSettingsView(root: HTMLElement): ConsoleView {
     h("div", "flex items-center gap-3", urlSave, urlStatus),
   );
 
-  // --- password -----------------------------------------------------------------
+  // --- Instance: password ----------------------------------------------------------
 
   const current = input("", "password");
   const next = input("", "password");
@@ -90,9 +125,9 @@ export function createSettingsView(root: HTMLElement): ConsoleView {
     h("div", "flex items-center gap-3", pwSave, pwStatus),
   );
 
-  column.append(urlCard, pwCard);
+  const instanceColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6", urlCard, pwCard);
 
-  return consoleView(root, () => {
+  function loadInstance(): void {
     pwStatus.textContent = "";
     void (async () => {
       const res = await fetch("/api/settings");
@@ -100,5 +135,105 @@ export function createSettingsView(root: HTMLElement): ConsoleView {
       urlInput.value = ((await res.json()) as { publicUrl: string }).publicUrl;
       urlStatus.textContent = "";
     })();
-  });
+  }
+
+  // --- Security: master key --------------------------------------------------------
+
+  const securityColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
+
+  async function loadSecurity(): Promise<void> {
+    const res = await fetch("/api/secrets");
+    if (!res.ok) {
+      securityColumn.replaceChildren(empty(await failure(res, "Could not load key status")));
+      return;
+    }
+    renderSecurity((await res.json()) as SecretsStatus);
+  }
+
+  function renderSecurity(status: SecretsStatus, note?: string): void {
+    const locked = status.state === "locked";
+    const keyStatus = h("span", "text-[11.5px]", "");
+    if (note) setStatus(keyStatus, "saved", note);
+
+    const stateLine = h(
+      "div",
+      "flex items-center gap-2",
+      badge(
+        status.state,
+        locked ? "bg-red-50 text-red-700 ring-red-200" : "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      ),
+      h(
+        "span",
+        "text-[12.5px] text-neutral-600",
+        locked
+          ? "Stored credentials cannot be read until the key is unlocked."
+          : status.mode === "vt"
+          ? "Key mode: vt:// — unlocking takes one vt approval per process start."
+          : "Key mode: file — the key sits raw in master.key; switch to vt:// to require an approval.",
+      ),
+    );
+
+    const body: HTMLElement[] = [stateLine];
+
+    if (locked) {
+      // The reason is the repair instruction; hiding it would leave only "locked".
+      body.push(h("p", "text-[12.5px] leading-snug text-red-600", status.reason ?? "No reason reported."));
+      const unlock = button("Unlock", true);
+      unlock.onclick = () => {
+        setStatus(keyStatus, "saving", "unlocking… (vt mode waits on your approval)");
+        void (async () => {
+          const res = await sendJson("/api/secrets/unlock", {});
+          if (!res.ok) return setStatus(keyStatus, "failed", await failure(res, "Could not unlock"));
+          renderSecurity((await res.json()) as SecretsStatus, "Unlocked — channels are starting.");
+        })();
+      };
+      body.push(h("div", "flex items-center gap-3", unlock, keyStatus));
+    } else {
+      const rotate = async (mode: "vt" | "file", confirmText: string, note: string): Promise<void> => {
+        if (!window.confirm(confirmText)) return;
+        setStatus(keyStatus, "saving", mode === "vt" ? "rotating… (vt asks for an approval)" : "rotating…");
+        const res = await sendJson("/api/secrets/rotate", { mode });
+        if (!res.ok) return setStatus(keyStatus, "failed", await failure(res, "Could not rotate"));
+        renderSecurity((await res.json()) as SecretsStatus, note);
+      };
+      const mode = status.mode ?? "file";
+      const keep = button("Rotate key", true);
+      keep.onclick = () => void rotate(
+        mode,
+        "Generate a new master key? Stored credentials stay valid; the old key stops working.",
+        "Rotated.",
+      );
+      const other = mode === "vt" ? "file" : "vt";
+      const switchBtn = button(other === "vt" ? "Switch to vt://" : "Switch to file");
+      switchBtn.onclick = () => void rotate(
+        other,
+        other === "vt"
+          ? "Move the master key into vt? Every process start will then wait on a vt approval."
+          : "Store the master key raw in master.key? Anyone who can read the file can read every credential.",
+        other === "vt" ? "Switched to vt:// mode." : "Switched to file mode.",
+      );
+      body.push(h("div", "flex items-center gap-3", keep, switchBtn, keyStatus));
+    }
+
+    securityColumn.replaceChildren(card(
+      "Master key",
+      "Seals every credential Pier stores (channel tokens, API keys). Rotating rewraps the key file; no stored data is rewritten.",
+      ...body,
+    ));
+  }
+
+  // --- view ----------------------------------------------------------------------
+
+  function show(): void {
+    renderTabs();
+    if (topic === "instance") {
+      pane.replaceChildren(instanceColumn);
+      loadInstance();
+    } else {
+      pane.replaceChildren(securityColumn);
+      void loadSecurity();
+    }
+  }
+
+  return consoleView(root, show);
 }

@@ -23,7 +23,7 @@ import { TaskStore } from "../tasks/store.js";
 import { SettingsStore } from "../settings.js";
 import { openDb } from "../db.js";
 import { SessionStateStore } from "./session-state.js";
-import { createServer } from "./server.js";
+import { createServer, type SecretsControl } from "./server.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
 function fakeSession(id: string): AgentSession & {
@@ -130,7 +130,40 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
   };
 }
 
-function setup(cwd = "/tmp") {
+/** Scripted SecretsControl — in memory, never touches disk or vt. */
+function fakeSecrets(opts: { unlockError?: string } = {}): SecretsControl & { calls: string[] } {
+  const calls: string[] = [];
+  let mode: "vt" | "file" | undefined;
+  let lockedReason = "unlock() has not run";
+  return {
+    calls,
+    get state() {
+      return mode ? ("unlocked" as const) : ("locked" as const);
+    },
+    get mode() {
+      return mode;
+    },
+    get lockedReason() {
+      return lockedReason;
+    },
+    unlock: async () => {
+      calls.push("unlock");
+      if (opts.unlockError) {
+        lockedReason = opts.unlockError;
+        throw new Error(opts.unlockError);
+      }
+      mode = "file";
+      lockedReason = "";
+    },
+    rotateKek: async (next?: "vt" | "file") => {
+      calls.push(`rotate:${next ?? "keep"}`);
+      if (!mode) throw new Error(`secrets locked: ${lockedReason}`);
+      if (next) mode = next;
+    },
+  };
+}
+
+function setup(cwd = "/tmp", secrets = fakeSecrets()) {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
@@ -150,11 +183,12 @@ function setup(cwd = "/tmp") {
   // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
+  const onUnlocked = vi.fn();
   app.route("/", createServer({
-    factory, router, hub, sessions: state, config, settings,
+    factory, router, hub, sessions: state, config, settings, secrets, onUnlocked,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
-  return { app, session, factory, hub, router, state, config, settings, tasks };
+  return { app, session, factory, hub, router, state, config, settings, tasks, secrets, onUnlocked };
 }
 
 describe("workbench server", () => {
@@ -214,6 +248,7 @@ describe("workbench server", () => {
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
       settings: new SettingsStore(openDb(":memory:")),
+      secrets: fakeSecrets(),
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
@@ -358,9 +393,65 @@ describe("workbench server", () => {
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
       settings: new SettingsStore(openDb(":memory:")),
+      secrets: fakeSecrets(),
     });
     const res = await app.request("/api/sessions/nope/history");
     expect(res.status).toBe(404);
+  });
+
+  it("reports secrets status — state, mode and the locked reason, never key material", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/secrets");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ state: "locked", mode: null, reason: "unlock() has not run" });
+  });
+
+  it("unlocks secrets and starts the held-back channels", async () => {
+    const { app, onUnlocked, secrets } = setup();
+    const res = await app.request("/api/secrets/unlock", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ state: "unlocked", mode: "file" });
+    expect(onUnlocked).toHaveBeenCalledOnce();
+    expect(secrets.calls).toEqual(["unlock"]);
+  });
+
+  it("surfaces a failed unlock as text and does not start channels", async () => {
+    const { app, onUnlocked } = setup("/tmp", fakeSecrets({ unlockError: "vt read denied" }));
+    const res = await app.request("/api/secrets/unlock", { method: "POST" });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Error: vt read denied" });
+    expect(onUnlocked).not.toHaveBeenCalled();
+    // The reason the unlock failed is what the next GET shows.
+    expect(await (await app.request("/api/secrets")).json()).toEqual({
+      state: "locked",
+      mode: null,
+      reason: "vt read denied",
+    });
+  });
+
+  it("rotates the KEK, switching mode on request and rejecting bad modes", async () => {
+    const { app, secrets } = setup();
+    const post = (body?: unknown) =>
+      app.request("/api/secrets/rotate", {
+        method: "POST",
+        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+
+    // Locked: the error is surfaced, never swallowed.
+    const locked = await post({});
+    expect(locked.status).toBe(500);
+    expect(((await locked.json()) as { error: string }).error).toContain("secrets locked");
+
+    await app.request("/api/secrets/unlock", { method: "POST" });
+    const keep = await post({});
+    expect(keep.status).toBe(200);
+    expect(await keep.json()).toEqual({ state: "unlocked", mode: "file" });
+
+    const toVt = await post({ mode: "vt" });
+    expect(await toVt.json()).toEqual({ state: "unlocked", mode: "vt" });
+
+    expect((await post({ mode: "paper" })).status).toBe(400);
+    expect(secrets.calls).toEqual(["rotate:keep", "unlock", "rotate:keep", "rotate:vt"]);
   });
 
   it("serves config for the global scope and known project cwds only", async () => {

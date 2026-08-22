@@ -18,7 +18,19 @@ import type {
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import type { SessionStateStore } from "./session-state.js";
+import type { SecretsMode } from "../secrets.js";
 import { normalizePublicUrl, type SettingsStore } from "../settings.js";
+
+/** The slice of Secrets the routes need; injectable so tests never touch disk
+ *  or spawn vt. Never exposes key material — state, mode and the locked reason
+ *  are all a browser may see. */
+export interface SecretsControl {
+  readonly state: "locked" | "unlocked";
+  readonly mode: SecretsMode | undefined;
+  readonly lockedReason: string;
+  unlock(): Promise<void>;
+  rotateKek(mode?: SecretsMode): Promise<void>;
+}
 
 export interface WebDeps {
   factory: AgentFactory;
@@ -28,6 +40,10 @@ export interface WebDeps {
   sessions: SessionStateStore;
   config: ConfigStore;
   settings: SettingsStore;
+  secrets: SecretsControl;
+  /** Ran after a successful unlock; main.ts starts the channels it held back.
+   *  A callback because web/ must not import channels/. */
+  onUnlocked?: () => void;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
 }
@@ -60,7 +76,7 @@ function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
 }
 
 export function createServer(
-  { factory, router, hub, sessions: state, config, settings, backgroundRuns }: WebDeps,
+  { factory, router, hub, sessions: state, config, settings, secrets, onUnlocked, backgroundRuns }: WebDeps,
 ): Hono {
   const app = new Hono();
 
@@ -373,6 +389,40 @@ export function createServer(
       return c.json({ error: "not a URL: expected http(s)://host, no query or fragment" }, 400);
     }
     return c.json(settings.setPublicUrl(publicUrl));
+  });
+
+  // Layer-1 key status and control (Console → Settings → Security). The GET
+  // is what a locked instance shows; unlock is how it recovers without a
+  // restart, and rotate is the only way to change how the KEK is protected.
+  const secretsStatus = () => ({
+    state: secrets.state,
+    mode: secrets.mode ?? null,
+    ...(secrets.state === "locked" ? { reason: secrets.lockedReason } : {}),
+  });
+
+  app.get("/api/secrets", (c) => c.json(secretsStatus()));
+
+  app.post("/api/secrets/unlock", async (c) => {
+    try {
+      await secrets.unlock();
+    } catch (err) {
+      return c.json({ error: String(err) }, 500);
+    }
+    onUnlocked?.();
+    return c.json(secretsStatus());
+  });
+
+  app.post("/api/secrets/rotate", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown };
+    if (body.mode !== undefined && body.mode !== "vt" && body.mode !== "file") {
+      return c.json({ error: "mode must be vt or file" }, 400);
+    }
+    try {
+      await secrets.rotateKek(body.mode);
+    } catch (err) {
+      return c.json({ error: String(err) }, 500);
+    }
+    return c.json(secretsStatus());
   });
 
   registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });
