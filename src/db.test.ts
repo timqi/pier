@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -84,6 +84,53 @@ describe("openDb", () => {
     bak.close();
     // The backup holds everything the 0600 database holds.
     expect(statSync(`${path}.v1.bak`).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the three newest snapshots and removes what they supersede", () => {
+    const path = dbPath();
+    const steps = [
+      "CREATE TABLE a (x)",
+      "CREATE TABLE b (y)",
+      "CREATE TABLE c (z)",
+      "CREATE TABLE d (w)",
+      "CREATE TABLE e (v)",
+    ];
+    // One upgrade at a time, the way releases arrive.
+    for (let n = 1; n <= steps.length; n++) openDb(path, steps.slice(0, n)).close();
+
+    const baks = readdirSync(dirname(path)).filter((f) => f.endsWith(".bak")).sort();
+    expect(baks).toEqual(["pier.db.v2.bak", "pier.db.v3.bak", "pier.db.v4.bak"]);
+    // And no temporary file survived any of them.
+    expect(readdirSync(dirname(path)).some((f) => f.endsWith(".tmp"))).toBe(false);
+
+    // A start with nothing to do adds nothing.
+    openDb(path, steps).close();
+    expect(readdirSync(dirname(path)).filter((f) => f.endsWith(".bak")).sort()).toEqual(baks);
+  });
+
+  it("leaves the database and the older snapshot alone when the snapshot fails", () => {
+    const path = dbPath();
+    openDb(path, ["CREATE TABLE a (x)"]).close();
+    openDb(path, ["CREATE TABLE a (x)", "CREATE TABLE b (y)"]).close();
+    expect(existsSync(`${path}.v1.bak`)).toBe(true);
+
+    // Nothing new can be written beside the database — a full disk, in effect.
+    chmodSync(dirname(path), 0o500);
+    try {
+      // SQLite's own words, and proof that it is the snapshot that failed
+      // rather than something incidental before it.
+      expect(() => openDb(path, ["CREATE TABLE a (x)", "CREATE TABLE b (y)", "CREATE TABLE c (z)"]))
+        .toThrow(/readonly/);
+      // The upgrade did not happen, the snapshot that existed still does, and
+      // no half-written file took the name of a backup.
+      expect(existsSync(`${path}.v2.bak`)).toBe(false);
+      expect(existsSync(`${path}.v1.bak`)).toBe(true);
+    } finally {
+      chmodSync(dirname(path), 0o700);
+    }
+    const after = new DatabaseSync(path);
+    expect(version(after)).toBe(2);
+    after.close();
   });
 
   it("names the migration that failed and rolls the database back", () => {

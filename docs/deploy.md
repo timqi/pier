@@ -224,7 +224,19 @@ stamped in the database. Before touching an existing database it snapshots it
 to `~/.pier/db/pier.db.v<N>.bak` (`N` = the schema it was at), so the step you
 cannot forget is the one you never take. **Upgrades only.** Start an older Pier
 on a database a newer one has migrated and it refuses to run rather than write
-tables it does not understand — the way back down is that `.bak`.
+tables it does not understand — the way back down is that `.bak`:
+
+```sh
+systemctl --user stop pier
+cd ~/.pier/db && rm -f pier.db pier.db-wal pier.db-shm && cp pier.db.v1.bak pier.db
+# then check out the Pier that speaks schema 1 again
+```
+
+The three newest snapshots are kept and older ones removed as later upgrades
+supersede them; each is a full copy of the database, so size grows with the
+database, not with the number of releases. They sit next to the database and
+therefore protect against a bad upgrade, not against a lost disk — an
+off-machine copy is still yours to take.
 
 ### Can it update itself?
 

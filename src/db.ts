@@ -12,13 +12,24 @@
 // transaction before any store exists. A store receives the handle and owns
 // only its queries.
 
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { logger } from "./log.js";
 import { PIER_DB } from "./paths.js";
 
 const log = logger("db");
+
+/** Pre-migration snapshots to keep. Three is two upgrades of regret plus one:
+ *  they are full copies of the database, and the one that matters is the
+ *  newest. */
+const KEEP_BACKUPS = 3;
+
+/** How long a second process may wait for the write lock before failing. Two
+ *  Pier processes on one PIER_HOME contend exactly once — at boot, when both
+ *  want to migrate — and failing instantly there turns a restart race into a
+ *  crash loop. */
+const BUSY_TIMEOUT_MS = 5_000;
 
 /**
  * Append-only, never edited: index + 1 is the `user_version` a database is at
@@ -131,6 +142,7 @@ export function openDb(path: string, migrations: readonly string[] = MIGRATIONS)
   // Outside the transaction below: journal_mode is a property of the file, and
   // SQLite refuses to change it inside one.
   db.exec("PRAGMA journal_mode = WAL");
+  db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   migrate(db, path, migrations);
   if (path !== ":memory:") restrict(path);
   return db;
@@ -146,9 +158,12 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
   const { user_version: at } = db.prepare("PRAGMA user_version").get() as { user_version: number };
   const target = migrations.length;
   if (at > target) {
+    // Name the snapshot that exists rather than a pattern: the operator is
+    // reading this because the service will not start.
+    const newest = path === ":memory:" ? undefined : backups(path)[0]?.file;
     throw new Error(
       `${path} is at schema ${at}, this Pier speaks ${target}: a database is ` +
-        `never downgraded. Restore ${path}.v*.bak, or run the newer Pier.`,
+        `never downgraded. Restore ${newest ?? `${path}.v*.bak`}, or run the newer Pier.`,
     );
   }
   // Version 0 with tables is a database from before versioning existed.
@@ -161,21 +176,24 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
     );
   }
   if (at === target) return;
-  // The transaction below only protects against a *failed* migration; the way
-  // back from a successful one you regret is this snapshot. VACUUM INTO, not
-  // cp: under WAL the committed tail lives in the -wal sidecar.
-  if (at > 0 && path !== ":memory:") {
-    const bak = `${path}.v${at}.bak`;
-    rmSync(bak, { force: true }); // VACUUM INTO refuses to overwrite
-    db.exec(`VACUUM INTO '${bak.replaceAll("'", "''")}'`);
-    chmodSync(bak, 0o600); // it holds everything the 0600 database holds
-    log.info(`pre-migration backup: ${bak}`);
-  }
+  if (at > 0 && path !== ":memory:") snapshot(db, path, at);
   // One transaction for the statements *and* the version number: a crash
   // between them would leave a database whose version describes a schema it
   // does not have, which is worse than a crash.
   db.exec("BEGIN IMMEDIATE");
-  let step = at;
+  // Re-read inside the lock. Two processes starting together both saw work to
+  // do; the one that waited for the lock would otherwise replay migrations the
+  // winner already committed and die on "table already exists", with a healthy
+  // database in front of it.
+  const { user_version: locked } = db.prepare("PRAGMA user_version").get() as {
+    user_version: number;
+  };
+  if (locked >= target) {
+    db.exec("ROLLBACK");
+    log.info(`schema already at ${locked}, migrated by another process`);
+    return;
+  }
+  let step = locked;
   try {
     for (; step < target; step++) db.exec(migrations[step]!);
     db.exec(`PRAGMA user_version = ${target}`);
@@ -190,7 +208,52 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
       { cause: err },
     );
   }
-  log.info(at === 0 ? `schema created at version ${target}` : `schema ${at} → ${target}`);
+  log.info(locked === 0 ? `schema created at version ${target}` : `schema ${locked} → ${target}`);
+  if (path !== ":memory:") prune(path);
+}
+
+/**
+ * The copy that exists because `user_version` only counts up: the transaction
+ * above protects against a migration that *failed*, and this against one that
+ * succeeded and should not have. `VACUUM INTO`, not `cp`: under WAL the
+ * committed tail of the database lives in the `-wal` sidecar.
+ *
+ * Written under a temporary name and renamed into place. `VACUUM INTO` refuses
+ * an existing target, so the alternative is deleting the previous snapshot
+ * first — which means the likely failure here, a full disk, leaves neither the
+ * old snapshot nor a complete new one. A rename is atomic: the `.bak` name only
+ * ever refers to a finished copy.
+ */
+function snapshot(db: DatabaseSync, path: string, at: number): void {
+  const bak = `${path}.v${at}.bak`;
+  const tmp = `${bak}.tmp`;
+  rmSync(tmp, { force: true }); // a previous crash may have left one
+  db.exec(`VACUUM INTO '${tmp.replaceAll("'", "''")}'`);
+  chmodSync(tmp, 0o600); // it holds everything the 0600 database holds
+  renameSync(tmp, bak);
+  log.info(`pre-migration backup: ${bak}`);
+}
+
+/** Snapshots beside the database, newest schema first. */
+function backups(path: string): { version: number; file: string }[] {
+  const prefix = `${basename(path)}.v`;
+  return readdirSync(dirname(path))
+    .filter((name) => name.startsWith(prefix) && name.endsWith(".bak"))
+    .map((name) => ({
+      version: Number(name.slice(prefix.length, -".bak".length)),
+      file: join(dirname(path), name),
+    }))
+    .filter(({ version }) => Number.isInteger(version))
+    .sort((a, b) => b.version - a.version);
+}
+
+/** Keep the newest few. Nobody restores a database from four upgrades ago, and
+ *  every one of these is the size of the whole database. */
+function prune(path: string): void {
+  for (const { file } of backups(path).slice(KEEP_BACKUPS)) {
+    rmSync(file, { force: true });
+    log.info(`removed superseded backup: ${file}`);
+  }
 }
 
 /**
