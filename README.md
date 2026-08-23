@@ -156,9 +156,10 @@ time to finish, whatever the deadline still had to cut off written to the chat
 it belonged to — and only then hand over. The automatic path additionally waits
 for an idle instance: no turn streaming, no task run in flight.
 
-Either way the updater writes `~/.pier/db/pier.db.release.bak` before npm
-touches the package, updates the npm installation recorded when the service was
-installed, and starts Pier again.
+Either way the updater writes `~/.pier/db/backups/pier.db.release-<version>.bak`
+before npm touches the package — named for the release being replaced, which is
+the one to reinstall beside it; the three newest are kept. Then it updates the
+npm installation recorded when the service was installed, and starts Pier again.
 
 `main` is the only development line. `npm version patch` writes the tag, the
 tag builds and publishes a GitHub Release, and the version in the web footer is

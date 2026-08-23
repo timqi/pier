@@ -347,7 +347,7 @@ export function startUpdate(options: {
   if (!run(["systemctl", "--user", "daemon-reload"])) return "failed";
   if (!run(["systemctl", "--user", "start", "--no-block", UPDATE_UNIT_NAME])) return "failed";
   say(`updating in the background — follow it with: journalctl --user -u ${UPDATE_UNIT_NAME} -f`);
-  say(`Pier stops, snapshots pier.db.release.bak, installs, then starts again.`);
+  say(`Pier stops, snapshots the database into db/backups/, installs, then starts again.`);
   return "started";
 }
 

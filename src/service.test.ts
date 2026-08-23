@@ -212,7 +212,7 @@ describe("update", () => {
       "systemctl --user daemon-reload",
       "systemctl --user start --no-block pier-update.service",
     ]);
-    expect(said.join(" ")).toMatch(/pier.db.release.bak/);
+    expect(said.join(" ")).toMatch(/db\/backups\//);
   });
 
   it("bridges a legacy unit once, naming its npm-path limitation", () => {

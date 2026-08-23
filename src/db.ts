@@ -12,7 +12,7 @@
 // transaction before any store exists. A store receives the handle and owns
 // only its queries.
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { logger } from "./log.js";
@@ -20,9 +20,10 @@ import { PIER_DB } from "./paths.js";
 
 const log = logger("db");
 
-/** Pre-migration snapshots to keep. Three is two upgrades of regret plus one:
+/** Snapshots to keep *of each kind*. Three is two upgrades of regret plus one:
  *  they are full copies of the database, and the one that matters is the
- *  newest. */
+ *  newest. Counted per kind because the two kinds answer different questions —
+ *  a run of releases must not evict the pre-migration copies. */
 const KEEP_BACKUPS = 3;
 
 /** How long a second process may wait for the write lock before failing. Two
@@ -155,13 +156,24 @@ let shared: DatabaseSync | undefined;
 export const pierDb = (): DatabaseSync => (shared ??= openDb(PIER_DB));
 
 /** A release-level restore point, taken while the service is stopped even when
- * the release has no schema migration. The previous complete copy stays put if
- * writing its replacement fails. */
-export function backupDb(path = PIER_DB): string | undefined {
+ * the release has no schema migration. The previous complete copies stay put if
+ * writing this one fails.
+ *
+ * `version` is the Pier that produced this database, not the one being
+ * installed: the updater runs this from the tree it is about to replace, and
+ * restoring a database means reinstalling the code that speaks its schema
+ * (`migrate` refuses one from a newer Pier). So the name carries the other half
+ * of the pair. Backing up twice at one version replaces that version's copy —
+ * the pairing is identical, so a second name for it would say nothing. */
+export function backupDb(version: string, path = PIER_DB): string | undefined {
   if (!existsSync(path)) return undefined;
-  const bak = `${path}.release.bak`;
+  // In a filename, so it may not carry a separator or a traversal; a version
+  // this malformed is a broken install, not something to guess at.
+  const safe = version.replaceAll(/[^0-9A-Za-z.+-]/g, "_") || "unknown";
+  const bak = join(backupsDir(path, true), `${basename(path)}.release-${safe}.bak`);
   copyDatabase(path, bak);
   log.info(`pre-update backup: ${bak}`);
+  prune(releases(path));
   return bak;
 }
 
@@ -193,10 +205,10 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
   if (at > target) {
     // Name the snapshot that exists rather than a pattern: the operator is
     // reading this because the service will not start.
-    const newest = path === ":memory:" ? undefined : backups(path)[0]?.file;
+    const newest = path === ":memory:" ? undefined : snapshots(path)[0]?.file;
     throw new Error(
       `${path} is at schema ${at}, this Pier speaks ${target}: a database is ` +
-        `never downgraded. Restore ${newest ?? `${path}.v*.bak`}, or run the newer Pier.`,
+        `never downgraded. Restore ${newest ?? `a copy from ${backupsDir(path)}`}, or run the newer Pier.`,
     );
   }
   // Version 0 with tables is a database from before versioning existed.
@@ -255,7 +267,7 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
     );
   }
   log.info(locked === 0 ? `schema created at version ${target}` : `schema ${locked} → ${target}`);
-  if (path !== ":memory:") prune(path);
+  if (path !== ":memory:") prune(snapshots(path).map(({ file }) => file));
 }
 
 /**
@@ -271,7 +283,7 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
  * ever refers to a finished copy.
  */
 function snapshot(path: string, at: number): void {
-  const bak = `${path}.v${at}.bak`;
+  const bak = join(backupsDir(path, true), `${basename(path)}.v${at}.bak`);
   copyDatabase(path, bak);
   log.info(`pre-migration backup: ${bak}`);
 }
@@ -289,23 +301,65 @@ function copyDatabase(path: string, bak: string): void {
   renameSync(tmp, bak);
 }
 
-/** Snapshots beside the database, newest schema first. */
-function backups(path: string): { version: number; file: string }[] {
+/**
+ * One directory for every copy of this database, `db/backups/`. Beside the
+ * database was fine while there was one snapshot per schema; a restore point
+ * per release turns that into a listing where the live file and its sidecars
+ * are hard to pick out, and "which of these do I not delete" is the wrong
+ * question to make an operator answer under pressure.
+ *
+ * `create` also adopts what an older Pier wrote next to the database, so the
+ * restore procedure names one location instead of two forever.
+ */
+function backupsDir(path: string, create = false): string {
+  const dir = join(dirname(path), "backups");
+  if (!create) return dir;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const prefix = `${basename(path)}.`;
+  for (const name of readdirSync(dirname(path))) {
+    if (!name.startsWith(prefix) || !name.endsWith(".bak")) continue;
+    renameSync(join(dirname(path), name), join(dir, name));
+    log.info(`moved ${name} into ${dir}`);
+  }
+  return dir;
+}
+
+/** The copies of one kind: `v<schema>` or `release-<version>`. Disjoint
+ *  prefixes, so each kind is counted and pruned on its own. */
+function listBackups(path: string, kind: string): string[] {
+  const dir = backupsDir(path);
+  if (!existsSync(dir)) return [];
+  const prefix = `${basename(path)}.${kind}`;
+  return readdirSync(dir).filter((name) => name.startsWith(prefix) && name.endsWith(".bak"));
+}
+
+/** Pre-migration snapshots, newest schema first — the number in the name is an
+ *  ordinal, so it orders them without asking the filesystem. */
+function snapshots(path: string): { version: number; file: string }[] {
   const prefix = `${basename(path)}.v`;
-  return readdirSync(dirname(path))
-    .filter((name) => name.startsWith(prefix) && name.endsWith(".bak"))
+  return listBackups(path, "v")
     .map((name) => ({
       version: Number(name.slice(prefix.length, -".bak".length)),
-      file: join(dirname(path), name),
+      file: join(backupsDir(path), name),
     }))
     .filter(({ version }) => Number.isInteger(version))
     .sort((a, b) => b.version - a.version);
 }
 
-/** Keep the newest few. Nobody restores a database from four upgrades ago, and
- *  every one of these is the size of the whole database. */
-function prune(path: string): void {
-  for (const { file } of backups(path).slice(KEEP_BACKUPS)) {
+/** Release restore points, newest copy first. Ordered by mtime: the name holds
+ *  a Pier version, and comparing those means reimplementing semver here — while
+ *  two updates of one instance are never in flight at the same moment. Legacy
+ *  `pier.db.release.bak` shares the prefix, so it ages out like the rest. */
+function releases(path: string): string[] {
+  return listBackups(path, "release")
+    .map((name) => join(backupsDir(path), name))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+}
+
+/** Keep the newest few, oldest first out. Nobody restores a database from four
+ *  upgrades ago, and every one of these is the size of the whole database. */
+function prune(newestFirst: string[]): void {
+  for (const file of newestFirst.slice(KEEP_BACKUPS)) {
     rmSync(file, { force: true });
     log.info(`removed superseded backup: ${file}`);
   }
@@ -325,4 +379,6 @@ function restrict(path: string): void {
     if (existsSync(file)) chmodSync(file, 0o600);
   }
   chmodSync(dirname(path), 0o700);
+  // Full copies of the same secrets, one directory down.
+  if (existsSync(backupsDir(path))) chmodSync(backupsDir(path), 0o700);
 }

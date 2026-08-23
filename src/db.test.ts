@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,6 +7,11 @@ import { describe, expect, it } from "vitest";
 import { backupDb, openDb } from "./db.js";
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-db-")), "pier.db");
+
+/** Where db.ts puts every copy, and one copy's name in it. */
+const backupsDir = (path: string): string => join(dirname(path), "backups");
+const bakPath = (path: string, kind: string): string =>
+  join(backupsDir(path), `pier.db.${kind}.bak`);
 
 const version = (db: DatabaseSync): number =>
   (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -81,29 +86,64 @@ describe("openDb", () => {
     expect(version(db)).toBe(2);
     db.close();
 
-    const bak = new DatabaseSync(`${path}.v1.bak`);
+    const bak = new DatabaseSync(bakPath(path, "v1"));
     expect(version(bak)).toBe(1);
     expect(tables(bak)).toEqual(["a"]); // no b: taken before migration 2 ran
     bak.close();
-    // The backup holds everything the 0600 database holds.
-    expect(statSync(`${path}.v1.bak`).mode & 0o777).toBe(0o600);
+    // The backup holds everything the 0600 database holds, and so does the
+    // directory holding it.
+    expect(statSync(bakPath(path, "v1")).mode & 0o777).toBe(0o600);
+    expect(statSync(backupsDir(path)).mode & 0o777).toBe(0o700);
   });
 
-  it("takes a release backup even when the schema does not change", () => {
+  it("takes a release backup named for the version, even with no schema change", () => {
     const path = dbPath();
     const db = openDb(path);
     db.prepare("INSERT INTO settings(key, value) VALUES ('publicUrl', 'before')").run();
     db.close();
 
-    expect(backupDb(path)).toBe(`${path}.release.bak`);
+    expect(backupDb("0.4.2", path)).toBe(bakPath(path, "release-0.4.2"));
     const after = openDb(path);
     after.prepare("UPDATE settings SET value = 'after'").run();
     after.close();
 
-    const bak = new DatabaseSync(`${path}.release.bak`, { readOnly: true });
+    const bak = new DatabaseSync(bakPath(path, "release-0.4.2"), { readOnly: true });
     expect(bak.prepare("SELECT value FROM settings").get()).toEqual({ value: "before" });
     bak.close();
-    expect(statSync(`${path}.release.bak`).mode & 0o777).toBe(0o600);
+    expect(statSync(bakPath(path, "release-0.4.2")).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the three newest release backups, and adopts one written beside the database", async () => {
+    const path = dbPath();
+    openDb(path).close();
+    // What an older Pier left next to the file, before backups had a home.
+    copyFileSync(path, `${path}.release.bak`);
+
+    for (const v of ["0.1.0", "0.2.0", "0.3.0"]) {
+      backupDb(v, path);
+      await new Promise((done) => setTimeout(done, 5)); // mtime orders them
+    }
+
+    // The legacy copy was adopted, then aged out first as the oldest.
+    expect(existsSync(`${path}.release.bak`)).toBe(false);
+    expect(readdirSync(backupsDir(path)).sort()).toEqual([
+      "pier.db.release-0.1.0.bak",
+      "pier.db.release-0.2.0.bak",
+      "pier.db.release-0.3.0.bak",
+    ]);
+  });
+
+  it("replaces a version's own copy rather than adding a second name for it", () => {
+    const path = dbPath();
+    openDb(path).close();
+    expect(backupDb("0.1.0", path)).toBe(backupDb("0.1.0", path));
+    expect(readdirSync(backupsDir(path))).toEqual(["pier.db.release-0.1.0.bak"]);
+  });
+
+  it("never lets a version escape its filename", () => {
+    const path = dbPath();
+    openDb(path).close();
+    expect(backupDb("../../etc/0.1.0", path)).toBe(bakPath(path, "release-.._.._etc_0.1.0"));
   });
 
   it("serializes the snapshot as well as the migration across processes", { timeout: 15_000 }, async () => {
@@ -146,35 +186,38 @@ describe("openDb", () => {
     // One upgrade at a time, the way releases arrive.
     for (let n = 1; n <= steps.length; n++) openDb(path, steps.slice(0, n)).close();
 
-    const baks = readdirSync(dirname(path)).filter((f) => f.endsWith(".bak")).sort();
+    const baks = readdirSync(backupsDir(path)).filter((f) => f.endsWith(".bak")).sort();
     expect(baks).toEqual(["pier.db.v2.bak", "pier.db.v3.bak", "pier.db.v4.bak"]);
     // And no temporary file survived any of them.
-    expect(readdirSync(dirname(path)).some((f) => f.endsWith(".tmp"))).toBe(false);
+    expect(readdirSync(backupsDir(path)).some((f) => f.endsWith(".tmp"))).toBe(false);
+    // The database's own directory holds the live file and its sidecars only.
+    expect(readdirSync(dirname(path)).some((f) => f.endsWith(".bak"))).toBe(false);
 
     // A start with nothing to do adds nothing.
     openDb(path, steps).close();
-    expect(readdirSync(dirname(path)).filter((f) => f.endsWith(".bak")).sort()).toEqual(baks);
+    expect(readdirSync(backupsDir(path)).filter((f) => f.endsWith(".bak")).sort()).toEqual(baks);
   });
 
   it("leaves the database and the older snapshot alone when the snapshot fails", () => {
     const path = dbPath();
     openDb(path, ["CREATE TABLE a (x)"]).close();
     openDb(path, ["CREATE TABLE a (x)", "CREATE TABLE b (y)"]).close();
-    expect(existsSync(`${path}.v1.bak`)).toBe(true);
+    expect(existsSync(bakPath(path, "v1"))).toBe(true);
 
-    // Nothing new can be written beside the database — a full disk, in effect.
-    chmodSync(dirname(path), 0o500);
+    // Nothing new can be written into the backups directory — a full disk, in
+    // effect.
+    chmodSync(backupsDir(path), 0o500);
     try {
       // SQLite's own words, and proof that it is the snapshot that failed
       // rather than something incidental before it.
       expect(() => openDb(path, ["CREATE TABLE a (x)", "CREATE TABLE b (y)", "CREATE TABLE c (z)"]))
-        .toThrow(/readonly/);
+        .toThrow(/unable to open database: .*pier\.db\.v2\.bak\.tmp/);
       // The upgrade did not happen, the snapshot that existed still does, and
       // no half-written file took the name of a backup.
-      expect(existsSync(`${path}.v2.bak`)).toBe(false);
-      expect(existsSync(`${path}.v1.bak`)).toBe(true);
+      expect(existsSync(bakPath(path, "v2"))).toBe(false);
+      expect(existsSync(bakPath(path, "v1"))).toBe(true);
     } finally {
-      chmodSync(dirname(path), 0o700);
+      chmodSync(backupsDir(path), 0o700);
     }
     const after = new DatabaseSync(path);
     expect(version(after)).toBe(2);

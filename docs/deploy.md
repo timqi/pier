@@ -265,10 +265,10 @@ pier update           # installs the latest release; hard-stops/restarts Pier
 pier update --check   # only says whether one exists
 ```
 
-The workbench footer says the same thing without being asked: the server checks
-`registry.npmjs.org` every six hours in the background, and the version turns
-into `v0.0.1 → 0.0.2` when there is something newer. A failed check is silent
-by design — an offline box is not a broken one.
+The workbench footer says the same thing without being asked: the server asks
+`registry.npmjs.org` at boot and at most every 30 minutes after that, and the
+version turns into `v0.0.1 → 0.0.2` when there is something newer. A failed
+check is silent by design — an offline box is not a broken one.
 
 From a checkout instead, stop and back up before replacing the build:
 
@@ -287,10 +287,12 @@ path do: both drain (new work refused, running turns finished, the rest
 ledgered for the next boot to report) before the updater unit is started.
 
 Either way the updater snapshots the database to
-`~/.pier/db/pier.db.release.bak` before npm touches the package. This happens for
-every release, including releases with no schema change. If installation or
-backup fails, the updater unit still tries to start the previously installed
-service and reports the failure in its journal.
+`~/.pier/db/backups/pier.db.release-<version>.bak` before npm touches the
+package — `<version>` being the Pier that is being replaced, i.e. the release to
+reinstall if that copy is ever restored. This happens for every release,
+including releases with no schema change. If installation or backup fails, the
+updater unit still tries to start the previously installed service and reports
+the failure in its journal.
 
 ### Automatic updates
 
@@ -313,22 +315,27 @@ pier service install --force    # re-records the current node and npm
 A newer Pier brings its own schema up on the next start: the migrations run in
 one transaction before the port opens, and the version they leave behind is
 stamped in the database. It also snapshots the immediately preceding schema to
-`~/.pier/db/pier.db.v<N>.bak` (`N` = the schema it was at). **Upgrades only.**
-Start an older Pier on a database a newer one has migrated and it refuses to run
-rather than write tables it does not understand — the way back down is either
-the release backup or that schema snapshot:
+`~/.pier/db/backups/pier.db.v<N>.bak` (`N` = the schema it was at). **Upgrades
+only.** Start an older Pier on a database a newer one has migrated and it
+refuses to run rather than write tables it does not understand — the way back
+down is either a release backup or that schema snapshot:
 
 ```sh
 systemctl --user stop pier
-cd ~/.pier/db && rm -f pier.db pier.db-wal pier.db-shm && cp pier.db.release.bak pier.db
-# then reinstall the Pier release that created that backup
+ls -t ~/.pier/db/backups/                       # newest first
+cd ~/.pier/db && rm -f pier.db pier.db-wal pier.db-shm
+cp backups/pier.db.release-0.0.4.bak pier.db    # the version in the name
+# then reinstall that Pier release: npm install -g @timqi/pier@0.0.4
 ```
 
-The release backup is replaced atomically on each update. The three newest
-schema snapshots are also kept and older ones removed as later migrations
-supersede them. Each is a full copy of the database. They sit next to the
-database and therefore protect against a bad upgrade, not against a lost disk —
-an off-machine copy is still yours to take.
+Every copy lives in `~/.pier/db/backups/`, written under a temporary name and
+renamed into place, so a `.bak` name only ever refers to a finished copy. The
+three newest of **each kind** are kept — three release backups and three schema
+snapshots, counted separately so a run of releases cannot evict the copies taken
+before a migration. Backing up twice at the same version replaces that version's
+copy. Each is a full copy of the database, one directory below it, and therefore
+protects against a bad upgrade, not against a lost disk — an off-machine copy is
+still yours to take.
 
 ### Can it update itself?
 
@@ -390,7 +397,8 @@ Three paths hold everything: `~/.pier/db/pier.db` (tasks, channels, the chat →
 session map, workbench state, settings, the password hash, and the sealed
 provider credentials and channel tokens), `~/.pier/master.key` (the key that
 seals them — without it the database's sealed values are unreadable), and
-`~/.pier/boards/`. `pier.db.release.bak` is the latest automatic pre-update copy.
+`~/.pier/boards/`. `~/.pier/db/backups/` holds the automatic pre-update and
+pre-migration copies, named for the release or schema they came from.
 For off-machine backups, use `sqlite3 ... "VACUUM INTO '…'"` rather than `cp`,
 which under WAL can miss the most recent commits. Pi's own session history lives
 under `~/.pier/pi` (Pier sets `PI_CODING_AGENT_DIR` there unless the environment

@@ -173,7 +173,9 @@ async function signalService(command: "restart" | "reload"): Promise<void> {
 
 async function backup(): Promise<void> {
   const [{ backupDb }, { PIER_DB }] = await Promise.all([import("./db.js"), import("./paths.js")]);
-  const path = backupDb(PIER_DB);
+  // This tree's version: the updater runs `backup` before npm replaces it, so
+  // it is the release the copy pairs with.
+  const path = backupDb(version, PIER_DB);
   process.stdout.write(path ? `backed up ${path}\n` : `no database yet — nothing to back up.\n`);
 }
 
