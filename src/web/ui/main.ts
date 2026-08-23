@@ -24,6 +24,7 @@ import {
   clearOptimistic,
   focusInput,
   initComposer,
+  markOptimisticUser,
   reconcileOptimisticUser,
   renderQueue,
   restoreDraft,
@@ -325,6 +326,10 @@ initChat({
   select: (id) => void select(id),
   showTasks,
   send: (mode, label) => void send(mode, label),
+  ownTurn: (text) => {
+    markOptimisticUser(text);
+    setState("streaming"); // an edit resend starts a turn; the buttons say so now
+  },
   reload: reloadIfCurrent,
 });
 initComposer({

@@ -6,7 +6,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { formatTurnMeta, isSilentReply, silentReason, splitReply } from "../../core/reply.js";
-import { sendJson } from "./api.js";
+import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { highlightCode } from "./highlight.js";
@@ -37,6 +37,9 @@ export interface ChatDeps {
   select: (id: string) => void;
   showTasks: (taskId?: string) => void;
   send: (mode: "auto" | "steer", label?: string) => void;
+  /** A user turn this client just drew itself: ledger it so the `user-message`
+   *  event reconciles instead of drawing it twice, and show the run as live. */
+  ownTurn: (text: string) => void;
   /** Reload the session snapshot if `id` is still the selected session. */
   reload: (id: string) => Promise<void>;
 }
@@ -220,12 +223,23 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   if (!id) return;
   // The Nth user row on screen is the Nth user turn of history().
   const index = [...turnsPane.querySelectorAll('[data-kind="user"]')].indexOf(row);
+  // Drawn before the round trip: reloading the snapshot instead blanked the
+  // pane for the length of a fetch, so the transcript flashed away and came
+  // back (principle 7). A rewind is exactly "this row and everything under it
+  // leaves", and the re-sent text is an ordinary optimistic user turn.
+  while (row.nextElementSibling) row.nextElementSibling.remove();
+  row.remove();
+  deps.ownTurn(text);
+  appendTurn("user", text);
+  scrollBottom(true);
   const res = await sendJson(`/api/sessions/${id}/turns/${index}/edit`, { text });
   if (!res.ok) {
-    appendTurn("error", `edit failed: ${res.status}`);
-    return;
+    // The optimistic prune was a lie — the server still holds those turns. The
+    // reload wipes the pane, so the reason goes in after it, not before.
+    const why = await failure(res, "edit failed");
+    await deps.reload(id);
+    appendTurn("error", why);
   }
-  await deps.reload(id); // the transcript was rewound — reload it
 }
 
 /** Row-hover meta chip on agent turns: completion time · duration · tokens. */

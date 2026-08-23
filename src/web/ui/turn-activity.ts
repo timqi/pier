@@ -80,6 +80,12 @@ export function decisionReplyBtn(messageId: string): HTMLElement {
 
 export function renderBackgroundRun(run: BackgroundRun): void {
   let row = backgroundRows.get(run.runId);
+  // An edit rewinds the transcript by removing rows: a card that went with them
+  // is drawn again rather than updated where nobody can see it.
+  if (row && !row.isConnected) {
+    backgroundRows.delete(run.runId);
+    row = undefined;
+  }
   if (!row) {
     row = h("div", "mx-5 my-1.5 border px-3 py-2 text-[13px]");
     row.dataset.kind = "background-run";

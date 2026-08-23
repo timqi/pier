@@ -57,6 +57,11 @@ export function reconcileOptimisticUser(text: string): boolean {
   return true;
 }
 
+/** Record a turn this client already drew, so its event only reconciles. */
+export function markOptimisticUser(text: string): void {
+  optimisticUserTexts.push(text);
+}
+
 export function clearOptimistic(): void {
   optimisticUserTexts = [];
 }
@@ -252,15 +257,17 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     // message sent into an existing run waits for the queue-state snapshot.
     // appendTurn renders the marker lines as attachment thumbs/cards itself.
     if (startsTurn || mode === "steer") {
-      optimisticUserTexts.push(text);
+      markOptimisticUser(text);
       appendTurn("user", text);
       scrollBottom(true);
     }
     const res = await sendJson(`/api/sessions/${id}/messages`, { text, mode });
     if (!res.ok) {
       // The body names the cause when there is one — a draining restart, say.
-      appendTurn("error", await failure(res, "send failed"));
+      // After the reload, which wipes the pane an error row would go into.
+      const why = await failure(res, "send failed");
       await deps.reload(id);
+      appendTurn("error", why);
     }
   } finally {
     if (label === undefined) sending = false;
