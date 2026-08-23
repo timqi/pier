@@ -66,7 +66,7 @@ html {
   }
   /* Home-indicator gutter for the two elements that sit on the bottom edge. */
   #composer,
-  #sidebar > footer {
+  #project-tree {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
   }
   /* Thumb-sized rows in the drawer; the desktop rail stays compact. */

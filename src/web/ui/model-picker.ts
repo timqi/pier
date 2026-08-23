@@ -7,6 +7,7 @@ import { thinkingLabel } from "../../core/reply.js";
 import { h } from "./dom.js";
 import { btn, CONTROL, field } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
+import { report } from "./report.js";
 
 export interface ModelPickerProps {
   models: ModelRef[];
@@ -29,6 +30,22 @@ const FAVORITES_KEY = "pier.modelFavorites";
 type Favorite = ModelRef & { thinking: ThinkingLevel };
 
 const favoriteKey = (f: Favorite): string => `${modelKey(f)}@${f.thinking}`;
+
+/** A row in one of the two sections above the provider groups: a model, the
+ *  reasoning level it is usually run at (a pin may leave that open) and, for a
+ *  pin, the operator's line of intent. */
+type Entry = ModelRef & { thinking?: ThinkingLevel; note?: string };
+
+// Settings → Models: the operator's pinned shortlist, above even the stars —
+// instance-wide advice about which models this deployment actually uses. The
+// last known menu renders instantly; the fetch reconciles it.
+let pinnedMenu: Entry[] | null = null;
+
+async function loadPinned(): Promise<Entry[]> {
+  const res = await fetch("/api/settings");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return ((await res.json()) as { modelMenu: Entry[] }).modelMenu;
+}
 
 function loadFavorites(): Favorite[] {
   try {
@@ -54,6 +71,8 @@ function loadFavorites(): Favorite[] {
 function modelRow(opts: {
   label: string;
   hint?: string;
+  /** Tooltip on the label — the pin's line of intent, when it has one. */
+  title?: string;
   checked: boolean;
   starred: boolean;
   onSelect: () => void;
@@ -66,6 +85,7 @@ function modelRow(opts: {
     h("span", "truncate", opts.label),
   );
   if (opts.hint) pick.append(h("span", "ml-auto flex-none text-[11.5px] text-neutral-400", opts.hint));
+  if (opts.title) pick.title = opts.title;
   pick.onclick = () => opts.onSelect();
   const star = h(
     "button",
@@ -138,33 +158,34 @@ export function modelPicker({
     favorites.some((f) => favoriteKey(f) === `${modelKey(m)}@${l}`);
 
   const listWrap = h("div", "max-h-72 overflow-y-auto py-1");
+  /** Pins and stars name a model by key; only one this session can run counts. */
+  const known = new Map(models.map((m) => [modelKey(m), m]));
 
-  /** Starred combos first: picking one applies its reasoning level too. */
-  const renderFavorites = (normalized: string): void => {
-    const known = new Map(models.map((m) => [modelKey(m), m]));
-    const rows = favorites
-      .map((f) => ({ f, model: known.get(modelKey(f)) }))
+  /** The two sections above the provider groups — the operator's pins and the
+   *  browser's stars. Same row, and the same rule for a missing level: the one
+   *  the selector currently shows. Picking a row applies the level it names. */
+  const renderSection = (label: string, entries: Entry[], normalized: string): void => {
+    const rows = entries
+      .map((e) => ({ e, model: known.get(modelKey(e)) }))
       .filter(
-        (r): r is { f: Favorite; model: ModelRef } =>
+        (r): r is { e: Entry; model: ModelRef } =>
           !!r.model && (!normalized || modelKey(r.model).toLowerCase().includes(normalized)),
       );
     if (!rows.length) return;
     listWrap.append(
-      h(
-        "div",
-        "px-3 pb-0.5 pt-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400",
-        "Starred",
-      ),
-      ...rows.map(({ f, model }) =>
-        modelRow({
+      h("div", "px-3 pb-0.5 pt-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
+      ...rows.map(({ e, model }) => {
+        const thinking = e.thinking ?? level;
+        return modelRow({
           label: model.id,
-          hint: thinkingLabel(f.thinking),
-          checked: !!current && modelKey(current) === modelKey(model) && level === f.thinking,
-          starred: true,
-          onSelect: () => onPick(model, f.thinking),
-          onStar: () => toggleFavorite(f),
-        }),
-      ),
+          hint: e.thinking ? thinkingLabel(e.thinking) : undefined,
+          title: e.note,
+          checked: !!current && modelKey(current) === modelKey(model) && level === thinking,
+          starred: isStarred(model, thinking),
+          onSelect: () => onPick(model, e.thinking),
+          onStar: () => toggleFavorite({ provider: model.provider, id: model.id, thinking }),
+        });
+      }),
       h("div", "my-1 border-t border-neutral-100"),
     );
   };
@@ -172,7 +193,8 @@ export function modelPicker({
   const renderModels = (query: string): void => {
     listWrap.replaceChildren();
     const normalized = query.trim().toLowerCase();
-    renderFavorites(normalized);
+    renderSection("Pinned", pinnedMenu ?? [], normalized);
+    renderSection("Starred", favorites, normalized);
     const groups = new Map<string, ModelRef[]>();
     for (const m of models) {
       if (normalized && !modelKey(m).toLowerCase().includes(normalized)) continue;
@@ -219,6 +241,16 @@ export function modelPicker({
 
   search.oninput = () => renderModels(search.value);
   renderModels("");
+  // Rendered from the last known menu, refreshed on every open so an edit in
+  // Settings → Models shows up without a page reload. Re-render only on a real
+  // change: it would otherwise collapse a group the user just expanded.
+  void loadPinned()
+    .then((menu) => {
+      const changed = JSON.stringify(menu) !== JSON.stringify(pinnedMenu);
+      pinnedMenu = menu;
+      if (changed) renderModels(search.value);
+    })
+    .catch((err: unknown) => report("model menu unavailable", err));
   wrap.append(controls, listWrap);
   queueMicrotask(() => search.focus());
   return wrap;

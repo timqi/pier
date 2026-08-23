@@ -31,7 +31,6 @@ import {
   send,
   updateComposer,
 } from "./composer.js";
-import { initNotify, noteState } from "./notify.js";
 import { initReport } from "./report.js";
 import {
   initHeader,
@@ -246,9 +245,6 @@ function connectWorkspace(): void {
       return;
     }
     refreshActivity();
-    // Every session, selected or not: a finished turn is worth a notification
-    // wherever it ran.
-    noteState(e.sessionId, e.state);
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;
     const s = sessions.find((x) => x.id === e.sessionId);
@@ -344,7 +340,6 @@ initShell({
     if (s) sessionMenu(anchor, s);
   },
 });
-initNotify((id) => sessions.find((s) => s.id === id)?.title ?? "Untitled session");
 initSidebar({
   sessions: () => sessions,
   currentId: () => currentId,

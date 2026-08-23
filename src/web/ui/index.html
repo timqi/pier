@@ -6,8 +6,7 @@
        under an iPhone's home indicator. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fafafa" />
-  <!-- Installed as a home-screen app, this is also what makes Web Push
-       possible on iOS — notifications there require a standalone web app. -->
+  <!-- Installed as a home-screen app: standalone window, own icon. -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <!-- SVG first (scales to any tab/bookmark size), 32px PNG for the engines
        that still ignore it. iOS wants an opaque square and rounds it itself. -->
@@ -80,10 +79,6 @@
       </button>
     </div>
     <div id="project-tree" class="flex-1 overflow-y-auto text-[13.5px]"></div>
-    <footer class="flex flex-none items-center gap-2 border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400">
-      <button type="button" id="notify-toggle" title="Notify me when a turn finishes"
-        class="cursor-pointer rounded px-1 hover:bg-neutral-200 hover:text-neutral-700">Notify</button>
-    </footer>
   </aside>
 
   <main class="flex min-w-0 flex-col overflow-hidden">

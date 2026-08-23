@@ -1,19 +1,37 @@
-<!-- Pier's mark: a dock in profile over water. Kept to four solid shapes so it
-     still reads at 16px in a browser tab. Source of truth for the PNG icons
-     next to it (favicon fallback, apple-touch, manifest).
+<!-- Pier's mark: a dock in profile over water. Two shapes only — the dock and
+     the wave — so it still reads at 16px in a browser tab. Source of truth for
+     the PNG icons next to it (favicon fallback, apple-touch, manifest).
 
      The plate is a squircle, not a rect: a superellipse outline (the iOS /
      Android app-icon silhouette) reads as an app rather than as a coloured
-     tile. Platforms that apply their own mask get the square PNGs instead. -->
+     tile. Platforms that apply their own mask get the square PNGs instead.
+
+     Deck and piers are one closed path, and the joint is where every earlier
+     version failed: three rects under a bar read as loose pills whatever their
+     corner radius, and a concave fillet only softened the seam. So the gap
+     carries the shape instead — each opening is a flat-topped slot (shoulders
+     of 2.3, not the half-circle this started as, which bulged the openings
+     into eyes) between vertical pier flanks. The deck is the subject: 8 deep
+     against pier width 7, and dead flat — bowing it either way turned it into
+     a face (crowned it was a brow, sagged it was a frown). Cuteness is spent
+     on the parts instead: nearly round feet, flanks that splay 0.3, a wave
+     with the same weight as the piers.
+
+     The white mark is centred on the plate as one bounding box (hence the
+     translate, the deck's top edge at y=0 and the wave's stroke edge ending
+     the box) — not shape by shape, which is how it first shipped sitting
+     visibly low. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <path fill="#4f46e5"
     d="M32 0c16 0 24 0 28 4s4 12 4 28-0 24-4 28-12 4-28 4-24 0-28-4-4-12-4-28 0-24 4-28 12-4 28-4Z" />
-  <g fill="#fff">
-    <rect x="11" y="23" width="42" height="6.5" rx="1.5" />
-    <rect x="15" y="29.5" width="5.5" height="16" rx="1" />
-    <rect x="29.25" y="29.5" width="5.5" height="16" rx="1" />
-    <rect x="43.5" y="29.5" width="5.5" height="16" rx="1" />
-  </g>
-  <path d="M11 51q7-4 14 0t14 0 14 0" fill="none" stroke="#fff" stroke-width="4"
+  <path fill="#fff" transform="translate(0 14.5)" d="M10 3 A3 3 0 0 1 13 0 L51 0
+    A3 3 0 0 1 54 3 L54 5 A3 3 0 0 1 51 8
+    L51.3 19.3 A3.2 3.2 0 0 1 48.1 22.5 L47.2 22.5 A3.2 3.2 0 0 1 44 19.3
+    L44 10.3 A2.3 2.3 0 0 0 41.7 8 L37.8 8 A2.3 2.3 0 0 0 35.5 10.3
+    L35.5 19.3 A3.2 3.2 0 0 1 32.3 22.5 L31.7 22.5 A3.2 3.2 0 0 1 28.5 19.3
+    L28.5 10.3 A2.3 2.3 0 0 0 26.2 8 L22.3 8 A2.3 2.3 0 0 0 20 10.3
+    L20 19.3 A3.2 3.2 0 0 1 16.8 22.5 L15.9 22.5 A3.2 3.2 0 0 1 12.7 19.3
+    L13 8 A3 3 0 0 1 10 5 Z" />
+  <path d="M12.5 44.5q6.5-5 13 0t13 0 13 0" fill="none" stroke="#fff" stroke-width="5"
     stroke-linecap="round" opacity=".85" />
 </svg>
