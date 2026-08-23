@@ -49,12 +49,31 @@ describe("renderUnit", () => {
     // The whole reason this is generated: systemd's PATH would not find a
     // version-managed node, and a checkout-relative entry does not exist.
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/pier/dist/main.js"');
+    // Every command a turn runs inherits this: without it node is missing from
+    // the shell of the agent, on the machine that installed Pier with node.
+    expect(unit).toContain('Environment="PATH=/opt/node/bin:/usr/local/bin:/usr/bin:/bin"');
     expect(unit).toContain('Environment="HOST=127.0.0.1"');
     expect(unit).toContain('Environment="PORT=3141"');
     expect(unit).toContain("Restart=always");
     expect(unit).toContain("SyslogIdentifier=pier");
     // Unset means "let Pier use its own default", not "write an empty value".
     expect(unit).not.toContain("PIER_HOME");
+  });
+
+  it("records the installing shell's PATH, node first, no relative entries", () => {
+    const unit = renderUnit({
+      execPath: "/opt/node/bin/node",
+      npmPath: "/opt/node/bin/npm",
+      entry: "/opt/pier/dist/main.js",
+      host: "127.0.0.1",
+      port: 3141,
+      shellPath: "/home/x/.local/bin:/usr/bin::.:/opt/node/bin:/usr/local/go/bin",
+    });
+    // The operator's own tools are on it, each directory once, and "" and "."
+    // are gone: relative entries would resolve against WorkingDirectory.
+    expect(unit).toContain(
+      'Environment="PATH=/opt/node/bin:/home/x/.local/bin:/usr/bin:/usr/local/go/bin:/usr/local/bin:/bin"',
+    );
   });
 
   it("carries a PIER_HOME only when one was asked for", () => {
@@ -158,6 +177,9 @@ describe("update", () => {
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/lib/node_modules/@timqi/pier/dist/cli.js" backup');
     // npm under the recorded node: its shebang cannot resolve on systemd's PATH.
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/bin/npm" install -g @timqi/pier@latest');
+    // And a dependency's postinstall (`sh -c node …`) resolves node from PATH,
+    // which the absolute path above does not cover.
+    expect(unit).toContain('Environment="PATH=/opt/node/bin:/usr/local/bin:/usr/bin:/bin"');
     expect(unit).toContain("ExecStopPost=systemctl --user start pier.service");
     expect(unit).not.toContain("refresh");
   });

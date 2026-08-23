@@ -46,6 +46,9 @@ export interface UnitOptions {
   port: number;
   /** `$PIER_HOME`, or empty to leave Pier its own default. */
   pierHome?: string;
+  /** The `PATH` of the shell that ran the install, recorded verbatim; absent
+   *  when bridging an old unit that never recorded one. */
+  shellPath?: string;
 }
 
 /** Quote one systemd word. Percent is doubled because specifier expansion runs
@@ -60,8 +63,23 @@ function quote(value: string, command = false): string {
 const environment = (key: string, value: string): string =>
   `Environment=${quote(`${key}=${value}`)}`;
 
+/** The PATH both units carry: the recorded node first, then the shell that ran
+ * the install (`pier service install` is typed in that shell, so its own PATH
+ * *is* the login one), with the standard directories as a floor.
+ *
+ * Recorded at install rather than sourced from a login shell at start, which
+ * would hand a dotfile the power to decide whether Pier boots and which node
+ * npm installs into. Relative entries are dropped: they would resolve against
+ * WorkingDirectory, which is not where the operator was standing. */
+function pathEnv(execPath: string, shellPath?: string): string {
+  const seen = new Set<string>();
+  return [dirname(execPath), ...(shellPath ?? "").split(":"), "/usr/local/bin", "/usr/bin", "/bin"]
+    .filter((dir) => dir.startsWith("/") && !/[\0\r\n]/.test(dir) && !seen.has(dir) && seen.add(dir))
+    .join(":");
+}
+
 export function renderUnit(options: UnitOptions): string {
-  const { execPath, entry, host, port, pierHome } = options;
+  const { execPath, entry, host, port, pierHome, shellPath } = options;
   return `[Unit]
 Description=Pier — agent workspace
 Documentation=https://github.com/timqi/pier
@@ -75,6 +93,10 @@ WorkingDirectory=%h
 # that installed Pier is usually not on it.
 ExecStart=${quote(execPath, true)} ${quote(entry, true)}
 ${environment("NODE_ENV", "production")}
+# Inherited by every command a turn runs, which is why it is here and not just
+# in the updater: an agent typing "npm test" on systemd's minimal PATH would be
+# told node does not exist on a machine that installed Pier with it.
+${environment("PATH", pathEnv(execPath, shellPath))}
 # Loopback by default. Put a reverse proxy in front before widening this —
 # whoever reaches this port can drive an agent that runs a shell.
 ${environment("HOST", host)}
@@ -114,7 +136,7 @@ function legacyOptions(home: string): UnitOptions {
 /** A separate cgroup stops Pier, takes a consistent backup, updates the exact
  * npm installation recorded at install time, and always starts Pier again. */
 export function renderUpdateUnit(options: UnitOptions): string {
-  const { execPath, npmPath, entry, pierHome } = options;
+  const { execPath, npmPath, entry, pierHome, shellPath } = options;
   const cli = join(dirname(entry), "cli.js");
   return `[Unit]
 Description=Update Pier to the latest published version
@@ -122,10 +144,14 @@ Documentation=https://github.com/timqi/pier
 
 [Service]
 Type=oneshot
+# The absolute node below answers npm's own shebang and nothing else: a
+# dependency's postinstall runs as "sh -c node scripts/postinstall", which
+# resolves node from PATH, and systemd's minimal PATH has no fnm/nvm node —
+# the install then dies with "node: not found" with the tree half written.
+${environment("PATH", pathEnv(execPath, shellPath))}
 ${pierHome ? `${environment("PIER_HOME", pierHome)}\n` : ""}ExecStart=systemctl --user stop ${UNIT_NAME}
 ExecStart=${quote(execPath, true)} ${quote(cli, true)} backup
-# npm runs under the recorded node: its shebang needs a node on PATH, and
-# systemd's minimal PATH has none for fnm/nvm installs.
+# npm runs under the recorded node: its shebang needs a node on PATH too.
 ExecStart=${quote(execPath, true)} ${quote(npmPath, true)} install -g @timqi/pier@latest
 # ExecStopPost runs on success and failure, so a failed backup or npm install
 # does not leave the previously working service stopped.

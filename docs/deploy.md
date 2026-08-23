@@ -59,6 +59,12 @@ WorkingDirectory=%h
 # that installed Pier and the globally installed entry point.
 ExecStart="/absolute/path/to/node" "/absolute/npm/prefix/lib/node_modules/@timqi/pier/dist/main.js"
 Environment="NODE_ENV=production"
+# Inherited by every command a turn runs: on systemd's bare PATH an agent asked
+# to run npm or node would be told they do not exist. The installer records the
+# PATH of the shell that ran it — that shell is your login one — with the node
+# above first and the standard directories as a floor. Installed a new tool
+# since? Re-run install --force, or add your own drop-in.
+Environment="PATH=/absolute/path/to/node/bin:/your/shell/PATH:/usr/local/bin:/usr/bin:/bin"
 # Loopback by default. Put a reverse proxy in front before widening this —
 # whoever reaches this port can drive an agent that runs a shell.
 Environment="HOST=127.0.0.1"
@@ -337,6 +343,11 @@ Description=Update Pier to the latest published version
 
 [Service]
 Type=oneshot
+# npm's dependencies run postinstall scripts as `sh -c node …`, which needs a
+# node on PATH — the absolute one below only answers npm's own shebang. Same
+# recorded PATH as pier.service, and recorded rather than sourced from a login
+# shell at run time: a dotfile must not get to decide which node npm uses.
+Environment="PATH=/path/to/node/bin:/your/shell/PATH:/usr/local/bin:/usr/bin:/bin"
 ExecStart=systemctl --user stop pier.service
 ExecStart=/path/to/node /path/to/pier/dist/cli.js backup
 ExecStart=/path/to/node /recorded/path/to/npm install -g @timqi/pier@latest

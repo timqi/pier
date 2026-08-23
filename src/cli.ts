@@ -210,6 +210,9 @@ async function service(action = "status"): Promise<void> {
       if (!install({
         execPath: process.execPath,
         npmPath: commandPath("npm"),
+        // This command is typed in the operator's shell, so its PATH is the one
+        // they expect a turn's commands to see; the unit records it.
+        shellPath: process.env.PATH,
         entry: fileURLToPath(new URL("./main.js", import.meta.url)),
         host,
         port,
