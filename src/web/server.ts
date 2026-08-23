@@ -66,9 +66,9 @@ export interface WebDeps {
   /** Ran after a successful unlock; main.ts starts the channels it held back.
    *  A callback because web/ must not import channels/. */
   onUnlocked?: () => void;
-  /** Re-read the adapters' configuration — the other half of `pier reload`,
-   *  behind a callback for the same reason. */
-  reloadChannels?: () => Promise<void>;
+  /** `pier reload`, defined by main.ts because half of it is the adapters:
+   *  re-read their configuration, let the sessions go, answer how many. */
+  reload?: () => Promise<number>;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
 }
@@ -88,7 +88,7 @@ export function createServer(
     settings,
     secrets,
     onUnlocked,
-    reloadChannels,
+    reload,
     updates,
     updater,
     backgroundRuns,
@@ -390,23 +390,21 @@ export function createServer(
       .catch((err: unknown) => log.error(`recycling sessions after ${what} failed`, err));
   };
 
-  // `pier reload` on a button. Everything a session reads when it *opens* —
-  // agent files, skills, prompts, credentials — is recycled by the callbacks
-  // below when the Console is what changed it; an agent editing AGENTS.md or a
-  // hand-edited file on the box has nothing to trigger them, and this is that
-  // trigger. `busy` is reported rather than waited on: a streaming session is
-  // never interrupted (core/router.ts evictIdle), so the count is the honest
-  // answer to "why is my change not live yet".
+  // `pier reload` on a button. The callbacks below already recycle when the
+  // Console is what changed the configuration; an agent editing AGENTS.md or a
+  // file edited over ssh has nothing to trigger them, and this is that trigger.
+  // `busy` is reported rather than waited on: a streaming session is never
+  // interrupted (core/router.ts evictIdle), so that count is the honest answer
+  // to "why is my change not live yet".
   app.post("/api/reload", async (c) => {
     try {
-      await reloadChannels?.();
+      const recycled = (await reload?.()) ?? 0;
+      log.info(`reload requested — recycled ${recycled} idle session(s)`);
+      return c.json({ recycled, busy: router.busy().length });
     } catch (err) {
-      log.error("reloading channels failed", err);
-      return c.json({ error: `Channels could not be reloaded: ${String(err)}` }, 500);
+      log.error("reload failed", err);
+      return c.json({ error: `Could not reload: ${String(err)}` }, 500);
     }
-    const recycled = await router.evictIdle(0, Date.now(), { includeWatched: true });
-    log.info(`reload requested — recycled ${recycled} idle session(s)`);
-    return c.json({ recycled, busy: router.busy().length });
   });
 
   registerInstanceRoutes(app, {

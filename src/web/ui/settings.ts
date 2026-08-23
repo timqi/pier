@@ -153,17 +153,11 @@ export function createSettingsView(
       const { recycled, busy } = (await res.json()) as { recycled: number; busy: number };
       // Both numbers, always: "nothing was live" and "a turn is still holding
       // the old configuration" look identical otherwise, and the second is the
-      // only reason a change can still fail to show up.
-      setStatus(
-        reloadStatus,
-        // Neutral, not green, while a turn still holds the old configuration:
-        // green would claim the change is everywhere.
-        busy ? "idle" : "saved",
-        `${recycled === 0 ? "No idle session needed it" : `Recycled ${recycled} session${recycled === 1 ? "" : "s"}`}` +
-          (busy
-            ? ` — ${busy} still mid-turn, ${busy === 1 ? "it picks" : "they pick"} the change up when that turn ends.`
-            : "."),
-      );
+      // only reason a change can still fail to show up. Neutral, not green,
+      // while one is — green would claim the change is everywhere.
+      const done = recycled ? `Recycled ${recycled} session(s).` : "No idle session needed it.";
+      const held = busy ? ` ${busy} still mid-turn — they take it when the turn ends.` : "";
+      setStatus(reloadStatus, busy ? "idle" : "saved", done + held);
     })();
   };
 

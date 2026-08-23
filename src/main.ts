@@ -155,6 +155,17 @@ const startChannels = async (): Promise<void> => {
     channels.notify(entry.channelId, entry.conversationId, entry.note))
     .catch((err: unknown) => log.error("restart-note delivery failed", err));
 };
+/** What "reload" means, in one place: the adapters re-read their configuration
+ * and sessions are let go, so the next message re-opens them with the current
+ * skills, extensions, prompts and credentials — all applied at attach, none
+ * stored in a transcript. SIGHUP (`pier reload`) and the Console's Reload are
+ * both this call; `includeWatched` is the only difference, and only because the
+ * Console knows a person asked from the session they are looking at. */
+const reloadInstance = async (includeWatched = false): Promise<number> => {
+  await channels.reload();
+  return router.evictIdle(0, Date.now(), { includeWatched });
+};
+
 void secrets.unlock().then(
   startChannels,
   (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
@@ -286,7 +297,7 @@ app.route("/", createServer({
   updater,
   // Unlocked from the Console: start the channels boot held back.
   onUnlocked: () => void startChannels(),
-  reloadChannels: () => channels.reload(),
+  reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
 }));
 
@@ -352,19 +363,16 @@ process.on("SIGUSR2", () => {
     .catch((err: unknown) => log.error("drain failed — shutting down anyway", err))
     .then(() => shutdown(false));
 });
-// Reload without a restart (`pier reload`): adapters re-read their config, and
-// idle sessions are let go so the next message re-opens them with the current
-// skills, extensions and prompts — all applied at attach, none stored in a
-// transcript. Streaming or watched sessions pick the change up at their next
-// natural eviction. Only under systemd (the CLI signals through systemctl):
-// a foreground `pier` keeps SIGHUP's default, dying with its terminal instead
-// of surviving as an orphan that holds the port.
+// Reload without a restart (`pier reload`): reloadInstance above, leaving the
+// sessions someone is watching alone — nobody asked from a browser here.
+// Only under systemd (the CLI signals through systemctl): a foreground `pier
+// serve` keeps SIGHUP's default, dying with its terminal instead of surviving
+// as an orphan that holds the port.
 if (process.env.INVOCATION_ID) {
   process.on("SIGHUP", () => {
     log.info("SIGHUP received, reloading channels and recycling idle sessions");
-    void channels.reload();
-    void router.evictIdle(0)
+    void reloadInstance()
       .then((n) => log.info(`recycled ${String(n)} idle session(s)`))
-      .catch((err) => log.error("session recycle failed", err));
+      .catch((err: unknown) => log.error("reload failed", err));
   });
 }

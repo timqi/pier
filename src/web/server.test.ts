@@ -233,10 +233,11 @@ function setup(
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
-  const reloadChannels = vi.fn(async () => {});
+  // Wired like main.ts: the adapters are its business, the eviction core's.
+  const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
-    reloadChannels,
+    reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
   return {
@@ -252,7 +253,7 @@ function setup(
     tasks,
     secrets,
     onUnlocked,
-    reloadChannels,
+    reload,
   };
 }
 
@@ -296,7 +297,7 @@ describe("workbench server", () => {
   });
 
   it("reloads channels, recycles idle sessions and counts the ones mid-turn", async () => {
-    const { app, session, router, reloadChannels } = setup();
+    const { app, session, router, reload } = setup();
     router.attach({ channelId: "web", conversationId: "s1" }, session);
     const busy = fakeSession("s2");
     busy.setState("streaming");
@@ -307,14 +308,14 @@ describe("workbench server", () => {
     // The idle one goes so its next message re-reads the agent files; the
     // streaming one is never interrupted, and saying so is the point.
     expect(await res.json()).toEqual({ recycled: 1, busy: 1 });
-    expect(reloadChannels).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
     expect(router.stateOf("s1")).toBeUndefined();
     expect(router.stateOf("s2")).toBe("streaming");
   });
 
   it("reports a reload that could not re-read channel configuration", async () => {
-    const { app, reloadChannels } = setup();
-    reloadChannels.mockRejectedValueOnce(new Error("slack: invalid_auth"));
+    const { app, reload } = setup();
+    reload.mockRejectedValueOnce(new Error("slack: invalid_auth"));
     const res = await app.request("/api/reload", { method: "POST" });
     expect(res.status).toBe(500);
     expect(((await res.json()) as { error: string }).error).toContain("invalid_auth");
