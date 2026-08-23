@@ -26,6 +26,7 @@ table and growing it past 500 means logic is leaking in.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
+| `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET /api/activity` | Active or last-24h sessions, task runs, and Subagent control/supervisor message edges for Console Activity |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |

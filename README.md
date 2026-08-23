@@ -68,8 +68,9 @@ Console → Settings is the normal setup path:
 - **Agent files** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
   `models.json` structure in the Pi agent directory — globally, or per project
   scope, where it also shows that project's `.pi/skills` and `.pi/extensions`
-  resources. Changes apply when a session next opens; `pier reload` recycles
-  idle, unwatched sessions so their next message uses the current files.
+  resources. Changes apply when a session next opens; saving here recycles the
+  idle ones for you, and **Settings → Instance → Reload** does it for files
+  something else changed — an agent, or an editor on the box.
 
 On first credential access, Pier imports an existing `auth.json` into its sealed
 store and renames the source to `auth.json.imported`. Literal provider keys left

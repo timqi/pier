@@ -135,6 +135,44 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", pwSave, pwStatus),
   );
 
+  // --- Instance: reload ------------------------------------------------------------
+  // Saving in the Console already recycles sessions. This is for the changes
+  // the Console never saw: an agent that rewrote AGENTS.md, a skill dropped in
+  // over ssh, a Pi config edited in an editor.
+
+  const reload = button("Reload", true);
+  const reloadStatus = h("span", "text-[11.5px]", "");
+
+  reload.onclick = () => {
+    reload.disabled = true;
+    setStatus(reloadStatus, "saving", "reloading…");
+    void (async () => {
+      const res = await sendJson("/api/reload", {});
+      reload.disabled = false;
+      if (!res.ok) return setStatus(reloadStatus, "failed", await failure(res, "Could not reload"));
+      const { recycled, busy } = (await res.json()) as { recycled: number; busy: number };
+      // Both numbers, always: "nothing was live" and "a turn is still holding
+      // the old configuration" look identical otherwise, and the second is the
+      // only reason a change can still fail to show up.
+      setStatus(
+        reloadStatus,
+        // Neutral, not green, while a turn still holds the old configuration:
+        // green would claim the change is everywhere.
+        busy ? "idle" : "saved",
+        `${recycled === 0 ? "No idle session needed it" : `Recycled ${recycled} session${recycled === 1 ? "" : "s"}`}` +
+          (busy
+            ? ` — ${busy} still mid-turn, ${busy === 1 ? "it picks" : "they pick"} the change up when that turn ends.`
+            : "."),
+      );
+    })();
+  };
+
+  const reloadCard = card(
+    "Reload configuration",
+    "Re-reads channel configuration and lets go of idle sessions, so the next message opens them with the current agent files, skills and credentials. Saving here does this on its own — use it after something outside the Console changed a file.",
+    h("div", "flex items-center gap-3", reload, reloadStatus),
+  );
+
   // --- Instance: sign out ------------------------------------------------------------
 
   const signOut = button("Sign out");
@@ -149,7 +187,14 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", signOut),
   );
 
-  const instanceColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6", urlCard, pwCard, signOutCard);
+  const instanceColumn = h(
+    "div",
+    "mx-auto flex max-w-2xl flex-col gap-6",
+    urlCard,
+    reloadCard,
+    pwCard,
+    signOutCard,
+  );
 
   // --- topic hosts -----------------------------------------------------------------
   // Simple topics share one scroll wrapper each; Channels and Agent files are

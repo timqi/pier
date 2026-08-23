@@ -249,6 +249,12 @@ and immediately evicts idle sessions nobody is watching, so their next message
 opens with current agent files and configuration. Streaming sessions and
 sessions held by an open workbench stay attached until their normal eviction.
 
+Console → Settings → Instance → **Reload** is the same thing from a browser, and
+needs no shell on the box. It also takes the session open in the tab that asked
+(only a turn in flight is exempt) and answers with how many were recycled and
+how many are still mid-turn — the second number is the only reason a change can
+still fail to show up.
+
 An ordinary `systemctl --user restart pier` and `pier update` remain fast,
 hard-stop paths. Let active work finish first when using either one.
 

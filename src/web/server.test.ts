@@ -233,11 +233,27 @@ function setup(
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
+  const reloadChannels = vi.fn(async () => {});
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
+    reloadChannels,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
-  return { app, session, factory, hub, router, state, config, providers, settings, tasks, secrets, onUnlocked };
+  return {
+    app,
+    session,
+    factory,
+    hub,
+    router,
+    state,
+    config,
+    providers,
+    settings,
+    tasks,
+    secrets,
+    onUnlocked,
+    reloadChannels,
+  };
 }
 
 describe("workbench server", () => {
@@ -277,6 +293,31 @@ describe("workbench server", () => {
     changed.mockClear();
     await app.request("/api/sessions/s1/read", { method: "POST" });
     expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("reloads channels, recycles idle sessions and counts the ones mid-turn", async () => {
+    const { app, session, router, reloadChannels } = setup();
+    router.attach({ channelId: "web", conversationId: "s1" }, session);
+    const busy = fakeSession("s2");
+    busy.setState("streaming");
+    router.attach({ channelId: "web", conversationId: "s2" }, busy);
+
+    const res = await app.request("/api/reload", { method: "POST" });
+    expect(res.status).toBe(200);
+    // The idle one goes so its next message re-reads the agent files; the
+    // streaming one is never interrupted, and saying so is the point.
+    expect(await res.json()).toEqual({ recycled: 1, busy: 1 });
+    expect(reloadChannels).toHaveBeenCalledOnce();
+    expect(router.stateOf("s1")).toBeUndefined();
+    expect(router.stateOf("s2")).toBe("streaming");
+  });
+
+  it("reports a reload that could not re-read channel configuration", async () => {
+    const { app, reloadChannels } = setup();
+    reloadChannels.mockRejectedValueOnce(new Error("slack: invalid_auth"));
+    const res = await app.request("/api/reload", { method: "POST" });
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toContain("invalid_auth");
   });
 
   it("lists a created session before Pi persists it, without duplicating later", async () => {

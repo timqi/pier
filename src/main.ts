@@ -286,6 +286,7 @@ app.route("/", createServer({
   updater,
   // Unlocked from the Console: start the channels boot held back.
   onUnlocked: () => void startChannels(),
+  reloadChannels: () => channels.reload(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
 }));
 

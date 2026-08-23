@@ -66,6 +66,9 @@ export interface WebDeps {
   /** Ran after a successful unlock; main.ts starts the channels it held back.
    *  A callback because web/ must not import channels/. */
   onUnlocked?: () => void;
+  /** Re-read the adapters' configuration — the other half of `pier reload`,
+   *  behind a callback for the same reason. */
+  reloadChannels?: () => Promise<void>;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
 }
@@ -85,6 +88,7 @@ export function createServer(
     settings,
     secrets,
     onUnlocked,
+    reloadChannels,
     updates,
     updater,
     backgroundRuns,
@@ -385,6 +389,25 @@ export function createServer(
       })
       .catch((err: unknown) => log.error(`recycling sessions after ${what} failed`, err));
   };
+
+  // `pier reload` on a button. Everything a session reads when it *opens* —
+  // agent files, skills, prompts, credentials — is recycled by the callbacks
+  // below when the Console is what changed it; an agent editing AGENTS.md or a
+  // hand-edited file on the box has nothing to trigger them, and this is that
+  // trigger. `busy` is reported rather than waited on: a streaming session is
+  // never interrupted (core/router.ts evictIdle), so the count is the honest
+  // answer to "why is my change not live yet".
+  app.post("/api/reload", async (c) => {
+    try {
+      await reloadChannels?.();
+    } catch (err) {
+      log.error("reloading channels failed", err);
+      return c.json({ error: `Channels could not be reloaded: ${String(err)}` }, 500);
+    }
+    const recycled = await router.evictIdle(0, Date.now(), { includeWatched: true });
+    log.info(`reload requested — recycled ${recycled} idle session(s)`);
+    return c.json({ recycled, busy: router.busy().length });
+  });
 
   registerInstanceRoutes(app, {
     settings,
