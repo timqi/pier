@@ -1,5 +1,5 @@
-// Syntax highlighting for chat code blocks. hljs core + a curated language set
-// (the full bundle is ~1MB); anything else renders as plain text.
+// Syntax highlighting — chat code blocks and Files-view previews. hljs core +
+// a curated language set (the full bundle is ~1MB); anything else is plain text.
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -31,4 +31,30 @@ export function highlightCode(root: HTMLElement): void {
     if (!lang || !hljs.getLanguage(lang)) continue;
     el.innerHTML = hljs.highlight(el.textContent ?? "", { language: lang }).value;
   }
+}
+
+/** Extensions whose hljs name isn't the extension itself. */
+const EXT_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  py: "python", rs: "rust", sh: "bash", zsh: "bash", md: "markdown",
+  yml: "yaml", html: "xml", htm: "xml", svg: "xml", patch: "diff",
+};
+
+/** The registered language a filename maps to, or null — plain text. */
+export function langFor(filename: string): string | null {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  const lang = EXT_LANG[ext] ?? ext;
+  return hljs.getLanguage(lang) ? lang : null;
+}
+
+/** One highlighted source line, for the Files view's numbered panes. Per-line
+ *  tokenizing loses multi-line constructs (block comments) — acceptable for a
+ *  viewer, and it keeps diff-toned lines highlightable independently. Same
+ *  safety story as above: hljs escapes its output. */
+export function lineEl(text: string, lang: string | null): HTMLElement {
+  const el = document.createElement("span");
+  if (lang && text.length <= 500) el.innerHTML = hljs.highlight(text, { language: lang }).value;
+  else el.textContent = text;
+  return el;
 }

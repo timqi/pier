@@ -59,6 +59,7 @@ import {
   refreshTasks,
   setSessionHash,
   showChat,
+  showFiles,
   showTasks,
   syncBar,
 } from "./views.js";
@@ -351,9 +352,10 @@ initSidebar({
   select: (id) => void select(id),
   sessionMenu,
   createSession,
+  openFiles: showFiles,
   onPinsChanged: renderHeader,
 });
-initHeader({ currentId: () => currentId, currentSession, syncBar });
+initHeader({ currentId: () => currentId, currentSession, syncBar, openFiles: showFiles });
 initViews({
   sessions: () => sessions,
   currentId: () => currentId,

@@ -7,6 +7,7 @@
 
 import { createActivityView, type ActivityView } from "./activity.js";
 import { createBoardsView } from "./boards.js";
+import { createExplorerView } from "./explorer.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, type ConsoleView } from "./dom.js";
@@ -38,7 +39,7 @@ let chatVisible = true;
 
 export const isChatVisible = (): boolean => chatVisible;
 
-type ConsoleName = "tasks" | "activity" | "boards" | "settings";
+type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files";
 
 let tasksView: TasksView;
 let activityView: ActivityView;
@@ -54,6 +55,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   activity: "Activity",
   boards: "Boards",
   settings: "Settings",
+  files: "Files",
 };
 
 // Workspace events fan into whichever of these views is open.
@@ -90,6 +92,9 @@ function showConsole(name: ConsoleName, arg?: string): void {
 }
 
 export const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
+
+/** Entry for the ⋯ menus (session header, project row): browse a cwd. */
+export const showFiles = (dir?: string): void => showConsole("files", dir);
 
 export function showChat(): void {
   if (!consoleViews.some(({ view }) => view.visible)) return;
@@ -177,6 +182,15 @@ export function initViews(d: ViewsDeps): void {
     { name: "tasks", view: tasksView },
     { name: "activity", view: activityView },
     { name: "boards", view: createBoardsView($("#boards-view"), d.select) },
+    {
+      name: "files",
+      view: createExplorerView(
+        $("#files-view"),
+        () => [...groupByCwd(deps.sessions()).keys()],
+        // Through the router, so Back walks directory switches too.
+        (dir) => showConsole("files", dir),
+      ),
+    },
     {
       name: "settings",
       view: createSettingsView(

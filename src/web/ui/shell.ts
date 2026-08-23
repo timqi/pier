@@ -1,8 +1,7 @@
-// Mobile shell. Below the md breakpoint the sidebar becomes a drawer (the
-// slide itself is CSS in style.css) and a compact top bar stands in for the
-// chat header, which hides there — so a Console view and a chat share one way
-// back to the drawer, and the ⋯ session menu stays one tap away. Desktop runs
-// none of this: the bar is md:hidden and the drawer CSS is media-queried.
+// The shell around the workbench: how the sidebar yields space. Below md it
+// becomes a drawer (the slide is CSS in style.css) with a compact top bar
+// standing in for the chat header; at md and up it collapses to a slim handle
+// column instead — body[data-rail="closed"], persisted, styled in style.css.
 
 import { $ } from "./dom.js";
 
@@ -28,6 +27,16 @@ export function setBarTitle(text: string, hasSession: boolean): void {
   menuBtn.classList.toggle("hidden", !hasSession);
 }
 
+// Applied at import time, before first paint — a rail that flashes open and
+// then snaps shut reads as a glitch, not a preference.
+const RAIL_KEY = "pier.railClosed";
+if (localStorage.getItem(RAIL_KEY) === "1") document.body.dataset.rail = "closed";
+
+function setRail(closed: boolean): void {
+  document.body.dataset.rail = closed ? "closed" : "";
+  localStorage.setItem(RAIL_KEY, closed ? "1" : "0");
+}
+
 export function initShell(deps: ShellDeps): void {
   $("#drawer-toggle").onclick = () => {
     if (sidebar.dataset.open !== undefined) return closeDrawer();
@@ -36,4 +45,5 @@ export function initShell(deps: ShellDeps): void {
   };
   scrim.onclick = closeDrawer;
   menuBtn.onclick = () => deps.sessionMenu(menuBtn);
+  $("#rail-toggle").onclick = () => setRail(document.body.dataset.rail !== "closed");
 }

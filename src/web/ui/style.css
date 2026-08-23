@@ -35,6 +35,34 @@ html {
   margin: 0;
 }
 
+/* Desktop: the rail collapses away and its re-open handle floats in the title
+   band, which every view starts with — an h-10 header first in its pane (the
+   chat's has an id; Boards' sits inside its scroll wrapper). The padding is
+   what keeps the handle out of their titles without each view knowing about
+   it. Unlayered, so it outranks the body's md: grid-template utility. */
+@media (width >= 48rem) {
+  body[data-rail="closed"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  body[data-rail="closed"] #sidebar {
+    display: none;
+  }
+  /* Open: the rail's top-right corner (14.5rem column − button − gutter). */
+  #rail-toggle {
+    left: 12.375rem;
+  }
+  body[data-rail="closed"] #rail-toggle {
+    left: 0.375rem;
+  }
+  body[data-rail="closed"] #rail-toggle svg {
+    transform: rotate(180deg);
+  }
+  body[data-rail="closed"]
+    :is(#chat-header, main section > header:first-child, main section > div:first-child > header:first-child) {
+    padding-left: 2.75rem;
+  }
+}
+
 /* Mobile: the sidebar leaves the grid and slides over the workbench. Plain CSS
    behind one media query rather than a pile of `max-md:` utilities — the open
    state is a single transform, and Tailwind's class ordering can't flip it. */

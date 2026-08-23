@@ -5,6 +5,7 @@
 import { sendJson } from "./api.js";
 import { browseButton } from "./dir-picker.js";
 import { $, basename, detailsRow, h, relTime } from "./dom.js";
+import { closeMenu, openMenu } from "./menu.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: AgentFactory.list() entry + live state + pin flag. */
@@ -28,6 +29,8 @@ export interface SidebarDeps {
   select: (id: string) => void;
   sessionMenu: (anchor: HTMLElement, s: SessionInfo) => void;
   createSession: (cwd: string) => Promise<void>;
+  /** Open the Files view on a project's cwd (views.ts, wired through main). */
+  openFiles: (cwd: string) => void;
   /** Pin state changed — the chat header may need re-rendering. */
   onPinsChanged: () => void;
 }
@@ -144,10 +147,27 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
     ev.stopPropagation();
     void deps.createSession(cwd);
   };
+  // The project's own ⋯ menu — today Browse files, later a terminal.
+  const more = h("button", HOVER_BTN.replace("ml-auto ", ""), "\u22ef");
+  more.title = "Project actions";
+  more.onclick = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openMenu(more, [
+      {
+        label: "Browse files",
+        onSelect: () => {
+          closeMenu();
+          deps.openFiles(cwd);
+        },
+      },
+    ]);
+  };
   const { el, summary } = detailsRow("border-b border-neutral-200/70", [
     h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", basename(cwd)),
     count,
     add,
+    more,
   ]);
   summary.className += " group px-3 py-1.5 hover:bg-neutral-100";
   summary.title = cwd;

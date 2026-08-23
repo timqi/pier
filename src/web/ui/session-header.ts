@@ -19,6 +19,8 @@ export interface HeaderDeps {
   currentSession: () => SessionInfo | undefined;
   /** Mobile top bar mirror (views.ts). */
   syncBar: () => void;
+  /** Open the Files view on a cwd (views.ts, wired through main). */
+  openFiles: (cwd: string) => void;
 }
 
 let deps: HeaderDeps;
@@ -242,6 +244,13 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       label: "Model",
       hint: s.id === deps.currentId() ? (currentModel?.id ?? "…") : "",
       onSelect: () => void pickModel(anchor, s.id),
+    },
+    {
+      label: "Browse files",
+      onSelect: () => {
+        closeMenu();
+        deps.openFiles(s.cwd);
+      },
     },
   ]);
 }

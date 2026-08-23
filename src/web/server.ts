@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
+import { registerExplorerRoutes } from "./explorer.js";
 import { guarded, registerFileRoutes } from "./files.js";
 import type {
   AgentFactory,
@@ -348,6 +349,7 @@ export function createServer(
   registerInstanceRoutes(app, { settings, updates, secrets, onUnlocked });
   registerProviderRoutes(app, providers);
   registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });
+  registerExplorerRoutes(app, { factory, nascentCwds: () => [...nascent.values()].map((n) => n.cwd) });
 
   // serveStatic resolves `root` against the *working directory*, and an
   // installed Pier is started from wherever the operator happens to be. The

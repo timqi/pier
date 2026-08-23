@@ -54,7 +54,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
     `fixed z-50 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg ${
       sheet
         ? "inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
-        : "min-w-52 max-w-80 text-[13px]"
+        : "min-w-52 max-w-[min(42rem,calc(100vw-1rem))] text-[13px]"
     }`,
   );
   panel.append(content);
