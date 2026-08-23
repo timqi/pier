@@ -1,6 +1,6 @@
 dev:
     npm i
-    HOST=0.0.0.0 PORT=3141 PIER_HOME=~/.pier_test npm run dev
+    PIER_TITLE=g1test HOST=0.0.0.0 PORT=3141 PIER_HOME=~/.pier_test npm run dev
 
 stable:
     git rebase main
