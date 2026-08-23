@@ -147,6 +147,21 @@ describe("outbox backoff", () => {
   });
 });
 
+describe("drain pause", () => {
+  it("refuses new root runs and resumes while paused; children stay allowed", async () => {
+    const { cwd, service } = setup();
+    const task = await service.create(bashDraft(cwd, "echo hi"));
+    const before = await service.waitForRun(service.run(task.id).id);
+    expect(before.state).toBe("succeeded");
+
+    service.pause();
+    expect(() => service.run(task.id)).toThrow(/restarting/);
+    expect(() => service.resume(before.id, "go on")).toThrow(/restarting/);
+    // A child of a run that is still finishing is the drain's own work.
+    expect(() => service.run(task.id, null, "task", before.id)).not.toThrow();
+  });
+});
+
 describe("task service", () => {
   it("records Bash input, context, output and timestamps", async () => {
     const { cwd, service } = setup();

@@ -85,6 +85,9 @@ export class TaskService {
 
   start(tickMs = 1000): void {
     if (this.timer) return;
+    // A service started again after pause()/stop() takes work again; without
+    // this, the refusal would outlive the drain that justified it.
+    this.paused = false;
     const now = Date.now();
     // A run that was running when the process died: it is being written off
     // here, and the previous boot's log is where its work stopped.
@@ -105,9 +108,32 @@ export class TaskService {
   }
 
   stop(): void {
+    this.pause();
+    this.execution.stop();
+  }
+
+  /** Stop taking new work but leave running runs alone — a graceful restart
+   *  (src/drain.ts) waits for them, where stop() would abort them. The
+   *  scheduler timer goes, and new root runs are refused; children of a run
+   *  that is still finishing stay allowed, because refusing them would fail
+   *  the very work the drain is waiting for. */
+  pause(): void {
+    this.paused = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    this.execution.stop();
+  }
+
+  private paused = false;
+
+  private refusePaused(parentRunId: string | null = null): void {
+    if (this.paused && parentRunId === null) {
+      throw new Error("Pier is restarting — new task runs are not accepted; retry after the restart");
+    }
+  }
+
+  /** Runs a drain still has to wait for (queued ones start when a slot frees). */
+  activeRunCount(): number {
+    return this.store.countActiveRuns();
   }
 
   list(): TaskDefinition[] {
@@ -182,6 +208,7 @@ export class TaskService {
     parentRunId: string | null = null,
     provenance: RunProvenance = {},
   ): TaskRun {
+    this.refusePaused(parentRunId);
     const task = this.get(taskId);
     // `enabled:false` pauses scheduling only; manual and agent triggers still
     // run a paused task on demand. Archiving is the terminal state.
@@ -223,6 +250,7 @@ export class TaskService {
     parentRunId: string | null,
     callbackSessionId: string | null,
   ): { group: TaskGroup; runs: TaskRun[] } {
+    this.refusePaused(parentRunId);
     return this.groups.runAll(definitions, join, callerSessionId, parentRunId, callbackSessionId);
   }
 
@@ -261,6 +289,7 @@ export class TaskService {
     message: string,
     provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "background"> = {},
   ): TaskRun {
+    this.refusePaused();
     const prior = this.getRun(id);
     if (!isTerminal(prior.state)) throw new Error("run must be terminal before resume");
     if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) {

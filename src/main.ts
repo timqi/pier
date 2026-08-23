@@ -19,6 +19,7 @@ import { handleSlackTool, slackToolSpec } from "./channels/slack-tool.js";
 import { parseConversation as parseSlackConversation } from "./channels/slack.js";
 import { EventHub } from "./core/hub.js";
 import { pierDb } from "./db.js";
+import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
@@ -143,8 +144,18 @@ resolveIm = resolveConversation(
 // Channels connect only once tokens are readable. A refused unlock (vt denial,
 // corrupt master.key) must not take the web surface down — it is where the
 // operator goes to repair — but it is named loudly, not served as silence.
+// Once they are up, the chats a previous restart cut off are told (drain.ts) —
+// on this path and on a later Console unlock alike, because a note held back
+// by locked secrets must not wait for yet another restart.
+const restartLedger = new RestartLedger(db);
+const startChannels = async (): Promise<void> => {
+  await channels.reload();
+  await deliverLedger(restartLedger, (entry) =>
+    channels.notify(entry.channelId, entry.conversationId, entry.note))
+    .catch((err: unknown) => log.error("restart-note delivery failed", err));
+};
 void secrets.unlock().then(
-  () => channels.reload(),
+  startChannels,
   (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
 );
 
@@ -177,7 +188,7 @@ app.route("/", createServer({
   secrets,
   updates: new UpdateCheck(),
   // Unlocked from the Console: start the channels boot held back.
-  onUnlocked: () => void channels.reload(),
+  onUnlocked: () => void startChannels(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
 }));
 
@@ -200,20 +211,64 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   log.error("unhandled rejection", reason);
 });
+let shuttingDown = false;
+const shutdown = (stopTasks = true): void => {
+  // Once: SIGTERM can land while a drain is finishing, and two teardowns
+  // racing each other close the same sockets twice.
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Best-effort, and bounded: a socket an adapter cannot close must not turn
+  // `systemctl restart` into a 90-second wait for SIGKILL.
+  setTimeout(() => process.exit(0), 3000).unref();
+  stopEviction();
+  // The drain path leaves task runs alone: aborting them here would record
+  // them cancelled and race their callbacks against dying channels, when the
+  // boot-time interrupted marking is the recovery that was promised.
+  if (stopTasks) tasks.stop();
+  void channels.stop().finally(() => {
+    server.close(() => process.exit(0));
+    // Every workbench tab holds an SSE stream open, so `close()` alone would
+    // always wait out the timer above. (`in` because the served type is a
+    // union with HTTP/2, which has no such method — and no such problem.)
+    if ("closeAllConnections" in server) server.closeAllConnections();
+  });
+};
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     log.info(`${signal} received, shutting down`);
-    // Best-effort, and bounded: a socket an adapter cannot close must not turn
-    // `systemctl restart` into a 90-second wait for SIGKILL.
-    setTimeout(() => process.exit(0), 3000).unref();
-    stopEviction();
-    tasks.stop();
-    void channels.stop().finally(() => {
-      server.close(() => process.exit(0));
-      // Every workbench tab holds an SSE stream open, so `close()` alone would
-      // always wait out the timer above. (`in` because the served type is a
-      // union with HTTP/2, which has no such method — and no such problem.)
-      if ("closeAllConnections" in server) server.closeAllConnections();
-    });
+    shutdown();
+  });
+}
+// The slow restart (`pier restart`): refuse new work, let running turns finish
+// — bounded by the drain deadline — then exit for `Restart=always` to bring the
+// next process up. SIGTERM above stays the fast path systemd expects. `on`,
+// not `once`: a second SIGUSR2 with no handler would fall back to Node's
+// default and kill the drain it meant to hurry.
+let draining = false;
+process.on("SIGUSR2", () => {
+  if (draining) {
+    log.info("SIGUSR2 received again — already draining");
+    return;
+  }
+  draining = true;
+  log.info("SIGUSR2 received, draining for restart");
+  void drainForRestart({ router, tasks, ledger: restartLedger })
+    .catch((err: unknown) => log.error("drain failed — shutting down anyway", err))
+    .then(() => shutdown(false));
+});
+// Reload without a restart (`pier reload`): adapters re-read their config, and
+// idle sessions are let go so the next message re-opens them with the current
+// skills, extensions and prompts — all applied at attach, none stored in a
+// transcript. Streaming or watched sessions pick the change up at their next
+// natural eviction. Only under systemd (the CLI signals through systemctl):
+// a foreground `pier` keeps SIGHUP's default, dying with its terminal instead
+// of surviving as an orphan that holds the port.
+if (process.env.INVOCATION_ID) {
+  process.on("SIGHUP", () => {
+    log.info("SIGHUP received, reloading channels and recycling idle sessions");
+    void channels.reload();
+    void router.evictIdle(0)
+      .then((n) => log.info(`recycled ${String(n)} idle session(s)`))
+      .catch((err) => log.error("session recycle failed", err));
   });
 }

@@ -85,6 +85,13 @@ export class TaskStore {
     `, rootRunId, clamp(limit, 500));
   }
 
+  countActiveRuns(): number {
+    const row = this.db.prepare(
+      "SELECT COUNT(*) AS n FROM task_runs WHERE state IN ('queued', 'running')",
+    ).get() as { n: number };
+    return row.n;
+  }
+
   findActiveRun(taskId: string): TaskRun | undefined {
     return this.#one(`
       SELECT json FROM task_runs

@@ -21,6 +21,9 @@ vi.mock("./telegram.js", () => ({
       events.push(`stop ${this.n}`);
     }
     async send(): Promise<void> {}
+    async notify(conversationId: string, note: { text: string }): Promise<void> {
+      events.push(`notify ${conversationId}: ${note.text}`);
+    }
   },
 }));
 vi.mock("./slack.js", () => ({
@@ -76,6 +79,18 @@ describe("ChannelRuntime", () => {
     );
     await expect(rt.reload()).resolves.toBeUndefined();
     expect(said.join(" ")).toMatch(/telegram reload failed.*sealed token/);
+  });
+
+  it("notify reaches a live adapter, and says so when there is none", async () => {
+    events.length = 0;
+    generation = 0;
+    startGate = Promise.resolve();
+    const rt = runtime({ telegram: { enabled: true, token: "t" } });
+    await rt.reload();
+    await expect(rt.notify("telegram", "42", "cut off")).resolves.toBe(true);
+    expect(events).toContain("notify 42: cut off");
+    await expect(rt.notify("slack", "C1", "cut off")).resolves.toBe(false);
+    await rt.stop();
   });
 
   it("a reload after stop() is refused — shutdown wins", async () => {

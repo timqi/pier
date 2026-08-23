@@ -61,6 +61,8 @@ src/
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   settings.ts  the instance facts a human owns (the public URL, the model menu)
   update.ts    whether a newer release exists; checking only, never applying
+  drain.ts     the graceful restart: finish running turns, ledger what the
+               deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
 ```
 

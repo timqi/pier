@@ -296,6 +296,42 @@ describe("opening a session", () => {
   });
 });
 
+describe("drain", () => {
+  it("refuses a dispatch, telling both the chat and the caller (§5b)", async () => {
+    router.beginDrain();
+    await expect(
+      router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" }),
+    ).rejects.toThrow(/restarting/);
+    expect(tg.notes[0]?.[1].text).toContain("restarting");
+    expect(tg.notes[0]?.[1].origin).toEqual({ kind: "error" });
+    // Gated before ensure: a drain must not be what opens a session.
+    expect(router.sessionOf(KEY)).toBeUndefined();
+  });
+
+  it("refuses a dispatch that was inside a slow ensure when the gate closed", async () => {
+    let release = (): void => {};
+    router = new Router(hub, () => new Promise((resolve) => {
+      release = () => resolve(fake.session);
+    }));
+    router.registerChannel(tg.channel);
+    const dispatched = router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" });
+    dispatched.catch(() => {}); // asserted below; unhandled until then
+    router.beginDrain();
+    release();
+    await expect(dispatched).rejects.toThrow(/restarting/);
+    expect(tg.notes[0]?.[1].text).toContain("restarting");
+  });
+
+  it("busy() lists only mid-turn sessions", async () => {
+    await router.ensure(KEY);
+    expect(router.busy()).toEqual([]);
+    fake.emit({ type: "state", state: "streaming" });
+    // The fake's state field is static; busy() reads the live session state.
+    Object.assign(fake.session, { state: "streaming" });
+    expect(router.busy()).toEqual([{ session: fake.session, key: KEY }]);
+  });
+});
+
 describe("conversation abort", () => {
   it("aborts an attached conversation", async () => {
     await router.ensure(KEY);

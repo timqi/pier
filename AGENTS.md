@@ -50,7 +50,7 @@ scheduled tasks, live observability, and static Show pages.
   entire agent-collaboration surface
 - `boards/` static Show pages: a filesystem scan plus a file handler
 - Root `src/*.ts` is the instance layer — entry points (`main.ts`, `cli.ts`),
-  ops (`service.ts`, `update.ts`) and the leaves any area may import
+  ops (`service.ts`, `update.ts`, `drain.ts`) and the leaves any area may import
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`); one reason per
   file, named in docs/architecture.md
 - Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.

@@ -24,6 +24,8 @@ Usage
   pier service status         what systemd thinks of it
   pier update                 install the latest release and restart the service
   pier update --check         only say whether one exists
+  pier restart                finish running turns first, then restart the service
+  pier reload                 re-read channel config and recycle idle sessions
   pier backup                 snapshot pier.db before a manual update
   pier --version | --help
 
@@ -89,6 +91,10 @@ if (values.help || command === "help") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly(["check"], "pier update");
   await update(values.check === true);
+} else if (command === "restart" || command === "reload") {
+  if (subcommand) fail(`unexpected argument "${subcommand}"`);
+  allowOnly([], `pier ${command}`);
+  await signalService(command);
 } else {
   process.stderr.write(`pier: unknown command "${command}"\n\n${HELP}`);
   process.exit(2);
@@ -131,6 +137,32 @@ async function update(checkOnly: boolean): Promise<void> {
   say(`pier backup`);
   say(`npm install -g @timqi/pier@${latest}`);
   say(`then restart Pier.`);
+}
+
+/** Both are signals to the running unit: SIGUSR2 drains then exits (systemd
+ * starts the next process), SIGHUP reloads config in place (main.ts). */
+async function signalService(command: "restart" | "reload"): Promise<void> {
+  if (process.platform !== "linux") {
+    return fail(`only under the systemd service — send ${command === "restart" ? "SIGUSR2" : "SIGHUP"} to the pier process yourself`);
+  }
+  const { UNIT_NAME } = await import("./service.js");
+  const signal = command === "restart" ? "SIGUSR2" : "SIGHUP";
+  try {
+    // `--kill-who`, not the newer `--kill-whom`: the old spelling is the one
+    // every systemd still parses (systemd/systemd#29793).
+    execFileSync("systemctl", ["--user", "kill", "-s", signal, "--kill-who=main", UNIT_NAME], { stdio: "inherit" });
+  } catch (err) {
+    // A failed kill already printed why on the inherited stderr; a missing
+    // systemctl printed nothing, so name it (same shape as `service status`).
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      process.stderr.write(`pier: systemctl is not on PATH — no systemd here.\n`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+  say(command === "restart"
+    ? "draining — running turns finish first (up to 5 minutes), then Pier restarts."
+    : "reloading — adapters re-read their config; idle sessions re-open with the current one.");
 }
 
 async function backup(): Promise<void> {

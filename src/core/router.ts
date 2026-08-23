@@ -54,6 +54,9 @@ export class Router {
   private readonly channels = new Map<string, Channel>();
   /** Who each session last heard from, so a header costs tokens only on news. */
   private readonly senders = new SenderPrefix();
+  /** Set once by a graceful restart (src/drain.ts); never unset — the process
+   *  exits when the drain ends. */
+  private draining = false;
 
   constructor(
     private readonly hub: EventHub,
@@ -264,6 +267,36 @@ export class Router {
     await this.bySession.get(sessionId)?.session.abort();
   }
 
+  /** Refuse new work from every surface; in-flight turns keep running. */
+  beginDrain(): void {
+    this.draining = true;
+  }
+
+  /** For surfaces that mutate state before dispatching (the web's edit and
+   *  queue-deliver routes): ask first, so a refused dispatch cannot cost a
+   *  rewound transcript or a cleared queue. */
+  isDraining(): boolean {
+    return this.draining;
+  }
+
+  /** The drain gate, throwing. Told to the chat directly (5b): an adapter's
+   *  dispatch catch only logs, and the web caller gets the throw. */
+  private refuseDraining(key: ConversationKey): void {
+    const message = "Pier is restarting — this message was not taken; send it again in a moment.";
+    this.channels.get(key.channelId)
+      ?.notify(key.conversationId, { text: message, origin: { kind: "error" } })
+      .catch((err) => log.error(`could not report the drain to ${key.channelId}`, err));
+    throw new Error(message);
+  }
+
+  /** Attached sessions still mid-turn — what the drain waits on, and what its
+   *  deadline snapshots into the ledger. */
+  busy(): { session: AgentSession; key: ConversationKey }[] {
+    return [...this.bySession.values()]
+      .filter((attached) => attached.session.state === "streaming")
+      .map((attached) => ({ session: attached.session, key: attached.key }));
+  }
+
   /**
    * The session already attached to a conversation, if any. Never creates one:
    * a channel's stop or settings command must not be what opens a session.
@@ -343,7 +376,12 @@ export class Router {
   }
 
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
+    // Before ensure — a drain must not be what opens a session …
+    if (this.draining) this.refuseDraining(msg.key);
     const session = await this.ensure(msg.key);
+    // … and after — a dispatch that was inside a slow ensure when the gate
+    // closed must not start the turn the drain just declared finished with.
+    if (this.draining) this.refuseDraining(msg.key);
     const { action, text } = decide(msg, session.state);
     // A group chat is many people talking into one session; without a speaker
     // line the agent cannot tell them apart or mention anyone back. Emitted

@@ -132,6 +132,18 @@ const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+  // 3 — what a restart's drain deadline cut off, told to the chat at next boot.
+  `
+  -- Written only when a graceful restart aborts a still-running turn; the next
+  -- boot delivers each row and clears it once delivered. Owned by drain.ts.
+  CREATE TABLE restart_ledger (
+    id INTEGER PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

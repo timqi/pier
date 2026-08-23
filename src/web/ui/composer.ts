@@ -2,7 +2,7 @@
 // the pending queue panel. Owns the optimistic user-turn ledger that main.ts
 // reconciles against `user-message` events.
 
-import { sendJson } from "./api.js";
+import { failure, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
 import { appendTurn, scrollBottom, turnsPane } from "./chat.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
@@ -258,7 +258,8 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     }
     const res = await sendJson(`/api/sessions/${id}/messages`, { text, mode });
     if (!res.ok) {
-      appendTurn("error", `send failed: ${res.status}`);
+      // The body names the cause when there is one — a draining restart, say.
+      appendTurn("error", await failure(res, "send failed"));
       await deps.reload(id);
     }
   } finally {

@@ -254,6 +254,9 @@ export function createServer(
     if (!Number.isInteger(index) || index < 0 || typeof body?.text !== "string" || !body.text.trim()) {
       return c.json({ error: "index and text required" }, 400);
     }
+    // Asked before touching anything: the dispatch below would be refused by
+    // the drain gate, and by then the transcript is already rewound.
+    if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
     await session.rewindToUserTurn(index);
@@ -276,6 +279,8 @@ export function createServer(
     if (mode !== "steer" && mode !== "restart") {
       return c.json({ error: "mode must be steer or restart" }, 400);
     }
+    // Same reason as edit above: a refused dispatch must not cost the queue.
+    if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
     const session = await ensure(id);
     const { steering, followUp } = await session.clearQueue();
     const text = [...steering, ...followUp].join("\n").trim();

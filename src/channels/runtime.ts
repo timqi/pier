@@ -100,6 +100,16 @@ export class ChannelRuntime {
     log.info(`${platform} started`);
   }
 
+  /** Post a note into a conversation on a live adapter. Boot-time restart-note
+   *  delivery (src/drain.ts) has no session to report through; false means the
+   *  platform is not running, so the caller can say so instead of dropping it. */
+  async notify(platform: string, conversationId: string, text: string): Promise<boolean> {
+    const channel = this.live.get(platform as ChannelPlatform);
+    if (!channel) return false;
+    await channel.notify(conversationId, { text, origin: { kind: "error" } });
+    return true;
+  }
+
   async stop(): Promise<void> {
     // Join the reload queue first: an in-flight restart could otherwise
     // register an adapter after `live` was cleared — running, unstoppable.
