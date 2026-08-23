@@ -1,11 +1,12 @@
-// The left rail: pinned sessions grouped by cwd (Projects), the All-sessions
-// dialog with pin toggles, and the New-session dialog. main.ts owns the
+// The left rail: pinned sessions grouped by cwd (Projects), the search palette
+// that reaches everything (⌘K), and the New-session dialog. main.ts owns the
 // session list; this module renders it and reports interactions back.
 
 import { sendJson } from "./api.js";
 import { browseButton } from "./dir-picker.js";
 import { $, basename, detailsRow, h, relTime } from "./dom.js";
 import { closeMenu, openMenu } from "./menu.js";
+import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: AgentFactory.list() entry + live state + pin flag. */
@@ -31,6 +32,8 @@ export interface SidebarDeps {
   createSession: (cwd: string) => Promise<void>;
   /** Open the Files view on a project's cwd (views.ts, wired through main). */
   openFiles: (cwd: string) => void;
+  /** Open a Console view by name — the palette lists them beside sessions. */
+  openConsole: (name: "activity" | "boards" | "settings") => void;
   /** Pin state changed — the chat header may need re-rendering. */
   onPinsChanged: () => void;
 }
@@ -138,22 +141,23 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
     "ml-auto flex-none text-[11px] text-neutral-400 group-hover:hidden",
     String(list.length),
   );
-  // Hover shortcut: new session in this cwd, no dialog — the cwd is the answer
-  // the dialog would have asked for.
-  const add = h("button", HOVER_BTN, "+");
-  add.title = `New session in ${cwd}`;
-  add.onclick = (ev) => {
-    ev.preventDefault(); // a click inside <summary> would toggle the project
-    ev.stopPropagation();
-    void deps.createSession(cwd);
-  };
-  // The project's own ⋯ menu — today Browse files, later a terminal.
-  const more = h("button", HOVER_BTN.replace("ml-auto ", ""), "\u22ef");
+  // One control, like the session row above it. A project had grown a bare "+"
+  // beside its ⋯, which made the same row teach two different idioms and left
+  // no room for the third action.
+  const more = h("button", HOVER_BTN, "\u22ef");
   more.title = "Project actions";
   more.onclick = (ev) => {
-    ev.preventDefault();
+    ev.preventDefault(); // a click inside <summary> would toggle the project
     ev.stopPropagation();
     openMenu(more, [
+      {
+        label: "New session here",
+        hint: basename(cwd),
+        onSelect: () => {
+          closeMenu();
+          void deps.createSession(cwd);
+        },
+      },
       {
         label: "Browse files",
         onSelect: () => {
@@ -166,7 +170,6 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   const { el, summary } = detailsRow("border-b border-neutral-200/70", [
     h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", basename(cwd)),
     count,
-    add,
     more,
   ]);
   summary.className += " group px-3 py-1.5 hover:bg-neutral-100";
@@ -193,7 +196,6 @@ export function renderSessions(): void {
           ),
         ]),
   );
-  archiveCount.textContent = String(sessions.length);
   knownProjects.replaceChildren(
     ...[...groupByCwd(sessions).keys()].map((cwd) => {
       const opt = document.createElement("option");
@@ -204,9 +206,48 @@ export function renderSessions(): void {
   if (archiveDialog.open) renderArchive();
 }
 
-// --- all sessions (everything Pi knows about, pin from here) -----------------------
+// --- the search palette (⌘K): every session, plus the Console -----------------------
+// Ordering is the feature. What is running now, then what you keep in
+// Projects, then everything else newest-first — grouping by cwd (the old
+// shape) cannot express any of that, so the cwd moved onto the row instead.
 
-function archiveRow(s: SessionInfo): HTMLElement {
+/** One thing the palette can open. `session` is what makes a row a session
+ *  row: the state dot, its age and the pin toggle all hang off it. */
+interface Target {
+  label: string;
+  detail: string;
+  open: () => void;
+  session?: SessionInfo;
+}
+
+// Searchable by what they are called *and* by what is inside them: "password"
+// and "channel" are how someone looks for Settings.
+const CONSOLE_TARGETS: { name: "activity" | "boards" | "settings"; label: string; detail: string }[] = [
+  { name: "activity", label: "Activity", detail: "Console — runs, scheduled tasks, dependencies" },
+  { name: "boards", label: "Boards", detail: "Console — the static pages Pier publishes" },
+  { name: "settings", label: "Settings", detail: "Console — providers, models, channels, agent files, password, sign out, security" },
+];
+
+/** Rebuilt on every render; the index is what ↑/↓ and Enter address. */
+let rows: { el: HTMLElement; open: () => void }[] = [];
+let active = 0;
+
+// Three idioms for the same two moves. The arrows; readline's ⌃P/⌃N, for hands
+// that would rather not leave the home row; and ⌃J/⌃K, because ⌃N is a
+// *reserved* chord in Chrome and Firefox on Linux and Windows — it opens a new
+// window and no `preventDefault` can stop it, so "down" needs a key the browser
+// will actually hand over. (⌃P is only print, which is interceptable.)
+const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
+const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
+
+function setActive(index: number): void {
+  if (!rows.length) return;
+  active = (index + rows.length) % rows.length;
+  rows.forEach(({ el }, i) => el.classList.toggle("bg-indigo-50", i === active));
+  rows[active]?.el.scrollIntoView({ block: "nearest" });
+}
+
+function pinButton(s: SessionInfo): HTMLElement {
   const pin = h(
     "button",
     `flex-none rounded px-1.5 py-0.5 text-[11.5px] ${
@@ -221,41 +262,105 @@ function archiveRow(s: SessionInfo): HTMLElement {
     ev.stopPropagation();
     void setPinned(s, !s.pinned);
   };
-  const li = h(
-    "li",
-    "flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-neutral-100",
-    stateDot(s),
-    h("span", "truncate", s.title ?? "untitled"),
-    h("span", "ml-auto flex-none text-[11px] text-neutral-400", relTime(s.createdAt)),
-    pin,
+  return pin;
+}
+
+function paletteRow(t: Target): HTMLElement {
+  const li = h("li", "flex cursor-pointer items-center gap-2 px-3 py-1.5");
+  // A Console row keeps the dot's width so both kinds of row start on the
+  // same column; only a session has a state to report there.
+  li.append(t.session ? stateDot(t.session) : h("span", "h-2 w-2 flex-none"));
+  li.append(
+    h("span", "min-w-0 flex-1 truncate", t.label),
+    h("span", "max-w-[45%] flex-none truncate text-[11.5px] text-neutral-400", t.detail),
   );
-  li.onclick = () => {
-    archiveDialog.close();
-    deps.select(s.id);
-  };
+  if (t.session) {
+    li.append(
+      h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)),
+      pinButton(t.session),
+    );
+  }
+  // Pointer and keyboard drive the same highlight, so the two never disagree
+  // about which row Enter would open.
+  li.onmouseenter = () => setActive(rows.findIndex((r) => r.el === li));
+  li.onclick = t.open;
   return li;
 }
 
+const sectionHead = (title: string): HTMLElement =>
+  h(
+    "li",
+    "px-3 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400",
+    title,
+  );
+
 function renderArchive(): void {
   const q = archiveSearch.value.trim().toLowerCase();
-  const match = deps.sessions().filter(
-    (s) => !q || `${s.title ?? ""} ${s.cwd}`.toLowerCase().includes(q),
-  );
+  const hit = (text: string): boolean => !q || text.toLowerCase().includes(q);
+  const open = (run: () => void) => () => {
+    archiveDialog.close();
+    run();
+  };
+  const matched = deps.sessions().filter((s) => hit(`${s.title ?? ""} ${s.cwd}`));
+  const byAge = (a: SessionInfo, b: SessionInfo): number => b.createdAt - a.createdAt;
+  const target = (s: SessionInfo): Target => ({
+    label: s.title ?? "untitled",
+    detail: basename(s.cwd),
+    open: open(() => deps.select(s.id)),
+    session: s,
+  });
+  const streaming = matched.filter((s) => s.state === "streaming");
+  const idle = matched.filter((s) => s.state !== "streaming");
+
+  const consoleSection: [string, Target[]] = [
+    "Console",
+    CONSOLE_TARGETS.filter((t) => hit(`${t.label} ${t.detail}`)).map(({ name, label, detail }) => ({
+      label,
+      detail,
+      open: open(() => deps.openConsole(name)),
+    })),
+  ];
+  const sections: [string, Target[]][] = [
+    ["Running", streaming.sort(byAge).map(target)],
+    ["Projects", idle.filter((s) => s.pinned).sort(byAge).map(target)],
+    ["Other sessions", idle.filter((s) => !s.pinned).sort(byAge).map(target)],
+  ];
+  // A query is a question about everything, so the Console answers it up top;
+  // an empty box is the session list it has always been, with the Console
+  // parked at the bottom where it stays discoverable.
+  if (q) sections.unshift(consoleSection);
+  else sections.push(consoleSection);
+
+  rows = [];
   const nodes: HTMLElement[] = [];
-  for (const [cwd, list] of groupByCwd(match)) {
-    const head = h(
-      "li",
-      "truncate px-3 pb-0.5 pt-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500",
-      basename(cwd),
-    );
-    head.title = cwd;
-    nodes.push(head, ...list.map(archiveRow));
+  for (const [title, targets] of sections) {
+    if (!targets.length) continue;
+    nodes.push(sectionHead(title));
+    for (const t of targets) {
+      const el = paletteRow(t);
+      rows.push({ el, open: t.open });
+      nodes.push(el);
+    }
   }
   archiveList.replaceChildren(
     ...(nodes.length
       ? nodes
-      : [h("li", "px-3 py-3 text-[13px] text-neutral-400", "No matching sessions.")]),
+      : [h("li", "px-3 py-3 text-[13px] text-neutral-400", "Nothing matches.")]),
   );
+  archiveCount.textContent = String(rows.length);
+  // Held, not reset: a session going streaming re-renders this list, and
+  // moving the highlight out from under a pressed Enter is a misfire.
+  setActive(active);
+}
+
+/** Same control from the button and from ⌘K, so the chord also dismisses it. */
+function toggleArchive(): void {
+  if (archiveDialog.open) return archiveDialog.close();
+  archiveSearch.value = "";
+  active = 0;
+  renderArchive();
+  archiveDialog.showModal();
+  archiveSearch.focus();
 }
 
 // --- wiring ----------------------------------------------------------------------------
@@ -271,12 +376,32 @@ export function initSidebar(d: SidebarDeps): void {
   $("#new-cancel").onclick = () => newDialog.close();
   $<HTMLFormElement>("#new-form").onsubmit = () =>
     void deps.createSession($<HTMLInputElement>("#new-cwd").value.trim());
-  $("#open-archive").onclick = () => {
-    archiveSearch.value = "";
-    renderArchive();
-    archiveDialog.showModal();
-    archiveSearch.focus();
-  };
+  const search = $("#open-archive");
+  search.onclick = toggleArchive;
+  // Once the palette is open the chord belongs to its list (⌃K walks up), so
+  // the global binding stands down; Esc is what a <dialog> closes on anyway.
+  shortcut(search, "k", "Search sessions and Console", toggleArchive, () => archiveDialog.open);
   $("#archive-close").onclick = () => archiveDialog.close();
-  archiveSearch.oninput = () => renderArchive();
+  archiveSearch.oninput = () => {
+    active = 0; // a new query is a new list; the old position means nothing
+    renderArchive();
+  };
+  // The input keeps focus while the list is walked — typing must never mean
+  // "start over because you moved".
+  archiveSearch.onkeydown = (ev) => {
+    // Bare Ctrl only: ⌃⇧N is the browser's incognito window, and claiming a
+    // chord someone meant for the browser is worse than not having it.
+    const step = ev.altKey || ev.metaKey || ev.shiftKey
+      ? undefined
+      : (ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key]);
+    if (step !== undefined) {
+      ev.preventDefault();
+      setActive(active + step);
+      return;
+    }
+    if (ev.key === "Enter" && !ev.ctrlKey) {
+      ev.preventDefault();
+      rows[active]?.open();
+    }
+  };
 }

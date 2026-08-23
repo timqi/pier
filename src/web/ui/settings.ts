@@ -214,7 +214,25 @@ export function createSettingsView(
       ),
     );
 
-    const body: HTMLElement[] = [stateLine];
+    // What vt is, once, next to the button that hands it the key.
+    const vtDoc = h(
+      "a",
+      "text-indigo-600 hover:underline",
+      "vt",
+    ) as HTMLAnchorElement;
+    vtDoc.href = "https://github.com/timqi/vt";
+    vtDoc.target = "_blank";
+    vtDoc.rel = "noreferrer";
+    const vtNote = h(
+      "p",
+      "text-[12px] leading-snug text-neutral-500",
+      vtDoc,
+      " is a small local KMS: it keeps the key wrapped and releases it only on an"
+        + " explicit approval — Touch ID on a Mac, a phone passkey on a headless host."
+        + " Pier only stores the vt:// record, so master.key alone unlocks nothing.",
+    );
+
+    const body: HTMLElement[] = [stateLine, vtNote];
 
     if (locked) {
       // The reason is the repair instruction; hiding it would leave only "locked".

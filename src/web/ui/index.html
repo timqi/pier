@@ -29,7 +29,7 @@
        moves it between the rail's top-right (open) and main's top-left
        (closed), flipping the chevron, so expand and collapse are the same
        control in the same band. -->
-  <button type="button" id="rail-toggle" title="Toggle sidebar" aria-label="Toggle sidebar"
+  <button type="button" id="rail-toggle" aria-label="Toggle sidebar"
     class="fixed top-1.5 z-40 hidden h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 md:flex">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5">
       <path d="M9.5 4 5.5 8l4 4" stroke-linecap="round" stroke-linejoin="round" />
@@ -75,8 +75,8 @@
     </details>
     <div class="flex items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
       Projects
-      <button type="button" id="open-archive" title="Search all sessions"
-        class="icon-btn ml-auto" aria-label="Search all sessions">
+      <button type="button" id="open-archive"
+        class="icon-btn ml-auto" aria-label="Search sessions and Console">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5">
           <circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2 14 14" stroke-linecap="round" />
         </svg>
@@ -215,9 +215,12 @@
     </form>
   </dialog>
 
-  <dialog id="archive-dialog" class="m-auto w-[35rem] max-w-[90vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
+  <!-- Not m-auto: a palette that grows downward as you type should not also
+       drift upward to stay centred. Pinned near the top instead, which is
+       where the eye already is and where every other ⌘K lives. -->
+  <dialog id="archive-dialog" class="mx-auto mb-auto mt-[12vh] w-[35rem] max-w-[90vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
     <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
-      <input id="archive-search" type="text" placeholder="Search all sessions…"
+      <input id="archive-search" type="text" placeholder="Search sessions and Console…"
         class="w-full bg-transparent text-[14px] focus:outline-none" />
       <span id="archive-count" class="flex-none rounded bg-neutral-100 px-1.5 text-[11px] text-neutral-500"></span>
       <button type="button" id="archive-close" class="btn flex-none text-[12px]">Close</button>

@@ -4,6 +4,7 @@
 // column instead — body[data-rail="closed"], persisted, styled in style.css.
 
 import { $ } from "./dom.js";
+import { shortcut } from "./shortcut.js";
 
 export interface ShellDeps {
   /** The current session's ⋯ menu, mirrored from the chat header. */
@@ -37,13 +38,22 @@ function setRail(closed: boolean): void {
   localStorage.setItem(RAIL_KEY, closed ? "1" : "0");
 }
 
+function toggleDrawer(): void {
+  if (sidebar.dataset.open !== undefined) return closeDrawer();
+  sidebar.dataset.open = "";
+  scrim.classList.remove("hidden");
+}
+
+/** Below md the rail attribute does nothing — the sidebar is the drawer there,
+ *  so one chord has to mean whichever of the two this width has. */
+const isDrawer = (): boolean => window.innerWidth < 768;
+
 export function initShell(deps: ShellDeps): void {
-  $("#drawer-toggle").onclick = () => {
-    if (sidebar.dataset.open !== undefined) return closeDrawer();
-    sidebar.dataset.open = "";
-    scrim.classList.remove("hidden");
-  };
+  $("#drawer-toggle").onclick = toggleDrawer;
   scrim.onclick = closeDrawer;
   menuBtn.onclick = () => deps.sessionMenu(menuBtn);
-  $("#rail-toggle").onclick = () => setRail(document.body.dataset.rail !== "closed");
+  const rail = $("#rail-toggle");
+  rail.onclick = () => setRail(document.body.dataset.rail !== "closed");
+  shortcut(rail, "b", "Toggle sidebar", () =>
+    isDrawer() ? toggleDrawer() : setRail(document.body.dataset.rail !== "closed"));
 }

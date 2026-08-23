@@ -39,7 +39,7 @@ let chatVisible = true;
 
 export const isChatVisible = (): boolean => chatVisible;
 
-type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files";
+export type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files";
 
 let tasksView: TasksView;
 let activityView: ActivityView;
@@ -70,7 +70,9 @@ export function syncBar(): void {
   else setBarTitle(chatTitle.textContent ?? "", deps.currentSession() !== undefined);
 }
 
-function showConsole(name: ConsoleName, arg?: string): void {
+/** Open a Console view by name — the sidebar's rows and the search palette
+ *  both address them this way rather than clicking each other's buttons. */
+export function showConsole(name: ConsoleName, arg?: string): void {
   if (name === "tasks" || name === "activity") lastActivityConsole = name;
   setHash({ kind: "console", name, arg });
   closeDrawer();

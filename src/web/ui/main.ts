@@ -59,6 +59,7 @@ import {
   refreshTasks,
   setSessionHash,
   showChat,
+  showConsole,
   showFiles,
   showTasks,
   syncBar,
@@ -353,6 +354,7 @@ initSidebar({
   sessionMenu,
   createSession,
   openFiles: showFiles,
+  openConsole: showConsole,
   onPinsChanged: renderHeader,
 });
 initHeader({ currentId: () => currentId, currentSession, syncBar, openFiles: showFiles });
