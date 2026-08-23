@@ -1,12 +1,15 @@
 // Web workbench backend: REST + SSE, a pure consumer of core.
 // See docs/design/03-web-workbench.md for the route contract.
 
-import { relative } from "node:path";
+import { hostname } from "node:os";
+import { readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
+import { logger } from "../log.js";
 import { Router } from "../core/router.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { guarded, registerFileRoutes } from "./files.js";
@@ -26,6 +29,24 @@ import type { SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl } from "./instance.js";
 import { registerProviderRoutes } from "./providers.js";
+
+const log = logger("web");
+
+/** What goes in front of `Pier` in the tab: `$PIER_TITLE`, then the machine.
+ *  The label leads because a tab is narrow and "which instance is this" is the
+ *  question it has to answer before the browser truncates — `staging - g1`. */
+export const tabPrefix = (title: string | undefined, host: string): string =>
+  [title?.trim(), host.trim()].filter(Boolean).join(" - ").slice(0, 60);
+
+/** `<title>staging - g1 - Pier</title>`. Nothing to say, or a shell that does
+ *  not say `Pier`: leave it exactly as built. */
+export const withTabPrefix = (html: string, prefix: string): string =>
+  prefix
+    ? html.replace(
+      "<title>Pier</title>",
+      `<title>${prefix.replace(/&/g, "&amp;").replace(/</g, "&lt;")} - Pier</title>`,
+    )
+    : html;
 
 export interface WebDeps {
   factory: AgentFactory;
@@ -346,9 +367,36 @@ export function createServer(
     });
   });
 
-  registerInstanceRoutes(app, { settings, updates, secrets, onUnlocked });
-  registerProviderRoutes(app, providers);
-  registerFileRoutes(app, { factory, config, nascentCwd: (id) => nascent.get(id)?.cwd });
+  // Provider credentials, the agent files and the surface prompt are read when
+  // a session *opens*: a live one keeps what it opened with, so a Console save
+  // would otherwise reach nothing until the idle sweep got around to it half an
+  // hour later. Letting the idle sessions go is what `pier reload` does — the
+  // next message re-opens them with the configuration just written. Watched
+  // included, unlike the background sweep: the session open in the tab that
+  // just saved is the likeliest one to need it. A turn in flight is still never
+  // interrupted; it picks the change up at its next natural eviction.
+  const recycle = (what: string): void => {
+    void router.evictIdle(0, Date.now(), { includeWatched: true })
+      .then((n) => {
+        if (n) log.info(`${what} changed — recycled ${n} idle session(s)`);
+      })
+      .catch((err: unknown) => log.error(`recycling sessions after ${what} failed`, err));
+  };
+
+  registerInstanceRoutes(app, {
+    settings,
+    updates,
+    secrets,
+    onUnlocked,
+    onSettingsChanged: () => recycle("instance settings"),
+  });
+  registerProviderRoutes(app, providers, () => recycle("provider configuration"));
+  registerFileRoutes(app, {
+    factory,
+    config,
+    nascentCwd: (id) => nascent.get(id)?.cwd,
+    onConfigWritten: () => recycle("an agent file"),
+  });
   registerExplorerRoutes(app, { factory, nascentCwds: () => [...nascent.values()].map((n) => n.cwd) });
 
   // serveStatic resolves `root` against the *working directory*, and an
@@ -357,6 +405,29 @@ export function createServer(
   // runs the source, dist/web/public in a build — so the path is derived from
   // the module and handed over as the relative form the option wants.
   const bundle = fileURLToPath(new URL("./public", import.meta.url));
+
+  // The tab says which instance this is (`staging - g1 - Pier`): an operator
+  // keeps a workbench open per environment and they are otherwise identical,
+  // and mistaking the test one for production is the mistake worth a few lines.
+  // Both facts are known only at runtime, so they are patched into the shell
+  // here rather than built in — and served behind the auth guard, so a stranger
+  // at /login learns neither. Read once: neither can change under a process.
+  const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
+  let shell: string | null = null;
+  app.get("/", async (c, next) => {
+    if (shell === null) {
+      try {
+        shell = withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix);
+      } catch (err) {
+        // A workbench that will not load is not worth a nicer tab: hand the
+        // request back to the static handler, which answers as it always did.
+        log.warn(`shell unreadable, serving it unpatched: ${String(err)}`);
+        return next();
+      }
+    }
+    return c.html(shell);
+  });
+
   app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || "." }));
   return app;
 }

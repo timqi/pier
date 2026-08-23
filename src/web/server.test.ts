@@ -25,7 +25,7 @@ import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
-import { createServer } from "./server.js";
+import { createServer, tabPrefix, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
@@ -1062,5 +1062,102 @@ describe("workbench server", () => {
     // Existing folder, and a parent that does not exist: both 400, not 500.
     expect((await create({ path: root, name: "new-project" })).status).toBe(400);
     expect((await create({ path: join(root, "nope"), name: "x" })).status).toBe(400);
+  });
+});
+
+describe("configuration reaching live sessions", () => {
+  /** Attached, idle, watched by nobody — the state the recycle is about. */
+  const attached = (router: Router, session: AgentSession) => {
+    router.attach({ channelId: "web", conversationId: "s1" }, session);
+    expect(router.stateOf("s1")).toBe("idle");
+  };
+  const json = (body: unknown) => ({
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  it("lets go of idle sessions when providers, agent files or the URL change", async () => {
+    const { app, router, session } = setup();
+    // A session opened before the change keeps the providers, files and prompt
+    // it opened with; recycling is what makes the save take effect.
+    const recycled = async (what: string, res: Response) => {
+      expect(res.status, what).toBe(200);
+      await vi.waitFor(() => expect(router.stateOf("s1"), what).toBeUndefined());
+    };
+
+    attached(router, session);
+    await recycled(
+      "provider setup",
+      await app.request("/api/providers/setup", json({
+        setup: { kind: "builtin", id: "anthropic" },
+        authType: null,
+      })),
+    );
+
+    attached(router, session);
+    await recycled(
+      "logout",
+      await app.request("/api/providers/anthropic/logout", { method: "POST" }),
+    );
+
+    attached(router, session);
+    await recycled(
+      "agent file",
+      await app.request("/api/config/files/SYSTEM.md?scope=global", {
+        ...json({ content: "new", expected: "content" }),
+        method: "PUT",
+      }),
+    );
+
+    attached(router, session);
+    await recycled(
+      "public URL",
+      await app.request("/api/settings", { ...json({ publicUrl: "pier.example.com" }), method: "PUT" }),
+    );
+  });
+
+  it("recycles the session the operator is looking at, but never a live turn", async () => {
+    const { app, hub, router, session } = setup();
+    attached(router, session);
+    // The tab that saved the change has this session's SSE stream open; it is
+    // the likeliest one to need the new configuration.
+    hub.subscribe("s1", () => {});
+    session.setState("streaming");
+    await app.request("/api/providers/anthropic/logout", { method: "POST" });
+    expect(router.stateOf("s1")).toBe("streaming");
+
+    session.setState("idle");
+    await app.request("/api/providers/anthropic/logout", { method: "POST" });
+    await vi.waitFor(() => expect(router.stateOf("s1")).toBeUndefined());
+  });
+
+  it("leaves a session alone for a setting it reads per call", async () => {
+    const { app, router, session } = setup();
+    attached(router, session);
+    // The model menu is read by every picker call, not baked into a session.
+    const res = await app.request("/api/settings", {
+      ...json({ modelMenu: [{ provider: "anthropic", id: "claude-opus-4-5" }] }),
+      method: "PUT",
+    });
+    expect(res.status).toBe(200);
+    expect(router.stateOf("s1")).toBe("idle");
+  });
+});
+
+describe("the app shell", () => {
+  it("names the instance in the tab title", () => {
+    const html = "<head><title>Pier</title></head>";
+    expect(withTabPrefix(html, tabPrefix(undefined, "g1"))).toContain("<title>g1 - Pier</title>");
+    // $PIER_TITLE leads: a narrow tab must still say which environment it is.
+    expect(tabPrefix("staging", "g1")).toBe("staging - g1");
+    expect(tabPrefix("  ", "g1")).toBe("g1");
+    expect(tabPrefix("staging", "")).toBe("staging");
+    expect(tabPrefix("x".repeat(80), "g1").length).toBe(60);
+    // Neither value is typed here, and neither may open a tag.
+    expect(withTabPrefix(html, "a<b&c")).toContain("<title>a&lt;b&amp;c - Pier</title>");
+    // Nothing to say, and any shell that does not say Pier: served as built.
+    expect(withTabPrefix(html, "")).toBe(html);
+    expect(withTabPrefix("<title>Other</title>", "g1")).toBe("<title>Other</title>");
   });
 });

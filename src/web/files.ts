@@ -55,9 +55,15 @@ export interface FileRouteDeps {
   config: ConfigStore;
   /** cwd of a session Pi hasn't persisted yet (server.ts's nascent map). */
   nascentCwd: (id: string) => string | undefined;
+  /** An agent file is read when a session opens, so a live session still has
+   *  the old one: server.ts recycles the idle ones after every save. */
+  onConfigWritten?: () => void;
 }
 
-export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: FileRouteDeps): void {
+export function registerFileRoutes(
+  app: Hono,
+  { factory, config, nascentCwd, onConfigWritten }: FileRouteDeps,
+): void {
   // Scope comes from the client as "global" or a project cwd; only cwds Pi
   // already knows (the session list) are accepted — never an arbitrary path.
   const parseScope = async (raw: string | undefined): Promise<ConfigScope | null> => {
@@ -94,6 +100,7 @@ export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: F
     }
     const name = c.req.param("name");
     await config.writeFile(scope, name, body.content, body.expected);
+    onConfigWritten?.();
     return c.json({ ok: true, content: await config.readFile(scope, name) });
   });
 

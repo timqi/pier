@@ -253,6 +253,18 @@ describe("idle eviction", () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it("takes a watched session when the caller says the configuration changed", async () => {
+    await router.ensure(KEY);
+    hub.subscribe("s1", () => {});
+    const opts = { includeWatched: true };
+    // Watching is no longer the exemption; a turn in flight still is.
+    Object.assign(fake.session, { state: "streaming" });
+    expect(await router.evictIdle(0, Date.now(), opts)).toBe(0);
+    Object.assign(fake.session, { state: "idle" });
+    expect(await router.evictIdle(0, Date.now(), opts)).toBe(1);
+    expect(fake.calls).toEqual(["dispose"]);
+  });
+
   it("keeps a session that was used inside the window", async () => {
     await router.ensure(KEY);
     expect(await router.evictIdle(60_000, Date.now() + 30_000)).toBe(0);

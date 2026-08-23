@@ -34,9 +34,12 @@ export function registerInstanceRoutes(
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
+    /** The public URL rides in the prompt a session is opened with, so a live
+     *  session still quotes the old one: server.ts recycles the idle ones. */
+    onSettingsChanged?: () => void;
   },
 ): void {
-  const { settings, updates, secrets, onUnlocked } = deps;
+  const { settings, updates, secrets, onUnlocked, onSettingsChanged } = deps;
 
   // The browser's half of the log. A workbench that threw after the response
   // left the server is otherwise invisible here (ui/report.ts) — this is the
@@ -102,6 +105,8 @@ export function registerInstanceRoutes(
       }
       settings.setModelMenu(menu);
     }
+    // Only the URL: the model menu is read per picker call, not per session.
+    if (body.publicUrl !== undefined) onSettingsChanged?.();
     return c.json(settings.get());
   });
 

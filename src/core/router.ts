@@ -118,12 +118,22 @@ export class Router {
    *
    * Skipped for anything that would notice: a streaming turn, and a session
    * someone is still watching over SSE.
+   *
+   * `includeWatched` is the one caller that may take a watched session too:
+   * configuration a session reads only when it opens has just changed, and the
+   * session most likely to need it is the one open in the tab that changed it.
+   * A turn in flight is still never touched — the exemption that stands is the
+   * one about interrupting work, not the one about being looked at.
    */
-  async evictIdle(ttlMs = IDLE_TTL_MS, now = Date.now()): Promise<number> {
+  async evictIdle(
+    ttlMs = IDLE_TTL_MS,
+    now = Date.now(),
+    { includeWatched = false }: { includeWatched?: boolean } = {},
+  ): Promise<number> {
     let evicted = 0;
     for (const [id, attached] of [...this.bySession]) {
       if (attached.session.state === "streaming") continue;
-      if (this.hub.hasSubscribers(id)) continue;
+      if (!includeWatched && this.hub.hasSubscribers(id)) continue;
       if (now - attached.activeAt < ttlMs) continue;
       this.bySession.delete(id);
       this.forgetKeys(attached.session);

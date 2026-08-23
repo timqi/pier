@@ -38,7 +38,14 @@ function setupFrom(raw: unknown): ProviderSetup | null {
 }
 
 
-export function registerProviderRoutes(app: Hono, providers: ProviderManager): void {
+export function registerProviderRoutes(
+  app: Hono,
+  providers: ProviderManager,
+  /** A session picks its providers up when it opens, so one that is already
+   *  live cannot use what was just configured: server.ts recycles the idle
+   *  ones after every change of credentials or structure. */
+  onProvidersChanged: () => void = () => {},
+): void {
   const flows = new ProviderFlows(providers);
   const configure = async (setup: ProviderSetup) => {
     await providers.setup(setup);
@@ -69,7 +76,11 @@ export function registerProviderRoutes(app: Hono, providers: ProviderManager): v
       if (setup.kind === "custom" && authType === "oauth") {
         return c.json({ error: "custom providers support API-key authentication" }, 400);
       }
-      if (authType === null) return c.json({ ok: true, provider: await configure(setup) });
+      if (authType === null) {
+        const provider = await configure(setup);
+        onProvidersChanged();
+        return c.json({ ok: true, provider });
+      }
 
       const before = (await providers.providers()).find((candidate) => candidate.id === setup.id);
       if (setup.kind === "builtin" && !before?.builtin) {
@@ -82,8 +93,11 @@ export function registerProviderRoutes(app: Hono, providers: ProviderManager): v
         async () => {
           if (!before) requireMethod(await configure(setup), authType);
         },
+        // Runs once the login itself succeeded: the credential is new even
+        // where the structure was already written by `prepare`.
         async () => {
           if (before) await configure(setup);
+          onProvidersChanged();
         },
       );
       return c.json(flow, 202);
@@ -125,6 +139,7 @@ export function registerProviderRoutes(app: Hono, providers: ProviderManager): v
   app.post("/api/providers/:provider/logout", async (c) => {
     try {
       await providers.logout(c.req.param("provider"));
+      onProvidersChanged();
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: String(err) }, 400);
