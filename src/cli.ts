@@ -197,8 +197,8 @@ async function service(action = "status"): Promise<void> {
   if (systemdAction && process.platform !== "linux") {
     process.stderr.write(
       `pier service is systemd, so Linux only — this is ${process.platform}.\n` +
-        `Run "pier" in a terminal, or under whatever supervisor you already use;\n` +
-        `it needs no arguments and keeps its state in $PIER_HOME (~/.pier).\n`,
+        `Run "pier serve" in a terminal, or under whatever supervisor you already\n` +
+        `use; it takes no arguments and keeps its state in $PIER_HOME (~/.pier).\n`,
     );
     process.exit(2);
   }

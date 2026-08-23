@@ -1,7 +1,7 @@
 # Running Pier as a service (Linux, systemd)
 
-Pier is one Node process that binds the loopback. Running it in a terminal is
-a complete installation — nothing below is required to *use* Pier. What systemd
+Pier is one Node process that binds the loopback. Running it in a terminal
+(`pier serve`) is a complete installation — nothing below is required to *use* Pier. What systemd
 adds is the thing a terminal cannot: scheduled tasks fire and IM channels stay
 connected while nobody is logged in.
 
