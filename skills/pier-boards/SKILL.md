@@ -38,18 +38,23 @@ Those four fields are the whole manifest.
 
 `"public": true` serves the board at `/p/<slug>/` **with no password**. Set it
 only if the user asked for a public or shareable board *in this request*;
-otherwise leave it `false`, say the board is private, and mention that Console →
-Boards flips it. Never publish credentials, internal paths, personal data or
-anything the user has not seen.
+otherwise leave it `false` and say the board is private. Never publish personal
+data or anything the user has not seen.
 
-The message announcing the board carries **one clickable link** — a bare path is
-not something a person can open, and a board nobody reached was not delivered.
+Asked to make an existing board public? Flip `"public"` to `true` in
+`board.json` and reply with the `/p/<slug>/` link — that is the whole answer.
+No verification step, no narrating the edit, no restating what the page holds.
+
+The message announcing the board carries **one bare URL** — paste the address
+itself, never `[title](url)`: link labels get mangled or truncated on some chat
+surfaces, and the title is already on the page. No filesystem paths either —
+`…/boards/<slug>/board.json` means nothing to the reader.
 `<pier>/AGENTS.md` gives you the address, so there is nothing to look up:
 
 | The user asked for | Send |
 | --- | --- |
-| a board, nothing about sharing | `[Weekly digest](https://pier.example.com/boards/weekly-digest/)` — behind the Pier password |
-| a **public** board | `[Weekly digest](https://pier.example.com/p/weekly-digest/)` — no password |
+| a board, nothing about sharing | `https://pier.example.com/boards/weekly-digest/` — behind the Pier password; Console → Boards makes it public |
+| a **public** board | `https://pier.example.com/p/weekly-digest/` — no password |
 
 Never both: the pair invites pasting the password-free URL of a board that was
 never meant to leave the workspace, and `/p/<slug>/` 404s unless the manifest
@@ -180,6 +185,10 @@ what makes it read as signal.
 
 ## Rules
 
+- **No secrets, ever.** Tokens, API keys, credentials, internal hostnames and
+  private paths never go into a board — not in the page, not in a `<details>`
+  fold, not in a code sample. A private board is one Console toggle from
+  public, so write every page as if it already were.
 - **Static and self-contained.** Everything the page needs lives under `site/`
   with relative paths. No CDN, no external fonts, no analytics, no `fetch()` —
   a published board is served under a CSP that blocks all of it, so an external
