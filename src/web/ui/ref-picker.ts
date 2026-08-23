@@ -13,6 +13,7 @@ export interface Commit {
   subject: string;
   body?: string;
   author?: string;
+  email?: string;
   at?: number; // epoch ms
 }
 
@@ -27,15 +28,29 @@ interface PointOption {
   subject?: string;
   body?: string;
   author?: string;
+  email?: string;
   at?: number;
 }
 
+/** Absolute local time, seconds included — "when exactly" is the question a
+ *  commit card answers; the rows next to it already carry the relative age. */
+const stamp = (ms: number): string => {
+  const d = new Date(ms);
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
 /** The hover card's text for a commit: message in full, then who and when. */
-export const commitHint = (c: { subject?: string; body?: string; author?: string; at?: number }): string =>
+export const commitHint = (c: { subject?: string; body?: string; author?: string; email?: string; at?: number }): string =>
   [
     c.subject,
     c.body,
-    [c.author, c.at ? new Date(c.at).toLocaleString() : ""].filter(Boolean).join(" · "),
+    [
+      [c.author, c.email ? `<${c.email}>` : ""].filter(Boolean).join(" "),
+      c.at ? stamp(c.at) : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -102,6 +117,10 @@ export function openDiffPicker(
   git: GitRefs,
   current: { base: string; head: string },
   onPick: (base: string, head: string) => void,
+  /** The repo's main line — one row resets the pick back to "that tip ↔ the
+   *  files on disk", which is where the view starts and where you want to be
+   *  again after wandering through commits. */
+  resetBase: string,
 ): void {
   let { base, head } = current;
   const asCommit = (): string => (head && base === `${head}~1` ? head : "");
@@ -110,9 +129,9 @@ export function openDiffPicker(
   const newest = git.commits[0];
   const points = (worktree: boolean): PointOption[] => [
     ...(worktree ? [{ value: "", label: "Working tree", subject: "the files on disk, uncommitted changes included" }] : []),
-    { value: "HEAD", subject: newest?.subject, body: newest?.body, author: newest?.author, at: newest?.at },
+    { ...newest, value: "HEAD" },
     ...git.refs.map((r): PointOption => ({ value: r.name, subject: r.subject })),
-    ...git.commits.map((c): PointOption => ({ value: c.hash, subject: c.subject, body: c.body, author: c.author, at: c.at })),
+    ...git.commits.map((c): PointOption => ({ ...c, value: c.hash })),
   ];
 
   const content = h("div", "flex w-[38rem] max-w-full flex-col");
@@ -167,9 +186,23 @@ export function openDiffPicker(
               }),
             ),
           );
+    // Last row of the compare mode, under both columns: the pick is two values,
+    // so it belongs to neither column.
+    const reset = h("div", "flex-none border-t border-neutral-200",
+      pointRow(
+        { value: resetBase, label: `↺ ${resetBase} ↔ Working tree`, subject: "back to the default: the main line's tip vs the files on disk" },
+        base === resetBase && head === "" ? resetBase : "",
+        () => {
+          base = resetBase;
+          head = "";
+          render();
+          onPick(base, head);
+        },
+      ));
     content.replaceChildren(
       h("div", "flex flex-none items-center gap-1 border-b border-neutral-200 px-2 py-1.5", tab("Compare two points", "compare"), tab("One commit", "commit")),
       body,
+      ...(mode === "compare" ? [reset] : []),
     );
   }
 

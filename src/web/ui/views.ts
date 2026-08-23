@@ -50,6 +50,9 @@ const consoleBtns = new Map<ConsoleName, HTMLElement>();
 // the views themselves keep their tab/selection state.
 let lastActivityConsole: ConsoleName = "activity";
 
+// Where Files was opened from, so its ✕ returns there.
+let filesOrigin: Route | null = null;
+
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
   tasks: "Tasks",
   activity: "Activity",
@@ -74,6 +77,11 @@ export function syncBar(): void {
  *  both address them this way rather than clicking each other's buttons. */
 export function showConsole(name: ConsoleName, arg?: string): void {
   if (name === "tasks" || name === "activity") lastActivityConsole = name;
+  // Switching folders inside Files re-enters the same view: not a new origin.
+  if (name === "files") {
+    const from = parseHash();
+    if (from && !(from.kind === "console" && from.name === "files")) filesOrigin = from;
+  }
   setHash({ kind: "console", name, arg });
   closeDrawer();
   chatVisible = false;
@@ -97,6 +105,20 @@ export const showTasks = (taskId?: string): void => showConsole("tasks", taskId)
 
 /** Entry for the ⋯ menus (session header, project row): browse a cwd. */
 export const showFiles = (dir?: string): void => showConsole("files", dir);
+
+/** Files' ✕. Back to the route it was opened from — a session's chat, or the
+ *  Console view you came from — and the current session when that is unknown
+ *  (a bookmarked or reloaded #/files, where there is no "from"). */
+function closeFiles(): void {
+  const id = deps.currentId();
+  const back: Route | null = filesOrigin ?? (id ? { kind: "session", id } : null);
+  filesOrigin = null;
+  if (back) setHash(back); // onhashchange → applyRoute() does the switching
+  else {
+    history.replaceState(null, "", "#/"); // no session to name; don't let the hash lie
+    showChat();
+  }
+}
 
 export function showChat(): void {
   if (!consoleViews.some(({ view }) => view.visible)) return;
@@ -191,6 +213,7 @@ export function initViews(d: ViewsDeps): void {
         () => [...groupByCwd(deps.sessions()).keys()],
         // Through the router, so Back walks directory switches too.
         (dir) => showConsole("files", dir),
+        closeFiles,
       ),
     },
     {

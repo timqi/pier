@@ -97,13 +97,13 @@ export function registerExplorerRoutes(app: Hono): void {
         return { name: line.slice(0, tab), subject: line.slice(tab + 1) };
       });
     // Unit/record separators, because a body is multi-line by nature.
-    const commits = (await git(root, "log", "-20", "--format=%h\u001f%at\u001f%an\u001f%s\u001f%b\u001e"))
+    const commits = (await git(root, "log", "-20", "--format=%h\u001f%at\u001f%an\u001f%ae\u001f%s\u001f%b\u001e"))
       .split("\u001e")
       .map((r) => r.trimStart())
       .filter(Boolean)
       .map((r) => {
-        const [hash = "", at = "", author = "", subject = "", body = ""] = r.split("\u001f");
-        return { hash, at: Number(at) * 1000, author, subject, body: body.trim() };
+        const [hash = "", at = "", author = "", email = "", subject = "", body = ""] = r.split("\u001f");
+        return { hash, at: Number(at) * 1000, author, email, subject, body: body.trim() };
       });
     return c.json({ branch, refs, commits });
   });

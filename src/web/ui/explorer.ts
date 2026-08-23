@@ -60,6 +60,8 @@ export function createExplorerView(
   projectCwds: () => string[],
   /** Through the router (hash), so Back walks directories too. */
   openDir: (dir: string) => void,
+  /** The ✕: leave the view, back to wherever it was opened from. */
+  close: () => void,
 ): ConsoleView {
   let cwd = "";
   let git: GitInfo = { branch: null, refs: [], commits: [] };
@@ -510,12 +512,20 @@ export function createExplorerView(
     } else {
       picker.title = "Choose what to diff";
     }
-    picker.onclick = () =>
-      openDiffPicker(picker, git, { base, head }, (b, hd) => {
-        base = b;
-        head = hd;
-        void applyRefs();
-      });
+    picker.onclick = async () => {
+      await refreshGit(); // a commit made since the view opened must be pickable
+      openDiffPicker(
+        picker,
+        git,
+        { base, head },
+        (b, hd) => {
+          base = b;
+          head = hd;
+          void applyRefs();
+        },
+        defaultBase(),
+      );
+    };
     let [adds, dels] = [0, 0];
     for (const c of changes.values()) {
       adds += c.add;
@@ -579,10 +589,30 @@ export function createExplorerView(
         })),
         { label: "Browse…", onSelect: () => openBrowser(cwdChip, cwd || undefined, openDir) },
       ]);
+    const closeBtn = h("button", "icon-btn ml-auto", "✕") as HTMLButtonElement;
+    closeBtn.type = "button";
+    closeBtn.title = "Close Files";
+    closeBtn.setAttribute("aria-label", "Close Files");
+    closeBtn.onclick = close;
     header.replaceChildren(
       cwdChip,
       h("span", "truncate font-mono text-[11.5px] text-neutral-400", git.branch ? `⎇ ${git.branch}` : "no git"),
+      closeBtn,
     );
+  }
+
+  /** Refs, commits and the branch move under the view — a commit made in a
+   *  terminal is invisible here and nothing pushes it — so re-read them
+   *  whenever the answer is about to be shown (re-entering the view) or used
+   *  (opening the diff picker). Errors land where load()'s git failure does. */
+  async function refreshGit(): Promise<void> {
+    if (!cwd) return;
+    try {
+      git = await getJson<GitInfo>(api("git", {}));
+      renderHeader(); // the branch may have moved too
+    } catch (err) {
+      viewer.replaceChildren(note(String(err), "text-red-600"));
+    }
   }
 
   /** The base worth drifting from: the repo's main line when it has one. */
@@ -618,7 +648,13 @@ export function createExplorerView(
   return consoleView(root, (arg) => {
     // Any absolute path is addressable; a stale or relative one falls back.
     const next = arg?.startsWith("/") ? arg : cwd || (projectCwds()[0] ?? "");
-    if (next === cwd && tree.childElementCount) return renderHeader(); // back to the view: keep tree + selection
+    if (next === cwd && tree.childElementCount) {
+      // Back to the view: keep tree + selection, but re-read git and the diff —
+      // both moved while it was away.
+      renderHeader();
+      void refreshGit().then(applyRefs);
+      return;
+    }
     cwd = next;
     void load();
   });
