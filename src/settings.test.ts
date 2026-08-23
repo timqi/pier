@@ -28,10 +28,11 @@ describe("SettingsStore", () => {
     const path = dbPath();
     const db = openDb(path);
     const store = new SettingsStore(db);
-    expect(store.get()).toEqual({ publicUrl: "", modelMenu: [] });
+    expect(store.get()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false });
     expect(store.setPublicUrl("https://pier.example.com")).toEqual({
       publicUrl: "https://pier.example.com",
       modelMenu: [],
+      autoUpdate: false,
     });
     // A restart: the connection is gone, the row is not.
     db.close();
@@ -39,6 +40,7 @@ describe("SettingsStore", () => {
     expect(new SettingsStore(reopened).get()).toEqual({
       publicUrl: "https://pier.example.com",
       modelMenu: [],
+      autoUpdate: false,
     });
     reopened.close();
   });

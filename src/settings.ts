@@ -31,6 +31,9 @@ export interface Settings {
   /** The deployment's model advice — pinned models with one line of intent
    *  each. Empty means "no advice": consumers fall back to the catalog. */
   modelMenu: ModelMenuEntry[];
+  /** Let Pier install a newer release of itself while nothing is running.
+   *  Off by default: replacing your own code is the operator's decision. */
+  autoUpdate: boolean;
 }
 
 /**
@@ -89,7 +92,11 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { publicUrl: this.#value("publicUrl") ?? "", modelMenu: this.#menu() };
+    return {
+      publicUrl: this.#value("publicUrl") ?? "",
+      modelMenu: this.#menu(),
+      autoUpdate: this.#value("autoUpdate") === "1",
+    };
   }
 
   #menu(): ModelMenuEntry[] {
@@ -121,6 +128,11 @@ export class SettingsStore {
   /** Same contract: hand this `normalizeModelMenu`'s output, not raw input. */
   setModelMenu(menu: ModelMenuEntry[]): Settings {
     this.#set("modelMenu", JSON.stringify(menu));
+    return this.get();
+  }
+
+  setAutoUpdate(on: boolean): Settings {
+    this.#set("autoUpdate", on ? "1" : "0");
     return this.get();
   }
 

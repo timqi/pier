@@ -54,8 +54,9 @@ export class Router {
   private readonly channels = new Map<string, Channel>();
   /** Who each session last heard from, so a header costs tokens only on news. */
   private readonly senders = new SenderPrefix();
-  /** Set once by a graceful restart (src/drain.ts); never unset — the process
-   *  exits when the drain ends. */
+  /** Set by a graceful restart (src/drain.ts). Usually never unset, because
+   *  the process exits when the drain ends — `endDrain` exists for the one
+   *  caller that drains *speculatively* and may not get to exit. */
   private draining = false;
 
   constructor(
@@ -280,6 +281,14 @@ export class Router {
   /** Refuse new work from every surface; in-flight turns keep running. */
   beginDrain(): void {
     this.draining = true;
+  }
+
+  /** Take work again. The auto-updater closes the gate *before* handing over,
+   *  so a turn cannot slip in behind the idle check — and when the handover
+   *  never happens, a Pier left refusing every message forever would be a far
+   *  worse outcome than the race it was avoiding. */
+  endDrain(): void {
+    this.draining = false;
   }
 
   /** For surfaces that mutate state before dispatching (the web's edit and

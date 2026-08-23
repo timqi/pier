@@ -196,7 +196,18 @@ function fakeSecrets(opts: { unlockError?: string } = {}): SecretsControl & { ca
   };
 }
 
-function setup(cwd = "/tmp", secrets = fakeSecrets()) {
+function setup(
+  cwd = "/tmp",
+  secrets = fakeSecrets(),
+  /** Latest published version, and how (or whether) this instance can take it. */
+  update: {
+    latest?: string;
+    updater?: {
+      apply: () => Promise<"started" | "busy" | "not-installed" | "failed">;
+      problem?: () => string | null;
+    } | null;
+  } = {},
+) {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
@@ -213,14 +224,17 @@ function setup(cwd = "/tmp", secrets = fakeSecrets()) {
   const config = fakeConfig();
   const providers = fakeProviders();
   const settings = new SettingsStore(db);
-  const updates = new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1"));
+  const updates = new UpdateCheck("0.0.1", () => Promise.resolve(update.latest ?? "0.0.1"));
+  const updater = update.updater
+    ? { apply: update.updater.apply, problem: update.updater.problem ?? (() => null) }
+    : null;
   const tasks = new TaskService(new TaskStore(db), factory, router, hub);
   // Composed exactly like main.ts: task routes and web server never import each other.
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
   app.route("/", createServer({
-    factory, router, hub, sessions: state, config, providers, settings, updates, secrets, onUnlocked,
+    factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
   }));
   return { app, session, factory, hub, router, state, config, providers, settings, tasks, secrets, onUnlocked };
@@ -424,9 +438,111 @@ describe("workbench server", () => {
     expect(seen).toHaveBeenCalledOnce();
   });
 
+  it("answers the version badge with a real first check, not 'no idea yet'", async () => {
+    const apply = vi.fn(() => Promise.resolve("started" as const));
+    const { app } = setup("/tmp", fakeSecrets(), { latest: "0.9.0", updater: { apply } });
+    // The whole point of statusNow: a browser loading right after a restart is
+    // told the truth instead of latest: null.
+    expect(await (await app.request("/api/update")).json()).toEqual({
+      current: "0.0.1", latest: "0.9.0", available: true, canApply: true, autoUpdate: false, problem: null,
+    });
+
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ started: true, latest: "0.9.0" });
+    expect(apply).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to apply an update it cannot apply, and says which reason it is", async () => {
+    // Nothing supervises the process: the button is not offered, and the route
+    // behind it says what to type instead.
+    const bare = setup("/tmp", fakeSecrets(), { latest: "0.9.0" });
+    expect((await (await bare.app.request("/api/update")).json() as { canApply: boolean }).canApply).toBe(false);
+    const noService = await bare.app.request("/api/update", { method: "POST" });
+    expect(noService.status).toBe(409);
+    expect(await noService.json()).toEqual({ error: expect.stringContaining("pier update") });
+
+    // Already current: nothing to install, and the updater is never started.
+    const apply = vi.fn(() => Promise.resolve("started" as const));
+    const current = setup("/tmp", fakeSecrets(), { updater: { apply } });
+    expect((await current.app.request("/api/update", { method: "POST" })).status).toBe(409);
+    expect(apply).not.toHaveBeenCalled();
+
+    // The unit is gone under a running Pier: a failure, reported as one.
+    const broken = setup("/tmp", fakeSecrets(), {
+      latest: "0.9.0",
+      updater: { apply: () => Promise.resolve("not-installed" as const) },
+    });
+    const failed = await broken.app.request("/api/update", { method: "POST" });
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({ error: expect.stringContaining("pier service install") });
+  });
+
+  it("answers busy as 409 when another handover or restart owns the gate", async () => {
+    const { app } = setup("/tmp", fakeSecrets(), {
+      latest: "0.9.0",
+      updater: { apply: () => Promise.resolve("busy" as const) },
+    });
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: expect.stringContaining("already in progress") });
+  });
+
+  it("answers 202 rather than holding the response through a long drain", async () => {
+    // The handover drains first, which can take minutes on a busy Pier; a
+    // response held open that long dies at every proxy on the way.
+    vi.useFakeTimers();
+    try {
+      const apply = vi.fn(() => new Promise<never>(() => {}));
+      const { app } = setup("/tmp", fakeSecrets(), { latest: "0.9.0", updater: { apply } });
+      const pending = app.request("/api/update", { method: "POST" });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const res = await pending;
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ started: true, draining: true, latest: "0.9.0" });
+      expect(apply).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a stale updater instead of draining for a handover that cannot happen", async () => {
+    // The fnm case: the recorded Node is gone, so the unit would fail to run.
+    // Reported whether or not an update is pending, and never attempted.
+    const apply = vi.fn(() => Promise.resolve("started" as const));
+    const { app } = setup("/tmp", fakeSecrets(), {
+      latest: "0.9.0",
+      updater: { apply, problem: () => "the node the updater would use is gone" },
+    });
+    expect(await (await app.request("/api/update")).json()).toMatchObject({
+      canApply: true,
+      problem: "the node the updater would use is gone",
+    });
+    const res = await app.request("/api/update", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "the node the updater would use is gone" });
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("stores the auto-update switch and rejects a non-boolean", async () => {
+    const { app, settings } = setup();
+    const put = (autoUpdate: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ autoUpdate }),
+      });
+    expect((await put(true)).status).toBe(200);
+    expect(settings.get().autoUpdate).toBe(true);
+    expect((await put("yes")).status).toBe(400);
+    expect(settings.get().autoUpdate).toBe(true);
+    expect((await put(false)).status).toBe(200);
+    expect(settings.get().autoUpdate).toBe(false);
+  });
+
   it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {
     const { app, settings } = setup();
-    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "", modelMenu: [] });
+    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false });
 
     const put = (publicUrl: unknown) =>
       app.request("/api/settings", {
@@ -436,7 +552,7 @@ describe("workbench server", () => {
       });
     const ok = await put("pier.example.com/");
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: [] });
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: [], autoUpdate: false });
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
 
     expect((await put("not a url")).status).toBe(400);
@@ -457,7 +573,7 @@ describe("workbench server", () => {
     const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hard problems" }];
     const ok = await put(menu);
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: menu });
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: menu, autoUpdate: false });
 
     expect((await put("nope")).status).toBe(400);
     expect((await put([{ provider: "a" }])).status).toBe(400);

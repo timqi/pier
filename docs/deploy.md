@@ -270,11 +270,33 @@ systemctl --user start pier
 ```
 
 For a service install, `pier update` stops Pier first; it does not use the
-graceful `pier restart` path. It snapshots the database to
+graceful `pier restart` path. The Console's **Update now** and the automatic
+path do: both drain (new work refused, running turns finished, the rest
+ledgered for the next boot to report) before the updater unit is started.
+
+Either way the updater snapshots the database to
 `~/.pier/db/pier.db.release.bak` before npm touches the package. This happens for
 every release, including releases with no schema change. If installation or
 backup fails, the updater unit still tries to start the previously installed
 service and reports the failure in its journal.
+
+### Automatic updates
+
+Off by default. Switched on from the version panel, it checks every 15 minutes
+and hands over only when all three hold: the switch is on, a newer release
+exists, and the instance is idle (nothing streaming, no task run in flight).
+systemd only — without the unit there is nothing to hand the install to.
+
+The unit records **absolute** paths to the node and npm that installed Pier,
+because systemd's PATH has neither. That pins it to one directory of one version
+manager: with fnm or nvm, `fnm uninstall v24` deletes the Node that `ExecStart`
+names while the running process survives (Linux keeps a deleted binary mapped).
+Pier checks those paths at boot and before every handover, and reports it in the
+journal and in the version panel rather than letting the next restart fail:
+
+```
+pier service install --force    # re-records the current node and npm
+```
 
 A newer Pier brings its own schema up on the next start: the migrations run in
 one transaction before the port opens, and the version they leave behind is

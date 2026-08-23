@@ -99,12 +99,26 @@ export class TaskService {
     this.definitions.resetNextRuns(now);
     this.callbacks.recover(now);
     this.groups.recover(now);
+    this.runTimer(tickMs);
+  }
+
+  private runTimer(tickMs: number): void {
     this.timer = setInterval(() => {
       // The scheduler's own loop: a throw here would stop nothing (the next
       // tick still fires) and say nothing, so due tasks would just stop.
       void this.tick().catch((err: unknown) => log.error("scheduler tick failed", err));
     }, tickMs);
     this.timer.unref();
+  }
+
+  /** Undo a `pause()` that was not followed by an exit — the auto-updater
+   *  drains before handing over, and a handover that never started must not
+   *  leave the scheduler switched off. Deliberately not `start()`: the boot
+   *  recovery in there would write off runs this process is still running. */
+  unpause(tickMs = 1000): void {
+    if (this.timer) return;
+    this.paused = false;
+    this.runTimer(tickMs);
   }
 
   stop(): void {

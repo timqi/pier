@@ -139,13 +139,24 @@ npm test          # vitest
 
 ## Releases
 
-Pier checks `registry.npmjs.org` in the background and shows `v0.0.1 → 0.0.2`
-in the footer when a release is out. It never updates automatically: this
-process holds provider keys and can run a shell, so rewriting its own code on a
-timer would be a supply-chain surface. `pier update` is a command someone
-types; unlike `pier restart`, it hard-stops the service, writes
-`~/.pier/db/pier.db.release.bak`, updates the npm installation recorded when
-the service was installed, and starts Pier again.
+Pier asks `registry.npmjs.org` at boot and every 30 minutes, and the version
+beside the title turns into `v0.0.1 → 0.0.2` when a release is out. Clicking it
+opens the panel: the source link, **Update now**, and **Update automatically**.
+
+Nothing here installs anything itself — the work is handed to the second
+systemd unit written at install time, because an npm running as a child of the
+process being restarted would be killed by that restart. Off systemd there is
+nothing to hand it to, so the panel says `pier update` instead.
+
+`pier update` typed in a terminal hard-stops the service. The Console and the
+automatic path both **drain first** — new work refused, running turns given
+time to finish, whatever the deadline still had to cut off written to the chat
+it belonged to — and only then hand over. The automatic path additionally waits
+for an idle instance: no turn streaming, no task run in flight.
+
+Either way the updater writes `~/.pier/db/pier.db.release.bak` before npm
+touches the package, updates the npm installation recorded when the service was
+installed, and starts Pier again.
 
 `main` is the only development line. `npm version patch` writes the tag, the
 tag builds and publishes a GitHub Release, and the version in the web footer is

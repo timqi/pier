@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isNewer, isValidVersion, UpdateCheck } from "./update.js";
+import { isNewer, isValidVersion, startAutoUpdate, UpdateCheck } from "./update.js";
 
 describe("isValidVersion", () => {
   it("accepts semver and rejects text that cannot enter a unit or npm argument", () => {
@@ -57,7 +57,7 @@ describe("UpdateCheck", () => {
     check.status();
     expect(fetchLatest).toHaveBeenCalledTimes(1);
 
-    now += 7 * 60 * 60_000;
+    now += 31 * 60_000;
     check.status();
     expect(fetchLatest).toHaveBeenCalledTimes(2);
   });
@@ -67,5 +67,68 @@ describe("UpdateCheck", () => {
     const check = new UpdateCheck("0.1.0", fetchLatest);
     await Promise.all([check.refresh(), check.refresh(), check.refresh()]);
     expect(fetchLatest).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the very first check rather than answering 'no idea'", async () => {
+    // The bug this exists for: a browser loading seconds after a restart was
+    // told latest: null, so a published release looked undetected.
+    const check = new UpdateCheck("0.1.0", () => Promise.resolve("0.2.0"));
+    expect(await check.statusNow()).toEqual({ current: "0.1.0", latest: "0.2.0", available: true });
+  });
+
+  it("serves the cache on every later call, without asking again", async () => {
+    const fetchLatest = vi.fn(() => Promise.resolve("0.2.0"));
+    const check = new UpdateCheck("0.1.0", fetchLatest);
+    await check.statusNow();
+    await check.statusNow();
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("startAutoUpdate", () => {
+  const setup = (over: Partial<{ enabled: boolean; idle: boolean; latest: string }> = {}) => {
+    const apply = vi.fn(() => Promise.resolve("started" as const));
+    const check = new UpdateCheck("0.1.0", () => Promise.resolve(over.latest ?? "0.2.0"));
+    const stop = startAutoUpdate(
+      check,
+      { enabled: () => over.enabled ?? true, idle: () => over.idle ?? true, apply },
+      10,
+    );
+    return { apply, check, stop };
+  };
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 40));
+
+  it("hands over only once all three conditions hold", async () => {
+    const { apply, check, stop } = setup();
+    await check.refresh(); // a warm cache, as a running instance would have
+    await tick();
+    expect(apply).toHaveBeenCalled();
+    stop();
+  });
+
+  it("never applies while the operator has it off", async () => {
+    const { apply, check, stop } = setup({ enabled: false });
+    await check.refresh();
+    await tick();
+    expect(apply).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("never applies while something is running — the updater's stop is hard", async () => {
+    const { apply, check, stop } = setup({ idle: false });
+    await check.refresh();
+    await tick();
+    expect(apply).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("leaves an up-to-date instance alone, and stops when told", async () => {
+    const { apply, check, stop } = setup({ latest: "0.1.0" });
+    await check.refresh();
+    await tick();
+    expect(apply).not.toHaveBeenCalled();
+    stop();
+    await tick();
+    expect(apply).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import type { SessionStateStore } from "./session-state.js";
 import type { SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
-import { registerInstanceRoutes, type SecretsControl } from "./instance.js";
+import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
@@ -60,6 +60,8 @@ export interface WebDeps {
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
   updates: UpdateCheck;
+  /** How this instance applies one; `null`/absent where nothing supervises it. */
+  updater?: UpdateApplier | null;
   secrets: SecretsControl;
   /** Ran after a successful unlock; main.ts starts the channels it held back.
    *  A callback because web/ must not import channels/. */
@@ -84,6 +86,7 @@ export function createServer(
     secrets,
     onUnlocked,
     updates,
+    updater,
     backgroundRuns,
   }: WebDeps,
 ): Hono {
@@ -386,6 +389,7 @@ export function createServer(
   registerInstanceRoutes(app, {
     settings,
     updates,
+    updater,
     secrets,
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),

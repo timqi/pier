@@ -224,6 +224,53 @@ export function install(options: InstallOptions): boolean {
 
 export type UpdateStart = "started" | "not-installed" | "failed";
 
+/**
+ * Why the installed updater could not do its job, or `null` when nothing is
+ * wrong. Checked while Pier is still alive, because the alternative is finding
+ * out at the next restart, from a service that no longer starts.
+ *
+ * The absolute node and npm paths in the unit are deliberate — systemd's PATH
+ * has neither — but they pin the unit to one directory of one version manager.
+ * `fnm install 26 && fnm uninstall 24` leaves ExecStart naming a Node that is
+ * gone; the running process survives (Linux keeps a deleted binary mapped),
+ * so nothing would notice until the update, or the next boot, failed.
+ */
+export function updaterProblem(home = homedir()): string | null {
+  if (!existsSync(unitPath(home))) return null; // not a service install; nothing to check
+  const path = updateUnitPath(home);
+  let unit: string;
+  if (existsSync(path)) {
+    try {
+      unit = readFileSync(path, "utf8");
+    } catch (err) {
+      return `${path} cannot be read: ${String(err)}`;
+    }
+  } else {
+    // A 0.0.1 install: startUpdate generates the updater from the main unit,
+    // so a missing file is only a problem when that bridge cannot either —
+    // and the generated text gets the same executable check below.
+    try {
+      unit = renderUpdateUnit(legacyOptions(home));
+    } catch {
+      return `${UPDATE_UNIT_NAME} is missing — run: pier service install --force`;
+    }
+  }
+  // The one line that names both executables, quoted and escaped by quote().
+  // Unparseable means hand-edited, which is not this function's business to
+  // judge; the escaping is undone before existsSync sees a path (a `%` or `$`
+  // in it would otherwise read as gone on a working updater).
+  const install = unit.match(/^ExecStart="((?:\\.|[^"\r\n])+)" "((?:\\.|[^"\r\n])+)" install -g/m);
+  if (!install) return null;
+  const unescape = (word: string): string =>
+    word.replaceAll("$$", "$").replaceAll("%%", "%").replace(/\\(.)/g, "$1");
+  for (const [what, bin] of [["node", unescape(install[1]!)], ["npm", unescape(install[2]!)]] as const) {
+    if (!existsSync(bin)) {
+      return `the ${what} the updater would use is gone (${bin}) — a version manager removed it; run: pier service install --force`;
+    }
+  }
+  return null;
+}
+
 function runningPierHome(home: string): string {
   const pid = Number(execFileSync(
     "systemctl",

@@ -30,8 +30,9 @@ import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath } from "./paths.js";
 import { Secrets } from "./secrets.js";
+import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
-import { UpdateCheck } from "./update.js";
+import { startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
@@ -159,6 +160,101 @@ void secrets.unlock().then(
   (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
 );
 
+// Replacing Pier is systemd's job, not this process's: the oneshot unit stops
+// the service, snapshots the database, installs and starts it again. Without
+// that unit there is nothing to hand the work to, and the Console says so
+// instead of offering a button that cannot work.
+const updates = new UpdateCheck();
+// Asked once at boot, not lazily on the first page load: a restart is exactly
+// when "am I current?" is worth knowing, and it puts the answer in the journal
+// of a Pier nobody has a browser open on.
+void updates.refresh();
+/**
+ * Hand over, but not onto a running turn. The updater's first act is
+ * `systemctl stop`, i.e. a SIGTERM, which is the *fast* teardown — so anything
+ * that started since the idle check would be killed with no note anywhere. The
+ * gate closes first and the drain waits, exactly as `pier restart` does,
+ * ledger included; only then is the install handed over. A handover that never
+ * starts reopens the gate, because a Pier that silently refuses every message
+ * forever is worse than the race it was avoiding.
+ */
+// Shared restart state. The updater's handover, the SIGUSR2 drain (below) and
+// the final teardown must see each other: without this, two paths drain the
+// same Pier at once, and a failure on one reopens the gate the other still
+// needs shut.
+let handingOver = false;
+let draining = false;
+let shuttingDown = false;
+const takeWorkAgain = (why: string): void => {
+  handingOver = false;
+  log.error(`${why} — taking work again`);
+  // Not ours to reopen: a SIGUSR2 restart or the teardown owns the gate now,
+  // and reopening it would hand new work to a process that is exiting.
+  if (draining || shuttingDown) return;
+  router.endDrain();
+  tasks.unpause();
+  // The drain may have deadline-aborted turns into the ledger. Without the
+  // restart that was supposed to follow, that debt would wait for one days
+  // away (§5b) — so the chats are told now, by the process that cut them off.
+  void deliverLedger(restartLedger, (entry) =>
+    channels.notify(entry.channelId, entry.conversationId, entry.note))
+    .catch((err: unknown) => log.error("restart-note delivery failed", err));
+};
+/** How long the handover has to actually stop us. `systemctl start --no-block`
+ *  returns when the job is *queued*, so "started" is not proof of anything;
+ *  the real outcome is a SIGTERM a second or two later. */
+const HANDOVER_GRACE_MS = 60_000;
+const handOverToUpdater = async (): Promise<UpdateStart> => {
+  // One handover at a time, and never on top of a restart: the Console button,
+  // the auto-update tick and SIGUSR2 would otherwise drain the same Pier
+  // twice, each believing the gate is its own to reopen on failure.
+  if (handingOver || draining || shuttingDown) return "busy";
+  handingOver = true;
+  await drainForRestart({ router, tasks, ledger: restartLedger });
+  const started = startUpdate({ say: (message: string) => log.info(message) });
+  if (started !== "started") {
+    takeWorkAgain(`update not started (${started})`);
+    return started;
+  }
+  // The gate is closed and nothing in this process will open it again, so a
+  // handover that queues and then goes nowhere — npm failed, the unit was
+  // masked, the job sat behind another — would leave Pier alive and refusing
+  // every message with no way back. Unref'd: this must not be what keeps the
+  // process up while systemd is trying to stop it.
+  setTimeout(() => {
+    takeWorkAgain(
+      `still running ${String(HANDOVER_GRACE_MS / 1000)}s after handing over — pier-update.service never stopped Pier` +
+        ` (check: journalctl --user -u pier-update.service -e)`,
+    );
+  }, HANDOVER_GRACE_MS).unref();
+  return started;
+};
+const updater = process.platform === "linux" && existsSync(unitPath())
+  ? { apply: handOverToUpdater, problem: () => updaterProblem() }
+  : null;
+// Unattended only when the operator asked for it *and* nothing is running.
+if (updater) {
+  const problem = updaterProblem();
+  // Loudly, at boot: this is the one moment the operator is looking, and the
+  // alternative is a restart that fails months from now.
+  if (problem) log.warn(`the updater cannot run: ${problem}`);
+  startAutoUpdate(updates, {
+    enabled: () => settings.get().autoUpdate,
+    idle: () => router.busy().length === 0 && tasks.activeRunCount() === 0,
+    apply: async () => {
+      // Re-checked here, not only at boot: a version manager can remove the
+      // recorded Node months into an uptime, and draining for a handover that
+      // cannot happen would take the whole instance down with it.
+      const now = updaterProblem();
+      if (now) {
+        log.error(`auto-update skipped: ${now}`);
+        return "not-installed";
+      }
+      return handOverToUpdater();
+    },
+  });
+}
+
 // Composition happens here so web/ and tasks/ never import each other.
 const app = new Hono();
 // A route that threw would otherwise answer 500 and leave no trace anywhere:
@@ -186,7 +282,8 @@ app.route("/", createServer({
   providers: factory,
   settings,
   secrets,
-  updates: new UpdateCheck(),
+  updates,
+  updater,
   // Unlocked from the Console: start the channels boot held back.
   onUnlocked: () => void startChannels(),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
@@ -211,7 +308,6 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   log.error("unhandled rejection", reason);
 });
-let shuttingDown = false;
 const shutdown = (stopTasks = true): void => {
   // Once: SIGTERM can land while a drain is finishing, and two teardowns
   // racing each other close the same sockets twice.
@@ -244,7 +340,6 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 // next process up. SIGTERM above stays the fast path systemd expects. `on`,
 // not `once`: a second SIGUSR2 with no handler would fall back to Node's
 // default and kill the drain it meant to hurry.
-let draining = false;
 process.on("SIGUSR2", () => {
   if (draining) {
     log.info("SIGUSR2 received again — already draining");

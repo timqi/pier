@@ -59,8 +59,10 @@ src/
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
-  settings.ts  the instance facts a human owns (the public URL, the model menu)
-  update.ts    whether a newer release exists; checking only, never applying
+  settings.ts  the instance facts a human owns (the public URL, the model menu,
+               the auto-update switch)
+  update.ts    the newer release: whether one exists, and when this instance may
+               become it — the install itself is handed to service.ts's unit
   drain.ts     the graceful restart: finish running turns, ledger what the
                deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes

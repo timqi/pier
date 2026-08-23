@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   unitPath,
   updateRuntimePath,
   updateUnitPath,
+  updaterProblem,
 } from "./service.js";
 
 const home = (): string => mkdtempSync(join(tmpdir(), "pier-home-"));
@@ -254,5 +255,67 @@ describe("uninstall", () => {
     expect(existsSync(updateUnitPath(h))).toBe(false);
     expect(calls[0]).toEqual(["systemctl", "--user", "disable", "--now", "pier.service"]);
     expect(said.join(" ")).toMatch(/PIER_HOME is untouched/);
+  });
+});
+
+describe("updaterProblem", () => {
+  it("says nothing when there is no service install and nothing is wrong", () => {
+    const h = home();
+    expect(updaterProblem(h)).toBeNull();
+
+    // A real install records executables that exist — this test's own node and
+    // an npm beside it, so the paths in the unit are true.
+    const npmPath = join(dirname(process.execPath), "npm");
+    if (existsSync(npmPath)) {
+      install(options({ home: h, execPath: process.execPath, npmPath }).opts);
+      expect(updaterProblem(h)).toBeNull();
+    }
+  });
+
+  it("names a Node a version manager removed, rather than waiting for a restart to fail", () => {
+    // The fnm shape: absolute paths into one node-versions directory, which
+    // `fnm uninstall` can delete under a Pier that keeps running.
+    const h = home();
+    install(options({
+      home: h,
+      execPath: "/home/x/.local/share/fnm/node-versions/v24.18.0/installation/bin/node",
+      npmPath: "/home/x/.local/share/fnm/node-versions/v24.18.0/installation/bin/npm",
+    }).opts);
+    expect(updaterProblem(h)).toMatch(/the node the updater would use is gone/);
+    expect(updaterProblem(h)).toMatch(/pier service install --force/);
+  });
+
+  it("names a missing updater unit", () => {
+    const h = home();
+    install(options({ home: h }).opts);
+    rmSync(updateUnitPath(h));
+    expect(updaterProblem(h)).toMatch(/pier-update\.service is missing/);
+  });
+
+  it("undoes the unit's escaping before checking the executables exist", () => {
+    // A path with a % in it is written doubled by quote(); a check that reads
+    // it back raw reported a present node as gone and blocked every update.
+    const h = home();
+    const bin = join(h, "node-%1", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "node"), "");
+    writeFileSync(join(bin, "npm"), "");
+    install(options({ home: h, execPath: join(bin, "node"), npmPath: join(bin, "npm") }).opts);
+    expect(updaterProblem(h)).toBeNull();
+  });
+
+  it("checks a 0.0.1 install through the unit startUpdate would generate", () => {
+    // The missing updater file is not the problem — startUpdate bridges it
+    // from the legacy unit; the gone node that bridge would run is.
+    const h = home();
+    mkdirSync(dirname(unitPath(h)), { recursive: true });
+    writeFileSync(unitPath(h), [
+      "ExecStart=/old/node/bin/node /old/entry.js",
+      "Environment=HOST=127.0.0.1",
+      "Environment=PORT=3141",
+      "",
+    ].join("\n"));
+    expect(updaterProblem(h)).toMatch(/the node the updater would use is gone/);
+    expect(updaterProblem(h)).not.toMatch(/is missing/);
   });
 });

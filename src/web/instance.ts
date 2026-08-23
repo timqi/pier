@@ -8,6 +8,17 @@ import type { SecretsMode } from "../secrets.js";
 import { normalizeModelMenu, normalizePublicUrl, type SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
 
+/** How this instance replaces itself, or `null` where nothing supervises it.
+ *  Injected so web/ never learns what systemd is — and so the install never
+ *  runs as a child of the request that asked for it. */
+export interface UpdateApplier {
+  /** `busy`: another handover or a restart already owns the gate. */
+  apply(): Promise<"started" | "busy" | "not-installed" | "failed">;
+  /** Why applying would fail today, checked before it is attempted. A stale
+   *  updater is invisible until the update that needed it (§5b). */
+  problem(): string | null;
+}
+
 /** The slice of Secrets the routes need; injectable so tests never touch disk
  *  or spawn vt. Never exposes key material — state, mode and the locked reason
  *  are all a browser may see. */
@@ -30,6 +41,9 @@ export function registerInstanceRoutes(
     /** Whether a newer Pier exists; answered from cache, refreshed in the
      *  background. */
     updates: UpdateCheck;
+    /** `null` when no service manager owns this process: the Console then says
+     *  so instead of offering a button that cannot work. */
+    updater?: UpdateApplier | null;
     secrets: SecretsControl;
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
@@ -39,7 +53,12 @@ export function registerInstanceRoutes(
     onSettingsChanged?: () => void;
   },
 ): void {
-  const { settings, updates, secrets, onUnlocked, onSettingsChanged } = deps;
+  const { settings, updates, updater = null, secrets, onUnlocked, onSettingsChanged } = deps;
+  const updateLog = logger("update");
+  // How long POST /api/update may hold its response open. A busy Pier drains
+  // first, which can take minutes, and a response held that long dies at every
+  // proxy on the way (principle 7): past this cap the answer is "draining".
+  const APPLY_REPLY_CAP_MS = 10_000;
 
   // The browser's half of the log. A workbench that threw after the response
   // left the server is otherwise invisible here (ui/report.ts) — this is the
@@ -76,19 +95,74 @@ export function registerInstanceRoutes(
   // it is a credential, and changing it takes the old one.
   app.get("/api/settings", (c) => c.json(settings.get()));
 
-  // Read-only on purpose: the workbench says a newer Pier exists, and applying
-  // it stays `pier update` in a terminal. An HTTP route that installs packages
-  // is a supply-chain surface behind one password.
-  app.get("/api/update", (c) => c.json(updates.status()));
+  // What the version badge reads: the two versions, whether this instance can
+  // do anything about the gap, and whether it is allowed to do it unattended.
+  // `statusNow` so a browser opened seconds after a restart is told the truth
+  // rather than "no idea yet".
+  app.get("/api/update", async (c) =>
+    c.json({
+      ...(await updates.statusNow()),
+      canApply: updater !== null,
+      autoUpdate: settings.get().autoUpdate,
+      // Reported whether or not an update is pending: the repair is the same,
+      // and finding out at the next restart is finding out too late.
+      problem: updater?.problem() ?? null,
+    }));
+
+  // Applying. Nothing is installed here: the work is handed to the service
+  // manager's own oneshot unit, which stops Pier, backs the database up,
+  // installs and starts Pier again — an npm child of this process would be
+  // killed by the very restart it is performing.
+  app.post("/api/update", async (c) => {
+    if (!updater) {
+      return c.json({ error: "no service manager owns this Pier — update it with: pier update" }, 409);
+    }
+    const { current, latest, available } = await updates.statusNow();
+    if (!available) {
+      return c.json({ error: latest === null ? "the registry could not be reached" : `${current} is the latest` }, 409);
+    }
+    const problem = updater.problem();
+    if (problem !== null) {
+      updateLog.error(`update to ${latest} refused: ${problem}`);
+      return c.json({ error: problem }, 409);
+    }
+    const applied = updater.apply().catch((err: unknown): "failed" => {
+      updateLog.error("update handover failed", err);
+      return "failed";
+    });
+    const started = await Promise.race([
+      applied,
+      new Promise<"draining">((resolve) => setTimeout(resolve, APPLY_REPLY_CAP_MS, "draining").unref()),
+    ]);
+    if (started === "draining") {
+      // The handover keeps running behind this response; if it fails later,
+      // main.ts's takeWorkAgain reports it and reopens the gate (§5b).
+      updateLog.info(`updating to ${latest} on the Console's request — waiting for running work to finish`);
+      return c.json({ started: true, draining: true, latest }, 202);
+    }
+    if (started === "busy") {
+      return c.json({ error: "an update or restart is already in progress" }, 409);
+    }
+    if (started !== "started") {
+      updateLog.error(`update to ${latest} refused by the updater: ${started}`);
+      return c.json({
+        error: started === "not-installed"
+          ? "the systemd unit is not installed — run: pier service install"
+          : "the updater could not be started; see the journal",
+      }, 500);
+    }
+    updateLog.info(`updating to ${latest} on the Console's request — Pier stops and starts again`);
+    return c.json({ started: true, latest });
+  });
 
   // Partial on purpose: each surface sends only the setting it edits, and a
   // malformed field is rejected before anything is written.
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null) as
-      | { publicUrl?: unknown; modelMenu?: unknown }
+      | { publicUrl?: unknown; modelMenu?: unknown; autoUpdate?: unknown }
       | null;
-    if (!body || (body.publicUrl === undefined && body.modelMenu === undefined)) {
-      return c.json({ error: "publicUrl or modelMenu required" }, 400);
+    if (!body || (body.publicUrl === undefined && body.modelMenu === undefined && body.autoUpdate === undefined)) {
+      return c.json({ error: "publicUrl, modelMenu or autoUpdate required" }, 400);
     }
     if (body.publicUrl !== undefined) {
       if (typeof body.publicUrl !== "string") return c.json({ error: "publicUrl must be a string" }, 400);
@@ -104,6 +178,10 @@ export function registerInstanceRoutes(
         return c.json({ error: "modelMenu must be [{provider, id, note?}] (≤32 entries)" }, 400);
       }
       settings.setModelMenu(menu);
+    }
+    if (body.autoUpdate !== undefined) {
+      if (typeof body.autoUpdate !== "boolean") return c.json({ error: "autoUpdate must be a boolean" }, 400);
+      settings.setAutoUpdate(body.autoUpdate);
     }
     // Only the URL: the model menu is read per picker call, not per session.
     if (body.publicUrl !== undefined) onSettingsChanged?.();
