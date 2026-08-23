@@ -350,12 +350,11 @@ export class Router {
     // only when the speaker or the clock says something new.
     const prompt = withPrefix(this.senders.next(session.id, msg.sender), text);
     log.debug(
-      `${action} ${keyOf(msg.key)} → session ${session.id}` +
-        ` (${String(prompt.length)} chars, ${String(msg.images?.length ?? 0)} images)`,
+      `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );
     // Turn outcomes flow through the event stream; a rejected call surfaces
     // there too, never as a thrown exception across the seam.
-    session[action](prompt, msg.images).catch((err) => {
+    session[action](prompt).catch((err) => {
       this.report(session.id, msg.key, String(err));
     });
     return { sessionId: session.id };

@@ -8,12 +8,6 @@ export interface ConversationKey {
   conversationId: string; // platform thread/chat id, or web session ui id
 }
 
-/** Base64 image payload (no data: URL prefix), IM- and web-friendly. */
-export interface ImageAttachment {
-  data: string;
-  mimeType: string;
-}
-
 /**
  * What an assistant turn renders as on any surface: markdown plus the
  * next-step labels the agent offered. Every surface renders the labels as
@@ -44,8 +38,12 @@ export interface InboundMessage {
    * (see `core/identity.ts`). Absent for surfaces with one obvious author.
    */
   sender?: { id: string; name: string };
+  /**
+   * The prompt, markdown. A file the sender attached arrives as a trailing
+   * `[name](file:///abs/path)` line (grammar: core/inbound-file.ts, bytes:
+   * core/inbox.ts) — the agent reads it only if it chooses to.
+   */
   text: string;
-  images?: ImageAttachment[];
   /** How to deliver when the agent is busy. "auto" = queue policy decides. */
   mode: "auto" | "steer" | "followUp";
 }
@@ -162,16 +160,6 @@ export interface ActivityStep {
   isError?: boolean;
 }
 
-/**
- * An image in the transcript. Snapshots carry the reference only; the bytes
- * are fetched one by one via image(), so history stays small.
- */
-export interface ImageRef {
-  mimeType: string;
-  /** Ordinal among the transcript's images, in message order. */
-  ordinal: number;
-}
-
 /** A completed conversation turn, for history rendering. */
 export interface ChatTurn {
   role: "user" | "assistant" | "system";
@@ -179,7 +167,6 @@ export interface ChatTurn {
   origin?: SystemInputOrigin; // system inputs only
   meta?: TurnMeta; // assistant turns only
   steps?: ActivityStep[]; // assistant turns only; activity preceding the text
-  images?: ImageRef[]; // attachments of the turn, bytes fetched on demand
 }
 
 /** Completion metadata of an assistant turn (bubble hover hints). */
@@ -219,8 +206,6 @@ export interface AgentSession {
   readonly contextUsage: ContextUsage | undefined;
   /** Completed turns of the persisted transcript (no partial streaming). */
   history(): Promise<ChatTurn[]>;
-  /** Bytes behind a history ImageRef; undefined once the transcript moved on. */
-  image(ordinal: number): Promise<ImageAttachment | undefined>;
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;
@@ -237,9 +222,9 @@ export interface AgentSession {
    * Rejects while streaming.
    */
   rewindToUserTurn(index: number): Promise<void>;
-  prompt(text: string, images?: ImageAttachment[]): Promise<void>; // resolves when the turn settles
-  steer(text: string, images?: ImageAttachment[]): Promise<void>; // interrupt mid-run
-  followUp(text: string, images?: ImageAttachment[]): Promise<void>; // deliver when idle
+  prompt(text: string): Promise<void>; // resolves when the turn settles
+  steer(text: string): Promise<void>; // interrupt mid-run
+  followUp(text: string): Promise<void>; // deliver when idle
   /** Persisted non-user input with provenance. Resolves when the turn the input
    * triggers settles — immediately for a queued mode the recipient is already
    * streaming through. Resolution is not an acceptance signal: callers that

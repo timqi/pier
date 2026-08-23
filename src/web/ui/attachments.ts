@@ -27,7 +27,7 @@ function step(delta: number): void {
   imageFull.src = gallery[shown]!;
 }
 
-/** Full-size view of any chat image (transcript, pending, or attachment). */
+/** Full-size view of any chat image (attachments, either direction). */
 function showImage(src: string): void {
   // An <img>'s .src is absolute; normalize the caller's to match (a data: URL
   // is returned unchanged).
@@ -70,7 +70,7 @@ export function imageRow(bubble: HTMLElement): HTMLElement {
 }
 
 /** Thumbnail in a chat row; click opens the lightbox at this image. */
-export function imageThumb(src: string): HTMLImageElement {
+function imageThumb(src: string): HTMLImageElement {
   const thumb = document.createElement("img");
   thumb.src = src;
   thumb.loading = "lazy";
@@ -115,6 +115,14 @@ export function rewriteFileLinks(markdown: string, sessionId: string): string {
 }
 
 const isFileUrl = (url: string): boolean => /^\/api\/sessions\/[^/]+\/files\?/.test(url);
+
+/** A user-sent file (a core/inbound-file.ts marker), rendered like an agent
+ *  attachment (thumb or card). */
+export function inboundAttachment(sessionId: string, path: string): HTMLElement {
+  const name = basename(path) || "file";
+  const url = fileUrl(sessionId, path);
+  return IMAGE_EXT.has(extOf(name)) ? thumb(url, name) : card(url, name);
+}
 
 /** The `path` query of a files URL — the attachment's name comes from it. */
 function pathOf(url: string): string {

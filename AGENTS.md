@@ -93,7 +93,7 @@ answer is allowed to be "the right things":
 
 | Area | Now | Second look past |
 | --- | --- | --- |
-| `core/` | ~700 | 750 — platform-blind and Pi-blind. The shared presentation vocabulary (reply.ts), the sender prefix (identity.ts) and the seam declarations in types.ts (including the provider seam and its shared validation, which web/ and agent/ must not each own) live here *on purpose*; growth anywhere else means something leaked in |
+| `core/` | ~720 | 780 — platform-blind and Pi-blind. The shared presentation vocabulary (reply.ts), the sender prefix (identity.ts), the inbound-file convention (inbox.ts saves the bytes once, inbound-file.ts owns the marker grammar every surface and the browser share) and the seam declarations in types.ts (including the provider seam and its shared validation, which web/ and agent/ must not each own) live here *on purpose*; growth anywhere else means something leaked in |
 | `channels/` | ~3.0k | 3.5k |
 | `web/` | ~6.3k | 6.5k — largest and least tested. The jump from 5.1k bought the password boundary (auth.ts), secure provider configuration (providers/provider-flows + their UI) and the Settings console; the next growth needs its own sentence |
 | `tasks/` | ~2.4k | 2.5k |

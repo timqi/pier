@@ -5,7 +5,7 @@ REST + SSE, no agent logic. Kept current as the workbench evolves.
 
 ## Backend (`src/web/server.ts`, Hono, ≤ 500 lines)
 
-Budget revised from 300: images, queue control, thinking-level and config
+Budget revised from 300: attachments, queue control, thinking-level and config
 routes each added a thin table row over core, no logic — the file is a route
 table and growing it past 500 means logic is leaking in.
 
@@ -21,8 +21,8 @@ table and growing it past 500 means logic is leaking in.
 | `GET /api/models` | the same list without a session, for pickers |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
 | `GET/POST /api/sessions/:id/thinking` | read or set the reasoning level (history also carries `thinkingLevel`) |
-| `POST /api/sessions/:id/messages` | body `{text, mode, images?}` (`mode` defaults `auto`; images = base64 `{data, mimeType}`, max 8 × 8MB, validated at the seam; text or images required) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
-| `GET /api/sessions/:id/images/:ordinal` | bytes of the ordinal-th transcript image (`content-type` from the message), 404 past the end |
+| `POST /api/sessions/:id/messages` | body `{text, mode}` (`mode` defaults `auto`; non-blank text required — attachments were already uploaded and ride the text as marker lines) → build `InboundMessage` with `key={channelId:"web", conversationId:id}`, hand to core router. Returns 202 immediately. |
+| `POST /api/inbox` | body `{name?, mimeType, data}` (base64, ≤32MB) → saved via `core/inbox.ts` under `$PIER_HOME/inbox/web/`, returns `{path}`; the client appends `[name](file:///path)` to the message it then sends |
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
@@ -108,12 +108,13 @@ per-turn Activity groups):
   tool rows reveal full args + output pre blocks; the thinking row shows its
   latest line collapsed and the full (tail-capped) text expanded.
   Idle-without-turn-end marks the group interrupted.
-- **Images**: paste, drag-drop, or attach via the `+` button → pending
-  thumbnail strip (removable) above the composer; sent as base64 attachments
-  and rendered in the optimistic user row. History carries image *refs*
-  (`{mimeType, ordinal}`); each thumbnail lazily pulls its bytes from
-  `/api/sessions/:id/images/:ordinal` and opens full size in a lightbox.
-  IM channels still get the `[n images]` text marker.
+- **Attachments**: paste, drag-drop, or attach via the `+` button → pending
+  strip (removable) above the composer; on send each file is uploaded to
+  `POST /api/inbox` and its `[name](file:///…)` marker line joins the message
+  text — so the text sent, rendered optimistically and echoed by the
+  `user-message` event are identical. User bubbles strip the marker lines and
+  render them through the same thumbnail/card pipeline as agent attachments
+  (`web/ui/attachments.ts`); images open in the lightbox.
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
 

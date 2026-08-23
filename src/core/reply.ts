@@ -28,7 +28,10 @@ conventions:
 - **Attachments** — link a file you produced by absolute \`file://\` URL:
   \`[report.md](file:///abs/path/report.md)\`. Images render as thumbnails,
   other files as a download card; only files inside the session's working
-  directory are readable.
+  directory or Pier's inbox are readable. The same convention runs inbound: a
+  user message ending in \`[name](file:///…)\` lines is carrying files the
+  sender attached, already saved to disk — read one only when it matters to
+  the task; every read puts its content in your context for good.
 - **Staying silent** — \`<silent>why</silent>\` is stripped, and if nothing else
   remains no message is sent. In a group chat you are handed every message,
   including humans talking to each other: stay silent rather than acknowledge

@@ -20,7 +20,6 @@ import type {
   AgentSession,
   ChatTurn,
   ContextUsage,
-  ImageAttachment,
   ModelRef,
   ProviderAuthEvent,
   ProviderAuthPrompt,
@@ -36,7 +35,6 @@ import type {
 } from "../core/types.js";
 import { logger } from "../log.js";
 import {
-  imageAt,
   toChatTurns,
   toSessionEvents,
   turnMetaAt,
@@ -48,9 +46,6 @@ import type { CredentialStore, ProviderCredential } from "./credentials.js";
 import { curateModels, pinFirst } from "./models.js";
 
 const log = logger("agent");
-
-const toImageContent = (images?: ImageAttachment[]) =>
-  images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
 
 /** Pi's bash tool has no default timeout, so a hung command holds the turn
  * until someone aborts it — nobody is watching in a scheduled task. Kept below
@@ -177,10 +172,6 @@ export class PiSession implements AgentSession {
     return toChatTurns(this.pi.messages as PiMessage[]);
   }
 
-  async image(ordinal: number): Promise<ImageAttachment | undefined> {
-    return imageAt(this.pi.messages as PiMessage[], ordinal);
-  }
-
   async rewindToUserTurn(index: number): Promise<void> {
     const total = (await this.history()).filter((t) => t.role === "user").length;
     // Anchor at the tail: branch entries keep compacted-away history that
@@ -199,19 +190,19 @@ export class PiSession implements AgentSession {
 
   // Async, so a refusal is a rejected promise: the seam promises callers they
   // may only `.catch()` (core/types.ts), and dispatch does exactly that.
-  async prompt(text: string, images?: ImageAttachment[]): Promise<void> {
+  async prompt(text: string): Promise<void> {
     this.live();
-    return this.pi.prompt(text, { images: toImageContent(images) });
+    return this.pi.prompt(text);
   }
 
-  async steer(text: string, images?: ImageAttachment[]): Promise<void> {
+  async steer(text: string): Promise<void> {
     this.live();
-    return this.pi.steer(text, toImageContent(images));
+    return this.pi.steer(text);
   }
 
-  async followUp(text: string, images?: ImageAttachment[]): Promise<void> {
+  async followUp(text: string): Promise<void> {
     this.live();
-    return this.pi.followUp(text, toImageContent(images));
+    return this.pi.followUp(text);
   }
 
   async systemInput(

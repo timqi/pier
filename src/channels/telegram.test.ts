@@ -1,7 +1,10 @@
 // Adapter golden test: a fake Bot API client in, normalized messages and
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
@@ -84,8 +87,11 @@ class FakeClient implements TelegramClient {
     return Promise.resolve();
   }
 
-  downloadPhoto(): Promise<{ data: string; mimeType: string }> {
-    return Promise.resolve({ data: "Zm8=", mimeType: "image/jpeg" });
+  downloaded: string[] = [];
+
+  downloadFile(fileId: string): Promise<{ bytes: Uint8Array; name: string }> {
+    this.downloaded.push(fileId);
+    return Promise.resolve({ bytes: new TextEncoder().encode("fo"), name: `${fileId}.jpg` });
   }
 }
 
@@ -211,7 +217,6 @@ describe("gating", () => {
       senderId: "42",
       sender: { id: "42", name: "Q" },
       text: "ship it",
-      images: [],
       mode: "steer",
     }]);
   });
@@ -560,9 +565,9 @@ describe("update concurrency", () => {
   /** Park the photo download so one chat's handling is measurably slow. */
   function slowPhotos(): () => void {
     let release = (): void => {};
-    client.downloadPhoto = () =>
+    client.downloadFile = () =>
       new Promise((resolve) => {
-        release = () => resolve({ data: "Zm8=", mimeType: "image/jpeg" });
+        release = () => resolve({ bytes: new TextEncoder().encode("fo"), name: "a.jpg" });
       });
     return () => release();
   }
@@ -594,7 +599,7 @@ describe("update concurrency", () => {
     expect(inbound).toEqual([]);
     release();
     await new Promise((r) => setTimeout(r, 10));
-    expect(inbound.map((m) => m.text)).toEqual(["first", "second"]);
+    expect(inbound.map((m) => m.text.split("\n")[0])).toEqual(["first", "second"]);
   });
 });
 
@@ -832,16 +837,47 @@ describe("system notes", () => {
 });
 
 describe("attachments", () => {
-  it("passes the largest photo through as an image attachment", async () => {
+  it("saves the largest photo to the inbox and appends its marker", async () => {
     openGates();
     await feed(message({
       chat: DM,
       caption: "look",
       photo: [{ file_id: "small" }, { file_id: "large" }],
     }));
-    expect(inbound[0]).toMatchObject({
-      text: "look",
-      images: [{ data: "Zm8=", mimeType: "image/jpeg" }],
-    });
+    expect(client.downloaded).toEqual(["large"]);
+    const { text, paths } = splitInboundFiles(inbound[0]!.text);
+    expect(text).toBe("look");
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.startsWith(join(process.env.PIER_HOME!, "inbox", "telegram"))).toBe(true);
+    expect(paths[0]!.endsWith("-large.jpg")).toBe(true);
+    expect(readFileSync(paths[0]!, "utf8")).toBe("fo");
+  });
+
+  it("saves a document under its own filename", async () => {
+    openGates();
+    await feed(message({
+      chat: DM,
+      document: { file_id: "doc1", file_name: "notes.pdf", mime_type: "application/pdf" },
+    }));
+    expect(client.downloaded).toEqual(["doc1"]);
+    expect(splitInboundFiles(inbound[0]!.text).paths[0]).toMatch(/-notes\.pdf$/);
+  });
+
+  it("a failed download becomes a lost line in the prompt, never silence", async () => {
+    openGates();
+    client.downloadFile = () => Promise.reject(new Error("telegram file download: 404"));
+    await feed(message({ chat: DM, caption: "look", photo: [{ file_id: "a" }] }));
+    expect(inbound[0]!.text).toBe("look\n[attachment lost: photo — download failed]");
+    expect(splitInboundFiles(inbound[0]!.text).paths).toEqual([]);
+  });
+
+  it("refuses an oversized document by metadata, without downloading", async () => {
+    openGates();
+    await feed(message({
+      chat: DM,
+      document: { file_id: "big", file_name: "movie.mp4", file_size: 33 * 1024 * 1024 },
+    }));
+    expect(client.downloaded).toEqual([]);
+    expect(inbound[0]!.text).toBe("[attachment lost: movie.mp4 — too large]");
   });
 });

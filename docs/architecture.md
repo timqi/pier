@@ -28,7 +28,8 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 
 ```
 src/
-  core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts, identity.ts
+  core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts, identity.ts,
+               inbox.ts, inbound-file.ts
   agent/       pi.ts (the ONLY file importing @earendil-works/pi-*), events.ts
                (Pi → Pier event translation, no SDK imports), config.ts
                (provider/model files), credentials.ts (sealed store + auth.json
@@ -112,8 +113,11 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   verbatim. Channel-level control that is not a prompt (`/stop`) is wired by
   `channels/runtime.ts`, which owns the router — the `Channel` seam has one
   inbound path and keeps it.
-- `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (all
-  accept optional image attachments), persisted system input, abort, history,
+- `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (text
+  only — an inbound file is saved to `$PIER_HOME/inbox/` by the surface that
+  received it and rides the prompt as a `[name](file:///…)` line; bytes in
+  `core/inbox.ts`, marker grammar in `core/inbound-file.ts`), persisted
+  system input, abort, history,
   model get/set/list, clearQueue, create/fork/resume, and a payload-only
   `subscribe`. Must stay implementable over RPC.
 - `SessionEventPayload` — the only observability currency: turn/text/thinking/

@@ -333,3 +333,8 @@ For off-machine backups, use `sqlite3 ... "VACUUM INTO '…'"` rather than `cp`,
 which under WAL can miss the most recent commits. Pi's own session history lives
 under `~/.pier/pi` (Pier sets `PI_CODING_AGENT_DIR` there unless the environment
 already names another directory).
+
+Inbound chat attachments (photos, uploads from any surface) accumulate under
+`~/.pier/inbox/<channel>/` and are never deleted by Pier — a transcript may
+reference them indefinitely. Prune old files by hand (or a cron) when disk
+matters; a pruned file degrades to a broken attachment link, nothing else.

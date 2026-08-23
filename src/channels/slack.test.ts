@@ -1,7 +1,10 @@
 // Adapter golden test: fake Socket Mode envelopes in, normalized messages and
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
@@ -102,8 +105,8 @@ class FakeClient implements SlackClient {
     return Promise.resolve(userId === "U42" ? "Q" : userId);
   }
 
-  downloadFile(): Promise<{ data: string; mimeType: string }> {
-    return Promise.resolve({ data: "Zm8=", mimeType: "image/png" });
+  downloadFile(): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    return Promise.resolve({ bytes: new TextEncoder().encode("fo"), mimeType: "image/png" });
   }
 
   // Only the agent-facing tool reads history; the adapter never does.
@@ -243,7 +246,6 @@ describe("threads are the conversation", () => {
       senderId: "U42",
       sender: { id: "U42", name: "Q" },
       text: "ship it",
-      images: [],
       mode: "steer",
     }]);
 
@@ -308,7 +310,6 @@ describe("gating", () => {
       senderId: "U42",
       sender: { id: "U42", name: "Q" },
       text: "ship it",
-      images: [],
       mode: "steer",
     }]);
   });
@@ -381,12 +382,50 @@ describe("inbound hygiene", () => {
         text: "look",
         ts: "1702.000100",
         subtype: "file_share",
-        files: [{ id: "F1", mimetype: "image/png", url_private_download: "https://files/x.png" }],
+        files: [{ id: "F1", name: "x.png", mimetype: "image/png", url_private_download: "https://files/x.png" }],
       }),
     );
     expect(dropped).toContain("ignored message subtype channel_join");
     expect(inbound).toHaveLength(1);
-    expect(inbound[0]!.images).toEqual([{ data: "Zm8=", mimeType: "image/png" }]);
+    // The bytes land in the inbox; the prompt carries the marker line.
+    const { text, paths } = splitInboundFiles(inbound[0]!.text);
+    expect(text).toBe("look");
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.startsWith(join(process.env.PIER_HOME!, "inbox", "slack"))).toBe(true);
+    expect(readFileSync(paths[0]!, "utf8")).toBe("fo");
+  });
+
+  it("reads a non-image upload too — nothing is silently dropped", async () => {
+    openGates();
+    await feed(
+      message({
+        text: "",
+        ts: "1702.000200",
+        subtype: "file_share",
+        files: [{ id: "F2", name: "notes.pdf", mimetype: "application/pdf", url_private_download: "https://files/notes.pdf" }],
+      }),
+    );
+    expect(inbound).toHaveLength(1);
+    expect(splitInboundFiles(inbound[0]!.text).paths[0]).toMatch(/-notes\.pdf$/);
+  });
+
+  it("a failed or oversized file becomes a lost line, never silence", async () => {
+    openGates();
+    client.downloadFile = () => Promise.reject(new Error("slack file download: 403"));
+    await feed(
+      message({
+        text: "two",
+        ts: "1702.000300",
+        subtype: "file_share",
+        files: [
+          { id: "F3", name: "a.png", mimetype: "image/png", url_private_download: "https://files/a.png" },
+          { id: "F4", name: "movie.mp4", size: 33 * 1024 * 1024, url_private_download: "https://files/movie.mp4" },
+        ],
+      }),
+    );
+    expect(inbound[0]!.text).toBe(
+      "two\n[attachment lost: a.png — download failed]\n[attachment lost: movie.mp4 — too large]",
+    );
   });
 
   it("deduplicates a redelivered event_id", async () => {

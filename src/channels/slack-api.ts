@@ -14,7 +14,9 @@ const BASE = "https://slack.com/api";
 
 export interface SlackFile {
   id: string;
+  name?: string;
   mimetype?: string;
+  size?: number; // bytes — checked against MAX_INBOUND_BYTES before download
   url_private_download?: string;
   url_private?: string;
 }
@@ -164,7 +166,7 @@ export interface SlackClient {
   history(channel: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
   /** One thread: the parent message followed by its replies, oldest first. */
   replies(channel: string, ts: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
-  downloadFile(file: SlackFile): Promise<{ data: string; mimeType: string }>;
+  downloadFile(file: SlackFile): Promise<{ bytes: Uint8Array; mimeType: string }>;
 }
 
 interface SlackResponse {
@@ -468,7 +470,7 @@ export class SlackApi implements SlackClient {
    * Slack file URLs are private: they need the bot token as a bearer header and
    * answer HTML (a login page) rather than an error when it is missing.
    */
-  async downloadFile(file: SlackFile): Promise<{ data: string; mimeType: string }> {
+  async downloadFile(file: SlackFile): Promise<{ bytes: Uint8Array; mimeType: string }> {
     const url = file.url_private_download ?? file.url_private;
     if (!url) throw new Error("slack file has no private url");
     const res = await fetch(url, {
@@ -476,8 +478,7 @@ export class SlackApi implements SlackClient {
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) throw new Error(`slack file download: ${res.status}`);
-    const mimeType = res.headers.get("content-type")?.split(";")[0] ?? file.mimetype ?? "image/png";
-    if (!mimeType.startsWith("image/")) throw new Error(`slack file is ${mimeType}, not an image`);
-    return { data: Buffer.from(await res.arrayBuffer()).toString("base64"), mimeType };
+    const mimeType = res.headers.get("content-type")?.split(";")[0] ?? file.mimetype ?? "application/octet-stream";
+    return { bytes: new Uint8Array(await res.arrayBuffer()), mimeType };
   }
 }

@@ -7,7 +7,8 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { formatTurnMeta, isSilentReply, silentReason, splitReply } from "../../core/reply.js";
 import { sendJson } from "./api.js";
-import { imageRow, imageThumb, renderAttachments, rewriteFileLinks } from "./attachments.js";
+import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
+import { splitInboundFiles } from "../../core/inbound-file.js";
 import { highlightCode } from "./highlight.js";
 import { $, copyBtn, h } from "./dom.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
@@ -83,7 +84,14 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   const grouped = (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
   const row = h("div", `group relative border-l-2 px-5 ${grouped ? "pt-1 pb-2.5" : "mt-1.5 py-2.5"} ${s.row}`);
   row.dataset.kind = kind;
-  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, text);
+  // A user message may end in inbound-file markers (core/inbound-file.ts):
+  // the typed text stays a plain bubble, the files render as thumbs/cards
+  // below.
+  const files = kind === "user" ? splitInboundFiles(text) : null;
+  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, files?.text ?? text);
+  // Editing resends the raw text, markers included — stripping them from the
+  // bubble must not detach the files from the message.
+  if (files?.paths.length) node.dataset.raw = text;
   if (markdown) renderMarkdown(node, text);
   // flow-root: the step line floats into the message's first line, and a row
   // that doesn't contain its float leaks it over whatever comes next while the
@@ -93,6 +101,11 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
     row.append(steps);
   }
   row.append(node);
+  const sessionId = deps.sessionId();
+  if (files?.paths.length && sessionId) {
+    const strip = imageRow(row);
+    for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
+  }
   if (kind === "user") {
     const edit = h("button", "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex");
     edit.title = "Edit — resends from here; this message and later turns leave the context";
@@ -172,7 +185,7 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
   }
   if (row.querySelector("textarea")) return;
   const area = document.createElement("textarea");
-  area.value = node.textContent ?? ""; // user turns are plain text
+  area.value = node.dataset.raw ?? node.textContent ?? ""; // user turns are plain text
   area.className =
     "block w-full resize-none rounded-md border border-indigo-300 bg-white px-2 py-1 focus:outline-none";
   // Grow with content like the composer does; same 192px cap (max-h-48).
@@ -383,7 +396,6 @@ export function renderSnapshot(
   turns: ChatTurn[],
   state: SessionState,
   backgroundRuns: BackgroundRun[],
-  id: string,
 ): void {
   // Detached run cards are placed where the run entered the conversation, not
   // at the end of the transcript: a reload must not sweep every card a session
@@ -416,7 +428,7 @@ export function renderSnapshot(
       // down to the end of the conversation on the next reload.
       placeRuns([...unplacedRuns.keys()].filter((run) => steps.some((s) => s.output?.includes(run))));
     }
-    if (!t.text && !t.images?.length) continue;
+    if (!t.text) continue;
     if (t.role === "system" && t.origin) {
       // Launched elsewhere (cron, another session, an IM turn): the callback
       // that delivered it is the earliest place it can be shown. A batched one
@@ -426,14 +438,8 @@ export function renderSnapshot(
       continue;
     }
     // meta is assistant-only (core/types.ts), so plain turns need no hint.
-    const bubble =
-      t.role === "assistant"
-        ? appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant)
-        : appendTurn(t.role, t.text);
-    // Refs only in the snapshot: each thumbnail pulls its own bytes.
-    for (const img of t.images ?? []) {
-      imageRow(bubble).append(imageThumb(`/api/sessions/${id}/images/${img.ordinal}`));
-    }
+    if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
+    else appendTurn(t.role, t.text);
   }
   // Whatever is left never appeared in the transcript at all — the bottom is
   // the only honest place for it.

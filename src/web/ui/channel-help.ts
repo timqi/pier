@@ -19,7 +19,7 @@ import { button, helpBadge, withControl } from "./form.js";
  *    the scope would be dead weight.
  *  - no `reactions:read` — receipts only ever add and remove, never read.
  *  - no `commands` — commands are bare words, not slash commands.
- *  - no `files:write` — Pier reads inbound images and uploads nothing.
+ *  - no `files:write` — Pier reads inbound files and uploads nothing.
  */
 const SLACK_MANIFEST = {
   display_information: {
@@ -52,7 +52,7 @@ const SLACK_MANIFEST = {
         "mpim:read",
         "mpim:write",
         "users:read", // users.info, to name a bound user
-        "files:read", // download inbound images
+        "files:read", // download inbound files
       ],
     },
   },

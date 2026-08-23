@@ -1,12 +1,19 @@
-// The composer: input + drafts, pending image strip, send semantics, and the
-// pending queue panel. Owns the optimistic user-turn ledger that main.ts
+// The composer: input + drafts, pending attachment strip, send semantics, and
+// the pending queue panel. Owns the optimistic user-turn ledger that main.ts
 // reconciles against `user-message` events.
 
 import { sendJson } from "./api.js";
 import { $, h } from "./dom.js";
-import { imageRow, imageThumb } from "./attachments.js";
 import { appendTurn, scrollBottom, turnsPane } from "./chat.js";
-import type { ImageAttachment, SessionState } from "../../core/types.js";
+import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
+import type { SessionState } from "../../core/types.js";
+
+/** A file picked but not yet sent; uploaded to the inbox on send. */
+interface PendingFile {
+  data: string; // base64
+  mimeType: string;
+  name?: string; // absent for a pasted screenshot — the server derives one
+}
 
 /** Everything the composer needs from the orchestrator (main.ts). */
 export interface ComposerDeps {
@@ -33,7 +40,7 @@ const imageStrip = $("#image-strip");
 const attachInput = $<HTMLInputElement>("#attach-input");
 
 let queueHasRows = false;
-let pendingImages: ImageAttachment[] = [];
+let pendingFiles: PendingFile[] = [];
 // Texts already rendered optimistically, awaiting their user-message event so
 // the same turn isn't drawn twice.
 let optimisticUserTexts: string[] = [];
@@ -106,40 +113,69 @@ export function renderQueue(steering: string[], followUp: string[]): void {
   );
 }
 
-// --- pending image strip ---------------------------------------------------------
+// --- pending attachment strip ------------------------------------------------------
 
-function renderImageStrip(): void {
-  imageStrip.classList.toggle("hidden", pendingImages.length === 0);
-  imageStrip.classList.toggle("flex", pendingImages.length > 0);
+const MAX_FILES = 8;
+
+function renderFileStrip(): void {
+  imageStrip.classList.toggle("hidden", pendingFiles.length === 0);
+  imageStrip.classList.toggle("flex", pendingFiles.length > 0);
   imageStrip.replaceChildren(
-    ...pendingImages.map((img, i) => {
-      const thumb = document.createElement("img");
-      thumb.src = `data:${img.mimeType};base64,${img.data}`;
-      thumb.className = "h-16 w-16 rounded-md border border-neutral-200 object-cover";
+    ...pendingFiles.map((f, i) => {
+      const body = f.mimeType.startsWith("image/")
+        ? Object.assign(document.createElement("img"), {
+            src: `data:${f.mimeType};base64,${f.data}`,
+            className: "h-16 w-16 rounded-md border border-neutral-200 object-cover",
+          })
+        : h("span", "flex h-16 max-w-40 items-center truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 text-[12px] text-neutral-700", f.name ?? "file");
       const remove = h("button", "absolute -right-1.5 -top-1.5 h-4 w-4 cursor-pointer rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", "×");
       remove.onclick = () => {
-        pendingImages.splice(i, 1);
-        renderImageStrip();
+        pendingFiles.splice(i, 1);
+        renderFileStrip();
       };
-      return h("div", "relative", thumb, remove);
+      return h("div", "relative", body, remove);
     }),
   );
 }
 
-function addImageFile(file: File): void {
-  if (!file.type.startsWith("image/") || pendingImages.length >= 8) return;
+function addFile(file: File): void {
+  // A refused file says so (5b) — a picker that swallows picks reads as broken.
+  if (pendingFiles.length >= MAX_FILES) {
+    appendTurn("error", `attachment limit is ${MAX_FILES} files per message`);
+    return;
+  }
+  if (file.size > MAX_INBOUND_BYTES) {
+    appendTurn("error", `${file.name || "file"} is too large (32MB max)`);
+    return;
+  }
   const reader = new FileReader();
   reader.onload = () => {
     const url = reader.result as string;
-    pendingImages.push({ data: url.slice(url.indexOf(",") + 1), mimeType: file.type });
-    renderImageStrip();
+    pendingFiles.push({
+      data: url.slice(url.indexOf(",") + 1),
+      mimeType: file.type || "application/octet-stream",
+      name: file.name || undefined,
+    });
+    renderFileStrip();
   };
   reader.readAsDataURL(file);
 }
 
-/** Mirrors the agent seam's user-message text so reconcile can match on it. */
-const imageMarker = (text: string, images: number): string =>
-  images ? `${text}${text ? " " : ""}[${images} image${images > 1 ? "s" : ""}]` : text;
+/**
+ * Upload files to the inbox and return their marker lines — built with the
+ * shared grammar (core/inbound-file.ts), so the text we send and render
+ * optimistically is exactly the text every other surface will see.
+ */
+async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
+  const markers: string[] = [];
+  for (const f of files) {
+    const res = await sendJson("/api/inbox", f);
+    if (!res.ok) return null;
+    const { path } = (await res.json()) as { path: string };
+    markers.push(fileMarker(path));
+  }
+  return markers;
+}
 
 // --- composer drafts -------------------------------------------------------------------
 // One draft per session, in localStorage only: switching sessions must not
@@ -158,8 +194,8 @@ export function saveDraft(): void {
 export function restoreDraft(id: string): void {
   input.value = localStorage.getItem(draftKey(id)) ?? "";
   autosize();
-  pendingImages = [];
-  renderImageStrip();
+  pendingFiles = [];
+  renderFileStrip();
 }
 
 /** Single-line by default; grows with content, icons stay on the bottom row. */
@@ -170,41 +206,63 @@ function autosize(): void {
 
 // --- sending ---------------------------------------------------------------------------
 
+let sending = false; // uploads await; a second Enter meanwhile must not double-send
+
 /** `label` sends that text instead of the composer's — a next-step button
  *  click is a side action and must not consume the user's unsent draft. */
 export async function send(mode: "auto" | "steer", label?: string): Promise<void> {
-  const text = (label ?? input.value).trim();
-  const images = label === undefined ? pendingImages : [];
+  const typed = (label ?? input.value).trim();
+  const files = label === undefined ? pendingFiles : [];
   const id = deps.sessionId();
-  if ((!text && images.length === 0) || !id) return;
-  const startsTurn = deps.sessionState() === "idle" && mode === "auto";
+  if ((!typed && files.length === 0) || !id) return;
   if (label === undefined) {
+    if (sending) return;
+    sending = true;
+    // Cleared before any await: whatever is typed while an upload runs is a
+    // new draft, not collateral of this send.
     input.value = "";
     autosize();
-    saveDraft(); // sent text is no longer a draft
-    pendingImages = [];
-    renderImageStrip();
+    saveDraft();
+    pendingFiles = [];
+    renderFileStrip();
   }
-  if (startsTurn) deps.setState("streaming");
-  else updateComposer();
-  // Optimistic: a fresh prompt (or a steer) reads as a user turn; only a
-  // message sent into an existing run waits for the queue-state snapshot.
-  if (startsTurn || mode === "steer") {
-    optimisticUserTexts.push(imageMarker(text, images.length));
-    const bubble = appendTurn("user", text);
-    for (const img of images) {
-      imageRow(bubble).append(imageThumb(`data:${img.mimeType};base64,${img.data}`));
+  try {
+    // Files first: their markers are part of the message text, so the upload
+    // must land before the text exists.
+    let markers: string[] = [];
+    if (files.length) {
+      const uploaded = await uploadFiles(files);
+      if (uploaded === null) {
+        appendTurn("error", "attachment upload failed");
+        // Give the message back — merged with anything typed meanwhile.
+        input.value = [typed, input.value.trim()].filter(Boolean).join("\n");
+        autosize();
+        saveDraft();
+        pendingFiles = files;
+        renderFileStrip();
+        return;
+      }
+      markers = uploaded;
     }
-    scrollBottom(true);
-  }
-  const res = await sendJson(`/api/sessions/${id}/messages`, {
-    text,
-    mode,
-    images: images.length ? images : undefined,
-  });
-  if (!res.ok) {
-    appendTurn("error", `send failed: ${res.status}`);
-    await deps.reload(id);
+    const text = [typed, ...markers].filter(Boolean).join("\n");
+    const startsTurn = deps.sessionState() === "idle" && mode === "auto";
+    if (startsTurn) deps.setState("streaming");
+    else updateComposer();
+    // Optimistic: a fresh prompt (or a steer) reads as a user turn; only a
+    // message sent into an existing run waits for the queue-state snapshot.
+    // appendTurn renders the marker lines as attachment thumbs/cards itself.
+    if (startsTurn || mode === "steer") {
+      optimisticUserTexts.push(text);
+      appendTurn("user", text);
+      scrollBottom(true);
+    }
+    const res = await sendJson(`/api/sessions/${id}/messages`, { text, mode });
+    if (!res.ok) {
+      appendTurn("error", `send failed: ${res.status}`);
+      await deps.reload(id);
+    }
+  } finally {
+    if (label === undefined) sending = false;
   }
 }
 
@@ -264,12 +322,12 @@ export function initComposer(d: ComposerDeps): void {
       void send("auto");
     }
   };
-  // Paste / drop / picker → pending image strip. Pasted text is trimmed: copied
-  // snippets drag along leading/trailing blank lines nobody wants in a prompt.
+  // Paste / drop / picker → pending attachment strip. Pasted text is trimmed:
+  // copied snippets drag along blank lines nobody wants in a prompt.
   input.onpaste = (ev) => {
     for (const item of ev.clipboardData?.items ?? []) {
       const file = item.kind === "file" ? item.getAsFile() : null;
-      if (file) addImageFile(file);
+      if (file) addFile(file);
     }
     const pasted = ev.clipboardData?.getData("text/plain") ?? "";
     const trimmed = pasted.trim();
@@ -282,11 +340,11 @@ export function initComposer(d: ComposerDeps): void {
   turnsPane.ondragover = (ev) => ev.preventDefault();
   turnsPane.ondrop = (ev) => {
     ev.preventDefault();
-    for (const file of ev.dataTransfer?.files ?? []) addImageFile(file);
+    for (const file of ev.dataTransfer?.files ?? []) addFile(file);
   };
   $("#attach").onclick = () => attachInput.click();
   attachInput.onchange = () => {
-    for (const file of attachInput.files ?? []) addImageFile(file);
+    for (const file of attachInput.files ?? []) addFile(file);
     attachInput.value = "";
   };
   updateComposer();

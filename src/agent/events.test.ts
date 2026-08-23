@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageAt, toChatTurns, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
+import { toChatTurns, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
 
 describe("toSessionEvents", () => {
   const cases: { name: string; input: PiEvent; expected: unknown[] }[] = [
@@ -204,25 +204,23 @@ describe("toChatTurns", () => {
     ]);
   });
 
-  it("numbers attachments as refs and resolves them back to bytes", () => {
+  it("renders only the text of a legacy message with inline image blocks", () => {
+    // Old transcripts carry base64 image blocks from before the inbox model;
+    // they are simply not rendered — the text still is.
     const messages: PiMessage[] = [
       {
         role: "user",
         content: [
           { type: "text", text: "look" },
-          { type: "image", data: "AAA", mimeType: "image/png" },
+          { type: "image" },
         ],
       },
       { role: "assistant", content: [{ type: "text", text: "ok" }] },
-      { role: "user", content: [{ type: "image", data: "BBB", mimeType: "image/jpeg" }] },
     ];
     expect(toChatTurns(messages)).toEqual([
-      { role: "user", text: "look", images: [{ mimeType: "image/png", ordinal: 0 }] },
+      { role: "user", text: "look" },
       { role: "assistant", text: "ok" },
-      { role: "user", text: "", images: [{ mimeType: "image/jpeg", ordinal: 1 }] },
     ]);
-    expect(imageAt(messages, 1)).toEqual({ data: "BBB", mimeType: "image/jpeg" });
-    expect(imageAt(messages, 2)).toBeUndefined();
   });
 });
 

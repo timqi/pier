@@ -27,10 +27,11 @@ import type {
   AgentReply,
   Channel,
   ConversationKey,
-  ImageAttachment,
   InboundMessage,
   SystemInputOrigin,
 } from "../core/types.js";
+import { saveInbound } from "../core/inbox.js";
+import { fileMarker, lostMarker, MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
@@ -319,7 +320,7 @@ export class SlackChannel implements Channel {
     const ts = event.ts;
     if (!ts) return this.log("message event without a ts, dropped");
     const raw = (event.text ?? "").trim();
-    const files = (event.files ?? []).filter((f) => f.mimetype?.startsWith("image/"));
+    const files = event.files ?? [];
     if (!raw && !files.length) return;
 
     const { kind } = await this.directory.channel(this.api, channel, event);
@@ -355,7 +356,7 @@ export class SlackChannel implements Channel {
 
     // Downloading only past the gate: an unauthorized sender must not be able
     // to make the bot pull bytes on their behalf.
-    const images = await this.images(files);
+    const markers = await this.saveAttachments(files);
     this.receipts.mark(here.conversationId, channel, ts);
     // IM messages steer by default: a follow-up that waits for the turn to end
     // is the wrong default when the human is watching a 👀 in a thread.
@@ -365,8 +366,7 @@ export class SlackChannel implements Channel {
       // A Slack thread is many people talking into one session, so the agent is
       // told who spoke — and the id, which is what a mention needs.
       sender: { id: event.user, name: await this.directory.user(this.api, event.user) },
-      text,
-      images,
+      text: [text, ...markers].filter(Boolean).join("\n"),
       mode: "steer",
     });
   }
@@ -537,16 +537,26 @@ export class SlackChannel implements Channel {
     return name ?? channel;
   }
 
-  private async images(files: SlackFile[]): Promise<ImageAttachment[]> {
-    const out: ImageAttachment[] = [];
+  /** Save uploads to the inbox; each becomes a prompt line — a failed one
+   *  becomes a lost-marker line, never silence (5b). */
+  private async saveAttachments(files: SlackFile[]): Promise<string[]> {
+    const markers: string[] = [];
     for (const file of files) {
+      // Metadata check before the fetch: any type is welcome, but a movie
+      // buffered whole into memory is not.
+      if (file.size !== undefined && file.size > MAX_INBOUND_BYTES) {
+        markers.push(lostMarker(file.name ?? "attachment", "too large"));
+        continue;
+      }
       try {
-        out.push(await this.api.downloadFile(file));
+        const { bytes, mimeType } = await this.api.downloadFile(file);
+        markers.push(fileMarker(await saveInbound(this.id, file.name, mimeType, bytes)));
       } catch (err) {
         this.log(`file download failed: ${String(err)}`);
+        markers.push(lostMarker(file.name ?? "attachment", "download failed"));
       }
     }
-    return out;
+    return markers;
   }
 
   // --- outbound --------------------------------------------------------------

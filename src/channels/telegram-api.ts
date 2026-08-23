@@ -37,6 +37,9 @@ export interface TgMessage {
   caption?: string;
   reply_to_message?: TgMessage;
   photo?: { file_id: string; file_size?: number }[];
+  /** A non-photo attachment (sent as "File"); photos compressed by Telegram
+   *  arrive in `photo` instead. */
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   /** Telegram echoes the inline keyboard back on the message it belongs to. */
   reply_markup?: InlineKeyboard;
 }
@@ -92,7 +95,8 @@ export interface TelegramClient {
   createForumTopic(chatId: string | number, name: string): Promise<{ message_thread_id: number }>;
   /** `text` shows as a toast — the way to answer a tap without a message. */
   answerCallbackQuery(id: string, text?: string): Promise<void>;
-  downloadPhoto(fileId: string): Promise<{ data: string; mimeType: string }>;
+  /** Bytes of any file_id; `name` is the basename Telegram stored it under. */
+  downloadFile(fileId: string): Promise<{ bytes: Uint8Array; name: string }>;
 }
 
 export class TelegramApi implements TelegramClient {
@@ -167,15 +171,14 @@ export class TelegramApi implements TelegramClient {
     await this.call("answerCallbackQuery", { callback_query_id: id, text });
   }
 
-  async downloadPhoto(fileId: string): Promise<{ data: string; mimeType: string }> {
+  async downloadFile(fileId: string): Promise<{ bytes: Uint8Array; name: string }> {
     const file = await this.call<{ file_path?: string }>("getFile", { file_id: fileId });
     if (!file.file_path) throw new Error("telegram getFile: no file_path");
     const res = await fetch(`${BASE}/file/bot${this.token}/${file.file_path}`, {
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) throw new Error(`telegram file download: ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const mimeType = file.file_path.endsWith(".png") ? "image/png" : "image/jpeg";
-    return { data: buf.toString("base64"), mimeType };
+    const name = file.file_path.split("/").pop() || "file";
+    return { bytes: new Uint8Array(await res.arrayBuffer()), name };
   }
 }

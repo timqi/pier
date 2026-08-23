@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
@@ -11,7 +11,6 @@ import type {
   ChatTurn,
   ConfigScope,
   ConfigStore,
-  ImageAttachment,
   ModelRef,
   ProviderManager,
   SessionEventPayload,
@@ -72,17 +71,12 @@ function fakeSession(id: string): AgentSession & {
     emit: (p: SessionEventPayload) => listeners.forEach((fn) => fn(p)),
     calls,
     history: async (): Promise<ChatTurn[]> => [
-      { role: "user", text: "hi", images: [{ mimeType: "image/png", ordinal: 0 }] },
+      { role: "user", text: "hi" },
       { role: "assistant", text: "hello" },
     ],
-    image: async (ordinal: number) =>
-      ordinal === 0 ? { data: Buffer.from("png-bytes").toString("base64"), mimeType: "image/png" } : undefined,
-    prompt: async (t: string, imgs?: ImageAttachment[]) =>
-      void calls.push(`prompt:${t}${imgs ? `+${imgs.length}img` : ""}`),
-    steer: async (t: string, imgs?: ImageAttachment[]) =>
-      void calls.push(`steer:${t}${imgs ? `+${imgs.length}img` : ""}`),
-    followUp: async (t: string, imgs?: ImageAttachment[]) =>
-      void calls.push(`followUp:${t}${imgs ? `+${imgs.length}img` : ""}`),
+    prompt: async (t: string) => void calls.push(`prompt:${t}`),
+    steer: async (t: string) => void calls.push(`steer:${t}`),
+    followUp: async (t: string) => void calls.push(`followUp:${t}`),
     systemInput: async (text, origin, mode) => {
       calls.push(`systemInput:${origin.kind}:${mode}:${text}`);
     },
@@ -340,14 +334,33 @@ describe("workbench server", () => {
     expect(seen).toHaveBeenCalledOnce();
   });
 
-  it("serves a transcript image by ordinal, 404 past the end", async () => {
+  it("accepts an inbox upload and refuses a malformed one", async () => {
     const { app } = setup();
-    const res = await app.request("/api/sessions/s1/images/0");
+    const res = await app.request("/api/inbox", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "shot.png", mimeType: "image/png", data: Buffer.from("png-bytes").toString("base64") }),
+    });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("image/png");
-    expect(await res.text()).toBe("png-bytes");
-    expect((await app.request("/api/sessions/s1/images/1")).status).toBe(404);
-    expect((await app.request("/api/sessions/s1/images/-1")).status).toBe(400);
+    const { path } = (await res.json()) as { path: string };
+    expect(path.startsWith(join(process.env.PIER_HOME!, "inbox", "web"))).toBe(true);
+    expect(path.endsWith("-shot.png")).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe("png-bytes");
+
+    const bad = await app.request("/api/inbox", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mimeType: "image/png" }), // no data
+    });
+    expect(bad.status).toBe(400);
+
+    // Buffer.from would "decode" this garbage to bytes; the seam must not.
+    const garbage = await app.request("/api/inbox", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mimeType: "image/png", data: "!!!!" }),
+    });
+    expect(garbage.status).toBe(400);
   });
 
   it("serves agent attachments from the session cwd, and nothing outside it", async () => {
@@ -366,6 +379,15 @@ describe("workbench server", () => {
     expect((await app.request(`${url(join(root, "report.md"))}&download=1`)).headers.get("content-disposition"))
       .toBe("attachment; filename*=UTF-8''report.md");
 
+    // A file in Pier's inbox (an inbound user attachment) is also served.
+    const inbox = join(process.env.PIER_HOME!, "inbox", "web");
+    mkdirSync(inbox, { recursive: true });
+    const sent = join(inbox, "1-ab-sent.txt");
+    writeFileSync(sent, "from user");
+    const fromInbox = await app.request(url(sent));
+    expect(fromInbox.status).toBe(200);
+    expect(await fromInbox.text()).toBe("from user");
+
     // Traversal, symlink escape, relative paths, missing file: all refused.
     expect((await app.request(url(outside))).status).toBe(404);
     expect((await app.request(url(join(root, "..", "..", "etc", "passwd")))).status).toBe(404);
@@ -383,7 +405,7 @@ describe("workbench server", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       turns: [
-        { role: "user", text: "hi", images: [{ mimeType: "image/png", ordinal: 0 }] },
+        { role: "user", text: "hi" },
         { role: "assistant", text: "hello" },
       ],
       lastSeq: 1,
@@ -880,34 +902,6 @@ describe("workbench server", () => {
     expect(res.status).toBe(400);
   });
 
-  it("passes image attachments through to the session", async () => {
-    const { app, session } = setup();
-    const img = { data: "aGVsbG8=", mimeType: "image/png" };
-    const res = await app.request("/api/sessions/s1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "look", images: [img] }),
-    });
-    expect(res.status).toBe(202);
-    expect(session.calls).toEqual(["prompt:look+1img"]);
-  });
-
-  it("accepts image-only messages and rejects malformed images", async () => {
-    const { app, session } = setup();
-    const ok = await app.request("/api/sessions/s1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "", images: [{ data: "aGVsbG8=", mimeType: "image/jpeg" }] }),
-    });
-    expect(ok.status).toBe(202);
-    expect(session.calls).toEqual(["prompt:+1img"]);
-    const bad = await app.request("/api/sessions/s1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: "x", images: [{ data: "a", mimeType: "text/html" }] }),
-    });
-    expect(bad.status).toBe(400);
-  });
 
   it("edits a user turn: rewind, then re-dispatch the new text", async () => {
     const { app, session } = setup();

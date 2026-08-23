@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, resolve, sep } from "node:path";
 import type { Context, Env, Hono } from "hono";
 import type { AgentFactory, ConfigScope, ConfigStore } from "../core/types.js";
+import { INBOX_DIR } from "../core/inbox.js";
 
 // Content types for the attachment route. Anything unlisted downloads as
 // bytes — guessing a type we can't vouch for is how a file starts executing.
@@ -109,24 +110,30 @@ export function registerFileRoutes(app: Hono, { factory, config, nascentCwd }: F
     return c.json({ content: await config.readResource(scope, kind, name) });
   });
 
-  /** Real path of a file a session may expose: inside its cwd, nothing else. */
+  /** Real path of a file a session may expose: inside its cwd or the inbox
+   *  (where inbound user attachments land — core/inbox.ts), nothing else. */
   const resolveFile = async (id: string, raw: string): Promise<string | null> => {
     const cwd = nascentCwd(id) ?? (await factory.list()).find((s) => s.id === id)?.cwd;
     if (!cwd || !isAbsolute(raw)) return null;
     try {
       // realpath both ends, so neither `..` nor a symlink can step outside.
-      const root = await realpath(cwd);
-      const target = await realpath(resolve(root, raw));
-      if (target !== root && !target.startsWith(root + sep)) return null;
+      const roots = [await realpath(cwd)];
+      try {
+        roots.push(await realpath(INBOX_DIR));
+      } catch {
+        /* no inbox yet — nothing was ever uploaded */
+      }
+      const target = await realpath(resolve(roots[0]!, raw));
+      if (!roots.some((root) => target === root || target.startsWith(root + sep))) return null;
       return (await stat(target)).isFile() ? target : null;
     } catch {
       return null; // missing, unreadable, or not a file
     }
   };
 
-  // Agent attachments: the agent links a file it produced (`file:///abs/path`)
-  // and the client fetches the bytes here — read-only, and only from within
-  // the session's own working directory.
+  // Attachments, both directions: the agent links a file it produced, the
+  // chat renders a file the user sent — the client fetches the bytes here,
+  // read-only, and only from the session's own cwd or the inbox.
   app.get("/api/sessions/:id/files", async (c) => {
     const raw = c.req.query("path");
     if (!raw) return c.json({ error: "path required" }, 400);

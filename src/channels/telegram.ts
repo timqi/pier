@@ -16,12 +16,13 @@ import type {
   AgentReply,
   Channel,
   ConversationKey,
-  ImageAttachment,
   InboundMessage,
   SystemInputOrigin,
   TurnMeta,
 } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
+import { saveInbound } from "../core/inbox.js";
+import { fileMarker, lostMarker, MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
@@ -199,7 +200,7 @@ export class TelegramChannel implements Channel {
   private async onMessage(msg: TgMessage, onMessage: (msg: InboundMessage) => void): Promise<void> {
     if (!msg.from || msg.from.id === this.me?.id) return; // own echo, or malformed
     const raw = (msg.text ?? msg.caption ?? "").trim();
-    if (!raw && !msg.photo?.length) return;
+    if (!raw && !msg.photo?.length && !msg.document) return;
 
     const chatId = String(msg.chat.id);
     const isDm = msg.chat.type === "private";
@@ -233,13 +234,13 @@ export class TelegramChannel implements Channel {
     if (await this.panel?.consumeCwdReply(msg, here)) return;
     // `@bot` on its own (text is empty once the mention is stripped) and
     // `/settings` are the same request: show me this conversation's settings.
-    if (this.panel && mine && (command?.name === "settings" || (!text && !msg.photo?.length))) {
+    if (this.panel && mine && (command?.name === "settings" || (!text && !msg.photo?.length && !msg.document))) {
       return this.panel.open(here, chatId, msg.message_thread_id);
     }
 
     // Downloading only past the gate: an unauthorized sender must not be able
     // to make the bot pull bytes on their behalf.
-    const images = await this.photos(msg);
+    const markers = await this.saveAttachments(msg);
     const topicId = await this.routeTopic(msg, text);
     const key = { channelId: this.id, conversationId: conversationId(chatId, topicId) };
     this.receipts.mark(key.conversationId, chatId, String(msg.message_id));
@@ -251,8 +252,7 @@ export class TelegramChannel implements Channel {
       // A group is many people talking into one session; the update already
       // carries the name, so no lookup is needed here.
       sender: { id: String(msg.from.id), name: senderName(msg.from) },
-      text,
-      images,
+      text: [text, ...markers].filter(Boolean).join("\n"),
       mode: "steer",
     });
   }
@@ -397,15 +397,31 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  private async photos(msg: TgMessage): Promise<ImageAttachment[]> {
-    const largest = msg.photo?.at(-1);
-    if (!largest) return [];
-    try {
-      return [await this.api.downloadPhoto(largest.file_id)];
-    } catch (err) {
-      this.log(`photo download failed: ${String(err)}`);
-      return [];
+  /** Save the message's attachments to the inbox; each becomes a prompt
+   *  line — a failed one becomes a lost-marker line, never silence (5b). */
+  private async saveAttachments(msg: TgMessage): Promise<string[]> {
+    // Telegram sends a photo as a size ladder — the last entry is the largest.
+    const photo = msg.photo?.at(-1);
+    const doc = msg.document;
+    const wanted = [
+      ...(photo ? [{ id: photo.file_id, name: undefined as string | undefined, label: "photo", mime: "image/jpeg", size: photo.file_size }] : []),
+      ...(doc ? [{ id: doc.file_id, name: doc.file_name, label: doc.file_name ?? "file", mime: doc.mime_type ?? "application/octet-stream", size: doc.file_size }] : []),
+    ];
+    const markers: string[] = [];
+    for (const { id, name, label, mime, size } of wanted) {
+      if (size !== undefined && size > MAX_INBOUND_BYTES) {
+        markers.push(lostMarker(label, "too large"));
+        continue;
+      }
+      try {
+        const file = await this.api.downloadFile(id);
+        markers.push(fileMarker(await saveInbound(this.id, name ?? file.name, mime, file.bytes)));
+      } catch (err) {
+        this.log(`attachment download failed: ${String(err)}`);
+        markers.push(lostMarker(label, "download failed"));
+      }
     }
+    return markers;
   }
 
   // --- addressing ------------------------------------------------------------

@@ -1,7 +1,7 @@
 // Workbench frontend orchestrator: session state, selection, and the SSE
 // event streams. Rendering lives in the surface modules — sidebar.ts
 // (projects + dialogs), chat.ts (turns pane), composer.ts (input, queue
-// panel, images), session-header.ts (title + ⋯ menu), views.ts (Console
+// panel, attachments), session-header.ts (title + ⋯ menu), views.ts (Console
 // views + routing) — wired here through explicit deps, never imports back.
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
@@ -299,7 +299,7 @@ async function loadSession(id: string): Promise<void> {
     appendTurn("error", `failed to load session: ${res.status}`);
     return;
   }
-  renderSnapshot(snap.turns, snap.state, snap.backgroundRuns, id);
+  renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
   // run state (composer buttons) and the pending queue panel.

@@ -13,12 +13,13 @@ import type {
   AgentFactory,
   BackgroundRun,
   ConfigStore,
-  ImageAttachment,
   InboundMessage,
   ProviderManager,
   ThinkingLevel,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
+import { saveInbound } from "../core/inbox.js";
+import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import type { SessionStateStore } from "./session-state.js";
 import type { SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
@@ -46,28 +47,8 @@ export interface WebDeps {
 }
 
 const HEARTBEAT_MS = 15_000;
-const MAX_IMAGES = 8;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // per image, base64 length ≈ bytes × 4/3
-
-/** Validate at the seam: malformed attachments are rejected, never half-sent. */
-function parseImages(raw: unknown): ImageAttachment[] | { error: string } {
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw) || raw.length > MAX_IMAGES) return { error: "invalid images" };
-  const images: ImageAttachment[] = [];
-  for (const i of raw) {
-    if (
-      typeof i?.data !== "string" ||
-      !i.data ||
-      i.data.length > (MAX_IMAGE_BYTES * 4) / 3 ||
-      typeof i?.mimeType !== "string" ||
-      !i.mimeType.startsWith("image/")
-    ) {
-      return { error: "invalid images" };
-    }
-    images.push({ data: i.data, mimeType: i.mimeType });
-  }
-  return images;
-}
+// Canonical base64 only: Buffer.from(.., "base64") happily "decodes" garbage.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export function createServer(
   {
@@ -182,18 +163,25 @@ export function createServer(
     });
   });
 
-  // Transcript images by their history ordinal: the snapshot ships refs, the
-  // browser pulls (and caches) the bytes only for what it renders.
-  guarded(app, "GET", "/api/sessions/:id/images/:ordinal", 404, async (c) => {
-    const ordinal = Number(c.req.param("ordinal"));
-    if (!Number.isInteger(ordinal) || ordinal < 0) return c.json({ error: "bad ordinal" }, 400);
-    const session = await ensure(c.req.param("id"));
-    const image = await session.image(ordinal);
-    if (!image) return c.json({ error: "no such image" }, 404);
-    return c.body(Buffer.from(image.data, "base64"), 200, {
-      "content-type": image.mimeType,
-      "cache-control": "private, max-age=3600",
-    });
+  // Composer attachments: bytes land in the inbox, the message carries the
+  // path as a `[name](file:///…)` line the client builds itself — upload
+  // first, so the text it sends (and optimistically renders) is final.
+  guarded(app, "POST", "/api/inbox", 400, async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (
+      typeof body?.data !== "string" ||
+      !body.data ||
+      // Cheap ceiling before decoding; the exact check is on the bytes.
+      body.data.length > Math.ceil(MAX_INBOUND_BYTES / 3) * 4 + 4 ||
+      !BASE64_RE.test(body.data) ||
+      typeof body?.mimeType !== "string"
+    ) {
+      return c.json({ error: "invalid file" }, 400);
+    }
+    const name = typeof body.name === "string" ? body.name : undefined;
+    const bytes = Buffer.from(body.data, "base64");
+    if (bytes.length > MAX_INBOUND_BYTES) return c.json({ error: "invalid file" }, 400);
+    return c.json({ path: await saveInbound("web", name, body.mimeType, bytes) });
   });
 
   // Backend model catalog, no session needed: surfaces that configure what a
@@ -242,13 +230,8 @@ export function createServer(
   app.post("/api/sessions/:id/messages", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.text !== "string") {
+    if (!body || typeof body.text !== "string" || !body.text.trim()) {
       return c.json({ error: "text required" }, 400);
-    }
-    const images = parseImages(body.images);
-    if ("error" in images) return c.json({ error: images.error }, 400);
-    if (!body.text.trim() && images.length === 0) {
-      return c.json({ error: "text or images required" }, 400);
     }
     const mode: InboundMessage["mode"] =
       body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
@@ -256,7 +239,6 @@ export function createServer(
       key: { channelId: "web", conversationId: id },
       senderId: "web",
       text: body.text,
-      images: images.length ? images : undefined,
       mode,
     });
     return c.json({ sessionId }, 202);
