@@ -77,11 +77,20 @@ export function consoleView(
 export function prose(markdown: string): HTMLElement {
   const el = h("span", "help");
   el.innerHTML = DOMPurify.sanitize(marked.parseInline(markdown, { async: false }));
-  for (const a of el.querySelectorAll("a")) {
+  externalLinks(el);
+  return el;
+}
+
+/** Every link in rendered markdown leaves in a new tab. The page is a live
+ *  session — an in-tab navigation drops the composer draft and the event
+ *  stream — so a link the agent wrote is never allowed to take the tab. In-app
+ *  hash routes are the exception: those *are* this page. */
+export function externalLinks(root: HTMLElement): void {
+  for (const a of root.querySelectorAll("a")) {
+    if ((a.getAttribute("href") ?? "").startsWith("#")) continue;
     a.target = "_blank";
     a.rel = "noreferrer";
   }
-  return el;
 }
 
 /** navigator.clipboard is secure-context only and the dev target binds 0.0.0.0,

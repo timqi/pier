@@ -11,6 +11,7 @@ import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js
 import { langFor, lineEl } from "./highlight.js";
 import { closeMenu, openMenu } from "./menu.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
+import { letterKey } from "./shortcut.js";
 
 interface Entry { name: string; dir: boolean }
 interface GitInfo {
@@ -302,9 +303,14 @@ export function createExplorerView(
     }
   }
 
-  function clearMinimap(): void {
+  const diffNav = createDiffNav();
+
+  /** The affordances that belong to a diff and to nothing else: the heatmap
+   *  strip and the change stepper (whose keys go quiet with it). */
+  function clearDiffChrome(): void {
     minimap.classList.add("hidden");
     minimap.replaceChildren();
+    diffNav.set([], []);
   }
 
   /** Stale-response guard: only the newest view() may touch the viewer — a
@@ -319,7 +325,7 @@ export function createExplorerView(
 
   async function viewPlain(path: string, seq: number): Promise<void> {
     if (!current(seq)) return; // reached as a stale viewDiff's fallback
-    clearMinimap();
+    clearDiffChrome();
     const url = api("file", { path });
     const body = h("div", "min-w-0");
     viewer.classList.remove("flex", "flex-col");
@@ -416,27 +422,52 @@ export function createExplorerView(
   const rowsLabel = (rowEls: HTMLElement[], i: number): string =>
     rowEls[i]?.querySelector("span")?.textContent?.trim() || String(i + 1);
 
-  /** ↑/↓ stepping through change sites, wrapping at the ends. */
-  function diffNav(segs: Segment[], rowEls: HTMLElement[]): HTMLElement {
+  /**
+   * ↑/↓ stepping through change sites, wrapping at the ends — with P/N (or
+   * K/J) on the keys, since walking a diff is the whole point of the view.
+   *
+   * Built once and refilled per file rather than rebuilt with the title: a
+   * bare-letter binding is never unbound, so a nav per rendered diff would
+   * stack one more listener for every file opened.
+   */
+  function createDiffNav(): { el: HTMLElement; set: (segs: Segment[], rowEls: HTMLElement[]) => void } {
+    let segs: Segment[] = [];
+    let rowEls: HTMLElement[] = [];
     let idx = -1;
-    const counter = h("span", "flex-none text-[10.5px] text-neutral-400", `${segs.length} change${segs.length === 1 ? "" : "s"}`);
+    const counter = h("span", "flex-none text-[10.5px] text-neutral-400");
     const go = (d: number): void => {
       if (!segs.length) return;
       idx = (idx + d + segs.length) % segs.length;
       rowEls[segs[idx]!.start]!.scrollIntoView({ block: "center" });
       counter.textContent = `${idx + 1}/${segs.length}`;
     };
-    const arrow = (glyph: string, d: number, hint: string): HTMLElement => {
+    // The keys are this view's only while it is on screen with a diff in it.
+    const live = (): boolean => segs.length > 0 && !root.classList.contains("hidden");
+    const arrow = (glyph: string, d: number, label: string, keys: [string, string]): HTMLElement => {
       const el = h("button", "icon-btn flex-none", glyph);
-      el.title = hint;
       el.onclick = () => go(d);
+      letterKey(el, keys, label, () => go(d), live);
       return el;
     };
-    return h("div", "flex flex-none items-center gap-1", counter, arrow("↑", -1, "Previous change"), arrow("↓", 1, "Next change"));
+    return {
+      el: h(
+        "div",
+        "flex flex-none items-center gap-1",
+        counter,
+        arrow("↑", -1, "Previous change", ["p", "k"]),
+        arrow("↓", 1, "Next change", ["n", "j"]),
+      ),
+      set(next, rows) {
+        segs = next;
+        rowEls = rows;
+        idx = -1;
+        counter.textContent = `${next.length} change${next.length === 1 ? "" : "s"}`;
+      },
+    };
   }
 
   async function viewDiff(path: string, seq: number): Promise<void> {
-    clearMinimap();
+    clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
     const canDownload = changes.get(path)?.status !== "D";
     viewer.replaceChildren(viewerTitle(path, canDownload), note("…"));
@@ -449,7 +480,8 @@ export function createExplorerView(
       const pane = codePane(rows, langFor(path));
       const rowEls = [...pane.children] as HTMLElement[];
       const segs = segmentsOf(rows);
-      viewer.replaceChildren(viewerTitle(path, canDownload, diffNav(segs, rowEls)), pane);
+      diffNav.set(segs, rowEls);
+      viewer.replaceChildren(viewerTitle(path, canDownload, diffNav.el), pane);
       renderMinimap(segs, rows.length, rowEls);
     } catch (err) {
       if (current(seq)) viewer.replaceChildren(viewerTitle(path, false), note(String(err), "text-red-600"));
@@ -624,7 +656,7 @@ export function createExplorerView(
     selectedPath = null;
     selectedRow = null;
     expanded.clear();
-    clearMinimap();
+    clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
     viewer.replaceChildren(note("Select a file."));
     if (!cwd) {

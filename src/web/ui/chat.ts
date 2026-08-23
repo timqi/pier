@@ -10,7 +10,7 @@ import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { highlightCode } from "./highlight.js";
-import { $, copyBtn, h } from "./dom.js";
+import { $, copyBtn, externalLinks, h } from "./dom.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
   decisionReplyBtn,
@@ -283,6 +283,7 @@ function renderMarkdown(node: HTMLElement, raw: string, streaming = false): void
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
   highlightCode(node);
+  externalLinks(node);
   // A streaming block is rewritten every frame-ish, so the two upgrades that
   // own state of their own wait for the final paint: copy buttons would be
   // recreated mid-click, and attachment cards refetch their bytes.

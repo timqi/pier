@@ -105,6 +105,40 @@ export function escapeKey(
   });
 }
 
+// A letter typed into one of these is text, never a command.
+const TYPING = "input, textarea, select, [contenteditable]";
+
+/**
+ * A bare letter, for a view that owns the keyboard while it is open — stepping
+ * through a diff's changes in the Files view.
+ *
+ * No modifier is available here: ⌘N/⌘P are the browser's new window and print,
+ * and ↑/↓ are the scrolling the reader still needs. `when` is the entire claim
+ * to an unmodified key — the view has to be on screen with something to step
+ * through — and a focused text field or an open dialog keeps the letter
+ * regardless. `keys` may carry aliases (`["n", "j"]`); the first is the one the
+ * hover card teaches.
+ *
+ * Never unbound, so call it once per action from an init path.
+ */
+export function letterKey(
+  el: HTMLElement,
+  keys: [string, ...string[]],
+  label: string,
+  run: () => void,
+  when: () => boolean,
+): void {
+  hint(el, label, keys[0].toUpperCase());
+  document.addEventListener("keydown", (ev) => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing || ev.defaultPrevented) return;
+    if (!keys.includes(ev.key.toLowerCase())) return;
+    if ((ev.target as Element | null)?.closest?.(TYPING)) return;
+    if (document.querySelector("dialog[open]") || !when()) return;
+    ev.preventDefault();
+    run();
+  });
+}
+
 /**
  * The binding without the hover card — for an action whose affordance is a
  * menu row carrying `chordLabel(key)`, where a card on the ⋯ button that
