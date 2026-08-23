@@ -1,6 +1,6 @@
 ---
 name: pier-slack
-description: Read and write Slack through Pier's slack tool — a channel's history for a time range, one thread, posting into a thread, and the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
+description: Read and write Slack through Pier's slack tool — a channel's history for a time range, one thread, posting into a thread, deleting a message Pier posted, and the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
 ---
 
 # Reading and writing Slack
@@ -96,6 +96,22 @@ and the error will say so.
 Going top-level takes the explicit `"none"`: a channel's main flow is wider
 than a thread. A `thread_ts` is never inherited across a change of `channel`.
 The response carries `ts` and `threadTs` for replying under what you posted.
+
+## Deleting
+
+```json
+{"operation":"delete","channel":"#ops","ts":"1717243800.000100"}
+```
+
+Slack only lets Pier delete what **its own bot** posted — a person's message
+answers `cant_delete_message`, and the answer is to ask them, not to retry.
+
+- `ts` is always explicit. There is no "delete the last one" and no default
+  from the thread you are in: the wrong `ts` cannot be undone.
+- A `ts` means nothing outside the conversation it came from — pass the
+  `channel` it was read in.
+- Deleting a thread parent does not remove its replies. Say what you removed;
+  a message vanishing with no word looks like a Slack bug to everyone watching.
 
 ## Message syntax
 

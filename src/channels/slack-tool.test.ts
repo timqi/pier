@@ -22,6 +22,9 @@ class FakeClient {
   readonly historyCalls: { channel: string; query: SlackHistoryQuery }[] = [];
   readonly repliesCalls: { channel: string; ts: string; cursor?: string }[] = [];
   readonly posted: SlackSend[] = [];
+  readonly deleted: { channel: string; ts: string }[] = [];
+  /** What Slack refuses with, when a test is about the refusal. */
+  deleteError: string | null = null;
   /**
    * What `conversations.history` will answer with, in Slack's own order:
    * newest first. Anything that reverses it is the code under test.
@@ -74,6 +77,12 @@ class FakeClient {
   postMessage(payload: SlackSend): Promise<{ ts: string }> {
     this.posted.push(payload);
     return Promise.resolve({ ts: T(9000) });
+  }
+
+  deleteMessage(channel: string, ts: string): Promise<void> {
+    this.deleted.push({ channel, ts });
+    if (this.deleteError) return Promise.reject(new Error(this.deleteError));
+    return Promise.resolve();
   }
 
   userName(userId: string): Promise<string> {
@@ -430,6 +439,30 @@ describe("posting", () => {
     await expect(call({ operation: "post", channel: "C100" })).rejects.toThrow(/text is required/);
     await expect(call({ operation: "read_thread", channel: "C100" }))
       .rejects.toThrow(/thread_ts is required/);
+  });
+});
+
+describe("deleting", () => {
+  beforeEach(() => configure());
+
+  it("removes the named message and says so", async () => {
+    expect(await call({ operation: "delete", channel: "#ops", ts: T(100) }))
+      .toMatchObject({ channel: "C100", ts: T(100), deleted: true });
+    expect(client.deleted).toEqual([{ channel: "C100", ts: T(100) }]);
+    // Nothing is left to read afterwards, so the log is the only record.
+    expect(logs.some((l) => l.includes(T(100)))).toBe(true);
+  });
+
+  it("never guesses the target, even inside a thread", async () => {
+    at = { channel: "C100", threadTs: T(100) };
+    await expect(call({ operation: "delete" })).rejects.toThrow(/ts is required/);
+    expect(client.deleted).toEqual([]);
+  });
+
+  it("turns Slack's refusal into what it means", async () => {
+    client.deleteError = "slack chat.delete: cant_delete_message";
+    await expect(call({ operation: "delete", channel: "C100", ts: T(100) }))
+      .rejects.toThrow(/own bot posted/);
   });
 });
 
