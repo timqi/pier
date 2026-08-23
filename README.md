@@ -161,9 +161,10 @@ before npm touches the package — named for the release being replaced, which i
 the one to reinstall beside it; the three newest are kept. Then it updates the
 npm installation recorded when the service was installed, and starts Pier again.
 
-`main` is the only development line. `npm version patch` writes the tag, the
-tag builds and publishes a GitHub Release, and the version in the web footer is
-the one from `package.json` — so the number on screen always names a commit.
+`main` is the only development line. `just release [patch|minor|major]` runs the
+checks, writes the tag and pushes it; the tag builds and publishes to npm and as
+a GitHub Release. The version in the web footer is the one from `package.json`
+— so the number on screen always names a commit.
 Schema upgrades are one-way: a database migrated by a newer Pier is refused by
 an older one. The release backup above is the way back; `docs/deploy.md` has the
 restore procedure and the additional snapshots taken before schema migrations.
