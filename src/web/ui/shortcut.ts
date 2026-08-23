@@ -14,6 +14,21 @@ import { h } from "./dom.js";
 // keyboard is a real thing and refusing it buys nothing.
 const APPLE = /Mac|iP(?:hone|ad|od)/.test(navigator.userAgent);
 const MOD = APPLE ? "⌘" : "Ctrl+";
+const SHIFT = APPLE ? "⇧" : "Shift+";
+
+// A key spec is `"k"` or `"shift+o"`: Shift is opt-in per binding, because
+// every unshifted letter worth having is either taken or the browser's.
+const parse = (spec: string): { key: string; shift: boolean } =>
+  spec.startsWith("shift+")
+    ? { key: spec.slice(6), shift: true }
+    : { key: spec, shift: false };
+
+/** The chord as a person reads it — for the hover card, or for a menu row
+ *  that is itself the affordance (menu.ts's `hint`). */
+export function chordLabel(spec: string): string {
+  const { key, shift } = parse(spec);
+  return `${MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
+}
 
 const CARD =
   "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11.5px] text-neutral-100 shadow-lg";
@@ -60,11 +75,50 @@ export function shortcut(
   run: () => void,
   unless?: () => boolean,
 ): void {
-  hint(el, label, `${MOD}${key.toUpperCase()}`);
+  hint(el, label, chordLabel(key));
+  chord(key, run, unless);
+}
+
+/**
+ * Esc, for the one action urgent enough to want no modifier: stopping a
+ * running turn.
+ *
+ * Not a chord, and deliberately not capture phase — Esc already means "close
+ * the topmost thing", and every overlay here consumes it on the way down
+ * (menu.ts, a modal <dialog>). Bubbling last is what makes this the meaning
+ * Esc has when nothing is layered above. `when` is the rest of that claim:
+ * the action has to be live, or the key stays the browser's.
+ */
+export function escapeKey(
+  el: HTMLElement,
+  label: string,
+  run: () => void,
+  when: () => boolean,
+): void {
+  hint(el, label, "Esc");
+  document.addEventListener("keydown", (ev) => {
+    // Esc during IME composition cancels the candidate, nothing else.
+    if (ev.key !== "Escape" || ev.isComposing || ev.defaultPrevented) return;
+    if (document.querySelector("dialog[open]") || !when()) return;
+    ev.preventDefault();
+    run();
+  });
+}
+
+/**
+ * The binding without the hover card — for an action whose affordance is a
+ * menu row carrying `chordLabel(key)`, where a card on the ⋯ button that
+ * opens it would name the wrong control (and a second chord on that button
+ * would stack a second card on top of the first).
+ *
+ * Never unbound, so call it once per action from an init path.
+ */
+export function chord(spec: string, run: () => void, unless?: () => boolean): void {
+  const { key, shift } = parse(spec);
   document.addEventListener(
     "keydown",
     (ev) => {
-      if (ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey) return;
+      if (ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return;
       if (!ev.metaKey && !ev.ctrlKey) return;
       if (unless?.()) return;
       ev.preventDefault();

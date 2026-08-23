@@ -369,10 +369,21 @@ export function initSidebar(d: SidebarDeps): void {
   deps = d;
   // Same picker the channel config uses; the input keeps its own semantics.
   $("#new-cwd-row").append(browseButton($<HTMLInputElement>("#new-cwd")));
-  $("#new-session").onclick = () => {
-    $<HTMLInputElement>("#new-cwd").value = "";
+  const newBtn = $("#new-session");
+  // Prefilled with wherever you are: the next session almost always belongs to
+  // the project on screen, and the text is selected so typing another path
+  // still costs one keystroke.
+  const openNew = (): void => {
+    const cwd = deps.sessions().find((s) => s.id === deps.currentId())?.cwd ?? "";
+    const input = $<HTMLInputElement>("#new-cwd");
+    input.value = cwd;
     newDialog.showModal();
+    input.select();
   };
+  newBtn.onclick = openNew;
+  // ⇧O, not ⇧N: ⌘⇧N / ⌘⇧T are the browser's own windows and cannot be
+  // taken back — ⇧O is what the chat apps settled on for the same action.
+  shortcut(newBtn, "shift+o", "New session", openNew, () => newDialog.open);
   $("#new-cancel").onclick = () => newDialog.close();
   $<HTMLFormElement>("#new-form").onsubmit = () =>
     void deps.createSession($<HTMLInputElement>("#new-cwd").value.trim());

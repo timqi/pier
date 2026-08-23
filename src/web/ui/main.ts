@@ -63,6 +63,7 @@ import {
   showFiles,
   showTasks,
   syncBar,
+  toggleFiles,
 } from "./views.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
@@ -357,7 +358,13 @@ initSidebar({
   openConsole: showConsole,
   onPinsChanged: renderHeader,
 });
-initHeader({ currentId: () => currentId, currentSession, syncBar, openFiles: showFiles });
+initHeader({
+  currentId: () => currentId,
+  currentSession,
+  syncBar,
+  openFiles: showFiles,
+  toggleFiles,
+});
 initViews({
   sessions: () => sessions,
   currentId: () => currentId,

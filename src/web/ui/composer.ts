@@ -6,6 +6,7 @@ import { failure, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
 import { appendTurn, scrollBottom, turnsPane } from "./chat.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
+import { escapeKey } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
 /** A file picked but not yet sent; uploaded to the inbox on send. */
@@ -303,10 +304,15 @@ async function recallQueue(): Promise<void> {
 
 export function initComposer(d: ComposerDeps): void {
   deps = d;
-  stopBtn.onclick = () => {
+  const abort = (): void => {
     const id = deps.sessionId();
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });
   };
+  stopBtn.onclick = abort;
+  // Only while the button is on screen: Esc with nothing running belongs to
+  // the browser, and in a Console view there is no turn in front of you.
+  escapeKey(stopBtn, "Stop the running turn", abort, () =>
+    deps.sessionState() === "streaming" && deps.chatVisible());
   $("#queue-steer").onclick = () => void deliverQueue("steer");
   $("#queue-restart").onclick = () => void deliverQueue("restart");
   $("#queue-recall").onclick = () => void recallQueue();

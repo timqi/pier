@@ -106,6 +106,13 @@ export const showTasks = (taskId?: string): void => showConsole("tasks", taskId)
 /** Entry for the ⋯ menus (session header, project row): browse a cwd. */
 export const showFiles = (dir?: string): void => showConsole("files", dir);
 
+/** The chord's version: one key both opens Files and, pressed again, is its ✕.
+ *  A menu row keeps opening — it names a directory, so it always browses. */
+export const toggleFiles = (dir?: string): void => {
+  if (consoleViews.find((entry) => entry.name === "files")?.view.visible) closeFiles();
+  else showFiles(dir);
+};
+
 /** Files' ✕. Back to the route it was opened from — a session's chat, or the
  *  Console view you came from — and the current session when that is unknown
  *  (a bookmarked or reloaded #/files, where there is no "from"). */

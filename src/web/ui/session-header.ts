@@ -9,6 +9,7 @@ import { appendTurn } from "./chat.js";
 import { $, copyBtn, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
+import { chord, chordLabel } from "./shortcut.js";
 import { setPinned, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel } from "../../core/types.js";
 
@@ -21,13 +22,37 @@ export interface HeaderDeps {
   syncBar: () => void;
   /** Open the Files view on a cwd (views.ts, wired through main). */
   openFiles: (cwd: string) => void;
+  /** Same view, but a second press closes it — what the chord binds to. */
+  toggleFiles: (cwd: string) => void;
 }
 
 let deps: HeaderDeps;
 
 export function initHeader(d: HeaderDeps): void {
   deps = d;
+  // Two of the ⋯ menu's actions are frequent enough to earn a chord. They act
+  // on the *current* session — the menu also opens from a project row, which
+  // is why the rows only advertise the chord for the one it would hit.
+  chord(PIN_KEY, () => {
+    const s = deps.currentSession();
+    if (!s) return;
+    closeMenu();
+    void setPinned(s, !s.pinned);
+  }, modal);
+  chord(FILES_KEY, () => {
+    const s = deps.currentSession();
+    if (!s) return;
+    closeMenu();
+    deps.toggleFiles(s.cwd);
+  }, modal);
 }
+
+/** A modal dialog is a mode: navigating underneath it would leave it floating
+ *  over a view it was never opened from, so both chords stand down. */
+const modal = (): boolean => document.querySelector("dialog[open]") !== null;
+
+const PIN_KEY = "d"; // bookmark — the gesture every browser already spells ⌘D
+const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘O are taken
 
 const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
@@ -227,6 +252,7 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
 
 /** Same menu from the chat header and from a project row's ⋯ button. */
 export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
+  const current = s.id === deps.currentId();
   openMenu(anchor, [
     {
       label: "Session info",
@@ -234,6 +260,7 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
     },
     {
       label: s.pinned ? "Remove from Projects" : "Pin to Projects",
+      hint: current ? chordLabel(PIN_KEY) : "",
       checked: s.pinned,
       onSelect: () => {
         closeMenu();
@@ -242,11 +269,12 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
     },
     {
       label: "Model",
-      hint: s.id === deps.currentId() ? (currentModel?.id ?? "…") : "",
+      hint: current ? (currentModel?.id ?? "…") : "",
       onSelect: () => void pickModel(anchor, s.id),
     },
     {
       label: "Browse files",
+      hint: current ? chordLabel(FILES_KEY) : "",
       onSelect: () => {
         closeMenu();
         deps.openFiles(s.cwd);
