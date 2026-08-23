@@ -18,7 +18,7 @@ const version = currentVersion();
 const HELP = `pier ${version} — a self-hosted workspace for coding agents
 
 Usage
-  pier                        run the workbench in this terminal
+  pier serve                  run the workbench in this terminal
   pier service install        write and start a systemd user unit (Linux)
   pier service uninstall      stop it and remove the unit
   pier service status         what systemd thinks of it
@@ -78,7 +78,13 @@ if (values.help || command === "help") {
 } else if (values.version || command === "version") {
   process.stdout.write(`${version}\n`);
 } else if (!command) {
-  allowOnly([], "pier");
+  // Typing the bare name is how someone finds out what this is, so it answers
+  // that and nothing else: it used to start a server, which is a surprising
+  // amount to have done by accident.
+  process.stdout.write(HELP);
+} else if (command === "serve") {
+  if (subcommand) fail(`unexpected argument "${subcommand}"`);
+  allowOnly([], "pier serve");
   // The server starts on import; this file stays a dispatcher.
   await import("./main.js");
 } else if (command === "service") {

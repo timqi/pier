@@ -26,7 +26,7 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 
 ```sh
 npm install -g @timqi/pier
-pier
+pier serve
 ```
 
 It listens on `127.0.0.1:3141` (`PORT`, `HOST`) and keeps everything under
@@ -57,7 +57,7 @@ installation. By default it is `$PIER_HOME/pi` (`~/.pier/pi`). Set
 an existing Pi setup:
 
 ```sh
-PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier
+PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier serve
 ```
 
 Console → Settings is the normal setup path:
@@ -109,8 +109,9 @@ find a version-managed one), a memory drop-in it never rewrites afterwards, and
 turns on linger so scheduled tasks survive your logout. Install also records the
 exact npm executable in a separate updater unit. Re-run `pier service install
 --force` after changing the service settings or its Node/npm installation; this
-rewrites both units and restarts Pier. On macOS run `pier` in a terminal, or
-under whatever supervisor you already use.
+rewrites both units and restarts Pier. On macOS run `pier serve` in a terminal,
+or under whatever supervisor you already use — `pier` on its own only prints
+the usage.
 
 `docs/deploy.md` is the same thing written out by hand, plus what the memory
 limits mean, how updates work (and why the updater is a second unit), how to

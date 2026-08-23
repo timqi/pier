@@ -28,6 +28,15 @@ function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } 
 }
 
 describe("pier CLI", () => {
+  it("prints the usage instead of starting a server when typed bare", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pier-cli-bare-"));
+    const result = await run([], { env: { ...process.env, HOME: home } });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("pier serve");
+    // Starting one would have printed a first-run password and kept the port.
+    expect(result.stdout).not.toMatch(/listening/i);
+  });
+
   it("rejects unknown options instead of silently using defaults", async () => {
     const result = await run(["service", "install", "--porrt", "8080"]);
     expect(result.code).toBe(2);
