@@ -169,7 +169,7 @@ journalctl --user -u pier --since -1h | grep 'tasks:'   # one area
 ```
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
-`channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `secrets`,
+`channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `drain`, `secrets`,
 `settings`, `credentials`, `update`, `web.providers`, `pier` — so an area is a
 grep
 and a level is a `-p`. The level reaches journald as a syslog priority prefix, which Pier
@@ -218,16 +218,38 @@ new password is generated and printed:
 
 ```sh
 sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'
-systemctl --user restart pier
+pier restart
 ```
 
 Changing the password invalidates every session cookie: the cookies are signed
 with the stored hash.
 
+## Restarting and reloading
+
+```sh
+pier restart          # finish active work, then restart the service
+pier reload           # apply channel config and recycle idle sessions in place
+```
+
+Both commands signal the installed systemd service; they are not foreground
+process controls. `pier restart` refuses new messages and root Task runs, waits
+up to five minutes for active work, then exits for `Restart=always` to start the
+next process. At the deadline it records every aborted IM turn first, and the
+next process posts that note after its adapter starts. Cleanup after the deadline
+has one shared 10-second bound regardless of how many sessions are stuck.
+
+`pier reload` does not stop active work. It reloads Slack and Telegram adapters
+and immediately evicts idle sessions nobody is watching, so their next message
+opens with current agent files and configuration. Streaming sessions and
+sessions held by an open workbench stay attached until their normal eviction.
+
+An ordinary `systemctl --user restart pier` and `pier update` remain fast,
+hard-stop paths. Let active work finish first when using either one.
+
 ## Updating
 
 ```sh
-pier update           # installs the latest release and restarts the service
+pier update           # installs the latest release; hard-stops/restarts Pier
 pier update --check   # only says whether one exists
 ```
 
@@ -242,14 +264,15 @@ From a checkout instead, stop and back up before replacing the build:
 systemctl --user stop pier
 pier backup
 cd ~/pier
-git fetch --tags && git checkout v0.2.0   # a tag, not a branch
+git fetch --tags && git checkout v0.0.2   # a tag, not a branch
 npm ci && npm run build
 systemctl --user start pier
 ```
 
-For a service install, `pier update` stops Pier first and snapshots the database
-to `~/.pier/db/pier.db.release.bak` before npm touches the package. This happens
-for every release, including releases with no schema change. If installation or
+For a service install, `pier update` stops Pier first; it does not use the
+graceful `pier restart` path. It snapshots the database to
+`~/.pier/db/pier.db.release.bak` before npm touches the package. This happens for
+every release, including releases with no schema change. If installation or
 backup fails, the updater unit still tries to start the previously installed
 service and reports the failure in its journal.
 
@@ -303,8 +326,8 @@ the work happens in a different cgroup. Starting the unit directly is unsupporte
 the command first records the effective database home used by the running service.
 
 Deliberately **not** a `systemd.timer`. An unattended update is a machine that
-rewrites its own code from the network while holding your API keys, and it
-interrupts whatever session was mid-turn to do it. Pier notices a newer release
+rewrites its own code from the network while holding your API keys, and its hard
+stop interrupts whatever session was mid-turn. Pier notices a newer release
 and says so in the workbench footer; starting the update stays a decision someone
 makes. The updater's `ExecStopPost` is what brings the service back after both
 success and failure.

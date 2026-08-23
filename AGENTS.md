@@ -54,7 +54,9 @@ scheduled tasks, live observability, and static Show pages.
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`); one reason per
   file, named in docs/architecture.md
 - Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
-  Never sideways.
+  Runtime dependencies never go sideways. The browser may import owner-defined
+  HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only; those
+  imports are erased at build and do not let web implement either area.
 
 ## Budgets
 
@@ -93,11 +95,11 @@ answer is allowed to be "the right things":
 
 | Area | Now | Second look past |
 | --- | --- | --- |
-| `core/` | ~720 | 780 — platform-blind and Pi-blind. The shared presentation vocabulary (reply.ts), the sender prefix (identity.ts), the inbound-file convention (inbox.ts saves the bytes once, inbound-file.ts owns the marker grammar every surface and the browser share) and the seam declarations in types.ts (including the provider seam and its shared validation, which web/ and agent/ must not each own) live here *on purpose*; growth anywhere else means something leaked in |
-| `channels/` | ~3.0k | 3.5k |
-| `web/` | ~6.3k | 6.5k — largest and least tested. The jump from 5.1k bought the password boundary (auth.ts), secure provider configuration (providers/provider-flows + their UI) and the Settings console; the next growth needs its own sentence |
-| `tasks/` | ~2.4k | 2.5k |
-| root `src/*.ts` | ~1.1k | 1.3k — instance layer: db, secrets, settings, service/update, cli, log, paths, main |
+| `core/` | ~880 | 780 — second look done: platform- and Pi-blind. Growth bought the shared presentation vocabulary, sender prefix, inbound-file convention, provider seam/validation, routing failure paths and the restart gate; none is a platform implementation |
+| `channels/` | ~3.04k | 3.5k |
+| `web/` | ~6.46k | 6.5k — largest and least tested. Growth from 5.1k bought the password boundary, secure provider configuration and the Settings console; the next growth needs its own sentence |
+| `tasks/` | ~2.56k | 2.5k — second look done: delivery proof/backoff/ceiling was consolidated into one outbox engine; the remaining growth is durable control-message state and required failure paths |
+| root `src/*.ts` | ~1.34k | 1.3k — second look done: the instance layer now owns secure credentials, service/update operations and the graceful-restart ledger; each remains a one-reason module |
 | one module | — | 300 — see rule 2 before splitting |
 | channel adapter file | — | 400 — transport, render and panel budgeted separately |
 

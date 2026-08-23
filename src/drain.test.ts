@@ -94,9 +94,32 @@ describe("drainForRestart", () => {
       () => [{ session: turn.session, key: { channelId: "telegram", conversationId: "42" } }],
       () => 0,
     );
-    // Resolves despite abort() never settling, because the seam bound answers.
+    // Resolves despite abort() never settling, because the cleanup bound answers.
     await drainForRestart(rig.deps, 0, 1, 5);
     expect(rig.ledger.list()).toHaveLength(1);
+  });
+
+  it("all hung sessions share one cleanup window", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = busySession("s1", [], "abort");
+      const second = busySession("s2", [], "abort");
+      const rig = deps(
+        () => [
+          { session: first.session, key: { channelId: "telegram", conversationId: "1" } },
+          { session: second.session, key: { channelId: "slack", conversationId: "2" } },
+        ],
+        () => 0,
+      );
+      const draining = drainForRestart(rig.deps, 0, 1, 10);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(first.calls).toContain("abort");
+      expect(second.calls).toContain("abort");
+      await vi.advanceTimersByTimeAsync(10);
+      await draining;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -123,11 +146,16 @@ describe("deliverLedger", () => {
     expect(ledger.list()).toEqual([]);
   });
 
-  it("a thrown notify is terminal — logged once, never a stale apology later", async () => {
+  it("keeps a thrown notify for the next delivery attempt", async () => {
     const ledger = new RestartLedger(openDb(":memory:"));
     ledger.record({ channelId: "telegram", conversationId: "b", note: "n" });
-    const notify = vi.fn().mockRejectedValue(new Error("boom"));
+    const notify = vi.fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce(true);
+    await deliverLedger(ledger, notify);
+    expect(ledger.list()).toHaveLength(1);
     await deliverLedger(ledger, notify);
     expect(ledger.list()).toEqual([]);
+    expect(notify).toHaveBeenCalledTimes(2);
   });
 });

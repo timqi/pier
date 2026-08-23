@@ -68,7 +68,8 @@ Console → Settings is the normal setup path:
 - **Agent files** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
   `models.json` structure in the Pi agent directory — globally, or per project
   scope, where it also shows that project's `.pi/skills` and `.pi/extensions`
-  resources. Changes apply to new sessions.
+  resources. Changes apply when a session next opens; `pier reload` recycles
+  idle, unwatched sessions so their next message uses the current files.
 
 On first credential access, Pier imports an existing `auth.json` into its sealed
 store and renames the source to `auth.json.imported`. Literal provider keys left
@@ -87,9 +88,20 @@ override; for API keys, prefer the sealed Providers UI.
 pier service install     # --port, --host, --pier-home, --force
 pier service status
 pier service uninstall
+pier restart             # drain running work, then restart
+pier reload              # re-read channel config and recycle idle sessions
 pier backup              # snapshot the database before a manual update
-pier update              # latest release, then restart the service
+pier update              # latest release, then hard-stop/restart the service
 ```
+
+`pier restart` refuses new work, waits up to five minutes for active turns and
+Task runs, then restarts; if its deadline aborts an IM turn, the next process
+tells that conversation. `pier reload` stays in-process: adapters re-read their
+configuration and idle, unwatched sessions reopen on their next message.
+Streaming or watched sessions keep running and pick changes up after eviction.
+Both commands target the installed systemd service. `pier update` is still a
+hard stop because its separate updater replaces the installed code; let active
+work finish before starting it.
 
 Linux only, because it is systemd. It writes `~/.config/systemd/user/pier.service`
 with the absolute path of the node you installed with (systemd's PATH would not
@@ -128,14 +140,14 @@ npm test          # vitest
 ## Releases
 
 Pier checks `registry.npmjs.org` in the background and shows `v0.0.1 → 0.0.2`
-in the footer when a release is out. It never updates itself: this process
-holds provider keys and can run a shell, so rewriting its own code on a timer
-would be a supply-chain surface — and an unattended restart kills whatever turn
-was mid-flight. `pier update` is a command someone types. It stops the service,
-writes `~/.pier/db/pier.db.release.bak`, updates the npm installation recorded
-when the service was installed, and starts Pier again.
+in the footer when a release is out. It never updates automatically: this
+process holds provider keys and can run a shell, so rewriting its own code on a
+timer would be a supply-chain surface. `pier update` is a command someone
+types; unlike `pier restart`, it hard-stops the service, writes
+`~/.pier/db/pier.db.release.bak`, updates the npm installation recorded when
+the service was installed, and starts Pier again.
 
-`main` is the only development line. `npm version minor` writes the tag, the
+`main` is the only development line. `npm version patch` writes the tag, the
 tag builds and publishes a GitHub Release, and the version in the web footer is
 the one from `package.json` — so the number on screen always names a commit.
 Schema upgrades are one-way: a database migrated by a newer Pier is refused by

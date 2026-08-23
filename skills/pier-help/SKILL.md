@@ -82,6 +82,19 @@ operator's source of truth.
   their other messages are dropped. "The bot ignores my DMs" usually means
   not bound.
 
+## Service restart, reload and update
+
+- `pier restart` is the graceful systemd path: it refuses new work, waits up to
+  five minutes for active turns and Task runs, then restarts. If the deadline
+  aborts an IM turn, the next process tells that conversation.
+- `pier reload` stays in-process: channel adapters re-read configuration and
+  idle, unwatched sessions reopen with current agent files on their next
+  message. Streaming or watched sessions are not interrupted.
+- `pier update` is deliberately different: the separate updater hard-stops the
+  service, backs up the database, replaces the package, and starts it again.
+  It can interrupt active work. All three are operator shell commands for an
+  installed Linux systemd service, not tools available to the agent.
+
 ## Only the Console can change
 
 Channel tokens and connections, per-chat gate policies, bind codes, provider

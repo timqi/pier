@@ -67,9 +67,12 @@ src/
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
-never imports platform SDKs or Pi. Nothing imports sideways between channels.
+never imports platform SDKs or Pi, and runtime dependencies never go sideways.
+The browser may import owner-defined HTTP DTOs from `tasks/types.ts` and
+`channels/types.ts` type-only: these imports are erased at build, keep wire
+shapes single-sourced, and do not let web implement either area.
 `paths.ts`, `db.ts`, `log.ts`, `secrets.ts` and `settings.ts` are the
-exceptions to "no sideways": leaves every area may import and that import
+root-leaf exceptions: every area may import them, and they import
 nothing outside the root layer (`settings.ts` also names types from
 `core/types.ts`, type-only), because `$PIER_HOME` is process configuration (it had otherwise grown a
 copy per module that needed a file), a schema version is one number per
@@ -101,14 +104,16 @@ adapter. See `docs/design/04-im-channels.md` for the rule itself.
 of truth (this doc stopped mirroring it to avoid drift). The seams:
 
 - `Channel` — platform ↔ core: `start(onMessage)`, `send(conversationId,
-  reply)`, `stop()`. One implementation per platform. `AgentReply` is markdown
+  reply)`, `notify(conversationId, note)`, `stop()`. One implementation per
+  platform. `AgentReply` is markdown
   plus next-step labels (`core/reply.ts` parses the agent's trailing `---\n[a] |
   [b]` block once); every surface renders them as buttons that send the label.
   `send` is called on **every** turn-end, empty text included — that is the
   turn-settled signal an adapter retires per-turn UI on. `notify` carries a
-  persisted `system-input` (delegation, task callback, supervisor message) to
-  the same conversation: a turn the chat never saw being asked for otherwise
-  reads as the agent talking to itself. `AgentReply` carries the turn's
+  persisted `system-input` (delegation, task callback, supervisor message) or a
+  service/error note such as restart recovery to the same conversation: a turn
+  the chat never saw being asked for otherwise reads as the agent talking to
+  itself. `AgentReply` carries the turn's
   `TurnMeta`, which surfaces without hover render as a footer.
 - Slash commands are parsed once for every platform in `channels/commands.ts`:
   trim both ends, require a leading `/`, split off an `@target`, keep args

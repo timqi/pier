@@ -18,10 +18,9 @@ const log = logger("drain");
  *  can be a subagent fan-out, and an abort still persists the partial work. */
 export const DRAIN_DEADLINE_MS = 5 * 60_000;
 const POLL_MS = 1_000;
-/** Per seam call during deadline cleanup. The deadline is a promise to exit;
- *  a session that will not answer `pendingQueue` or `abort` must not turn it
- *  into a hang the operator can only SIGKILL out of. */
-const SEAM_BOUND_MS = 10_000;
+/** Shared cleanup window after the deadline. All sessions use the same clock,
+ *  so N hung seams still cost at most this long rather than N times as long. */
+const CLEANUP_BOUND_MS = 10_000;
 
 export interface LedgerEntry {
   channelId: string;
@@ -76,7 +75,7 @@ export async function drainForRestart(
   deps: DrainDeps,
   deadlineMs = DRAIN_DEADLINE_MS,
   pollMs = POLL_MS,
-  seamBoundMs = SEAM_BOUND_MS,
+  cleanupBoundMs = CLEANUP_BOUND_MS,
 ): Promise<void> {
   const { router, tasks, ledger } = deps;
   router.beginDrain();
@@ -99,7 +98,9 @@ export async function drainForRestart(
         `drain deadline after ${String(Math.round(deadlineMs / 1000))}s — aborting ${String(busy.length)} turn(s); ` +
         `${String(runs)} task run(s) will be marked interrupted at boot`,
       );
-      for (const { session, key } of busy) await abortToLedger(session, key, ledger, seamBoundMs);
+      const cleanupDeadline = Date.now() + cleanupBoundMs;
+      await Promise.all(busy.map(({ session, key }) =>
+        abortToLedger(session, key, ledger, cleanupDeadline)));
       return;
     }
     const report = `draining: ${String(busy.length)} turn(s), ${String(runs)} active task run(s)`;
@@ -109,19 +110,27 @@ export async function drainForRestart(
 
 /** A seam call the deadline cannot wait on forever: a hang or a rejection is
  *  logged and answered with the fallback, and cleanup moves on. */
-const bounded = <T>(work: Promise<T>, ms: number, what: string, fallback: T): Promise<T> =>
-  Promise.race([
-    work.catch((err: unknown) => {
-      log.error(`${what} failed`, err);
-      return fallback;
-    }),
-    new Promise<T>((resolve) => {
-      setTimeout(() => {
-        log.error(`${what} did not answer within ${String(ms)}ms`);
-        resolve(fallback);
-      }, ms).unref();
-    }),
-  ]);
+async function bounded<T>(work: Promise<T>, ms: number, what: string, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      log.error(`${what} did not answer within ${String(ms)}ms`);
+      resolve(fallback);
+    }, ms);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([
+      work.catch((err: unknown) => {
+        log.error(`${what} failed`, err);
+        return fallback;
+      }),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Write the chat's entry, then abort the turn. The ledger comes first so a
  *  hung abort cannot cost the note; the abort persists the partial transcript;
@@ -130,10 +139,11 @@ async function abortToLedger(
   session: AgentSession,
   key: ConversationKey,
   ledger: RestartLedger,
-  seamBoundMs: number,
+  cleanupDeadline: number,
 ): Promise<void> {
+  const remaining = (): number => Math.max(0, cleanupDeadline - Date.now());
   const queued = await bounded(
-    session.pendingQueue(), seamBoundMs,
+    session.pendingQueue(), remaining(),
     `queue snapshot of session ${session.id}`, { steering: [], followUp: [] },
   );
   const pending = [...queued.steering, ...queued.followUp];
@@ -152,15 +162,14 @@ async function abortToLedger(
     ].join("\n");
     ledger.record({ channelId: key.channelId, conversationId: key.conversationId, note });
   }
-  await bounded(session.abort(), seamBoundMs, `abort of session ${session.id}`, undefined);
+  await bounded(session.abort(), remaining(), `abort of session ${session.id}`, undefined);
 }
 
 /**
  * Deliver what a previous process wrote on its way out. Runs at boot once the
  * adapters are up, and again on a Console unlock. Each entry is removed only
- * after its delivery attempt: delivered or thrown is terminal (a throw is
- * logged, never retried across boots into a stale apology), but a platform
- * that simply is not running keeps its entry for the next start.
+ * after confirmed delivery. A missing adapter or a thrown notification keeps
+ * the debt for the next start: a duplicate apology is preferable to silence.
  */
 export async function deliverLedger(
   ledger: RestartLedger,
@@ -168,11 +177,11 @@ export async function deliverLedger(
 ): Promise<void> {
   for (const entry of ledger.list()) {
     const target = `${entry.channelId}:${entry.conversationId}`;
-    const delivered = await notify(entry).catch((err: unknown) => {
+    const delivered: boolean | null = await notify(entry).catch((err: unknown) => {
       log.error(`restart note to ${target} failed`, err);
-      return true; // attempted: logged is the terminal state, not a retry
+      return null;
     });
-    if (delivered) ledger.remove(entry.id);
-    else log.warn(`restart note waiting — ${target} is not running: ${entry.note}`);
+    if (delivered === true) ledger.remove(entry.id);
+    else if (delivered === false) log.warn(`restart note waiting — ${target} is not running: ${entry.note}`);
   }
 }

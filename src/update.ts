@@ -7,7 +7,7 @@
 // Deliberately only an answer. Applying it is `pier update`, a command someone
 // types: this process holds provider keys and can run a shell, so a service
 // that rewrites its own code on a timer is a supply-chain surface (AGENTS.md 8)
-// — and an unattended restart would kill whatever turn was mid-flight.
+// — and the updater's hard stop would kill whatever turn was mid-flight.
 
 import { createRequire } from "node:module";
 import { logger } from "./log.js";
