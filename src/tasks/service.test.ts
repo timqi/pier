@@ -16,11 +16,19 @@ import type {
   SystemInputOrigin,
   ThinkingLevel,
 } from "../core/types.js";
+import { TaskCallbacks } from "./callbacks.js";
+import { TaskMessenger } from "./messages.js";
 import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
 import type { GroupSummary, RunSummary } from "./tool.js";
 import { TaskStore } from "./store.js";
-import { retryDelay, type TaskDefinition, type TaskMessage, type TaskRun } from "./types.js";
+import {
+  MAX_DELIVERY_ATTEMPTS,
+  retryDelay,
+  type TaskDefinition,
+  type TaskMessage,
+  type TaskRun,
+} from "./types.js";
 
 function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
   prompts: string[];
@@ -107,6 +115,24 @@ function setup(session = fakeSession()) {
   const store = new TaskStore(openDb(":memory:"));
   const service = new TaskService(store, factory, router, hub);
   return { cwd, session, factory, hub, router, store, service };
+}
+
+/** A stored run row. The literal is long and four tests need one, differing
+ *  only in the handful of fields each is about. */
+function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<TaskRun> = {}): TaskRun {
+  return {
+    id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+    rootRunId: id, depth: 0, resumedFromRunId: null,
+    triggerSource: "agent", invokedBySessionId: null, sourceSessionId: null,
+    targetSessionId: null, sessionMode: null,
+    callbackSessionId: null, background: false, callbackState: null,
+    callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+    state: "succeeded", input: null,
+    context: { definition: task }, probe: null, matched: null,
+    result: { type: "bash", exitCode: 0, stdout: "done", stderr: "", stdoutTruncated: false, stderrTruncated: false },
+    error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: now,
+    ...over,
+  };
 }
 
 const bashDraft = (cwd: string, script: string) => ({
@@ -323,9 +349,10 @@ describe("task service", () => {
     });
     await vi.waitFor(() => expect(service.getRun(run.id).targetSessionId).toBe("steer-child"));
 
-    // Hand-off is recorded immediately — the sender never waits for the
-    // recipient's turn — and the rejection lands afterwards.
-    expect(await service.control(run.id, "owner", "steer", "Change direction")).toMatchObject({ state: "delivered" });
+    // The sender never waits for the recipient's turn, so the receipt is a
+    // hand-off, not a delivery: `delivered` needs the recipient's transcript to
+    // show it, and this injection is rejected before anything is recorded.
+    expect(await service.control(run.id, "owner", "steer", "Change direction")).toMatchObject({ state: "pending" });
     await vi.waitFor(() => expect(service.listMessages(run.id)[0]).toMatchObject({
       state: "failed",
       error: expect.stringContaining("session gone"),
@@ -342,11 +369,12 @@ describe("task service", () => {
     service.stop();
   });
 
-  it("records callback delivery when the session accepts it, not when its turn ends", async () => {
+  it("records callback delivery from the transcript, without waiting out the recipient's turn", async () => {
     const { cwd, service, session } = setup();
     let release = (): void => {};
-    // Pi resolves `systemInput` only when the turn it triggers settles; a
-    // recipient turn running for minutes must not leave the run "pending".
+    // Pi resolves `systemInput` only when the turn it triggers settles; the
+    // proof is in the transcript as the turn starts, so a recipient turn
+    // running for minutes must not leave the run "pending".
     session.systemInput = async (text, origin, mode) => {
       session.systemInputs.push({ text, origin, mode });
       await new Promise<void>((resolve) => { release = resolve; });
@@ -365,6 +393,226 @@ describe("task service", () => {
       mode: "followUp",
     });
     release();
+  });
+
+  it("will not call a callback delivered on a recipient that recorded nothing", async () => {
+    // Pi's queues are memory: an input an abort or a restart throws away leaves
+    // no transcript entry, and a resolved send proves nothing. This recipient
+    // accepts everything and records none of it.
+    const amnesiac = fakeSession();
+    amnesiac.systemInput = async () => {};
+    const { cwd, service } = setup(amnesiac);
+    service.start(20);
+    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo lost") }, "s1") as TaskDefinition;
+    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
+    const done = await service.waitForRun(queued.runId);
+
+    await vi.waitFor(() => expect(service.getRun(done.id).callbackAttempts).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(service.getRun(done.id).callbackState).toBe("pending");
+    // ...and it keeps trying, on the backoff curve rather than every tick.
+    await vi.waitFor(() => expect(service.getRun(done.id).callbackAttempts).toBe(2), { timeout: 3000 });
+    expect(service.getRun(done.id).callbackState).toBe("pending");
+    service.stop();
+  });
+
+  it("counts a target that will not resolve, and gives up after the ceiling", async () => {
+    // The original incident's worst case: the recipient's transcript is gone,
+    // so every attempt fails before a send. Nothing counted those, and the
+    // callback retried at attempt 0 forever.
+    const { cwd, service, store, hub } = setup();
+    const router = new Router(hub, () => Promise.reject(new Error("unknown session")));
+    const told: string[] = [];
+    const callbacks = new TaskCallbacks(store, router, () => {}, (id, what, why) => told.push(`${id}|${what}|${why}`));
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun(storedRun("lost", task, now, { callbackSessionId: "s1", callbackState: "pending" }));
+
+    for (let i = 1; i <= MAX_DELIVERY_ATTEMPTS; i++) {
+      callbacks.recover(now + i * 600_000);
+      await vi.waitFor(() => expect(store.getRun("lost")?.callbackAttempts).toBe(i));
+    }
+    callbacks.recover(now + 999 * 600_000);
+    await vi.waitFor(() => expect(store.getRun("lost")).toMatchObject({
+      callbackState: "abandoned",
+      callbackError: expect.stringContaining("undeliverable"),
+    }));
+    expect(told).toHaveLength(1);
+  });
+
+  it("lets proof win over the ceiling: a callback that did land is not given up on", async () => {
+    const { cwd, service, store, session, router, hub } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun(storedRun("landed", task, now, {
+      callbackSessionId: session.id,
+      callbackState: "failed",
+      callbackAttempts: MAX_DELIVERY_ATTEMPTS,
+    }));
+    // Its last attempt did reach the transcript; the proof read happens before
+    // the ceiling, or a delivered result would be reported as undeliverable.
+    session.systemInputs.push({
+      text: "result",
+      origin: { kind: "task-callback", taskId: task.id, runId: "landed", sourceSessionId: null },
+      mode: "followUp",
+    });
+    const told: string[] = [];
+    const callbacks = new TaskCallbacks(store, router, () => {}, (...args) => told.push(args.join("|")));
+
+    callbacks.recover(now + 600_000);
+    await vi.waitFor(() => expect(store.getRun("landed")?.callbackState).toBe("delivered"));
+    expect(told).toEqual([]);
+    expect(hub.lastSeq(session.id)).toBeDefined();
+  });
+
+  it("does not send a steer twice while the first one waits in Pi's queue", async () => {
+    // A steer is not deferred on a busy target — reaching the running turn is
+    // the point — so it sits in Pi's in-memory queue, invisible in the
+    // transcript until the turn drains it. Re-sending it there is a duplicate.
+    const busy = fakeSession("busy");
+    const queued: string[] = [];
+    busy.systemInput = async (text) => { queued.push(text); };
+    busy.pendingQueue = async () => ({ steering: [...queued], followUp: [] });
+    busy.setState("streaming");
+    const { cwd, service, store, router, hub } = setup(busy);
+    const messenger = new TaskMessenger(store, router, hub, () => { throw new Error("no resume"); }, () => {});
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun(storedRun("steered", task, now, {
+      state: "running", finishedAt: null, result: null,
+      targetSessionId: busy.id, sessionMode: "reuse", invokedBySessionId: "owner",
+    }));
+    const message = await messenger.control(store.getRun("steered")!, "owner", "steer", "Change direction");
+
+    await vi.waitFor(() => expect(queued).toHaveLength(1));
+    for (let i = 1; i <= 3; i++) {
+      messenger.retryUndelivered(now + i * 600_000);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(queued).toHaveLength(1);
+    expect(store.getMessage(message.id)).toMatchObject({ state: "pending", attempts: 1 });
+
+    // The turn drains it: now it is in the transcript, and only now delivered.
+    busy.systemInputs.push({
+      text: queued[0]!,
+      origin: {
+        kind: "task-message", taskId: task.id, runId: "steered",
+        sourceSessionId: "owner", messageId: message.id, messageKind: "steer",
+      },
+      mode: "steer",
+    });
+    queued.length = 0;
+    messenger.retryUndelivered(now + 999 * 600_000);
+    await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
+    expect(queued).toHaveLength(0);
+  });
+
+  it("gives up on an unreachable callback target and reports it instead of retrying forever", async () => {
+    const { cwd, service, store, hub } = setup();
+    const errors: string[] = [];
+    hub.subscribe("s1", (event) => { if (event.type === "error") errors.push(event.message); });
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun({
+      id: "spent", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      rootRunId: "spent", depth: 0, resumedFromRunId: null,
+      triggerSource: "agent", invokedBySessionId: "s1", sourceSessionId: "s1",
+      targetSessionId: null, sessionMode: null,
+      callbackSessionId: "s1", background: true, callbackState: "failed",
+      callbackAttempts: MAX_DELIVERY_ATTEMPTS, callbackError: "unknown session",
+      callbackNextAttemptAt: now,
+      state: "succeeded", input: null,
+      context: { definition: task }, probe: null, matched: null,
+      result: {
+        type: "bash", exitCode: 0, stdout: "done", stderr: "",
+        stdoutTruncated: false, stderrTruncated: false,
+      },
+      error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: now,
+    });
+    service.start(20);
+
+    await vi.waitFor(() => expect(service.getRun("spent")).toMatchObject({
+      callbackState: "abandoned",
+      callbackError: expect.stringContaining("undeliverable"),
+      callbackNextAttemptAt: null,
+    }));
+    // The session that was owed the result hears about it — the whole point of
+    // stopping is that stopping is visible.
+    expect(errors.join(" ")).toContain("could not be delivered");
+    service.stop();
+  });
+
+  it("counts a message pass that dies before the send, so its ceiling arrives too", async () => {
+    const { cwd, service, store, hub } = setup();
+    const messenger = new TaskMessenger(
+      store,
+      new Router(hub, () => Promise.reject(new Error("unknown session"))),
+      hub,
+      () => { throw new Error("no resume"); },
+      () => {},
+    );
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun(storedRun("gone", task, now, {
+      state: "running", finishedAt: null, result: null,
+      targetSessionId: "gone-session", sessionMode: "reuse", invokedBySessionId: "owner",
+    }));
+    const message = await messenger.control(store.getRun("gone")!, "owner", "steer", "Change direction");
+
+    for (let i = 1; i <= MAX_DELIVERY_ATTEMPTS; i++) {
+      await vi.waitFor(() => expect(store.getMessage(message.id)?.attempts).toBe(i));
+      messenger.retryUndelivered(now + i * 600_000);
+    }
+    await vi.waitFor(() => expect(store.getMessage(message.id)).toMatchObject({
+      state: "expired",
+      error: expect.stringContaining("undeliverable"),
+    }));
+  });
+
+  it("gives up on an undeliverable message and tells the session it was aimed at", async () => {
+    const amnesiac = fakeSession("target");
+    amnesiac.systemInput = async () => {};
+    const { cwd, service, store, router, hub } = setup(amnesiac);
+    const told: string[] = [];
+    const messenger = new TaskMessenger(
+      store,
+      router,
+      hub,
+      () => { throw new Error("no resume in this test"); },
+      (sessionId, what, why) => told.push(`${sessionId}|${what}|${why}`),
+    );
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun({
+      id: "live", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      rootRunId: "live", depth: 0, resumedFromRunId: null,
+      triggerSource: "agent", invokedBySessionId: "owner", sourceSessionId: "owner",
+      targetSessionId: "target", sessionMode: "reuse",
+      callbackSessionId: null, background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+      state: "running", input: null,
+      context: { definition: task }, probe: null, matched: null, result: null,
+      error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: null,
+    });
+    const run = store.getRun("live")!;
+    const message = await messenger.control(run, "owner", "steer", "Change direction");
+    expect(message.state).toBe("pending");
+
+    // The hand-off spent attempt 1; each sweep past the backoff spends the
+    // next, and the one past the ceiling gives up.
+    await vi.waitFor(() => expect(store.getMessage(message.id)?.attempts).toBe(1));
+    for (let i = 1; i <= MAX_DELIVERY_ATTEMPTS; i++) {
+      messenger.retryUndelivered(now + i * 600_000);
+      await vi.waitFor(() => expect(store.getMessage(message.id)?.attempts).toBe(i + 1));
+    }
+    expect(store.getMessage(message.id)).toMatchObject({
+      state: "expired",
+      error: expect.stringContaining("undeliverable"),
+    });
+    // Both ends: the session that was owed it, and the sender waiting on it.
+    expect(told).toHaveLength(2);
+    expect(told[0]).toContain("target|a steer from run live");
+    expect(told[1]).toContain("owner|your steer on run live");
   });
 
   it("does not spend a delivery attempt while the callback target is busy", async () => {
@@ -467,11 +715,13 @@ describe("task service", () => {
     session.setState("streaming");
     const queued = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner" });
     const message = await service.control(queued.id, "owner", "steer", "Change direction");
-    expect(message).toMatchObject({ kind: "steer", state: "delivered", runId: queued.id });
-    expect(session.systemInputs).toContainEqual(expect.objectContaining({
+    expect(message).toMatchObject({ kind: "steer", state: "pending", runId: queued.id });
+    await vi.waitFor(() => expect(session.systemInputs).toContainEqual(expect.objectContaining({
       origin: expect.objectContaining({ kind: "task-message", messageId: message.id }),
       mode: "steer",
-    }));
+    })));
+    // Delivered once the recipient's own transcript carries it, not before.
+    await vi.waitFor(() => expect(service.listMessages(queued.id)[0]?.state).toBe("delivered"));
     session.setState("idle");
     const done = await service.waitForRun(queued.id);
     const resumed = await service.waitForRun(service.resume(done.id, "Check one more edge case").id);
@@ -520,12 +770,14 @@ describe("task service", () => {
       reason: "decision",
       message: "Use API A or B?",
     }, child.id) as TaskMessage;
-    expect(receipt).toMatchObject({ kind: "decision", state: "delivered" });
+    expect(receipt).toMatchObject({ kind: "decision", state: "pending" });
+    await vi.waitFor(() => expect(service.listMessages(run.id)[0]?.state).toBe("delivered"));
     expect(parent.systemInputs.at(-1)).toMatchObject({ text: expect.stringContaining("Use API A or B?"), mode: "steer" });
     await expect(service.tool({ operation: "contact", reason: "decision", message: "again?" }, child.id))
       .rejects.toThrow("pending supervisor decision");
     await service.tool({ operation: "contact", reason: "progress", message: "Halfway done" }, child.id);
-    expect(parent.systemInputs.at(-1)).toMatchObject({ text: expect.stringContaining("Halfway done"), mode: "followUp" });
+    await vi.waitFor(() => expect(parent.systemInputs.at(-1))
+      .toMatchObject({ text: expect.stringContaining("Halfway done"), mode: "followUp" }));
 
     const bash = await service.create(bashDraft(cwd, "true"));
     await expect(service.tool({ operation: "run", task_id: bash.id }, child.id)).rejects.toThrow("only invoke Agent tasks");

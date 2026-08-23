@@ -172,7 +172,10 @@ export class TaskStore {
       WHERE state = 'pending' AND json_extract(json, '$.kind') != 'decision'
     `).map((message) => {
       message.state = "expired";
-      message.error = "Pier restarted before delivery completed";
+      // "Confirmed", not "completed": the input may well have been read — the
+      // proof of it lives in the recipient's transcript, which this layer
+      // cannot see, and the run it steered is interrupted by the same restart.
+      message.error = "Pier restarted before delivery could be confirmed";
       this.saveMessage(message);
       return message;
     });

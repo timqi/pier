@@ -85,12 +85,23 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
   });
 };
 
-class PiSession implements AgentSession {
+export class PiSession implements AgentSession {
   constructor(
     private readonly pi: PiAgentSession,
     /** Operator pins, read per call — the menu can change while we run. */
     private readonly pinned: () => ModelRef[] = () => [],
   ) {}
+
+  /** Pi's dispose unhooks the one listener that persists and emits, so a turn
+   *  started after it runs for real — model call, tools and all — and lands
+   *  nowhere: no transcript entry, no event, and a promise that resolves as if
+   *  it worked. Refusing is what turns that silence into the failure it is;
+   *  callers already report or retry a rejection (§5b). */
+  private disposed = false;
+
+  private live(): void {
+    if (this.disposed) throw new Error(`session ${this.pi.sessionId} is closed`);
+  }
 
   get id(): string {
     return this.pi.sessionId;
@@ -162,6 +173,7 @@ class PiSession implements AgentSession {
   }
 
   async history(): Promise<ChatTurn[]> {
+    this.live();
     return toChatTurns(this.pi.messages as PiMessage[]);
   }
 
@@ -185,23 +197,29 @@ class PiSession implements AgentSession {
     if (cancelled) throw new Error("rewind cancelled");
   }
 
-  prompt(text: string, images?: ImageAttachment[]): Promise<void> {
+  // Async, so a refusal is a rejected promise: the seam promises callers they
+  // may only `.catch()` (core/types.ts), and dispatch does exactly that.
+  async prompt(text: string, images?: ImageAttachment[]): Promise<void> {
+    this.live();
     return this.pi.prompt(text, { images: toImageContent(images) });
   }
 
-  steer(text: string, images?: ImageAttachment[]): Promise<void> {
+  async steer(text: string, images?: ImageAttachment[]): Promise<void> {
+    this.live();
     return this.pi.steer(text, toImageContent(images));
   }
 
-  followUp(text: string, images?: ImageAttachment[]): Promise<void> {
+  async followUp(text: string, images?: ImageAttachment[]): Promise<void> {
+    this.live();
     return this.pi.followUp(text, toImageContent(images));
   }
 
-  systemInput(
+  async systemInput(
     text: string,
     origin: SystemInputOrigin,
     mode: "prompt" | "steer" | "followUp",
   ): Promise<void> {
+    this.live();
     return this.pi.sendCustomMessage(
       { customType: "pier.system-input", content: text, display: true, details: origin },
       { triggerTurn: true, deliverAs: mode === "prompt" ? undefined : mode },
@@ -230,6 +248,7 @@ class PiSession implements AgentSession {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.pi.dispose();
   }
 }

@@ -48,7 +48,8 @@ src/
                secrets, client error reports), providers.ts + provider-flows.ts,
                auth.ts, files.ts, session-state.ts,
                ui/ modules (form.ts + dom.ts are the shared vocabulary)
-  tasks/       types (incl. the shared callback-outbox semantics), definitions,
+  tasks/       types (incl. the shared delivery record), outbox (the one
+               delivery engine: proof, backoff, ceiling), definitions,
                runs, groups, agent (the child-run runner),
                execution, callbacks, messages, command, service, store, tool,
                HTTP routes

@@ -95,7 +95,7 @@ export interface TaskRunContext {
   resumePrompt?: string;
 }
 
-export interface TaskRun {
+export interface TaskRun extends CallbackFields {
   id: string;
   taskId: string;
   taskRevision: number;
@@ -111,10 +111,6 @@ export interface TaskRun {
   sessionMode: "reuse" | "fresh" | "fork" | null;
   callbackSessionId: string | null;
   background: boolean;
-  callbackState: "pending" | "delivered" | "failed" | null;
-  callbackAttempts: number;
-  callbackError: string | null;
-  callbackNextAttemptAt: number | null;
   state: TaskRunState;
   input: unknown;
   context: TaskRunContext;
@@ -132,17 +128,13 @@ export type GroupJoinMode = "all" | "first";
 
 /** A fan-out join owned by core: one aggregated callback when the join
  * condition is met. Members carry `groupId` and no individual callback. */
-export interface TaskGroup {
+export interface TaskGroup extends CallbackFields {
   id: string;
   join: GroupJoinMode;
   invokedBySessionId: string;
   callbackSessionId: string | null;
   memberRunIds: string[];
   winnerRunId: string | null;
-  callbackState: "pending" | "delivered" | "failed" | null;
-  callbackAttempts: number;
-  callbackError: string | null;
-  callbackNextAttemptAt: number | null;
   createdAt: number;
   finishedAt: number | null;
 }
@@ -163,13 +155,22 @@ export interface TaskMessage {
   deliveredAt: number | null;
   answeredAt: number | null;
   error: string | null;
+  /** Persisted, not in memory: a decision outlives restarts, and an attempt
+   *  counter that resets with the process is a ceiling that never arrives. */
+  attempts: number;
+  nextAttemptAt: number | null;
 }
 
-/** The one callback-outbox semantics, shared by runs and groups (their
- *  callback* columns are the same shape). Deferring on a busy target is not
- *  an attempt; backoff caps at 60s. */
+/** The delivery record runs and groups share (their callback* columns are the
+ *  same shape); outbox.ts owns the transitions between these states.
+ *
+ *  `delivered` means the input is in the recipient's own transcript, not that
+ *  a send resolved: Pi's queues are memory, so an abort or a restart drops an
+ *  accepted input, and reporting that as delivered loses it in silence.
+ *  `abandoned` is the end of the line — a target nothing can reach, reported
+ *  instead of retried forever. */
 export interface CallbackFields {
-  callbackState: "pending" | "delivered" | "failed" | null;
+  callbackState: "pending" | "delivered" | "failed" | "abandoned" | null;
   callbackAttempts: number;
   callbackError: string | null;
   callbackNextAttemptAt: number | null;
@@ -178,25 +179,14 @@ export interface CallbackFields {
 export const retryDelay = (attempts: number): number =>
   Math.min(60_000, 1000 * 2 ** Math.min(attempts, 6));
 
-export const outbox = {
-  defer(t: CallbackFields): void {
-    t.callbackNextAttemptAt = Date.now() + 1000;
-  },
-  attempt(t: CallbackFields): void {
-    t.callbackAttempts += 1;
-    t.callbackState = "pending";
-    t.callbackError = null;
-  },
-  delivered(t: CallbackFields): void {
-    t.callbackState = "delivered";
-    t.callbackNextAttemptAt = null;
-  },
-  failed(t: CallbackFields, error: unknown): void {
-    t.callbackState = "failed";
-    t.callbackError = String(error);
-    t.callbackNextAttemptAt = Date.now() + retryDelay(t.callbackAttempts);
-  },
-};
+/** Attempts before a delivery is given up on and reported. With the backoff
+ *  above that is ~4 minutes: long enough to outlast a busy or restarting
+ *  recipient, short enough that whoever is waiting still cares. */
+export const MAX_DELIVERY_ATTEMPTS = 8;
+
+/** What a delivery says when it stops trying. */
+export const undeliverable = (attempts: number, error: string | null): string =>
+  `undeliverable after ${String(attempts)} attempts${error ? `: ${error}` : ""}`;
 
 export const isTerminal = (state: TaskRunState): boolean =>
   state === "succeeded" ||

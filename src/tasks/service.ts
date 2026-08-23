@@ -33,7 +33,7 @@ export class TaskService {
   constructor(
     readonly store: TaskStore,
     private readonly factory: AgentFactory,
-    router: Router,
+    private readonly router: Router,
     private readonly hub: EventHub,
     /** Structural on purpose: tasks/ must not import settings.ts — main.ts
      *  hands in a closure over the store instead. Absent in bare test rigs. */
@@ -41,10 +41,13 @@ export class TaskService {
       modelMenu(): { provider: string; id: string; thinking?: string; note?: string }[];
     },
   ) {
+    const unreachable = (sessionId: string, what: string, why: string): void =>
+      this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, (runId, prompt, fromSessionId) =>
-      this.resume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }));
+      this.resume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }),
+      unreachable);
     this.definitions = new TaskDefinitions(store, factory, router, hub);
-    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run));
+    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },
@@ -56,7 +59,7 @@ export class TaskService {
         background: true,
         groupId,
       }),
-    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }));
+    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable);
     const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run));
     this.execution = new TaskExecution(store, this.definitions, this.callbacks, agent, {
       runChild: (taskId, parent) => this.run(taskId, parent.input, "task", parent.id, {
@@ -298,14 +301,35 @@ export class TaskService {
     this.ticking = true;
     try {
       const now = Date.now();
-      for (const task of this.definitions.claimDue(now)) {
-        this.run(task.id, null, task.trigger.type === "watch" ? "watch" : "cron");
-      }
-      this.callbacks.recover(now);
-      this.groups.recover(now);
-      this.messages.retryUndelivered(now);
+      this.sweep("schedule", () => {
+        for (const task of this.definitions.claimDue(now)) {
+          this.run(task.id, null, task.trigger.type === "watch" ? "watch" : "cron");
+        }
+      });
+      this.sweep("run callbacks", () => this.callbacks.recover(now));
+      this.sweep("group callbacks", () => this.groups.recover(now));
+      this.sweep("messages", () => this.messages.retryUndelivered(now));
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /** A delivery nobody can complete. Retrying it forever costs the same
+   * silence as dropping it, so it stops here and says so on three surfaces:
+   * the operator's log, the record the tool and Console read, and the event
+   * stream of the session that was supposed to receive it (§5b). */
+  private unreachable(sessionId: string, what: string, why: string): void {
+    log.error(`gave up delivering ${what} to session ${sessionId}: ${why}`);
+    this.router.reportTo(sessionId, `${what} could not be delivered — ${why}`);
+  }
+
+  /** Four independent sweeps, isolated: one throwing (a group whose member row
+   * is gone throws on every pass) must not starve the retries behind it. */
+  private sweep(what: string, run: () => void): void {
+    try {
+      run();
+    } catch (err) {
+      log.error(`${what} sweep failed`, err);
     }
   }
 

@@ -186,6 +186,25 @@ describe("channel fan-out", () => {
   });
 });
 
+describe("reporting to a session", () => {
+  it("tells the conversation waiting on it", async () => {
+    await router.ensure(KEY);
+    router.reportTo("s1", "the result could not be delivered");
+    expect(tg.notes.at(-1)?.[1]).toMatchObject({
+      text: "the result could not be delivered",
+      origin: { kind: "error" },
+    });
+  });
+
+  it("falls back to the event stream when no conversation is attached", () => {
+    const seen: string[] = [];
+    hub.subscribe("s9", (e) => { if (e.type === "error") seen.push(e.message); });
+    router.reportTo("s9", "nobody to tell but the timeline");
+    expect(seen).toEqual(["nobody to tell but the timeline"]);
+    expect(tg.notes).toEqual([]);
+  });
+});
+
 describe("idle eviction", () => {
   it("lets an idle session go, and resumes it on the next message", async () => {
     const opened: string[] = [];
@@ -208,6 +227,20 @@ describe("idle eviction", () => {
     await router.evictIdle(60_000, Date.now() + 61_000);
     fake.emit({ type: "turn-end", text: "late" });
     expect(tg.sent).toEqual([]);
+  });
+
+  it("drops the aliases too, so a task callback never reaches a disposed session", async () => {
+    // web:<id> and task:<id> name one session; a callback arrives under task:.
+    const web = { channelId: "web", conversationId: "s1" };
+    const task = { channelId: "task", conversationId: "s1" };
+    const fresh = fakeSession("s1");
+    let opened = 0;
+    router = new Router(hub, () => Promise.resolve(++opened === 1 ? fake.session : fresh.session));
+    await router.ensure(web);
+    await router.ensure(task);
+    expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(1);
+    expect(router.sessionOf(task)).toBeUndefined();
+    expect(await router.ensure(task)).toBe(fresh.session);
   });
 
   it("keeps a session someone is still watching, or still streaming", async () => {
@@ -233,6 +266,33 @@ describe("idle eviction", () => {
     expect(hub.replay("s1", 0)).toEqual([]); // the ring is what costs memory
     hub.emit("s1", { type: "turn-end", text: "two" });
     expect(hub.lastSeq("s1")).toBe(before + 1);
+  });
+});
+
+describe("opening a session", () => {
+  it("opens it once for concurrent callers, aliases included", async () => {
+    let opened = 0;
+    router = new Router(hub, () => {
+      opened += 1;
+      // Resolve on a later tick: the whole point is the window in between.
+      return new Promise((res) => setTimeout(() => res(fakeSession("s1").session), 5));
+    });
+    const [a, b, c] = await Promise.all([
+      router.ensure({ channelId: "web", conversationId: "s1" }),
+      router.ensure({ channelId: "web", conversationId: "s1" }),
+      router.ensure({ channelId: "task", conversationId: "s1" }),
+    ]);
+    expect(opened).toBe(1);
+    expect(a).toBe(b);
+    expect(a).toBe(c);
+  });
+
+  it("tells the chat when the session cannot be opened", async () => {
+    router = new Router(hub, () => Promise.reject(new Error("unknown session")));
+    router.registerChannel(tg.channel);
+    await expect(router.ensure(KEY)).rejects.toThrow("unknown session");
+    expect(tg.notes[0]?.[1].text).toContain("could not open a session");
+    expect(tg.notes[0]?.[1].origin).toEqual({ kind: "error" });
   });
 });
 

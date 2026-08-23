@@ -47,6 +47,10 @@ interface Attached {
 export class Router {
   private readonly byKey = new Map<string, AgentSession>();
   private readonly bySession = new Map<string, Attached>();
+  /** Resolves in flight, so two surfaces asking at once share one session
+   *  object instead of opening a second Pi runtime on the same transcript.
+   *  Web and task keys collapse to the session id they both name. */
+  private readonly opening = new Map<string, Promise<AgentSession>>();
   private readonly channels = new Map<string, Channel>();
   /** Who each session last heard from, so a header costs tokens only on news. */
   private readonly senders = new SenderPrefix();
@@ -90,6 +94,19 @@ export class Router {
   }
 
   /**
+   * Report something that happened *to* a session rather than in it: a task
+   * result that could not be delivered, say. Its conversation is told when one
+   * is attached — an agent that was promised an answer and a human watching the
+   * same thread learn it is not coming from the same place they were waiting.
+   * Otherwise the hub carries it for the web timeline.
+   */
+  reportTo(sessionId: string, message: string): void {
+    const key = this.conversationOf(sessionId);
+    if (key) this.report(sessionId, key, message);
+    else this.hub.emit(sessionId, { type: "error", message });
+  }
+
+  /**
    * Let go of every session that has been idle too long, so a process serving
    * IM threads and task runs for weeks does not hold one live Pi runtime per
    * conversation it ever saw. Only the in-memory attachment goes: the durable
@@ -106,9 +123,7 @@ export class Router {
       if (this.hub.hasSubscribers(id)) continue;
       if (now - attached.activeAt < ttlMs) continue;
       this.bySession.delete(id);
-      if (this.byKey.get(keyOf(attached.key)) === attached.session) {
-        this.byKey.delete(keyOf(attached.key));
-      }
+      this.forgetKeys(attached.session);
       attached.unsubscribe();
       this.senders.forget(id);
       this.hub.dropReplay(id);
@@ -156,14 +171,32 @@ export class Router {
     return this.bySession.get(sessionId)?.key;
   }
 
+  /** Every key that points at this session object. One session can be reached
+   *  under more than one — `web:<id>` and `task:<id>` name the same session —
+   *  and a key left behind hands out a session that is no longer live. */
+  private forgetKeys(session: AgentSession): void {
+    for (const [key, held] of this.byKey) if (held === session) this.byKey.delete(key);
+  }
+
   /** Attach an existing session to a conversation and wire its events. */
   attach(key: ConversationKey, session: AgentSession): void {
-    this.byKey.set(keyOf(key), session);
     const existing = this.bySession.get(session.id);
     if (existing?.session === session) {
+      this.byKey.set(keyOf(key), session);
       existing.activeAt = Date.now();
       return;
     }
+    if (existing) {
+      // Two live objects on one transcript: both would write it and both would
+      // answer the chat. Single-flight `ensure` closes the race that makes
+      // this, so reaching here is a bug worth seeing — the replaced one is
+      // silenced and unreachable, rather than left answering under aliases
+      // nobody knows are stale.
+      log.warn(`session ${session.id} replaced while attached to ${keyOf(existing.key)}`);
+      existing.unsubscribe();
+      this.forgetKeys(existing.session);
+    }
+    this.byKey.set(keyOf(key), session);
     log.info(`attached ${keyOf(key)} → session ${session.id}`);
     const unsubscribe = session.subscribe((payload) => {
       this.hub.emit(session.id, payload);
@@ -253,18 +286,57 @@ export class Router {
       if (session) this.byKey.set(keyOf(key), session);
     }
     if (!session) {
+      // Aliases share one lock: web:<id> and task:<id> must not each open one.
+      const lock = key.channelId === "web" || key.channelId === "task"
+        ? `session:${key.conversationId}`
+        : keyOf(key);
+      const inflight = this.opening.get(lock);
+      // A second caller rides the first one's resolve — which attaches before
+      // this continuation runs, having awaited it first — and registers its own
+      // key against the session that came back.
+      if (inflight) {
+        session = await inflight;
+        this.byKey.set(keyOf(key), session);
+        return this.reached(session);
+      }
       try {
-        session = await this.resolve(key);
+        // Inside the try: a resolver that throws synchronously is the same
+        // failure as one that rejects, and reports the same way.
+        const opening = this.resolve(key);
+        this.opening.set(lock, opening);
+        session = await opening;
       } catch (err) {
-        // The one failure with nowhere to report itself: there is no session id
-        // to emit under yet, and every caller only sees a rejected promise.
-        log.error(`could not open a session for ${keyOf(key)}`, err);
+        this.unopened(key, err);
         throw err;
+      } finally {
+        this.opening.delete(lock);
       }
       this.attach(key, session);
     }
-    // Reached for, so not idle — every surface that uses a session comes
-    // through here, including the ones that only read it.
+    return this.reached(session);
+  }
+
+  /** A session that would not open has no event stream of its own to report on
+   *  — unless its id is what we were asked for, which is what a web or task key
+   *  is. Otherwise the chat that is waiting is told directly. Callers still get
+   *  the rejection; this is only so the waiting side is not left with nothing. */
+  private unopened(key: ConversationKey, err: unknown): void {
+    log.error(`could not open a session for ${keyOf(key)}`, err);
+    const message = truncate(`could not open a session: ${String(err)}`);
+    // A web or task key names the session that would not open, so its own
+    // stream is where the waiting surface is looking; an IM key names a chat.
+    if (key.channelId === "web" || key.channelId === "task") {
+      this.reportTo(key.conversationId, message);
+      return;
+    }
+    this.channels.get(key.channelId)
+      ?.notify(key.conversationId, { text: message, origin: { kind: "error" } })
+      .catch((e: unknown) => log.error(`could not report it to ${key.channelId}`, e));
+  }
+
+  /** Reached for, so not idle — every surface that uses a session comes
+   *  through `ensure`, including the ones that only read it. */
+  private reached(session: AgentSession): AgentSession {
     const attached = this.bySession.get(session.id);
     if (attached) attached.activeAt = Date.now();
     return session;

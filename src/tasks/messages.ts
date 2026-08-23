@@ -5,7 +5,7 @@ import { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
-import { isTerminal, retryDelay } from "./types.js";
+import { isTerminal, MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable } from "./types.js";
 
 const log = logger("tasks");
 
@@ -19,16 +19,14 @@ function bounded(content: string): string {
 }
 
 export class TaskMessenger {
-  /** Retry schedule for failed injections. In-memory on purpose: a restart
-   * expires undelivered control messages and re-offers decisions anyway. */
-  private readonly retries = new Map<string, { attempts: number; nextAt: number }>();
-
   constructor(
     private readonly store: TaskStore,
     private readonly router: Router,
     private readonly hub: EventHub,
     /** Continues a terminal child with a supervisor reply as its prompt. */
     private readonly resumeRun: (runId: string, prompt: string, fromSessionId: string) => TaskRun,
+    /** Reports a delivery nobody can complete (service.ts owns the surfaces). */
+    private readonly unreachable: (sessionId: string, what: string, why: string) => void,
   ) {}
 
   expirePending(): void {
@@ -96,7 +94,7 @@ export class TaskMessenger {
         this.changed(message);
         continue;
       }
-      if ((this.retries.get(message.id)?.nextAt ?? 0) > now) continue;
+      if ((message.nextAttemptAt ?? 0) > now) continue;
       const target = message.toSessionId || run.targetSessionId;
       if (target) this.deliver(message, run, target);
     }
@@ -178,6 +176,8 @@ export class TaskMessenger {
       deliveredAt: null,
       answeredAt: null,
       error: null,
+      attempts: 0,
+      nextAttemptAt: null,
     };
     this.store.saveMessage(message);
     this.changed(message);
@@ -187,20 +187,70 @@ export class TaskMessenger {
   /** Never awaits the recipient: the seam's `systemInput` settles with the turn
    * the input triggers, so awaiting it would block the sender — a child's
    * `contact` on its supervisor's whole answer turn — which the design forbids.
-   * Delivery is therefore recorded on hand-off and corrected to `failed` by the
-   * catch; the tick sweep retries from there. */
+   * So `delivered` is written by `confirmed`, against the one proof that
+   * survives an abort or a restart: the message visible in the recipient's own
+   * transcript. Until then it stays pending and the sweep tries again. */
   private deliver(candidate: TaskMessage, run: TaskRun, targetSessionId: string): void {
     const message = this.require(candidate.id);
     if (message.state !== "pending" && message.state !== "failed") return;
     if (message.toSessionId !== targetSessionId) message.toSessionId = targetSessionId;
-    message.state = "delivered";
-    message.deliveredAt = Date.now();
+    message.state = "pending";
     message.error = null;
-    this.retries.delete(message.id); // a redelivery starts its backoff fresh
     this.store.saveMessage(message);
     this.changed(message);
     void this.inject(message, run, targetSessionId, this.mode(message))
-      .catch((error: unknown) => { this.failed(message.id, error); });
+      .catch((error: unknown) => log.error(`message ${message.id} delivery collapsed`, error));
+  }
+
+  /** The one place a message becomes delivered. */
+  private confirmed(id: string): void {
+    const message = this.store.getMessage(id);
+    if (!message || message.state !== "pending") return;
+    message.state = "delivered";
+    message.deliveredAt = Date.now();
+    message.error = null;
+    message.nextAttemptAt = null;
+    this.store.saveMessage(message);
+    this.changed(message);
+  }
+
+  /** Counts one hand-off and says whether it may happen: a recipient that
+   *  never records the message must not be re-sent once a second forever.
+   *  False means the ceiling was reached and the message is now expired. */
+  private spend(id: string): boolean {
+    const message = this.store.getMessage(id);
+    if (!message || message.state !== "pending") return false;
+    message.attempts += 1;
+    message.nextAttemptAt = Date.now() + retryDelay(message.attempts);
+    if (message.attempts > MAX_DELIVERY_ATTEMPTS) {
+      this.abandon(message, undeliverable(message.attempts - 1, message.error));
+      return false;
+    }
+    this.store.saveMessage(message);
+    return true;
+  }
+
+  /** Out of attempts. Both ends are told — the recipient that was owed it and
+   *  the sender waiting on the answer — and a decision that expires here stops
+   *  suppressing its run's completion callback, which `execution.ts` decided
+   *  once, at the end of the run, and never revisits. */
+  private abandon(message: TaskMessage, why: string): void {
+    message.state = "expired";
+    message.error = why;
+    message.answeredAt = Date.now();
+    message.nextAttemptAt = null;
+    this.store.saveMessage(message);
+    this.changed(message);
+    this.unreachable(message.toSessionId, `a ${message.kind} from run ${message.runId}`, why);
+    if (message.fromSessionId && message.fromSessionId !== message.toSessionId) {
+      this.unreachable(message.fromSessionId, `your ${message.kind} on run ${message.runId}`, why);
+    }
+    const run = this.store.getRun(message.runId);
+    if (message.kind !== "decision" || !run?.callbackSessionId) return;
+    if (run.callbackState === null && isTerminal(run.state)) {
+      run.callbackState = "pending"; // the tick sweep delivers it
+      this.store.saveRun(run);
+    }
   }
 
   /** A decision steers — a follow-up would land only after the supervisor runs
@@ -209,35 +259,62 @@ export class TaskMessenger {
     return message.kind === "steer" || message.kind === "decision" ? "steer" : "follow_up";
   }
 
-  private failed(id: string, error: unknown): void {
+  private failed(id: string, error: unknown, spent: boolean): void {
     const message = this.store.getMessage(id);
-    if (!message || message.state === "answered" || message.state === "expired") return;
+    // Only a still-pending message can fail: a late rejection must not undo a
+    // delivery a newer attempt already proved, nor revive an expired one.
+    if (message?.state !== "pending") return;
     // Both ends are waiting on this one: the sender for an answer, the
     // recipient for a message it never got told about.
     log.warn(`${message.kind} ${id} to session ${message.toSessionId} failed`, error);
     message.state = "failed";
     message.error = String(error);
+    // A pass that died before the send never spent its attempt — an
+    // unresolvable target dies there every time, and would retry forever.
+    if (!spent) message.attempts += 1;
+    message.nextAttemptAt = Date.now() + retryDelay(message.attempts);
     this.store.saveMessage(message);
     this.changed(message);
-    const attempts = (this.retries.get(id)?.attempts ?? 0) + 1;
-    this.retries.set(id, { attempts, nextAt: Date.now() + retryDelay(attempts) });
+    if (message.attempts > MAX_DELIVERY_ATTEMPTS) {
+      this.abandon(message, undeliverable(message.attempts - 1, message.error));
+    }
   }
 
+  /** One pass at getting the message into the recipient: the dedupe on a retry
+   *  and the proof of delivery are the same transcript read. Owns its own
+   *  failure, so an attempt is counted exactly once whether the pass died
+   *  before the send or the send itself was refused. */
   private async inject(
     message: TaskMessage,
     run: TaskRun,
     targetSessionId: string,
     mode: "steer" | "follow_up",
   ): Promise<void> {
-    const session = await this.router.ensure({ channelId: "task", conversationId: targetSessionId });
-    const delivered = (await session.history()).some((turn) =>
-      turn.role === "system" && turn.origin?.kind === "task-message" && turn.origin.messageId === message.id);
-    if (delivered) return;
-    await session.systemInput(
-      this.format(message, run),
-      this.origin(message, run),
-      mode === "follow_up" ? "followUp" : mode,
-    );
+    let spent = false;
+    try {
+      const session = await this.router.ensure({ channelId: "task", conversationId: targetSessionId });
+      const recorded = async (): Promise<boolean> =>
+        (await session.history()).some((turn) =>
+          turn.role === "system" && turn.origin?.kind === "task-message" && turn.origin.messageId === message.id);
+      if (await recorded()) return this.confirmed(message.id);
+      // Accepted and waiting in Pi's queue for the running turn to drain it:
+      // not recorded yet, and sending again would deliver the same steer twice.
+      // Unlike a callback this is not deferred — a steer's whole point is to
+      // reach the turn already running — so the queue is where it sits, and
+      // waiting for it to drain costs no attempt.
+      const queue = await session.pendingQueue();
+      if ([...queue.steering, ...queue.followUp].some((text) => text.includes(message.id))) return;
+      spent = this.spend(message.id);
+      if (!spent) return;
+      await session.systemInput(
+        this.format(message, run),
+        this.origin(message, run),
+        mode === "follow_up" ? "followUp" : mode,
+      );
+      if (await recorded()) this.confirmed(message.id);
+    } catch (error) {
+      this.failed(message.id, error, spent);
+    }
   }
 
   private format(message: TaskMessage, run: TaskRun): string {

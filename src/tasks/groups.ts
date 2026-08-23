@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runResultText } from "./callbacks.js";
+import { Outbox } from "./outbox.js";
 import { TaskStore } from "./store.js";
 import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
-import { isTerminal, outbox } from "./types.js";
+import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
 
@@ -18,14 +19,29 @@ interface GroupHost {
 /** Core-owned fan-out join: members run detached, the group delivers one
  * aggregated callback when the join condition is met (design 04). */
 export class TaskGroups {
-  private readonly delivering = new Set<string>();
+  private readonly outbox: Outbox<TaskGroup>;
 
   constructor(
     private readonly store: TaskStore,
-    private readonly router: Router,
+    router: Router,
     private readonly host: GroupHost,
     private readonly changed: (group: TaskGroup) => void,
-  ) {}
+    unreachable: (sessionId: string, what: string, why: string) => void,
+  ) {
+    this.outbox = new Outbox<TaskGroup>(router, {
+      id: (group) => group.id,
+      reload: (id) => this.store.getGroup(id),
+      save: (group) => { this.store.saveGroup(group); },
+      changed,
+      // A group names itself in the origin where a run names its run id, so the
+      // engine's transcript proof works unchanged.
+      input: (groups) => ({
+        text: this.text(groups[0]!),
+        origin: { kind: "task-callback", taskId: groups[0]!.id, runId: groups[0]!.id, sourceSessionId: null },
+      }),
+      describe: (group) => `the result of a ${String(group.memberRunIds.length)}-run group`,
+    }, unreachable);
+  }
 
   /** Enqueues every member or none: a partially started group is worse than
    * a rejected one. */
@@ -123,48 +139,11 @@ export class TaskGroups {
     if (group.callbackState === "pending") void this.deliver(group);
   }
 
-  /** Same outbox semantics as run callbacks: busy defer, transcript dedupe on
-   * the group id, backoff retry, restart recovery. */
+  /** The engine owns retry, proof and the ceiling; a group is a batch of one. */
   async deliver(candidate: TaskGroup): Promise<void> {
-    if (this.delivering.has(candidate.id)) return;
-    this.delivering.add(candidate.id);
-    try {
-      const group = this.store.getGroup(candidate.id);
-      if (!group?.callbackSessionId || (group.callbackState !== "pending" && group.callbackState !== "failed")) return;
-      const session = await this.router.ensure({ channelId: "task", conversationId: group.callbackSessionId });
-      const alreadyDelivered = (await session.history()).some((turn) =>
-        turn.role === "system" && turn.origin?.kind === "task-callback" && turn.origin.runId === group.id);
-      // Busy target: waiting is not an attempt (see TaskCallbacks.deliver).
-      if (!alreadyDelivered && session.state === "streaming") {
-        outbox.defer(group);
-        this.store.saveGroup(group);
-        return;
-      }
-      outbox.attempt(group);
-      this.store.saveGroup(group);
-      // Delivered means Pi accepted the input, not that the recipient's turn
-      // ended (see TaskCallbacks.deliver); a rejection flips it to failed.
-      const sent = alreadyDelivered
-        ? Promise.resolve()
-        : session.systemInput(
-          this.text(group),
-          { kind: "task-callback", taskId: group.id, runId: group.id, sourceSessionId: null },
-          "followUp",
-        );
-      outbox.delivered(group);
-      this.store.saveGroup(group);
-      this.changed(group);
-      await sent;
-    } catch (error) {
-      log.warn(`group ${candidate.id} callback failed, will retry`, error);
-      const group = this.store.getGroup(candidate.id);
-      if (!group) return;
-      outbox.failed(group, error);
-      this.store.saveGroup(group);
-      this.changed(group);
-    } finally {
-      this.delivering.delete(candidate.id);
-    }
+    const group = this.store.getGroup(candidate.id);
+    if (!group?.callbackSessionId || (group.callbackState !== "pending" && group.callbackState !== "failed")) return;
+    await this.outbox.deliver(group.callbackSessionId, [group]);
   }
 
   private text(group: TaskGroup): string {
