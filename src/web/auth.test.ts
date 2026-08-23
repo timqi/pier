@@ -230,7 +230,7 @@ describe("changing the password", () => {
     expect(s.verify(password)).toBe(true);
   });
 
-  it("swaps the password, hands back a working cookie, and kills the old ones", async () => {
+  it("swaps the password and kills every cookie, the caller's included", async () => {
     const { store: s, password } = store();
     const a = app(s);
     const before = cookieOf(await login(a, password));
@@ -240,9 +240,9 @@ describe("changing the password", () => {
     expect(s.verify("correct-horse")).toBe(true);
     expect(s.verify(password)).toBe(false);
 
-    // The caller keeps working; every cookie signed under the old hash does not.
-    const after = cookieOf(res);
-    expect((await a.request("/api/sessions", { headers: { cookie: after } })).status).toBe(200);
+    // No cookie is re-issued — the caller's is cleared, and every cookie
+    // signed under the old hash stops verifying. Everyone signs in again.
+    expect(cookieOf(res)).toBe("pier_session=");
     expect((await a.request("/api/sessions", { headers: { cookie: before } })).status).toBe(401);
     expect((await login(a, "correct-horse")).status).toBe(302);
   });
@@ -267,6 +267,23 @@ describe("changing the password", () => {
     }
     expect((await change(a, { current: password, next: "correct-horse" }, cookie, client)).status).toBe(429);
     expect(s.verify(password)).toBe(true);
+  });
+});
+
+describe("logout", () => {
+  it("clears the cookie for a signed-in browser", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    const res = await a.request("/logout", { method: "POST", headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(cookieOf(res)).toBe("pier_session=");
+    expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("is behind the boundary like every other write", async () => {
+    const res = await app(store().store).request("/logout", { method: "POST" });
+    expect(res.status).toBe(401);
   });
 });
 

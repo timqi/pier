@@ -116,7 +116,10 @@ export function createSettingsView(
       return setStatus(pwStatus, "failed", await failure(res, "Could not change the password"));
     }
     for (const el of [current, next, confirm]) el.value = "";
-    setStatus(pwStatus, "saved", "Changed. Every other signed-in browser has to sign in again.");
+    // The change revoked every cookie, this browser's included — hand the
+    // person straight to the form their new password now opens.
+    setStatus(pwStatus, "saved", "Changed. Sign in again with the new password.");
+    location.href = "/login";
   }
   pwSave.onclick = () => void savePassword();
   confirm.onkeydown = (ev) => {
@@ -125,14 +128,28 @@ export function createSettingsView(
 
   const pwCard = card(
     "Password",
-    "One shared password guards every page and API route. Changing it signs out every other browser.",
+    "One shared password guards every page and API route. Changing it signs out every signed-in browser, this one included.",
     field("Current password", current),
     field("New password", next, { hint: "At least 10 characters." }),
     field("Repeat new password", confirm),
     h("div", "flex items-center gap-3", pwSave, pwStatus),
   );
 
-  const instanceColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6", urlCard, pwCard);
+  // --- Instance: sign out ------------------------------------------------------------
+
+  const signOut = button("Sign out");
+  signOut.onclick = () => {
+    void sendJson("/logout", {}).finally(() => {
+      location.href = "/login";
+    });
+  };
+  const signOutCard = card(
+    "Sign out",
+    "Ends this browser's session. Others keep theirs — change the password to sign out everywhere.",
+    h("div", "flex items-center gap-3", signOut),
+  );
+
+  const instanceColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6", urlCard, pwCard, signOutCard);
 
   // --- topic hosts -----------------------------------------------------------------
   // Simple topics share one scroll wrapper each; Channels and Agent files are

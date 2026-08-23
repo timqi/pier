@@ -27,7 +27,7 @@ import {
 import type { DatabaseSync } from "node:sqlite";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Hono, MiddlewareHandler } from "hono";
-import { getCookie, setCookie } from "hono/cookie";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
 
@@ -307,9 +307,20 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     }
     failures.delete(client);
     store.setPassword(next);
-    // The rotation just killed this caller's cookie too; re-issue rather than
-    // bounce the person who is holding the new password to the login form.
-    issueCookie(c, store);
+    // The rotation just killed every cookie out there, this caller's included —
+    // a password is changed because the old one may be known, and "everyone
+    // signs in again" is the whole point. Clear the dead cookie; the client
+    // sends the person to the login form with the password they just chose.
+    deleteCookie(c, COOKIE, { path: "/" });
+    return c.json({ ok: true });
+  });
+
+  // Signs out this browser by clearing its cookie. The value itself stays
+  // verifiable until it expires — it is a signature, not a stored id — so the
+  // full revocation story remains the password change above. Behind the
+  // boundary like every write: only a signed-in browser has anything to end.
+  app.post("/logout", (c) => {
+    deleteCookie(c, COOKIE, { path: "/" });
     return c.json({ ok: true });
   });
 }
