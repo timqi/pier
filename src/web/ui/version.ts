@@ -1,9 +1,10 @@
 // What the version label beside the title says, and what you can do about it.
 //
-// Two states: the version this instance is, and — once the server's registry
-// check has an answer — the version it could be. The second looks different on
-// purpose: a number that is merely true should not draw the eye, and one you
-// can act on should.
+// Two states, one number: the label always reads the version this instance is,
+// and — once the server's registry check has an answer — turns into a badge
+// when a newer one exists. Only the styling carries the news, because two
+// version numbers beside the title cost more room than they were worth; which
+// version is out lives in the tooltip and in the panel.
 //
 // Clicking opens the panel rather than the releases page, because everything
 // about "the version" now lives in one place: the source link AGPL-3.0 §13
@@ -52,7 +53,8 @@ const link = $<HTMLAnchorElement>("#version");
 
 function renderLabel(current: string): void {
   const news = status?.available === true && status.latest !== null;
-  link.textContent = news ? `v${current} → ${status?.latest}` : `v${current}`;
+  link.textContent = `v${current}`;
+  link.title = news ? `Pier ${status?.latest} is out` : "";
   link.classList.remove(...(news ? QUIET : BADGE));
   link.classList.add(...(news ? BADGE : QUIET));
 }
