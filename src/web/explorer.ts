@@ -1,14 +1,15 @@
 // Files view backend: read-only directory listing, file bytes and git
-// ref/diff queries for the Console's Files view. Every route is scoped to a
-// known project cwd — the picker offers exactly those roots, and nothing
-// outside one is ever listed, read or diffed.
+// ref/diff queries for the Console's Files view. `root` is any directory the
+// process can read — sessions work in worktrees and siblings of their cwd, and
+// an owner who is already past the Console password can reach those paths
+// anyway. `path` is still confined to the `root` it was asked under, so a
+// listing can never widen itself, and nothing here writes.
 
 import { execFile } from "node:child_process";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Hono } from "hono";
-import type { AgentFactory } from "../core/types.js";
 import { guarded } from "./files.js";
 
 const run = promisify(execFile);
@@ -36,21 +37,14 @@ const REF_RE = /^[^-\s][^\s]*$/;
 const git = async (root: string, ...args: string[]): Promise<string> =>
   (await run("git", ["-C", root, ...args], { maxBuffer: MAX_DIFF_BYTES })).stdout;
 
-export interface ExplorerDeps {
-  factory: AgentFactory;
-  /** cwds of sessions Pi hasn't persisted yet (server.ts's nascent map). */
-  nascentCwds: () => string[];
-}
-
-export function registerExplorerRoutes(app: Hono, { factory, nascentCwds }: ExplorerDeps): void {
-  /** The scope check every route shares: `root` must be a project cwd Pi
-   *  already knows, and `path` must resolve inside it (realpath both ends —
-   *  neither `..` nor a symlink steps outside). Returns the real target. */
+export function registerExplorerRoutes(app: Hono): void {
+  /** The scope check every route shares: `root` must be an absolute directory,
+   *  and `path` must resolve inside it (realpath both ends — neither `..` nor a
+   *  symlink steps outside). Returns the real target. */
   const resolveScoped = async (root: string | undefined, path = ""): Promise<string> => {
-    if (!root || !isAbsolute(root)) throw new Error("root must be a known project directory");
-    const known = new Set([...(await factory.list()).map((s) => s.cwd), ...nascentCwds()]);
-    if (!known.has(root)) throw new Error("root must be a known project directory");
+    if (!root || !isAbsolute(root)) throw new Error("root must be an absolute directory");
     const real = await realpath(root);
+    if (!(await stat(real)).isDirectory()) throw new Error("root must be an absolute directory");
     const target = await realpath(resolve(real, path));
     if (target !== real && !target.startsWith(real + sep)) throw new Error("path escapes root");
     return target;

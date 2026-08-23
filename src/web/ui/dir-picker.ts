@@ -1,7 +1,8 @@
-// Working-directory picker, shared by every surface that asks for a path:
-// the new-session dialog and the IM channel config. It decorates an existing
-// text input rather than replacing it, so form semantics (required, datalist
-// of known projects) stay where they are and typing a path still works.
+// Working-directory picker, shared by every surface that asks for a path: the
+// new-session dialog, the IM channel config and the Files view's root chip.
+// The panel is the shared part; `browseButton` decorates an existing text
+// input rather than replacing it, so form semantics (required, datalist of
+// known projects) stay where they are and typing a path still works.
 
 import { sendJson } from "./api.js";
 import { h } from "./dom.js";
@@ -62,20 +63,17 @@ function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLEl
 }
 
 /**
- * A "Browse…" button for a path input. Opens a folder list anchored under the
- * button; picking a folder writes it into the input and fires `onPick`, so an
- * optimistic caller can mark itself dirty without listening to input events.
+ * The folder list itself, anchored under `anchor` and starting at `start`
+ * (the user's home when it is not an absolute path). Picking a folder closes
+ * the panel and hands the path to `onPick`.
  */
-export function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
-  const button = btn(
-    "Browse…",
-    "flex-none cursor-pointer rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-600 hover:bg-neutral-100",
-  );
-
+export function openBrowser(
+  anchor: HTMLElement,
+  start: string | undefined,
+  onPick: (path: string) => void,
+): void {
   const commit = (path: string): void => {
-    input.value = path;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    onPick?.(path);
+    onPick(path);
     closeMenu();
   };
 
@@ -99,11 +97,29 @@ export function browseButton(input: HTMLInputElement, onPick?: (path: string) =>
     if (!list.entries.length) body.append(h("p", "px-3 py-1.5 text-[12px] text-neutral-400", "No sub-folders."));
     // Creating navigates into the new folder, so "Use" is one click away.
     content.append(head, body, newFolderRow(list.path, (path) => void open(path)));
-    openPanel(button, content);
+    openPanel(anchor, content);
   }
 
+  void open(start);
+}
+
+/**
+ * A "Browse…" button for a path input. Picking a folder writes it into the
+ * input and fires `onPick`, so an optimistic caller can mark itself dirty
+ * without listening to input events.
+ */
+export function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
+  const button = btn(
+    "Browse…",
+    "flex-none cursor-pointer rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-600 hover:bg-neutral-100",
+  );
   // Start where the field points, falling back to the user's home directory.
-  button.onclick = () => void open(input.value.trim() || undefined);
+  button.onclick = () =>
+    openBrowser(button, input.value.trim() || undefined, (path) => {
+      input.value = path;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      onPick?.(path);
+    });
   return button;
 }
 

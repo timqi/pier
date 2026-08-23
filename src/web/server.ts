@@ -401,7 +401,7 @@ export function createServer(
     nascentCwd: (id) => nascent.get(id)?.cwd,
     onConfigWritten: () => recycle("an agent file"),
   });
-  registerExplorerRoutes(app, { factory, nascentCwds: () => [...nascent.values()].map((n) => n.cwd) });
+  registerExplorerRoutes(app);
 
   // serveStatic resolves `root` against the *working directory*, and an
   // installed Pier is started from wherever the operator happens to be. The

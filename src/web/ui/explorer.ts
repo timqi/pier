@@ -6,6 +6,7 @@
 // numbers, images, PDFs). A viewer, not an editor: /api/explorer/* is scoped
 // server-side to known project cwds, and nothing here writes.
 
+import { openBrowser } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
 import { langFor, lineEl } from "./highlight.js";
 import { closeMenu, openMenu } from "./menu.js";
@@ -560,18 +561,24 @@ export function createExplorerView(
   // --- header + orchestration ----------------------------------------------------------
 
   function renderHeader(): void {
-    const cwdChip = chip(cwd, "neutral");
+    const cwdChip = chip(cwd || "Choose a folder…", "neutral");
     cwdChip.className += " max-w-72";
-    cwdChip.title = "Switch project";
+    cwdChip.title = "Switch folder";
+    // Projects first, because that is the usual answer — but a session's work
+    // often lands in a worktree or a sibling of its cwd, so any readable
+    // directory is one "Browse…" away.
     cwdChip.onclick = () =>
-      openMenu(cwdChip, projectCwds().map((c) => ({
-        label: c,
-        checked: c === cwd,
-        onSelect: () => {
-          closeMenu();
-          openDir(c); // hash first; show() reloads
-        },
-      })));
+      openMenu(cwdChip, [
+        ...projectCwds().map((c) => ({
+          label: c,
+          checked: c === cwd,
+          onSelect: () => {
+            closeMenu();
+            openDir(c); // hash first; show() reloads
+          },
+        })),
+        { label: "Browse…", onSelect: () => openBrowser(cwdChip, cwd || undefined, openDir) },
+      ]);
     header.replaceChildren(
       cwdChip,
       h("span", "truncate font-mono text-[11.5px] text-neutral-400", git.branch ? `⎇ ${git.branch}` : "no git"),
@@ -593,7 +600,7 @@ export function createExplorerView(
     if (!cwd) {
       compare.replaceChildren();
       tree.replaceChildren();
-      viewer.replaceChildren(note("No projects yet — create a session first."));
+      viewer.replaceChildren(note("No folder yet — pick one from the chip above."));
       return;
     }
     try {
@@ -609,7 +616,8 @@ export function createExplorerView(
   }
 
   return consoleView(root, (arg) => {
-    const next = arg && projectCwds().includes(arg) ? arg : cwd || (projectCwds()[0] ?? "");
+    // Any absolute path is addressable; a stale or relative one falls back.
+    const next = arg?.startsWith("/") ? arg : cwd || (projectCwds()[0] ?? "");
     if (next === cwd && tree.childElementCount) return renderHeader(); // back to the view: keep tree + selection
     cwd = next;
     void load();

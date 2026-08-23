@@ -3,8 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { AgentFactory } from "../core/types.js";
+import { beforeAll, describe, expect, it } from "vitest";
 import { registerExplorerRoutes } from "./explorer.js";
 
 // A real repo in a temp dir: the routes are a thin shell around git, so the
@@ -29,11 +28,8 @@ beforeAll(() => {
   writeFileSync(join(root, "a.ts"), "const x = 3;\n"); // uncommitted
   writeFileSync(join(root, "bin.dat"), Buffer.from([0x50, 0x00, 0x01]));
 
-  const factory = {
-    list: vi.fn(async () => [{ id: "s1", cwd: root, createdAt: 1 }]),
-  } as unknown as AgentFactory;
   app = new Hono();
-  registerExplorerRoutes(app, { factory, nascentCwds: () => [] });
+  registerExplorerRoutes(app);
 });
 
 const get = (ep: string, params: Record<string, string>) =>
@@ -47,8 +43,18 @@ describe("explorer routes", () => {
     expect(entries.map((e) => e.name)).toEqual(["sub", "a.ts", "bin.dat"]);
   });
 
-  it("refuses roots that are not known project cwds, and escapes", async () => {
-    expect((await app.request(`/api/explorer/ls?root=${encodeURIComponent(tmpdir())}`)).status).toBe(404);
+  it("takes any readable directory as root — worktrees are not session cwds", async () => {
+    const other = realpathSync(mkdtempSync(join(tmpdir(), "pier-explorer-other-")));
+    writeFileSync(join(other, "c.txt"), "c\n");
+    const res = await app.request(`/api/explorer/ls?root=${encodeURIComponent(other)}`);
+    expect(res.status).toBe(200);
+    const { entries } = (await res.json()) as { entries: { name: string; dir: boolean }[] };
+    expect(entries).toEqual([{ name: "c.txt", dir: false }]);
+  });
+
+  it("refuses relative roots, non-directories and paths escaping the root", async () => {
+    expect((await app.request("/api/explorer/ls?root=relative/dir")).status).toBe(404);
+    expect((await app.request(`/api/explorer/ls?root=${encodeURIComponent(join(root, "a.ts"))}`)).status).toBe(404);
     expect((await get("ls", { path: "../" })).status).toBe(404);
     expect((await get("file", { path: "../../etc/passwd" })).status).toBe(404);
   });
