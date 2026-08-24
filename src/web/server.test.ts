@@ -1400,6 +1400,12 @@ describe("configuration reaching live sessions", () => {
 });
 
 describe("the app shell", () => {
+  it("loads protected install metadata without browser deprecation warnings", () => {
+    const html = readFileSync(new URL("./ui/index.html", import.meta.url), "utf8");
+    expect(html).toContain('rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"');
+    expect(html).toContain('<meta name="mobile-web-app-capable" content="yes" />');
+  });
+
   it("names the instance in the tab title", () => {
     const html = "<head><title>Pier</title></head>";
     expect(withTabPrefix(html, tabPrefix(undefined, "g1"))).toContain("<title>g1 - Pier</title>");

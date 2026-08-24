@@ -517,6 +517,9 @@ export function createServer(
   const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
   let shell: string | null = null;
   app.get("/", async (c, next) => {
+    // A release replaces hashed assets. Revalidate the shell on every
+    // navigation so a cached index cannot name bundles that no longer exist.
+    c.header("cache-control", "private, no-cache");
     if (shell === null) {
       try {
         shell = withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix);
