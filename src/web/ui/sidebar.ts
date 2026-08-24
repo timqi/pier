@@ -180,6 +180,15 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
           deps.openTerminal(cwd);
         },
       },
+      {
+        // Reversible, like the per-session row above it: the sessions and
+        // their transcripts stay, All sessions can pin any of them back.
+        label: `Remove ${list.length} session${list.length > 1 ? "s" : ""} from Projects`,
+        onSelect: () => {
+          closeMenu();
+          for (const s of list) void setPinned(s, false);
+        },
+      },
     ]);
   };
   const { el, summary } = detailsRow("border-b border-neutral-200/70", [
