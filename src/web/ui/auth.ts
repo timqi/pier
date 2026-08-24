@@ -4,6 +4,7 @@
 // that comes back 401, and an SSE stream that simply stops. Both end at the
 // login page, so the decision lives here once instead of at forty call sites.
 
+import { button } from "./form.js";
 import { report } from "./report.js";
 
 const nativeFetch = window.fetch.bind(window);
@@ -41,7 +42,17 @@ export function streamDied(source: EventSource, what: string): void {
   if (source.readyState !== EventSource.CLOSED) return;
   // Through report(), so a stream that died out in someone's browser is also a
   // line in the server's log — the disconnect is usually the server's story.
-  const died = () => report(`${what} stream disconnected — reload to reconnect`);
+  // A button, because on the surface that disconnects most — an installed iOS
+  // PWA — reloading is otherwise not a thing the person *can* do: no address
+  // bar, and pull-to-refresh is off (style.css) so no turn is lost to a swipe.
+  const died = (): void => {
+    const line = report(`${what} stream disconnected`);
+    if (!line) return; // already on screen; one button is enough
+    const again = button("Reload");
+    again.classList.add("ml-2", "align-middle");
+    again.onclick = () => location.reload();
+    line.append(" ", again);
+  };
   // Deliberately the unwrapped fetch: this *is* the 401 handler, and going
   // through the wrapper would hide which of the two answers came back.
   void nativeFetch("/api/projects").then(

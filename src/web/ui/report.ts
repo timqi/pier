@@ -35,17 +35,21 @@ const detail = (value: unknown): string | undefined =>
 /**
  * Report a client-side failure. Callable directly from a `catch` that has
  * nothing better to do than swallow the error.
+ *
+ * Returns the chat line it wrote, for the few failures that come with
+ * something to do about them — null when the line was suppressed as a repeat,
+ * which is also the answer to "is there already one on screen?".
  */
-export function report(message: string, cause?: unknown): void {
+export function report(message: string, cause?: unknown): HTMLElement | null {
   const text = cause === undefined ? message : `${message}: ${String(cause)}`;
   const now = Date.now();
-  if (now - (seen.get(text) ?? -REPEAT_MS) < REPEAT_MS) return;
+  if (now - (seen.get(text) ?? -REPEAT_MS) < REPEAT_MS) return null;
   // A tab stays open for days: forget the old keys rather than grow a map of
   // every message ever seen.
   if (seen.size > 100) seen.clear();
   seen.set(text, now);
   sent = sent.filter((at) => now - at < 60_000);
-  if (sent.length >= RATE_PER_MINUTE) return;
+  if (sent.length >= RATE_PER_MINUTE) return null;
   sent.push(now);
   // The POST goes first: `appendTurn` touches the DOM, and if *that* is what
   // broke, the server's copy is the only one that will exist.
@@ -60,7 +64,7 @@ export function report(message: string, cause?: unknown): void {
     // Nowhere left to report to: the beacon itself is what failed. The chat
     // line below is still on screen, which is the half that matters here.
   });
-  appendTurn("error", text);
+  return appendTurn("error", text);
 }
 
 /** Install the two handlers that catch what no `catch` was written for. */
