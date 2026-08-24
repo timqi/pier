@@ -9,6 +9,7 @@ import { formatTurnMeta, isSilentReply, silentReason, splitReply } from "../../c
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
+import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, copyBtn, externalLinks, h } from "./dom.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
@@ -99,10 +100,16 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   // the typed text stays a plain bubble, the files render as thumbs/cards
   // below.
   const files = kind === "user" ? splitInboundFiles(text) : null;
-  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, files?.text ?? text);
-  // Editing resends the raw text, markers included — stripping them from the
-  // bubble must not detach the files from the message.
-  if (files?.paths.length) node.dataset.raw = text;
+  const body = files?.text ?? text;
+  // An IM turn carries core/identity.ts's speaker header as its first line.
+  // It is written for the model, and read as body text it buries the message
+  // under a raw platform id — so it becomes the row's caption instead.
+  const speaker = kind === "user" ? splitSpeaker(body) : null;
+  const named = speaker?.id || speaker?.when ? speaker : null;
+  const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
+  // Editing resends the raw text, markers and header included — stripping them
+  // from the bubble must not detach the files, or drop who was speaking.
+  if (files?.paths.length || named) node.dataset.raw = text;
   if (markdown) renderMarkdown(node, text);
   // flow-root: the step line floats into the message's first line, and a row
   // that doesn't contain its float leaks it over whatever comes next while the
@@ -111,6 +118,7 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
     row.classList.add("flow-root");
     row.append(steps);
   }
+  if (named) row.append(speakerLine(named));
   row.append(node);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
@@ -129,6 +137,20 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   turnsPane.append(row);
   scrollBottom();
   return node;
+}
+
+/** The speaker caption above an IM user message: who, when, and the mention id
+ *  on hover — the one thing the header carries that a name cannot replace. */
+function speakerLine(speaker: Speaker): HTMLElement {
+  const line = h("div", "mb-1 flex items-baseline gap-2 text-[11.5px] leading-tight");
+  const who = speaker.name ?? speaker.id;
+  if (who) {
+    const label = h("span", "font-semibold text-indigo-700", who);
+    if (speaker.id) label.title = speaker.id;
+    line.append(label);
+  }
+  if (speaker.when) line.append(h("span", "text-neutral-400", speaker.when));
+  return line;
 }
 
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {

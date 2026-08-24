@@ -2,7 +2,7 @@
 // message is pure token waste in a conversation whose speaker never changes.
 
 import { describe, expect, it } from "vitest";
-import { sanitizeIdentity, SenderPrefix, withPrefix } from "./identity.js";
+import { sanitizeIdentity, SenderPrefix, splitSpeaker, withPrefix } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
 const bob = { id: "U2", name: "Bob" };
@@ -92,5 +92,29 @@ describe("withPrefix", () => {
   it("leaves the message alone when there is nothing to say", () => {
     expect(withPrefix("", "hello")).toBe("hello");
     expect(withPrefix("[Ada<U1>]", "hello")).toBe("[Ada<U1>]\nhello");
+  });
+});
+
+describe("splitSpeaker", () => {
+  it("reads back every shape the prefix is written in", () => {
+    const p = new SenderPrefix();
+    const first = withPrefix(p.next("s1", ada, noon), "hello");
+    expect(splitSpeaker(first)).toEqual({ name: "Ada", id: "U1", when: "2024-06-01 12:00", text: "hello" });
+    // Same speaker, ten minutes later: time only.
+    expect(splitSpeaker(withPrefix(p.next("s1", ada, noon + 10 * 60_000), "hi")))
+      .toEqual({ when: "12:10", text: "hi" });
+    // A new speaker inside the same minute: who only.
+    expect(splitSpeaker(withPrefix(p.next("s1", bob, noon + 10 * 60_000), "yo")))
+      .toEqual({ name: "Bob", id: "U2", text: "yo" });
+    // Unnamed speaker — the id is all there was.
+    expect(splitSpeaker("[<U9>]\nyo")).toEqual({ id: "U9", text: "yo" });
+  });
+
+  it("leaves body text that merely starts with a bracket alone", () => {
+    // The inbound-file convention, any human typing brackets, and the one case
+    // only the trailing newline rules out: a message that opens with a time.
+    for (const text of ["[report.md](file:///tmp/report.md)", "[TODO] fix it", "[]\nhi", "[14:23] on my way", "[Ada<U1>] said no", "plain"]) {
+      expect(splitSpeaker(text)).toEqual({ text });
+    }
   });
 });

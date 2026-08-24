@@ -88,3 +88,36 @@ export class SenderPrefix {
 /** Put the prefix above the message, or hand the message back untouched. */
 export const withPrefix = (prefix: string, text: string): string =>
   prefix ? `${prefix}\n${text}` : text;
+
+/** What a header line said, once read back off a stored message. */
+export interface Speaker {
+  /** Absent when the platform only ever knew the id. */
+  name?: string;
+  id?: string;
+  /** `2024-06-01 12:00` or `12:00`, exactly as it was written. */
+  when?: string;
+  /** The message with its header line removed. */
+  text: string;
+}
+
+// Only the shapes `next()` emits: `who`, `when`, or both, and — because
+// `withPrefix` always joins with one — a newline after them. Anything else, a
+// markdown link opening the message or a human typing `[14:23] on my way`, is
+// body text and must come back untouched.
+const HEADER = /^\[(?:([^\n[\]<>]*)<([^\n[\]<>]+)>)? ?((?:\d{4}-\d{2}-\d{2} )?\d{1,2}:\d{2})?\]\n/;
+
+/**
+ * Read back a header this module wrote. The prefix is a token-saving device for
+ * the model, not something a human should have to read: a surface showing a
+ * stored message can render the speaker as it likes and the body without it.
+ */
+export function splitSpeaker(text: string): Speaker {
+  const m = HEADER.exec(text);
+  if (!m?.[2] && !m?.[3]) return { text };
+  return {
+    ...(m[1] ? { name: m[1] } : {}),
+    ...(m[2] ? { id: m[2] } : {}),
+    ...(m[3] ? { when: m[3] } : {}),
+    text: text.slice(m[0].length),
+  };
+}

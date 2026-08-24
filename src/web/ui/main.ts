@@ -33,6 +33,7 @@ import {
   send,
   updateComposer,
 } from "./composer.js";
+import { readableTitle } from "./dom.js";
 import { initReport } from "./report.js";
 import {
   initHeader,
@@ -122,7 +123,10 @@ async function createSession(cwd: string): Promise<void> {
  *  read speaks only for the pinned ones and merges instead: dropping the rest
  *  would delete the current session out from under its own chat the moment it
  *  is unpinned — header, ⋯ menu and its Pin row with it. */
-function commitSessions(next: SessionInfo[], complete: boolean): void {
+function commitSessions(rows: SessionInfo[], complete: boolean): void {
+  // A title read off an IM prompt still carries its speaker header: every
+  // surface downstream reads `title`, so it is made readable once, here.
+  const next = rows.map((s) => ({ ...s, title: readableTitle(s.title) }));
   if (complete) {
     sessions = next;
   } else {

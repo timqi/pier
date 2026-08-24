@@ -1,6 +1,6 @@
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
-import { consoleView, fmtDuration, h, type ConsoleView } from "./dom.js";
+import { consoleView, fmtDuration, h, readableTitle, type ConsoleView } from "./dom.js";
 import { tabButton as control } from "./form.js";
 
 interface ActivitySession {
@@ -43,7 +43,10 @@ export function createActivityView(
       root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", `Failed to load activity: ${res.status}`));
       return;
     }
-    snapshot = (await res.json()) as ActivitySnapshot;
+    const fresh = (await res.json()) as ActivitySnapshot;
+    // Same speaker-header cleanup the sidebar does (dom.ts): a session titled
+    // by an IM prompt must not show a raw platform id here either.
+    snapshot = { ...fresh, sessions: fresh.sessions.map((s) => ({ ...s, title: readableTitle(s.title) })) };
     render();
   }
 
