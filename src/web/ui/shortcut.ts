@@ -16,18 +16,23 @@ const APPLE = /Mac|iP(?:hone|ad|od)/.test(navigator.userAgent);
 const MOD = APPLE ? "⌘" : "Ctrl+";
 const SHIFT = APPLE ? "⇧" : "Shift+";
 
-// A key spec is `"k"` or `"shift+o"`: Shift is opt-in per binding, because
-// every unshifted letter worth having is either taken or the browser's.
-const parse = (spec: string): { key: string; shift: boolean } =>
-  spec.startsWith("shift+")
-    ? { key: spec.slice(6), shift: true }
-    : { key: spec, shift: false };
+// A key spec is `"k"`, `"shift+o"` or `"meta+b"`: Shift is opt-in per binding,
+// because every unshifted letter worth having is either taken or the browser's.
+// `meta+` narrows the modifier to ⌘ alone — Ctrl+B is the backward motion every
+// text field on a Unix desktop has, and a chord may not take that away.
+const parse = (spec: string): { key: string; shift: boolean; meta: boolean } => {
+  const meta = spec.startsWith("meta+");
+  const rest = meta ? spec.slice(5) : spec;
+  return rest.startsWith("shift+")
+    ? { key: rest.slice(6), shift: true, meta }
+    : { key: rest, shift: false, meta };
+};
 
 /** The chord as a person reads it — for the hover card, or for a menu row
  *  that is itself the affordance (menu.ts's `hint`). */
 export function chordLabel(spec: string): string {
-  const { key, shift } = parse(spec);
-  return `${MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
+  const { key, shift, meta } = parse(spec);
+  return `${meta ? "⌘" : MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
 }
 
 const CARD =
@@ -148,12 +153,12 @@ export function letterKey(
  * Never unbound, so call it once per action from an init path.
  */
 export function chord(spec: string, run: () => void, unless?: () => boolean): void {
-  const { key, shift } = parse(spec);
+  const { key, shift, meta } = parse(spec);
   document.addEventListener(
     "keydown",
     (ev) => {
       if (ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return;
-      if (!ev.metaKey && !ev.ctrlKey) return;
+      if (meta ? !ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
       if (unless?.()) return;
       ev.preventDefault();
       ev.stopPropagation();

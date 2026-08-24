@@ -54,6 +54,7 @@ export function initShell(deps: ShellDeps): void {
   menuBtn.onclick = () => deps.sessionMenu(menuBtn);
   const rail = $("#rail-toggle");
   rail.onclick = () => setRail(document.body.dataset.rail !== "closed");
-  shortcut(rail, "b", "Toggle sidebar", () =>
+  // ⌘ only: Ctrl+B is the backward motion a composer needs to keep.
+  shortcut(rail, "meta+b", "Toggle sidebar", () =>
     isDrawer() ? toggleDrawer() : setRail(document.body.dataset.rail !== "closed"));
 }
