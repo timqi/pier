@@ -18,6 +18,17 @@ const PLATFORMS: readonly string[] = ["telegram", "slack", "lark"];
 export const isChannelPlatform = (v: unknown): v is ChannelPlatform =>
   typeof v === "string" && PLATFORMS.includes(v);
 
+/**
+ * The chat a conversation id belongs to. Every adapter spells its ids
+ * `<chatId>` or `<chatId>/<thread>` — Telegram's topic, Slack's thread_ts,
+ * Lark's root message — so the chat half has one decoder instead of one per
+ * platform (control.ts used to import all three adapters for exactly this).
+ * The *thread* half stays with each adapter: its type and meaning genuinely
+ * differ per platform.
+ */
+export const chatOf = (conversationId: string): string =>
+  conversationId.split("/", 1)[0] ?? "";
+
 /** A DM, a plain group, or a group with native sub-threads (Telegram forum). */
 export type ChatKind = "dm" | "group" | "forum";
 
@@ -51,11 +62,14 @@ export interface BindCode {
 /** Platform-level values double as the seed for newly discovered chats. */
 export interface ChannelConfig {
   enabled: boolean;
+  /** The platform's primary credential: Telegram's bot token, Slack's bot
+   *  token (`xoxb-`), Lark's App ID (`cli_…`). */
   token: string;
   /**
-   * Second credential, for platforms whose event transport is authenticated
-   * separately from their Web API. Slack Socket Mode needs an app-level token
-   * (`xapp-`) beside the bot token (`xoxb-`); Telegram leaves this empty.
+   * Second credential, for platforms that authenticate with a pair. Slack
+   * Socket Mode needs an app-level token (`xapp-`) beside the bot token;
+   * Lark signs everything with App ID + App Secret, and this is the secret.
+   * Telegram leaves this empty.
    */
   appToken: string;
   /**

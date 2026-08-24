@@ -8,6 +8,8 @@
 import type { ConversationKey } from "../core/types.js";
 import {
   ChatPanel,
+  CWD_PLACEHOLDER,
+  CWD_TAIL,
   PANEL_PREFIX,
   type PanelButton,
   type PanelDeps,
@@ -134,15 +136,11 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
           type: "input",
           block_id: CWD_BLOCK,
           label: { type: "plain_text", text: "Working directory" },
-          hint: {
-            type: "plain_text",
-            text:
-              "An absolute path. A new session starts there; the current one stays in its own directory.",
-          },
+          hint: { type: "plain_text", text: `An absolute path. ${CWD_TAIL}` },
           element: {
             type: "plain_text_input",
             action_id: CWD_INPUT,
-            placeholder: { type: "plain_text", text: "/path/to/project" },
+            placeholder: { type: "plain_text", text: CWD_PLACEHOLDER },
           },
         },
       ],

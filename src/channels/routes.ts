@@ -74,7 +74,6 @@ export function registerChannelRoutes(
       ...config,
       token: maskToken(config.token),
       appToken: maskToken(config.appToken),
-      supported: platform === "telegram" || platform === "slack",
     });
   });
 

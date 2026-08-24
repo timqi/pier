@@ -9,6 +9,8 @@
 import type { ConversationKey } from "../core/types.js";
 import {
   ChatPanel,
+  CWD_PLACEHOLDER,
+  CWD_TAIL,
   PANEL_PREFIX,
   type PanelButton,
   type PanelDeps,
@@ -122,8 +124,8 @@ export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
       message_thread_id: state.topicId,
       // Said plainly: this is not an edit, it is a new session.
       text:
-        "Reply with an absolute path. A new session starts there; the current one stays in its own directory.",
-      reply_markup: { force_reply: true, input_field_placeholder: "/path/to/project" },
+        `Reply with an absolute path. ${CWD_TAIL}`,
+      reply_markup: { force_reply: true, input_field_placeholder: CWD_PLACEHOLDER },
     });
     this.cwdPrompts.set(key.conversationId, sent.message_id);
   }

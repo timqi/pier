@@ -150,3 +150,31 @@ export const slackThreadHelp = (align: "left" | "right" = "left"): HTMLElement =
     "Inside a thread Pier already owns, no `@mention` is needed — continuing that thread is addressing it.",
     "Commands are bare words after a mention: `@bot settings`, `@bot stop`, `@bot bind <code>`. Slack's client swallows an unregistered `/command` before it ever reaches an app.",
   ], align);
+
+/**
+ * Lark setup is a checklist, not a manifest — Feishu has no create-from-config
+ * URL — and it fails *late*: permissions and event subscriptions only take
+ * effect after a version is published, which is the step everyone misses.
+ */
+export const larkTokenHelp = (): HTMLElement =>
+  helpBadge("Creating a Feishu app", [
+    "On [open.feishu.cn](https://open.feishu.cn/app) create a 企业自建应用 (custom app). `Credentials & Basic Info` shows the App ID (`cli_…`) and App Secret — paste both here.",
+    "`Add Features` → enable **Bot** (机器人).",
+    "`Permissions` (权限管理), add: `im:message` (read messages), `im:message:send_as_bot` (send), `im:resource` (download attachments), `im:message.reactions:create` + `:read` + `:delete` (the 👀 receipt), `im:chat:readonly` (chat names for this page), `contact:user.base:readonly` (speaker names).",
+    "`Events & Callbacks` → set the mode to **长连接 (long connection)** — no public URL needed. Under Events subscribe `im.message.receive_v1` (接收消息); Callbacks gain `card.action.trigger` automatically once cards are sent, add it if listed.",
+    "**Publish a version** (版本管理与发布 → 创建版本 → 申请发布). Nothing above takes effect until this is approved — the usual reason a configured bot stays silent.",
+    "Add the bot to a group (群设置 → 群机器人), or DM it directly.",
+  ]);
+
+/**
+ * Threads are not optional on Lark either: replies go `reply_in_thread`, so
+ * the toggle is replaced by the explanation, exactly like Slack.
+ */
+export const larkThreadHelp = (align: "left" | "right" = "left"): HTMLElement =>
+  helpBadge("How Lark topics work here", [
+    "Pier never posts in a chat's main flow. A message in the chat is answered in *its own topic* (话题); a message inside a topic is answered there.",
+    "Each topic is its own Pi session, so one group hosts many parallel sessions.",
+    "The same applies in a DM: every new message starts its own topic and its own session. Reply *inside* a topic to continue that conversation.",
+    "Inside a topic Pier already owns, no @mention is needed — continuing that topic is addressing it.",
+    "Commands are slash words: `/stop`, `/settings`, `/bind <code>`. A bare @mention with nothing else also opens the settings panel.",
+  ], align);

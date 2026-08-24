@@ -10,6 +10,8 @@
 // No SDK: `apps.connections.open` plus Node's built-in WebSocket is the whole
 // protocol, and @slack/socket-mode would pull a dependency tree to wrap it.
 
+import { readCapped } from "../core/inbox.js";
+
 const BASE = "https://slack.com/api";
 
 export interface SlackFile {
@@ -166,7 +168,7 @@ export interface SlackClient {
   history(channel: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
   /** One thread: the parent message followed by its replies, oldest first. */
   replies(channel: string, ts: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
-  downloadFile(file: SlackFile): Promise<{ bytes: Uint8Array; mimeType: string }>;
+  downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }>;
 }
 
 interface SlackResponse {
@@ -470,7 +472,7 @@ export class SlackApi implements SlackClient {
    * Slack file URLs are private: they need the bot token as a bearer header and
    * answer HTML (a login page) rather than an error when it is missing.
    */
-  async downloadFile(file: SlackFile): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  async downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
     const url = file.url_private_download ?? file.url_private;
     if (!url) throw new Error("slack file has no private url");
     const res = await fetch(url, {
@@ -479,6 +481,7 @@ export class SlackApi implements SlackClient {
     });
     if (!res.ok) throw new Error(`slack file download: ${res.status}`);
     const mimeType = res.headers.get("content-type")?.split(";")[0] ?? file.mimetype ?? "application/octet-stream";
-    return { bytes: new Uint8Array(await res.arrayBuffer()), mimeType };
+    // Bounded mid-stream: the event's size metadata is the platform's word.
+    return { bytes: await readCapped(res.body, maxBytes), mimeType };
   }
 }

@@ -43,7 +43,7 @@ src/
                runtime.ts (adapter lifecycle), routes.ts,
                telegram.ts + -api + -render + -panel
                slack.ts + -api + -render + -panel + -tool + -outbound + -directory
-               [lark.ts: configurable, no adapter yet]
+               lark.ts + -api + -render + -panel + -outbound
   boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         server.ts (sessions + events), instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
@@ -192,10 +192,14 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   does not generalize — the adapter reports every channel as `"group"` because
   a Slack channel is *always* threaded, so `"forum"` would be either always or
   never right. `topicMode` turned out not to generalize either: it is a real
-  switch on Telegram and a constant on Slack, which now shows "Thread mode:
-  always on" instead. Both want resolving together with Lark — probably by
-  making "threads per request" an adapter capability rather than a stored flag.
-  Two data points is enough to see the shape; a third decides the name.
+  switch on Telegram and a constant on Slack and Lark, which both show "Thread
+  mode: always on" instead. The third data point (Lark) landed on Slack's side
+  — `reply_in_thread` works everywhere, so the adapter reports `"group"` and
+  ignores the flag. The shape is now clear: `"forum"` and `topicMode` are
+  Telegram facts living in shared types, and the eventual fix is an adapter
+  capability ("threads per request") rather than a stored flag. Not renamed
+  yet — it is a stored-config migration, worth doing when the contract next
+  changes for its own reasons.
 
 ## Decisions Log
 

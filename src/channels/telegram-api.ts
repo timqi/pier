@@ -6,6 +6,8 @@
 // Behind a proxy, run node with NODE_USE_ENV_PROXY=1 and HTTPS_PROXY set;
 // nothing here needs to know.
 
+import { readCapped } from "../core/inbox.js";
+
 const BASE = "https://api.telegram.org";
 
 export interface TgUser {
@@ -96,7 +98,7 @@ export interface TelegramClient {
   /** `text` shows as a toast — the way to answer a tap without a message. */
   answerCallbackQuery(id: string, text?: string): Promise<void>;
   /** Bytes of any file_id; `name` is the basename Telegram stored it under. */
-  downloadFile(fileId: string): Promise<{ bytes: Uint8Array; name: string }>;
+  downloadFile(fileId: string, maxBytes: number): Promise<{ bytes: Uint8Array; name: string }>;
 }
 
 export class TelegramApi implements TelegramClient {
@@ -171,7 +173,8 @@ export class TelegramApi implements TelegramClient {
     await this.call("answerCallbackQuery", { callback_query_id: id, text });
   }
 
-  async downloadFile(fileId: string): Promise<{ bytes: Uint8Array; name: string }> {
+  /** Bounded mid-stream: metadata size is the platform's word, not a cap. */
+  async downloadFile(fileId: string, maxBytes: number): Promise<{ bytes: Uint8Array; name: string }> {
     const file = await this.call<{ file_path?: string }>("getFile", { file_id: fileId });
     if (!file.file_path) throw new Error("telegram getFile: no file_path");
     const res = await fetch(`${BASE}/file/bot${this.token}/${file.file_path}`, {
@@ -179,6 +182,6 @@ export class TelegramApi implements TelegramClient {
     });
     if (!res.ok) throw new Error(`telegram file download: ${res.status}`);
     const name = file.file_path.split("/").pop() || "file";
-    return { bytes: new Uint8Array(await res.arrayBuffer()), name };
+    return { bytes: await readCapped(res.body, maxBytes), name };
   }
 }

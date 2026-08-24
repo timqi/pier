@@ -21,6 +21,11 @@ import type { ChannelPlatform, ChatConfig, ChatPolicy } from "./types.js";
 export const PANEL_PREFIX = "cfg:";
 const MODELS_PER_PAGE = 8;
 
+/** The cwd prompt's one sentence and placeholder — each platform owns only
+ *  its widget's lead-in ("Reply with…", a modal hint, a form label). */
+export const CWD_TAIL = "A new session starts there; the current one stays in its own directory.";
+export const CWD_PLACEHOLDER = "/path/to/project";
+
 const onOff = (v: boolean): string => (v ? "on" : "off");
 
 export interface PanelButton {

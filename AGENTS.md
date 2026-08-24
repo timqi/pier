@@ -96,7 +96,7 @@ answer is allowed to be "the right things":
 | Area | Now | Second look past |
 | --- | --- | --- |
 | `core/` | ~880 | 780 — second look done: platform- and Pi-blind. Growth bought the shared presentation vocabulary, sender prefix, inbound-file convention, provider seam/validation, routing failure paths and the restart gate; none is a platform implementation |
-| `channels/` | ~3.04k | 3.5k |
+| `channels/` | ~3.96k | 4.3k — second look done: the growth is the Lark adapter (five files, the same shape Slack settled on — adapter, api, render, outbound, panel); the shared layer grew only by a moved fence-balancer and the extracted event dedup, both second-copy fixes |
 | `web/` | ~7.34k | 7.5k — largest and least tested. Growth from 5.1k bought the password boundary, secure provider configuration and the Settings console; from 6.46k the Files view — project tree, whole-file inline diffs, the diff picker — rendered with zero new dependencies, which is exactly where the lines went; the next growth needs its own sentence |
 | `tasks/` | ~2.56k | 2.5k — second look done: delivery proof/backoff/ceiling was consolidated into one outbox engine; the remaining growth is durable control-message state and required failure paths |
 | root `src/*.ts` | ~1.34k | 1.3k — second look done: the instance layer now owns secure credentials, service/update operations and the graceful-restart ledger; each remains a one-reason module |

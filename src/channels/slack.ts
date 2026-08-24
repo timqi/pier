@@ -30,11 +30,13 @@ import type {
   InboundMessage,
   SystemInputOrigin,
 } from "../core/types.js";
-import { saveInbound } from "../core/inbox.js";
-import { fileMarker, lostMarker, MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { saveInboundAll } from "../core/inbox.js";
+import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
+import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { Gatekeeper } from "./gatekeeper.js";
@@ -160,7 +162,7 @@ export class SlackChannel implements Channel {
   /** The inbound gate and the bind-hint throttle; see gatekeeper.ts. */
   private readonly gate: Gatekeeper;
   /** `event_id`s already handled, against Slack's at-least-once delivery. */
-  private readonly seen = new Map<string, number>();
+  private readonly seen: Dedup;
   /** The in-chat settings panel; absent when no control was wired (tests). */
   private readonly panel?: SlackPanel;
   /** Channel kinds/names and user names, cached; see slack-directory.ts. */
@@ -186,6 +188,7 @@ export class SlackChannel implements Channel {
     this.chains = new Chains(this.log, MAX_ACTIVE_CHATS);
     this.directory = deps.directory ?? new SlackDirectory(this.log);
     this.gate = new Gatekeeper(deps.store, "slack", this.log, "channel");
+    this.seen = new Dedup(this.log, DEDUP_TTL_MS, DEDUP_MAX);
     this.api = deps.client ?? new SlackApi(config.token, config.appToken, this.log);
     this.out = new SlackOutbound(this.api, this.log);
     this.receipts = new Receipts(
@@ -266,7 +269,7 @@ export class SlackChannel implements Channel {
         this.log(`ignored event type ${event.type}`);
         return;
       }
-      if (this.duplicate(payload?.event_id)) return;
+      if (this.seen.duplicate(payload?.event_id)) return;
       const channel = event.channel;
       if (!channel) return this.log("message event without a channel, dropped");
       this.chains.run(channel, () => this.onMessage(event, onMessage));
@@ -282,28 +285,6 @@ export class SlackChannel implements Channel {
       return;
     }
     this.log(`ignored envelope type ${env.type}`);
-  }
-
-  /**
-   * Slack redelivers an envelope it did not see acknowledged, so the same
-   * `event_id` can arrive twice. Bounded and time-limited: the map is fed by
-   * every message in every channel the bot is in.
-   */
-  private duplicate(eventId: string | undefined): boolean {
-    if (!eventId) return false;
-    const now = Date.now();
-    if (this.seen.size > DEDUP_MAX) {
-      for (const [id, at] of this.seen) {
-        if (now - at > DEDUP_TTL_MS) this.seen.delete(id);
-      }
-    }
-    const at = this.seen.get(eventId);
-    if (at !== undefined && now - at <= DEDUP_TTL_MS) {
-      this.log(`duplicate event ${eventId} ignored`);
-      return true;
-    }
-    this.seen.set(eventId, now);
-    return false;
   }
 
   private async onMessage(
@@ -357,15 +338,19 @@ export class SlackChannel implements Channel {
     // Downloading only past the gate: an unauthorized sender must not be able
     // to make the bot pull bytes on their behalf.
     const markers = await this.saveAttachments(files);
+    // A Slack thread is many people talking into one session, so the agent is
+    // told who spoke — and the id, which is what a mention needs. Resolved
+    // *before* the mark: every await between mark() and dispatch is a window
+    // in which a previous turn can end and settle, taking this receipt with it
+    // (paid for on Lark first).
+    const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
     this.receipts.mark(here.conversationId, channel, ts);
     // IM messages steer by default: a follow-up that waits for the turn to end
     // is the wrong default when the human is watching a 👀 in a thread.
     onMessage({
       key: here,
       senderId: event.user,
-      // A Slack thread is many people talking into one session, so the agent is
-      // told who spoke — and the id, which is what a mention needs.
-      sender: { id: event.user, name: await this.directory.user(this.api, event.user) },
+      sender,
       text: [text, ...markers].filter(Boolean).join("\n"),
       mode: "steer",
     });
@@ -413,7 +398,10 @@ export class SlackChannel implements Channel {
 
     const text = offeredLabel(message.blocks, actionId);
     if (text === undefined) {
+      // The person clicked and would otherwise see nothing happen (5b).
       this.log(`unknown action ${actionId} in channel ${channel}`);
+      await this.api.postMessage({ channel, thread_ts: threadTs, text: STALE_OPTION })
+        .catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
       return;
     }
     // The options belonged to the turn that just ended; once one is taken the
@@ -423,24 +411,20 @@ export class SlackChannel implements Channel {
     // A bot cannot post as the user, so the pick is echoed and marked as one.
     // Without it the thread shows an answer to a request nobody can see being
     // made, and there is no message of the user's to carry the eyes.
+    const sender = { id: user, name: await this.directory.user(this.api, user) };
     const echo = await this.api.postMessage({
       channel,
       thread_ts: threadTs,
-      text: `\u25b8 ${escapeMrkdwn(text)}`,
+      text: picked(escapeMrkdwn(text)),
     }).catch((err) => {
       this.log(`option echo failed: ${String(err)}`);
       return undefined;
     });
     // The receipt goes on the echo, not on the bot message that held the
-    // buttons: the eyes mean "this input is being worked on".
+    // buttons: the eyes mean "this input is being worked on". No await
+    // between mark and dispatch — see onMessage.
     if (echo?.ts) this.receipts.mark(key.conversationId, channel, echo.ts);
-    onMessage({
-      key,
-      senderId: user,
-      sender: { id: user, name: await this.directory.user(this.api, user) },
-      text,
-      mode: "steer",
-    });
+    onMessage({ key, senderId: user, sender, text, mode: "steer" });
   }
 
   /**
@@ -471,7 +455,7 @@ export class SlackChannel implements Channel {
    */
   private async abortTurn(key: ConversationKey, channel: string, threadTs: string): Promise<void> {
     await this.deps.control?.abort(key);
-    await this.api.postMessage({ channel, thread_ts: threadTs, text: "⏹ Stopped." });
+    await this.api.postMessage({ channel, thread_ts: threadTs, text: STOPPED });
   }
 
   // --- bind ------------------------------------------------------------------
@@ -485,7 +469,7 @@ export class SlackChannel implements Channel {
     await this.api.postMessage({
       channel,
       thread_ts: threadTs,
-      text: "You are not bound yet. Ask the operator for a bind code, then send `bind <code>`.",
+      text: bindHint("`bind <code>`"),
     }).catch((err) => this.log(`bind hint failed: ${String(err)}`));
   }
 
@@ -500,7 +484,7 @@ export class SlackChannel implements Channel {
     await this.api.postMessage({
       channel,
       thread_ts: threadTs,
-      text: ok ? `Bound as ${escapeMrkdwn(name)}.` : "That bind code is invalid or expired.",
+      text: bindResult(ok, escapeMrkdwn(name)),
     });
   }
 
@@ -537,26 +521,17 @@ export class SlackChannel implements Channel {
     return name ?? channel;
   }
 
-  /** Save uploads to the inbox; each becomes a prompt line — a failed one
-   *  becomes a lost-marker line, never silence (5b). */
-  private async saveAttachments(files: SlackFile[]): Promise<string[]> {
-    const markers: string[] = [];
-    for (const file of files) {
-      // Metadata check before the fetch: any type is welcome, but a movie
-      // buffered whole into memory is not.
-      if (file.size !== undefined && file.size > MAX_INBOUND_BYTES) {
-        markers.push(lostMarker(file.name ?? "attachment", "too large"));
-        continue;
-      }
-      try {
-        const { bytes, mimeType } = await this.api.downloadFile(file);
-        markers.push(fileMarker(await saveInbound(this.id, file.name, mimeType, bytes)));
-      } catch (err) {
-        this.log(`file download failed: ${String(err)}`);
-        markers.push(lostMarker(file.name ?? "attachment", "download failed"));
-      }
-    }
-    return markers;
+  /** The upload list as the shared save loop wants it (the loop itself, size
+   *  gate and lost markers included, is core/inbox.ts). */
+  private saveAttachments(files: SlackFile[]): Promise<string[]> {
+    return saveInboundAll(this.id, files.map((file) => ({
+      label: file.name ?? "attachment",
+      name: file.name,
+      mimeType: file.mimetype ?? "application/octet-stream",
+      size: file.size,
+      // The response's content-type wins: Slack's metadata is a guess.
+      fetch: async () => this.api.downloadFile(file, MAX_INBOUND_BYTES),
+    })), this.log);
   }
 
   // --- outbound --------------------------------------------------------------
@@ -577,14 +552,9 @@ export class SlackChannel implements Channel {
       await this.receipts.settle(conversation);
       return;
     }
-    try {
-      await this.out.reply(channel, threadTs, reply);
-    } finally {
-      // Always: the turn ended either way, and a 👀 left on a user's message
-      // because the reply failed to send would sit there until the stale sweep
-      // half an hour later, looking like the agent is still working.
-      await this.receipts.settle(conversation);
-    }
+    // settleAfter: the turn ended either way, and a 👀 left up because the
+    // reply failed to send looks like work until the stale sweep.
+    await this.receipts.settleAfter(conversation, () => this.out.reply(channel, threadTs, reply));
   }
 
   /** A system note, posted without touching the receipts: the turn it triggers

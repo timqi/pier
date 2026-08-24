@@ -21,8 +21,9 @@ import type {
   TurnMeta,
 } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
-import { saveInbound } from "../core/inbox.js";
-import { fileMarker, lostMarker, MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { saveInboundAll } from "../core/inbox.js";
+import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
 import { parseCommand } from "./commands.js";
@@ -280,8 +281,14 @@ export class TelegramChannel implements Channel {
     if (await this.panel?.onCallback(query, key)) return;
     const text = offeredLabel(msg, query.data);
     if (text === undefined) {
-      await this.api.answerCallbackQuery(query.id, "That option is no longer on this message.")
-        .catch(() => {});
+      // Said in the chat, not as a second answerCallbackQuery: a query may be
+      // answered exactly once, and the toast already went to the ack above —
+      // against the real API the second answer is silently dropped.
+      await this.api.sendMessage({
+        chat_id: chatId,
+        message_thread_id: msg.message_thread_id,
+        text: STALE_OPTION,
+      }).catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
       return;
     }
     // The options belonged to the turn that just ended; once one is taken the
@@ -298,7 +305,7 @@ export class TelegramChannel implements Channel {
     const echo = await this.api.sendMessage({
       chat_id: chatId,
       message_thread_id: msg.message_thread_id,
-      text: `\u25b8 ${escapeHtml(text)}`,
+      text: picked(escapeHtml(text)),
       parse_mode: "HTML",
     }).catch((err) => {
       this.log(`option echo failed: ${String(err)}`);
@@ -324,7 +331,7 @@ export class TelegramChannel implements Channel {
     await this.api.sendMessage({
       chat_id: msg.chat.id,
       message_thread_id: msg.message_thread_id,
-      text: "⏹ Stopped.",
+      text: STOPPED,
     });
   }
 
@@ -336,7 +343,7 @@ export class TelegramChannel implements Channel {
     if (!this.gate.mayHint(String(msg.from?.id ?? ""))) return;
     await this.api.sendMessage({
       chat_id: msg.chat.id,
-      text: "You are not bound yet. Ask the operator for a bind code, then send /bind <code>.",
+      text: bindHint("/bind <code>"),
     }).catch((err) => this.log(`bind hint failed: ${String(err)}`));
   }
 
@@ -346,7 +353,7 @@ export class TelegramChannel implements Channel {
     const ok = this.deps.store.redeemBindCode("telegram", code, { id: String(user.id), name });
     await this.api.sendMessage({
       chat_id: msg.chat.id,
-      text: ok ? `Bound as ${name}.` : "That bind code is invalid or expired.",
+      text: bindResult(ok, name),
     });
   }
 
@@ -397,31 +404,28 @@ export class TelegramChannel implements Channel {
     }
   }
 
-  /** Save the message's attachments to the inbox; each becomes a prompt
-   *  line — a failed one becomes a lost-marker line, never silence (5b). */
-  private async saveAttachments(msg: TgMessage): Promise<string[]> {
+  /** The message's attachments as the shared save loop wants them (the loop
+   *  itself, size gate and lost markers included, is core/inbox.ts). */
+  private saveAttachments(msg: TgMessage): Promise<string[]> {
     // Telegram sends a photo as a size ladder — the last entry is the largest.
     const photo = msg.photo?.at(-1);
     const doc = msg.document;
-    const wanted = [
-      ...(photo ? [{ id: photo.file_id, name: undefined as string | undefined, label: "photo", mime: "image/jpeg", size: photo.file_size }] : []),
-      ...(doc ? [{ id: doc.file_id, name: doc.file_name, label: doc.file_name ?? "file", mime: doc.mime_type ?? "application/octet-stream", size: doc.file_size }] : []),
-    ];
-    const markers: string[] = [];
-    for (const { id, name, label, mime, size } of wanted) {
-      if (size !== undefined && size > MAX_INBOUND_BYTES) {
-        markers.push(lostMarker(label, "too large"));
-        continue;
-      }
-      try {
-        const file = await this.api.downloadFile(id);
-        markers.push(fileMarker(await saveInbound(this.id, name ?? file.name, mime, file.bytes)));
-      } catch (err) {
-        this.log(`attachment download failed: ${String(err)}`);
-        markers.push(lostMarker(label, "download failed"));
-      }
-    }
-    return markers;
+    return saveInboundAll(this.id, [
+      ...(photo ? [{
+        label: "photo",
+        mimeType: "image/jpeg",
+        size: photo.file_size,
+        // Telegram only learns a filename from getFile, so the fetch's wins.
+        fetch: async () => this.api.downloadFile(photo.file_id, MAX_INBOUND_BYTES),
+      }] : []),
+      ...(doc ? [{
+        label: doc.file_name ?? "file",
+        name: doc.file_name,
+        mimeType: doc.mime_type ?? "application/octet-stream",
+        size: doc.file_size,
+        fetch: async () => this.api.downloadFile(doc.file_id, MAX_INBOUND_BYTES),
+      }] : []),
+    ], this.log);
   }
 
   // --- addressing ------------------------------------------------------------
@@ -463,26 +467,27 @@ export class TelegramChannel implements Channel {
     const quiet = isSilentReply(reply)
       ? `<i>${quietLabel(reply.silence && escapeHtml(reply.silence))}</i>`
       : "";
-    const body = (text ? toTelegramHtml(text) : quiet) + turnFooter(reply.meta);
-    try {
-      if (body.trim()) {
-        const parts = chunk(body);
-        for (const [i, part] of parts.entries()) {
-          await this.api.sendMessage({
-            chat_id: chatId,
-            message_thread_id: topicId,
-            text: part,
-            parse_mode: "HTML",
-            // Next-step buttons ride the last chunk; a click sends the label.
-            reply_markup: i === parts.length - 1 ? buttons : undefined,
-          });
-        }
+    // A turn that is only its options still has to carry them: with no text,
+    // no silence marker and no meta the body is empty, and a keyboard cannot
+    // ride a message that was never sent — so it gets the smallest one.
+    const body = ((text ? toTelegramHtml(text) : quiet) + turnFooter(reply.meta)) ||
+      (buttons ? "…" : "");
+    // settleAfter: a 👀 left up because the reply failed would sit there until
+    // the stale sweep, looking like the agent is still working.
+    await this.receipts.settleAfter(conversation, async () => {
+      if (!body.trim()) return;
+      const parts = chunk(body);
+      for (const [i, part] of parts.entries()) {
+        await this.api.sendMessage({
+          chat_id: chatId,
+          message_thread_id: topicId,
+          text: part,
+          parse_mode: "HTML",
+          // Next-step buttons ride the last chunk; a click sends the label.
+          reply_markup: i === parts.length - 1 ? buttons : undefined,
+        });
       }
-    } finally {
-      // Always: a 👀 left up because the reply failed would sit there until the
-      // stale sweep, looking like the agent is still working.
-      await this.receipts.settle(conversation);
-    }
+    });
   }
 
   /**

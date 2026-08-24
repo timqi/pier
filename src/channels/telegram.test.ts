@@ -466,6 +466,15 @@ describe("outbound", () => {
     }]);
   });
 
+  it("a turn that is only its options still carries them, meta or not", async () => {
+    // No text, no silence, no meta: the old body was empty, so the keyboard
+    // rode a message that was never sent and the options vanished.
+    await channel.send("42", { text: "", suggestions: ["Run it"] });
+    const sent = client.sent.at(-1)!;
+    expect(sent.reply_markup).toBeDefined();
+    expect(sent.text.trim()).not.toBe("");
+  });
+
   it("carries an index, not the label — a CJK label blows the 64-byte cap", async () => {
     // 67 bytes as a payload; this is what silently dropped every button before.
     const long = "验证不同任务的结果是否能发送到指定 Telegram 话题";
@@ -557,7 +566,9 @@ describe("outbound", () => {
     openGates();
     await feed(tapped("sg:3", ["only one"]));
     expect(inbound).toEqual([]);
-    expect(client.toasts.at(-1)).toMatch(/no longer on this message/);
+    // A chat message, not a second answerCallbackQuery: a query may be
+    // answered exactly once, and the plain ack already was it.
+    expect(client.sent.at(-1)?.text).toMatch(/no longer available/);
   });
 });
 

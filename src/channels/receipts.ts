@@ -127,6 +127,21 @@ export class Receipts {
   }
 
   /**
+   * Deliver a turn and settle its receipts *whatever happens* — a 👀 left on
+   * a message because the reply failed to send sits there looking like work
+   * until the stale sweep. The try/finally was copied into all three
+   * adapters' send() before landing here; the error still propagates, because
+   * a failed delivery is the router's to report.
+   */
+  async settleAfter(conversationId: string, deliver: () => Promise<void>): Promise<void> {
+    try {
+      await deliver();
+    } finally {
+      await this.settle(conversationId);
+    }
+  }
+
+  /**
    * Everything on the books at startup is orphaned — nothing in memory can be
    * ours yet — and past `staleMs` a receipt's turn is never going to settle.
    */

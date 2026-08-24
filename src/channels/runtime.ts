@@ -1,12 +1,13 @@
 // Channel lifecycle: which adapters are running, and where their sessions
 // live. Keeps main.ts wiring-only and gives the Console one call to apply a
-// config change. Lark is configurable but has no adapter yet.
+// config change.
 
 import type { Router } from "../core/router.js";
 import type { Channel } from "../core/types.js";
 import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
+import { LarkChannel } from "./lark.js";
 import { SlackChannel } from "./slack.js";
 import { TelegramChannel } from "./telegram.js";
 import type { ChannelPlatform } from "./types.js";
@@ -24,6 +25,9 @@ const ADAPTERS: {
 }[] = [
   { platform: "telegram", needsAppToken: false, build: (deps) => new TelegramChannel(deps) },
   { platform: "slack", needsAppToken: true, build: (deps) => new SlackChannel(deps) },
+  // Lark's "token" is the App ID and "appToken" the App Secret; the adapter
+  // needs both before it can start, same gate as Slack's two credentials.
+  { platform: "lark", needsAppToken: true, build: (deps) => new LarkChannel(deps) },
 ];
 
 // Lifecycle news, which is not what the injected sink below is for: that one

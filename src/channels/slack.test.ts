@@ -854,6 +854,23 @@ describe("receipts", () => {
     await reborn.stop();
   });
 
+  it("a turn ending during the name lookup cannot consume the next message's receipt", async () => {
+    openGates();
+    // Park the lookup so the message sits in the window where the old code
+    // had already marked its receipt.
+    let releaseName: (v: string) => void = () => {};
+    client.userName = () => new Promise((r) => (releaseName = r));
+    client.emit(message({ text: "next", ts: "1799.000100" }));
+    await new Promise((r) => setTimeout(r, 10));
+    // A previous turn settles now: nothing may be on the books yet.
+    await channel.send("C100/1799.000100", { text: "previous turn", suggestions: [] });
+    expect(client.reactions).toEqual([]);
+    releaseName("Q");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(client.reactions).toEqual([{ channel: "C100", ts: "1799.000100", name: "eyes", add: true }]);
+    expect(inbound.at(-1)!.text).toBe("next");
+  });
+
   it("keeps two threads' receipts apart", async () => {
     openGates();
     await feed(

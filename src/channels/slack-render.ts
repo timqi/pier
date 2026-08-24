@@ -8,7 +8,7 @@
 // literal text instead of rejecting the message, so the risk here is an ugly
 // reply rather than a lost one.
 
-import { chunkText } from "./chunk.js";
+import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
 
 /**
@@ -75,32 +75,11 @@ export function toMrkdwn(markdown: string): string {
 
 /**
  * Split rendered mrkdwn into sendable chunks at the last blank line or newline
- * that fits, then re-balance code fences across the cut.
- *
- * Telegram can be cut mid-`<pre>` and shrug — its parser closes the tag itself.
- * Slack does not: an unterminated ``` swallows the rest of that message, and
- * the next chunk starts *outside* a fence, so the tail of a long code block
- * renders as prose. Closing and reopening around the boundary is what keeps a
- * split code block readable.
+ * that fits, then re-balance code fences across the cut (see chunk.ts for why
+ * an unbalanced fence is a mangled reply here and not on Telegram).
  */
 export const chunk = (text: string, max: number): string[] =>
   balanceFences(chunkText(text, max));
-
-/**
- * Close a fence a chunk left open, and reopen it on the next one. Counting `\`
- * runs is enough because `toMrkdwn` has already normalised every fence to a
- * bare ``` on its own line.
- */
-function balanceFences(parts: string[]): string[] {
-  let open = false;
-  return parts.map((part) => {
-    const reopened = open ? `\`\`\`\n${part}` : part;
-    // The prepended fence counts too, so a chunk that closes the block it
-    // inherited comes out even and clears the flag.
-    open = ((reopened.match(/```/g) ?? []).length % 2) === 1;
-    return open ? `${reopened}\n\`\`\`` : reopened;
-  });
-}
 
 /**
  * The body of a turn, as Slack's own markdown renderer sees it. Preferred over

@@ -17,9 +17,7 @@ import type {
 } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
-import { parseConversation as parseSlack } from "./slack.js";
-import { parseConversation as parseTelegram } from "./telegram.js";
-import type { ChannelPlatform } from "./types.js";
+import { chatOf, isChannelPlatform } from "./types.js";
 
 /** Everything an in-chat panel reads out. Absent when nothing is attached. */
 export interface ConversationStatus {
@@ -68,16 +66,11 @@ export interface ControlDeps {
 
 export function createControl({ router, factory, conversations, store }: ControlDeps): ChannelControl {
   const launchFor = (key: ConversationKey): Partial<AgentLaunchOptions> => {
-    const platform = key.channelId as ChannelPlatform;
-    // Decoding a conversation id back to a chat id is the adapter layer's
-    // business, never core's — so each platform's own parser is used here.
-    const chatId = platform === "telegram"
-      ? parseTelegram(key.conversationId).chatId
-      : platform === "slack"
-      ? parseSlack(key.conversationId).channel
-      : undefined;
-    if (chatId === undefined) return {};
-    const policy = store.policy(platform, chatId);
+    // Decoding a conversation id back to a chat id is the channel layer's
+    // business, never core's; the chat half of every platform's id has one
+    // decoder (chatOf), so no adapter import is needed here.
+    if (!isChannelPlatform(key.channelId)) return {};
+    const policy = store.policy(key.channelId, chatOf(key.conversationId));
     return {
       cwd: policy.cwd || undefined,
       model: policy.model ?? undefined,
