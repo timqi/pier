@@ -47,6 +47,37 @@ let pendingFiles: PendingFile[] = [];
 // the same turn isn't drawn twice.
 let optimisticUserTexts: string[] = [];
 
+/**
+ * Keep the app inside what the keyboard leaves visible, and tell style.css
+ * that it is up.
+ *
+ * iOS neither shrinks the layout viewport for the keyboard nor drops
+ * `env(safe-area-inset-bottom)` behind it: it scrolls the page instead, and
+ * keeps reporting the home indicator's inset. That is three symptoms — a blank
+ * strip above the keyboard's accessory bar, a top bar scrolled off screen, and
+ * a composer sometimes left under the keyboard — and the visual viewport is
+ * the only thing that knows the real numbers.
+ */
+function trackKeyboard(): void {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const sync = (): void => {
+    // Not `> 0`: the layout viewport is a pixel or two off on its own, and the
+    // accessory bar alone is ~44px — no keyboard is anywhere near this short.
+    // A pinch-zoom shrinks the visual viewport too, and pinning the body to
+    // that would collapse the app into a corner of the screen.
+    const up = vv.scale <= 1.05 && window.innerHeight - vv.height - vv.offsetTop > 80;
+    if (up) document.body.dataset.kb = "";
+    else delete document.body.dataset.kb;
+    document.body.style.height = up ? `${String(vv.height)}px` : "";
+    // The height above already made the room iOS scrolled for.
+    if (up && window.scrollY) window.scrollTo(0, 0);
+  };
+  // The keyboard arrives as a resize, the scroll under it as an offset change.
+  vv.addEventListener("resize", sync);
+  vv.addEventListener("scroll", sync);
+}
+
 export function focusInput(): void {
   input.focus();
 }
@@ -304,6 +335,7 @@ async function recallQueue(): Promise<void> {
 
 export function initComposer(d: ComposerDeps): void {
   deps = d;
+  trackKeyboard();
   const abort = (): void => {
     const id = deps.sessionId();
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });

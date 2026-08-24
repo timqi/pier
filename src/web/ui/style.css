@@ -97,6 +97,19 @@ html {
   #project-tree {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
   }
+  /* Keyboard up (composer.ts sets it): the indicator is behind the keyboard,
+     and the inset iOS still reports for it would sit as a blank strip between
+     the input and the keyboard's accessory bar. */
+  body[data-kb] #composer {
+    padding-bottom: 0.5rem;
+  }
+  /* black-translucent (index.html) hands us the notch strip instead of the
+     system's grey band, so the two surfaces that touch the top edge pay the
+     inset back — and the strip carries their background, which was the point. */
+  main,
+  #sidebar {
+    padding-top: env(safe-area-inset-top);
+  }
   /* Thumb-sized rows in the drawer; the desktop rail stays compact. */
   #project-tree li,
   #project-tree summary,

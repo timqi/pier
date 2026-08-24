@@ -15,6 +15,10 @@
   <link rel="apple-touch-icon" href="/icon-touch-192.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Pier" />
+  <!-- Without this iOS paints the status-bar strip in a system grey that
+       belongs to no part of the app. Translucent hands the strip to the page,
+       which style.css pays for with the safe-area inset. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Pier</title>
 </head>
 <!-- The document never scrolls: this is a fixed-viewport workbench, and every
