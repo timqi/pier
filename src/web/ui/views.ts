@@ -22,6 +22,7 @@ import { shortcut } from "./shortcut.js";
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 export interface ViewsDeps {
   sessions: () => SessionInfo[];
+  loadSessions: () => Promise<void>;
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
   select: (id: string) => void;
@@ -186,16 +187,13 @@ function setHash(r: Route, replace = false): void {
 
 export const setSessionHash = (id: string): void => setHash({ kind: "session", id });
 
-/** Hash → UI. A missing or stale route falls back to the first pinned session. */
+/** Hash → UI. Session routes may name non-pinned sessions; select verifies them. */
 export function applyRoute(): void {
   const route = parseHash();
   const sessions = deps.sessions();
   const currentId = deps.currentId();
   const wanted = route?.kind === "session" ? route.id : null;
-  const id =
-    wanted && sessions.some((s) => s.id === wanted)
-      ? wanted
-      : (currentId ?? (sessions.find((s) => s.pinned) ?? sessions[0])?.id ?? null);
+  const id = wanted ?? (currentId ?? (sessions.find((s) => s.pinned) ?? sessions[0])?.id ?? null);
   applyingRoute = true;
   try {
     if (id && id !== currentId) deps.select(id);
@@ -205,8 +203,7 @@ export function applyRoute(): void {
   } finally {
     applyingRoute = false;
   }
-  // Boot with no hash, or a session that no longer exists: name where we landed
-  // without adding a history entry.
+  // Boot with no hash: name where we landed without adding a history entry.
   if (route?.kind !== "console" && id) setHash({ kind: "session", id }, true);
 }
 
@@ -215,6 +212,7 @@ export function initViews(d: ViewsDeps): void {
   tasksView = createTasksView(
     $("#tasks-view"),
     () => deps.sessions().map(({ id, cwd, title }) => ({ id, cwd, title })),
+    d.loadSessions,
     d.select,
     () => deps.currentId(),
     (arg) => showConsole("activity", arg),

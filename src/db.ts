@@ -145,6 +145,12 @@ const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  // 4 — Projects can render from SQLite without scanning every Pi transcript.
+  `
+  ALTER TABLE session_state ADD COLUMN cwd TEXT;
+  ALTER TABLE session_state ADD COLUMN title TEXT;
+  ALTER TABLE session_state ADD COLUMN created_at INTEGER;
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

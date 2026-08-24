@@ -97,6 +97,7 @@ declare const __PIER_VERSION__: string; // injected by vite.config.ts
 // --- state ---------------------------------------------------------------------
 
 let sessions: SessionInfo[] = [];
+let selectionSeq = 0;
 let currentId: string | null = null;
 let currentState: SessionState = "idle";
 let source: EventSource | null = null;
@@ -112,17 +113,55 @@ async function createSession(cwd: string): Promise<void> {
     return;
   }
   const { id } = (await res.json()) as { id: string };
-  await refreshSessions();
+  await refreshProjects();
   await select(id);
   focusInput();
 }
 
-async function refreshSessions(): Promise<void> {
-  sessions = (await (await fetch("/api/sessions")).json()) as SessionInfo[];
+/** `complete` = every session Pi knows, so it replaces the list. A Projects
+ *  read speaks only for the pinned ones and merges instead: dropping the rest
+ *  would delete the current session out from under its own chat the moment it
+ *  is unpinned — header, ⋯ menu and its Pin row with it. */
+function commitSessions(next: SessionInfo[], complete: boolean): void {
+  if (complete) {
+    sessions = next;
+  } else {
+    const fresh = new Map(next.map((s) => [s.id, s]));
+    sessions = sessions.map((s) => fresh.get(s.id) ?? (s.pinned ? { ...s, pinned: false } : s));
+    const known = new Set(sessions.map((s) => s.id));
+    sessions.push(...next.filter((s) => !known.has(s.id)));
+  }
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
   maybeAckRead();
 }
+
+/** One list request in flight at a time; anything asked for during one runs
+ *  after it, so a burst of workspace events costs two fetches, not twenty. */
+function coalesce(load: () => Promise<void>): () => Promise<void> {
+  let inflight: Promise<void> | undefined;
+  let dirty = false;
+  return () => {
+    dirty = true;
+    return inflight ??= (async () => {
+      while (dirty) {
+        dirty = false;
+        await load();
+      }
+    })().finally(() => {
+      inflight = undefined;
+    });
+  };
+}
+
+const refreshProjects = coalesce(async () => {
+  commitSessions((await (await fetch("/api/projects")).json()) as SessionInfo[], false);
+});
+
+/** Full Pi transcript scan, only for surfaces that explicitly need history. */
+const refreshSessions = coalesce(async () => {
+  commitSessions((await (await fetch("/api/sessions")).json()) as SessionInfo[], true);
+});
 
 /** Seen = read: the selected session's chat is on screen in a visible tab.
  *  The ack clears the server-side unread mark, and the resulting broadcast
@@ -137,12 +176,9 @@ function maybeAckRead(): void {
   void fetch(`/api/sessions/${s.id}/read`, { method: "POST" });
 }
 
-/** The listed session, or a stub for one Pi hasn't persisted yet — a fresh
- *  session must have a working ⋯ menu (info, pin, model) from turn zero. */
+/** The selected session's persisted summary, when it exists. */
 function currentSession(): SessionInfo | undefined {
-  const listed = sessions.find((x) => x.id === currentId);
-  if (listed || !currentId) return listed;
-  return { id: currentId, cwd: "—", createdAt: Date.now(), state: currentState, pinned: false, unread: false, activeRuns: 0 };
+  return sessions.find((s) => s.id === currentId);
 }
 
 /** First prompt titles the session optimistically — the server list, which
@@ -162,7 +198,7 @@ function setState(state: SessionState): void {
   renderSessions();
   renderHeader();
   updateComposer();
-  if (state === "idle") void refreshSessions();
+  if (state === "idle") void refreshProjects();
 }
 
 // --- event handling ----------------------------------------------------------------
@@ -234,20 +270,20 @@ function handleEvent(e: SessionEvent): void {
  */
 function connectWorkspace(): void {
   const src = new EventSource("/api/events");
-  // Any (re)connect may follow a gap — re-list instead of replaying.
-  src.onopen = () => void refreshSessions();
+  // Any (re)connect may follow a gap — re-list Projects instead of replaying.
+  src.onopen = () => void refreshProjects();
   src.onerror = () => streamDied(src, "Workspace");
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;
     if (e.type === "sessions-changed") {
-      void refreshSessions();
+      void refreshProjects();
       return;
     }
     if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
       refreshTasks(e.type === "task-run-changed" ? e.taskId : undefined);
       refreshActivity();
       // A run starting or settling changes its launcher's activeRuns dot.
-      if (e.type === "task-run-changed") void refreshSessions();
+      if (e.type === "task-run-changed") void refreshProjects();
       return;
     }
     refreshActivity();
@@ -271,10 +307,17 @@ function connect(id: string, after: number): void {
 // --- selection --------------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
+  const seq = ++selectionSeq;
+  let missing = false;
+  if (!sessions.some((s) => s.id === id)) {
+    await refreshSessions();
+    if (seq !== selectionSeq) return;
+    missing = !sessions.some((s) => s.id === id);
+  }
   showChat();
   closeDrawer(); // on mobile the drawer is how you got here
   setSessionHash(id);
-  if (id === currentId) return;
+  if (id === currentId && !missing) return;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
@@ -282,11 +325,11 @@ async function select(id: string): Promise<void> {
   renderSessions();
   renderHeader();
   maybeAckRead(); // selecting an unread session is looking at it
-  await loadSession(id);
+  await loadSession(id, missing);
 }
 
 /** (Re)load the current session's snapshot and reconnect its event stream. */
-async function loadSession(id: string): Promise<void> {
+async function loadSession(id: string, missing = false): Promise<void> {
   source?.close();
   resetChat();
   renderQueue([], []);
@@ -297,6 +340,11 @@ async function loadSession(id: string): Promise<void> {
   // Painted before the fetch: a long transcript takes a moment to arrive and
   // render, and until then the pane would look like an empty session.
   chatLoading(true);
+  if (missing) {
+    chatLoading(false);
+    appendTurn("error", `session not found: ${id}`);
+    return;
+  }
   const res = await fetch(`/api/sessions/${id}/history`);
   const snap = res.ok ? ((await res.json()) as SessionSnapshot) : null;
   if (currentId !== id) return; // stale: the user switched again mid-fetch
@@ -356,6 +404,7 @@ initShell({
 });
 initSidebar({
   sessions: () => sessions,
+  loadSessions: refreshSessions,
   currentId: () => currentId,
   select: (id) => void select(id),
   sessionMenu,
@@ -374,6 +423,7 @@ initHeader({
 });
 initViews({
   sessions: () => sessions,
+  loadSessions: refreshSessions,
   currentId: () => currentId,
   currentSession,
   select: (id) => void select(id),
@@ -386,4 +436,4 @@ initVersion(__PIER_VERSION__);
 document.addEventListener("visibilitychange", maybeAckRead);
 
 connectWorkspace();
-void refreshSessions().then(applyRoute);
+void refreshProjects().then(applyRoute);

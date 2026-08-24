@@ -16,7 +16,8 @@ import type { ContextUsage, ModelRef, ThinkingLevel } from "../../core/types.js"
 /** Everything the header needs from the orchestrator (main.ts). */
 export interface HeaderDeps {
   currentId: () => string | null;
-  /** The listed session, or main's stub for one Pi hasn't persisted yet. */
+  /** The selected session's listed summary. `select` guarantees one exists
+   *  for any session that does — the header hides itself when it does not. */
   currentSession: () => SessionInfo | undefined;
   /** Mobile top bar mirror (views.ts). */
   syncBar: () => void;

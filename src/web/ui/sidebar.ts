@@ -9,7 +9,7 @@ import { closeMenu, openMenu } from "./menu.js";
 import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
-/** GET /api/sessions row: AgentFactory.list() entry + live state + pin flag. */
+/** GET /api/projects or /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
   id: string;
   cwd: string;
@@ -26,6 +26,7 @@ export interface SessionInfo {
 /** Everything the sidebar needs from the orchestrator (main.ts). */
 export interface SidebarDeps {
   sessions: () => SessionInfo[];
+  loadSessions: () => Promise<void>;
   currentId: () => string | null;
   select: (id: string) => void;
   sessionMenu: (anchor: HTMLElement, s: SessionInfo) => void;
@@ -107,7 +108,12 @@ export async function setPinned(s: SessionInfo, pinned: boolean): Promise<void> 
   s.pinned = pinned;
   renderSessions();
   deps.onPinsChanged();
-  const res = await sendJson(`/api/sessions/${s.id}/pin`, { pinned });
+  const res = await sendJson(`/api/sessions/${s.id}/pin`, {
+    pinned,
+    cwd: s.cwd,
+    createdAt: s.createdAt,
+    ...(s.title ? { title: s.title } : {}),
+  });
   if (!res.ok) {
     s.pinned = !pinned; // reconcile: the server is the truth
     renderSessions();
@@ -370,6 +376,9 @@ function toggleArchive(): void {
   renderArchive();
   archiveDialog.showModal();
   archiveSearch.focus();
+  void deps.loadSessions().then(() => {
+    if (archiveDialog.open) renderArchive();
+  });
 }
 
 // --- wiring ----------------------------------------------------------------------------

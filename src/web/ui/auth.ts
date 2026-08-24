@@ -44,7 +44,7 @@ export function streamDied(source: EventSource, what: string): void {
   const died = () => report(`${what} stream disconnected — reload to reconnect`);
   // Deliberately the unwrapped fetch: this *is* the 401 handler, and going
   // through the wrapper would hide which of the two answers came back.
-  void nativeFetch("/api/sessions").then(
+  void nativeFetch("/api/projects").then(
     (res) => (res.status === 401 ? toLogin() : died()),
     died,
   );

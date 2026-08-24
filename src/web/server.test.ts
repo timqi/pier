@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSy
 import { homedir, tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
@@ -208,6 +209,7 @@ function setup(
       problem?: () => string | null;
     } | null;
   } = {},
+  prepareState: (db: DatabaseSync) => void = () => {},
 ) {
   const session = fakeSession("s1");
   const factory: AgentFactory = {
@@ -221,6 +223,7 @@ function setup(
   const router = new Router(hub, () => factory.resume("s1"));
   // Hermetic: every store shares one in-memory database, never the real $HOME.
   const db = openDb(":memory:");
+  prepareState(db);
   const state = new SessionStateStore(db);
   const config = fakeConfig();
   const providers = fakeProviders();
@@ -268,19 +271,56 @@ describe("workbench server", () => {
     ]);
   });
 
+  it("lists complete Projects metadata without scanning Pi sessions", async () => {
+    const { app, factory, state } = setup();
+    state.pin({ id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned" }, true);
+    const res = await app.request("/api/projects");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", pinned: true, unread: false, activeRuns: 0 },
+    ]);
+    expect(factory.list).not.toHaveBeenCalled();
+  });
+
+  it("backfills legacy pins once, then serves Projects from SQLite", async () => {
+    const { app, factory } = setup(
+      "/tmp",
+      fakeSecrets(),
+      {},
+      (db) => db.prepare("INSERT INTO session_state(session_id, pinned) VALUES ('s1', 1)").run(),
+    );
+    const first = await app.request("/api/projects");
+    expect(first.status).toBe(200);
+    expect((await first.json()) as { cwd: string }[]).toEqual([
+      expect.objectContaining({ id: "s1", cwd: "/tmp", createdAt: 1 }),
+    ]);
+    expect((await app.request("/api/projects")).status).toBe(200);
+    expect(factory.list).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces concurrent full session listings", async () => {
+    const { app, factory } = setup();
+    let resolve!: (rows: { id: string; cwd: string; createdAt: number }[]) => void;
+    vi.mocked(factory.list).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const requests = [app.request("/api/sessions"), app.request("/api/sessions")];
+    expect(factory.list).toHaveBeenCalledOnce();
+    resolve([{ id: "s1", cwd: "/tmp", createdAt: 1 }]);
+    expect((await Promise.all(requests)).map((res) => res.status)).toEqual([200, 200]);
+  });
+
   it("marks a session unread when a witnessed run settles, until a client acks", async () => {
     const { app, session, hub, router, state } = setup();
     router.attach({ channelId: "web", conversationId: "s1" }, session);
 
     // Idle without a witnessed start (e.g. boot) never marks unread.
     session.emit({ type: "state", state: "idle" });
-    expect(state.has("unread", "s1")).toBe(false);
+    expect(state.unread("s1")).toBe(false);
 
     const changed = vi.fn();
     hub.subscribeWorkspace(changed);
     session.emit({ type: "state", state: "streaming" });
     session.emit({ type: "state", state: "idle" });
-    expect(state.has("unread", "s1")).toBe(true);
+    expect(state.unread("s1")).toBe(true);
     expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
     const rows = (await (await app.request("/api/sessions")).json()) as { unread: boolean }[];
     expect(rows[0]!.unread).toBe(true);
@@ -288,7 +328,7 @@ describe("workbench server", () => {
     // Seen = read: the ack clears the mark and broadcasts the change.
     changed.mockClear();
     expect((await app.request("/api/sessions/s1/read", { method: "POST" })).status).toBe(200);
-    expect(state.has("unread", "s1")).toBe(false);
+    expect(state.unread("s1")).toBe(false);
     expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
 
     // Acking a session that isn't unread is a no-op, not a broadcast.
@@ -361,17 +401,21 @@ describe("workbench server", () => {
   it("pins sessions created here, and toggles pins on demand", async () => {
     const { app, state } = setup();
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
-    expect(state.has("pinned", "s1")).toBe(true);
+    expect(state.projects()).toHaveLength(1);
 
     const off = await app.request("/api/sessions/s1/pin", {
       method: "POST",
-      body: JSON.stringify({ pinned: false }),
+      body: JSON.stringify({ pinned: false, cwd: "/tmp", createdAt: 1 }),
     });
     expect(off.status).toBe(200);
-    expect(state.has("pinned", "s1")).toBe(false);
+    expect(state.projects()).toEqual([]);
 
     const bad = await app.request("/api/sessions/s1/pin", { method: "POST", body: "{}" });
     expect(bad.status).toBe(400);
+    expect((await app.request("/api/sessions/s1/pin", {
+      method: "POST",
+      body: JSON.stringify({ pinned: true, cwd: "/tmp" }),
+    })).status).toBe(400);
   });
 
   it("creates a session in the given project directory, never pier's own", async () => {
@@ -1078,7 +1122,8 @@ describe("workbench server", () => {
   });
 
   it("routes messages through the queue policy", async () => {
-    const { app, session } = setup();
+    const { app, session, state } = setup();
+    state.pin({ id: "s1", cwd: "/tmp", createdAt: 1 }, true);
     const post = (body: unknown) =>
       app.request("/api/sessions/s1/messages", {
         method: "POST",
@@ -1089,6 +1134,7 @@ describe("workbench server", () => {
     let res = await post({ text: "hello" });
     expect(res.status).toBe(202);
     expect(session.calls).toEqual(["prompt:hello"]);
+    expect(state.projects()[0]?.title).toBe("hello");
 
     session.setState("streaming");
     await post({ text: "wait for it" });

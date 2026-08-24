@@ -21,6 +21,7 @@ import type {
   ConfigStore,
   InboundMessage,
   ProviderManager,
+  SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
@@ -119,7 +120,7 @@ export function createServer(
       return;
     }
     if (!runningNow.delete(e.sessionId)) return;
-    state.set("unread", e.sessionId, true);
+    state.setUnread(e.sessionId, true);
     hub.emitWorkspace({ type: "sessions-changed" });
   });
 
@@ -135,19 +136,51 @@ export function createServer(
   // so every client sees a new session immediately; dropped once Pi lists it.
   const nascent = new Map<string, { cwd: string; createdAt: number }>();
 
+  // listAll parses every transcript. Concurrent consumers share that work,
+  // but the result is not retained: an explicit All-sessions open stays fresh.
+  let listing: Promise<SessionSummary[]> | undefined;
+  let projectBackfillNeeded = state.needsProjectBackfill();
+  const listSessions = (): Promise<SessionSummary[]> =>
+    listing ??= factory.list()
+      .then((rows) => {
+        state.remember(rows);
+        return rows;
+      })
+      .finally(() => {
+        listing = undefined;
+      });
+
+  const present = (s: SessionSummary, pinned: boolean, unread: boolean) => ({
+    ...s,
+    state: router.stateOf(s.id) ?? "idle",
+    pinned,
+    unread,
+    activeRuns: activeRuns(s.id),
+  });
+
+  app.get("/api/projects", async (c) => {
+    // Existing databases have pin booleans but no summaries. Pay one legacy
+    // scan, fill those rows, then every later Projects read is SQLite-only.
+    if (projectBackfillNeeded) {
+      await listSessions();
+      // Do not retry on every request, and do not clear a pin whose transcript
+      // happened to be unreadable. A later explicit full listing can repair it.
+      projectBackfillNeeded = false;
+    }
+    return c.json(state.projects().map((s) => present(s, true, s.unread)));
+  });
+
   app.get("/api/sessions", async (c) => {
-    const sessions = await factory.list();
+    const sessions = await listSessions();
     for (const s of sessions) nascent.delete(s.id);
     // A session created but never prompted would otherwise be listed forever.
     for (const [id, n] of nascent) if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
+    const flags = state.flags();
     return c.json(
-      [...[...nascent].map(([id, n]) => ({ id, ...n })), ...sessions].map((s) => ({
-        ...s,
-        state: router.stateOf(s.id) ?? "idle",
-        pinned: state.has("pinned", s.id),
-        unread: state.has("unread", s.id),
-        activeRuns: activeRuns(s.id),
-      })),
+      [...[...nascent].map(([id, n]) => ({ id, ...n })), ...sessions].map((s) => {
+        const row = flags.get(s.id);
+        return present(s, row?.pinned ?? false, row?.unread ?? false);
+      }),
     );
   });
 
@@ -156,10 +189,11 @@ export function createServer(
     // A session always starts in its project directory — never in pier's own.
     if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
     const session = await factory.create({ cwd: body.cwd });
-    nascent.set(session.id, { cwd: body.cwd, createdAt: Date.now() });
+    const createdAt = Date.now();
+    nascent.set(session.id, { cwd: body.cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
     // Created here = part of the workspace; pinning is what Projects lists.
-    state.set("pinned", session.id, true);
+    state.pin({ id: session.id, cwd: body.cwd, createdAt }, true);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
@@ -168,8 +202,8 @@ export function createServer(
   // here; the broadcast moves every other client's dot back to idle.
   app.post("/api/sessions/:id/read", (c) => {
     const id = c.req.param("id");
-    if (state.has("unread", id)) {
-      state.set("unread", id, false);
+    if (state.unread(id)) {
+      state.setUnread(id, false);
       hub.emitWorkspace({ type: "sessions-changed" });
     }
     return c.json({ ok: true });
@@ -177,10 +211,22 @@ export function createServer(
 
   app.post("/api/sessions/:id/pin", async (c) => {
     const body = await c.req.json().catch(() => null);
-    if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
-    // The id is trusted: checking existence costs a session list per click,
-    // and the surface is operator-authenticated. Worst case is a stray row.
-    state.set("pinned", c.req.param("id"), body.pinned);
+    if (
+      typeof body?.pinned !== "boolean" ||
+      typeof body.cwd !== "string" || !body.cwd ||
+      typeof body.createdAt !== "number" || !Number.isFinite(body.createdAt) ||
+      (body.title !== undefined && typeof body.title !== "string")
+    ) {
+      return c.json({ error: "pinned and session summary required" }, 400);
+    }
+    // The summary came from this authenticated surface's own list. Persisting
+    // it here makes the next Projects read independent of Pi's transcript scan.
+    state.pin({
+      id: c.req.param("id"),
+      cwd: body.cwd,
+      createdAt: body.createdAt,
+      ...(body.title ? { title: body.title.slice(0, 80) } : {}),
+    }, body.pinned);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ pinned: body.pinned });
   });
@@ -300,6 +346,7 @@ export function createServer(
       text: body.text,
       mode,
     });
+    if (state.title(id, body.text)) hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ sessionId }, 202);
   });
 

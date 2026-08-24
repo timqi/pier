@@ -29,6 +29,7 @@ import type {
   ProviderSetup,
   SessionEventPayload,
   SessionState,
+  SessionSummary,
   SystemInputOrigin,
   ThinkingLevel,
   TurnMeta,
@@ -546,9 +547,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     return infos;
   }
 
-  async list(): Promise<
-    { id: string; cwd: string; createdAt: number; title?: string }[]
-  > {
+  async list(): Promise<SessionSummary[]> {
     const infos = await this.listed();
     return infos.map((s) => ({
       id: s.id,

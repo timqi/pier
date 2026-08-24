@@ -301,6 +301,13 @@ export interface AgentLaunchOptions {
   capabilities?: "read" | "write";
 }
 
+export interface SessionSummary {
+  id: string;
+  cwd: string;
+  createdAt: number;
+  title?: string;
+}
+
 export interface AgentFactory {
   /**
    * Models with configured auth, independent of any session. Session-scoped
@@ -312,9 +319,7 @@ export interface AgentFactory {
   create(opts: AgentLaunchOptions): Promise<AgentSession>;
   fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
-  list(): Promise<
-    { id: string; cwd: string; createdAt: number; title?: string }[]
-  >;
+  list(): Promise<SessionSummary[]>;
 }
 
 export type ProviderAuthType = "api_key" | "oauth";

@@ -30,6 +30,7 @@ const actionSummary = (task: TaskDefinition): string => {
 export function createTasksView(
   root: HTMLElement,
   getSessions: () => SessionChoice[],
+  loadSessions: () => Promise<void>,
   openSession: (id: string) => void,
   getCurrentSessionId: () => string | null,
   openActivity: (arg?: string) => void,
@@ -119,7 +120,7 @@ export function createTasksView(
 
   function renderList(): void {
     const create = button("New task", true);
-    create.onclick = () => openTaskEditor(editorDeps);
+    create.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps));
     const filters = consoleTabs();
     // w-full below md forces its own line inside the wrapping .tabstrip — six
     // filters crammed beside the console tabs are unreachable on a phone.
@@ -201,7 +202,7 @@ export function createTasksView(
     pause.onclick = () => void mutate(`/api/tasks/${task.id}/${task.enabled ? "pause" : "resume"}`);
     const edit = button("Edit");
     edit.disabled = task.archived;
-    edit.onclick = () => openTaskEditor(editorDeps, task);
+    edit.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps, task));
     const archive = button("Archive");
     archive.disabled = task.archived;
     archive.onclick = () => void mutate(`/api/tasks/${task.id}/archive`);
