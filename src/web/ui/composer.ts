@@ -5,6 +5,7 @@
 import { failure, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
 import { appendTurn, scrollBottom, turnsPane } from "./chat.js";
+import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { escapeKey } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
@@ -128,11 +129,10 @@ function renderFileStrip(): void {
   imageStrip.classList.toggle("flex", pendingFiles.length > 0);
   imageStrip.replaceChildren(
     ...pendingFiles.map((f, i) => {
+      // The chat tile, so a pending image looks like the sent one and clicking
+      // it opens the same lightbox (paging across the strip, not the transcript).
       const body = f.mimeType.startsWith("image/")
-        ? Object.assign(document.createElement("img"), {
-            src: `data:${f.mimeType};base64,${f.data}`,
-            className: "h-16 w-16 rounded-md border border-neutral-200 object-cover",
-          })
+        ? imageThumb(`data:${f.mimeType};base64,${f.data}`)
         : h("span", "flex h-16 max-w-40 items-center truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 text-[12px] text-neutral-700", f.name ?? "file");
       const remove = h("button", "absolute -right-1.5 -top-1.5 h-4 w-4 cursor-pointer rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", "×");
       remove.onclick = () => {

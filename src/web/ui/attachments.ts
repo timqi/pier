@@ -14,7 +14,7 @@ const imageFull = $<HTMLImageElement>("#image-full");
 const imagePrev = $("#image-prev");
 const imageNext = $("#image-next");
 
-/** The transcript's thumbnails in document order. Read at open time rather
+/** The clicked thumbnail's gallery in document order. Read at open time rather
  *  than tracked: what is on screen *is* the gallery, so there is no second
  *  list to keep in step with the event stream. */
 let gallery: string[] = [];
@@ -27,14 +27,16 @@ function step(delta: number): void {
   imageFull.src = gallery[shown]!;
 }
 
-/** Full-size view of any chat image (attachments, either direction). */
-function showImage(src: string): void {
-  // An <img>'s .src is absolute; normalize the caller's to match (a data: URL
-  // is returned unchanged).
-  const absolute = new URL(src, location.href).href;
-  gallery = [...$("#turns").querySelectorAll<HTMLImageElement>("img.thumb")].map((i) => i.src);
-  shown = Math.max(0, gallery.indexOf(absolute));
-  imageFull.src = absolute;
+/** Full-size view of any thumbnail. Paging stays within the `[data-gallery]`
+ *  the clicked one sits in — the transcript, or the composer's pending strip —
+ *  so the arrows never step out of what you were looking at. */
+function showImage(clicked: HTMLImageElement): void {
+  const scope = clicked.closest("[data-gallery]");
+  gallery = scope
+    ? [...scope.querySelectorAll<HTMLImageElement>("img.thumb")].map((i) => i.src)
+    : [clicked.src];
+  shown = Math.max(0, gallery.indexOf(clicked.src));
+  imageFull.src = clicked.src;
   // display, not a `hidden` class: `hidden` and `flex` are the same Tailwind
   // property and which one wins is an ordering accident.
   const arrows = gallery.length < 2 ? "none" : "flex";
@@ -69,13 +71,14 @@ export function imageRow(bubble: HTMLElement): HTMLElement {
   return row;
 }
 
-/** Thumbnail in a chat row; click opens the lightbox at this image. */
-function imageThumb(src: string): HTMLImageElement {
+/** Thumbnail tile; click opens the lightbox at this image. The same tile in a
+ *  chat row and in the composer's pending strip — one look, one lightbox. */
+export function imageThumb(src: string): HTMLImageElement {
   const thumb = document.createElement("img");
   thumb.src = src;
   thumb.loading = "lazy";
   thumb.className = "thumb";
-  thumb.onclick = () => showImage(src);
+  thumb.onclick = () => showImage(thumb);
   return thumb;
 }
 

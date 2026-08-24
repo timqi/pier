@@ -131,7 +131,9 @@
       </div>
     </header>
     <!-- The transcript's own type scale, inherited by rows, chips and markdown. -->
-    <div id="turns" class="flex-1 overflow-y-auto pb-4 text-[15px] leading-[1.35]"></div>
+    <!-- data-gallery: the lightbox pages within the container it was opened
+         from (see attachments.ts), so transcript and pending strip stay apart. -->
+    <div id="turns" data-gallery class="flex-1 overflow-y-auto pb-4 text-[15px] leading-[1.35]"></div>
     <!-- Pi's queue primitives are whole-queue (steer / clear), so the actions
          live on the header row and read as "the queue", never per message. -->
     <div id="queue-panel" class="hidden flex-col border-t border-neutral-200 px-3 py-1.5">
@@ -173,7 +175,7 @@
     </div>
     <form id="composer" class="border-t border-neutral-200 px-4 py-2">
       <div class="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
-        <div id="image-strip" class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
+        <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
         <!-- items-end keeps the icons on the bottom row while the textarea grows upward -->
         <div class="flex items-end gap-1.5">
           <button type="button" id="attach" title="Attach file (or paste / drop)"
@@ -236,8 +238,8 @@
     <ul id="archive-list" class="max-h-[60vh] overflow-y-auto py-1 text-[13.5px]"></ul>
   </dialog>
 
-  <!-- Full-size view of a transcript image; click anywhere (or Esc) closes.
-       The arrows page through every thumbnail in the transcript, as do ← / →;
+  <!-- Full-size view of a thumbnail; click anywhere (or Esc) closes.
+       The arrows page through the gallery it was opened from, as do ← / →;
        they hide when there is only one image to look at. -->
   <dialog id="image-dialog" class="m-auto max-h-[92vh] max-w-[92vw] rounded-xl bg-transparent p-0 backdrop:bg-black/70">
     <div class="relative">
