@@ -3,6 +3,7 @@
 // and Pi types never leak past the seam. The golden-table test in
 // events.test.ts is the mapping's spec; extend types.ts before adding events.
 
+import { MAX_STEP_OUTPUT } from "../core/types.js";
 import type {
   ActivityStep,
   ChatTurn,
@@ -159,8 +160,12 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     if (m.role === "toolResult") {
       const step = pendingTools.get(m.toolCallId ?? "");
       if (step) {
-        step.output = textOf(m.content);
+        // Capped where the transcript is rebuilt, not where it is rendered: a
+        // long session's tool results are megabytes nobody ever sees.
+        const output = textOf(m.content);
+        step.output = output.length > MAX_STEP_OUTPUT ? output.slice(0, MAX_STEP_OUTPUT) + "…" : output;
         step.isError = m.isError ?? false;
+        step.done = true;
         pendingTools.delete(m.toolCallId ?? "");
       }
       continue;

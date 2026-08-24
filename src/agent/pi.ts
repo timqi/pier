@@ -268,6 +268,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   /** One runtime for the whole process; catalogs are global, not per session. */
   private catalog?: Promise<ModelRuntime>;
+  /** Where each listed session lives. `listAll` reads the head of every
+   *  session file on disk (~250ms at 200 sessions, and it only grows), which
+   *  `resume` paid on every cold open — web selection, an IM message, a task
+   *  run. The sidebar's own listing keeps this warm; a miss still lists. */
+  private located = new Map<string, { path: string; cwd: string }>();
   private refreshQueue: Promise<void> = Promise.resolve();
   private builtinProviderIds?: Promise<Set<string>>;
 
@@ -497,7 +502,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   async fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession> {
-    const infos = await SessionManager.listAll();
+    const infos = await this.listed();
     const source = infos.find((session) => session.id === sourceSessionId);
     if (!source) throw new Error(`unknown session: ${sourceSessionId}`);
     const targetDir = SessionManager.create(opts.cwd).getSessionDir();
@@ -515,16 +520,36 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   async resume(sessionId: string): Promise<AgentSession> {
-    const infos = await SessionManager.listAll();
+    const known = this.located.get(sessionId);
+    if (known) {
+      try {
+        return await this.open(known.cwd, SessionManager.open(known.path));
+      } catch (err) {
+        // The file moved or went away under us: the cache was the only thing
+        // that claimed otherwise, so drop it and take the slow, true path.
+        log.warn(`cached path for session ${sessionId} did not open; re-listing`, err);
+        this.located.delete(sessionId);
+      }
+    }
+    const infos = await this.listed();
     const info = infos.find((s) => s.id === sessionId);
     if (!info) throw new Error(`unknown session: ${sessionId}`);
     return this.open(info.cwd || process.cwd(), SessionManager.open(info.path));
   }
 
+  /** Every listing goes through here, so it also refreshes `located`. */
+  private async listed(): Promise<Awaited<ReturnType<typeof SessionManager.listAll>>> {
+    const infos = await SessionManager.listAll();
+    for (const s of infos) {
+      this.located.set(s.id, { path: s.path, cwd: s.cwd || process.cwd() });
+    }
+    return infos;
+  }
+
   async list(): Promise<
     { id: string; cwd: string; createdAt: number; title?: string }[]
   > {
-    const infos = await SessionManager.listAll();
+    const infos = await this.listed();
     return infos.map((s) => ({
       id: s.id,
       cwd: s.cwd,

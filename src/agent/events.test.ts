@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_STEP_OUTPUT } from "../core/types.js";
 import { toChatTurns, toSessionEvents, turnMetaAt, type PiEvent, type PiMessage } from "./events.js";
 
 describe("toSessionEvents", () => {
@@ -176,7 +177,7 @@ describe("toChatTurns", () => {
         meta: { completedAt: 3000, durationMs: 2000, tokens: 0 },
         steps: [
           { kind: "thinking", text: "hmm" },
-          { kind: "tool", id: "t1", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false },
+          { kind: "tool", id: "t1", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false, done: true },
         ],
       },
     ]);
@@ -202,6 +203,18 @@ describe("toChatTurns", () => {
       { role: "user", text: "go" },
       { role: "assistant", text: "", steps: [{ kind: "tool", id: "t1", toolName: "bash", args: {} }] },
     ]);
+  });
+
+  it("caps a tool result at what a surface shows", () => {
+    // A session's tool output is most of its history payload; the bytes past
+    // the cap were downloaded only to be sliced off at render time.
+    const turns = toChatTurns([
+      { role: "user", content: "go" },
+      { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: {} }] },
+      { role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "y".repeat(MAX_STEP_OUTPUT * 2) }] },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+    ]);
+    expect(turns[1]?.steps?.[0]?.output).toBe("y".repeat(MAX_STEP_OUTPUT) + "…");
   });
 
   it("renders only the text of a legacy message with inline image blocks", () => {

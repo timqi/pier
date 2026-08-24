@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { gunzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
@@ -478,6 +479,55 @@ describe("workbench server", () => {
     hub.subscribe("s1", seen);
     session.emit({ type: "turn-start" });
     expect(seen).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a step's args and output off the snapshot, and serves them per turn", async () => {
+    const { app, session } = setup();
+    const steps = [
+      { kind: "thinking" as const, text: "hmm" },
+      { kind: "tool" as const, id: "t1", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false, done: true },
+    ];
+    session.history = async () => [
+      { role: "user" as const, text: "hi" },
+      { role: "assistant" as const, text: "hello", steps },
+    ];
+    const snapshot = (await (await app.request("/api/sessions/s1/history")).json()) as {
+      turns: { steps?: unknown[] }[];
+    };
+    // The headline needs the thinking text and the step's identity; the bulk
+    // — args and output — waits until a group is opened.
+    expect(snapshot.turns[1]?.steps).toEqual([
+      { kind: "thinking", text: "hmm" },
+      { kind: "tool", id: "t1", toolName: "read", isError: false, done: true },
+    ]);
+
+    const detail = await app.request("/api/sessions/s1/turns/1/steps");
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toEqual({ steps });
+    // A turn with no activity answers with an empty list, not a 404 — and an
+    // index past the transcript is the 404.
+    expect(await (await app.request("/api/sessions/s1/turns/0/steps")).json()).toEqual({ steps: [] });
+    expect((await app.request("/api/sessions/s1/turns/9/steps")).status).toBe(404);
+    expect((await app.request("/api/sessions/s1/turns/x/steps")).status).toBe(400);
+  });
+
+  it("gzips a long transcript, and only the transcript", async () => {
+    const { app, session } = setup();
+    const filler = "x".repeat(2000);
+    session.history = async () =>
+      Array.from({ length: 20 }, () => ({ role: "assistant" as const, text: filler }));
+    const res = await app.request("/api/sessions/s1/history", {
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    expect(res.headers.get("content-encoding")).toBe("gzip");
+    const body = gunzipSync(Buffer.from(await res.arrayBuffer())).toString();
+    expect((JSON.parse(body) as { turns: unknown[] }).turns).toHaveLength(20);
+    // The SSE streams must stay uncompressed: an encoder would sit on events
+    // until its buffer filled, which is the opposite of a live stream.
+    const stream = await app.request("/api/sessions/s1/events", {
+      headers: { "Accept-Encoding": "gzip" },
+    });
+    expect(stream.headers.get("content-encoding")).toBeNull();
   });
 
   it("answers the version badge with a real first check, not 'no idea yet'", async () => {

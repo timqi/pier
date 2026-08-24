@@ -51,14 +51,22 @@ export const turnsPane = $("#turns");
 export function initChat(d: ChatDeps): void {
   deps = d;
   // The pane is handed over rather than imported back: see TurnsPane there.
-  initTurnActivity(d, { el: turnsPane, append: appendTurn, scroll: scrollBottom });
+  initTurnActivity(d, { el: turnsPane, append: appendTurn, scroll: scrollBottom, bulk: () => bulk });
 }
 
 // --- scrolling -------------------------------------------------------------------
 // Stick to the bottom only when the user is already there (avibe behavior);
 // force on own sends so the conversation follows the user's action.
 
+/** A whole snapshot is going in: every row and every activity step would
+ *  otherwise measure the pane, and reading scrollHeight flushes layout for the
+ *  entire transcript — a session with a thousand steps paid that a thousand
+ *  times, each flush over a bigger pane. One scroll at the end says the same
+ *  thing. */
+let bulk = false;
+
 export function scrollBottom(force = false): void {
+  if (bulk) return;
   const near = turnsPane.scrollHeight - turnsPane.scrollTop - turnsPane.clientHeight < 80;
   if (force || near) turnsPane.scrollTop = turnsPane.scrollHeight;
 }
@@ -406,16 +414,39 @@ export function resetChat(): void {
   resetSuggestions();
 }
 
+/** The pane between selecting a session and its snapshot arriving. An empty
+ *  pane there is indistinguishable from an empty session — and a long
+ *  transcript keeps it empty long enough to look broken (principle 5b). */
+export function chatLoading(on: boolean): void {
+  if (!on) {
+    turnsPane.querySelector('[data-kind="loading"]')?.remove();
+    return;
+  }
+  const box = h("div", "flex flex-col gap-3 px-5 py-4");
+  box.dataset.kind = "loading";
+  // Text-shaped bars, not a spinner: the pane fills with what is coming, so
+  // the transcript replacing it doesn't read as a jump.
+  for (const width of ["w-2/5", "w-4/5", "w-3/5", "w-1/3", "w-2/3"]) {
+    box.append(h("div", `skeleton h-3.5 ${width}`));
+  }
+  turnsPane.append(box);
+}
+
 /** Replay a session snapshot into the pane (main.ts fetches, this renders). */
 export function renderSnapshot(
   turns: ChatTurn[],
   state: SessionState,
   backgroundRuns: BackgroundRun[],
 ): void {
+  chatLoading(false);
   // Detached run cards are placed where the run entered the conversation, not
   // at the end of the transcript: a reload must not sweep every card a session
   // ever launched to the bottom, below turns that came after it.
   const unplacedRuns = new Map(backgroundRuns.map((run) => [run.runId, run]));
+  // A card belongs to the turn that was running when its run was queued: the
+  // first turn to finish at or after that moment. Same process, same clock.
+  const queuedBy = (completedAt: number): string[] =>
+    [...unplacedRuns].filter(([, run]) => run.queuedAt <= completedAt).map(([runId]) => runId);
   const placeRuns = (runIds: string[]): void => {
     for (const runId of runIds) {
       const run = unplacedRuns.get(runId);
@@ -427,38 +458,43 @@ export function renderSnapshot(
   // The final assistant turn keeps its next-step buttons across reloads and
   // on every client — an idle session is still waiting on exactly that choice.
   const lastAssistant = turns.reduce((acc, t, i) => (t.role === "assistant" ? i : acc), -1);
-  for (const [i, t] of turns.entries()) {
-    // The in-flight turn is the trailing one, recognisable while streaming by a
-    // tool call without a result or by activity with no answer yet.
-    const live =
-      state === "streaming" &&
-      i === turns.length - 1 &&
-      (!t.text || (t.steps?.some((s) => s.kind === "tool" && s.output === undefined) ?? false));
-    const steps = t.steps;
-    if (steps?.length) {
-      replayActivity(steps, t.meta?.durationMs, live);
-      // A card belongs under the tool call that launched the run — the result
-      // that named its id — because that is where the live stream put it when
-      // the run was queued. Anchoring on the callback instead moved every card
-      // down to the end of the conversation on the next reload.
-      placeRuns([...unplacedRuns.keys()].filter((run) => steps.some((s) => s.output?.includes(run))));
+  bulk = true;
+  try {
+    for (const [i, t] of turns.entries()) {
+      // The in-flight turn is the trailing one, recognisable while streaming by a
+      // tool call without a result or by activity with no answer yet.
+      const live =
+        state === "streaming" &&
+        i === turns.length - 1 &&
+        (!t.text || (t.steps?.some((s) => s.kind === "tool" && !s.done) ?? false));
+      const steps = t.steps;
+      if (steps?.length) {
+        replayActivity(steps, t.meta?.durationMs, live, i);
+        // Placed here, between the steps and the answer, because that is where
+        // the live stream put the card when the run was queued. Anchoring on
+        // the callback instead moved every card down to the end of the
+        // conversation on the next reload.
+        if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
+      }
+      if (!t.text) continue;
+      if (t.role === "system" && t.origin) {
+        // Launched elsewhere (cron, another session, an IM turn): the callback
+        // that delivered it is the earliest place it can be shown. A batched one
+        // carries every run id it delivers.
+        placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
+        appendSystemInput(t.text, t.origin);
+        continue;
+      }
+      // meta is assistant-only (core/types.ts), so plain turns need no hint.
+      if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
+      else appendTurn(t.role, t.text);
     }
-    if (!t.text) continue;
-    if (t.role === "system" && t.origin) {
-      // Launched elsewhere (cron, another session, an IM turn): the callback
-      // that delivered it is the earliest place it can be shown. A batched one
-      // carries every run id it delivers.
-      placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
-      appendSystemInput(t.text, t.origin);
-      continue;
-    }
-    // meta is assistant-only (core/types.ts), so plain turns need no hint.
-    if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
-    else appendTurn(t.role, t.text);
+    // Whatever is left never appeared in the transcript at all — the bottom is
+    // the only honest place for it.
+    for (const run of unplacedRuns.values()) renderBackgroundRun(run);
+  } finally {
+    bulk = false; // a row that threw must not leave the pane unable to scroll
   }
-  // Whatever is left never appeared in the transcript at all — the bottom is
-  // the only honest place for it.
-  for (const run of unplacedRuns.values()) renderBackgroundRun(run);
   scrollBottom(true);
 }
 

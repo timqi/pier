@@ -6,6 +6,7 @@
 import { failure, promptRun, type Sent } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h } from "./dom.js";
+import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun } from "../../core/types.js";
 
 /**
@@ -19,6 +20,8 @@ export interface TurnsPane {
   /** Append a chat row; this module only ever needs the error kind. */
   append: (kind: "error", text: string) => HTMLElement;
   scroll: (force?: boolean) => void;
+  /** A whole snapshot is being replayed: no step may measure layout. */
+  bulk: () => boolean;
 }
 
 let deps: ChatDeps;
@@ -157,6 +160,23 @@ interface Activity {
 }
 
 let activity: Activity | null = null; // the live (running) group
+
+/** Every tool row of a group, in the order they ran — what a later detail fetch
+ *  writes into. Keyed by the group element so it is collected with it: a
+ *  transcript reload drops thousands of these and must not leak them. */
+interface DetailRow {
+  tool: string;
+  call: string;
+  preview: HTMLElement;
+  argsPre: HTMLElement;
+  outputPre: HTMLElement;
+}
+const detailRows = new WeakMap<HTMLDetailsElement, DetailRow[]>();
+const rowsOf = (group: HTMLDetailsElement): DetailRow[] => {
+  const rows = detailRows.get(group) ?? [];
+  detailRows.set(group, rows);
+  return rows;
+};
 
 /**
  * Close the live group because a chat row is going in below it. A group is
@@ -297,24 +317,38 @@ export function noteTurnError(): void {
   if (activity) activity.sawError = true;
 }
 
+/** The args, on one line, as much of it as the summary shows. Sliced before
+ *  the collapse so a 200KB `write` argument isn't regex-scanned for 100
+ *  characters — and shared with the detail fill below, so replayed and live
+ *  rows cannot spell the same line two ways. */
+function argsPreview(argsText: string): string {
+  const short = argsText.slice(0, 400).replace(/\s+/g, " ");
+  return short.length > 100 ? short.slice(0, 100) + "…" : short;
+}
+
 export function activityToolStart(ts: number, id: string, name: string, args: unknown): void {
   const a = ensureActivity(ts);
   a.steps += 1;
   a.thinking = null;
   const argsText = JSON.stringify(args, null, 2) ?? "";
-  const short = argsText.replace(/\s+/g, " ");
   const statusEl = h("span", "ml-auto flex-none text-black/40", "running…");
+  const preview = h("span", "truncate text-black/50", argsPreview(argsText));
   const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03]", [
     h("span", "flex-none font-semibold", name),
-    h("span", "truncate text-black/50", short.length > 100 ? short.slice(0, 100) + "…" : short),
+    preview,
     statusEl,
   ]);
   const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]", argsText);
   const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]");
   el.append(h("div", "mt-1 flex flex-col gap-1 pl-4", argsPre, outputPre));
+  // A replayed row arrives without args or output — they are fetched when the
+  // group is opened, and this is where that fill writes.
+  rowsOf(a.el).push({ tool: name, call: id, preview, argsPre, outputPre });
   a.toolRows.set(id, { el, statusEl, outputPre });
   a.rowsEl.append(el);
-  a.rowsEl.scrollTop = a.rowsEl.scrollHeight; // capped list: follow the newest step
+  // Capped list: follow the newest step. Skipped on replay — reading
+  // scrollHeight flushes layout for the whole transcript, once per step.
+  if (!turns.bulk()) a.rowsEl.scrollTop = a.rowsEl.scrollHeight;
   activityHeadline(a, "running", name);
   turns.scroll();
 }
@@ -330,7 +364,8 @@ export function activityToolEnd(id: string, isError: boolean, output: string): v
     row.el.classList.toggle("bg-red-50", isError);
     row.el.classList.toggle("text-red-700", isError);
     if (output) {
-      row.outputPre.textContent = output.length > 8000 ? output.slice(0, 8000) + "…" : output;
+      row.outputPre.textContent =
+        output.length > MAX_STEP_OUTPUT ? output.slice(0, MAX_STEP_OUTPUT) + "…" : output;
       row.outputPre.classList.remove("hidden");
     }
     if (isError) a.failedSteps += 1;
@@ -364,8 +399,16 @@ export function activityThinking(ts: number, text: string): void {
  */
 let replaySeq = 0;
 
-export function replayActivity(steps: ActivityStep[], durationMs = 0, live = false): void {
+export function replayActivity(
+  steps: ActivityStep[],
+  durationMs = 0,
+  live = false,
+  /** Index of this turn in the snapshot, for fetching its detail on demand.
+   *  Absent only for a group with no turn to point at. */
+  turnIndex?: number,
+): void {
   const start = Date.now() - durationMs; // headline duration is now - startTs
+  const group = ensureActivity(start).el;
   for (const s of steps) {
     if (s.kind === "thinking") {
       activityThinking(start, s.text ?? "");
@@ -375,14 +418,76 @@ export function replayActivity(steps: ActivityStep[], durationMs = 0, live = fal
     // replayed row then closes that row instead of missing it.
     const id = s.id ?? `replay-${++replaySeq}`;
     activityToolStart(start, id, s.toolName ?? "", s.args);
-    // No recorded output = the run was cut short; leave the row running so
-    // finishActivity marks the group interrupted.
-    if (s.output !== undefined) activityToolEnd(id, s.isError ?? false, s.output);
+    // `done` and not "has output": the snapshot carries no output, so reading
+    // absence as "cut short" marked every replayed step interrupted.
+    if (s.done) activityToolEnd(id, s.isError ?? false, s.output ?? "");
+  }
+  if (turnIndex !== undefined && steps.some((s) => s.kind === "tool" && s.args === undefined)) {
+    onFirstOpen(group, turnIndex);
   }
   // The turn still running keeps its group open, so the live stream counts on
   // into it instead of opening a second bubble beneath the replayed one.
   if (live) return;
-  finishActivity(
-    steps.some((s) => s.kind === "tool" && s.output === undefined) ? "interrupted" : "done",
-  );
+  finishActivity(steps.some((s) => s.kind === "tool" && !s.done) ? "interrupted" : "done");
+}
+
+/** Args and output are ~90% of a transcript and live behind this very toggle,
+ *  so they travel per opened group instead of per page load. One request for
+ *  the whole group: a curious click must not become one round trip per step. */
+function onFirstOpen(group: HTMLDetailsElement, turnIndex: number): void {
+  const load = (): void => {
+    if (!group.open) return;
+    group.removeEventListener("toggle", load);
+    void fillDetail(group, turnIndex);
+  };
+  group.addEventListener("toggle", load);
+}
+
+async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise<void> {
+  const sessionId = deps.sessionId();
+  const rows = rowsOf(group);
+  // A group can also hold steps the live stream delivered in full: those keep
+  // their place in the pairing below, but nothing here writes over them — not
+  // a position match, not an error.
+  const fillable = new Set(rows.filter((row) => !row.argsPre.textContent));
+  const say = (text: string): void => {
+    for (const row of fillable) row.argsPre.textContent = text;
+  };
+  // The session may have been evicted since the snapshot, and then this fetch
+  // waits on a full transcript reopen. An empty pane would read as a tool that
+  // did nothing.
+  say("loading…");
+  if (!sessionId) return say("no session");
+  let steps: ActivityStep[];
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/turns/${turnIndex}/steps`);
+    if (!res.ok) return say(await failure(res, "could not load these steps"));
+    steps = ((await res.json()) as { steps: ActivityStep[] }).steps;
+  } catch (err) {
+    // Silence here reads as "this tool did nothing", which is a lie about the
+    // one thing the user opened the group to see.
+    return say(`could not load these steps: ${String(err)}`);
+  }
+  const tools = steps.filter((s) => s.kind === "tool");
+  for (const [i, row] of rows.entries()) {
+    if (!fillable.has(row)) continue;
+    const step = tools[i];
+    // Position pairs the two lists; identity only confirms it. An edit or a
+    // compaction can rewind the transcript under a snapshot, and then this
+    // index names a different turn — whose output must not be shown here as if
+    // it were this tool's. The transcript is also the source of both sides, so
+    // a step with no id of its own is checked by name (`replay-N` is ours).
+    const matches = step && (step.id ? step.id === row.call : step.toolName === row.tool);
+    if (!matches) {
+      row.argsPre.textContent = "detail no longer available — reload the session";
+      continue;
+    }
+    const argsText = JSON.stringify(step.args, null, 2) ?? "";
+    row.argsPre.textContent = argsText;
+    row.preview.textContent = argsPreview(argsText);
+    if (step.output) {
+      row.outputPre.textContent = step.output;
+      row.outputPre.classList.remove("hidden");
+    }
+  }
 }

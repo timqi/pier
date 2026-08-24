@@ -154,6 +154,10 @@ html {
   .spinner {
     @apply h-3 w-3 flex-none animate-spin rounded-full border-2 border-current border-t-transparent;
   }
+  /* Placeholder bar for content on its way in — a transcript being fetched. */
+  .skeleton {
+    @apply animate-pulse rounded bg-neutral-200;
+  }
   /* Chat attachment thumbnails — the same tile whether the user attached the
      image or the agent produced it. A small fixed square; object-contain, not
      cover, because a cropped corner of a chart says nothing about what it is. */

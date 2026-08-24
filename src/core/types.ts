@@ -146,9 +146,15 @@ export type WorkspaceEvent =
   | { type: "task-message-changed"; runId: string; messageId: string }
   | { type: "task-group-changed"; groupId: string };
 
+/** How much of a tool result any surface ever shows. A transcript replay
+ *  carries no more than that: a session's tool output is most of its history
+ *  payload, and the bytes past this point were downloaded to be sliced off. */
+export const MAX_STEP_OUTPUT = 8_000;
+
 /**
  * One step of an assistant turn's activity, reconstructed from the transcript
  * so a reloaded client shows the same Activity group the live stream built.
+ * `output` is capped at MAX_STEP_OUTPUT.
  */
 export interface ActivityStep {
   kind: "thinking" | "tool";
@@ -158,6 +164,10 @@ export interface ActivityStep {
   args?: unknown;
   output?: string;
   isError?: boolean;
+  /** The tool returned. Says so explicitly because `args`/`output` are the
+   *  bulk of a transcript and a surface may be handed a step without them:
+   *  "no output" then means "not fetched", never "cut short". */
+  done?: boolean;
 }
 
 /** A completed conversation turn, for history rendering. */

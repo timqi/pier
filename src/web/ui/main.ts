@@ -12,6 +12,7 @@ import {
   appendDelta,
   appendSystemInput,
   appendTurn,
+  chatLoading,
   completeTurn,
   finalizeStreaming,
   initChat,
@@ -292,10 +293,14 @@ async function loadSession(id: string): Promise<void> {
   turnOpen = false;
   clearOptimistic();
   lastSeq = 0;
+  // Painted before the fetch: a long transcript takes a moment to arrive and
+  // render, and until then the pane would look like an empty session.
+  chatLoading(true);
   const res = await fetch(`/api/sessions/${id}/history`);
   const snap = res.ok ? ((await res.json()) as SessionSnapshot) : null;
   if (currentId !== id) return; // stale: the user switched again mid-fetch
   if (!snap) {
+    chatLoading(false);
     appendTurn("error", `failed to load session: ${res.status}`);
     return;
   }

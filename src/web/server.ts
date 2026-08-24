@@ -7,6 +7,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
@@ -16,6 +17,7 @@ import { guarded, registerFileRoutes } from "./files.js";
 import type {
   AgentFactory,
   BackgroundRun,
+  ChatTurn,
   ConfigStore,
   InboundMessage,
   ProviderManager,
@@ -31,6 +33,14 @@ import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from 
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
+
+/** A transcript without the bytes nobody has asked to see yet. A step's `args`
+ *  and `output` are ~90% of a long session's snapshot and sit inside a
+ *  collapsed group; the client fetches one turn's worth when it is opened. */
+const slim = (turn: ChatTurn): ChatTurn =>
+  turn.steps
+    ? { ...turn, steps: turn.steps.map(({ args: _args, output: _output, ...step }) => step) }
+    : turn;
 
 /** What goes in front of `Pier` in the tab: `$PIER_TITLE`, then the machine.
  *  The label leads because a tab is narrow and "which instance is this" is the
@@ -175,13 +185,19 @@ export function createServer(
     return c.json({ pinned: body.pinned });
   });
 
+  // The two responses big enough to matter: a transcript, and one turn's tool
+  // detail. Scoped to these routes on purpose — compressing the SSE streams
+  // would sit on events until the encoder's buffer filled.
+  app.use("/api/sessions/:id/history", compress());
+  app.use("/api/sessions/:id/turns/:index/steps", compress());
+
   // Snapshot: everything a fresh client needs before it starts consuming
   // deltas from SSE — transcript, live state, pending queue, model.
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
     const session = await ensure(id);
     return c.json({
-      turns: await session.history(),
+      turns: (await session.history()).map(slim),
       lastSeq: hub.lastSeq(id),
       model: session.model ?? null,
       state: session.state,
@@ -190,6 +206,20 @@ export function createServer(
       queue: await session.pendingQueue(),
       backgroundRuns: backgroundRuns?.(id) ?? [],
     });
+  });
+
+  // One turn's activity in full, for the group the user just opened. Indexed
+  // like the edit route below; the steps carry their own id and tool name so a
+  // client whose snapshot has since been rewound can tell it is looking at a
+  // different turn instead of showing the wrong tool's output.
+  guarded(app, "GET", "/api/sessions/:id/turns/:index/steps", 404, async (c) => {
+    const index = Number(c.req.param("index"));
+    if (!Number.isInteger(index) || index < 0) return c.json({ error: "index required" }, 400);
+    const turn = (await (await ensure(c.req.param("id"))).history())[index];
+    if (!turn) return c.json({ error: `no turn at index ${index}` }, 404);
+    // Already capped at MAX_STEP_OUTPUT by the transcript rebuild: this route
+    // hands back what a surface shows, not the untruncated tool result.
+    return c.json({ steps: turn.steps ?? [] });
   });
 
   // Composer attachments: bytes land in the inbox, the message carries the
