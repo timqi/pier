@@ -24,6 +24,8 @@ you want the unit to say something different.
 ## Prerequisites
 
 - Node 24 or newer (`node:sqlite` is used unflagged).
+- Python 3, `make` and a C/C++ compiler for Microsoft's `node-pty`; its npm
+  package has no Linux prebuild (`apt install python3 build-essential` on Debian/Ubuntu).
 - A user-writable global npm prefix. The updater runs as you, so an initial
   install that needed `sudo npm install -g` cannot later update itself.
 - The `sqlite3` CLI is optional, for the off-machine backup and password steps
@@ -389,7 +391,9 @@ elsewhere, pick a tunnel rather than a wider bind:
   there, preserve the external `Host` (or pass `X-Forwarded-Host`), and pass
   `X-Forwarded-For`; Pier uses the external host for write-origin checks and
   counts login failures per forwarded client. Its session cookie is marked
-  `Secure` when the proxy reports `X-Forwarded-Proto: https`.
+  `Secure` when the proxy reports `X-Forwarded-Proto: https`. The proxy must
+  pass WebSocket upgrades for `/api/terminal` (Caddy does automatically;
+  nginx needs its usual HTTP/1.1 `Upgrade`/`Connection` forwarding).
 
 ## Backups
 

@@ -20,19 +20,23 @@ const SHIFT = APPLE ? "⇧" : "Shift+";
 // because every unshifted letter worth having is either taken or the browser's.
 // `meta+` narrows the modifier to ⌘ alone — Ctrl+B is the backward motion every
 // text field on a Unix desktop has, and a chord may not take that away.
-const parse = (spec: string): { key: string; shift: boolean; meta: boolean } => {
+// `ctrl+` narrows to ⌃ alone — for the terminal toggle, whose ⌘ spelling is
+// macOS's own window cycling.
+const parse = (spec: string): { key: string; shift: boolean; meta: boolean; ctrl: boolean } => {
   const meta = spec.startsWith("meta+");
-  const rest = meta ? spec.slice(5) : spec;
+  const ctrl = spec.startsWith("ctrl+");
+  const rest = meta || ctrl ? spec.slice(5) : spec;
   return rest.startsWith("shift+")
-    ? { key: rest.slice(6), shift: true, meta }
-    : { key: rest, shift: false, meta };
+    ? { key: rest.slice(6), shift: true, meta, ctrl }
+    : { key: rest, shift: false, meta, ctrl };
 };
 
 /** The chord as a person reads it — for the hover card, or for a menu row
  *  that is itself the affordance (menu.ts's `hint`). */
 export function chordLabel(spec: string): string {
-  const { key, shift, meta } = parse(spec);
-  return `${meta ? "⌘" : MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
+  const { key, shift, meta, ctrl } = parse(spec);
+  const mod = meta ? "⌘" : ctrl ? (APPLE ? "⌃" : "Ctrl+") : MOD;
+  return `${mod}${shift ? SHIFT : ""}${key.toUpperCase()}`;
 }
 
 const CARD =
@@ -79,9 +83,10 @@ export function shortcut(
   label: string,
   run: () => void,
   unless?: () => boolean,
+  pierce = false,
 ): void {
   hint(el, label, chordLabel(key));
-  chord(key, run, unless);
+  chord(key, run, unless, pierce);
 }
 
 /**
@@ -152,13 +157,20 @@ export function letterKey(
  *
  * Never unbound, so call it once per action from an init path.
  */
-export function chord(spec: string, run: () => void, unless?: () => boolean): void {
-  const { key, shift, meta } = parse(spec);
+export function chord(spec: string, run: () => void, unless?: () => boolean, pierce = false): void {
+  const { key, shift, meta, ctrl } = parse(spec);
   document.addEventListener(
     "keydown",
     (ev) => {
       if (ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return;
-      if (meta ? !ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
+      if (meta ? !ev.metaKey : ctrl ? !ev.ctrlKey || ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
+      // A surface that owns the keyboard keeps Ctrl chords (Ctrl+K is shell
+      // kill-line), while Cmd remains Pier's application modifier. `pierce`
+      // is for the Ctrl+` toggle, which must close Terminal from inside.
+      if (
+        !pierce && !ev.metaKey &&
+        (ev.target as Element | null)?.closest?.("[data-owns-keyboard]")
+      ) return;
       if (unless?.()) return;
       ev.preventDefault();
       ev.stopPropagation();

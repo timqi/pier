@@ -1,11 +1,12 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
+import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { AuthStore, requireAuth, registerAuthRoutes } from "./auth.js";
+import { AuthStore, requireAuth, registerAuthRoutes, upgradeAuthorized } from "./auth.js";
 
 /** A store on a throwaway file, plus the password it printed on first boot. */
 function store(path = join(mkdtempSync(join(tmpdir(), "pier-auth-")), "pier.db")): {
@@ -151,6 +152,39 @@ describe("requireAuth", () => {
   });
 });
 
+describe("WebSocket auth", () => {
+  const upgrade = (
+    cookie: string,
+    origin?: string,
+    host = "pier.example",
+    remoteAddress = "127.0.0.1",
+    forwardedHost?: string,
+  ): IncomingMessage => ({
+    headers: { cookie, origin, host, ...(forwardedHost ? { "x-forwarded-host": forwardedHost } : {}) },
+    socket: { remoteAddress },
+  }) as unknown as IncomingMessage;
+
+  it("uses the HTTP boundary's cookie and normalized Origin rules", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    expect(upgradeAuthorized(s, upgrade(cookie, "https://pier.example"))).toBe(true);
+    expect(upgradeAuthorized(s, upgrade(cookie))).toBe(true); // non-browser client
+    expect(upgradeAuthorized(s, upgrade("pier_session=bad", "https://pier.example"))).toBe(false);
+    expect(upgradeAuthorized(s, upgrade(cookie, "https://other.example"))).toBe(false);
+    // A loopback TLS proxy's external host is trusted and URL-normalized.
+    expect(upgradeAuthorized(
+      s,
+      upgrade(cookie, "https://pier.example", "127.0.0.1:3141", "::1", "PIER.EXAMPLE:443"),
+    )).toBe(true);
+    // A remote caller cannot make its own forwarded host authoritative.
+    expect(upgradeAuthorized(
+      s,
+      upgrade(cookie, "https://pier.example", "127.0.0.1:3141", "10.0.0.2", "pier.example"),
+    )).toBe(false);
+  });
+});
+
 describe("login", () => {
   it("issues a cookie that opens the workbench", async () => {
     const { store: s, password } = store();
@@ -234,11 +268,14 @@ describe("changing the password", () => {
     const { store: s, password } = store();
     const a = app(s);
     const before = cookieOf(await login(a, password));
+    let rotations = 0;
+    s.onRotation(() => rotations++);
 
     const res = await change(a, { current: password, next: "correct-horse" }, before);
     expect(res.status).toBe(200);
     expect(s.verify("correct-horse")).toBe(true);
     expect(s.verify(password)).toBe(false);
+    expect(rotations).toBe(1);
 
     // No cookie is re-issued — the caller's is cleared, and every cookie
     // signed under the old hash stops verifying. Everyone signs in again.

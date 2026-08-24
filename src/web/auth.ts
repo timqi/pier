@@ -24,6 +24,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Hono, MiddlewareHandler } from "hono";
@@ -73,6 +74,7 @@ export class AuthStore {
   readonly #db: DatabaseSync;
   /** HMAC key for cookies: the hash, so rotating the password expires them. */
   #key: string;
+  readonly #rotationListeners = new Set<() => void>();
 
   constructor(db: DatabaseSync = pierDb(), print: (message: string) => void = (m) => log.info(m)) {
     this.#db = db;
@@ -120,6 +122,13 @@ export class AuthStore {
       .prepare("UPDATE auth SET salt = ?, hash = ?, created_at = ? WHERE id = 1")
       .run(salt, next, Date.now());
     this.#key = next;
+    for (const listener of this.#rotationListeners) listener();
+  }
+
+  /** A long-lived authenticated surface closes itself when every cookie is
+   *  revoked. The store and listeners share the process lifetime. */
+  onRotation(listener: () => void): void {
+    this.#rotationListeners.add(listener);
   }
 
   /** Cookie signing key. Never the password: that is not stored anywhere. */
@@ -215,23 +224,46 @@ function noteFailure(client: string): void {
 }
 
 /** Browsers name the source of unsafe requests. Compare hosts rather than
- * schemes because TLS commonly terminates at the reverse proxy. */
-function sameOrigin(c: Context): boolean {
-  const origin = c.req.header("origin");
+ * schemes because TLS commonly terminates at the reverse proxy. Shared by HTTP
+ * and WebSocket so the password boundary cannot disagree with itself. */
+function originMatches(origin: string | undefined, host: string | undefined): boolean {
   if (!origin) return true; // curl and other non-browser clients
   try {
     const parsed = new URL(origin);
-    const remote = remoteOf(c);
-    const forwarded = remote && loopback(remote)
-      ? c.req.header("x-forwarded-host")?.split(",").at(-1)?.trim()
-      : undefined;
-    const host = forwarded || c.req.header("host") || new URL(c.req.url).host;
-    const external = new URL(`${parsed.protocol}//${host}`);
+    const external = new URL(`${parsed.protocol}//${host ?? ""}`);
     return parsed.origin === origin && external.origin === parsed.origin &&
       external.pathname === "/" && !external.search && !external.hash;
   } catch {
     return false;
   }
+}
+
+function sameOrigin(c: Context): boolean {
+  const remote = remoteOf(c);
+  const forwarded = remote && loopback(remote)
+    ? c.req.header("x-forwarded-host")?.split(",").at(-1)?.trim()
+    : undefined;
+  return originMatches(
+    c.req.header("origin"),
+    forwarded || c.req.header("host") || new URL(c.req.url).host,
+  );
+}
+
+/** The same cookie + Origin boundary for a WebSocket upgrade, where no Hono
+ *  context exists before the handshake completes. */
+export function upgradeAuthorized(store: AuthStore, req: IncomingMessage): boolean {
+  const raw = req.headers.cookie
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${COOKIE}=`))
+    ?.slice(COOKIE.length + 1);
+  if (!valid(store.cookieKey, raw)) return false;
+  const remote = req.socket.remoteAddress ?? "";
+  const forwardedHeader = req.headers["x-forwarded-host"];
+  const forwarded = loopback(remote) && typeof forwardedHeader === "string"
+    ? forwardedHeader.split(",").at(-1)?.trim()
+    : undefined;
+  return originMatches(req.headers.origin, forwarded || req.headers.host);
 }
 
 /** Every route, in one place — no per-route opt-in to forget on the next one. */

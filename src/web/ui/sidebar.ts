@@ -32,6 +32,8 @@ export interface SidebarDeps {
   createSession: (cwd: string) => Promise<void>;
   /** Open the Files view on a project's cwd (views.ts, wired through main). */
   openFiles: (cwd: string) => void;
+  /** Open the Terminal view on a project's cwd (views.ts, wired through main). */
+  openTerminal: (cwd: string) => void;
   /** Open a Console view by name — the palette lists them beside sessions. */
   openConsole: (name: "activity" | "boards" | "settings") => void;
   /** Pin state changed — the chat header may need re-rendering. */
@@ -163,6 +165,13 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
         onSelect: () => {
           closeMenu();
           deps.openFiles(cwd);
+        },
+      },
+      {
+        label: "Terminal here",
+        onSelect: () => {
+          closeMenu();
+          deps.openTerminal(cwd);
         },
       },
     ]);

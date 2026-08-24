@@ -36,6 +36,7 @@ import { startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
+import { attachTerminal } from "./web/terminal.js";
 
 const log = logger("pier");
 
@@ -307,6 +308,9 @@ const server = serve({ fetch: app.fetch, port, hostname }, () => {
   log.info(`workbench on http://${hostname}:${port}`);
   log.info(`pid ${process.pid}, node ${process.version}, home ${PIER_HOME}`);
 });
+// The one WebSocket surface (see web/terminal.ts); `serve` above builds a
+// plain node:http server, which is the only shape with an upgrade event.
+const terminals = attachTerminal(server as import("node:http").Server, auth);
 
 // A crash and a clean stop must be distinguishable after the fact, and both
 // left nothing behind before this.
@@ -329,6 +333,7 @@ const shutdown = (stopTasks = true): void => {
   // `systemctl restart` into a 90-second wait for SIGKILL.
   setTimeout(() => process.exit(0), 3000).unref();
   stopEviction();
+  terminals.close(); // no shell outlives the workbench
   // The drain path leaves task runs alone: aborting them here would record
   // them cancelled and race their callbacks against dying channels, when the
   // boot-time interrupted marking is the recovery that was promised.

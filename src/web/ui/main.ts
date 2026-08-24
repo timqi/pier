@@ -63,6 +63,7 @@ import {
   showConsole,
   showFiles,
   showTasks,
+  showTerminal,
   syncBar,
   toggleFiles,
 } from "./views.js";
@@ -360,6 +361,7 @@ initSidebar({
   sessionMenu,
   createSession,
   openFiles: showFiles,
+  openTerminal: showTerminal,
   openConsole: showConsole,
   onPinsChanged: renderHeader,
 });

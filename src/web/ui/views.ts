@@ -16,6 +16,8 @@ import { createSettingsView } from "./settings.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { groupByCwd, type SessionInfo } from "./sidebar.js";
 import { createTasksView, type TasksView } from "./tasks.js";
+import { createTerminalView } from "./terminal.js";
+import { shortcut } from "./shortcut.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 export interface ViewsDeps {
@@ -39,7 +41,7 @@ let chatVisible = true;
 
 export const isChatVisible = (): boolean => chatVisible;
 
-export type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files";
+export type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files" | "terminal";
 
 let tasksView: TasksView;
 let activityView: ActivityView;
@@ -50,8 +52,10 @@ const consoleBtns = new Map<ConsoleName, HTMLElement>();
 // the views themselves keep their tab/selection state.
 let lastActivityConsole: ConsoleName = "activity";
 
-// Where Files was opened from, so its ✕ returns there.
-let filesOrigin: Route | null = null;
+// Files and Terminal drop over whatever was on screen and their ✕ returns
+// there — each remembers where it was opened from.
+const OVERLAYS: ConsoleName[] = ["files", "terminal"];
+const origins = new Map<ConsoleName, Route>();
 
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
   tasks: "Tasks",
@@ -59,6 +63,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   boards: "Boards",
   settings: "Settings",
   files: "Files",
+  terminal: "Terminal",
 };
 
 // Workspace events fan into whichever of these views is open.
@@ -77,10 +82,10 @@ export function syncBar(): void {
  *  both address them this way rather than clicking each other's buttons. */
 export function showConsole(name: ConsoleName, arg?: string): void {
   if (name === "tasks" || name === "activity") lastActivityConsole = name;
-  // Switching folders inside Files re-enters the same view: not a new origin.
-  if (name === "files") {
+  // Switching folders inside an overlay re-enters the same view: not a new origin.
+  if (OVERLAYS.includes(name)) {
     const from = parseHash();
-    if (from && !(from.kind === "console" && from.name === "files")) filesOrigin = from;
+    if (from && !(from.kind === "console" && from.name === name)) origins.set(name, from);
   }
   setHash({ kind: "console", name, arg });
   closeDrawer();
@@ -106,20 +111,26 @@ export const showTasks = (taskId?: string): void => showConsole("tasks", taskId)
 /** Entry for the ⋯ menus (session header, project row): browse a cwd. */
 export const showFiles = (dir?: string): void => showConsole("files", dir);
 
-/** The chord's version: one key both opens Files and, pressed again, is its ✕.
- *  A menu row keeps opening — it names a directory, so it always browses. */
-export const toggleFiles = (dir?: string): void => {
-  if (consoleViews.find((entry) => entry.name === "files")?.view.visible) closeFiles();
-  else showFiles(dir);
+/** Entry for the project row menu and the sidebar icon: a shell in a cwd. */
+export const showTerminal = (dir?: string): void => showConsole("terminal", dir);
+
+/** The chord's version: one key both opens the overlay and, pressed again, is
+ *  its ✕. A menu row keeps opening — it names a directory, so it always does. */
+const toggleOverlay = (name: ConsoleName, dir?: string): void => {
+  if (consoleViews.find((entry) => entry.name === name)?.view.visible) closeOverlay(name);
+  else showConsole(name, dir);
 };
 
-/** Files' ✕. Back to the route it was opened from — a session's chat, or the
- *  Console view you came from — and the current session when that is unknown
- *  (a bookmarked or reloaded #/files, where there is no "from"). */
-function closeFiles(): void {
+export const toggleFiles = (dir?: string): void => toggleOverlay("files", dir);
+export const toggleTerminal = (dir?: string): void => toggleOverlay("terminal", dir);
+
+/** An overlay's ✕. Back to the route it was opened from — a session's chat, or
+ *  the Console view you came from — and the current session when that is
+ *  unknown (a bookmarked or reloaded #/files, where there is no "from"). */
+function closeOverlay(name: ConsoleName): void {
   const id = deps.currentId();
-  const back: Route | null = filesOrigin ?? (id ? { kind: "session", id } : null);
-  filesOrigin = null;
+  const back: Route | null = origins.get(name) ?? (id ? { kind: "session", id } : null);
+  origins.delete(name);
   if (back) setHash(back); // onhashchange → applyRoute() does the switching
   else {
     history.replaceState(null, "", "#/"); // no session to name; don't let the hash lie
@@ -220,7 +231,17 @@ export function initViews(d: ViewsDeps): void {
         () => [...groupByCwd(deps.sessions()).keys()],
         // Through the router, so Back walks directory switches too.
         (dir) => showConsole("files", dir),
-        closeFiles,
+        () => closeOverlay("files"),
+      ),
+    },
+    {
+      name: "terminal",
+      view: createTerminalView(
+        $("#terminal-view"),
+        () => [...groupByCwd(deps.sessions()).keys()],
+        () => deps.currentSession()?.cwd,
+        (dir) => showConsole("terminal", dir),
+        () => closeOverlay("terminal"),
       ),
     },
     {
@@ -234,6 +255,11 @@ export function initViews(d: ViewsDeps): void {
       ),
     },
   ];
+  // The sidebar icon and its chord both toggle — pierce: this Ctrl chord must
+  // close Terminal from inside it; other Ctrl chords stay with the shell.
+  const termBtn = $("#open-terminal");
+  termBtn.onclick = () => toggleTerminal();
+  shortcut(termBtn, "ctrl+`", "Terminal", () => toggleTerminal(), undefined, true);
   // The Activity button reopens whichever of its two views was showing last.
   for (const name of ["activity", "boards", "settings"] as const) {
     const btn = $(`#open-${name}`);

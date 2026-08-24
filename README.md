@@ -17,6 +17,7 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 ## Requirements
 
 - Node 24 or newer (`node:sqlite` is used unflagged)
+- Linux: Python 3, `make` and a C/C++ compiler for `node-pty`
 - A provider account (Anthropic, OpenAI, …) — configure its API key or OAuth
   login from Console → Settings → Providers after signing in
 - A user-writable global npm prefix if `pier update` should update a service
