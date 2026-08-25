@@ -360,6 +360,12 @@ export function createActivityView(
     if (arg === "dependencies") tab = "dependencies";
     else if (arg === "sessions") tab = "sessions";
     void load();
+  }, () => {
+    // Hiding a view only flips a class, so a session table and a graph of every
+    // run in the last 24h stay in memory for as long as the page lives — and for
+    // nothing: show() re-fetches the snapshot and draws both again.
+    root.replaceChildren();
+    snapshot = { sessions: [], runs: [], messages: [] };
   });
   // The graph's palette is baked into attributes at draw time, so a theme
   // switch under an open graph leaves the old one on screen until it redraws.

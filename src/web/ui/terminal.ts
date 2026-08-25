@@ -434,7 +434,11 @@ export function createTerminalView(
       fontFamily: prefs.fontFamily,
       fontSize: prefs.fontSize,
       cursorBlink: prefs.cursorBlink,
-      scrollback: 10_000,
+      // Scrollback is the emulator's whole memory cost, it is paid per cell of
+      // the widest line the shell ever printed, and WASM linear memory never
+      // gives it back — a build log at 10k lines held hundreds of MB for the
+      // life of the page. 2k is still far past what is read by scrolling.
+      scrollback: 2_000,
       theme: THEME,
     });
     term.open(box);

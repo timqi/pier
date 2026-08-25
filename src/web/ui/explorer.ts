@@ -753,5 +753,14 @@ export function createExplorerView(
     sessionKey = id;
     cwd = next;
     void load();
+  }, () => {
+    // A whole file's diff is thousands of rows, each a handful of highlighted
+    // spans, and hiding the view only flips a class — the largest DOM in the
+    // workbench sat there for the life of the page. Re-entering re-reads git and
+    // re-renders the selected file anyway (applyRefs), so nothing is lost; the
+    // placeholder is what an empty viewer must never be (principle 5b).
+    clearDiffChrome();
+    viewer.classList.remove("flex", "flex-col");
+    viewer.replaceChildren(note("Select a file."));
   });
 }

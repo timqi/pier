@@ -82,13 +82,12 @@ export function decisionReplyBtn(messageId: string): HTMLElement {
 }
 
 export function renderBackgroundRun(run: BackgroundRun): void {
+  // Rows leave the pane without telling us: an edit rewinds the transcript, the
+  // trim (chat.ts) drops the oldest. A card that went with them is drawn again
+  // rather than updated where nobody can see it — and none of them may be held
+  // here after the pane let go, or this map is where the trimmed DOM survives.
+  for (const [id, el] of backgroundRows) if (!el.isConnected) backgroundRows.delete(id);
   let row = backgroundRows.get(run.runId);
-  // An edit rewinds the transcript by removing rows: a card that went with them
-  // is drawn again rather than updated where nobody can see it.
-  if (row && !row.isConnected) {
-    backgroundRows.delete(run.runId);
-    row = undefined;
-  }
   if (!row) {
     row = h("div", "mx-5 my-1.5 border px-3 py-2 text-[13px]");
     row.dataset.kind = "background-run";

@@ -122,6 +122,39 @@ export function scrollBottom(force = false): void {
 // --- chat rows (Slack-style full-width) ----------------------------------------------
 // No sender labels: user rows carry an accent bar + tint, agent rows stay plain.
 
+/** Rows the pane keeps. Nothing ever left it: a workbench open for a day held
+ *  every turn, every replayed activity group and every highlighted code block
+ *  of every session it visited. The transcript itself lives on the server, and
+ *  the tail is what a chat is read from — so the oldest rows leave, and a
+ *  reload (or an edit's rewind) draws the tail again from the snapshot. */
+const MAX_ROWS = 500;
+
+/** User turns the trim dropped, so the Nth user row *on screen* still names the
+ *  right turn of history() in submitEdit. */
+let trimmedUserTurns = 0;
+let trimmedRows = 0;
+/** Says how many rows left, because a transcript that just starts in the middle
+ *  is indistinguishable from a transcript that lost its beginning. */
+let trimNotice: HTMLElement | null = null;
+
+/** Called after every append: the pane grows only from the bottom. */
+function trimRows(): void {
+  while (turnsPane.childElementCount > MAX_ROWS) {
+    const row = turnsPane.firstElementChild as HTMLElement;
+    row.remove();
+    if (row === trimNotice) continue; // re-placed at the top below
+    if (row.dataset.kind === "user") trimmedUserTurns++;
+    trimmedRows++;
+  }
+  if (!trimmedRows) return;
+  if (!trimNotice) {
+    trimNotice = h("div", "px-5 py-2 text-center text-[11.5px] italic text-neutral-400");
+    trimNotice.dataset.kind = "trim"; // every row in the pane names its kind
+  }
+  trimNotice.textContent = `${trimmedRows} earlier row${trimmedRows === 1 ? "" : "s"} not shown — still in the transcript, not on this screen`;
+  if (turnsPane.firstElementChild !== trimNotice) turnsPane.prepend(trimNotice);
+}
+
 const ROW_STYLE: Record<string, { row: string; body: string }> = {
   user: { row: "border-l-indigo-500 bg-indigo-50", body: "text-neutral-900" },
   assistant: { row: "border-l-transparent", body: "text-neutral-900" },
@@ -182,6 +215,7 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
     row.append(edit);
   }
   turnsPane.append(row);
+  trimRows();
   scrollBottom();
   return node;
 }
@@ -250,6 +284,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   } else {
     content.classList.remove(...collapsed);
   }
+  trimRows();
   scrollBottom();
 }
 
@@ -298,8 +333,9 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
 async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   const id = deps.sessionId();
   if (!id) return;
-  // The Nth user row on screen is the Nth user turn of history().
-  const index = [...turnsPane.querySelectorAll('[data-kind="user"]')].indexOf(row);
+  // The Nth user row on screen is the Nth user turn of history() — plus the
+  // ones the trim took off the top, which history() still holds.
+  const index = trimmedUserTurns + [...turnsPane.querySelectorAll('[data-kind="user"]')].indexOf(row);
   // Drawn before the round trip: reloading the snapshot instead blanked the
   // pane for the length of a fetch, so the transcript flashed away and came
   // back (principle 7). A rewind is exactly "this row and everything under it
@@ -359,12 +395,16 @@ function renderMarkdown(node: HTMLElement, raw: string, streaming = false): void
   node.innerHTML = DOMPurify.sanitize(marked.parse(md, { async: false }));
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
-  highlightCode(node);
   externalLinks(node);
-  // A streaming block is rewritten every frame-ish, so the two upgrades that
-  // own state of their own wait for the final paint: copy buttons would be
-  // recreated mid-click, and attachment cards refetch their bytes.
+  // A streaming block is rewritten whole every ~80ms, so everything that is
+  // either expensive or stateful waits for the final paint. Highlighting is the
+  // expensive one: it re-tokenizes *every* fence in the block on every repaint,
+  // and each repaint throws the result away — a 40KB turn measured ~2.9s of
+  // hljs against ~0.2s of parsing, i.e. the streaming cost was almost entirely
+  // colour nobody had time to read. Copy buttons would be recreated mid-click
+  // and attachment cards would refetch their bytes, so they wait too.
   if (streaming) return;
+  highlightCode(node);
   addCodeCopy(node);
   renderAttachments(node);
 }
@@ -477,6 +517,9 @@ export function interruptTurn(): void {
 /** Reset everything before a session snapshot re-render. */
 export function resetChat(): void {
   turnsPane.replaceChildren();
+  trimmedUserTurns = 0;
+  trimmedRows = 0;
+  trimNotice = null;
   streamingEl = null;
   stopStreamPaint();
   resetActivity();
