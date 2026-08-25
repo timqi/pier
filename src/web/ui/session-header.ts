@@ -21,10 +21,11 @@ export interface HeaderDeps {
   currentSession: () => SessionInfo | undefined;
   /** Mobile top bar mirror (views.ts). */
   syncBar: () => void;
-  /** Open the Files view on a cwd (views.ts, wired through main). */
-  openFiles: (cwd: string) => void;
+  /** Open the Files view on a cwd, or on nothing — which reopens the folder
+   *  and diff the current session last browsed (views.ts, wired through main). */
+  openFiles: (cwd?: string) => void;
   /** Same view, but a second press closes it — what the chord binds to. */
-  toggleFiles: (cwd: string) => void;
+  toggleFiles: (cwd?: string) => void;
 }
 
 let deps: HeaderDeps;
@@ -44,7 +45,7 @@ export function initHeader(d: HeaderDeps): void {
     const s = deps.currentSession();
     if (!s) return;
     closeMenu();
-    deps.toggleFiles(s.cwd);
+    deps.toggleFiles(); // no cwd: the current session's own last folder + diff
   }, modal);
 }
 
@@ -278,7 +279,9 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       hint: current ? chordLabel(FILES_KEY) : "",
       onSelect: () => {
         closeMenu();
-        deps.openFiles(s.cwd);
+        // The current session reopens where it left off; another session's row
+        // names a directory, since only the current one has a remembered diff.
+        deps.openFiles(current ? undefined : s.cwd);
       },
     },
   ]);

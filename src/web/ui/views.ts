@@ -109,7 +109,8 @@ export function showConsole(name: ConsoleName, arg?: string): void {
 
 export const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
 
-/** Entry for the ⋯ menus (session header, project row): browse a cwd. */
+/** Entry for the ⋯ menus (session header, project row): browse a cwd — or
+ *  none, which reopens where the current session left off. */
 export const showFiles = (dir?: string): void => showConsole("files", dir);
 
 /** Entry for the project row menu and the sidebar icon: a shell in a cwd. */
@@ -227,6 +228,8 @@ export function initViews(d: ViewsDeps): void {
       view: createExplorerView(
         $("#files-view"),
         () => [...groupByCwd(deps.sessions()).keys()],
+        // Whose folder+diff to restore: a bare open is "the files of this chat".
+        () => deps.currentSession(),
         // Through the router, so Back walks directory switches too.
         (dir) => showConsole("files", dir),
         () => closeOverlay("files"),
@@ -253,11 +256,13 @@ export function initViews(d: ViewsDeps): void {
       ),
     },
   ];
-  // The sidebar icon and its chord both toggle — pierce: this Ctrl chord must
-  // close Terminal from inside it; other Ctrl chords stay with the shell.
+  // The sidebar icon and its chord both toggle. ⌘; and not ⌃`: the backtick
+  // chord is what quake-mode terminals and editors grab globally, and a ⌘
+  // chord is Pier's own everywhere — including inside Terminal, whose shell
+  // keeps every Ctrl chord.
   const termBtn = $("#open-terminal");
   termBtn.onclick = () => toggleTerminal();
-  shortcut(termBtn, "ctrl+`", "Terminal", () => toggleTerminal(), undefined, true);
+  shortcut(termBtn, "meta+;", "Terminal", () => toggleTerminal());
   // The Activity button reopens whichever of its two views was showing last.
   for (const name of ["activity", "boards", "settings"] as const) {
     const btn = $(`#open-${name}`);

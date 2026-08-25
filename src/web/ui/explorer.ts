@@ -41,6 +41,42 @@ type CodeRow = {
 };
 type Segment = { start: number; end: number; tone: "add" | "del" | "mixed" };
 
+/** What a session was last looking at here. Browser-local, like every other
+ *  view preference: it is where *this* workbench left off, and the answer is
+ *  worth nothing to another one. */
+type Prefs = { cwd: string; base: string; head: string };
+const PREFS_KEY = "pier.filesPrefs";
+const MAX_REMEMBERED = 50; // one entry per session; the oldest fall off
+
+const allPrefs = (): Record<string, Prefs> => {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}");
+    return raw && typeof raw === "object" ? (raw as Record<string, Prefs>) : {};
+  } catch {
+    return {}; // hand-edited or from an older shape — start over
+  }
+};
+
+const readPrefs = (sessionId: string): Prefs | null => {
+  const p: Partial<Prefs> | undefined = sessionId ? allPrefs()[sessionId] : undefined;
+  return typeof p?.cwd === "string" && typeof p.base === "string" && typeof p.head === "string"
+    ? { cwd: p.cwd, base: p.base, head: p.head }
+    : null;
+};
+
+const writePrefs = (sessionId: string, p: Prefs): void => {
+  const all = allPrefs();
+  delete all[sessionId]; // re-insert last, so the prune drops the least recent
+  all[sessionId] = p;
+  const keys = Object.keys(all);
+  for (const k of keys.slice(0, Math.max(0, keys.length - MAX_REMEMBERED))) delete all[k];
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(all));
+  } catch (err) {
+    console.warn("Files: could not remember this folder", err); // quota, or a private window
+  }
+};
+
 /** The compare panel's control skin — a chip, like the header's model chip. */
 const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonElement => {
   const el = h(
@@ -59,12 +95,16 @@ const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonE
 export function createExplorerView(
   root: HTMLElement,
   projectCwds: () => string[],
+  /** The chat this was opened from: its id keys the remembered folder+diff,
+   *  its cwd is where a bare open lands the first time. */
+  session: () => { id: string; cwd: string } | undefined,
   /** Through the router (hash), so Back walks directories too. */
   openDir: (dir: string) => void,
   /** The ✕: leave the view, back to wherever it was opened from. */
   close: () => void,
 ): ConsoleView {
   let cwd = "";
+  let sessionKey = ""; // whose folder+diff is on screen, and where it is saved
   let git: GitInfo = { branch: null, refs: [], commits: [] };
   let base = "HEAD";
   let head = ""; // "" = working tree
@@ -573,6 +613,20 @@ export function createExplorerView(
         fold)));
   }
 
+  /** Written on every change, not on close: the view is an overlay and its ✕
+   *  is one of several ways out (a hash change, a closed tab). */
+  const remember = (): void => {
+    if (sessionKey && cwd) writePrefs(sessionKey, { cwd, base, head });
+  };
+
+  /** A remembered ref may be gone — a merged branch, a commit past the log
+   *  window. Fall back to the default diff rather than open on a git error. */
+  const usableRef = (ref: string): boolean => {
+    const name = ref.replace(/~\d+$/, "");
+    return !name || name === "HEAD" || git.refs.some((r) => r.name === name) ||
+      git.commits.some((c) => c.hash === name);
+  };
+
   async function loadChanges(): Promise<void> {
     changes = new Map();
     if (!git.branch) return;
@@ -588,6 +642,7 @@ export function createExplorerView(
   }
 
   async function applyRefs(): Promise<void> {
+    remember();
     try {
       await loadChanges();
     } catch (err) {
@@ -671,22 +726,31 @@ export function createExplorerView(
       git = { branch: null, refs: [], commits: [] };
       viewer.replaceChildren(note(String(err), "text-red-600"));
     }
-    base = defaultBase();
-    head = "";
+    // The diff this session last chose here, when it still resolves.
+    const saved = readPrefs(sessionKey);
+    const kept = saved && saved.cwd === cwd && usableRef(saved.base) && usableRef(saved.head) ? saved : null;
+    base = kept?.base ?? defaultBase();
+    head = kept?.head ?? "";
     renderHeader(); // now with the branch
     await applyRefs();
   }
 
   return consoleView(root, (arg) => {
-    // Any absolute path is addressable; a stale or relative one falls back.
-    const next = arg?.startsWith("/") ? arg : cwd || (projectCwds()[0] ?? "");
-    if (next === cwd && tree.childElementCount) {
+    const s = session();
+    const id = s?.id ?? "";
+    // Any absolute path is addressable; a stale or relative one falls back to
+    // what this session last browsed, then to its own project directory.
+    const next = arg?.startsWith("/")
+      ? arg
+      : (id === sessionKey ? cwd : "") || readPrefs(id)?.cwd || s?.cwd || projectCwds()[0] || "";
+    if (next === cwd && id === sessionKey && tree.childElementCount) {
       // Back to the view: keep tree + selection, but re-read git and the diff —
       // both moved while it was away.
       renderHeader();
       void refreshGit().then(applyRefs);
       return;
     }
+    sessionKey = id;
     cwd = next;
     void load();
   });
