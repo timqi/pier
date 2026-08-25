@@ -151,6 +151,27 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_state ADD COLUMN title TEXT;
   ALTER TABLE session_state ADD COLUMN created_at INTEGER;
   `,
+  // 5 — the workbench can reach a browser that is not open (web/push.ts).
+  `
+  -- One row per browser that asked to be notified, exactly as the Push API
+  -- described it; a dead endpoint is deleted when its service says so.
+  CREATE TABLE push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  -- This instance's VAPID identity: one key pair, minted on first use. Every
+  -- subscription above is bound to it, so it is never rotated on its own.
+  CREATE TABLE push_identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

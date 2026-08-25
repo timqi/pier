@@ -533,6 +533,13 @@ export function createServer(
     return c.html(shell);
   });
 
+  // Same reasoning as the shell above, for the one asset that is not hashed:
+  // an installed app keeps its worker until the script it re-fetches differs,
+  // so a cached copy is a released fix that never ships.
+  app.get("/sw.js", async (c, next) => {
+    c.header("cache-control", "private, no-cache");
+    await next();
+  });
   app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || "." }));
   return app;
 }

@@ -30,7 +30,43 @@ table and growing it past 500 means logic is leaking in.
 | `GET /api/activity` | Active or last-24h sessions, task runs, and Subagent control/supervisor message edges for Console Activity |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
-| `GET /*` | static frontend from `src/web/public/` |
+| `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
+
+## Notifications (`src/web/push.ts` + `src/web/webpush.ts`)
+
+Web Push, so a finished turn reaches a workbench nobody has open — Chrome and
+Edge on desktop, and iOS/iPadOS 16.4+ once Pier is on the Home Screen (Apple
+grants push only to the installed app). Composed in `main.ts` beside the other
+surfaces, not inside `server.ts`: it is a second, independent consumer of the
+same event stream.
+
+| Route | Behavior |
+| ----- | -------- |
+| `GET /api/push` | `{publicKey}` — the instance's VAPID public key, what a browser subscribes with |
+| `POST /api/push/subscribe` | a `PushSubscription` (`{endpoint, keys:{p256dh, auth}, label}`) → stored; upsert, so a browser re-posting on every load repairs a lost row. 400 on anything that is not one |
+| `POST /api/push/unsubscribe` | body `{endpoint}` → forgotten |
+| `POST /api/push/test` | send a test notification to every subscribed device, `{sent, failed}`; 409 when none is subscribed |
+
+- **The rule is the unread dot, read late.** `streaming → idle` starts a settle
+  window (6s); if the session is *still* unread when it closes, nobody was
+  looking and a notification goes out. A second notion of attention would drift
+  from the dot within a release.
+- **Only the workbench's own sessions.** A turn answering a Slack, Telegram or
+  Lark conversation was already delivered there (`router.conversationOf(id)`
+  names the channel); notifying about it too is the same reply twice on the
+  same phone.
+- **The wire format is `webpush.ts` and nothing else** — RFC 8291 `aes128gcm`
+  encryption and RFC 8292 VAPID authorization on `node:crypto`, with the RFC's
+  own worked example as the golden test. No dependency: the format is one ECDH,
+  two HKDFs, one AES-GCM record and a JWT.
+- **Only 404/410 costs a subscription.** Every other failure is logged with what
+  the push service said; a notification that never arrives must not look like
+  one nobody tapped (principle 5b).
+- **`sw.js` caches nothing.** The shell revalidates on every navigation and the
+  bundles are content-hashed; its one `fetch` handler is a navigation fallback
+  so an offline tap on the app icon says who is unreachable.
+- **The keys are per instance.** One VAPID key pair, minted on first use, never
+  rotated on its own — every live subscription is bound to it.
 
 The web surface implements `Channel` only if it falls out naturally; do not
 force it — SSE already delivers outbound content, so `send()` may be a no-op.

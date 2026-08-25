@@ -66,6 +66,17 @@ export class SessionStateStore {
     }));
   }
 
+  /** What to call a session where there is room for one line — a push
+   *  notification's title. Falls back to the project directory, then to the
+   *  fact that it is a session at all: a notification with no title reads as a
+   *  browser bug rather than as an unnamed session. */
+  name(sessionId: string): string {
+    const row = this.#db.prepare(
+      "SELECT title, cwd FROM session_state WHERE session_id = ?",
+    ).get(sessionId) as { title: string | null; cwd: string | null } | undefined;
+    return row?.title || row?.cwd?.split("/").filter(Boolean).at(-1) || "Pier session";
+  }
+
   needsProjectBackfill(): boolean {
     return this.#db.prepare(
       "SELECT 1 FROM session_state WHERE pinned = 1 AND (cwd IS NULL OR created_at IS NULL) LIMIT 1",

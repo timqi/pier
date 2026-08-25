@@ -34,6 +34,7 @@ import {
   updateComposer,
 } from "./composer.js";
 import { readableTitle } from "./dom.js";
+import { initPush } from "./notifications.js";
 import { initReport } from "./report.js";
 import {
   initHeader,
@@ -435,6 +436,9 @@ initViews({
 });
 
 initVersion(__PIER_VERSION__);
+// Also what makes Pier installable and what answers a navigation with the
+// network gone; the notification permission is asked for in Settings, never here.
+void initPush();
 
 // Coming back to a hidden tab is the other way turns get seen.
 document.addEventListener("visibilitychange", maybeAckRead);

@@ -11,6 +11,7 @@ import { createConfigView } from "./config.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, button, card, empty, field, input, pill, setStatus } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
+import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
 
 type Topic = "instance" | "providers" | "models" | "channels" | "files" | "security";
@@ -185,6 +186,10 @@ export function createSettingsView(
     "div",
     "mx-auto flex max-w-2xl flex-col gap-6",
     urlCard,
+    // Per browser, not per instance — but this is the page a person opens to
+    // configure Pier, and a second place for one toggle would be a third copy
+    // of the same vocabulary.
+    createNotificationsCard(),
     reloadCard,
     pwCard,
     signOutCard,

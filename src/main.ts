@@ -34,6 +34,7 @@ import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
 import { startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
+import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
 import { attachTerminal } from "./web/terminal.js";
@@ -285,11 +286,23 @@ registerAuthRoutes(app, auth);
 registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
+const sessionState = new SessionStateStore(db);
+// The workbench's notifications to a browser that is not open. Composed here,
+// beside the other surfaces: it consumes the same event stream the web server
+// does, and neither one runs the other.
+registerPushRoutes(app, {
+  store: new PushStore(db),
+  hub,
+  unread: (id) => sessionState.unread(id),
+  channelOf: (id) => router.conversationOf(id)?.channelId,
+  name: (id) => sessionState.name(id),
+  publicUrl: () => settings.get().publicUrl,
+});
 app.route("/", createServer({
   factory,
   router,
   hub,
-  sessions: new SessionStateStore(db),
+  sessions: sessionState,
   config: piConfig,
   providers: factory,
   settings,

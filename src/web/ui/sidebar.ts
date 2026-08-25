@@ -6,6 +6,7 @@ import { sendJson } from "./api.js";
 import { browseButton } from "./dir-picker.js";
 import { $, basename, detailsRow, h, relTime } from "./dom.js";
 import { closeMenu, openMenu } from "./menu.js";
+import { setUnreadBadge } from "./notifications.js";
 import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
@@ -208,6 +209,9 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
 
 export function renderSessions(): void {
   const sessions = deps.sessions();
+  // The one place the unread dots are painted, so also the one place the
+  // installed app's icon badge is kept in step with them.
+  setUnreadBadge(sessions.filter((s) => s.unread).length);
   const projects = groupByCwd(sessions.filter((s) => s.pinned));
   projectTree.replaceChildren(
     ...(projects.size

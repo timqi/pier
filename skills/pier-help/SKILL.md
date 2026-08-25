@@ -71,6 +71,18 @@ operator's source of truth.
   (Telegram ~3.8k chars); the footer and the next-step buttons ride the last
   one.
 
+## Notifications on the web
+
+- The workbench can push a notification when a turn finishes and no client
+  had that session on screen — Settings → Instance → Notifications, per
+  browser. Chrome and Edge on desktop work in a tab; **iPhone and iPad only
+  notify the installed app**, so it is Share → Add to Home Screen first, then
+  enable it from the icon's window. A "Send a test notification" button in the
+  same card answers whether it actually arrives.
+- Pier is installable (an **Install Pier** button appears in that same card on
+  Chrome and Edge; elsewhere it is the address-bar icon), and an installed
+  Pier badges its icon with the number of sessions carrying an unread turn.
+
 ## Who may talk (groups and binding)
 
 - Group messages pass a per-chat gate the operator sets: it can require a
