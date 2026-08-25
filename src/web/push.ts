@@ -180,6 +180,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
       const { status, error } = await sendPush(target, body, keys, subject());
       if (status >= 200 && status < 300) {
         sent += 1;
+        log.info(`notified ${target.label}`);
         return;
       }
       failed += 1;
@@ -229,9 +230,19 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     // it, and their phone buzzing twice for one answer is what a notification
     // budget gets spent on. Read now, not in the timer: this is the state that
     // produced the turn.
-    if (channelOf(e.sessionId) !== "web") return;
+    // Every outcome says which one it was: a push that was never sent and one
+    // that arrived look identical from here otherwise, and "why did my phone
+    // stay quiet" is the only question this feature is ever asked (§5b).
+    const channel = channelOf(e.sessionId);
+    if (channel !== "web") {
+      log.debug(`no push for ${e.sessionId}: answering ${channel ?? "nothing"}, not the workbench`);
+      return;
+    }
     const timer = setTimeout(() => {
-      if (!unread(e.sessionId)) return; // somebody has it on screen
+      if (!unread(e.sessionId)) {
+        log.debug(`no push for ${e.sessionId}: a client reported the turn as seen`);
+        return; // somebody has it on screen
+      }
       void deliver({
         title: name(e.sessionId),
         body: preview(text) || "Turn finished.",

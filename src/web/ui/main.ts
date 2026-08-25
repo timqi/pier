@@ -169,12 +169,17 @@ const refreshSessions = coalesce(async () => {
   commitSessions((await (await fetch("/api/sessions")).json()) as SessionInfo[], true);
 });
 
-/** Seen = read: the selected session's chat is on screen in a visible tab.
- *  The ack clears the server-side unread mark, and the resulting broadcast
- *  moves every other client's dot back too. Optimistic locally — the dot
- *  must not stay amber while the user is literally looking at the turn. */
+/** Seen = read: the selected session's chat is on screen in a *focused*
+ *  window. The ack clears the server-side unread mark, and the resulting
+ *  broadcast moves every other client's dot back too. Optimistic locally — the
+ *  dot must not stay amber while the user is literally looking at the turn.
+ *
+ *  Focus, not just visibility: an installed workbench left open behind another
+ *  app is still `document.hidden === false` on macOS, so visibility alone
+ *  claimed every finished turn had been read and the push that should have
+ *  followed (web/push.ts) was suppressed by a window nobody was looking at. */
 function maybeAckRead(): void {
-  if (document.hidden || !isChatVisible()) return;
+  if (document.hidden || !document.hasFocus() || !isChatVisible()) return;
   const s = sessions.find((x) => x.id === currentId);
   if (!s?.unread) return;
   s.unread = false;
@@ -442,8 +447,10 @@ initVersion(__PIER_VERSION__);
 // network gone; the notification permission is asked for in Settings, never here.
 void initPush();
 
-// Coming back to a hidden tab is the other way turns get seen.
+// Coming back to a hidden tab — or to an unfocused window — is the other way
+// turns get seen.
 document.addEventListener("visibilitychange", maybeAckRead);
+window.addEventListener("focus", maybeAckRead);
 
 connectWorkspace();
 void refreshProjects().then(applyRoute);

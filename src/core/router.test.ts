@@ -299,6 +299,23 @@ describe("opening a session", () => {
     expect(a).toBe(c);
   });
 
+  it("answers the alias that reached it last, never a chat it belongs to", async () => {
+    // A task callback opens a workbench session under task:<id> whenever
+    // nothing had it attached; the workbench asking for it again makes it a web
+    // session, or the notification for its next turn is never sent (web/push.ts).
+    router = new Router(hub, () => Promise.resolve(fakeSession("s1").session));
+    await router.ensure({ channelId: "task", conversationId: "s1" });
+    expect(router.conversationOf("s1")?.channelId).toBe("task");
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    expect(router.conversationOf("s1")?.channelId).toBe("web");
+    // The chat key is where turn-ends go: a task callback into an IM session
+    // must not make the router think it is answering the workbench.
+    router = new Router(hub, () => Promise.resolve(fake.session));
+    await router.ensure(KEY);
+    await router.ensure({ channelId: "task", conversationId: "s1" });
+    expect(router.conversationOf("s1")).toEqual(KEY);
+  });
+
   it("tells the chat when the session cannot be opened", async () => {
     router = new Router(hub, () => Promise.reject(new Error("unknown session")));
     router.registerChannel(tg.channel);

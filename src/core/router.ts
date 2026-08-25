@@ -32,6 +32,13 @@ function keyOf(key: ConversationKey): string {
   return `${key.channelId}:${key.conversationId}`;
 }
 
+/** `web:<id>` and `task:<id>` are two names for one session id, and neither is
+ *  a chat — no Channel is registered under them. So they share a lock in
+ *  `ensure`, and which of the two a session records costs nothing but the
+ *  answer to "what is it answering". */
+const isAlias = (key: ConversationKey): boolean =>
+  key.channelId === "web" || key.channelId === "task";
+
 interface Attached {
   session: AgentSession;
   key: ConversationKey;
@@ -197,7 +204,7 @@ export class Router {
     const existing = this.bySession.get(session.id);
     if (existing?.session === session) {
       this.byKey.set(keyOf(key), session);
-      existing.activeAt = Date.now();
+      this.reached(session, key);
       return;
     }
     if (existing) {
@@ -333,15 +340,13 @@ export class Router {
     let session = this.byKey.get(keyOf(key));
     // Web and task conversation ids are session ids. Reuse an attached
     // instance so two surfaces never open the same Pi transcript twice.
-    if (!session && (key.channelId === "web" || key.channelId === "task")) {
+    if (!session && isAlias(key)) {
       session = this.bySession.get(key.conversationId)?.session;
       if (session) this.byKey.set(keyOf(key), session);
     }
     if (!session) {
       // Aliases share one lock: web:<id> and task:<id> must not each open one.
-      const lock = key.channelId === "web" || key.channelId === "task"
-        ? `session:${key.conversationId}`
-        : keyOf(key);
+      const lock = isAlias(key) ? `session:${key.conversationId}` : keyOf(key);
       const inflight = this.opening.get(lock);
       // A second caller rides the first one's resolve — which attaches before
       // this continuation runs, having awaited it first — and registers its own
@@ -349,7 +354,7 @@ export class Router {
       if (inflight) {
         session = await inflight;
         this.byKey.set(keyOf(key), session);
-        return this.reached(session);
+        return this.reached(session, key);
       }
       try {
         // Inside the try: a resolver that throws synchronously is the same
@@ -365,7 +370,7 @@ export class Router {
       }
       this.attach(key, session);
     }
-    return this.reached(session);
+    return this.reached(session, key);
   }
 
   /** A session that would not open has no event stream of its own to report on
@@ -387,10 +392,19 @@ export class Router {
   }
 
   /** Reached for, so not idle — every surface that uses a session comes
-   *  through `ensure`, including the ones that only read it. */
-  private reached(session: AgentSession): AgentSession {
+   *  through `ensure`, including the ones that only read it.
+   *
+   *  Also where a session learns which of its two aliases is current: a task
+   *  callback (tasks/outbox.ts) opens a workbench session under `task:<id>`
+   *  whenever nothing had it attached, and the key from that first attach used
+   *  to stand forever — so the workbench's own next turn was still "a task",
+   *  and the notification for it (web/push.ts) was never sent. A chat key is
+   *  never overwritten: that one is also where turn-ends are delivered. */
+  private reached(session: AgentSession, key: ConversationKey): AgentSession {
     const attached = this.bySession.get(session.id);
-    if (attached) attached.activeAt = Date.now();
+    if (!attached) return session;
+    attached.activeAt = Date.now();
+    if (isAlias(key) && isAlias(attached.key)) attached.key = key;
     return session;
   }
 
