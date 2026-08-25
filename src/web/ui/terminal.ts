@@ -53,6 +53,19 @@ const loadGhostty = (): Promise<Ghostty> => {
   return ghosttyOnce;
 };
 
+/** Fetch and compile it while nothing else is happening, so the first open is
+ *  a shell appearing rather than a download. Idle-time only, and the failure is
+ *  the load's own — a warm-up that did not happen costs the open, nothing else. */
+const warmGhostty = (): void => {
+  const warm = (): void =>
+    void loadGhostty().catch((err: unknown) => {
+      // Named, not swallowed: the open path retries and shows its own failure.
+      console.warn("terminal: emulator warm-up failed", err);
+    });
+  if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 10_000 });
+  else setTimeout(warm, 3000); // Safari
+};
+
 const THEME = { background: "#1a1b26", foreground: "#a9b1d6", cursor: "#c0caf5" };
 
 interface CellMetrics {
@@ -110,12 +123,14 @@ export function createTerminalView(
   /** The ✕: leave the view, back to wherever it was opened from. */
   close: () => void,
 ): ConsoleView {
+  warmGhostty();
   let cwd = "";
   let term: InstanceType<Ghostty["Terminal"]> | null = null;
   let fit: InstanceType<Ghostty["FitAddon"]> | null = null;
   let ws: WebSocket | null = null;
   let ended = false; // the shell exited or refused; don't overwrite that with "disconnected"
   let epoch = 0; // a stale boot() resolving after a cwd switch must do nothing
+  let restarting = false; // this page asked for the exit that is about to arrive
   let prefs = loadPrefs();
 
   const statusBox = h("div", "ml-auto flex min-w-0 flex-none items-center gap-2");
@@ -211,7 +226,7 @@ export function createTerminalView(
         stored = ((await res.json()) as { terminalInitCommand?: string }).terminalInitCommand ?? "";
         cmd.value = stored;
         cmd.disabled = false;
-        report("idle", "Runs when a shell starts — this one is already up.");
+        report("idle", "Runs when a shell starts — Restart applies it here.");
       } catch (err) {
         report("failed", String(err));
       }
@@ -338,6 +353,9 @@ export function createTerminalView(
       claimSize();
       term?.focus();
     };
+    const restartBtn = chip("Restart");
+    restartBtn.title = "End this shell and start a new one";
+    restartBtn.onclick = () => void restart();
     const settingsBtn = h("button", "icon-btn text-[15px]", "⚙") as HTMLButtonElement;
     settingsBtn.type = "button";
     settingsBtn.title = "Terminal settings";
@@ -348,7 +366,7 @@ export function createTerminalView(
     closeBtn.title = "Close Terminal";
     closeBtn.setAttribute("aria-label", "Close Terminal");
     closeBtn.onclick = close;
-    header.replaceChildren(cwdChip, statusBox, fitBtn, settingsBtn, closeBtn);
+    header.replaceChildren(cwdChip, statusBox, fitBtn, restartBtn, settingsBtn, closeBtn);
   }
 
   const sendResize = (): void => {
@@ -356,6 +374,21 @@ export function createTerminalView(
       ws.send(JSON.stringify({ t: "resize", cols: term.cols, rows: term.rows }));
     }
   };
+
+  /** End the shell and come back with a new one — the way out of a wedged
+   *  program, and what makes a changed startup command take effect. The pty is
+   *  shared, so every other attached page sees the same exit: asked for once,
+   *  never twice. A dead socket only needs a reattach, which boot() already is. */
+  async function restart(): Promise<void> {
+    if (ws?.readyState !== WebSocket.OPEN) {
+      await boot();
+      return;
+    }
+    if (!window.confirm(`Restart the shell in ${cwd}? Anything running in it stops.`)) return;
+    restarting = true;
+    setStatus("restarting…");
+    ws.send(JSON.stringify({ t: "restart" }));
+  }
 
   /** Take the shell's size for this page. The pty is shared and the last resize
    *  wins, so a page that was hidden or behind another window can come back to
@@ -387,6 +420,7 @@ export function createTerminalView(
     const mine = ++epoch;
     teardown();
     ended = false;
+    restarting = false;
     setStatus("connecting…");
     let g: Ghostty;
     try {
@@ -436,6 +470,13 @@ export function createTerminalView(
         return;
       }
       if (msg.t === "exit") {
+        // Asked for: the shell we killed is gone, so boot() spawns a fresh one
+        // (with the startup command). Unasked-for exits keep their chip.
+        if (restarting) {
+          restarting = false;
+          void boot();
+          return;
+        }
         ended = true;
         setStatus(`shell exited (${msg.code ?? "?"})`, { label: "Restart", run: () => void boot() });
       } else if (msg.t === "error") {

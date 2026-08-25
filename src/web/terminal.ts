@@ -215,6 +215,13 @@ export class TerminalHub {
       term.pty.write(msg.d);
       return;
     }
+    // The only way a page can end a shell: everything attached to it is told by
+    // the exit path below, exactly as if the shell had exited on its own.
+    if (msg.t === "restart") {
+      log.info(`shell ${term.pty.pid} for ${cwd} killed on request`);
+      term.pty.kill();
+      return;
+    }
     if (
       msg.t === "resize" &&
       typeof msg.cols === "number" && typeof msg.rows === "number" &&

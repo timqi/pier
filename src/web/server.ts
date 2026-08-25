@@ -577,6 +577,15 @@ export function createServer(
     c.header("cache-control", "private, no-cache");
     await next();
   });
+  // Hashed bundles never change under their name — a release writes new names,
+  // and the shell above is what re-points at them. Without this they carry only
+  // the auth layer's bare `private`, so a browser revalidates each one before it
+  // may reuse it: three round trips on a remote instance, one of them in front
+  // of the 636KB terminal emulator, every time the workbench is opened.
+  app.get("/assets/*", async (c, next) => {
+    c.header("cache-control", "private, max-age=31536000, immutable");
+    await next();
+  });
   app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || "." }));
   return app;
 }

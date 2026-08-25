@@ -296,6 +296,29 @@ describe("TerminalHub", () => {
     await until(() => a.output.includes("still-alive"));
   });
 
+  it("restarts on request: every attached page is told, and the next attach is a new shell", async () => {
+    const h = make();
+    const a = new FakeSocket();
+    const b = new FakeSocket();
+    const conn = (await h.attach(cwd, a))!;
+    await h.attach(cwd, b);
+    conn.message(JSON.stringify({ t: "in", d: "echo before-restart\r" }));
+    await until(() => a.output.includes("before-restart"));
+
+    conn.message(JSON.stringify({ t: "restart" }));
+    await until(() => h.size === 0);
+    for (const sock of [a, b]) {
+      expect(sock.controls().some((f) => f.t === "exit")).toBe(true);
+      expect(sock.closed).not.toBeNull();
+    }
+
+    const c = new FakeSocket();
+    const fresh = (await h.attach(cwd, c))!;
+    expect(c.output).not.toContain("before-restart"); // a new pty, a new ring
+    fresh.message(JSON.stringify({ t: "in", d: "echo after-restart\r" }));
+    await until(() => c.output.includes("after-restart"));
+  });
+
   it("refuses a bad cwd with an error frame, never silently", async () => {
     const h = make();
     for (const bad of ["relative/path", "/definitely/not/a/dir"]) {
