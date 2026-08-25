@@ -1,5 +1,5 @@
 dev:
-    npm i
+    NODE_ENV= npm i
     PIER_TITLE='>t' HOST=0.0.0.0 PORT=3143 PIER_HOME=~/.pier_test npm run dev
 
 stable:
