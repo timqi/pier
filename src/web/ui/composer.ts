@@ -4,10 +4,10 @@
 
 import { failure, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
-import { appendTurn, scrollBottom, turnsPane } from "./chat.js";
+import { appendTurn, followTail, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
-import { escapeKey } from "./shortcut.js";
+import { escapeKey, letterKey } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
 /** A file picked but not yet sent; uploaded to the inbox on send. */
@@ -352,6 +352,15 @@ export function initComposer(d: ComposerDeps): void {
     ev.preventDefault();
     void send("auto");
   };
+  // Reading the transcript, then writing: "/" is where Slack, GitHub and
+  // Discord put this, and it needs no modifier because a key pressed outside a
+  // text field is not text. The composer is its own affordance — the hover
+  // card over it names the key. Only with the chat on screen.
+  letterKey(input, ["/"], "Write a message", focusInput, deps.chatVisible);
+  // Focusing the composer at the end of the transcript means the user is
+  // watching the tail: follow it from here on, and keep it in view when the
+  // keyboard, the growing input or the queue panel takes the room away.
+  input.onfocus = followTail;
   input.oninput = () => {
     autosize();
     saveDraft();

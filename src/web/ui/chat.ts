@@ -66,10 +66,57 @@ export function initChat(d: ChatDeps): void {
  *  thing. */
 let bulk = false;
 
+const atBottom = (): boolean =>
+  turnsPane.scrollHeight - turnsPane.scrollTop - turnsPane.clientHeight < 80;
+
+/** Tail follow. Being at the bottom is a *state*, not a per-append test, and
+ *  it is re-applied from what the pane *does* rather than from the handful of
+ *  call sites that remember to ask. Both halves are needed: the pane shrinks
+ *  under the queue panel, the composer and the keyboard without a scroll event
+ *  to notice it, and it grows after the appends are over — a finished turn is
+ *  re-rendered with copy buttons, attachment cards and next-step buttons, an
+ *  activity group is sealed into the row, code is highlighted — none of which
+ *  goes through scrollBottom, which is why the last lines stayed below the
+ *  fold. Released the moment the user scrolls away themselves. */
+let follow = true;
+
+turnsPane.addEventListener("scroll", () => {
+  if (!bulk) follow = atBottom();
+}, { passive: true });
+
+/** At most one re-pin per frame: a streaming block mutates every ~80ms and
+ *  each scrollTop write flushes layout. 0 = nothing scheduled. */
+let pinning = 0;
+
+function repin(): void {
+  if (!follow || bulk || pinning) return;
+  pinning = requestAnimationFrame(() => {
+    pinning = 0;
+    // Re-checked: a frame is long enough for the user to have scrolled away.
+    if (follow && !bulk) turnsPane.scrollTop = turnsPane.scrollHeight;
+  });
+}
+
+new ResizeObserver(repin).observe(turnsPane);
+// An image or a thumbnail that finishes decoding after its row was appended
+// moves the bottom with no mutation of its own. Capture: `load` never bubbles.
+turnsPane.addEventListener("load", repin, true);
+new MutationObserver(repin).observe(turnsPane, {
+  childList: true,
+  subtree: true,
+  characterData: true,
+});
+
+/** Re-arm tail follow when the user comes back to the end — focusing the
+ *  composer there means "I'm watching the tail", so keep it in view. */
+export function followTail(): void {
+  if (atBottom()) follow = true;
+}
+
 export function scrollBottom(force = false): void {
   if (bulk) return;
-  const near = turnsPane.scrollHeight - turnsPane.scrollTop - turnsPane.clientHeight < 80;
-  if (force || near) turnsPane.scrollTop = turnsPane.scrollHeight;
+  if (force) follow = true;
+  if (follow) turnsPane.scrollTop = turnsPane.scrollHeight;
 }
 
 // --- chat rows (Slack-style full-width) ----------------------------------------------
