@@ -129,6 +129,25 @@ export function createTerminalView(
   box.addEventListener("keydown", (ev) => {
     if (ev.metaKey && !ev.defaultPrevented) ev.stopImmediatePropagation();
   }, true);
+  // The emulator makes this box contenteditable so an IME has somewhere to
+  // compose. Chrome puts the pre-edit in the box *beside* the canvas and then
+  // scrolls the box to keep the caret in view, which slides the canvas up out
+  // of its own frame; a composition abandoned rather than committed (Esc, or
+  // picking nothing — routine with Rime and any pinyin IME) leaves a <br>
+  // behind, so the shell stays shifted and its last row is never drawn again.
+  // The canvas *is* the box, so the box must never scroll, and nothing but the
+  // emulator's own two elements may stay in it.
+  box.addEventListener("scroll", () => {
+    box.scrollTop = 0;
+    box.scrollLeft = 0;
+  });
+  box.addEventListener("compositionend", () => {
+    // Backwards: the list is live, and each remove() shifts what follows.
+    for (let i = box.childNodes.length - 1; i >= 0; i--) {
+      const node = box.childNodes[i];
+      if (node && node.nodeName !== "CANVAS" && node.nodeName !== "TEXTAREA") node.remove();
+    }
+  });
   root.append(header, box);
 
   const chip = (label: string): HTMLButtonElement => {
