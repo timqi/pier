@@ -1,9 +1,10 @@
 // Console → Terminal view: a real shell in a project's cwd. The pty lives on
 // the server (web/terminal.ts) and every open page mirrors it — same shell,
-// any page may type, last resize wins, and the Fit button forces this page's
-// size when another window shrank it. The view stays mounted and connected
-// while hidden, so toggling it back is instant and loses nothing; the server
-// replays recent output when a page attaches fresh.
+// any page may type, last resize wins — so the page being looked at claims the
+// size back, and the Fit chip does it by hand when two windows are visible at
+// once. The view stays mounted and connected while hidden, so toggling it back
+// is instant and loses nothing; the server replays recent output when a page
+// attaches fresh.
 
 import { failure, sendJson } from "./api.js";
 import { openBrowser } from "./dir-picker.js";
@@ -53,6 +54,48 @@ const loadGhostty = (): Promise<Ghostty> => {
 };
 
 const THEME = { background: "#1a1b26", foreground: "#a9b1d6", cursor: "#c0caf5" };
+
+interface CellMetrics {
+  width: number;
+  height: number;
+  baseline: number;
+}
+
+/**
+ * ghostty-web sizes a cell from `M` alone — a glyph with no descender — so a
+ * row ends up cap-height+2 tall with the baseline 1px above its bottom: rows
+ * are squeezed together and every g/j/p/q hangs below its own cell background
+ * (their lib/renderer.ts `measureFont`, still that way in 0.4.0). Measure the
+ * font's box instead, which is what a cell was meant to be. The renderer's
+ * measurement is private to them, so the one method we replace is asserted
+ * here and its absence is reported rather than assumed away.
+ */
+function useFontBoxMetrics(term: InstanceType<Ghostty["Terminal"]>): void {
+  const renderer = term.renderer as unknown as
+    | { measureFont: () => CellMetrics; remeasureFont: () => void }
+    | undefined;
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx || typeof renderer?.remeasureFont !== "function") {
+    console.warn("terminal: could not correct cell metrics — rows will render tight");
+    return;
+  }
+  // Replacing the measurement, not the metrics: the library remeasures on every
+  // font change, and each of those has to come back through here.
+  renderer.measureFont = () => {
+    const { fontSize, fontFamily } = term.options;
+    ctx.font = `${fontSize}px ${fontFamily}`;
+    const m = ctx.measureText("M");
+    const ascent = m.fontBoundingBoxAscent || m.actualBoundingBoxAscent || fontSize * 0.8;
+    const descent = m.fontBoundingBoxDescent || m.actualBoundingBoxDescent || fontSize * 0.25;
+    return {
+      width: Math.ceil(m.width),
+      height: Math.ceil(ascent + descent),
+      baseline: Math.ceil(ascent),
+    };
+  };
+  renderer.remeasureFont();
+}
+
 /** The ⚙ panel's text fields — narrower and denser than a Settings card's. */
 const FIELD =
   "w-full rounded border border-neutral-300 px-2 py-1.5 font-mono text-[12px] outline-none focus:border-indigo-400";
@@ -275,10 +318,7 @@ export function createTerminalView(
     const fitBtn = chip("Fit");
     fitBtn.title = "Resize the shell to this window";
     fitBtn.onclick = () => {
-      // Unconditional send: after another page shrank the pty, this page's own
-      // dimensions haven't changed, so fit() alone would say nothing.
-      fit?.fit();
-      sendResize();
+      claimSize();
       term?.focus();
     };
     const settingsBtn = h("button", "icon-btn text-[15px]", "⚙") as HTMLButtonElement;
@@ -299,6 +339,23 @@ export function createTerminalView(
       ws.send(JSON.stringify({ t: "resize", cols: term.cols, rows: term.rows }));
     }
   };
+
+  /** Take the shell's size for this page. The pty is shared and the last resize
+   *  wins, so a page that was hidden or behind another window can come back to
+   *  a shell that has redrawn itself at some other page's size: its screen ends
+   *  mid-canvas and everything below it is dead. `fit()` alone says nothing —
+   *  this page's own geometry never changed — so the send is unconditional. */
+  function claimSize(): void {
+    if (!term || box.clientHeight === 0) return; // hidden view: no geometry to claim
+    fit?.fit();
+    sendResize();
+  }
+  // Whichever page is being looked at owns the shell; the Fit chip stays for
+  // the case of two windows visible at once, where focus cannot decide.
+  window.addEventListener("focus", claimSize);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) claimSize();
+  });
 
   function teardown(): void {
     ws?.close();
@@ -330,6 +387,7 @@ export function createTerminalView(
       theme: THEME,
     });
     term.open(box);
+    useFontBoxMetrics(term); // before the first fit: rows are counted in cells
     fit = new g.FitAddon();
     term.loadAddon(fit);
     fit.observeResize(); // sidebar, viewport and mobile-keyboard resizes
@@ -389,7 +447,10 @@ export function createTerminalView(
       // every pty): reattach rather than present a dead shell as live. An
       // exit the user asked for keeps its status and Restart chip instead.
       if (!ended && ws && ws.readyState > WebSocket.OPEN) void boot();
-      else term.focus();
+      else {
+        claimSize(); // reopened after another page resized the shell
+        term.focus();
+      }
       return;
     }
     cwd = next;
