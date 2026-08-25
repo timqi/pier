@@ -172,6 +172,15 @@ const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  // 6 — Projects keeps the order the workbench was put in, by hand.
+  `
+  -- Manual order, both nullable: a row nobody has dragged sorts on top of the
+  -- list it belongs to, so a fresh database needs no backfill. sort places a
+  -- session inside its project; project_sort places the project, carried on
+  -- every one of its rows because a project is a cwd, not a table.
+  ALTER TABLE session_state ADD COLUMN sort INTEGER;
+  ALTER TABLE session_state ADD COLUMN project_sort INTEGER;
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

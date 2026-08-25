@@ -22,6 +22,11 @@ export interface SessionInfo {
   unread: boolean;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
+  /** Where it was dragged to inside its project; unset = never dragged. */
+  sort?: number;
+  /** Where its *project* was dragged to; every row of a cwd carries the same
+   *  one, so a session's arrival never moves the project it arrived in. */
+  projectSort?: number;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -84,6 +89,128 @@ export function groupByCwd(list: SessionInfo[]): Map<string, SessionInfo[]> {
   return groups;
 }
 
+// --- manual order -------------------------------------------------------------------
+// Two lists, arranged by hand and kept on the server: the projects, and the
+// sessions inside each one. Both were derived from creation time before, which
+// meant starting a session hoisted its project over everything else — the one
+// move that must not rearrange the rail you are reading.
+
+/** Never-dragged sorts first, so a new row lands on top of its list and an
+ *  instance that has never been arranged keeps a stable, obvious order. */
+function byRank(a: number | undefined, b: number | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined) return -1;
+  if (b === undefined) return 1;
+  return a - b;
+}
+
+/** Projects in their arranged order, each with its sessions in theirs.
+ *  Un-arranged ties break on when the project was *first* seen (newest first)
+ *  and when a session was created (newest first) — both immutable, so nothing
+ *  below moves because something new appeared above it. */
+function orderedProjects(list: SessionInfo[]): [string, SessionInfo[]][] {
+  const groups = [...groupByCwd(list)].map(([cwd, rows]): [string, SessionInfo[]] => [
+    cwd,
+    [...rows].sort((a, b) => byRank(a.sort, b.sort) || b.createdAt - a.createdAt),
+  ]);
+  const rank = (rows: SessionInfo[]): number | undefined =>
+    rows.find((s) => s.projectSort !== undefined)?.projectSort;
+  const born = (rows: SessionInfo[]): number => Math.min(...rows.map((s) => s.createdAt));
+  return groups.sort(([, a], [, b]) => byRank(rank(a), rank(b)) || born(b) - born(a));
+}
+
+/** `key` out, back in above or below `target`. */
+function moved(keys: string[], key: string, target: string, after: boolean): string[] {
+  const rest = keys.filter((k) => k !== key);
+  rest.splice(rest.indexOf(target) + (after ? 1 : 0), 0, key);
+  return rest;
+}
+
+/** What the rail is showing: the pinned sessions, arranged. */
+const pinnedProjects = (): [string, SessionInfo[]][] =>
+  orderedProjects(deps.sessions().filter((s) => s.pinned));
+
+/** Optimistic, like the pin toggle: the new places are on the rows and drawn
+ *  before the write, and whatever the server says wins over them. A rejected
+ *  or unreachable write reloads the list, so the order visibly snaps back
+ *  rather than lying about having been saved. */
+function place(
+  order: string[],
+  keyOf: (s: SessionInfo) => string,
+  set: (s: SessionInfo, at: number) => void,
+  body: { sessions?: string[]; projects?: string[] },
+): void {
+  const rank = new Map(order.map((key, i) => [key, i]));
+  for (const s of deps.sessions()) {
+    const at = rank.get(keyOf(s));
+    if (at !== undefined) set(s, at);
+  }
+  renderSessions();
+  const reload = () => void deps.loadSessions();
+  void sendJson("/api/projects/order", body).then((res) => {
+    if (!res.ok) reload();
+  }, reload);
+}
+
+function dropSession(cwd: string, id: string, target: string, after: boolean): void {
+  const rows = pinnedProjects().find(([c]) => c === cwd);
+  if (!rows) return;
+  const sessions = moved(rows[1].map((s) => s.id), id, target, after);
+  place(sessions, (s) => s.id, (s, at) => (s.sort = at), { sessions });
+}
+
+function dropProject(cwd: string, target: string, after: boolean): void {
+  const projects = moved(pinnedProjects().map(([c]) => c), cwd, target, after);
+  place(projects, (s) => s.cwd, (s, at) => (s.projectSort = at), { projects });
+}
+
+/** Which row is being dragged, and which list it may be dropped in: a session
+ *  belongs to its cwd and cannot leave it — the directory is what it *is*. */
+let dragging: { list: string; key: string } | null = null;
+
+/** The line the row would land on — inline rather than a class, so it cannot
+ *  collide with the borders the project rows already carry. */
+function dropLine(row: HTMLElement, after: boolean | null): void {
+  row.style.boxShadow = after === null ? "" : `inset 0 ${after ? -2 : 2}px 0 0 #818cf8`;
+}
+
+/** Make one row draggable within `list`, dropping above or below whichever
+ *  half of a row it is released on. */
+function sortable(row: HTMLElement, list: string, key: string, drop: (target: string, after: boolean) => void): void {
+  row.draggable = true;
+  row.ondragstart = (ev) => {
+    ev.stopPropagation(); // a session drag is not also its project's
+    dragging = { list, key };
+    // Firefox starts no drag at all without payload; the key is the payload.
+    ev.dataTransfer?.setData("text/plain", key);
+  };
+  // Re-render on end, not only on drop: a drag abandoned outside every row
+  // leaves the last drop line drawn, and a stray line is an order nobody made.
+  row.ondragend = () => {
+    dragging = null;
+    renderSessions();
+  };
+  const half = (ev: DragEvent): boolean => {
+    const box = row.getBoundingClientRect();
+    return ev.clientY > box.top + box.height / 2;
+  };
+  const droppable = (ev: DragEvent): boolean => {
+    if (!dragging || dragging.list !== list || dragging.key === key) return false;
+    ev.preventDefault(); // the default is "reject the drop"
+    ev.stopPropagation();
+    return true;
+  };
+  row.ondragover = (ev) => {
+    if (droppable(ev)) dropLine(row, half(ev));
+  };
+  row.ondragleave = () => dropLine(row, null);
+  row.ondrop = (ev) => {
+    const from = dragging?.key;
+    dropLine(row, null);
+    if (droppable(ev) && from) drop(from, half(ev));
+  };
+}
+
 /** Row action revealed on hover (resident on touch, which has no hover). */
 const HOVER_BTN =
   "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block";
@@ -140,6 +267,8 @@ function sessionRow(s: SessionInfo): HTMLElement {
   };
   li.append(stateDot(s), h("span", "truncate", s.title ?? "untitled"), more);
   li.onclick = () => deps.select(s.id);
+  li.title = "Drag to reorder";
+  sortable(li, s.cwd, s.id, (id, after) => dropSession(s.cwd, id, s.id, after));
   return li;
 }
 
@@ -198,7 +327,10 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
     more,
   ]);
   summary.className += " group px-3 py-1.5 hover:bg-neutral-100";
-  summary.title = cwd;
+  summary.title = `${cwd}\nDrag to reorder`;
+  // The summary is the handle and the drop zone: an open project is as tall as
+  // its sessions, and "above or below" has to mean above or below its heading.
+  sortable(summary, "", cwd, (from, after) => dropProject(from, cwd, after));
   el.open = !collapsed.has(cwd);
   el.ontoggle = () => setCollapsed(cwd, !el.open);
   const rows = h("ul", "pb-1");
@@ -212,10 +344,10 @@ export function renderSessions(): void {
   // The one place the unread dots are painted, so also the one place the
   // installed app's icon badge is kept in step with them.
   setUnreadBadge(sessions.filter((s) => s.unread).length);
-  const projects = groupByCwd(sessions.filter((s) => s.pinned));
+  const projects = pinnedProjects();
   projectTree.replaceChildren(
-    ...(projects.size
-      ? [...projects].map(([cwd, list]) => projectNode(cwd, list))
+    ...(projects.length
+      ? projects.map(([cwd, list]) => projectNode(cwd, list))
       : [
           h(
             "p",

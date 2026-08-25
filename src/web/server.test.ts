@@ -418,6 +418,36 @@ describe("workbench server", () => {
     })).status).toBe(400);
   });
 
+  it("keeps the manual order, and a new session never moves its project", async () => {
+    const { app, state } = setup();
+    state.pin({ id: "a1", cwd: "/a", createdAt: 1 }, true);
+    state.pin({ id: "b1", cwd: "/b", createdAt: 2 }, true);
+    const order = (body: unknown) =>
+      app.request("/api/projects/order", { method: "POST", body: JSON.stringify(body) });
+
+    expect((await order({ projects: ["/b", "/a"], sessions: ["b1", "a1"] })).status).toBe(200);
+    expect(state.projects().map((s) => [s.id, s.sort, s.projectSort])).toEqual([
+      ["b1", 0, 0],
+      ["a1", 1, 1],
+    ]);
+
+    // The jump this exists to stop: a second session in /a inherits /a's place.
+    state.pin({ id: "a2", cwd: "/a", createdAt: 3 }, true);
+    const rows = (await (await app.request("/api/projects")).json()) as
+      { id: string; sort?: number; projectSort?: number }[];
+    expect(rows.find((r) => r.id === "a2")).toMatchObject({ projectSort: 1 });
+    // Never dragged: no place of its own, which is what puts it on top of /a.
+    expect(rows.find((r) => r.id === "a2")).not.toHaveProperty("sort");
+  });
+
+  it("refuses an order that is not a list of ids", async () => {
+    const { app } = setup();
+    const order = (body: string) => app.request("/api/projects/order", { method: "POST", body });
+    expect((await order("{}")).status).toBe(400);
+    expect((await order(JSON.stringify({ projects: ["/a", 7] }))).status).toBe(400);
+    expect((await order(JSON.stringify({ sessions: "s1" }))).status).toBe(400);
+  });
+
   it("creates a session in the given project directory, never pier's own", async () => {
     const { app, factory, session, hub } = setup();
     expect((await app.request("/api/sessions", { method: "POST", body: "{}" })).status).toBe(400);

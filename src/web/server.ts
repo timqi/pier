@@ -150,8 +150,16 @@ export function createServer(
         listing = undefined;
       });
 
-  const present = (s: SessionSummary, pinned: boolean, unread: boolean) => ({
+  // `order` is where the workbench was arranged to put this row, not a fact
+  // about the Pi session — it rides along so one Projects read is enough.
+  const present = (
+    s: SessionSummary,
+    pinned: boolean,
+    unread: boolean,
+    order: { sort?: number; projectSort?: number } = {},
+  ) => ({
     ...s,
+    ...order,
     state: router.stateOf(s.id) ?? "idle",
     pinned,
     unread,
@@ -167,7 +175,33 @@ export function createServer(
       // happened to be unreadable. A later explicit full listing can repair it.
       projectBackfillNeeded = false;
     }
-    return c.json(state.projects().map((s) => present(s, true, s.unread)));
+    return c.json(
+      state.projects().map(({ sort, projectSort, ...s }) =>
+        present(s, true, s.unread, { sort, projectSort })
+      ),
+    );
+  });
+
+  // One drag, one write of the list that changed: the projects, or one
+  // project's sessions. Whole lists rather than a move — the client has just
+  // rendered the result, and replaying a move on top of a stale list would put
+  // the row somewhere nobody dropped it.
+  app.post("/api/projects/order", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const list = (raw: unknown): string[] | null | undefined =>
+      raw === undefined
+        ? undefined
+        : Array.isArray(raw) && raw.every((x) => typeof x === "string" && x)
+          ? (raw as string[])
+          : null;
+    const sessions = list(body?.sessions);
+    const projects = list(body?.projects);
+    if (sessions === null || projects === null || (!sessions && !projects)) {
+      return c.json({ error: "sessions and/or projects must be lists of ids" }, 400);
+    }
+    state.reorder({ sessions, projects });
+    hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ ok: true });
   });
 
   app.get("/api/sessions", async (c) => {
@@ -179,7 +213,10 @@ export function createServer(
     return c.json(
       [...[...nascent].map(([id, n]) => ({ id, ...n })), ...sessions].map((s) => {
         const row = flags.get(s.id);
-        return present(s, row?.pinned ?? false, row?.unread ?? false);
+        return present(s, row?.pinned ?? false, row?.unread ?? false, {
+          sort: row?.sort,
+          projectSort: row?.projectSort,
+        });
       }),
     );
   });

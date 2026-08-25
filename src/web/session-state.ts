@@ -34,21 +34,48 @@ export class SessionStateStore {
 
   /** Pin plus the summary Projects needs, atomically in one row. */
   pin(summary: SessionSummary, pinned: boolean): void {
+    // A new session joins a project that already has a place in the list.
+    // Unranked it would sort on top — lifting the whole project with it, which
+    // is the jump manual order exists to stop.
+    const sibling = this.#db.prepare(
+      "SELECT project_sort AS rank FROM session_state WHERE cwd = ? AND project_sort IS NOT NULL LIMIT 1",
+    ).get(summary.cwd) as { rank: number } | undefined;
     this.#db.prepare(
-      `INSERT INTO session_state(session_id, pinned, cwd, title, created_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO session_state(session_id, pinned, cwd, title, created_at, project_sort)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          pinned = excluded.pinned,
          cwd = excluded.cwd,
          title = COALESCE(excluded.title, session_state.title),
-         created_at = excluded.created_at`,
-    ).run(summary.id, pinned ? 1 : 0, summary.cwd, summary.title ?? null, summary.createdAt);
+         created_at = excluded.created_at,
+         project_sort = COALESCE(session_state.project_sort, excluded.project_sort)`,
+    ).run(
+      summary.id,
+      pinned ? 1 : 0,
+      summary.cwd,
+      summary.title ?? null,
+      summary.createdAt,
+      sibling?.rank ?? null,
+    );
+  }
+
+  /** One drag = one write of the whole list it reordered: index is the place.
+   *  `sessions` are ids (a session's place inside its project), `projects` are
+   *  cwds, whose place is stamped on every session that has that cwd. */
+  reorder(order: { sessions?: string[]; projects?: string[] }): void {
+    const bySession = this.#db.prepare("UPDATE session_state SET sort = ? WHERE session_id = ?");
+    const byCwd = this.#db.prepare("UPDATE session_state SET project_sort = ? WHERE cwd = ?");
+    this.#tx(() => {
+      order.sessions?.forEach((id, i) => bySession.run(i, id));
+      order.projects?.forEach((cwd, i) => byCwd.run(i, cwd));
+    });
   }
 
   /** Project rows only; unlike AgentFactory.list(), this never touches disk. */
-  projects(): (SessionSummary & { unread: boolean })[] {
+  projects(): (SessionSummary & { unread: boolean; sort?: number; projectSort?: number })[] {
     const rows = this.#db.prepare(
-      `SELECT session_id AS id, cwd, title, created_at AS createdAt, unread
+      `SELECT session_id AS id, cwd, title, created_at AS createdAt, unread,
+              sort, project_sort AS projectSort
        FROM session_state
        WHERE pinned = 1 AND cwd IS NOT NULL AND created_at IS NOT NULL
        ORDER BY created_at DESC`,
@@ -58,10 +85,14 @@ export class SessionStateStore {
       title: string | null;
       createdAt: number;
       unread: number;
+      sort: number | null;
+      projectSort: number | null;
     }[];
-    return rows.map(({ title, unread, ...row }) => ({
+    return rows.map(({ title, unread, sort, projectSort, ...row }) => ({
       ...row,
       ...(title ? { title } : {}),
+      ...(sort === null ? {} : { sort }),
+      ...(projectSort === null ? {} : { projectSort }),
       unread: unread === 1,
     }));
   }
@@ -90,9 +121,16 @@ export class SessionStateStore {
          cwd = ?, title = COALESCE(?, title), created_at = ?
        WHERE session_id = ?`,
     );
+    this.#tx(() => {
+      for (const s of summaries) update.run(s.cwd, s.title ?? null, s.createdAt, s.id);
+    });
+  }
+
+  /** All-or-nothing: a half-written order is a list nobody arranged. */
+  #tx(run: () => void): void {
     this.#db.exec("BEGIN");
     try {
-      for (const s of summaries) update.run(s.cwd, s.title ?? null, s.createdAt, s.id);
+      run();
       this.#db.exec("COMMIT");
     } catch (err) {
       this.#db.exec("ROLLBACK");
@@ -100,11 +138,23 @@ export class SessionStateStore {
     }
   }
 
-  flags(): Map<string, { pinned: boolean; unread: boolean }> {
+  flags(): Map<string, { pinned: boolean; unread: boolean; sort?: number; projectSort?: number }> {
     const rows = this.#db.prepare(
-      "SELECT session_id AS id, pinned, unread FROM session_state WHERE pinned = 1 OR unread = 1",
-    ).all() as unknown as { id: string; pinned: number; unread: number }[];
-    return new Map(rows.map((r) => [r.id, { pinned: r.pinned === 1, unread: r.unread === 1 }]));
+      `SELECT session_id AS id, pinned, unread, sort, project_sort AS projectSort
+       FROM session_state WHERE pinned = 1 OR unread = 1`,
+    ).all() as unknown as {
+      id: string;
+      pinned: number;
+      unread: number;
+      sort: number | null;
+      projectSort: number | null;
+    }[];
+    return new Map(rows.map((r) => [r.id, {
+      pinned: r.pinned === 1,
+      unread: r.unread === 1,
+      ...(r.sort === null ? {} : { sort: r.sort }),
+      ...(r.projectSort === null ? {} : { projectSort: r.projectSort }),
+    }]));
   }
 
   /** The first prompt supplies the title of a newly-created pinned session. */
