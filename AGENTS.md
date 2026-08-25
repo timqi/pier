@@ -114,3 +114,8 @@ No repo-wide number: it fired unconditionally and therefore said nothing.
   dropped, never half-handled. No silent `catch`.
 - Deps: official platform SDKs or nothing; SQLite direct, no ORM; no
   frameworks in core.
+- **Never kill by pattern.** No `pkill`/`killall`/`kill` by name or `-f` — this
+  repo's own process is `node dist/main.js`, so the match hits production. Kill
+  only a PID you started (`node dist/main.js & pid=$!; trap 'kill $pid' EXIT`),
+  or give the test process a unique marker; the live service is
+  `systemctl --user … pier`, and stopping or restarting it is destructive — ask first.
