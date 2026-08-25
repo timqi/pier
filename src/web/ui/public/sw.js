@@ -10,10 +10,12 @@
 
 const OFFLINE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Pier is unreachable</title>
-<style>body{margin:0;display:grid;place-items:center;height:100dvh;font:15px/1.5 ui-sans-serif,system-ui,sans-serif;color:#404040;background:#fafafa}
-main{text-align:center;padding:2rem}button{margin-top:1rem;padding:.5rem 1rem;border:1px solid #d4d4d4;border-radius:.5rem;background:#fff;font:inherit;cursor:pointer}</style>
+<style>:root{color-scheme:light dark}
+body{margin:0;display:grid;place-items:center;height:100dvh;font:15px/1.5 ui-sans-serif,system-ui,sans-serif;color:light-dark(#404040,#d4d4d4);background:light-dark(#fafafa,#1c1c1c)}
+main{text-align:center;padding:2rem}.dim{color:light-dark(#737373,#8a8a8a)}
+button{margin-top:1rem;padding:.5rem 1rem;border:1px solid light-dark(#d4d4d4,#3d3d3d);border-radius:.5rem;background:light-dark(#fff,#262626);color:inherit;font:inherit;cursor:pointer}</style>
 </head><body><main><h1 style="font-size:1rem">Pier is unreachable</h1>
-<p style="color:#737373">This device is offline, or the server is not answering.</p>
+<p class="dim">This device is offline, or the server is not answering.</p>
 <button onclick="location.reload()">Try again</button></main></body></html>`;
 
 self.addEventListener("install", () => self.skipWaiting());

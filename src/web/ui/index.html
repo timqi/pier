@@ -6,6 +6,17 @@
        under an iPhone's home indicator. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fafafa" />
+  <!-- Ahead of the stylesheet, because a workbench that flashes white and then
+       goes dark reads as a bug. This is the only place "system" is resolved
+       before the bundle exists; theme.ts owns the choice from there on. -->
+  <script>
+    try {
+      var t = localStorage.getItem("pier.theme");
+      document.documentElement.dataset.theme =
+        t === "light" || t === "dark" ? t
+          : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } catch (e) { /* storage denied (private mode, blocked cookies): light it is */ }
+  </script>
   <!-- Installed as a home-screen app: standalone window, own icon. The
        manifest shares the workbench's cookie boundary. -->
   <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
@@ -54,6 +65,12 @@
       <a id="version" href="https://github.com/timqi/pier" target="_blank" rel="noreferrer"
         title="Pier is free software (AGPL-3.0) — the source of what you are using"
         class="font-mono text-[11px] text-neutral-400 hover:text-neutral-700 hover:underline"></a>
+      <!-- Cycles system → light → dark; the glyph is what is on screen, the
+           title says which of the three states put it there. Beside the
+           version rather than at the header's right edge, which is where the
+           fixed rail toggle lands. -->
+      <button type="button" id="theme-toggle" aria-label="Theme"
+        class="icon-btn text-[13px]"></button>
     </header>
     <details id="console-section" open class="flex-none border-b border-neutral-200/70">
       <summary class="flex cursor-pointer select-none items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 hover:bg-neutral-100">

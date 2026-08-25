@@ -81,7 +81,7 @@ export function openBrowser(
     const list = await listing(path);
     if (!list) return;
     const content = h("div", "flex max-h-80 w-80 flex-col");
-    const use = btn("Use", "ml-auto flex-none cursor-pointer rounded bg-indigo-600 px-2 py-0.5 text-[11.5px] text-white");
+    const use = btn("Use", "ml-auto flex-none cursor-pointer rounded bg-indigo-600 px-2 py-0.5 text-[11.5px] text-white dark:text-neutral-50");
     use.onclick = () => commit(list.path);
     const head = h(
       "div",

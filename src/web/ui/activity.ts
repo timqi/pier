@@ -28,6 +28,55 @@ const svg = (name: string, attrs: Record<string, string> = {}): SVGElement => {
 const elapsed = (since: number | null): string =>
   since === null ? "-" : fmtDuration(Date.now() - since);
 
+/**
+ * The dependency graph is the one surface that cannot inherit the theme.
+ * Everywhere else a colour is a Tailwind utility resolving to a CSS variable,
+ * which style.css swaps wholesale in dark; here the colours are SVG
+ * presentation attributes, and `var()` in one of those is not something every
+ * engine resolves. So the graph carries both palettes and picks at draw time —
+ * `pier:theme` (theme.ts) is what makes it draw again.
+ *
+ * Per-kind card chrome; a session's state overrides it (green = streaming,
+ * muted = idle) so the graph answers "who is busy" at a glance.
+ */
+interface Card { fill: string; stroke: string; text: string; dash?: string }
+interface Palette {
+  edge: string;
+  callback: string;
+  message: string;
+  scheduler: Card;
+  console: Card;
+  task: Card;
+  process: Card;
+  streaming: Card;
+  idle: Card;
+}
+const PALETTE: Record<"light" | "dark", Palette> = {
+  light: {
+    edge: "#a3a3a3",
+    callback: "#0891b2",
+    message: "#d97706",
+    scheduler: { fill: "#f5f3ff", stroke: "#a78bfa", text: "#5b21b6" },
+    console: { fill: "#eff6ff", stroke: "#93c5fd", text: "#1d4ed8" },
+    task: { fill: "#fffbeb", stroke: "#fbbf24", text: "#92400e" },
+    process: { fill: "#f5f5f5", stroke: "#a3a3a3", text: "#525252", dash: "4 3" },
+    streaming: { fill: "#ffffff", stroke: "#10b981", text: "#262626" },
+    idle: { fill: "#fafafa", stroke: "#d4d4d4", text: "#737373" },
+  },
+  dark: {
+    edge: "#7a7a7a",
+    callback: "#3fc3dd",
+    message: "#e0a13a",
+    scheduler: { fill: "#2b2440", stroke: "#7d63c9", text: "#c9b8f5" },
+    console: { fill: "#1f2a3d", stroke: "#4a7fbf", text: "#a8c8f0" },
+    task: { fill: "#3a2f1c", stroke: "#b8862a", text: "#f0d49a" },
+    process: { fill: "#262626", stroke: "#5c5c5c", text: "#a3a3a3", dash: "4 3" },
+    streaming: { fill: "#22302a", stroke: "#10b981", text: "#e5e5e5" },
+    idle: { fill: "#212121", stroke: "#4a4a4a", text: "#9a9a9a" },
+  },
+};
+const palette = (): Palette => PALETTE[document.documentElement.dataset.theme === "dark" ? "dark" : "light"];
+
 export function createActivityView(
   root: HTMLElement,
   openSession: (id: string) => void,
@@ -190,7 +239,8 @@ export function createActivityView(
     // graph outgrows it instead of shrinking labels into illegibility.
     const graph = svg("svg", { width: String(width), height: String(height), viewBox: `0 0 ${width} ${height}`, class: "block" });
     const defs = svg("defs");
-    for (const [id, color] of [["activity-arrow", "#a3a3a3"], ["activity-arrow-cb", "#0891b2"], ["activity-arrow-msg", "#d97706"]] as const) {
+    const ink = palette();
+    for (const [id, color] of [["activity-arrow", ink.edge], ["activity-arrow-cb", ink.callback], ["activity-arrow-msg", ink.message]] as const) {
       const marker = svg("marker", {
         id,
         viewBox: "0 0 10 10",
@@ -227,7 +277,7 @@ export function createActivityView(
       const path = svg("path", {
         d,
         fill: "none",
-        stroke: edge.kind === "callback" ? "#0891b2" : edge.kind === "message" ? "#d97706" : "#a3a3a3",
+        stroke: edge.kind === "callback" ? ink.callback : edge.kind === "message" ? ink.message : ink.edge,
         "stroke-width": "1.5",
         "marker-end": edge.kind === "callback" ? "url(#activity-arrow-cb)" : edge.kind === "message" ? "url(#activity-arrow-msg)" : "url(#activity-arrow)",
       });
@@ -238,14 +288,6 @@ export function createActivityView(
       graph.append(path);
     }
 
-    // Per-kind card chrome; a session's state overrides it (green = streaming,
-    // muted = idle) so the graph answers "who is busy" at a glance.
-    const CARD: Record<Exclude<NodeKind, "session">, { fill: string; stroke: string; text: string; dash?: string }> = {
-      scheduler: { fill: "#f5f3ff", stroke: "#a78bfa", text: "#5b21b6" },
-      console: { fill: "#eff6ff", stroke: "#93c5fd", text: "#1d4ed8" },
-      task: { fill: "#fffbeb", stroke: "#fbbf24", text: "#92400e" },
-      process: { fill: "#f5f5f5", stroke: "#a3a3a3", text: "#525252", dash: "4 3" },
-    };
     // SVG text doesn't clip to its card, so truncate by width: CJK glyphs run
     // twice as wide as latin at this size.
     const wide = /[\u1100-\u11FF\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
@@ -259,11 +301,9 @@ export function createActivityView(
     };
     for (const node of all) {
       const p = positions.get(node.id)!;
-      const card = node.kind === "session"
-        ? node.state === "streaming"
-          ? { fill: "#ffffff", stroke: "#10b981", text: "#262626" }
-          : { fill: "#fafafa", stroke: "#d4d4d4", text: "#737373" }
-        : CARD[node.kind];
+      const card: Card = node.kind === "session"
+        ? node.state === "streaming" ? ink.streaming : ink.idle
+        : ink[node.kind];
       const group = svg("g", { transform: `translate(${p.x},${p.y})` });
       if (node.kind === "session") group.classList.add("cursor-pointer");
       group.onclick = () => { if (node.kind === "session") openSession(node.id); };
@@ -281,7 +321,7 @@ export function createActivityView(
       group.append(rect);
       let textX = -NODE_W / 2 + 12;
       if (node.kind === "session") {
-        const dot = svg("circle", { cx: String(-NODE_W / 2 + 15), cy: "0", r: "3.5", fill: node.state === "streaming" ? "#10b981" : "#d4d4d4" });
+        const dot = svg("circle", { cx: String(-NODE_W / 2 + 15), cy: "0", r: "3.5", fill: card.stroke });
         if (node.state === "streaming") {
           const pulse = svg("animate", { attributeName: "opacity", values: "1;0.3;1", dur: "1.6s", repeatCount: "indefinite" });
           dot.append(pulse);
@@ -321,5 +361,8 @@ export function createActivityView(
     else if (arg === "sessions") tab = "sessions";
     void load();
   });
+  // The graph's palette is baked into attributes at draw time, so a theme
+  // switch under an open graph leaves the old one on screen until it redraws.
+  window.addEventListener("pier:theme", () => { if (view.visible) render(); });
   return Object.assign(view, { refresh() { if (view.visible) void load(); } });
 }

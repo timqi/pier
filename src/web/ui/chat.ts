@@ -295,7 +295,7 @@ function addCodeCopy(root: HTMLElement): void {
     wrap.append(
       pre,
       copyBtn(
-        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100 pointer-coarse:opacity-100",
+        "absolute right-1.5 top-1.5 cursor-pointer rounded border border-black/[0.08] bg-white/85 px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition-opacity hover:bg-white hover:text-neutral-800 focus:opacity-100 group-hover/code:opacity-100 pointer-coarse:opacity-100 dark:border-neutral-200",
         () => code.textContent ?? "",
       ),
     );
@@ -349,7 +349,7 @@ function renderAssistant(
 function renderSilence(node: HTMLElement, reason: string | undefined): void {
   node.classList.remove("md", "whitespace-pre-wrap");
   node.replaceChildren(
-    h("span", "text-[12.5px] italic text-black/40", reason ? `Stayed silent — ${reason}` : "Stayed silent."),
+    h("span", "text-[12.5px] italic text-neutral-400", reason ? `Stayed silent — ${reason}` : "Stayed silent."),
   );
 }
 

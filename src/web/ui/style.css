@@ -1,6 +1,109 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* theme.ts resolves the choice — including "system" — before the first paint
+   and puts the answer on <html>. One attribute then drives both the palette
+   swap below and the handful of `dark:` utilities the swap cannot reach. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* --- dark palette -----------------------------------------------------------
+   Tailwind v4 compiles every colour utility to `var(--color-…)` and declares
+   the palette inside `@layer theme`. Redefining those variables in an unlayered
+   rule therefore repaints all ~640 colour utilities at once; the alternative
+   was a `dark:` twin at every one of those call sites.
+
+   Not a mechanical mirror of the light ramp. `text-neutral-400` is 86 uses of
+   muted label text and `text-neutral-500` another 51, so the light half of each
+   ramp sits higher than a straight 50↔950 swap would put it; and the accent
+   ramps flatten at the top, because 600/700/800 are all "accent text on a tinted
+   chip" here and all have to read against a dark surface.
+
+   `--color-black` is deliberately untouched: every remaining use of it is a
+   scrim or a backdrop, which still wants to be black over a dark page. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  /* No element paints the page itself — `bg-white` starts at the panes — so
+     without this the canvas would be whatever the UA picks for a dark scheme. */
+  background-color: var(--color-white);
+
+  /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
+     rail), 100–300 the chrome over it; 400 and up is type. */
+  --color-white: oklch(22.5% 0 none);
+  --color-neutral-50: oklch(19% 0 none);
+  --color-neutral-100: oklch(27.5% 0 none);
+  --color-neutral-200: oklch(32.5% 0 none);
+  --color-neutral-300: oklch(39% 0 none);
+  --color-neutral-400: oklch(62% 0 none);
+  --color-neutral-500: oklch(70% 0 none);
+  --color-neutral-600: oklch(78% 0 none);
+  --color-neutral-700: oklch(85% 0 none);
+  --color-neutral-800: oklch(90% 0 none);
+  --color-neutral-900: oklch(94% 0 none);
+  /* Only reached through `dark:` — the one token that means "white whatever the
+     theme", for labels over a scrim or a saturated fill. */
+  --color-neutral-950: oklch(97% 0 none);
+
+  --color-indigo-50: oklch(24.5% 0.028 272.314);
+  --color-indigo-100: oklch(32% 0.065 272.788);
+  --color-indigo-200: oklch(40% 0.09 274.039);
+  --color-indigo-300: oklch(50% 0.125 274.713);
+  --color-indigo-400: oklch(62% 0.155 276.935);
+  --color-indigo-500: oklch(68% 0.165 277.117);
+  --color-indigo-600: oklch(70% 0.175 276.966);
+  --color-indigo-700: oklch(80% 0.115 277.023);
+  --color-indigo-800: oklch(86% 0.08 277.366);
+
+  --color-red-50: oklch(24.5% 0.028 17.38);
+  --color-red-100: oklch(32% 0.065 17.717);
+  --color-red-200: oklch(40% 0.09 18.334);
+  --color-red-400: oklch(62% 0.155 22.216);
+  --color-red-600: oklch(73% 0.145 27.325);
+  --color-red-700: oklch(80% 0.115 27.518);
+
+  --color-amber-50: oklch(24.5% 0.028 95.277);
+  --color-amber-100: oklch(32% 0.065 95.617);
+  --color-amber-200: oklch(40% 0.09 95.746);
+  --color-amber-300: oklch(50% 0.125 91.605);
+  --color-amber-400: oklch(62% 0.155 84.429);
+  --color-amber-500: oklch(68% 0.165 70.08);
+  --color-amber-600: oklch(73% 0.145 58.318);
+  --color-amber-700: oklch(80% 0.115 48.998);
+  --color-amber-800: oklch(86% 0.08 46.201);
+
+  --color-emerald-50: oklch(24.5% 0.028 166.113);
+  --color-emerald-100: oklch(32% 0.065 163.051);
+  --color-emerald-200: oklch(40% 0.09 164.15);
+  --color-emerald-400: oklch(62% 0.155 163.223);
+  --color-emerald-500: oklch(68% 0.165 162.48);
+  --color-emerald-600: oklch(73% 0.145 163.225);
+  --color-emerald-700: oklch(80% 0.115 165.612);
+
+  --color-green-50: oklch(24.5% 0.028 155.826);
+  --color-green-200: oklch(40% 0.09 155.995);
+  --color-green-500: oklch(68% 0.165 149.579);
+  --color-green-700: oklch(80% 0.115 150.069);
+  --color-green-800: oklch(86% 0.08 151.328);
+
+  --color-cyan-50: oklch(24.5% 0.028 200.873);
+  --color-cyan-100: oklch(32% 0.065 203.388);
+  --color-cyan-200: oklch(40% 0.09 205.041);
+  --color-cyan-400: oklch(62% 0.155 211.53);
+  --color-cyan-500: oklch(68% 0.165 215.221);
+  --color-cyan-700: oklch(80% 0.115 223.128);
+  --color-cyan-800: oklch(86% 0.08 224.283);
+
+  --color-sky-50: oklch(24.5% 0.028 236.62);
+  --color-sky-200: oklch(40% 0.09 230.902);
+  --color-sky-500: oklch(68% 0.165 237.323);
+  --color-sky-700: oklch(80% 0.115 242.749);
+
+  --color-violet-50: oklch(24.5% 0.028 293.756);
+  --color-violet-200: oklch(40% 0.09 293.283);
+  --color-violet-700: oklch(80% 0.115 292.581);
+
+  --color-blue-700: oklch(80% 0.115 264.376);
+}
+
 /* --- global UI scale --------------------------------------------------------
    One knob for how big the whole workbench reads. Tailwind's spacing and sizing
    utilities are rem-based, so the root size scales padding, row heights and
@@ -124,8 +227,10 @@ html {
   .btn {
     @apply rounded-md border border-neutral-300 bg-white px-3 py-1 shadow-2xs transition-colors hover:bg-neutral-100 active:bg-neutral-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white;
   }
+  /* Dark: the indigo ramp flattens upward so accent *text* stays readable, and
+     a label over that brighter fill has to go the other way. */
   .btn-primary {
-    @apply border-indigo-600 bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-500 active:bg-indigo-700;
+    @apply border-indigo-600 bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50;
   }
   /* The one <select> skin: native chrome off, house chevron on. Sits beside
      whatever size utilities the call site adds; the right padding keeps text
@@ -148,8 +253,10 @@ html {
     @apply flex flex-none items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-neutral-200 px-4 py-2 max-md:flex-wrap max-md:gap-y-2;
   }
   /* Lightbox paging arrows; the side comes from a `left-2` / `right-2` beside it. */
+  /* The scrim under these stays black in both themes, so the glyph on it has to
+     stay white — which `text-white` no longer means once the palette flips. */
   .lightbox-nav {
-    @apply absolute top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white hover:bg-black/70;
+    @apply absolute top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white dark:text-neutral-950 hover:bg-black/70;
   }
   /* Collapsible rows: hide native markers, rotate our chevron on open. */
   summary {
@@ -174,8 +281,10 @@ html {
   /* Chat attachment thumbnails — the same tile whether the user attached the
      image or the agent produced it. A small fixed square; object-contain, not
      cover, because a cropped corner of a chart says nothing about what it is. */
+  /* The faint black tint that outlines a tile on paper vanishes into a dark
+     page; the same separation there has to come up the ramp instead. */
   .thumb {
-    @apply inline-block h-16 w-16 cursor-zoom-in rounded-md border border-black/5 bg-black/[0.02] object-contain align-middle;
+    @apply inline-block h-16 w-16 cursor-zoom-in rounded-md border border-black/5 bg-black/[0.02] object-contain align-middle dark:border-neutral-200 dark:bg-neutral-100;
   }
   /* The tiles get their own block under the text — packed across the row and
      wrapping, never trailing the prose on its last line. */
@@ -202,7 +311,29 @@ html {
     @apply prose prose-neutral max-w-none;
     font-size: inherit;
     line-height: inherit;
+    /* `prose-neutral` resolves its palette at build time and emits literal
+       colours, so none of prose's own chrome follows the palette swap: in dark
+       every heading, link, bold word and quote would paint near-black on a
+       near-black pane. Re-point the ones that paint at the ramp — the values
+       are what prose-neutral already used, so light is unchanged. The rest
+       (lead, pre) is either never emitted by marked or overridden by the rules
+       below. */
     --tw-prose-body: var(--color-neutral-900);
+    --tw-prose-headings: var(--color-neutral-900);
+    --tw-prose-links: var(--color-neutral-900);
+    --tw-prose-bold: var(--color-neutral-900);
+    --tw-prose-quotes: var(--color-neutral-900);
+    --tw-prose-kbd: var(--color-neutral-900);
+    /* Used as a colour, not a shadow: prose's own value is the same 10% of ink. */
+    --tw-prose-kbd-shadows: color-mix(in oklab, var(--color-neutral-900) 10%, transparent);
+    --tw-prose-code: var(--color-neutral-900);
+    --tw-prose-counters: var(--color-neutral-500);
+    --tw-prose-captions: var(--color-neutral-500);
+    --tw-prose-bullets: var(--color-neutral-300);
+    --tw-prose-th-borders: var(--color-neutral-300);
+    --tw-prose-hr: var(--color-neutral-200);
+    --tw-prose-quote-borders: var(--color-neutral-200);
+    --tw-prose-td-borders: var(--color-neutral-200);
   }
   .md p,
   .md ul,
@@ -257,11 +388,11 @@ html {
      background is swapped for a faint tint that keeps the page's light weight,
      and inline code loses prose's literal backtick pseudo-elements. */
   .md pre {
-    @apply overflow-x-auto rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2 text-[13px];
+    @apply overflow-x-auto rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
     color: var(--color-neutral-800);
   }
   .md :not(pre) > code {
-    @apply rounded bg-black/[0.055] px-1 py-px text-[0.9em] font-normal text-neutral-800;
+    @apply rounded bg-black/[0.055] px-1 py-px text-[0.9em] font-normal text-neutral-800 dark:bg-neutral-100;
   }
   .md :not(pre) > code::before,
   .md :not(pre) > code::after {

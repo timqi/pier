@@ -228,7 +228,7 @@ export function takeActivityGroup(): HTMLElement | null {
  */
 const STATUS_STYLE: Record<ActivityStatus, string> = {
   running: "text-green-700 open:bg-green-50",
-  done: "text-neutral-400 hover:text-neutral-600 open:bg-black/[0.02] open:text-neutral-500",
+  done: "text-neutral-400 hover:text-neutral-600 open:bg-black/[0.02] open:text-neutral-500 dark:open:bg-neutral-100",
   failed: "text-red-600 open:bg-red-50",
   interrupted: "text-amber-700 open:bg-amber-50",
 };
@@ -248,7 +248,7 @@ function styleGroup(el: HTMLElement, status: ActivityStatus): void {
   const placement = el.dataset.adopted
     ? "float-left min-w-[6.5rem] pr-3 tabular-nums mt-[3px] open:float-none open:mt-0 open:mb-1.5 open:min-w-0 open:pr-0"
     : "mx-5 my-1.5";
-  el.className = `${placement} rounded-md text-[11.5px] leading-[1.35] open:border open:border-black/[0.06] open:px-2 open:py-1.5 ${STATUS_STYLE[status]}`;
+  el.className = `${placement} rounded-md text-[11.5px] leading-[1.35] open:border open:border-black/[0.06] open:px-2 open:py-1.5 dark:open:border-neutral-200 ${STATUS_STYLE[status]}`;
 }
 
 const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, string> = {
@@ -272,7 +272,7 @@ function ensureActivity(ts: number): Activity {
   el.dataset.kind = "activity";
   styleGroup(el, "running");
   // Caps at ~10 step rows, then scrolls: an expanded group can't swallow the chat.
-  const rowsEl = h("div", "mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain border-t border-black/5 pt-1.5");
+  const rowsEl = h("div", "mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain border-t border-black/5 pt-1.5 dark:border-neutral-200");
   el.append(rowsEl);
   tailFollow(el, rowsEl);
   turns.el.append(el);
@@ -360,15 +360,15 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   a.steps += 1;
   a.thinking = null;
   const argsText = JSON.stringify(args, null, 2) ?? "";
-  const statusEl = h("span", "ml-auto flex-none text-black/40", "running…");
-  const preview = h("span", "truncate text-black/50", argsPreview(argsText));
-  const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03]", [
+  const statusEl = h("span", "ml-auto flex-none text-neutral-400", "running…");
+  const preview = h("span", "truncate text-neutral-500", argsPreview(argsText));
+  const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
     h("span", "flex-none font-semibold", name),
     preview,
     statusEl,
   ]);
-  const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]", argsText);
-  const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px]");
+  const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100", argsText);
+  const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100");
   el.append(h("div", "mt-1 flex flex-col gap-1 pl-4", argsPre, outputPre));
   // A replayed row arrives without args or output — they are fetched when the
   // group is opened, and this is where that fill writes.
@@ -403,10 +403,10 @@ export function activityToolEnd(id: string, isError: boolean, output: string): v
 export function activityThinking(ts: number, text: string): void {
   const a = ensureActivity(ts);
   if (!a.thinking) {
-    const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-black/50 hover:bg-black/[0.03]", [
+    const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
       h("span", "truncate", "thinking…"),
     ]);
-    const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap pl-4 not-italic text-black/60", "");
+    const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap pl-4 not-italic text-neutral-500", "");
     el.append(pre);
     a.rowsEl.append(el);
     a.thinking = { pre, summary };

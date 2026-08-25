@@ -45,6 +45,7 @@ import {
   setHeaderState,
 } from "./session-header.js";
 import { closeDrawer, initShell } from "./shell.js";
+import { initTheme } from "./theme.js";
 import { initVersion } from "./version.js";
 import { initSidebar, renderSessions, type SessionInfo } from "./sidebar.js";
 import {
@@ -376,6 +377,7 @@ async function loadSession(id: string, missing = false): Promise<void> {
 // the way reaches the server's log instead of only the browser console.
 initReport();
 guardFetch();
+initTheme();
 
 /** Shared by chat + composer deps: reload only if `id` is still selected. */
 const reloadIfCurrent = async (id: string): Promise<void> => {

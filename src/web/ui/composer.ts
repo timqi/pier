@@ -107,7 +107,7 @@ export function updateComposer(): void {
   sendBtn.className = `flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg ${
     streaming
       ? "bg-amber-100 text-amber-700 hover:bg-amber-200 active:bg-amber-300"
-      : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
+      : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50"
   }`;
   sendBtn.title = streaming ? "Queue — delivered when the turn ends" : "Send";
   sendPlane.classList.toggle("hidden", streaming);
