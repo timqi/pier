@@ -278,7 +278,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
 function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   const count = h(
     "span",
-    "ml-auto flex-none text-[11px] text-neutral-400 group-hover:hidden",
+    "flex-none text-[11px] text-neutral-400 group-hover:hidden",
     String(list.length),
   );
   // One control, like the session row above it. A project had grown a bare "+"
@@ -325,8 +325,10 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   };
   const { el, summary } = detailsRow("border-b border-neutral-200/70", [
     h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", basename(cwd)),
-    count,
-    more,
+    // On a coarse pointer the ⋯ is resident, so count and button are visible
+    // together: two ml-autos would split the free space and leave the count
+    // mid-row. One wrapper owns it.
+    h("div", "ml-auto flex flex-none items-center gap-1.5", count, more),
   ]);
   summary.className += " group px-3 py-1.5 hover:bg-neutral-100";
   summary.title = `${cwd}\nDrag to reorder`;
