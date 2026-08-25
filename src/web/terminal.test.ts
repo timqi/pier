@@ -224,6 +224,35 @@ describe("TerminalHub", () => {
     expect(socket.output).toContain("env=||||;agent=/tmp/agent.sock");
   });
 
+  it("does not hand the shell Pier's own configuration", async () => {
+    const inherited = { ...process.env };
+    Object.assign(process.env, {
+      NODE_ENV: "production",
+      PORT: "3142",
+      PIER_AGENT_DIR: "/home/x/.pier/pi",
+      PI_CODING_AGENT_DIR: "/home/x/.pier/pi",
+    });
+    const h = make();
+    const socket = new FakeSocket();
+    let conn: TermConn | null;
+    try {
+      conn = await h.attach(cwd, socket);
+    } finally {
+      for (const key of ["NODE_ENV", "PORT", "PIER_AGENT_DIR", "PI_CODING_AGENT_DIR"]) {
+        const value = inherited[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    conn!.message(JSON.stringify({
+      t: "in",
+      // PATH stays: on a service-managed instance it is the only one there is.
+      d: "printf 'pier=%s|%s|%s|%s;path=%s\\n' \"$NODE_ENV\" \"$PORT\" \"$PIER_AGENT_DIR\" \"$PI_CODING_AGENT_DIR\" \"${PATH:+set}\"\r",
+    }));
+    await until(() => socket.output.includes("path=set"));
+    expect(socket.output).toContain("pier=|||;path=set");
+  });
+
   it("replays the ring to a late attach", async () => {
     const h = make();
     const a = new FakeSocket();

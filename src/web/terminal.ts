@@ -32,6 +32,15 @@ const MAX_FRAME_BYTES = 1024 * 1024;
 // start under. Inheriting these can attach the shell back into Pier's parent
 // tmux session; SSH_AUTH_SOCK deliberately stays so git/ssh keep working.
 const PARENT_TERMINAL_ENV = ["TMUX", "TMUX_PANE", "SSH_TTY", "SSH_CLIENT", "SSH_CONNECTION"];
+// Pier's own configuration is Pier's, not this shell's. `NODE_ENV=production`
+// alone turns an `npm i` typed here into an install with no dev dependencies,
+// and every `PI_*`/`PIER_*` would point a `pi` started here at Pier's own
+// instance rather than the person's. Everything else is inherited on purpose:
+// PATH, LANG, SSH_AUTH_SOCK and the session's XDG/DBUS handles are what make
+// the shell usable, and on a service-managed instance nothing else supplies
+// them.
+const PIER_OWN_ENV = ["NODE_ENV", "PORT", "HOST"];
+const PIER_OWN_PREFIX = /^PI(ER)?_/;
 
 /** What the hub needs from a socket — `ws.WebSocket` satisfies it, tests fake it. */
 export interface TermSocket {
@@ -150,7 +159,11 @@ export class TerminalHub {
 
   #spawn(cwd: string): Term {
     const env = { ...process.env } as Record<string, string>;
-    for (const key of PARENT_TERMINAL_ENV) delete env[key];
+    for (const key of Object.keys(env)) {
+      if (PARENT_TERMINAL_ENV.includes(key) || PIER_OWN_ENV.includes(key) || PIER_OWN_PREFIX.test(key)) {
+        delete env[key];
+      }
+    }
     const pty = spawn(this.#shell, [], {
       name: "xterm-256color",
       cols: 120,
