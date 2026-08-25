@@ -274,11 +274,40 @@ function ensureActivity(ts: number): Activity {
   // Caps at ~10 step rows, then scrolls: an expanded group can't swallow the chat.
   const rowsEl = h("div", "mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto overscroll-contain border-t border-black/5 pt-1.5");
   el.append(rowsEl);
+  tailFollow(el, rowsEl);
   turns.el.append(el);
   lastGroup = el;
   turns.scroll();
   activity = { el, statusIcon, headline, rowsEl, toolRows: new Map(), thinking: null, steps: 0, failedSteps: 0, startTs: ts, sawError: false };
   return activity;
+}
+
+/**
+ * What a group is opened for is its newest step — the one running, or the last
+ * one that ran — so opening lands at the bottom of the list instead of at a
+ * step from a minute ago, and a still-running group keeps following the tail.
+ * Scrolling off the bottom is the reader saying they want to stay where they
+ * are, and stops the following until they come back down.
+ */
+function tailFollow(el: HTMLDetailsElement, rowsEl: HTMLElement): void {
+  rowsEl.dataset.follow = "1";
+  rowsEl.addEventListener("scroll", () => {
+    const atBottom = rowsEl.scrollHeight - rowsEl.scrollTop - rowsEl.clientHeight < 24;
+    rowsEl.dataset.follow = atBottom ? "1" : "";
+  });
+  el.addEventListener("toggle", () => {
+    if (!el.open) return;
+    rowsEl.scrollTop = rowsEl.scrollHeight;
+    rowsEl.dataset.follow = "1";
+  });
+}
+
+/** Follow the newest step, if the group is showing one and nobody scrolled
+ *  away. Skipped on replay and while closed — reading scrollHeight flushes
+ *  layout for the whole transcript, once per step, for nothing on screen. */
+function tailSteps(a: Activity): void {
+  if (turns.bulk() || !a.el.open || !a.rowsEl.dataset.follow) return;
+  a.rowsEl.scrollTop = a.rowsEl.scrollHeight;
 }
 
 function activityHeadline(a: Activity, status: ActivityStatus, latest?: string): void {
@@ -346,9 +375,7 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   rowsOf(a.el).push({ tool: name, call: id, preview, argsPre, outputPre });
   a.toolRows.set(id, { el, statusEl, outputPre });
   a.rowsEl.append(el);
-  // Capped list: follow the newest step. Skipped on replay — reading
-  // scrollHeight flushes layout for the whole transcript, once per step.
-  if (!turns.bulk()) a.rowsEl.scrollTop = a.rowsEl.scrollHeight;
+  tailSteps(a);
   activityHeadline(a, "running", name);
   turns.scroll();
 }
@@ -383,6 +410,7 @@ export function activityThinking(ts: number, text: string): void {
     el.append(pre);
     a.rowsEl.append(el);
     a.thinking = { pre, summary };
+    tailSteps(a);
     activityHeadline(a, "running", "thinking…");
   }
   const t = a.thinking;
