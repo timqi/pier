@@ -2,7 +2,7 @@
 // mirror/replay/reap policy, not node-pty itself — but a mocked pty would skip
 // the part most likely to break (spawn, resize, exit plumbing).
 
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { openDb } from "../db.js";
 import { AuthStore, registerAuthRoutes } from "./auth.js";
-import { attachTerminal, TerminalHub, type TermConn, type TermSocket } from "./terminal.js";
+import {
+  attachTerminal,
+  TerminalHub,
+  type HubOptions,
+  type TermConn,
+  type TermSocket,
+} from "./terminal.js";
 
 class FakeSocket implements TermSocket {
   frames: (Buffer | string)[] = [];
@@ -49,11 +55,11 @@ const until = async (cond: () => boolean, ms = 5000): Promise<void> => {
 
 const cwd = realpathSync(mkdtempSync(join(tmpdir(), "pier-term-")));
 // `sh` with a fixed prompt: the assertions read echoed output, not the prompt.
-const hub = (opts: { idleMs?: number; maxTerms?: number } = {}): TerminalHub =>
+const hub = (opts: Omit<HubOptions, "shell"> = {}): TerminalHub =>
   new TerminalHub({ shell: "/bin/sh", ...opts });
 
 let hubs: TerminalHub[] = [];
-const make = (opts?: { idleMs?: number; maxTerms?: number }): TerminalHub => {
+const make = (opts?: Omit<HubOptions, "shell">): TerminalHub => {
   const h = hub(opts);
   hubs.push(h);
   return h;
@@ -83,7 +89,7 @@ describe("terminal WebSocket", () => {
     const server = createServer((_req, res) => {
       res.writeHead(404).end();
     });
-    const terminal = attachTerminal(server, auth, 100);
+    const terminal = attachTerminal(server, auth, { heartbeatMs: 100 });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as AddressInfo).port;
     const malformed = await new Promise<string>((resolve, reject) => {
@@ -228,6 +234,46 @@ describe("TerminalHub", () => {
     const b = new FakeSocket();
     await h.attach(cwd, b);
     expect(b.output).toContain("replay-me");
+  });
+
+  it("types the startup command into each new shell, once per pty and read at spawn", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "pier-term-init-")));
+    const marker = join(dir, "runs");
+    const runs = (): string => {
+      try {
+        return readFileSync(marker, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    let command = `printf a >> ${marker}`;
+    const h = make({ initCommand: () => command });
+    const a = new FakeSocket();
+    const first = (await h.attach(dir, a))!;
+    await until(() => runs() === "a");
+
+    // A page joining the same cwd attaches to that shell; only a spawn runs it.
+    first.detach();
+    const b = new FakeSocket();
+    const second = (await h.attach(dir, b))!;
+    second.message(JSON.stringify({ t: "in", d: "echo attached\r" }));
+    await until(() => b.output.includes("attached"));
+    expect(runs()).toBe("a");
+
+    // Read per spawn: an edit in the Console reaches the next shell, no restart.
+    command = `printf b >> ${marker}`;
+    const other = realpathSync(mkdtempSync(join(tmpdir(), "pier-term-init-")));
+    await h.attach(other, new FakeSocket());
+    await until(() => runs() === "ab");
+  });
+
+  it("leaves a plain shell alone when no startup command is set", async () => {
+    const h = make();
+    const a = new FakeSocket();
+    const conn = (await h.attach(cwd, a))!;
+    conn.message(JSON.stringify({ t: "in", d: "echo only-mine\r" }));
+    await until(() => a.output.includes("only-mine"));
+    expect(a.output.trimStart().startsWith("echo only-mine")).toBe(true);
   });
 
   it("applies the last resize", async () => {

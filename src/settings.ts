@@ -34,6 +34,9 @@ export interface Settings {
   /** Let Pier install a newer release of itself while nothing is running.
    *  Off by default: replacing your own code is the operator's decision. */
   autoUpdate: boolean;
+  /** Typed into every Web Terminal shell as it starts — `tmux new -As run`
+   *  and friends. Empty means a plain shell. */
+  terminalInitCommand: string;
 }
 
 /**
@@ -84,6 +87,22 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
   return menu;
 }
 
+/**
+ * One line, typed into a shell. Same reject-don't-repair contract: a command
+ * silently truncated at a newline would run half of what the operator wrote,
+ * in every project shell, with no sign of what was dropped.
+ */
+export function normalizeTerminalInitCommand(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  if (!text) return "";
+  if (text.length > 500) return null;
+  // A tty reads these as keys, not text: an embedded newline is a second
+  // command nobody would see in the field it was typed in.
+  for (const ch of text) if (ch < " " || ch === "\u007f") return null;
+  return text;
+}
+
 export class SettingsStore {
   readonly #db: DatabaseSync;
 
@@ -96,6 +115,7 @@ export class SettingsStore {
       publicUrl: this.#value("publicUrl") ?? "",
       modelMenu: this.#menu(),
       autoUpdate: this.#value("autoUpdate") === "1",
+      terminalInitCommand: this.#value("terminalInitCommand") ?? "",
     };
   }
 
@@ -128,6 +148,12 @@ export class SettingsStore {
   /** Same contract: hand this `normalizeModelMenu`'s output, not raw input. */
   setModelMenu(menu: ModelMenuEntry[]): Settings {
     this.#set("modelMenu", JSON.stringify(menu));
+    return this.get();
+  }
+
+  /** Same contract again: hand this `normalizeTerminalInitCommand`'s output. */
+  setTerminalInitCommand(command: string): Settings {
+    this.#set("terminalInitCommand", command);
     return this.get();
   }
 

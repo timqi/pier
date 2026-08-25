@@ -323,7 +323,9 @@ const server = serve({ fetch: app.fetch, port, hostname }, () => {
 });
 // The one WebSocket surface (see web/terminal.ts); `serve` above builds a
 // plain node:http server, which is the only shape with an upgrade event.
-const terminals = attachTerminal(server as import("node:http").Server, auth);
+const terminals = attachTerminal(server as import("node:http").Server, auth, {
+  initCommand: () => settings.get().terminalInitCommand,
+});
 
 // A crash and a clean stop must be distinguishable after the fact, and both
 // left nothing behind before this.

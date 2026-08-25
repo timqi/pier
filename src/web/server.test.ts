@@ -678,7 +678,7 @@ describe("workbench server", () => {
 
   it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {
     const { app, settings } = setup();
-    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false });
+    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false, terminalInitCommand: "" });
 
     const put = (publicUrl: unknown) =>
       app.request("/api/settings", {
@@ -688,13 +688,33 @@ describe("workbench server", () => {
       });
     const ok = await put("pier.example.com/");
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: [], autoUpdate: false });
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: [], autoUpdate: false, terminalInitCommand: "" });
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
 
     expect((await put("not a url")).status).toBe(400);
     expect((await put(42)).status).toBe(400);
     // A rejected write leaves the stored value alone.
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
+  });
+
+  it("writes the terminal startup command and rejects one a tty would split", async () => {
+    const { app, settings } = setup();
+    const put = (terminalInitCommand: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ terminalInitCommand }),
+      });
+    const ok = await put("  tmux new -As run  ");
+    expect(ok.status).toBe(200);
+    expect(settings.get().terminalInitCommand).toBe("tmux new -As run");
+
+    expect((await put("tmux new\nrm -rf /")).status).toBe(400);
+    expect((await put(42)).status).toBe(400);
+    expect(settings.get().terminalInitCommand).toBe("tmux new -As run");
+
+    expect((await put("")).status).toBe(200);
+    expect(settings.get().terminalInitCommand).toBe("");
   });
 
   it("writes the model menu without disturbing the URL, and rejects a bad one", async () => {
@@ -709,7 +729,7 @@ describe("workbench server", () => {
     const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hard problems" }];
     const ok = await put(menu);
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: menu, autoUpdate: false });
+    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: menu, autoUpdate: false, terminalInitCommand: "" });
 
     expect((await put("nope")).status).toBe(400);
     expect((await put([{ provider: "a" }])).status).toBe(400);

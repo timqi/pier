@@ -5,8 +5,10 @@
 // while hidden, so toggling it back is instant and loses nothing; the server
 // replays recent output when a page attaches fresh.
 
+import { failure, sendJson } from "./api.js";
 import { openBrowser } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
+import { setStatus as setFieldStatus, type SaveState } from "./form.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 
 type Ghostty = typeof import("ghostty-web");
@@ -51,6 +53,9 @@ const loadGhostty = (): Promise<Ghostty> => {
 };
 
 const THEME = { background: "#1a1b26", foreground: "#a9b1d6", cursor: "#c0caf5" };
+/** The ⚙ panel's text fields — narrower and denser than a Settings card's. */
+const FIELD =
+  "w-full rounded border border-neutral-300 px-2 py-1.5 font-mono text-[12px] outline-none focus:border-indigo-400";
 
 export function createTerminalView(
   root: HTMLElement,
@@ -118,12 +123,77 @@ export function createTerminalView(
     });
   }
 
+  /** The one shared, server-side setting on this panel: the command every new
+   *  shell is handed as it starts. Loaded per open so an edit made in another
+   *  window shows, and saved on Enter or blur rather than per keystroke —
+   *  half a command must never reach a tty. Outside-click closes the panel and
+   *  blurs the field in the same gesture, so a save that fails after that is
+   *  reported on the header instead, where the panel no longer is. */
+  function initCommandSection(): HTMLElement {
+    const cmd = document.createElement("input");
+    cmd.type = "text";
+    cmd.placeholder = 'tmux new -As "$(basename $PWD)"';
+    cmd.spellcheck = false;
+    cmd.autocomplete = "off";
+    cmd.autocapitalize = "off"; // a phone keyboard would capitalize the command
+    cmd.disabled = true; // until the stored value lands, so it cannot be overwritten blind
+    cmd.className = `${FIELD} disabled:bg-neutral-50`;
+    const status = h("span", "block text-[11.5px] text-neutral-400", "loading…");
+    const report = (state: SaveState, text: string): void => {
+      if (status.isConnected) setFieldStatus(status, state, text);
+      else if (state === "failed") setStatus(text);
+    };
+    let stored = "";
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        if (!res.ok) throw new Error(await failure(res, "Could not load the startup command"));
+        stored = ((await res.json()) as { terminalInitCommand?: string }).terminalInitCommand ?? "";
+        cmd.value = stored;
+        cmd.disabled = false;
+        report("idle", "Runs when a shell starts — this one is already up.");
+      } catch (err) {
+        report("failed", String(err));
+      }
+    })();
+    const save = async (): Promise<void> => {
+      const next = cmd.value.trim();
+      if (cmd.disabled || next === stored) return;
+      report("saving", "saving…");
+      try {
+        const res = await sendJson("/api/settings", { terminalInitCommand: next }, "PUT");
+        if (!res.ok) return report("failed", await failure(res, "Could not save the startup command"));
+        stored = ((await res.json()) as { terminalInitCommand: string }).terminalInitCommand;
+        cmd.value = stored;
+        report("saved", stored ? "Saved — the next shell runs it." : "Cleared.");
+      } catch (err) {
+        report("failed", `Could not save the startup command: ${String(err)}`);
+      }
+    };
+    cmd.onblur = () => void save();
+    cmd.onkeydown = (ev) => {
+      if (ev.key === "Enter") void save();
+    };
+    return h(
+      "div",
+      "space-y-1.5 border-t border-neutral-200 pt-2.5",
+      h(
+        "div",
+        "",
+        h("span", "text-[12px] font-semibold text-neutral-700", "Startup command"),
+        h("span", "block text-[11px] text-neutral-400", "This Pier, every shell — not only this browser."),
+      ),
+      cmd,
+      status,
+    );
+  }
+
   function openSettings(anchor: HTMLElement): void {
     const font = document.createElement("input");
     font.type = "text";
     font.value = prefs.fontFamily;
     font.setAttribute("list", "terminal-font-presets");
-    font.className = "w-full rounded border border-neutral-300 px-2 py-1.5 font-mono text-[12px] outline-none focus:border-indigo-400";
+    font.className = FIELD;
     const presets = document.createElement("datalist");
     presets.id = "terminal-font-presets";
     for (const value of [
@@ -183,6 +253,7 @@ export function createTerminalView(
         h("label", "block space-y-1 text-[11.5px] text-neutral-500", h("span", "", "Font family"), font, presets),
         h("label", "flex items-center justify-between text-[11.5px] text-neutral-500", h("span", "", "Font size"), size),
         h("label", "flex cursor-pointer items-center justify-between text-[11.5px] text-neutral-500", h("span", "", "Blinking cursor"), blink),
+        initCommandSection(),
       ),
     );
   }

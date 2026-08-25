@@ -70,6 +70,9 @@ export interface HubOptions {
   shell?: string;
   idleMs?: number;
   maxTerms?: number;
+  /** The operator's startup command, read at every spawn so an edit in the
+   *  Console applies to the next shell without a restart. */
+  initCommand?: () => string;
 }
 
 export class TerminalHub {
@@ -77,6 +80,7 @@ export class TerminalHub {
   readonly #shell: string;
   readonly #idleMs: number;
   readonly #maxTerms: number;
+  readonly #initCommand: () => string;
   readonly #sweeper: NodeJS.Timeout;
   readonly #closeListeners = new Set<() => void>();
   #closed = false;
@@ -85,6 +89,7 @@ export class TerminalHub {
     this.#shell = opts.shell ?? process.env.SHELL ?? "/bin/bash";
     this.#idleMs = opts.idleMs ?? IDLE_MS;
     this.#maxTerms = opts.maxTerms ?? MAX_TERMS;
+    this.#initCommand = opts.initCommand ?? (() => "");
     this.#sweeper = setInterval(() => this.sweep(Date.now()), SWEEP_MS);
     this.#sweeper.unref();
   }
@@ -156,6 +161,13 @@ export class TerminalHub {
     const term: Term = { pty, ring: [], ringBytes: 0, clients: new Set(), idleSince: Infinity };
     this.#terms.set(cwd, term);
     log.info(`shell ${pty.pid} for ${cwd}`);
+    // Typed in, not exec'd: the shell stays the parent, so quitting whatever
+    // this starts leaves a usable prompt, and the echo plus any error is in
+    // the ring where the person can see what ran. The tty buffers it until the
+    // shell's first read, so no wait is needed. A reattach never repeats it —
+    // this runs once per pty, which is once per cwd.
+    const init = this.#initCommand().trim();
+    if (init) pty.write(`${init}\r`);
     pty.onData((data) => {
       const chunk = Buffer.from(data);
       term.ring.push(chunk);
@@ -255,9 +267,10 @@ export class TerminalHub {
 export function attachTerminal(
   server: Server,
   auth: AuthStore,
-  heartbeatMs = HEARTBEAT_MS,
+  opts: HubOptions & { heartbeatMs?: number } = {},
 ): TerminalHub {
-  const hub = new TerminalHub();
+  const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_MS;
+  const hub = new TerminalHub(opts);
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
   const alive = new WeakSet<TermSocket>();
   const heartbeat = setInterval(() => {

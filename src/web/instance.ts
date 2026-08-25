@@ -5,7 +5,12 @@
 import type { Hono } from "hono";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
-import { normalizeModelMenu, normalizePublicUrl, type SettingsStore } from "../settings.js";
+import {
+  normalizeModelMenu,
+  normalizePublicUrl,
+  normalizeTerminalInitCommand,
+  type SettingsStore,
+} from "../settings.js";
 import type { UpdateCheck } from "../update.js";
 
 /** How this instance replaces itself, or `null` where nothing supervises it.
@@ -159,10 +164,14 @@ export function registerInstanceRoutes(
   // malformed field is rejected before anything is written.
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null) as
-      | { publicUrl?: unknown; modelMenu?: unknown; autoUpdate?: unknown }
+      | { publicUrl?: unknown; modelMenu?: unknown; autoUpdate?: unknown; terminalInitCommand?: unknown }
       | null;
-    if (!body || (body.publicUrl === undefined && body.modelMenu === undefined && body.autoUpdate === undefined)) {
-      return c.json({ error: "publicUrl, modelMenu or autoUpdate required" }, 400);
+    if (
+      !body ||
+      (body.publicUrl === undefined && body.modelMenu === undefined &&
+        body.autoUpdate === undefined && body.terminalInitCommand === undefined)
+    ) {
+      return c.json({ error: "publicUrl, modelMenu, autoUpdate or terminalInitCommand required" }, 400);
     }
     if (body.publicUrl !== undefined) {
       if (typeof body.publicUrl !== "string") return c.json({ error: "publicUrl must be a string" }, 400);
@@ -182,6 +191,13 @@ export function registerInstanceRoutes(
     if (body.autoUpdate !== undefined) {
       if (typeof body.autoUpdate !== "boolean") return c.json({ error: "autoUpdate must be a boolean" }, 400);
       settings.setAutoUpdate(body.autoUpdate);
+    }
+    if (body.terminalInitCommand !== undefined) {
+      const command = normalizeTerminalInitCommand(body.terminalInitCommand);
+      if (command === null) {
+        return c.json({ error: "terminalInitCommand must be one line of at most 500 characters" }, 400);
+      }
+      settings.setTerminalInitCommand(command);
     }
     // Only the URL: the model menu is read per picker call, not per session.
     if (body.publicUrl !== undefined) onSettingsChanged?.();

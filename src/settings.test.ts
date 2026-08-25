@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "./db.js";
-import { normalizeModelMenu, normalizePublicUrl, SettingsStore } from "./settings.js";
+import {
+  normalizeModelMenu,
+  normalizePublicUrl,
+  normalizeTerminalInitCommand,
+  SettingsStore,
+} from "./settings.js";
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
 
@@ -28,11 +33,12 @@ describe("SettingsStore", () => {
     const path = dbPath();
     const db = openDb(path);
     const store = new SettingsStore(db);
-    expect(store.get()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false });
+    expect(store.get()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false, terminalInitCommand: "" });
     expect(store.setPublicUrl("https://pier.example.com")).toEqual({
       publicUrl: "https://pier.example.com",
       modelMenu: [],
       autoUpdate: false,
+      terminalInitCommand: "",
     });
     // A restart: the connection is gone, the row is not.
     db.close();
@@ -41,6 +47,7 @@ describe("SettingsStore", () => {
       publicUrl: "https://pier.example.com",
       modelMenu: [],
       autoUpdate: false,
+      terminalInitCommand: "",
     });
     reopened.close();
   });
@@ -67,6 +74,22 @@ describe("SettingsStore", () => {
     db.prepare("UPDATE settings SET value = '{\"provider\":1}' WHERE key = 'modelMenu'").run();
     expect(store.get().modelMenu).toEqual([]);
     db.close();
+  });
+});
+
+describe("normalizeTerminalInitCommand", () => {
+  it("keeps one trimmed line", () => {
+    expect(normalizeTerminalInitCommand('  tmux new -As "$(basename $PWD)"  ')).toBe(
+      'tmux new -As "$(basename $PWD)"',
+    );
+    expect(normalizeTerminalInitCommand("   ")).toBe("");
+  });
+
+  it("rejects what a tty would read as more than that line", () => {
+    expect(normalizeTerminalInitCommand("tmux new\nrm -rf /")).toBeNull();
+    expect(normalizeTerminalInitCommand("tmux\tnew")).toBeNull();
+    expect(normalizeTerminalInitCommand("echo \u0007")).toBeNull();
+    expect(normalizeTerminalInitCommand("x".repeat(501))).toBeNull();
   });
 });
 
