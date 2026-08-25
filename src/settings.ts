@@ -37,6 +37,10 @@ export interface Settings {
   /** Typed into every Web Terminal shell as it starts — `tmux new -As run`
    *  and friends. Empty means a plain shell. */
   terminalInitCommand: string;
+  /** Names of the bundled extensions switched on (src/extensions). Empty by
+   *  default: an extension gives every session new tools, which is the
+   *  operator's call, and a name nobody ships any more is simply not found. */
+  extensions: string[];
 }
 
 /**
@@ -103,6 +107,25 @@ export function normalizeTerminalInitCommand(raw: unknown): string | null {
   return text;
 }
 
+/**
+ * Shape only — an unknown name is not an error here. This file must not know
+ * what Pier bundles (that catalog is code, and importing it would drag the Pi
+ * SDK into the instance layer); agent/ matches the names it recognizes and
+ * ignores the rest, which is also what keeps a downgrade from losing a
+ * setting it cannot currently explain.
+ */
+export function normalizeExtensions(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length > 32) return null;
+  const names = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") return null;
+    const name = item.trim();
+    if (!name || name.length > 64) return null;
+    names.add(name);
+  }
+  return [...names];
+}
+
 export class SettingsStore {
   readonly #db: DatabaseSync;
 
@@ -113,29 +136,31 @@ export class SettingsStore {
   get(): Settings {
     return {
       publicUrl: this.#value("publicUrl") ?? "",
-      modelMenu: this.#menu(),
+      modelMenu: this.#json("modelMenu", normalizeModelMenu, "a valid menu") ?? [],
       autoUpdate: this.#value("autoUpdate") === "1",
       terminalInitCommand: this.#value("terminalInitCommand") ?? "",
+      extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
     };
   }
 
-  #menu(): ModelMenuEntry[] {
-    const raw = this.#value("modelMenu");
-    if (!raw) return [];
+  /**
+   * A JSON-valued row, validated on the way out. Only a hand-edited row can be
+   * malformed, and it is named rather than silently served as the empty value:
+   * a setting that stopped applying without saying so is the bug this logs.
+   */
+  #json<T>(key: string, normalize: (raw: unknown) => T | null, expected: string): T | null {
+    const raw = this.#value(key);
+    if (!raw) return null;
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      // Only a hand-edited row can get here; named, not silently served as [].
-      log.warn("settings.modelMenu is not JSON — ignoring it");
-      return [];
+      log.warn(`settings.${key} is not JSON — ignoring it`);
+      return null;
     }
-    const menu = normalizeModelMenu(parsed);
-    if (!menu) {
-      log.warn("settings.modelMenu is not a valid menu — ignoring it");
-      return [];
-    }
-    return menu;
+    const value = normalize(parsed);
+    if (value === null) log.warn(`settings.${key} is not ${expected} — ignoring it`);
+    return value;
   }
 
   /** Store an already-normalized value — validation belongs at the boundary
@@ -159,6 +184,12 @@ export class SettingsStore {
 
   setAutoUpdate(on: boolean): Settings {
     this.#set("autoUpdate", on ? "1" : "0");
+    return this.get();
+  }
+
+  /** Same contract again: hand this `normalizeExtensions`'s output. */
+  setExtensions(names: string[]): Settings {
+    this.#set("extensions", JSON.stringify(names));
     return this.get();
   }
 

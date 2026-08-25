@@ -13,8 +13,10 @@ scheduled tasks, live observability, and static Show pages.
 3. **Two seams only.** `Channel` (platform ↔ core) and `AgentSession`
    (core ↔ Pi). Nothing crosses a boundary outside its seam; Pi stays
    swappable (SDK → RPC later), platform quirks stay out of core.
-4. **Core is platform-blind and Pi-blind.** Only `agent/` imports the Pi SDK;
-   only `channels/` imports platform SDKs.
+4. **Core is platform-blind and Pi-blind.** Only `agent/` and `extensions/`
+   import the Pi SDK — an extension takes an `ExtensionAPI`, so it is Pi-shaped
+   by construction; only `agent/pi.ts` registers one and `core/` never sees the
+   area. Only `channels/` imports platform SDKs.
 5. **One event stream per session.** Web UI, logs, Show pages are all
    consumers of it — never parallel bookkeeping.
 5b. **Nothing that happened may look like nothing happening.** Every turn is
@@ -45,6 +47,9 @@ scheduled tasks, live observability, and static Show pages.
 - `core/` routing, steer/follow-up policy, event fan-out
 - `channels/` one file per platform: normalize inbound, render outbound
 - `agent/` Pi SDK behind `AgentSession`
+- `extensions/` the extensions Pier ships with, loaded as Pi inline factories
+  and switched on per instance from the Console — never copied to disk, and
+  standing down when a copy on disk already registers the same tools
 - `web/` chat + observability timeline, an event-stream consumer
 - `tasks/` scheduler; cron + prompt + session config; one custom tool is the
   entire agent-collaboration surface
@@ -95,11 +100,12 @@ answer is allowed to be "the right things":
 
 | Area | Now | Second look past |
 | --- | --- | --- |
-| `core/` | ~880 | 780 — second look done: platform- and Pi-blind. Growth bought the shared presentation vocabulary, sender prefix, inbound-file convention, provider seam/validation, routing failure paths and the restart gate; none is a platform implementation |
+| `core/` | ~895 | 780 — second look done: platform- and Pi-blind. Growth bought the shared presentation vocabulary, sender prefix, inbound-file convention, provider seam/validation, routing failure paths and the restart gate; none is a platform implementation |
 | `channels/` | ~3.96k | 4.3k — second look done: the growth is the Lark adapter (five files, the same shape Slack settled on — adapter, api, render, outbound, panel); the shared layer grew only by a moved fence-balancer and the extracted event dedup, both second-copy fixes |
-| `web/` | ~8.3k | 8.6k — largest and least tested. Growth from 5.1k bought the password boundary, secure provider configuration and the Settings console; from 6.46k the Files view — project tree, whole-file inline diffs, the diff picker — rendered with zero new dependencies, which is exactly where the lines went; from 7.34k the Terminal — a real shell per project cwd that outlives the page, mirrored across pages, behind the same password boundary — which could not exist without a pty, a WebSocket upgrade path and an emulator view; from 7.8k Web Push — a finished turn reaching a workbench nobody has open, on desktop Chrome and on an iPhone's Home Screen — which needs the RFC 8291/8292 wire format (a dependency-free ~120 lines, against the RFC's own test vector), the subscriptions to send it to, a service worker, and the one rule that decides a notification; the next growth needs its own sentence |
+| `web/` | ~8.5k | 8.6k — largest and least tested. Growth from 5.1k bought the password boundary, secure provider configuration and the Settings console; from 6.46k the Files view — project tree, whole-file inline diffs, the diff picker — rendered with zero new dependencies, which is exactly where the lines went; from 7.34k the Terminal — a real shell per project cwd that outlives the page, mirrored across pages, behind the same password boundary — which could not exist without a pty, a WebSocket upgrade path and an emulator view; from 7.8k Web Push — a finished turn reaching a workbench nobody has open, on desktop Chrome and on an iPhone's Home Screen — which needs the RFC 8291/8292 wire format (a dependency-free ~120 lines, against the RFC's own test vector), the subscriptions to send it to, a service worker, and the one rule that decides a notification; from 8.3k the extension switches — a section in the tab that already lists extensions, and a settings route that answers with the catalog beside the setting so a switch cannot draw a state nobody stored; the topic strip lost a tab in the same change (Providers and the model menu are one topic, not two); from 8.37k the provider probe — a model the operator picks (nothing picks one for them), and the line under the row carrying both halves of the exchange verbatim, because a refusal only means something next to what provoked it; +6 net for the second reader of a file the Console did not write — the Files view's renderer became `ui/code.ts` instead of a second bare `<pre>` (rule 3, caught at the second copy); the next growth needs its own sentence |
 | `tasks/` | ~2.56k | 2.5k — second look done: delivery proof/backoff/ceiling was consolidated into one outbox engine; the remaining growth is durable control-message state and required failure paths |
-| root `src/*.ts` | ~1.37k | 1.3k — second look done: the instance layer now owns secure credentials, service/update operations and the graceful-restart ledger; each remains a one-reason module, and the growth since is one schema migration plus the composition line that hands the push surface its dependencies |
+| root `src/*.ts` | ~1.4k | 1.3k — second look done: the instance layer now owns secure credentials, service/update operations and the graceful-restart ledger; each remains a one-reason module, and the growth since is one schema migration, the composition line that hands the push surface its dependencies, and the enabled-extension set — stored by shape only, because the catalog is code and naming it here would drag the Pi SDK into the instance layer |
+| one bundled extension | — | 500 — the area has no number: extensions are pluggable, not core, so each one pays for itself or is not shipped. `web` is ~970 and carries its sentence: web access with no second service, no API key of its own and no new dependency, which takes two provider wire formats (Anthropic tool-use, OpenAI Responses), the language-preservation audit that is the reason it exists, and retry/timeout policy against someone else's endpoint — the last 80 lines are the failure paths rule 4 exempts: one ceiling for the whole call, a truncated answer saying so on both backends, and progress on a surface that was silent for a minute |
 | one module | — | 300 — see rule 2 before splitting |
 | channel adapter file | — | 400 — transport, render and panel budgeted separately |
 

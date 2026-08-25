@@ -6,9 +6,10 @@
 // numbers, images, PDFs). A viewer, not an editor: /api/explorer/* is scoped
 // server-side to known project cwds, and nothing here writes.
 
+import { codePane, plainRows, type CodeRow } from "./code.js";
 import { openBrowser } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
-import { langFor, lineEl } from "./highlight.js";
+import { langFor } from "./highlight.js";
 import { closeMenu, openMenu } from "./menu.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
 import { letterKey } from "./shortcut.js";
@@ -27,18 +28,9 @@ const STATUS_TONE: Record<string, string> = {
   A: "text-emerald-600", M: "text-amber-600", D: "text-red-600",
 };
 
-/** Past this, per-line highlighting is the slow part — numbers stay, color goes. */
-const MAX_HIGHLIGHT_LINES = 20_000;
 /** Auto-expanding the tree to every change stops helping past a screenful. */
 const MAX_AUTO_EXPAND = 30;
 
-type CodeRow = {
-  nums: (number | "")[];
-  text: string;
-  tone: "" | "add" | "del";
-  /** Chars [start, end) that actually changed — the intra-line emphasis. */
-  mark?: [number, number];
-};
 type Segment = { start: number; end: number; tone: "add" | "del" | "mixed" };
 
 /** What a session was last looking at here. Browser-local, like every other
@@ -273,45 +265,6 @@ export function createExplorerView(
     return title;
   }
 
-  /** The one code renderer: gutter number column(s), toned diff lines,
-   *  per-line highlighting, long lines wrapping past the gutter. */
-  function codePane(rows: CodeRow[], lang: string | null): HTMLElement {
-    const hl = rows.length <= MAX_HIGHLIGHT_LINES ? lang : null;
-    // Gutters as wide as the largest number they hold, not a fixed column.
-    const digits = Math.max(2, ...rows.map((r) => r.nums.reduce<number>((w, n) => Math.max(w, String(n).length), 0)));
-    // Wrapping, not horizontal scroll: a long line folds under itself, hanging
-    // past the gutter, which stays put as the flex row's first column.
-    const box = h("div", "py-2 font-mono text-[12px] leading-[1.5]");
-    for (const r of rows) {
-      const row = h("div", `flex pl-2 pr-4 ${r.tone === "add" ? "bg-emerald-50" : r.tone === "del" ? "bg-red-50" : ""}`);
-      for (const n of r.nums) {
-        const gutter = h("span", "flex-none select-none pr-1.5 text-right text-neutral-300", n === "" ? "" : String(n));
-        gutter.style.width = `calc(${digits}ch + 0.375rem)`; // content + its own pr
-        row.append(gutter);
-      }
-      row.append(codeSpan(r, hl));
-      box.append(row);
-    }
-    return box;
-  }
-
-  /** The line's code cell; a marked row renders as three fragments so the
-   *  changed span can carry a deeper tint on top of the row's own. Fragment
-   *  highlighting degrades tokens that straddle the mark — per-line hljs is
-   *  already an approximation, and the emphasis is worth more. */
-  function codeSpan(r: CodeRow, hl: string | null): HTMLElement {
-    const cls = "min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]";
-    if (!r.mark || r.mark[0] >= r.mark[1]) {
-      const el = lineEl(r.text, hl);
-      el.className = cls;
-      return el;
-    }
-    const [s, e] = r.mark;
-    const mid = lineEl(r.text.slice(s, e), hl);
-    mid.className = `rounded-xs ${r.tone === "add" ? "bg-emerald-200/80" : "bg-red-200/70"}`;
-    return h("span", cls, lineEl(r.text.slice(0, s), hl), mid, lineEl(r.text.slice(e), hl));
-  }
-
   /** Character-level emphasis: pair the i-th removed line of a change site
    *  with its i-th added line, trim the common prefix and suffix, and mark
    *  what is left. No common edge means the line was rewritten — the row
@@ -397,7 +350,7 @@ export function createExplorerView(
     const lines = (await res.text()).split("\n");
     if (!current(seq)) return;
     if (lines.at(-1) === "") lines.pop(); // the trailing newline is not a line
-    body.replaceChildren(codePane(lines.map((text, i) => ({ nums: [i + 1], text, tone: "" as const })), langFor(path)));
+    body.replaceChildren(codePane(plainRows(lines), langFor(path)));
   }
 
   /** `+`/`-`/context off the wire, two number columns on screen. The request

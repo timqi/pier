@@ -163,7 +163,7 @@ const hashOf = (r: Route): string =>
     : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}`;
 
 /** Pre-fold bookmarks still land: the old top-level views are Settings tabs now. */
-const FOLDED: Record<string, string> = { config: "files", channels: "channels", providers: "providers" };
+const FOLDED: Record<string, string> = { config: "files", channels: "channels", providers: "models" };
 
 function parseHash(): Route | null {
   const [head = "", arg] = location.hash.replace(/^#\/?/, "").split("/");

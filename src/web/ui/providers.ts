@@ -1,14 +1,19 @@
-// New-user provider setup: endpoint/model structure and authentication in one flow.
+// Getting a provider to work: endpoint/model structure, authentication, and the
+// one request that proves the three of them agree. Rendered as a card in
+// Settings → Models, above the operator's menu; the head below is `form.ts`'s
+// card head, hand-built only because this pane owns a button in it.
 
 import type {
+  ModelRef,
   ProviderApi,
   ProviderAuthType,
+  ProviderCheck,
   ProviderInfo,
   ProviderSetup,
 } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { h } from "./dom.js";
-import { badge, button, CONTROL, empty, field, input, textarea } from "./form.js";
+import { badge, button, CONTROL, empty, field, input, select, setStatus, textarea } from "./form.js";
 import { openAuthFlow, type AuthFlow } from "./auth-flow.js";
 
 const POPULAR = ["anthropic", "openai", "openai-codex", "google", "openrouter", "deepseek"];
@@ -24,17 +29,29 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
   const add = button("Add provider", true);
   add.classList.add("ml-auto");
   const bar = h(
-    "div", "flex flex-none items-center gap-3 border-b border-neutral-200 px-4 py-2",
-    h("span", "font-mono text-[12.5px] text-neutral-500", "Providers"),
+    "div",
+    "flex flex-none items-center gap-3 rounded-t-xl border-b border-neutral-200/70 bg-neutral-50/70 px-4 py-2",
+    h("h2", "text-[13px] font-semibold text-neutral-700", "Providers"),
     add,
   );
   const content = h("div", "min-h-0 flex-1 overflow-y-auto");
   pane.replaceChildren(bar, content);
 
+  // The catalog, for the Test picker: which models a provider can be probed
+  // on. A provider's own configured ids are there regardless; when neither has
+  // anything the row says so rather than quietly dropping the button.
+  let catalog: ModelRef[] = [];
+  let catalogError = "";
+
   const load = async (): Promise<void> => {
     content.replaceChildren(h("p", "px-4 py-3 text-[13px] text-neutral-400", "Loading…"));
     try {
-      const res = await fetch("/api/providers", { cache: "no-store" });
+      const [res, models] = await Promise.all([
+        fetch("/api/providers", { cache: "no-store" }),
+        fetch("/api/models", { cache: "no-store" }),
+      ]);
+      catalog = models.ok ? ((await models.json()) as ModelRef[]) : [];
+      catalogError = models.ok ? "" : await failure(models, "the model catalog could not be read");
       if (!res.ok) {
         content.replaceChildren(empty(await failure(res, "Could not load providers")));
         return;
@@ -61,6 +78,45 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
     }
   };
 
+  /** The ids a provider may be probed on: what it was configured with, plus
+   *  whatever the catalog lists for it. Deduped, its own order kept. */
+  const testable = (provider: ProviderInfo): string[] => [
+    ...new Set([
+      ...(provider.models ?? []).map((model) => model.id),
+      ...catalog.filter((model) => model.provider === provider.id).map((model) => model.id),
+    ]),
+  ];
+
+  const exchange = (title: string, text: string): HTMLElement =>
+    h(
+      "div",
+      "flex flex-col gap-1",
+      h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title),
+      h(
+        "pre",
+        "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-neutral-50 p-2 font-mono text-[11.5px] leading-relaxed text-neutral-600",
+        text,
+      ),
+    );
+
+  /**
+   * "Configured" is a stored credential, not a working one. One real request is
+   * the only thing that can tell the difference — and both halves of it are
+   * shown, because a refusal only means something next to what provoked it, and
+   * anything between Pier and the provider can rewrite either one.
+   *
+   * Answers rather than draws: the row it belongs to owns its own elements.
+   */
+  const probe = async (id: string, model: string): Promise<ProviderCheck | string> => {
+    try {
+      const res = await sendJson(`/api/providers/${encodeURIComponent(id)}/check`, { model });
+      if (!res.ok) return await failure(res, "Could not test");
+      return (await res.json()) as ProviderCheck;
+    } catch (err) {
+      return `Could not test: ${String(err)}`;
+    }
+  };
+
   const render = (providers: ProviderInfo[]): void => {
     const configured = providers.filter((provider) => provider.configured);
     if (!configured.length) {
@@ -84,7 +140,50 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
         h("span", "max-w-48 truncate text-[11px] text-neutral-400", endpoint),
       );
       state.title = endpoint;
+      // Its own line under the row: the two halves of an exchange are not
+      // something that fits in a column.
+      const status = h("span", "text-[11.5px]", "");
+      const line = h("div", "hidden flex-col gap-2 px-4 pb-3", status);
       const actions = h("div", "flex flex-wrap justify-end gap-1.5");
+      // Which model to probe is the operator's call and nothing else's: an
+      // answer about a model Pier picked is an answer about a different
+      // question, and the one it picked here was an unreleased id nobody uses.
+      const ids = testable(provider);
+      if (!ids.length) {
+        // No button, and the reason — "Test is missing" is not a diagnosis.
+        setStatus(status, "idle", catalogError || "No models to test: none are configured here.");
+        line.classList.replace("hidden", "flex");
+      } else {
+        const models = select(
+          [["Model to test…", ""], ...ids.map((id): [string, string] => [id, id])],
+          "",
+        );
+        models.classList.add("max-w-52", "text-[12px]");
+        const test = button("Test");
+        test.disabled = true;
+        models.onchange = () => (test.disabled = !models.value);
+        test.onclick = () => {
+          const model = models.value;
+          test.disabled = true;
+          line.replaceChildren(status);
+          line.classList.replace("hidden", "flex");
+          setStatus(status, "saving", `asking ${model}…`);
+          void probe(provider.id, model).then((result) => {
+            test.disabled = false;
+            if (typeof result === "string") return setStatus(status, "failed", result);
+            setStatus(
+              status,
+              result.ok ? "saved" : "failed",
+              `${result.model} ${result.ok ? "answered" : "did not answer"} in ${result.ms} ms`,
+            );
+            line.append(
+              exchange("sent", result.request || "(the request was never made)"),
+              exchange(result.ok ? "answered" : "replied", result.response),
+            );
+          });
+        };
+        actions.append(models, test);
+      }
       if (provider.builtin || (provider.api && provider.models)) {
         const edit = button("Edit");
         edit.onclick = () => openSetup(providers, provider, load);
@@ -97,8 +196,13 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       }
       return h(
         "div",
-        "grid grid-cols-[minmax(8rem,1fr)_minmax(8rem,auto)_minmax(9rem,auto)] items-center gap-3 border-b border-neutral-100 px-4 py-2.5 max-sm:grid-cols-[1fr_auto]",
-        identity, state, actions,
+        "border-b border-neutral-100",
+        h(
+          "div",
+          "grid grid-cols-[minmax(8rem,1fr)_minmax(8rem,auto)_minmax(9rem,auto)] items-center gap-3 px-4 py-2.5 max-sm:grid-cols-[1fr_auto]",
+          identity, state, actions,
+        ),
+        line,
       );
     }));
   };

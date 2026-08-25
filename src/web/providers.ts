@@ -136,6 +136,21 @@ export function registerProviderRoutes(
     }
   });
 
+  // A probe, so nothing is written and nothing is recycled. 200 either way:
+  // "the key is revoked" is a successful answer to "does this work", and only
+  // a request that could not be made at all is a 400 — including one that
+  // names no model, because nothing here picks one for you.
+  app.post("/api/providers/:provider/check", async (c) => {
+    const body = await c.req.json().catch(() => null) as { model?: unknown } | null;
+    const model = typeof body?.model === "string" ? body.model.trim() : "";
+    if (!model) return c.json({ error: "model required" }, 400);
+    try {
+      return c.json(await providers.check(c.req.param("provider"), model));
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
   app.post("/api/providers/:provider/logout", async (c) => {
     try {
       await providers.logout(c.req.param("provider"));

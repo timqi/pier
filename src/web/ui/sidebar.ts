@@ -393,7 +393,7 @@ interface Target {
 const CONSOLE_TARGETS: { name: "activity" | "boards" | "settings"; label: string; detail: string }[] = [
   { name: "activity", label: "Activity", detail: "Console — runs, scheduled tasks, dependencies" },
   { name: "boards", label: "Boards", detail: "Console — the static pages Pier publishes" },
-  { name: "settings", label: "Settings", detail: "Console — providers, models, channels, agent files, password, sign out, security" },
+  { name: "settings", label: "Settings", detail: "Console — models and providers, agent files and extensions, channels, password, sign out, security" },
 ];
 
 /** Rebuilt on every render; the index is what ↑/↓ and Enter address. */

@@ -1,11 +1,16 @@
-// Settings → Agent files: scoped Pi config editing (whitelisted files) plus
-// read-only extension/skill browsing. A pure consumer of /api/config; scope
-// choices come from the session list (global + each project cwd).
+// Settings → Agent: one list of everything a session is made of, and one pane
+// to act on whichever item is selected — an agent file to edit, a skill or an
+// extension to read, a bundled extension to switch on. Three kinds of item,
+// one reason to exist: pick a thing on the left, do the one thing it affords on
+// the right. Scope comes from the session list (global + each project cwd);
+// bundled switches are instance-wide, so they appear under Global only.
 
-import type { ConfigResource } from "../../core/types.js";
+import type { BundledExtensionInfo, ConfigResource } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
+import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { setStatus } from "./form.js";
+import { setStatus, toggle } from "./form.js";
+import { langFor } from "./highlight.js";
 
 interface ConfigIndex {
   dir: string;
@@ -15,7 +20,8 @@ interface ConfigIndex {
 
 type Selection =
   | { type: "file"; name: string }
-  | { type: "resource"; kind: "extensions" | "skills"; name: string };
+  | { type: "resource"; kind: "extensions" | "skills"; name: string }
+  | { type: "bundled"; name: string };
 
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
   let scope = "global";
@@ -25,6 +31,14 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   // Where "Global" lives, from the API — PIER_HOME moves it, so no path is
   // hardcoded here. Empty until the first load answers.
   let globalDir = "";
+  /** What the nav is currently drawn from, so a switch can redraw its badge
+   *  without re-reading the scope's files. */
+  let lastIndex: ConfigIndex | null = null;
+  /** The bundled extensions and their switch state; [] outside global scope. */
+  let bundled: BundledExtensionInfo[] = [];
+  /** Why the list is missing, when it is — an empty section would read as
+   *  "Pier ships none", which is a different fact. */
+  let bundledError = "";
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
@@ -58,10 +72,30 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   const q = (extra = ""): string => `?scope=${encodeURIComponent(scope)}${extra}`;
 
+  /** Instance-wide, and the Console already serves them beside the setting. */
+  async function loadBundled(): Promise<void> {
+    if (scope !== "global") {
+      bundled = [];
+      bundledError = "";
+      return;
+    }
+    const res = await fetch("/api/settings", { cache: "no-store" });
+    if (!res.ok) {
+      bundled = [];
+      bundledError = await failure(res, "could not be loaded");
+      return;
+    }
+    bundled = ((await res.json()) as { extensionCatalog: BundledExtensionInfo[] }).extensionCatalog;
+    bundledError = "";
+  }
+
   async function load(): Promise<void> {
     const request = ++loadRequest;
     paneRequest++;
-    const res = await fetch(`/api/config${q()}`, { cache: "no-store" });
+    const [res] = await Promise.all([
+      fetch(`/api/config${q()}`, { cache: "no-store" }),
+      loadBundled(),
+    ]);
     if (request !== loadRequest) return;
     if (!res.ok) {
       renderNav(null);
@@ -74,6 +108,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       globalDir = index.dir;
       renderScopeOptions();
     }
+    lastIndex = index;
     renderNav(index);
     if (!selection) renderPlaceholder();
   }
@@ -95,13 +130,22 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return badge;
   };
 
+  /** A switch that is on, said in the nav so the list can be scanned. */
+  const onBadge = (): HTMLElement =>
+    h(
+      "span",
+      "flex-none rounded bg-emerald-50 px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700",
+      "on",
+    );
+
   function navRow(
     label: string,
     active: boolean,
     dim: boolean,
     onPick: () => void,
     depth = 0,
-    link = false,
+    /** `linkBadge()` or `onBadge()` — one way to mark a row, not two. */
+    tag?: HTMLElement,
   ): HTMLElement {
     const row = h(
       "button",
@@ -110,7 +154,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       } ${dim ? "text-neutral-400" : ""}`,
     );
     row.append(h("span", "truncate", label));
-    if (link) row.append(linkBadge());
+    if (tag) row.append(tag);
     row.style.paddingLeft = `${20 + depth * 14}px`;
     row.title = label;
     row.onclick = onPick;
@@ -171,7 +215,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     for (const file of tree.files) {
       const name = prefix ? `${prefix}/${file.name}` : file.name;
       const sel: Selection = { type: "resource", kind, name };
-      rows.push(navRow(file.name, isActive(sel), false, () => open(sel), depth, file.link));
+      rows.push(
+        navRow(file.name, isActive(sel), false, () => open(sel), depth, file.link ? linkBadge() : undefined),
+      );
     }
     return rows;
   }
@@ -186,6 +232,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       selection = sel;
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name);
+      else if (sel.type === "bundled") openBundled(sel.name);
       else void openResource(sel.kind, sel.name);
     };
     const rows: HTMLElement[] = [];
@@ -193,6 +240,20 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     for (const f of index.files) {
       const sel: Selection = { type: "file", name: f.name };
       rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel)));
+    }
+    if (scope === "global") {
+      rows.push(navSection("bundled with Pier"));
+      if (bundledError) {
+        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", bundledError));
+      } else if (!bundled.length) {
+        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
+      }
+      for (const ext of bundled) {
+        const sel: Selection = { type: "bundled", name: ext.name };
+        rows.push(
+          navRow(ext.name, isActive(sel), false, () => open(sel), 0, ext.enabled ? onBadge() : undefined),
+        );
+      }
     }
     for (const kind of ["extensions", "skills"] as const) {
       rows.push(navSection(`${kind} (read-only)`));
@@ -284,6 +345,63 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     editor.focus();
   }
 
+  /**
+   * The switch, and the two things it cannot be understood without: when it
+   * takes effect, and who wins against a copy of your own.
+   */
+  function openBundled(name: string, note?: { state: "saved" | "failed"; text: string }): void {
+    paneRequest++;
+    const ext = bundled.find((e) => e.name === name);
+    if (!ext) return renderError(`unknown extension: ${name}`);
+    const status = h("span", "text-[11.5px] text-neutral-400", "");
+    if (note) setStatus(status, note.state, note.text);
+    pane.replaceChildren(
+      paneBar(ext.name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "ships with Pier")),
+      h(
+        "div",
+        "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
+        h("p", "max-w-2xl text-[13px] leading-relaxed text-neutral-600", ext.summary),
+        // What the switch actually adds, and what each tool needs to work:
+        // "which providers" has no single answer for a whole extension, and
+        // finding out from a failed turn is finding out too late.
+        h(
+          "dl",
+          "flex max-w-2xl flex-col gap-1.5",
+          ...ext.tools.flatMap((tool) => [
+            h("dt", "font-mono text-[12px] text-neutral-700", tool.name),
+            h("dd", "text-[12px] leading-snug text-neutral-500", `needs ${tool.needs}`),
+          ]),
+        ),
+        toggle(
+          "Enabled",
+          "Loaded from inside Pier — nothing is installed and no update touches your own extensions. "
+            + "A session mid-turn keeps the tools it started with; the next message picks this up.",
+          ext.enabled,
+          (checked) => void saveBundled(ext.name, checked),
+        ),
+        h(
+          "p",
+          "max-w-2xl text-[12px] leading-snug text-neutral-400",
+          "An extension of your own that registers the same tool wins: this copy stands down and says so in the log.",
+        ),
+        status,
+      ),
+    );
+  }
+
+  async function saveBundled(name: string, checked: boolean): Promise<void> {
+    const names = bundled.filter((e) => (e.name === name ? checked : e.enabled)).map((e) => e.name);
+    const res = await sendJson("/api/settings", { extensions: names }, "PUT");
+    if (!res.ok) {
+      // Redrawn from the state the server last confirmed, so the switch never
+      // shows something nobody stored — and the reason rides with the redraw.
+      return openBundled(name, { state: "failed", text: await failure(res, "could not save") });
+    }
+    bundled = ((await res.json()) as { extensionCatalog: BundledExtensionInfo[] }).extensionCatalog;
+    renderNav(lastIndex); // the `on` badge in the nav is part of the answer
+    openBundled(name, { state: "saved", text: "Saved — sessions take it on their next message." });
+  }
+
   async function openResource(kind: "extensions" | "skills", name: string): Promise<void> {
     const request = ++paneRequest;
     const res = await fetch(
@@ -296,9 +414,14 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     const { content } = (await res.json()) as { content: string };
     if (request !== paneRequest) return;
+    const lines = content.split("\n");
+    if (lines.at(-1) === "") lines.pop(); // the trailing newline is not a line
+    // The Files view's renderer, not a second one: same gutter, same
+    // highlighting, same wrapping — a skill or an extension is source code,
+    // and it was reading as a wall of grey <pre>.
     pane.replaceChildren(
       paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only")),
-      h("pre", "min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-[12.5px]", content),
+      h("div", "min-h-0 flex-1 overflow-auto", codePane(plainRows(lines), langFor(name))),
     );
   }
 

@@ -3,9 +3,11 @@
 // a session; server.ts stays the session/event surface.
 
 import type { Hono } from "hono";
+import type { BundledExtensionInfo } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
+  normalizeExtensions,
   normalizeModelMenu,
   normalizePublicUrl,
   normalizeTerminalInitCommand,
@@ -50,6 +52,9 @@ export function registerInstanceRoutes(
      *  so instead of offering a button that cannot work. */
     updater?: UpdateApplier | null;
     secrets: SecretsControl;
+    /** The bundled-extension catalog, handed over as data by main.ts. Absent
+     *  in tests that do not care; the Console then shows no switches. */
+    extensions?: () => BundledExtensionInfo[];
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
@@ -58,7 +63,8 @@ export function registerInstanceRoutes(
     onSettingsChanged?: () => void;
   },
 ): void {
-  const { settings, updates, updater = null, secrets, onUnlocked, onSettingsChanged } = deps;
+  const { settings, updates, updater = null, secrets, extensions, onUnlocked, onSettingsChanged } =
+    deps;
   const updateLog = logger("update");
   // How long POST /api/update may hold its response open. A busy Pier drains
   // first, which can take minutes, and a response held that long dies at every
@@ -98,7 +104,12 @@ export function registerInstanceRoutes(
 
   // Instance settings. The password lives behind its own route (web/auth.ts):
   // it is a credential, and changing it takes the old one.
-  app.get("/api/settings", (c) => c.json(settings.get()));
+  // The catalog rides along: one round trip for the whole page, and the
+  // switches cannot disagree with the setting they are drawn from. One shape
+  // for both the read and the write, or the page reconciles two answers.
+  const instanceSettings = () => ({ ...settings.get(), extensionCatalog: extensions?.() ?? [] });
+
+  app.get("/api/settings", (c) => c.json(instanceSettings()));
 
   // What the version badge reads: the two versions, whether this instance can
   // do anything about the gap, and whether it is allowed to do it unattended.
@@ -164,14 +175,21 @@ export function registerInstanceRoutes(
   // malformed field is rejected before anything is written.
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null) as
-      | { publicUrl?: unknown; modelMenu?: unknown; autoUpdate?: unknown; terminalInitCommand?: unknown }
+      | {
+        publicUrl?: unknown;
+        modelMenu?: unknown;
+        autoUpdate?: unknown;
+        terminalInitCommand?: unknown;
+        extensions?: unknown;
+      }
       | null;
-    if (
-      !body ||
-      (body.publicUrl === undefined && body.modelMenu === undefined &&
-        body.autoUpdate === undefined && body.terminalInitCommand === undefined)
-    ) {
-      return c.json({ error: "publicUrl, modelMenu, autoUpdate or terminalInitCommand required" }, 400);
+    const given = body &&
+      [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions]
+        .some((v) => v !== undefined);
+    if (!given) {
+      return c.json({
+        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand or extensions required",
+      }, 400);
     }
     if (body.publicUrl !== undefined) {
       if (typeof body.publicUrl !== "string") return c.json({ error: "publicUrl must be a string" }, 400);
@@ -199,9 +217,17 @@ export function registerInstanceRoutes(
       }
       settings.setTerminalInitCommand(command);
     }
-    // Only the URL: the model menu is read per picker call, not per session.
-    if (body.publicUrl !== undefined) onSettingsChanged?.();
-    return c.json(settings.get());
+    if (body.extensions !== undefined) {
+      const names = normalizeExtensions(body.extensions);
+      if (names === null) {
+        return c.json({ error: "extensions must be a list of names (≤32)" }, 400);
+      }
+      settings.setExtensions(names);
+    }
+    // The URL and the extension set are both read when a session opens; the
+    // model menu is read per picker call, so it needs no recycle.
+    if (body.publicUrl !== undefined || body.extensions !== undefined) onSettingsChanged?.();
+    return c.json(instanceSettings());
   });
 
   // Layer-1 key status and control (Console → Settings → Security). The GET

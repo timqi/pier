@@ -19,7 +19,7 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 - Node 24 or newer (`node:sqlite` is used unflagged)
 - Linux: Python 3, `make` and a C/C++ compiler for `node-pty`
 - A provider account (Anthropic, OpenAI, …) — configure its API key or OAuth
-  login from Console → Settings → Providers after signing in
+  login from Console → Settings → Models after signing in
 - A user-writable global npm prefix if `pier update` should update a service
 - Optional: the `sqlite3` CLI, for backups and password resets
 
@@ -43,10 +43,10 @@ is behind it — there is no default password and no unclaimed window. Lost it?
 Open `http://localhost:3141`, sign in, then:
 
 - **Console → Settings** — everything the instance is configured with, one
-  tab per topic: Providers (API-key/OAuth logins), Models (the menu of
-  favored models agents are advised with), Channels (Slack Socket-Mode or
-  Telegram bot tokens; chats are discovered when the bot first sees traffic,
-  gated by the mention/bind rules you set), Agent files (Pi configuration),
+  tab per topic: Models (API-key/OAuth logins, and the menu of favored models
+  agents are advised with), Agent (Pi configuration, skills, extensions),
+  Channels (Slack Socket-Mode or Telegram bot tokens; chats are discovered
+  when the bot first sees traffic, gated by the mention/bind rules you set),
   plus the public URL, password and master key
 - **New session** — pick a directory; that is where the agent's shell runs
 
@@ -61,17 +61,34 @@ an existing Pi setup:
 PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier serve
 ```
 
+Pier exports that variable for the SDK, so anything it starts inherits it — a
+shell in the Web Terminal included. A second Pier launched from there with its
+own `PIER_HOME` derives its own agent directory rather than adopting the first
+one's; setting `PI_CODING_AGENT_DIR` again on that command line still wins.
+
 Console → Settings is the normal setup path:
 
-- **Providers** configures built-in or custom endpoints and API-key/OAuth login.
-  Stored credentials are sealed in Pier's SQLite database; they are not written
-  back to `models.json`.
-- **Agent files** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
+- **Models** configures built-in or custom endpoints and API-key/OAuth login,
+  then pins the few models this deployment favors. Stored credentials are
+  sealed in Pier's SQLite database; they are not written back to `models.json`.
+  **Test** sends one real request on a model you pick and shows both halves of
+  it — the body as the provider received it, and what came back — so a wrong
+  base URL, a revoked key, a gateway rewriting the request or a model the
+  endpoint never had says so here instead of in a session.
+- **Agent** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
   `models.json` structure in the Pi agent directory — globally, or per project
   scope, where it also shows that project's `.pi/skills` and `.pi/extensions`
   resources. Changes apply when a session next opens; saving here recycles the
   idle ones for you, and **Settings → Instance → Reload** does it for files
   something else changed — an agent, or an editor on the box.
+  The same tab lists the extensions Pier ships with, under Global — they live
+  inside the package, so there is nothing to install and an update never
+  touches your own `extensions` directory, and if an extension of yours
+  already registers the same tool, Pier's copy stands down. `web` is the one
+  shipped today: the public web through the provider's own hosted web tools —
+  `web_search` on an authenticated Anthropic or OpenAI model, `web_fetch` on an
+  Anthropic one (OpenAI hosts no fetch tool), and no other key or service. The
+  page says which tools a switch adds and what each needs before you flip it.
 
 On first credential access, Pier imports an existing `auth.json` into its sealed
 store and renames the source to `auth.json.imported`. Literal provider keys left

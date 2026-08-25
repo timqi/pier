@@ -1,6 +1,6 @@
-// The ONLY file allowed to import @earendil-works/pi-*. Implements the
-// AgentFactory/AgentSession seam from src/core/types.ts on the Pi SDK.
-// No Pi type may appear in an exported signature.
+// The only file outside src/extensions allowed to import @earendil-works/pi-*.
+// Implements the AgentFactory/AgentSession seam from src/core/types.ts on the
+// Pi SDK. No Pi type may appear in an exported signature.
 
 import {
   createAgentSession,
@@ -10,7 +10,9 @@ import {
   ModelRuntime,
   SessionManager,
   type AgentSession as PiAgentSession,
+  type Extension,
   type ExtensionAPI,
+  type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import type {
@@ -24,6 +26,7 @@ import type {
   ProviderAuthEvent,
   ProviderAuthPrompt,
   ProviderAuthType,
+  ProviderCheck,
   ProviderInfo,
   ProviderManager,
   ProviderSetup,
@@ -34,6 +37,7 @@ import type {
   ThinkingLevel,
   TurnMeta,
 } from "../core/types.js";
+import { inlineExtensions } from "../extensions/index.js";
 import { logger } from "../log.js";
 import {
   toChatTurns,
@@ -54,6 +58,14 @@ const log = logger("agent");
  * a tool error the agent can retry with an explicit longer timeout, instead of
  * killing the whole run. */
 const BASH_DEFAULT_TIMEOUT_SECONDS = 600;
+/** A probe nobody is watching is a hung page: the Console waits on this. */
+const PROVIDER_CHECK_TIMEOUT_MS = 20_000;
+/** An ordinary budget, not a token: a 1-token cap is a request no real turn
+ *  ever makes, and answers about it are answers about a different request. */
+const PROVIDER_CHECK_MAX_TOKENS = 8192;
+/** Neither half of a probe is worth more than a screen. */
+const clip = (text: string): string =>
+  text.length > 4000 ? `${text.slice(0, 4000)}\n[… ${text.length - 4000} more characters]` : text;
 
 /** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows it. */
 const PIER_SYSTEM_PROMPT = `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work, verify results, and state what you could not check.
@@ -79,6 +91,29 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
       event.input.timeout = BASH_DEFAULT_TIMEOUT_SECONDS;
     }
   });
+};
+
+/**
+ * A bundled extension stands down when a copy on disk already registers one of
+ * its tools. Pi loads both and reports the clash as a diagnostic nobody reads,
+ * leaving two tools of the same name and no way to tell which one answered;
+ * the copy the user put there wins, and the journal says so (§5b).
+ */
+export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsResult => {
+  const inline = (ext: Extension): boolean => ext.path.startsWith("<inline:");
+  const onDisk = new Set(
+    base.extensions.filter((ext) => !inline(ext)).flatMap((ext) => [...ext.tools.keys()]),
+  );
+  if (!onDisk.size) return base;
+  return {
+    ...base,
+    extensions: base.extensions.filter((ext) => {
+      const clash = inline(ext) && [...ext.tools.keys()].filter((tool) => onDisk.has(tool));
+      if (!clash || !clash.length) return true;
+      log.info(`bundled ${ext.path} stood down — ${clash.join(", ")} already loaded from disk`);
+      return false;
+    }),
+  };
 };
 
 export class PiSession implements AgentSession {
@@ -265,6 +300,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     /** Operator-pinned models (Console → Settings → Models), surfaced first in
      * every picker. A getter for the same reason `instructions` is one. */
     private readonly pinned: () => ModelRef[] = () => [],
+    /** Which bundled extensions the Console has switched on. A getter for the
+     * same reason again: the toggle takes effect on the next session open. */
+    private readonly enabledExtensions: () => string[] = () => [],
   ) {}
 
   /** One runtime for the whole process; catalogs are global, not per session. */
@@ -354,6 +392,71 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     });
   }
 
+  /**
+   * One real request on the model the operator named. `configured` only ever
+   * meant "a credential is stored", and a wrong base URL, a revoked key, a
+   * gateway rewriting the request and a model this endpoint has never heard of
+   * all look identical until a turn fails hours later.
+   *
+   * The request goes out through a fetch of our own for one reason: what a
+   * provider (or a proxy in front of it) was actually sent, and what it
+   * actually said, is the answer here — a summary of either would be Pier's
+   * word for someone else's.
+   */
+  async check(providerId: string, modelId: string): Promise<ProviderCheck> {
+    const started = Date.now();
+    const signal = AbortSignal.timeout(PROVIDER_CHECK_TIMEOUT_MS);
+    let request = "";
+    let body: Promise<string> = Promise.resolve("");
+    const recorded: typeof globalThis.fetch = async (input, init) => {
+      request = typeof init?.body === "string" ? init.body : "";
+      const response = await globalThis.fetch(input, init);
+      // Cloned, not consumed: the SDK still needs to read the real stream.
+      body = response.clone().text().then(clip, () => "");
+      return response;
+    };
+    const answered = (text: string, ok: boolean): ProviderCheck => ({
+      ok,
+      model: modelId,
+      ms: Date.now() - started,
+      request: clip(request),
+      response: text,
+    });
+    try {
+      const runtime = await this.refreshedRuntime();
+      const model = runtime.getModel(providerId, modelId);
+      if (!model) throw new Error(`unknown model: ${providerId}/${modelId}`);
+      const answer = await runtime.completeSimple(
+        model,
+        { messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
+        { maxTokens: PROVIDER_CHECK_MAX_TOKENS, signal, fetch: recorded },
+      );
+      // A refusal can arrive as a message rather than a throw; the stop reason
+      // is the only thing separating it from an answer.
+      const refused = answer.stopReason === "error" || answer.stopReason === "aborted";
+      if (refused) {
+        throw new Error(answer.errorMessage ?? `the provider stopped: ${answer.stopReason}`);
+      }
+      const text = answer.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("")
+        .trim();
+      // An empty answer is still an answer; say which kind of nothing it was.
+      return answered(clip(text) || `(no text; stop reason: ${answer.stopReason})`, true);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      log.warn(`provider check failed for ${providerId}/${modelId}`, err);
+      const raw = await body;
+      return answered(
+        signal.aborted
+          ? `no answer within ${PROVIDER_CHECK_TIMEOUT_MS / 1000}s (${error})`
+          : raw || error,
+        false,
+      );
+    }
+  }
+
   async setup(input: ProviderSetup): Promise<void> {
     const builtins = await this.builtinIds();
     if (input.kind === "builtin" && !builtins.has(input.id)) {
@@ -427,7 +530,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       // Pi's generic default, preserving the user's later instruction layer.
       systemPromptOverride: pierSystemPrompt,
       additionalSkillPaths: this.skillPaths,
-      extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
+      extensionFactories: [
+        { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
+        ...inlineExtensions(this.enabledExtensions()),
+      ],
+      extensionsOverride: standDownShadowed,
       agentsFilesOverride: (current) => {
         const content = this.instructions();
         return {

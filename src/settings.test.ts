@@ -4,11 +4,20 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "./db.js";
 import {
+  normalizeExtensions,
   normalizeModelMenu,
   normalizePublicUrl,
   normalizeTerminalInitCommand,
   SettingsStore,
 } from "./settings.js";
+
+const EMPTY = {
+  publicUrl: "",
+  modelMenu: [],
+  autoUpdate: false,
+  terminalInitCommand: "",
+  extensions: [],
+};
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
 
@@ -33,21 +42,17 @@ describe("SettingsStore", () => {
     const path = dbPath();
     const db = openDb(path);
     const store = new SettingsStore(db);
-    expect(store.get()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false, terminalInitCommand: "" });
+    expect(store.get()).toEqual(EMPTY);
     expect(store.setPublicUrl("https://pier.example.com")).toEqual({
+      ...EMPTY,
       publicUrl: "https://pier.example.com",
-      modelMenu: [],
-      autoUpdate: false,
-      terminalInitCommand: "",
     });
     // A restart: the connection is gone, the row is not.
     db.close();
     const reopened = openDb(path);
     expect(new SettingsStore(reopened).get()).toEqual({
+      ...EMPTY,
       publicUrl: "https://pier.example.com",
-      modelMenu: [],
-      autoUpdate: false,
-      terminalInitCommand: "",
     });
     reopened.close();
   });
@@ -90,6 +95,30 @@ describe("normalizeTerminalInitCommand", () => {
     expect(normalizeTerminalInitCommand("tmux\tnew")).toBeNull();
     expect(normalizeTerminalInitCommand("echo \u0007")).toBeNull();
     expect(normalizeTerminalInitCommand("x".repeat(501))).toBeNull();
+  });
+});
+
+describe("bundled extensions", () => {
+  it("round-trips the enabled set and ignores a corrupt row rather than crashing", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    expect(store.setExtensions(["web"]).extensions).toEqual(["web"]);
+    db.prepare("UPDATE settings SET value = 'not json' WHERE key = 'extensions'").run();
+    expect(store.get().extensions).toEqual([]);
+    db.prepare("UPDATE settings SET value = '[7]' WHERE key = 'extensions'").run();
+    expect(store.get().extensions).toEqual([]);
+    db.close();
+  });
+
+  it("accepts names it does not know, and refuses anything that is not one", () => {
+    // Shape only: the catalog lives in code, and a name from a newer release
+    // must survive a downgrade rather than be dropped on read.
+    expect(normalizeExtensions([" web ", "web", "future-thing"]))
+      .toEqual(["web", "future-thing"]);
+    expect(normalizeExtensions([])).toEqual([]);
+    for (const bad of ["web", [42], [""], [" "], ["x".repeat(65)], Array(33).fill("a")]) {
+      expect(normalizeExtensions(bad)).toBeNull();
+    }
   });
 });
 

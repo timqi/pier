@@ -101,6 +101,22 @@ function fakeSession(id: string): AgentSession & {
   };
 }
 
+/** The bundled extensions this test pretends Pier ships with. */
+const CATALOG = [{
+  name: "web",
+  summary: "the provider's own web tools",
+  tools: [{ name: "web_search", needs: "an authenticated model" }],
+}];
+/** GET /api/settings on a fresh instance. */
+const SETTINGS_JSON = {
+  publicUrl: "",
+  modelMenu: [],
+  autoUpdate: false,
+  terminalInitCommand: "",
+  extensions: [],
+  extensionCatalog: CATALOG.map((ext) => ({ ...ext, enabled: false })),
+};
+
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
   const calls: string[] = [];
@@ -149,6 +165,13 @@ function fakeProviders(): ProviderManager & { calls: string[] } {
       },
     ],
     setup: async (input) => void calls.push(`setup:${input.kind}:${input.id}:${input.endpoint ?? "default"}`),
+    check: async (providerId, modelId) => {
+      calls.push(`check:${providerId}/${modelId}`);
+      const sent = `{"model":"${modelId}","messages":[{"role":"user","content":"hi"}]}`;
+      return providerId === "anthropic"
+        ? { ok: true, model: modelId, ms: 42, request: sent, response: "Hi!" }
+        : { ok: false, model: modelId, ms: 7, request: sent, response: "401 invalid_api_key" };
+    },
     login: async (providerId, type, interaction) => {
       calls.push(`login:${providerId}:${type}`);
       if (type === "oauth") {
@@ -243,6 +266,10 @@ function setup(
   const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
+    // Composed like main.ts — a catalog of names, so this test never loads an
+    // extension or the SDK behind one.
+    extensions: () =>
+      CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     channelOf: (id) => imOwners.get(id),
@@ -721,9 +748,31 @@ describe("workbench server", () => {
     expect(settings.get().autoUpdate).toBe(false);
   });
 
+  it("switches a bundled extension on, refuses a mis-shaped list, and recycles", async () => {
+    const { app, settings } = setup();
+    const put = (extensions: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ extensions }),
+      });
+    const ok = await put(["web"]);
+    expect(ok.status).toBe(200);
+    expect(settings.get().extensions).toEqual(["web"]);
+    // The answer carries the switches back, already flipped.
+    expect(await ok.json()).toMatchObject({
+      extensionCatalog: [{ name: "web", enabled: true }],
+    });
+    expect((await put("web")).status).toBe(400);
+    expect((await put([42])).status).toBe(400);
+    expect(settings.get().extensions).toEqual(["web"]);
+    expect((await put([])).status).toBe(200);
+    expect(settings.get().extensions).toEqual([]);
+  });
+
   it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {
     const { app, settings } = setup();
-    expect(await (await app.request("/api/settings")).json()).toEqual({ publicUrl: "", modelMenu: [], autoUpdate: false, terminalInitCommand: "" });
+    expect(await (await app.request("/api/settings")).json()).toEqual(SETTINGS_JSON);
 
     const put = (publicUrl: unknown) =>
       app.request("/api/settings", {
@@ -733,7 +782,7 @@ describe("workbench server", () => {
       });
     const ok = await put("pier.example.com/");
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: [], autoUpdate: false, terminalInitCommand: "" });
+    expect(await ok.json()).toEqual({ ...SETTINGS_JSON, publicUrl: "https://pier.example.com" });
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
 
     expect((await put("not a url")).status).toBe(400);
@@ -774,7 +823,11 @@ describe("workbench server", () => {
     const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hard problems" }];
     const ok = await put(menu);
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ publicUrl: "https://pier.example.com", modelMenu: menu, autoUpdate: false, terminalInitCommand: "" });
+    expect(await ok.json()).toEqual({
+      ...SETTINGS_JSON,
+      publicUrl: "https://pier.example.com",
+      modelMenu: menu,
+    });
 
     expect((await put("nope")).status).toBe(400);
     expect((await put([{ provider: "a" }])).status).toBe(400);
@@ -867,6 +920,36 @@ describe("workbench server", () => {
       "setup:builtin:anthropic:https://proxy.example/v1",
       "logout:anthropic",
     ]);
+  });
+
+  it("answers a provider probe, and a refusal is an answer rather than a 500", async () => {
+    const { app, providers } = setup();
+    const probe = (id: string, body: unknown) =>
+      app.request(`/api/providers/${id}/check`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const worked = await probe("anthropic", { model: " claude-haiku-4-5 " });
+    expect(worked.status).toBe(200);
+    expect(await worked.json()).toMatchObject({
+      ok: true,
+      model: "claude-haiku-4-5",
+      response: "Hi!",
+      request: expect.stringContaining("claude-haiku-4-5"),
+    });
+
+    // "The key is revoked" is the answer to "does this work", not an error of
+    // the request that asked — and the provider's own words are kept.
+    const refused = await probe("someone-else", { model: "m" });
+    expect(refused.status).toBe(200);
+    expect(await refused.json()).toMatchObject({ ok: false, response: "401 invalid_api_key" });
+
+    // Nothing picks a model here: without one there is nothing to answer.
+    expect((await probe("anthropic", {})).status).toBe(400);
+    expect((await probe("anthropic", { model: "  " })).status).toBe(400);
+    expect(providers.calls).toEqual(["check:anthropic/claude-haiku-4-5", "check:someone-else/m"]);
   });
 
   it("sanitizes provider-owned flow data and redacts submitted values from failures", async () => {
@@ -1433,6 +1516,14 @@ describe("configuration reaching live sessions", () => {
     await recycled(
       "public URL",
       await app.request("/api/settings", { ...json({ publicUrl: "pier.example.com" }), method: "PUT" }),
+    );
+
+    // A bundled extension is read at session open like the rest: a session
+    // that kept running would keep the tool set it was created with.
+    attached(router, session);
+    await recycled(
+      "bundled extension",
+      await app.request("/api/settings", { ...json({ extensions: ["web"] }), method: "PUT" }),
     );
   });
 

@@ -17,6 +17,7 @@ import { guarded, registerFileRoutes } from "./files.js";
 import type {
   AgentFactory,
   BackgroundRun,
+  BundledExtensionInfo,
   ChatTurn,
   ConfigStore,
   InboundMessage,
@@ -68,6 +69,9 @@ export interface WebDeps {
   config: ConfigStore;
   providers: ProviderManager;
   settings: SettingsStore;
+  /** The extensions Pier ships with, and which are on. Passed as data by
+   *  main.ts: the catalog is code that imports the Pi SDK, and web/ may not. */
+  extensions?: () => BundledExtensionInfo[];
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
   updates: UpdateCheck;
@@ -103,6 +107,7 @@ export function createServer(
     config,
     providers,
     settings,
+    extensions,
     secrets,
     onUnlocked,
     reload,
@@ -534,6 +539,7 @@ export function createServer(
     updates,
     updater,
     secrets,
+    extensions,
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),
   });

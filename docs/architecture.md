@@ -30,10 +30,14 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 src/
   core/        types.ts, router.ts, hub.ts, queue.ts, reply.ts, identity.ts,
                inbox.ts, inbound-file.ts
-  agent/       pi.ts (the ONLY file importing @earendil-works/pi-*), events.ts
-               (Pi → Pier event translation, no SDK imports), config.ts
-               (provider/model files), credentials.ts (sealed store + auth.json
-               import), models.ts (catalog curation)
+  agent/       pi.ts (the only file outside extensions/ importing
+               @earendil-works/pi-*), events.ts (Pi → Pier event translation,
+               no SDK imports), config.ts (provider/model files),
+               credentials.ts (sealed store + auth.json import), models.ts
+               (catalog curation)
+  extensions/  index.ts (the list Pier ships and nothing else),
+               web/ (web_search + web_fetch on the provider's own hosted
+               web tools)
   channels/    types.ts (config contract), config.ts (store + permission gate),
                gatekeeper.ts (verdict + drop log), chains.ts (ordering),
                chunk.ts, commands.ts (slash-command parse), control.ts,
@@ -50,7 +54,8 @@ src/
                auth.ts, files.ts, session-state.ts,
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,
-               ui/ modules (form.ts + dom.ts are the shared vocabulary)
+               ui/ modules (form.ts + dom.ts are the shared vocabulary;
+               code.ts renders every file the Console did not write)
   tasks/       types (incl. the shared delivery record), outbox (the one
                delivery engine: proof, backoff, ceiling), definitions,
                runs, groups, agent (the child-run runner),
@@ -62,7 +67,7 @@ src/
   log.ts       what a log line looks like, and where it goes
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   settings.ts  the instance facts a human owns (the public URL, the model menu,
-               the auto-update switch)
+               the auto-update switch, which bundled extensions are on)
   update.ts    the newer release: whether one exists, and when this instance may
                become it — the install itself is handed to service.ts's unit
   drain.ts     the graceful restart: finish running turns, ledger what the
@@ -72,6 +77,11 @@ src/
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
 never imports platform SDKs or Pi, and runtime dependencies never go sideways.
+`extensions/` sits beside `agent/` rather than under it: an extension takes an
+`ExtensionAPI`, so it is Pi-shaped by construction and is the second area
+allowed to import the SDK. Only `agent/pi.ts` registers one (as an inline
+factory) and only `main.ts` reads the catalog, as `BundledExtensionInfo` data
+for the Console; nothing else imports the area.
 The browser may import owner-defined HTTP DTOs from `tasks/types.ts` and
 `channels/types.ts` type-only: these imports are erased at build, keep wire
 shapes single-sourced, and do not let web implement either area.
@@ -219,6 +229,17 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - Pi **SDK** over RPC; seam kept RPC-compatible (no Pi types leak out of `agent/`).
 - Standalone program, not a Pi extension; Pier registers custom tools into
   the sessions it creates (task tool, step 4).
+- Bundled extensions (`src/extensions/`) ship *inside* the package and load as
+  Pi inline factories — nothing is ever copied into `<agentDir>/extensions`.
+  A copy on disk has an owner problem: an update either clobbers the edits
+  someone made to it or skips them forever. Two rules keep it honest: the
+  Console's switch is an instance setting read when a session opens (so it
+  reaches sessions exactly like an edited agent file, and saving recycles the
+  idle ones), and a bundled extension stands down when an extension on disk
+  already registers one of its tools — the user's copy wins and the journal
+  says which one answered. Pier is not an extension manager: installing
+  third-party extensions stays Pi's job, and this list is only what Pier
+  ships.
 - Web workbench before IM channels (fastest loop for steering/observability).
 - Boards (avibe's "Show pages", renamed): a board is a *directory* under
   `$PIER_HOME/boards`, derived by scanning like Projects are — no table, no

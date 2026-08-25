@@ -20,6 +20,7 @@ import { parseConversation as parseSlackConversation } from "./channels/slack.js
 import { EventHub } from "./core/hub.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
+import { bundledInfo } from "./extensions/index.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
@@ -28,7 +29,7 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
-import { PIER_HOME, pierPath } from "./paths.js";
+import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
@@ -43,8 +44,18 @@ const log = logger("pier");
 
 // Pier owns the Pi runtime dir. Set before any SDK call resolves a path, so
 // everything Pi derives from its agent dir (auth.json, models.json, sessions,
-// bin) lands under PIER_HOME instead of ~/.pi. An operator override wins.
-process.env.PI_CODING_AGENT_DIR ??= pierPath("pi");
+// bin) lands under PIER_HOME instead of ~/.pi.
+//
+// An operator override wins — but only a human's. Everything Pier spawns (the
+// Web Terminal, the agent's own shell) inherits this variable, so a second
+// Pier started from inside the first with its own PIER_HOME would adopt the
+// first one's agent dir and write its sessions, SYSTEM.md and models.json
+// there: two instances sharing a directory neither was told to share, and
+// PIER_HOME looking like it did nothing. PIER_AGENT_DIR marks the value as
+// ours, and a value that is ours is not an override, it is a leak — derive it
+// again from this instance's own PIER_HOME.
+process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
+process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
 // First, and explicitly: every store below shares this one connection, and a
 // schema that cannot be migrated must stop the process here — before a port is
@@ -116,6 +127,9 @@ const factory = new PiAgentFactory(
   piConfig,
   // Operator pins ride ahead of the curated catalog in every model picker.
   () => settings.get().modelMenu,
+  // Bundled extensions the Console switched on; read per session open, so the
+  // toggle reaches the next session the same way an edited agent file does.
+  () => settings.get().extensions,
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
@@ -306,6 +320,9 @@ app.route("/", createServer({
   config: piConfig,
   providers: factory,
   settings,
+  // The catalog is code, so the composition root is where it is read: web/
+  // gets names and summaries, not a module that imports the Pi SDK.
+  extensions: () => bundledInfo(settings.get().extensions),
   secrets,
   updates,
   updater,
@@ -321,6 +338,11 @@ const hostname = process.env.HOST ?? "127.0.0.1";
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
   log.info(`workbench on http://${hostname}:${port}`);
   log.info(`pid ${process.pid}, node ${process.version}, home ${PIER_HOME}`);
+  // Only when it is not the derived default: an agent dir outside PIER_HOME is
+  // the one thing about this process's paths that cannot be guessed from it.
+  if (process.env.PI_CODING_AGENT_DIR !== pierPath("pi")) {
+    log.info(`agent dir ${process.env.PI_CODING_AGENT_DIR} (PI_CODING_AGENT_DIR)`);
+  }
 });
 // The one WebSocket surface (see web/terminal.ts); `serve` above builds a
 // plain node:http server, which is the only shape with an upgrade event.

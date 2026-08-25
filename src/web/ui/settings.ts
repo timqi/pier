@@ -1,9 +1,9 @@
 // Console → Settings: the one place the instance is configured, one tab per
-// topic. Instance (URL, password), Providers (model auth), Models (the
-// operator's menu), Channels and Agent files host their own modules; this
-// file owns the topic strip and the two cards small enough to live here
-// (Instance, Security). Storage is not the split — a db row and a Pi file are
-// both "settings" to the person opening this page.
+// topic. Models (provider auth and the operator's menu — one topic: what the
+// agent runs on), Channels and Agent host their own modules; this file owns
+// the topic strip and the cards small enough to live here (Instance,
+// Security). Storage is not the split — a db row and a Pi file are both
+// "settings" to the person opening this page.
 
 import { failure, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
@@ -14,13 +14,12 @@ import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
 
-type Topic = "instance" | "providers" | "models" | "channels" | "files" | "security";
-// Setup order: what you need first sits first — auth, then what to run, then
-// where it talks, then the instance's own facts.
+type Topic = "instance" | "models" | "channels" | "files" | "security";
+// Setup order: what you need first sits first — what to run on, then what the
+// agent is made of, then where it talks, then the instance's own facts.
 const TOPICS: [Topic, string][] = [
-  ["providers", "Providers"],
   ["models", "Models"],
-  ["files", "Agent files"],
+  ["files", "Agent"],
   ["channels", "Channels"],
   ["instance", "Instance"],
   ["security", "Security"],
@@ -43,7 +42,7 @@ export function createSettingsView(
   onTopic: (topic: string) => void,
 ): ConsoleView {
   const stored = localStorage.getItem(TOPIC_KEY) ?? undefined;
-  let topic: Topic = isTopic(stored) ? stored : "providers";
+  let topic: Topic = isTopic(stored) ? stored : "models";
 
   // Header and tabs sit above the topic host, which scrolls (or lays out) on
   // its own — the strip stays visible however long a topic page gets.
@@ -204,8 +203,17 @@ export function createSettingsView(
   const wrap = (content: HTMLElement): HTMLElement =>
     h("div", "hidden min-h-0 flex-1 overflow-y-auto bg-neutral-50/60", h("div", "px-4 py-5", content));
 
+  // One topic, two halves: the endpoints that can be reached, then the few
+  // models this deployment favors. Configuring auth and then pinning what to
+  // reach for is one sitting, and splitting it made the second half look
+  // optional.
   const modelMenu = createModelMenuPane();
-  const providersBox = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
+  // Same column width and card chrome as the menu below it, or the two halves
+  // of one topic read as two pages.
+  const providersBox = h(
+    "div",
+    "mx-auto flex w-full min-w-0 max-w-3xl flex-col rounded-xl border border-neutral-200 bg-white shadow-xs",
+  );
 
   const channelsHost = h("section", "hidden min-h-0 flex-1 flex-col");
   const channelsChild = createChannelsView(channelsHost);
@@ -328,17 +336,18 @@ export function createSettingsView(
   // --- view ----------------------------------------------------------------------
 
   const instancePane = wrap(instanceColumn);
-  const providersPane = wrap(providersBox);
-  const modelsPane = wrap(modelMenu.el);
+  const modelsPane = wrap(h("div", "flex flex-col gap-6", providersBox, modelMenu.el));
   const securityPane = wrap(securityColumn);
   const simplePanes: [Topic, HTMLElement, () => void][] = [
     ["instance", instancePane, loadInstance],
-    ["providers", providersPane, () => void openProviders(providersBox)],
-    ["models", modelsPane, () => modelMenu.load()],
+    ["models", modelsPane, () => {
+      void openProviders(providersBox);
+      modelMenu.load();
+    }],
     ["security", securityPane, () => void loadSecurity()],
   ];
 
-  root.append(header, tabs, instancePane, providersPane, modelsPane, channelsHost, filesHost, securityPane);
+  root.append(header, tabs, instancePane, modelsPane, channelsHost, filesHost, securityPane);
 
   function show(arg?: string): void {
     if (isTopic(arg)) topic = arg;

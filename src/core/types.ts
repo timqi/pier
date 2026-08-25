@@ -262,6 +262,21 @@ export interface ConfigResource {
 }
 
 /**
+ * One extension Pier ships with, as a surface may show it. Not a
+ * `ConfigResource`: it is not a file anyone can open, it is a switch — the
+ * code lives inside the package and its state is an instance setting.
+ */
+export interface BundledExtensionInfo {
+  name: string;
+  summary: string;
+  /** The tools it adds, and what each needs — which providers an extension
+   *  works with is the question asked in front of its switch, and it does not
+   *  always have one answer for the whole extension. */
+  tools: { name: string; needs: string }[];
+  enabled: boolean;
+}
+
+/**
  * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
  * browsing. Changes apply to sessions created afterwards — Pi reads these
  * files at session start, never mid-run.
@@ -421,10 +436,35 @@ export interface ProviderInfo {
   models?: { id: string; reasoning: boolean }[];
 }
 
+/**
+ * What one probe of a provider answers. Deliberately not part of
+ * `ProviderInfo` and stored nowhere: `configured` means a credential exists,
+ * this means the endpoint, the credential and a model id actually work
+ * together — and that is a fact about a moment, not a state.
+ *
+ * `request` and `response` are the probe's whole point: a refusal is only
+ * useful next to what provoked it, and a proxy in the path can change either.
+ * Both are verbatim and both are shown.
+ */
+export interface ProviderCheck {
+  ok: boolean;
+  model: string;
+  ms: number;
+  /** The request body as the provider received it, "" if none was sent. */
+  request: string;
+  /** The answer's text when there was one, otherwise the refusal verbatim. */
+  response: string;
+}
+
 /** Core ↔ Pi provider seam: structural setup plus provider-owned auth flows. */
 export interface ProviderManager {
   providers(): Promise<ProviderInfo[]>;
   setup(input: ProviderSetup): Promise<void>;
+  /** One real request against the provider, on the model the operator picked
+   *  — nothing here chooses one, because a probe that answers about a model
+   *  nobody named answers nothing. Answers rather than throws: "it does not
+   *  work, and here is what it said" is the result, not an exception. */
+  check(providerId: string, modelId: string): Promise<ProviderCheck>;
   /** Returns a compare-and-restore action until the caller commits setup. */
   login(
     providerId: string,
