@@ -173,16 +173,14 @@ export function createTerminalView(
     }
   }
 
-  /** Apply browser-local presentation without touching the shared pty. */
+  /** Apply browser-local presentation. The pty is shared, but a font change is
+   *  a new cell size and therefore a new row count, which the shell must hear. */
   function applyPrefs(): void {
     if (!term) return;
     term.options.fontFamily = prefs.fontFamily;
     term.options.fontSize = prefs.fontSize;
     term.options.cursorBlink = prefs.cursorBlink;
-    requestAnimationFrame(() => {
-      fit?.fit();
-      sendResize();
-    });
+    requestAnimationFrame(claimSize);
   }
 
   /** The one shared, server-side setting on this panel: the command every new
