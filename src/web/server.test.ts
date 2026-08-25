@@ -237,15 +237,19 @@ function setup(
   const app = new Hono();
   registerTaskRoutes(app, tasks, { factory, router });
   const onUnlocked = vi.fn();
+  // Stands in for channels/conversations.ts: session id → the IM channel that owns it.
+  const imOwners = new Map<string, string>();
   // Wired like main.ts: the adapters are its business, the eviction core's.
   const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
+    channelOf: (id) => imOwners.get(id),
   }));
   return {
     app,
+    imOwners,
     session,
     factory,
     hub,
@@ -267,8 +271,17 @@ describe("workbench server", () => {
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false, unread: false, activeRuns: 0 },
+      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
+  });
+
+  // The badge counts "web" rows only (ui/sidebar.ts): an IM turn is delivered
+  // to its own chat, and no Console visit is owed for it.
+  it("names the IM channel that owns a session", async () => {
+    const { app, imOwners } = setup();
+    imOwners.set("s1", "slack");
+    const rows = (await (await app.request("/api/sessions")).json()) as { channel: string }[];
+    expect(rows[0]?.channel).toBe("slack");
   });
 
   it("lists complete Projects metadata without scanning Pi sessions", async () => {
@@ -277,7 +290,7 @@ describe("workbench server", () => {
     const res = await app.request("/api/projects");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", pinned: true, unread: false, activeRuns: 0 },
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
     ]);
     expect(factory.list).not.toHaveBeenCalled();
   });
@@ -389,13 +402,15 @@ describe("workbench server", () => {
     // Not on disk yet — the nascent entry fills the gap.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: true, unread: false, activeRuns: 0 },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
     listed.push({ id: "s2", cwd: "/tmp", createdAt: 1 });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
-    expect(rows).toEqual([{ id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", pinned: true, unread: false, activeRuns: 0 }]);
+    expect(rows).toEqual([
+      { id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
+    ]);
   });
 
   it("pins sessions created here, and toggles pins on demand", async () => {

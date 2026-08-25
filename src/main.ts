@@ -313,6 +313,7 @@ app.route("/", createServer({
   onUnlocked: () => void startChannels(),
   reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
+  channelOf: (id) => conversations.channelOf(id),
 }));
 
 const port = Number(process.env.PORT ?? 3141);

@@ -82,6 +82,12 @@ export interface WebDeps {
   reload?: () => Promise<number>;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
+  /** The IM channel that durably owns a session, absent for everything else.
+   *  Injected because the mapping lives in channels/. Not push.ts's question:
+   *  that one asks which conversation produced *this* turn and is answered
+   *  from the live router, so a chat session prompted from the workbench
+   *  answers "web" there and its owning channel here. */
+  channelOf?: (sessionId: string) => string | undefined;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -103,6 +109,7 @@ export function createServer(
     updates,
     updater,
     backgroundRuns,
+    channelOf,
   }: WebDeps,
 ): Hono {
   const app = new Hono();
@@ -163,6 +170,7 @@ export function createServer(
     state: router.stateOf(s.id) ?? "idle",
     pinned,
     unread,
+    channel: channelOf?.(s.id) ?? "web",
     activeRuns: activeRuns(s.id),
   });
 

@@ -63,6 +63,13 @@ describe("conversation store", () => {
     expect(second.get(CHAT)).toBe("s1");
   });
 
+  it("names the channel that owns a session, and nobody for the rest", () => {
+    const store = new ConversationStore(db);
+    store.set(CHAT, "s1");
+    expect(store.channelOf("s1")).toBe(CHAT.channelId);
+    expect(store.channelOf("s2")).toBeUndefined(); // a workbench session
+  });
+
   it("re-pointing a conversation replaces the mapping", () => {
     const store = new ConversationStore(db);
     store.set(CHAT, "s1");

@@ -37,6 +37,17 @@ export class ConversationStore {
     `).run(key.channelId, key.conversationId, sessionId, Date.now());
   }
 
+  /** Which channel owns this session, durably — the router's own answer is
+   * in-memory and becomes undefined the moment an idle session is evicted, so
+   * a surface asking "was this turn already delivered to a chat?" long after
+   * the turn cannot use it. Sessions with no row are nobody's conversation. */
+  channelOf(sessionId: string): string | undefined {
+    const row = this.db.prepare(`
+      SELECT channel_id FROM conversations WHERE session_id = ? LIMIT 1
+    `).get(sessionId) as { channel_id: string } | undefined;
+    return row?.channel_id;
+  }
+
   /** Drop a mapping whose session Pi no longer has, so the next message
    * starts a fresh one instead of failing forever. */
   forget(key: ConversationKey): void {

@@ -20,6 +20,8 @@ export interface SessionInfo {
   pinned: boolean;
   /** Turn finished, no client has viewed it yet (server-side, all clients agree). */
   unread: boolean;
+  /** The IM channel that owns it, or `"web"` for everything else. */
+  channel: string;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
   /** Where it was dragged to inside its project; unset = never dragged. */
@@ -343,7 +345,13 @@ export function renderSessions(): void {
   const sessions = deps.sessions();
   // The one place the unread dots are painted, so also the one place the
   // installed app's icon badge is kept in step with them.
-  setUnreadBadge(sessions.filter((s) => s.unread).length);
+  //
+  // Not the IM sessions, for the reason web/push.ts skips them too: that turn
+  // was already delivered to the chat it came from. Their dot still says "new
+  // since you last looked here", but only a Console visit clears one — and a
+  // badge on a closed app showing a number no action of yours can clear is not
+  // attention state, it is a session counter.
+  setUnreadBadge(sessions.filter((s) => s.unread && s.channel === "web").length);
   const projects = pinnedProjects();
   projectTree.replaceChildren(
     ...(projects.length
