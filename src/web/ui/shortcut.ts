@@ -46,6 +46,7 @@ function hint(el: HTMLElement, label: string, chord: string): void {
   const hide = (): void => {
     card?.remove();
     card = null;
+    document.removeEventListener("keydown", hide, true);
   };
   el.addEventListener("pointerenter", (ev) => {
     // Touch has no hover, so a card opened by a tap is an overlay that never
@@ -55,11 +56,20 @@ function hint(el: HTMLElement, label: string, chord: string): void {
     card = h("div", CARD, label, h("kbd", "rounded bg-white/15 px-1 py-px font-sans text-[10.5px]", chord));
     document.body.append(card);
     const r = el.getBoundingClientRect();
-    card.style.top = `${Math.min(r.bottom + 6, window.innerHeight - card.offsetHeight - 8)}px`;
+    // Below the anchor, or above it when the viewport has no room — clamping
+    // into the viewport instead would drop the card *onto* the control it
+    // names, and for the composer that is over the text being typed.
+    const below = r.bottom + 6;
+    const fits = below + card.offsetHeight + 8 <= window.innerHeight;
+    card.style.top = `${fits ? below : Math.max(8, r.top - card.offsetHeight - 6)}px`;
     card.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - card.offsetWidth - 8))}px`;
+    // A hand that moved to the keyboard is no longer hovering, but the mouse it
+    // left behind still is: without this the card outlives its welcome by as
+    // long as the pointer happens to rest there.
+    document.addEventListener("keydown", hide, true);
   });
   el.addEventListener("pointerleave", hide);
-  el.addEventListener("click", hide); // the card would sit over what the click opened
+  el.addEventListener("pointerdown", hide); // the card would sit over what the click opens
 }
 
 /**
