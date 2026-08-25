@@ -139,6 +139,9 @@ export class Router {
     { includeWatched = false }: { includeWatched?: boolean } = {},
   ): Promise<number> {
     let evicted = 0;
+    // Snapshot on purpose: this loop awaits dispose(), so another turn may
+    // attach or drop a session while it is suspended.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, attached] of [...this.bySession]) {
       if (attached.session.state === "streaming") continue;
       if (!includeWatched && this.hub.hasSubscribers(id)) continue;

@@ -116,6 +116,14 @@ async function feed(...updates: TgUpdate[]): Promise<void> {
   await new Promise((r) => setTimeout(r, 10));
 }
 
+/**
+ * Wait for an async consequence instead of guessing how long it takes: a
+ * fixed sleep that is generous on a laptop is a coin flip on a loaded CI box.
+ */
+async function settle(done: () => boolean): Promise<void> {
+  for (let i = 0; i < 2000 && !done(); i++) await new Promise((r) => setTimeout(r, 1));
+}
+
 const message = (over: Partial<TgMessage> & { chat: TgMessage["chat"] }): TgUpdate => ({
   update_id: Math.floor(Math.random() * 1e6),
   message: { message_id: 10, from: { id: 42, first_name: "Q" }, ...over },
@@ -435,7 +443,7 @@ describe("reaction receipts", () => {
     receipts.add({ conversationId: "-100/5", chatId: "-100", messageId: "88" });
     const reborn = new TelegramChannel({ store, client, receipts, log: (m) => dropped.push(m) });
     await reborn.start(() => {});
-    await new Promise((r) => setTimeout(r, 10));
+    await settle(() => client.reactions.length > 0);
     expect(client.reactions).toEqual([{ chatId: "-100", messageId: 88, emoji: null }]);
     client.closed = true;
     await reborn.stop();
@@ -595,7 +603,7 @@ describe("update concurrency", () => {
     );
     expect(inbound.map((m) => m.text)).toEqual(["unblocked"]);
     release();
-    await new Promise((r) => setTimeout(r, 10));
+    await settle(() => inbound.length === 2);
     expect(inbound).toHaveLength(2);
   });
 
@@ -609,7 +617,7 @@ describe("update concurrency", () => {
     // order would interrupt a turn its predecessor never started.
     expect(inbound).toEqual([]);
     release();
-    await new Promise((r) => setTimeout(r, 10));
+    await settle(() => inbound.length === 2);
     expect(inbound.map((m) => m.text.split("\n")[0])).toEqual(["first", "second"]);
   });
 });
