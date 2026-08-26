@@ -60,6 +60,7 @@ import {
   initViews,
   isChatVisible,
   refreshActivity,
+  refreshBus,
   refreshTasks,
   setSessionHash,
   showChat,
@@ -295,6 +296,10 @@ function connectWorkspace(): void {
       refreshActivity();
       // A run starting or settling changes its launcher's activeRuns dot.
       if (e.type === "task-run-changed") void refreshProjects();
+      return;
+    }
+    if (e.type === "bus-changed") {
+      refreshBus();
       return;
     }
     refreshActivity();

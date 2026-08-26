@@ -152,6 +152,28 @@ export class SubStore {
     return row ? JSON.parse(row.json) as BusNote : undefined;
   }
 
+  // Read-only, fence-free admin queries for the Console's Bus view; the reason
+  // there is no session fence is recorded once, in bus/store.ts.
+
+  /** Every subscription, ordered so one session's patterns sit together. */
+  adminSubs(): BusSub[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM bus_subs ORDER BY session_id, topic_glob",
+    ).all() as unknown as SubRow[];
+    return rows.map(subOf);
+  }
+
+  /** Notes still owed or given up on, newest first — settled ones only. An
+   * abandoned delivery is the row that most needs a surface, so it is listed
+   * rather than filtered out (AGENTS.md 5b). */
+  adminNotes(): BusNote[] {
+    const rows = this.#db.prepare(
+      "SELECT json FROM bus_notes WHERE state IS NULL OR state != 'delivered'",
+    ).all() as unknown as { json: string }[];
+    return rows.map((row) => JSON.parse(row.json) as BusNote)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   /** Notes whose retry is due — the delivery sweep's worklist. */
   dueNotes(now: number): BusNote[] {
     const rows = this.#db.prepare(`

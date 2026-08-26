@@ -25,14 +25,19 @@ export class BusDelivery {
      * attempts and resume when the operator re-enables, rather than being
      * spent against sessions that were told the bus is off. */
     private readonly enabled: () => boolean = () => true,
+    /** A note's lifecycle moved (attempted, failed, abandoned, settled). It
+     * happens with no tool call behind it, so it is the one bus change no
+     * caller can announce — and a delivery nobody can complete is precisely
+     * what has to reach a surface (AGENTS.md 5b). */
+    private readonly announce: () => void = () => {},
   ) {
     this.#outbox = new Outbox<BusNote>(router, {
       id: (note) => note.id,
       reload: (id) => this.subs.getNote(id),
       save: (note) => { this.subs.saveNote(note); },
-      // No surface renders a note's lifecycle — the recipient sees the input,
-      // the operator sees `unreachable` when it gives up. Nothing to emit.
-      changed: () => {},
+      // The Console's Bus view renders exactly this — the stub stood until
+      // there was a surface to tell.
+      changed: () => { this.announce(); },
       proven: (origin) => (origin.kind === "bus-notify" ? origin.noteIds : []),
       urgency: (note) => (note.mode === "steer" ? "steer" : "followUp"),
       // One line per subscription even when it is owed several notes (a note

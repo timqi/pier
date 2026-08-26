@@ -208,6 +208,27 @@ summaries are durable keyed facts (`key: "librarian-summary"`), so a run that
 dies between summarizing and archiving is finished by the next one instead of
 summarized twice.
 
+## The Console view
+
+Console → Bus is the bus's one visible surface, read-only: per (topic, scope)
+the live and archived counts, when it last moved and when anyone last read it,
+with the live facts expandable underneath; every subscription with its cursor
+**lag as a number** against its pinned scopes; the pointer notifications still
+owed — pending, failed with their attempts and next retry, and abandoned ones
+listed rather than filtered, because a delivery nobody can complete is a
+failure and not an absence (AGENTS.md 5b); and the tail of the stream, newest
+first, with payload previews as text. It hosts the `busEnabled` switch: off,
+the page is the explanation and the toggle, and nothing else — but the tab
+itself is always reachable, because hiding it would hide the switch. The
+queries behind it (`BusStore.adminTopics/adminFacts/adminTail`,
+`SubStore.adminSubs/adminNotes`) carry no scope fence: the fence answers "what
+may this *session* see" and the operator has no session — they are the person
+who can already open pier.db with sqlite3, and a hidden row here would only
+hide a stuck delivery. They also never stamp a read, so looking at the
+inventory cannot keep a dead topic looking alive to the librarian. The page
+refetches on a coalesced `bus-changed` workspace event (emitted after any
+accepted `bus` tool call and on every note lifecycle change), never on a timer.
+
 ## What the bus deliberately does not do
 
 No payload in notifications, no embedding, no CRDTs, no transcript mining, no

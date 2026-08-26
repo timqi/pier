@@ -149,7 +149,11 @@ export type WorkspaceEvent =
   | { type: "tasks-changed" }
   | { type: "task-run-changed"; taskId: string; runId: string }
   | { type: "task-message-changed"; runId: string; messageId: string }
-  | { type: "task-group-changed"; groupId: string };
+  | { type: "task-group-changed"; groupId: string }
+  // The shared blackboard moved: a write, a subscription, or a note's delivery
+  // state. No ids — the Bus view is one fetch, so a pointer is all a refetch
+  // needs, and the emitter (main.ts) coalesces bursts into one frame.
+  | { type: "bus-changed" };
 
 /** How much of a tool result any surface ever shows. A transcript replay
  *  carries no more than that: a session's tool output is most of its history

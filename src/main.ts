@@ -9,6 +9,7 @@ import { CredentialStore } from "./agent/credentials.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { BusDelivery } from "./bus/delivery.js";
+import { registerBusRoutes } from "./bus/routes.js";
 import { BusStore } from "./bus/store.js";
 import { SubStore } from "./bus/subs.js";
 import { busToolSpec, handleBusTool } from "./bus/tool.js";
@@ -112,8 +113,8 @@ const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
     {
-      ...busToolSpec((params, callerSessionId) =>
-        handleBusTool({
+      ...busToolSpec(async (params, callerSessionId) => {
+        const result = await handleBusTool({
           store: busStore,
           subs: busSubs,
           enabled: () => settings.get().busEnabled,
@@ -145,7 +146,13 @@ const factory = new PiAgentFactory(
             },
           },
           notify: (event) => busDelivery.notify(event),
-        }, params, callerSessionId)),
+        }, params, callerSessionId);
+        // Every accepted operation moved durable state the Bus view shows —
+        // a write, a subscription, or a read stamp. A refused one threw,
+        // so nothing is announced for it.
+        busChanged();
+        return result;
+      }),
       // The whole bus is one capability (docs/bus.md): off hides the tool from
       // the next session, exactly like an unconfigured Slack tool.
       available: () => settings.get().busEnabled,
@@ -194,6 +201,19 @@ const factory = new PiAgentFactory(
   () => settings.get().extensions,
 );
 const hub = new EventHub();
+// One frame per burst: a publish storm or a delivery sweep must not become
+// thirty SSE messages a second in every open Console. Coalesced here because
+// composition is where "which events this instance emits" is decided, and the
+// bus itself must not learn what a workspace event is.
+let busTick: ReturnType<typeof setTimeout> | undefined;
+const busChanged = (): void => {
+  if (busTick) return;
+  busTick = setTimeout(() => {
+    busTick = undefined;
+    hub.emitWorkspace({ type: "bus-changed" });
+  }, 250);
+  busTick.unref();
+};
 const router = new Router(hub, (key) => {
   // Web conversation ids ARE session ids; an IM conversation id is a chat or a
   // topic, so its session is looked up in the durable map (and created in the
@@ -215,7 +235,7 @@ busDelivery = new BusDelivery(router, busStore, busSubs, (sessionId, what, why) 
   // record, and the event stream of whoever was owed the delivery.
   log.error(`gave up delivering ${what} to session ${sessionId}: ${why}`);
   router.reportTo(sessionId, `${what} could not be delivered — ${why}`);
-}, () => settings.get().busEnabled);
+}, () => settings.get().busEnabled, busChanged);
 busDelivery.start();
 
 channelStore = new ChannelStore(db, secrets);
@@ -367,6 +387,7 @@ const auth = new AuthStore(db);
 app.use("*", requireAuth(auth));
 registerAuthRoutes(app, auth);
 registerTaskRoutes(app, tasks, { factory, router });
+registerBusRoutes(app, { events: busStore, subs: busSubs, enabled: () => settings.get().busEnabled });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);

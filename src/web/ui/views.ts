@@ -1,5 +1,5 @@
 // Chat ↔ Console switching and the hash router. Owns the Console views
-// (Tasks, Activity, Boards, Settings — which hosts Providers, Models,
+// (Tasks, Activity, Boards, Bus, Settings — which hosts Providers, Models,
 // Channels and Agent files as tabs), which chat elements hide while one is
 // open, and the address bar's copy of "where am I" — so refresh, bookmarks
 // and back/forward land where the user was. main.ts owns sessions and
@@ -7,6 +7,7 @@
 
 import { createActivityView, type ActivityView } from "./activity.js";
 import { createBoardsView } from "./boards.js";
+import { createBusView, type BusView } from "./bus.js";
 import { createExplorerView } from "./explorer.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
@@ -42,10 +43,11 @@ let chatVisible = true;
 
 export const isChatVisible = (): boolean => chatVisible;
 
-export type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files" | "terminal";
+export type ConsoleName = "tasks" | "activity" | "boards" | "bus" | "settings" | "files" | "terminal";
 
 let tasksView: TasksView;
 let activityView: ActivityView;
+let busView: BusView;
 let consoleViews: { name: ConsoleName; view: ConsoleView }[] = [];
 const consoleBtns = new Map<ConsoleName, HTMLElement>();
 
@@ -62,6 +64,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   tasks: "Tasks",
   activity: "Activity",
   boards: "Boards",
+  bus: "Bus",
   settings: "Settings",
   files: "Files",
   terminal: "Terminal",
@@ -70,6 +73,7 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
 // Workspace events fan into whichever of these views is open.
 export const refreshTasks = (taskId?: string): void => tasksView.refresh(taskId);
 export const refreshActivity = (): void => activityView.refresh();
+export const refreshBus = (): void => busView.refresh();
 
 /** Mobile top bar mirrors the route: a Console view's name, or the chat title
  *  plus its ⋯ menu (the chat header itself is hidden below md). */
@@ -219,10 +223,12 @@ export function initViews(d: ViewsDeps): void {
     (arg) => showConsole("activity", arg),
   );
   activityView = createActivityView($("#activity-view"), d.select, showTasks);
+  busView = createBusView($("#bus-view"), d.select);
   consoleViews = [
     { name: "tasks", view: tasksView },
     { name: "activity", view: activityView },
     { name: "boards", view: createBoardsView($("#boards-view"), d.select) },
+    { name: "bus", view: busView },
     {
       name: "files",
       view: createExplorerView(
@@ -264,7 +270,7 @@ export function initViews(d: ViewsDeps): void {
   termBtn.onclick = () => toggleTerminal();
   shortcut(termBtn, "meta+;", "Terminal", () => toggleTerminal());
   // The Activity button reopens whichever of its two views was showing last.
-  for (const name of ["activity", "boards", "settings"] as const) {
+  for (const name of ["activity", "boards", "bus", "settings"] as const) {
     const btn = $(`#open-${name}`);
     consoleBtns.set(name, btn);
     btn.onclick = () => showConsole(name === "activity" ? lastActivityConsole : name);

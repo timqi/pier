@@ -1,0 +1,348 @@
+// Console → Bus view: the shared blackboard's first visible surface — the
+// state that exists, who listens to it, what delivery is still owed, and what
+// just happened. Read-only; the one write on the page is the capability
+// switch, which lives here because this is where its consequences show.
+
+import { failure, sendJson } from "./api.js";
+import { basename, consoleView, h, relTime, type ConsoleView } from "./dom.js";
+import { badge, btn, empty, setStatus, toggle } from "./form.js";
+// Type-only: the wire shapes stay single-sourced in the area that fills them.
+import type {
+  BusEventRow,
+  BusFactRow,
+  BusNoteRow,
+  BusOverview,
+  BusSubRow,
+  BusTopicRow,
+} from "../../bus/types.js";
+
+export type BusView = ConsoleView & { refresh(): void };
+
+const EMPTY: BusOverview = { enabled: false, topics: [], subs: [], notes: [], events: [] };
+
+// --- vocabulary ------------------------------------------------------------------
+// Three badge families, tinted like the rest of the Console: the neutral thing,
+// the thing that overrides, the thing that is wrong.
+
+/** A scope named the way a human reads it, with the raw string on hover — a
+ *  `project:/very/long/abs/path` is a column of its own otherwise. */
+function scopeBadge(scope: string): HTMLElement {
+  const [kind = scope, rest = ""] = scope.startsWith("run:")
+    ? ["run", scope.slice(4)]
+    : scope.startsWith("project:")
+    ? ["project", scope.slice(8)]
+    : [scope, ""];
+  const label = kind === "run" ? `run ${rest.slice(0, 8)}` : kind === "project" ? basename(rest) : kind;
+  const el = badge(label, kind === "run"
+    ? "bg-amber-50 text-amber-700 ring-amber-200"
+    : kind === "project"
+    ? "bg-indigo-50 text-indigo-700 ring-indigo-200"
+    : "bg-sky-50 text-sky-700 ring-sky-200");
+  el.title = scope;
+  return el;
+}
+
+const kindBadge = (kind: BusEventRow["kind"]): HTMLElement =>
+  badge(kind, kind === "fact"
+    ? "bg-indigo-50 text-indigo-700 ring-indigo-200"
+    : kind === "tombstone"
+    ? "bg-red-50 text-red-700 ring-red-200"
+    : "bg-neutral-100 text-neutral-600 ring-neutral-200");
+
+const stateBadge = (state: string): HTMLElement =>
+  badge(state, state === "abandoned"
+    ? "bg-red-50 text-red-700 ring-red-200"
+    : state === "failed"
+    ? "bg-amber-50 text-amber-700 ring-amber-200"
+    : "bg-neutral-100 text-neutral-600 ring-neutral-200");
+
+/** A payload preview: text, always. Nothing on this page renders agent-written
+ *  content as markup (dom.ts's rule), so a payload is a text node in a <span>. */
+const mono = (text: string): HTMLElement =>
+  h("span", "break-all font-mono text-[11.5px] text-neutral-600", text);
+
+// No truncation on the cell itself: badges and scopes wrap, and a clipped
+// second line is how a pinned scope disappears. What must stay on one line
+// says so on the inner span.
+const cell = (...children: (Node | string)[]): HTMLElement =>
+  h("td", "px-3 py-2 align-top", ...children);
+
+function row(...cells: HTMLElement[]): HTMLElement {
+  const tr = document.createElement("tr");
+  tr.className = "border-t border-neutral-100";
+  tr.append(...cells);
+  return tr;
+}
+
+/** A table wearing the Tasks list's chrome, built without innerHTML. */
+function table(headers: [string, string][], rows: HTMLElement[]): HTMLElement {
+  const el = document.createElement("table");
+  el.className = "w-full min-w-[44rem] table-fixed text-left text-[12.5px]";
+  const head = document.createElement("thead");
+  head.className = "bg-neutral-50 text-[10.5px] uppercase text-neutral-400";
+  const tr = document.createElement("tr");
+  for (const [label, width] of headers) tr.append(h("th", `${width} px-3 py-2 font-semibold`, label));
+  head.append(tr);
+  const body = document.createElement("tbody");
+  body.append(...rows);
+  el.append(head, body);
+  return h("div", "overflow-x-auto rounded-xl border border-neutral-200 bg-white", el);
+}
+
+function section(title: string, hint: string, body: HTMLElement): HTMLElement {
+  return h(
+    "section",
+    "mb-6",
+    h("h2", "text-[13px] font-semibold text-neutral-700", title),
+    h("p", "mb-1 text-[11.5px] leading-snug text-neutral-500", hint),
+    body,
+  );
+}
+
+export function createBusView(root: HTMLElement, openSession: (id: string) => void): BusView {
+  let data: BusOverview = EMPTY;
+  /** The last read or write that did not take. A view that re-renders the old
+   *  state silently is indistinguishable from one nobody clicked. */
+  let problem = "";
+  const switchStatus = h("span", "text-[11.5px]", "");
+
+  const header = h(
+    "header",
+    "sticky top-0 z-30 flex h-10 flex-none items-center gap-3 border-b border-neutral-200 bg-white px-4",
+    h("span", "font-medium max-md:hidden", "Bus"),
+  );
+  const pane = h("div", "px-4 py-5");
+  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, pane));
+
+  const sessionChip = (id: string): HTMLElement => {
+    const chip = btn(id.slice(0, 8), "cursor-pointer font-mono text-[11.5px] text-indigo-600 hover:underline");
+    chip.title = `Open session ${id}`;
+    chip.onclick = () => openSession(id);
+    return chip;
+  };
+
+  // --- the switch -------------------------------------------------------------
+
+  const HINT = "Off hides the bus tool from new sessions and freezes owed notifications; nothing is deleted. A session mid-turn keeps the tools it started with; the next message picks this up.";
+
+  /** Drawn from confirmed state, never from the click: the switch must not
+   *  show something nobody stored. */
+  const busSwitch = (): HTMLElement =>
+    toggle("Session bus", HINT, data.enabled, (checked) => void save(checked));
+
+  async function save(checked: boolean): Promise<void> {
+    setStatus(switchStatus, "saving", "saving…");
+    const res = await sendJson("/api/settings", { busEnabled: checked }, "PUT");
+    if (!res.ok) {
+      setStatus(switchStatus, "failed", await failure(res, "Could not save"));
+      return render();
+    }
+    data = { ...data, enabled: ((await res.json()) as { busEnabled: boolean }).busEnabled };
+    setStatus(
+      switchStatus,
+      "saved",
+      data.enabled ? "On — sessions take it on their next message." : "Off — hidden from the next session.",
+    );
+    // Re-read rather than trust the flip: enabling reveals whatever the tables
+    // were already holding from the last time it was on.
+    await load();
+  }
+
+  // --- sections ---------------------------------------------------------------
+
+  function topicRow(topic: BusTopicRow): HTMLElement {
+    const counts = [
+      `${topic.events} live`,
+      ...(topic.archived ? [`${topic.archived} archived`] : []),
+      `newest ${relTime(Date.parse(topic.newestAt))}`,
+      topic.lastReadAt === null ? "never read" : `read ${relTime(topic.lastReadAt)}`,
+    ].join(" · ");
+    const head = h(
+      "div",
+      "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1",
+      h("span", "truncate font-medium text-neutral-800", topic.topic),
+      scopeBadge(topic.scope),
+      h("span", "text-[11.5px] text-neutral-500", counts),
+    );
+    // The facts hang under the topic they belong to, so no topic is listed
+    // twice to carry its state.
+    if (topic.facts.length === 0) {
+      return h("div", "border-b border-neutral-200/70 px-3 py-2.5 last:border-b-0", head);
+    }
+    const el = document.createElement("details");
+    el.className = "border-b border-neutral-200/70 px-3 py-2.5 last:border-b-0";
+    const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
+    summary.append(h("span", "chev", "▶"), head, h(
+      "span",
+      "ml-auto flex-none text-[11px] text-neutral-400",
+      `${topic.facts.length} fact${topic.facts.length === 1 ? "" : "s"}`,
+    ));
+    el.append(summary, h("div", "mt-2 flex flex-col gap-1 pl-4", ...topic.facts.map(factRow)));
+    return el;
+  }
+
+  const factRow = (fact: BusFactRow): HTMLElement =>
+    h(
+      "div",
+      "flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 border-l-2 border-neutral-200 pl-2.5",
+      h("span", "flex-none font-mono text-[11.5px] font-medium text-neutral-700", fact.key),
+      mono(fact.payload),
+      h("span", "flex-none text-[11px] text-neutral-400", relTime(Date.parse(fact.createdAt))),
+      sessionChip(fact.writerSession),
+    );
+
+  const subRow = (sub: BusSubRow): HTMLElement =>
+    row(
+      cell(sessionChip(sub.sessionId)),
+      cell(mono(sub.topicGlob)),
+      cell(sub.mode),
+      cell(h(
+        "span",
+        sub.lag > 0 ? "text-amber-700" : "text-neutral-500",
+        sub.lag === 0 ? "up to date" : `${sub.lag} behind`,
+      )),
+      cell(h("div", "flex flex-wrap gap-1", ...sub.scopes.map(scopeBadge))),
+    );
+
+  function noteRow(note: BusNoteRow): HTMLElement {
+    // Seconds, not relTime: the backoff tops out at a minute, and a retry is
+    // in the future — relTime only reads backwards.
+    const retry = note.nextAttemptAt === null
+      ? note.state === "abandoned" ? "given up" : "due now"
+      : note.nextAttemptAt > Date.now()
+      ? `retry in ${Math.max(1, Math.round((note.nextAttemptAt - Date.now()) / 1000))}s`
+      : "retry due";
+    return row(
+      cell(sessionChip(note.sessionId)),
+      cell(mono(note.topicGlob)),
+      cell(h("div", "flex flex-wrap items-center gap-1.5", stateBadge(note.state), h(
+        "span",
+        "text-[11px] text-neutral-500",
+        `${note.attempts} attempt${note.attempts === 1 ? "" : "s"} · ${retry}`,
+      ))),
+      // The reason a delivery is stuck is the whole point of the row.
+      cell(h("span", note.state === "abandoned" ? "text-red-600" : "text-neutral-500", note.error ?? "—")),
+    );
+  }
+
+  function eventRow(event: BusEventRow): HTMLElement {
+    const trail = [
+      ...(event.causedBy ? [`caused_by ${event.causedBy.slice(-6)}`] : []),
+      ...(event.hops ? [`${event.hops} hop${event.hops === 1 ? "" : "s"}`] : []),
+      ...(event.filePtr ? [event.filePtr] : []),
+    ].join(" · ");
+    return row(
+      cell(h("span", "text-neutral-500", relTime(Date.parse(event.createdAt)))),
+      cell(h(
+        "div",
+        "flex min-w-0 flex-col gap-1",
+        h("span", "truncate", event.topic),
+        h("div", "flex flex-wrap gap-1", scopeBadge(event.scope), kindBadge(event.kind)),
+      )),
+      cell(event.key ? h("span", "break-all font-mono text-[11.5px] text-neutral-700", event.key) : "—"),
+      cell(h(
+        "div",
+        "flex min-w-0 flex-col gap-0.5",
+        mono(event.payload),
+        // caused_by and hops only when they exist: an empty causal trail is a
+        // column of dashes saying nothing.
+        ...(trail ? [h("span", "break-all text-[11px] text-neutral-400", trail)] : []),
+      )),
+      cell(sessionChip(event.writerSession)),
+    );
+  }
+
+  // --- render -----------------------------------------------------------------
+
+  function render(): void {
+    const column = h("div", "mx-auto flex w-full min-w-0 max-w-5xl flex-col");
+    if (problem) column.append(h("p", "mb-3 text-[13px] text-red-600", problem));
+    if (!data.enabled) {
+      // Only the explanation and the switch: the sections below would describe
+      // a capability no session can reach. The view itself stays reachable —
+      // hiding it would hide the switch with it.
+      column.append(h(
+        "section",
+        "rounded-xl border border-neutral-200 bg-white p-4",
+        h("h2", "text-[13px] font-semibold text-neutral-700", "The bus is off"),
+        h(
+          "p",
+          "mb-3 mt-0.5 max-w-2xl text-[12.5px] leading-snug text-neutral-500",
+          "Shared memory and cross-session events: sessions publish facts, read each other's, "
+            + "and subscribe to be notified of writes (docs/bus.md). While it is off the tool is "
+            + "not offered to new sessions and owed notifications are frozen — nothing stored is lost.",
+        ),
+        busSwitch(),
+        switchStatus,
+      ));
+      pane.replaceChildren(column);
+      return;
+    }
+    column.append(h(
+      "div",
+      "mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-neutral-200 bg-white px-4 py-3",
+      busSwitch(),
+      switchStatus,
+    ));
+    column.append(
+      section(
+        "Topics",
+        "Per topic and scope: how much history is there, when it last moved, when anyone last read it — and the live facts underneath.",
+        data.topics.length
+          ? h("div", "rounded-xl border border-neutral-200 bg-white", ...data.topics.map(topicRow))
+          : empty("No events yet. A session's first publish creates its topic."),
+      ),
+      section(
+        "Subscriptions",
+        "Who asked to hear about writes. Lag is counted against the scopes the subscription pinned when it was made.",
+        data.subs.length
+          ? table(
+            [["Session", "w-[14%]"], ["Pattern", "w-[26%]"], ["Mode", "w-[10%]"], ["Lag", "w-[14%]"], ["Pinned scopes", ""]],
+            data.subs.map(subRow),
+          )
+          : empty("Nobody is subscribed."),
+      ),
+      section(
+        "Deliveries owed",
+        "Pointer notifications not yet in a recipient's transcript. Abandoned ones stay listed — a delivery nobody can complete is a failure, not an absence.",
+        data.notes.length
+          ? table(
+            [["Recipient", "w-[14%]"], ["Pattern", "w-[24%]"], ["State", "w-[28%]"], ["Reason", ""]],
+            data.notes.map(noteRow),
+          )
+          : empty("Nothing owed — every notification landed."),
+      ),
+      section(
+        "Recent events",
+        `The tail of the stream, newest first (${data.events.length} shown). Payloads are previews; the full value is one bus get away.`,
+        data.events.length
+          ? table(
+            [["Age", "w-[8%]"], ["Topic", "w-[22%]"], ["Key", "w-[14%]"], ["Payload", ""], ["Writer", "w-[10%]"]],
+            data.events.map(eventRow),
+          )
+          : empty("The stream is empty."),
+      ),
+    );
+    pane.replaceChildren(column);
+  }
+
+  async function load(): Promise<void> {
+    const res = await fetch("/api/bus");
+    if (!res.ok) {
+      problem = await failure(res, "Could not load the bus");
+      return render();
+    }
+    data = (await res.json()) as BusOverview;
+    render();
+    // Cleared only after a good render, so the reason survives the reload it
+    // caused and disappears on the next clean one.
+    problem = "";
+  }
+
+  const view = consoleView(root, () => void load());
+  return Object.assign(view, {
+    refresh() {
+      if (view.visible) void load();
+    },
+  });
+}

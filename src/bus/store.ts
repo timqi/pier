@@ -8,8 +8,9 @@ import { randomBytes } from "node:crypto";
 import { isAbsolute } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
+import type { BusKind, BusTopicCounts } from "./types.js";
 
-export type BusKind = "event" | "fact" | "tombstone";
+export type { BusKind, BusTopicCounts };
 
 export interface BusEvent {
   id: string;
@@ -452,6 +453,51 @@ export class BusStore {
       UNION ALL SELECT * FROM bus_events_archive WHERE id = ?
     `).get(id, id) as unknown as Row | undefined;
     return row ? fromRow(row) : undefined;
+  }
+
+  // --- read-only admin queries: the Console's Bus view (bus/routes.ts) -------
+  //
+  // None of these takes a scope set, on purpose. The fence answers "what may
+  // this *session* see"; the Console has no session — it is the operator,
+  // behind the instance password, who can already open pier.db with sqlite3.
+  // Handing this surface a fabricated caller would only hide rows from the one
+  // place built to show them, and an invisible stuck delivery is exactly the
+  // nothing-looks-like-nothing failure (AGENTS.md 5b). They also never stamp a
+  // read: looking at the inventory must not keep a dead topic alive to the
+  // librarian's retention question.
+
+  /** Per (topic, scope): live count, archived count, newest write, last read.
+   * Split by scope like topics() — a row is a scope, because archive is. */
+  adminTopics(): BusTopicCounts[] {
+    return this.#db.prepare(`
+      SELECT e.topic, e.scope, SUM(e.live) AS events, SUM(1 - e.live) AS archived,
+             MAX(e.created_at) AS newestAt, r.last_read_at AS lastReadAt
+      FROM (SELECT topic, scope, created_at, 1 AS live FROM bus_events
+            UNION ALL SELECT topic, scope, created_at, 0 AS live FROM bus_events_archive) e
+      LEFT JOIN bus_topic_reads r ON r.topic = e.topic
+      GROUP BY e.topic, e.scope ORDER BY e.topic, e.scope
+    `).all() as unknown as BusTopicCounts[];
+  }
+
+  /** The live facts of one exact (topic, scope), newest write per key. No
+   * cross-scope shadowing: which scope wins is a *caller's* question, and here
+   * every scope is its own row — collapsing them would hide the override. */
+  adminFacts(topic: string, scope: string, now = Date.now()): BusEvent[] {
+    const rows = this.#db.prepare(`
+      SELECT * FROM bus_events e
+      WHERE e.topic = ? AND e.scope = ? AND e.key IS NOT NULL
+        AND e.id = (SELECT MAX(id) FROM bus_events
+                    WHERE topic = e.topic AND key = e.key AND scope = e.scope)
+      ORDER BY e.key
+    `).all(topic, scope) as unknown as Row[];
+    return rows.map(fromRow).filter((event) => live(event, now));
+  }
+
+  /** Tail of the live stream, newest first — one page, not a query language. */
+  adminTail(limit = 50): BusEvent[] {
+    const rows = this.#db.prepare("SELECT * FROM bus_events ORDER BY id DESC LIMIT ?")
+      .all(Math.min(Math.max(limit, 1), 200)) as unknown as Row[];
+    return rows.map(fromRow);
   }
 
   #throttle(writer: string, topic: string, now: number): void {

@@ -56,7 +56,8 @@ src/
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,
                ui/ modules (form.ts + dom.ts are the shared vocabulary;
-               code.ts renders every file the Console did not write)
+               code.ts renders every file the Console did not write;
+               bus.ts is the Bus view, the shared blackboard's one surface)
   tasks/       types (incl. the shared delivery record), outbox (the one
                delivery engine: proof, backoff, ceiling), definitions,
                runs, groups, agent (the child-run runner),
@@ -64,8 +65,10 @@ src/
                HTTP routes
   bus/         store (the append-only event table read as memory or as a
                stream), subs (who hears about a write, and what is still
-               owed), delivery (pointer notifications over the tasks outbox)
-               and the `bus` tool; who a caller is (its run tree, its cwd)
+               owed), delivery (pointer notifications over the tasks outbox),
+               routes + types (the operator's read-only HTTP view of all
+               three, and its wire DTOs) and the `bus` tool; who a caller is
+               (its run tree, its cwd)
                arrives through an injected resolver, wired in main.ts —
                see docs/bus.md
   main.ts      wiring only
@@ -93,9 +96,13 @@ end. tasks never imports bus, so the edge cannot become a cycle.
 allowed to import the SDK. Only `agent/pi.ts` registers one (as an inline
 factory) and only `main.ts` reads the catalog, as `BundledExtensionInfo` data
 for the Console; nothing else imports the area.
-The browser may import owner-defined HTTP DTOs from `tasks/types.ts` and
-`channels/types.ts` type-only: these imports are erased at build, keep wire
-shapes single-sourced, and do not let web implement either area.
+The browser may import owner-defined HTTP DTOs from `tasks/types.ts`,
+`channels/types.ts` and `bus/types.ts` type-only: these imports are erased at
+build, keep wire shapes single-sourced, and do not let web implement any of the
+three. Such a file declares and imports nothing else — `bus/types.ts` owns
+`BusKind` rather than re-exporting the store's, because a browser program that
+reached `bus/store.ts` through it would be type-checking Node's sqlite
+bindings.
 `paths.ts`, `db.ts`, `log.ts`, `secrets.ts` and `settings.ts` are the
 root-leaf exceptions: every area may import them, and they import
 nothing outside the root layer (`settings.ts` also names types from

@@ -67,13 +67,21 @@ function setup() {
   };
   const router = new Router(new EventHub(), (key) => Promise.resolve(session(key.conversationId)));
   const given: string[] = [];
-  const delivery = new BusDelivery(router, store, subs, (sid, what, why) => given.push(`${sid}|${what}|${why}`));
+  const announced: number[] = [];
+  const delivery = new BusDelivery(
+    router,
+    store,
+    subs,
+    (sid, what, why) => given.push(`${sid}|${what}|${why}`),
+    () => true,
+    () => announced.push(Date.now()),
+  );
   const publish = (payload: string, topic = "proj/auth") => {
     const event = store.publish({ topic, payload: JSON.stringify(payload), scope: SCOPE, writerSession: "writer" });
     delivery.notify(event);
     return event;
   };
-  return { db, store, subs, session, delivery, publish, given };
+  return { db, store, subs, session, delivery, publish, given, announced };
 }
 
 describe("BusDelivery", () => {
@@ -92,6 +100,17 @@ describe("BusDelivery", () => {
     expect(input.origin.kind).toBe("bus-notify");
     // Proof read back from the transcript: the note settles as delivered.
     await vi.waitFor(() => expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]));
+  });
+
+  it("announces a note's lifecycle, so the operator's view is not the last to know", async () => {
+    const { subs, session, publish, store, announced } = setup();
+    subs.upsert("b", "proj/*", "queue", [SCOPE], store.tip());
+    publish("one");
+    // The note is attempted and then settled against transcript proof: state
+    // moved twice with no tool call behind it, which is the whole reason the
+    // Deliverable's changed() hook stopped being a stub.
+    await vi.waitFor(() => expect(session("b").inputs).toHaveLength(1));
+    await vi.waitFor(() => expect(announced.length).toBeGreaterThan(0));
   });
 
   it("coalesces while the subscriber is busy and delivers once at the boundary", async () => {
