@@ -146,7 +146,9 @@ export function letterKey(
   hint(el, label, keys[0].toUpperCase());
   document.addEventListener("keydown", (ev) => {
     if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing || ev.defaultPrevented) return;
-    if (!keys.includes(ev.key.toLowerCase())) return;
+    // Autofill and some extensions dispatch synthetic keydowns with no `key`;
+    // a global listener that dereferences it crashes on every such event.
+    if (!ev.key || !keys.includes(ev.key.toLowerCase())) return;
     if ((ev.target as Element | null)?.closest?.(TYPING)) return;
     if (document.querySelector("dialog[open]") || !when()) return;
     ev.preventDefault();
@@ -167,7 +169,7 @@ export function chord(spec: string, run: () => void, unless?: () => boolean): vo
   document.addEventListener(
     "keydown",
     (ev) => {
-      if (ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return;
+      if (!ev.key || ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
       if (meta ? !ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
       // A surface that owns the keyboard keeps Ctrl chords (Ctrl+K is shell
       // kill-line), while Cmd remains Pier's application modifier — which is
