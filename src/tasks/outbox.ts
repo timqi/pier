@@ -20,6 +20,13 @@ export interface Deliverable<T extends CallbackFields> {
   changed(record: T): void;
   /** What the recipient reads, and the origin that identifies it afterwards. */
   input(records: T[]): { text: string; origin: SystemInputOrigin };
+  /** Which record ids an origin already in the transcript proves delivered —
+   * the other half of `input`'s origin, and the crash-window dedupe. */
+  proven(origin: SystemInputOrigin): string[];
+  /** How a record enters a busy session: `followUp` waits for the turn
+   * boundary (the default), `steer` reaches the running turn — for records
+   * whose recipient asked to be interrupted. */
+  urgency?(record: T): "steer" | "followUp";
   /** Named when giving up, e.g. `the result of "review-web"`. */
   describe(record: T): string;
 }
@@ -58,22 +65,27 @@ export class Outbox<T extends CallbackFields> {
       if (live.length === 0) return;
       // Waiting for a busy target is not a delivery attempt: counting it would
       // inflate the attempts once per second and skip the failure backoff
-      // straight to its ceiling.
+      // straight to its ceiling. Steer-urgency records do not wait — reaching
+      // the running turn is what their subscriber asked for.
+      let batch = live;
+      let mode: "steer" | "followUp" = "followUp";
       if (session.state === "streaming") {
-        for (const record of live) this.defer(record);
-        return;
+        batch = live.filter((record) => this.kind.urgency?.(record) === "steer");
+        for (const record of live) if (!batch.includes(record)) this.defer(record);
+        if (batch.length === 0) return;
+        mode = "steer";
       }
-      for (const record of live) this.sent(record);
-      const { text, origin } = this.kind.input(live);
-      log.debug(`callback for ${live.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
+      for (const record of batch) this.sent(record);
+      const { text, origin } = this.kind.input(batch);
+      log.debug(`callback for ${batch.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
       // Not awaited: `systemInput` settles with the recipient's whole turn, and
       // holding the delivery lock that long would keep the proof from ever
       // being read — which is the only thing that marks this delivered.
-      session.systemInput(text, origin, "followUp")
-        .catch((error: unknown) => this.retry(sessionId, live, error));
+      session.systemInput(text, origin, mode)
+        .catch((error: unknown) => this.retry(sessionId, batch, error));
       // Pi records the input as it starts the turn, so the proof is usually
       // here already; the tick sweep is the backstop when it is not.
-      await this.settle(live, session);
+      await this.settle(batch, session);
     } catch (error) {
       this.retry(sessionId, mine, error);
     } finally {
@@ -85,8 +97,8 @@ export class Outbox<T extends CallbackFields> {
   private async settle(records: T[], session: AgentSession): Promise<T[]> {
     const seen = new Set<string>();
     for (const turn of await session.history()) {
-      if (turn.role !== "system" || turn.origin?.kind !== "task-callback") continue;
-      for (const id of turn.origin.runIds ?? [turn.origin.runId]) seen.add(id);
+      if (turn.role !== "system" || !turn.origin) continue;
+      for (const id of this.kind.proven(turn.origin)) seen.add(id);
     }
     const unproven: T[] = [];
     for (const stale of records) {

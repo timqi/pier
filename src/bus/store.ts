@@ -52,6 +52,11 @@ const TOPIC = /^[a-z0-9-]+(\/[a-z0-9-]+)*$/;
 // SQL parameter, so this only rejects nonsense early, not injection.
 const TOPIC_GLOB = /^[a-z0-9\-/*?[\]]+$/;
 
+/** Shared with subscribe (bus/subs.ts): a pattern that will match topics for
+ * the life of a subscription deserves the same gate as a one-off read. */
+export const validTopicGlob = (glob: string): boolean =>
+  TOPIC_GLOB.test(glob) && glob.length <= 128;
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** ULID: 48-bit ms timestamp + 80 random bits in Crockford base32 — the
@@ -253,7 +258,7 @@ export class BusStore {
   /** Incremental read: everything after the cursor, tombstones included —
    * a reader tracking state needs to see the deletions too. */
   log(topicGlob: string, scopes: readonly string[], after = "", limit = 50): { events: BusEvent[]; cursor: string } {
-    if (!TOPIC_GLOB.test(topicGlob) || topicGlob.length > 128) {
+    if (!validTopicGlob(topicGlob)) {
       throw new Error("topic_glob may use the topic alphabet plus GLOB wildcards (* ? [])");
     }
     if (scopes.length === 0) return { events: [], cursor: after };
@@ -273,6 +278,23 @@ export class BusStore {
       { topic, key, kind: "tombstone", payload: "null", scope, writerSession, causedBy },
       now,
     );
+  }
+
+  /** Newest id overall — where a new subscription starts hearing from. */
+  tip(): string {
+    const row = this.#db.prepare("SELECT MAX(id) AS id FROM bus_events").get() as { id: string | null };
+    return row.id ?? "";
+  }
+
+  /** How many events a cursor is behind — the number a pointer notification
+   * carries, computed at delivery time so it is true when read. */
+  countSince(topicGlob: string, scopes: readonly string[], after: string): number {
+    if (scopes.length === 0) return 0;
+    const row = this.#db.prepare(`
+      SELECT COUNT(*) AS n FROM bus_events
+      WHERE topic GLOB ? AND id > ? AND scope IN (${holes(scopes)})
+    `).get(topicGlob, after, ...scopes) as { n: number };
+    return row.n;
   }
 
   byId(id: string): BusEvent | undefined {

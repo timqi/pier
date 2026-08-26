@@ -67,6 +67,12 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   const value = message.details;
   if (!value || typeof value !== "object") return null;
   const origin = value as Record<string, unknown>;
+  // Parsed before the task shapes: it shares none of their required fields,
+  // and an unparsed origin here would break the bus outbox's transcript proof.
+  if (
+    origin.kind === "bus-notify" &&
+    Array.isArray(origin.noteIds) && origin.noteIds.every((id) => typeof id === "string")
+  ) return origin as SystemInputOrigin;
   if (
     typeof origin.taskId !== "string" ||
     typeof origin.runId !== "string" ||

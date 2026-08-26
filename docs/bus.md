@@ -3,8 +3,9 @@
 One append-only table (`bus_events`, migration 7) read two ways: `latest(topic,
 key)` is shared state between sessions — memory; `log(topic_glob, after)` is a
 message stream. They are the same rows, so there is no second bookkeeping to
-drift. Delivery (write-triggers-notify) is P2; search and the librarian are P3.
-This page covers P1: the table, the store, and the `bus` tool.
+drift. P2 adds delivery: a write finds its subscribers and each is owed a
+pointer notification (`bus_subs` + `bus_notes`, migration 8). Search and the
+librarian are P3.
 
 ## The model's contract
 
@@ -20,6 +21,9 @@ Four operations on the `bus` tool:
 - `log {topic_glob, after?, limit?}` returns events after the cursor in write
   order plus the next cursor. Tombstones appear here — a reader syncing state
   needs the deletions too.
+- `subscribe {topic_glob, mode?}` asks to be told about writes the caller can
+  see; `unsubscribe` stops it; `ack {topic_glob, cursor}` confirms progress —
+  `get` and `log` never move a cursor, only `ack` does.
 - `forget {topic, key, caused_by?}` writes a tombstone — into the scope where
   the currently visible winner lives, so forgetting a project fact from inside
   a run does not merely mask it until the run ends. Never a `DELETE`: cursors
@@ -56,8 +60,8 @@ Two declared limits: run scope is **ephemeral** — when the run tree ends,
 nothing resolves to it any more and its events await P3's archive rather than
 any reader; and because scope membership is resolved per call while a cursor
 is just an id, a reader whose scope set grows mid-stream does not see the
-older events of its new scope (`id > cursor` never revisits). P2 must pin a
-subscription's scope set at subscribe time or keep one cursor per scope.
+older events of its new scope (`id > cursor` never revisits). That is why a
+subscription pins its scope set at subscribe time.
 
 Who the caller is — its root run, its delegated trees, its cwd — is not the
 bus's knowledge: the tool takes a `BusCaller` resolver, and `main.ts` wires it
@@ -81,9 +85,34 @@ every reader of every page containing it), `ttl_seconds` needs a fact,
   is refused. In memory on purpose: it exists to break a storm inside one
   process's lifetime, and a restart resetting it loses nothing.
 
-## What P1 deliberately does not do
+## Delivery: notify-then-pull
 
-No delivery — a session learns of new events by reading, until P2 adds
-subscriptions over the tasks outbox. No search, no distillation — P3. No
+A publish never carries its payload to anyone. It matches the subscriptions
+(pattern GLOB, scope in the sub's pinned set, never the writer itself — its
+own transcript already shows the write) and leaves each matched subscriber a
+**note**: at most one open per subscription, which *is* the coalescing — a
+reader owed a pointer is not owed two, and the count in the text is computed
+against the sub's cursor at delivery time, so it is true when read, not when
+queued. The notification names the newest event id so a reactive publish can
+carry it as `caused_by`; the hop ceiling closes the notify→publish→notify loop.
+
+Delivery rides the tasks outbox — the one system-input engine with transcript
+proof, backoff and a ceiling — as a third `Deliverable` beside run and group
+callbacks (the named sideways edge in docs/architecture.md). A note that can
+never land is abandoned out loud on the same three surfaces as a task
+callback. A subscriber that caught up on its own (log + ack while the note
+waited) is settled without being woken for nothing.
+
+Three modes, differing only against a busy recipient: `queue` (default) and
+`wake` deliver at the next turn boundary and start a turn when idle — they are
+one implementation, `wake` is the name for "I am usually idle, resume me";
+`steer` interrupts the running turn, for subscribers who asked to be
+interrupted. Cursors start at the tip: a subscription hears the future, not a
+replay of what it could already have read. Scopes are pinned at subscribe time
+(the P1 caveat below is why); re-subscribing re-pins them and keeps the cursor.
+
+## What P1+P2 deliberately do not do
+
+No search, no distillation, no archive — P3. No payload in notifications, no
 embedding, no CRDTs, no transcript mining, no multi-host sync; those are
 recorded as non-goals in the plan, not omissions.

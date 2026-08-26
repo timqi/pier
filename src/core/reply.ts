@@ -75,6 +75,7 @@ Boards: \`${instance.boardsDir}/<slug>/\` — this path, not \`~/.pier\`. ${reac
  */
 export function originLabel(origin: NoteOrigin): string {
   if (origin.kind === "error") return "\u26a0 failed";
+  if (origin.kind === "bus-notify") return "\u2709 bus events";
   if (origin.kind !== "task-message") {
     return origin.kind === "task-delegation" ? "\u25b6 delegated task" : "\u21a9 task callback";
   }

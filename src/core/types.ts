@@ -90,6 +90,11 @@ export type SystemInputOrigin = {
   sourceSessionId: string;
   messageId: string;
   messageKind: "steer" | "follow_up" | "progress" | "decision" | "reply";
+} | {
+  // A bus pointer notification (bus/delivery.ts): the note ids are the
+  // delivery engine's transcript proof, exactly as runIds are for callbacks.
+  kind: "bus-notify";
+  noteIds: string[];
 };
 
 export interface BackgroundRun {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { BusStore } from "./store.js";
+import { BusStore, type BusEvent } from "./store.js";
+import { SubStore } from "./subs.js";
 import { handleBusTool, type BusCaller } from "./tool.js";
 
 // Sessions the resolver knows: A and B share a project, "run-child" is a
@@ -17,8 +18,15 @@ const caller: BusCaller = {
   }[id] ?? {}),
 };
 
-const tool = (store = new BusStore(openDb(":memory:"))) =>
-  (params: unknown, sessionId: string) => handleBusTool(store, caller, params, sessionId);
+const tool = (db = openDb(":memory:"), notified: BusEvent[] = []) => {
+  const deps = {
+    store: new BusStore(db),
+    subs: new SubStore(db),
+    caller,
+    notify: (event: BusEvent) => notified.push(event),
+  };
+  return (params: unknown, sessionId: string) => handleBusTool(deps, params, sessionId);
+};
 
 describe("bus tool", () => {
   it("A publishes a fact, B in the same project gets the latest", async () => {
@@ -114,6 +122,27 @@ describe("bus tool", () => {
     }
     await expect(call({ operation: "publish", topic: "t", payload: 2, caused_by: last.id }, "b"))
       .rejects.toThrow(/feedback loop/);
+  });
+
+  it("subscribe pins scopes and starts at the tip; ack moves the cursor; unsubscribe ends it", async () => {
+    const notified: BusEvent[] = [];
+    const call = tool(openDb(":memory:"), notified);
+    const before = await call({ operation: "publish", topic: "proj/auth", payload: 0 }, "a") as { id: string };
+    const sub = await call({ operation: "subscribe", topic_glob: "proj/*" }, "b") as
+      { mode: string; cursor: string; scopes: string[] };
+    // Hears the future, not a replay; sees exactly what B saw when it asked.
+    expect(sub).toMatchObject({ mode: "queue", cursor: before.id, scopes: ["project:/p", "instance"] });
+
+    const ack = await call({ operation: "ack", topic_glob: "proj/*", cursor: "zzz" }, "b") as { cursor: string };
+    expect(ack.cursor).toBe("zzz");
+    // Every write reaches the notifier — who hears it is delivery's decision.
+    expect(notified.map((e) => e.payload)).toEqual(["0"]);
+
+    expect(await call({ operation: "unsubscribe", topic_glob: "proj/*" }, "b")).toEqual({ removed: "proj/*" });
+    await expect(call({ operation: "unsubscribe", topic_glob: "proj/*" }, "b")).rejects.toThrow(/no subscription/);
+    await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: "z" }, "b")).rejects.toThrow(/subscribe first/);
+    await expect(call({ operation: "subscribe", topic_glob: "proj/*", mode: "loud" }, "b")).rejects.toThrow(/mode/);
+    await expect(call({ operation: "subscribe", topic_glob: "{bad}" }, "b")).rejects.toThrow(/topic_glob/);
   });
 
   it("rejects what the boundary must not half-handle", async () => {

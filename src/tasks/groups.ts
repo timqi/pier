@@ -39,6 +39,8 @@ export class TaskGroups {
         text: this.text(groups[0]!),
         origin: { kind: "task-callback", taskId: groups[0]!.id, runId: groups[0]!.id, sourceSessionId: null },
       }),
+      proven: (origin) =>
+        origin.kind === "task-callback" ? origin.runIds ?? [origin.runId] : [],
       describe: (group) => `the result of a ${String(group.memberRunIds.length)}-run group`,
     }, unreachable);
   }

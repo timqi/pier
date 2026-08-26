@@ -203,6 +203,36 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX bus_events_topic ON bus_events(topic, id);
   CREATE INDEX bus_events_latest ON bus_events(topic, key, id) WHERE key IS NOT NULL;
   `,
+  // 8 — a write can reach its readers instead of waiting to be polled.
+  `
+  -- Who hears about a bus write: one row per (session, pattern). scopes is the
+  -- set pinned at subscribe time — a cursor is just an id, so a scope set that
+  -- grew mid-stream would silently skip the new scope's history. Owned by
+  -- bus/subs.ts.
+  CREATE TABLE bus_subs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    topic_glob TEXT NOT NULL,
+    mode TEXT NOT NULL,               -- 'steer' | 'queue' | 'wake'
+    scopes TEXT NOT NULL,             -- JSON array, pinned at subscribe
+    cursor TEXT NOT NULL DEFAULT '',  -- last event id the subscriber acked
+    created_at TEXT NOT NULL,
+    UNIQUE(session_id, topic_glob)
+  );
+
+  -- Pointer notifications still owed, one open row per subscription at most —
+  -- the row is the coalescing. Columns beside the JSON document are only what
+  -- the delivery sweep filters on (the task_runs pattern).
+  CREATE TABLE bus_notes (
+    id TEXT PRIMARY KEY,
+    sub_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    state TEXT,
+    next_attempt_at INTEGER,
+    json TEXT NOT NULL
+  );
+  CREATE INDEX bus_notes_session ON bus_notes(session_id, state);
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

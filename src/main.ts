@@ -8,7 +8,9 @@ import { PiConfigStore } from "./agent/config.js";
 import { CredentialStore } from "./agent/credentials.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
+import { BusDelivery } from "./bus/delivery.js";
 import { BusStore } from "./bus/store.js";
+import { SubStore } from "./bus/subs.js";
 import { busToolSpec, handleBusTool } from "./bus/tool.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
@@ -87,6 +89,9 @@ let tasks: TaskService;
 const taskStore = new TaskStore(db);
 // One instance, not per call: the publish rate limiter lives in its memory.
 const busStore = new BusStore(db);
+const busSubs = new SubStore(db);
+// Constructed after the router exists; the tool only runs long after wiring.
+let busDelivery: BusDelivery;
 const knownCwd = new Map<string, string>();
 const sessionCwd = async (sessionId: string): Promise<string | undefined> => {
   if (!knownCwd.has(sessionId)) {
@@ -107,22 +112,27 @@ const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
     busToolSpec((params, callerSessionId) =>
-      handleBusTool(busStore, {
+      handleBusTool({
+        store: busStore,
+        subs: busSubs,
         // Who owns which half of "where does this caller stand": tasks know
         // run trees (the one targeting the session, and the active ones it
         // delegated), the factory knows every session's cwd. Run membership is
         // resolved per call because it changes between two writes; a cwd never
         // does, so it is cached to keep factory.list()'s directory scan off
         // every bus call.
-        resolve: async (sessionId) => ({
-          rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
-          invokedRootRunIds: [...new Set(
-            taskStore.listRunsForSession(sessionId)
-              .filter((run) => !isTerminal(run.state))
-              .map((run) => run.rootRunId),
-          )],
-          cwd: await sessionCwd(sessionId),
-        }),
+        caller: {
+          resolve: async (sessionId) => ({
+            rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
+            invokedRootRunIds: [...new Set(
+              taskStore.listRunsForSession(sessionId)
+                .filter((run) => !isTerminal(run.state))
+                .map((run) => run.rootRunId),
+            )],
+            cwd: await sessionCwd(sessionId),
+          }),
+        },
+        notify: (event) => busDelivery.notify(event),
       }, params, callerSessionId)),
     slackToolSpec((params, callerSessionId) =>
       handleSlackTool({
@@ -179,6 +189,13 @@ tasks = new TaskService(taskStore, factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
 });
 tasks.start();
+busDelivery = new BusDelivery(router, busStore, busSubs, (sessionId, what, why) => {
+  // Same three surfaces as the task service's unreachable (§5b): the log, the
+  // record, and the event stream of whoever was owed the delivery.
+  log.error(`gave up delivering ${what} to session ${sessionId}: ${why}`);
+  router.reportTo(sessionId, `${what} could not be delivered — ${why}`);
+});
+busDelivery.start();
 
 channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
@@ -407,6 +424,7 @@ const shutdown = (stopTasks = true): void => {
   // them cancelled and race their callbacks against dying channels, when the
   // boot-time interrupted marking is the recovery that was promised.
   if (stopTasks) tasks.stop();
+  busDelivery.stop();
   void channels.stop().finally(() => {
     server.close(() => process.exit(0));
     // Every workbench tab holds an SSE stream open, so `close()` alone would

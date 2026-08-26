@@ -40,6 +40,8 @@ export class TaskCallbacks {
           runIds: runs.map((run) => run.id),
         },
       }),
+      proven: (origin) =>
+        origin.kind === "task-callback" ? origin.runIds ?? [origin.runId] : [],
       describe: (run) => `the result of "${run.context.definition.name}"`,
     }, unreachable);
   }

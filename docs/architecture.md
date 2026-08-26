@@ -62,8 +62,10 @@ src/
                execution, callbacks, messages, command, service, store, tool,
                HTTP routes
   bus/         store (the append-only event table read as memory or as a
-               stream) and the `bus` tool; who a caller is (its run tree, its
-               cwd) arrives through an injected resolver, wired in main.ts —
+               stream), subs (who hears about a write, and what is still
+               owed), delivery (pointer notifications over the tasks outbox)
+               and the `bus` tool; who a caller is (its run tree, its cwd)
+               arrives through an injected resolver, wired in main.ts —
                see docs/bus.md
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
@@ -80,7 +82,11 @@ src/
 ```
 
 Dependency direction: `channels | web | tasks | boards | bus → core → agent`. Core
-never imports platform SDKs or Pi, and runtime dependencies never go sideways.
+never imports platform SDKs or Pi, and runtime dependencies never go sideways —
+with one named exception: `bus → tasks/outbox.ts` (+ its `CallbackFields`
+type), because the outbox is the *one* system-input delivery engine (proof,
+backoff, ceiling) and a second copy is exactly the drift it was extracted to
+end. tasks never imports bus, so the edge cannot become a cycle.
 `extensions/` sits beside `agent/` rather than under it: an extension takes an
 `ExtensionAPI`, so it is Pi-shaped by construction and is the second area
 allowed to import the SDK. Only `agent/pi.ts` registers one (as an inline

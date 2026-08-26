@@ -4,7 +4,8 @@
 
 import { Type } from "typebox";
 import type { AgentCustomTool } from "../core/types.js";
-import { BusStore, type BusEvent } from "./store.js";
+import { BusStore, validTopicGlob, type BusEvent } from "./store.js";
+import type { BusSubMode, SubStore } from "./subs.js";
 
 const strEnum = <const T extends readonly string[]>(...values: T) =>
   Type.Unsafe<T[number]>({ type: "string", enum: [...values] });
@@ -28,6 +29,15 @@ const requiredString = (value: unknown, field: string): string => {
  * children's blackboard, indistinguishable from "no fact". */
 export interface BusCaller {
   resolve(sessionId: string): Promise<{ rootRunId?: string; cwd?: string; invokedRootRunIds?: string[] }>;
+}
+
+/** The tool's collaborators, wired in main.ts. `notify` is fire-and-forget —
+ * a publish must not wait on its readers' turns. */
+export interface BusToolDeps {
+  store: BusStore;
+  subs: SubStore;
+  caller: BusCaller;
+  notify: (event: BusEvent) => void;
 }
 
 /** Model-facing event shape: payload parsed back to a value. */
@@ -61,11 +71,14 @@ export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomToo
       "log {topic_glob, after?, limit?} reads the stream: events after a cursor in write order, returning the next cursor — use it to catch up, then pass the cursor back in. " +
       "publish {topic, key?, payload, ...} appends: with key it is a fact that overwrites in get; without key a plain event. " +
       "forget {topic, key} deletes a fact (as a tombstone). " +
+      "subscribe {topic_glob, mode?} asks to be told about writes you can see: mode 'queue' (default) delivers a pointer at your next turn boundary, 'steer' interrupts your running turn, 'wake' is 'queue' that also starts your turn when idle (they differ only when busy). The notification is a pointer, never the payload — read with log, then ack {topic_glob, cursor} to confirm progress; unsubscribe {topic_glob} stops it. " +
       "Topics are lowercase 'a/b/c' paths. Keep payload small (JSON, 8KB max); write large content to a file and pass its absolute path as file_ptr. " +
       "Scope defaults to your run tree when you are a subagent, else your project; pass scope 'instance' only for facts every project should see. A narrower scope's fact shadows a wider one's under the same key; run scope lives only while its run tree is active. " +
       "When you publish in reaction to an event you read, pass that event's id as caused_by — chains deeper than 4 are refused as feedback loops.",
     parameters: Type.Object({
-      operation: strEnum("publish", "get", "log", "forget"),
+      operation: strEnum("publish", "get", "log", "forget", "subscribe", "unsubscribe", "ack"),
+      mode: Type.Optional(strEnum("queue", "steer", "wake")),
+      cursor: Type.Optional(Type.String()),
       topic: Type.Optional(Type.String()),
       key: Type.Optional(Type.String()),
       payload: Type.Optional(Type.Unknown()),
@@ -82,11 +95,11 @@ export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomToo
 }
 
 export async function handleBusTool(
-  store: BusStore,
-  caller: BusCaller,
+  deps: BusToolDeps,
   raw: unknown,
   callerSessionId: string,
 ): Promise<unknown> {
+  const { store, subs, caller, notify } = deps;
   const input = record(raw);
   if (!input) throw new Error("bus tool parameters required");
   const { rootRunId, cwd, invokedRootRunIds = [] } = await caller.resolve(callerSessionId);
@@ -116,6 +129,7 @@ export async function handleBusTool(
         causedBy: input.caused_by === undefined ? undefined : requiredString(input.caused_by, "caused_by"),
         ttlSeconds: input.ttl_seconds === undefined ? undefined : Number(input.ttl_seconds),
       });
+      notify(event);
       return { id: event.id, scope: event.scope };
     }
     case "get": {
@@ -152,7 +166,37 @@ export async function handleBusTool(
         callerSessionId,
         input.caused_by === undefined ? undefined : requiredString(input.caused_by, "caused_by"),
       );
+      notify(event);
       return { id: event.id, scope: event.scope };
+    }
+    case "subscribe": {
+      const glob = requiredString(input.topic_glob, "topic_glob");
+      if (!validTopicGlob(glob)) {
+        throw new Error("topic_glob may use the topic alphabet plus GLOB wildcards (* ? [])");
+      }
+      const mode = (input.mode ?? "queue") as BusSubMode;
+      if (mode !== "queue" && mode !== "steer" && mode !== "wake") {
+        throw new Error("mode must be 'queue', 'steer' or 'wake'");
+      }
+      // Scopes pinned now, cursor starting at the tip: a subscription hears
+      // the future, not a replay of everything it could already have read.
+      const sub = subs.upsert(callerSessionId, glob, mode, scopes, store.tip());
+      return { sub_id: sub.id, topic_glob: sub.topicGlob, mode: sub.mode, cursor: sub.cursor, scopes: sub.scopes };
+    }
+    case "unsubscribe": {
+      const glob = requiredString(input.topic_glob, "topic_glob");
+      if (!subs.remove(callerSessionId, glob)) {
+        throw new Error(`no subscription on '${glob}'`);
+      }
+      return { removed: glob };
+    }
+    case "ack": {
+      const sub = subs.ack(
+        callerSessionId,
+        requiredString(input.topic_glob, "topic_glob"),
+        requiredString(input.cursor, "cursor"),
+      );
+      return { topic_glob: sub.topicGlob, cursor: sub.cursor };
     }
     default:
       throw new Error(`unknown bus operation: ${String(input.operation)}`);

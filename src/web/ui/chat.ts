@@ -235,26 +235,32 @@ function speakerLine(speaker: Speaker): HTMLElement {
 }
 
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
-  const kind = origin.kind === "task-callback"
-    ? "Task callback"
-    : origin.kind === "task-message"
-      ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
-      : "Agent task input";
+  const kind = origin.kind === "bus-notify"
+    ? "Bus events"
+    : origin.kind === "task-callback"
+      ? "Task callback"
+      : origin.kind === "task-message"
+        ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
+        : "Agent task input";
   sealActivity();
   const row = h("div", "mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
   row.dataset.kind = "system";
   const head = h("div", "mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase text-cyan-800", h("span", "", kind));
-  if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
-    const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
-    source.title = "Open source session";
-    source.onclick = () => deps.select(origin.sourceSessionId!);
-    head.append(h("span", "text-cyan-400", "from"), source);
-  }
-  const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
-  run.onclick = () => deps.showTasks(origin.taskId);
-  head.append(run);
-  if (origin.kind === "task-message" && origin.messageKind === "decision") {
-    head.append(decisionReplyBtn(origin.messageId));
+  // A bus note has no run to link and no source session: the pointer text
+  // itself names the topic and the event id.
+  if (origin.kind !== "bus-notify") {
+    if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
+      const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
+      source.title = "Open source session";
+      source.onclick = () => deps.select(origin.sourceSessionId!);
+      head.append(h("span", "text-cyan-400", "from"), source);
+    }
+    const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
+    run.onclick = () => deps.showTasks(origin.taskId);
+    head.append(run);
+    if (origin.kind === "task-message" && origin.messageKind === "decision") {
+      head.append(decisionReplyBtn(origin.messageId));
+    }
   }
   const collapsed = ["max-h-[min(18rem,40dvh)]", "overflow-hidden"];
   const content = h("div", `whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
@@ -593,7 +599,9 @@ export function renderSnapshot(
         // Launched elsewhere (cron, another session, an IM turn): the callback
         // that delivered it is the earliest place it can be shown. A batched one
         // carries every run id it delivers.
-        placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
+        if (t.origin.kind !== "bus-notify") {
+          placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
+        }
         appendSystemInput(t.text, t.origin);
         continue;
       }
