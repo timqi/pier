@@ -6,7 +6,7 @@
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
 import "./style.css";
-import { sendJson } from "./api.js";
+import { coalesce, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -140,24 +140,6 @@ function commitSessions(rows: SessionInfo[], complete: boolean): void {
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
   maybeAckRead();
-}
-
-/** One list request in flight at a time; anything asked for during one runs
- *  after it, so a burst of workspace events costs two fetches, not twenty. */
-function coalesce(load: () => Promise<void>): () => Promise<void> {
-  let inflight: Promise<void> | undefined;
-  let dirty = false;
-  return () => {
-    dirty = true;
-    return inflight ??= (async () => {
-      while (dirty) {
-        dirty = false;
-        await load();
-      }
-    })().finally(() => {
-      inflight = undefined;
-    });
-  };
 }
 
 const refreshProjects = coalesce(async () => {
@@ -319,16 +301,14 @@ function connect(id: string, after: number): void {
 
 async function select(id: string): Promise<void> {
   const seq = ++selectionSeq;
-  let missing = false;
-  if (!sessions.some((s) => s.id === id)) {
-    await refreshSessions();
-    if (seq !== selectionSeq) return;
-    missing = !sessions.some((s) => s.id === id);
-  }
+  // The pane opens before anything is fetched. A session named from Activity or
+  // from the hash is usually not in the list yet, and the full listing that
+  // decides that costs ~150ms in which the click looked ignored.
   showChat();
   closeDrawer(); // on mobile the drawer is how you got here
   setSessionHash(id);
-  if (id === currentId && !missing) return;
+  const listed = sessions.some((s) => s.id === id);
+  if (id === currentId && listed) return;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
@@ -336,7 +316,17 @@ async function select(id: string): Promise<void> {
   renderSessions();
   renderHeader();
   maybeAckRead(); // selecting an unread session is looking at it
-  await loadSession(id, missing);
+  if (listed) return await loadSession(id);
+  // Unlisted: show the transcript placeholder first, then pay the listing that
+  // says whether this id exists at all — "not found" is worth the wait, a
+  // blank pane during it is not. The old stream closes with the pane it was
+  // painting, or a delta from the session just left lands in the empty one.
+  source?.close();
+  resetChat();
+  chatLoading(true);
+  await refreshSessions();
+  if (seq !== selectionSeq || currentId !== id) return;
+  await loadSession(id, !sessions.some((s) => s.id === id));
 }
 
 /** (Re)load the current session's snapshot and reconnect its event stream. */

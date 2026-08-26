@@ -1,5 +1,6 @@
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
+import { coalesce } from "./api.js";
 import { consoleView, fmtDuration, h, readableTitle, type ConsoleView } from "./dom.js";
 import { tabButton as control } from "./form.js";
 
@@ -85,19 +86,30 @@ export function createActivityView(
   let tab: "sessions" | "dependencies" = "sessions";
   let scope: "active" | "recent" = "active";
   let snapshot: ActivitySnapshot = { sessions: [], runs: [], messages: [] };
+  /** The last payload drawn, so an event that changed nothing here draws
+   *  nothing: a redraw threw away the table's scroll position, and a
+   *  replaceChildren() landing between mousedown and mouseup swallows the
+   *  click that was already happening. Cleared wherever the pane is emptied. */
+  let drawn = "";
 
-  async function load(): Promise<void> {
-    const res = await fetch(`/api/activity?scope=${scope}`);
+  const load = coalesce(async () => {
+    const wanted = scope;
+    const res = await fetch(`/api/activity?scope=${wanted}`);
     if (!res.ok) {
+      drawn = "";
       root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", `Failed to load activity: ${res.status}`));
       return;
     }
-    const fresh = (await res.json()) as ActivitySnapshot;
+    const body = await res.text();
+    if (wanted !== scope) return; // stale: the scope changed mid-fetch
+    if (body === drawn) return;
+    drawn = body;
+    const fresh = JSON.parse(body) as ActivitySnapshot;
     // Same speaker-header cleanup the sidebar does (dom.ts): a session titled
     // by an IM prompt must not show a raw platform id here either.
     snapshot = { ...fresh, sessions: fresh.sessions.map((s) => ({ ...s, title: readableTitle(s.title) })) };
     render();
-  }
+  });
 
   function render(): void {
     // The mobile top bar already names this view, and this header carries
@@ -114,9 +126,16 @@ export function createActivityView(
     // survives switching them — Sessions gets the same 24h history the graph
     // shows. w-full below md forces its own line inside the wrapping .tabstrip.
     const scopeControl = h("div", "ml-auto flex gap-1 max-md:ml-0 max-md:w-full");
+    // render() first, load() second: the fetch behind a scope is ~150ms, and
+    // until it lands the pressed button would show no sign of having been hit.
+    const setScope = (next: typeof scope) => () => {
+      scope = next;
+      render();
+      void load();
+    };
     scopeControl.append(
-      control("Active", scope === "active", () => { scope = "active"; void load(); }),
-      control("Last 24h", scope === "recent", () => { scope = "recent"; void load(); }),
+      control("Active", scope === "active", setScope("active")),
+      control("Last 24h", scope === "recent", setScope("recent")),
     );
     tabs.append(scopeControl);
     const body = h("div", "min-h-0 flex-1 overflow-auto");
@@ -366,6 +385,7 @@ export function createActivityView(
     // nothing: show() re-fetches the snapshot and draws both again.
     root.replaceChildren();
     snapshot = { sessions: [], runs: [], messages: [] };
+    drawn = "";
   });
   // The graph's palette is baked into attributes at draw time, so a theme
   // switch under an open graph leaves the old one on screen until it redraws.

@@ -3,7 +3,7 @@
 // create/edit dialog in task-editor.ts; this file owns navigation and state.
 
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
-import { sendJson } from "./api.js";
+import { coalesce, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { button, tabButton } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
@@ -39,23 +39,39 @@ export function createTasksView(
   let availableTasks: TaskRow[] = [];
   let selectedId: string | null = null;
   let filter = "active";
+  /** Filter plus payload of the last list drawn — the Activity view's guard
+   *  (activity.ts), for the same reason: most workspace events change nothing
+   *  here, and replacing the table anyway loses its scroll position and the
+   *  click that was mid-press. Filter included because two filters can answer
+   *  with the same rows, and the pressed tab is drawn by this list. */
+  let drawn = "";
 
-  async function load(): Promise<void> {
-    const state = filter === "archived" ? "archived" : "active";
-    const res = await fetch(`/api/tasks?state=${state}${filter === "subagent" ? "&kind=subagent" : ""}`);
-    if (!res.ok) return renderError(`Failed to load tasks: ${res.status}`);
-    rows = (await res.json()) as TaskRow[];
+  const load = coalesce(async () => {
+    const wanted = filter;
+    const state = wanted === "archived" ? "archived" : "active";
+    const res = await fetch(`/api/tasks?state=${state}${wanted === "subagent" ? "&kind=subagent" : ""}`);
+    if (!res.ok) {
+      drawn = "";
+      return renderError(`Failed to load tasks: ${res.status}`);
+    }
+    const body = await res.text();
+    if (wanted !== filter) return; // stale: the filter changed mid-fetch
+    // The detail page has endpoints of its own — a run's state changes without
+    // this list changing — so only the list may be skipped.
+    if (wanted + body === drawn && !selectedId) return;
+    drawn = wanted + body;
+    rows = JSON.parse(body) as TaskRow[];
     // The editor offers active tasks as chain targets whatever the list is
     // filtered to, so a filter that cannot stand in for that list fetches it.
     // Reusing the wrong list left the target picker empty or stale.
-    if (filter === "archived" || filter === "subagent") availableTasks = await activeTasks();
+    if (wanted === "archived" || wanted === "subagent") availableTasks = await activeTasks();
     else availableTasks = rows;
-    if (filter !== "active" && filter !== "archived" && filter !== "subagent") {
-      rows = rows.filter((task) => task.trigger.type === filter);
+    if (wanted !== "active" && wanted !== "archived" && wanted !== "subagent") {
+      rows = rows.filter((task) => task.trigger.type === wanted);
     }
     if (selectedId) await renderDetail(selectedId);
     else renderList();
-  }
+  });
 
   function renderError(message: string): void {
     root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", message));

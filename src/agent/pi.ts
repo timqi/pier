@@ -52,12 +52,20 @@ import { curateModels, pinFirst } from "./models.js";
 
 const log = logger("agent");
 
+type SessionInfos = Awaited<ReturnType<typeof SessionManager.listAll>>;
+
 /** Pi's bash tool has no default timeout, so a hung command holds the turn
  * until someone aborts it — nobody is watching in a scheduled task. Kept below
  * the default task-run timeout so a stuck command comes back as
  * a tool error the agent can retry with an explicit longer timeout, instead of
  * killing the whole run. */
 const BASH_DEFAULT_TIMEOUT_SECONDS = 600;
+
+/** How long a session listing stays usable: long enough that one workspace
+ *  event, which several surfaces answer at once, scans disk once; short enough
+ *  that a title no invalidation covers is never stale on screen. */
+const LIST_TTL_MS = 3_000;
+
 /** A probe nobody is watching is a hung page: the Console waits on this. */
 const PROVIDER_CHECK_TIMEOUT_MS = 20_000;
 /** An ordinary budget, not a token: a 1-token cap is a request no real turn
@@ -312,6 +320,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
    *  `resume` paid on every cold open — web selection, an IM message, a task
    *  run. The sidebar's own listing keeps this warm; a miss still lists. */
   private located = new Map<string, { path: string; cwd: string }>();
+  /** That same scan, retained for LIST_TTL_MS instead of paid once per asking
+   *  surface — one workspace event has three (sidebar, Activity, task lookups).
+   *  Dropped on create/fork; ids appear for reasons this factory never sees, so
+   *  a miss that decides something re-lists rather than trusts it (`resume`). */
+  private listing?: { at: number; infos: Promise<SessionInfos> };
   private refreshQueue: Promise<void> = Promise.resolve();
   private builtinProviderIds?: Promise<Set<string>>;
 
@@ -610,6 +623,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   async create(opts: AgentLaunchOptions): Promise<AgentSession> {
+    this.listing = undefined;
     return this.open(opts.cwd, SessionManager.create(opts.cwd), opts);
   }
 
@@ -628,6 +642,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     const leafId = hasPendingToolCall ? latest.parentId : latest?.id;
     if (!leafId) throw new Error("cannot fork a session before its first persisted input");
     manager.createBranchedSession(leafId);
+    this.listing = undefined;
     return this.open(opts.cwd, manager, opts);
   }
 
@@ -643,18 +658,35 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
         this.located.delete(sessionId);
       }
     }
-    const infos = await this.listed();
-    const info = infos.find((s) => s.id === sessionId);
+    const find = (infos: SessionInfos) => infos.find((s) => s.id === sessionId);
+    // A retained listing is not evidence that a session is gone: it may have
+    // been written since — by another Pier, or by the first turn of a session
+    // this factory opened. The miss is what earns a fresh scan, because the
+    // caller above reads "unknown" as permission to start a replacement session
+    // (channels/conversations.ts) and that costs a conversation its history.
+    // `reused` is how we know a scan is owed: same entry back, same disk state.
+    const reused = this.listing;
+    const info = find(await this.listed()) ??
+      (reused && this.listing === reused ? find(await this.listed(true)) : undefined);
     if (!info) throw new Error(`unknown session: ${sessionId}`);
     return this.open(info.cwd || process.cwd(), SessionManager.open(info.path));
   }
 
   /** Every listing goes through here, so it also refreshes `located`. */
-  private async listed(): Promise<Awaited<ReturnType<typeof SessionManager.listAll>>> {
-    const infos = await SessionManager.listAll();
-    for (const s of infos) {
-      this.located.set(s.id, { path: s.path, cwd: s.cwd || process.cwd() });
-    }
+  private listed(force = false): Promise<SessionInfos> {
+    const now = Date.now();
+    if (!force && this.listing && now - this.listing.at < LIST_TTL_MS) return this.listing.infos;
+    const infos = SessionManager.listAll().then((listed) => {
+      for (const s of listed) {
+        this.located.set(s.id, { path: s.path, cwd: s.cwd || process.cwd() });
+      }
+      return listed;
+    });
+    // A failed scan is not an answer to hand the next caller for three seconds.
+    void infos.catch(() => {
+      if (this.listing?.infos === infos) this.listing = undefined;
+    });
+    this.listing = { at: now, infos };
     return infos;
   }
 

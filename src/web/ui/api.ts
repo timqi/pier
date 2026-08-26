@@ -1,5 +1,26 @@
-// The one shape every JSON write shares — nine modules had grown their own
-// copy of the same method/headers/body triple.
+// What every view shares when it talks to Pier's own HTTP API — the shape of a
+// write, the sentence a failure shows, the scheduling of a re-read. Nine
+// modules had grown their own copy of the method/headers/body triple.
+
+/**
+ * One list request in flight at a time; anything asked for during one runs
+ * after it, so a burst of workspace events costs two fetches, not twenty.
+ */
+export function coalesce(load: () => Promise<void>): () => Promise<void> {
+  let inflight: Promise<void> | undefined;
+  let dirty = false;
+  return () => {
+    dirty = true;
+    return inflight ??= (async () => {
+      while (dirty) {
+        dirty = false;
+        await load();
+      }
+    })().finally(() => {
+      inflight = undefined;
+    });
+  };
+}
 
 /** POST (or PUT/PATCH) a JSON body; the caller owns the response. */
 export const sendJson = (

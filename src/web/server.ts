@@ -148,8 +148,9 @@ export function createServer(
   // so every client sees a new session immediately; dropped once Pi lists it.
   const nascent = new Map<string, { cwd: string; createdAt: number }>();
 
-  // listAll parses every transcript. Concurrent consumers share that work,
-  // but the result is not retained: an explicit All-sessions open stays fresh.
+  // listAll parses every transcript. Concurrent consumers share that work and
+  // the metadata repair below, whatever the factory behind the seam retains of
+  // its own scan; nothing here is cached past the last of them.
   let listing: Promise<SessionSummary[]> | undefined;
   let projectBackfillNeeded = state.needsProjectBackfill();
   const listSessions = (): Promise<SessionSummary[]> =>
