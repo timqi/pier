@@ -1,6 +1,9 @@
 // Adapter golden test: fake long-connection events in, normalized messages and
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
@@ -96,6 +99,16 @@ class FakeClient implements LarkClient {
     this.downloads.push({ messageId, fileKey, type });
     if (this.oversized) return Promise.reject(new Error(`lark resource ${fileKey}: too large (>${maxBytes} bytes)`));
     return Promise.resolve({ bytes: new TextEncoder().encode("fo") });
+  }
+
+  readonly uploads: { root: string; name: string; image: boolean; size: number }[] = [];
+
+  uploadFile(
+    rootId: string,
+    file: { name: string; bytes: Uint8Array; image: boolean },
+  ): Promise<void> {
+    this.uploads.push({ root: rootId, name: file.name, image: file.image, size: file.bytes.length });
+    return Promise.resolve();
   }
 }
 
@@ -242,6 +255,15 @@ describe("threads are the conversation", () => {
     openGates();
     await feed(message({ text: "and now?", messageId: "om_2", rootId: "om_1" }));
     expect(inbound[0]!.key.conversationId).toBe(`${CHAT}/om_1`);
+  });
+
+  it("uploads a file the agent linked into the same thread", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pier-lark-out-")), "chart.png");
+    writeFileSync(path, "px");
+    await channel.send(`${CHAT}/om_1`, { text: `here [chart.png](file://${path})`, suggestions: [] });
+    // The link is dead on every machine but this one, so the bytes go instead.
+    expect(bodyText(client.replied[0]!.card)).toBe("here chart.png");
+    expect(client.uploads).toEqual([{ root: "om_1", name: "chart.png", image: true, size: 2 }]);
   });
 
   it("refuses a conversation id without a root, loudly, and still settles receipts", async () => {

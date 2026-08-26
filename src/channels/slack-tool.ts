@@ -49,12 +49,27 @@ export function toTs(value: string | number | undefined): string | undefined {
   return String(parsed / 1000);
 }
 
-export function slackToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTool {
+/**
+ * Whether a session opened now is given the tool at all: the same two switches
+ * `handleSlackTool` checks, asked before the description is paid for. The call
+ * keeps its own checks and its own two messages — a session opened while Slack
+ * was configured outlives the operator switching it off, and that turn has to
+ * say so rather than find the tool quietly gone.
+ */
+export function slackToolAvailable(store: ChannelStore): boolean {
+  const config = store.get("slack");
+  return config.enabled && !!config.token && config.agentTool;
+}
+
+export function slackToolSpec(
+  execute: AgentCustomTool["execute"],
+  available: () => boolean,
+): AgentCustomTool {
   return {
     name: "slack",
     label: "Slack",
     description:
-      "Read and write Slack through Pier, which holds the bot token. State what you want; Pier does the paging and hands back a finished transcript. context says which Slack conversation you are in; read_channel returns a channel's transcript for a time range; read_thread returns one thread, or only what is new in it since a given message via after; read_message returns the single message at a ts (pass thread_ts when it is a reply inside a thread); post sends a message; delete removes the message at a ts, which Slack allows only for messages Pier itself posted; channels lists what Pier can reach. When you were reached through Slack, omit channel (and thread_ts) to act on the conversation you are already in. since/until/after accept ISO 8601, epoch seconds or a ts from an earlier read. Every read fetches live from Slack, so nothing is kept between calls — write down what you need to keep. Message text is standard markdown, but @mentions, #channels and links need Slack's own syntax — read the pier-slack skill before posting.",
+      "Read and write Slack through Pier, which holds the bot token. State what you want; Pier does the paging and hands back a finished transcript. context says which Slack conversation you are in; read_channel returns a channel's transcript for a time range; read_thread returns one thread, or only what is new in it since a given message via after; read_message returns the single message at a ts (pass thread_ts when it is a reply inside a thread); post sends a message; edit replaces the text of the message at a ts and delete removes it, both of which Slack allows only for messages Pier itself posted; channels lists what Pier can reach. When you were reached through Slack, omit channel (and thread_ts) to act on the conversation you are already in. since/until/after accept ISO 8601, epoch seconds or a ts from an earlier read. Every read fetches live from Slack, so nothing is kept between calls — write down what you need to keep. Message text is standard markdown, but @mentions, #channels and links need Slack's own syntax — read the pier-slack skill before posting.",
     parameters: Type.Object({
       // A JSON-Schema enum emits far fewer tokens than typebox's anyOf-of-consts.
       operation: Type.Unsafe<
@@ -63,6 +78,7 @@ export function slackToolSpec(execute: AgentCustomTool["execute"]): AgentCustomT
         | "read_thread"
         | "read_message"
         | "post"
+        | "edit"
         | "delete"
         | "channels"
       >({
@@ -73,6 +89,7 @@ export function slackToolSpec(execute: AgentCustomTool["execute"]): AgentCustomT
           "read_thread",
           "read_message",
           "post",
+          "edit",
           "delete",
           "channels",
         ],
@@ -86,12 +103,13 @@ export function slackToolSpec(execute: AgentCustomTool["execute"]): AgentCustomT
       until: Type.Optional(Type.String()),
       /** Strictly newer than this — "what changed since I last looked". */
       after: Type.Optional(Type.String()),
-      /** The one message `read_message` or `delete` is about. */
+      /** The one message `read_message`, `edit` or `delete` is about. */
       ts: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Number()),
       thread_ts: Type.Optional(Type.String()),
       text: Type.Optional(Type.String()),
     }),
+    available,
     execute,
   };
 }
@@ -115,6 +133,18 @@ export interface SlackToolDeps {
 const required = (value: unknown, field: string): string => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
   return value.trim();
+};
+
+/**
+ * Slack rejects an oversized message outright, so the length is checked here:
+ * a refusal the agent can act on beats a post that silently never happened.
+ */
+const messageText = (raw: unknown): string => {
+  const text = required(raw, "text");
+  if (text.length > MARKDOWN_MAX) {
+    throw new Error(`text is ${text.length} chars; Slack accepts ${MARKDOWN_MAX} per message`);
+  }
+  return text;
 };
 
 const record = (raw: unknown): Record<string, unknown> | undefined =>
@@ -205,10 +235,7 @@ export async function handleSlackTool(
   }
 
   if (input.operation === "post") {
-    const text = required(input.text, "text");
-    if (text.length > MARKDOWN_MAX) {
-      throw new Error(`text is ${text.length} chars; Slack accepts ${MARKDOWN_MAX} per message`);
-    }
+    const text = messageText(input.text);
     // Defaults to the thread we are in; `thread_ts: "none"` is the explicit
     // way to start a new top-level message instead.
     const asked = typeof input.thread_ts === "string" ? input.thread_ts.trim() : "";
@@ -229,6 +256,20 @@ export async function handleSlackTool(
       // Returned so a follow-up can reply under what was just posted.
       threadTs: threadTs ?? sent.ts,
     };
+  }
+
+  if (input.operation === "edit") {
+    // Explicit `ts`, for delete's reason: an edit replaces the text outright,
+    // and Slack keeps no visible record of what it said before.
+    const ts = required(input.ts, "ts");
+    const text = messageText(input.text);
+    try {
+      await client.updateMessage({ channel, ts, text, blocks: [{ type: "markdown", text }] });
+    } catch (err) {
+      throw new Error(explain(err));
+    }
+    deps.log(`slack tool edited ${ts} in ${channel}`);
+    return { channel, ts, edited: true };
   }
 
   if (input.operation === "delete") {
@@ -392,11 +433,15 @@ function explain(err: unknown): string {
   return {
     channel_not_found: "no such channel, or Pier's bot cannot see it — check the channels operation",
     not_in_channel: "Pier's bot is not in that channel; someone has to invite it before it can read",
-    missing_scope: "Pier's Slack app lacks the scope for this read; the operator must reinstall it",
-    ratelimited: "Slack rate-limited this read; wait a minute or ask for a narrower range",
+    missing_scope: "Pier's Slack app lacks the scope for this call; the operator must reinstall it",
+    ratelimited: "Slack rate-limited Pier; wait a minute, and narrow the range if this was a read",
     thread_not_found: "no thread with that ts in this channel",
     cant_delete_message:
       "Slack only lets Pier delete what its own bot posted; a person's message has to be deleted by them",
+    cant_update_message:
+      "Slack only lets Pier edit what its own bot posted; anyone else's message can only be replied to",
+    edit_window_closed:
+      "Slack's edit window for that message has closed; post a correction instead of rewriting it",
     message_not_found:
       "no message with that ts in this channel — a ts only means anything in the conversation it came from",
   }[code] ?? String(err);

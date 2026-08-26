@@ -1,6 +1,6 @@
 ---
 name: pier-slack
-description: Read and write Slack through Pier's slack tool — a channel's history for a time range, one thread, posting into a thread, deleting a message Pier posted, and the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
+description: Read and write Slack through Pier's slack tool — a channel's history for a time range, one thread, posting into a thread, editing or deleting a message Pier posted, and the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
 ---
 
 # Reading and writing Slack
@@ -96,6 +96,26 @@ and the error will say so.
 Going top-level takes the explicit `"none"`: a channel's main flow is wider
 than a thread. A `thread_ts` is never inherited across a change of `channel`.
 The response carries `ts` and `threadTs` for replying under what you posted.
+
+## Editing
+
+```json
+{"operation":"edit","channel":"#ops","ts":"1717243800.000100",
+ "text":"**Deploy done** — 3 services, 1 rollback."}
+```
+
+`text` replaces the message outright; there is no partial edit. Read the
+message first if you are changing part of it.
+
+- Slack only lets Pier edit what **its own bot** posted — anyone else's message
+  answers `cant_update_message`, and the answer is to reply, not to retry.
+- `ts` is always explicit, as with `delete`, and means nothing outside the
+  channel it was read in.
+- The old text is gone — Slack keeps no version a reader can open, and may not
+  mark the message as edited at all. When the previous wording mattered to
+  people reading, say what changed rather than quietly rewriting history.
+- A long-running update — a status line, a running tally — is better as one
+  message edited in place than as a new message per change.
 
 ## Deleting
 

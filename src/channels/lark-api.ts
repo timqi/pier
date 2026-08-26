@@ -162,6 +162,11 @@ export interface LarkClient {
   removeReaction(messageId: string, emojiType: string): Promise<void>;
   chatName(chatId: string): Promise<string | undefined>;
   userName(openId: string): Promise<string>;
+  /** Upload one file and post it into the message's thread. */
+  uploadFile(
+    rootId: string,
+    file: { name: string; bytes: Uint8Array; image: boolean },
+  ): Promise<void>;
   /** Fetch one attachment, refusing past `maxBytes` mid-stream. */
   download(
     messageId: string,
@@ -300,6 +305,48 @@ export class LarkApi implements LarkClient {
       },
     });
     return { messageId: ok("message.reply", res).data?.message_id ?? "" };
+  }
+
+  /**
+   * Two calls: the bytes go to the platform first and come back as a key,
+   * then the key is posted as a message. Images take the image endpoint so
+   * they render inline; everything else is a `stream` file, which is Lark's
+   * name for "a file whose type I am not claiming to know".
+   *
+   * The SDK unwraps an upload response to its `data`, so a business failure
+   * arrives as a missing key rather than as a code — hence the explicit throw
+   * instead of `ok()`.
+   */
+  async uploadFile(
+    rootId: string,
+    file: { name: string; bytes: Uint8Array; image: boolean },
+  ): Promise<void> {
+    const bytes = Buffer.from(file.bytes);
+    let content: { image_key: string } | { file_key: string };
+    if (file.image) {
+      const res = await this.client.im.v1.image.create({
+        data: { image_type: "message", image: bytes },
+      });
+      if (!res?.image_key) throw new Error(`lark image.create: no image_key for ${file.name}`);
+      content = { image_key: res.image_key };
+    } else {
+      const res = await this.client.im.v1.file.create({
+        data: { file_type: "stream", file_name: file.name, file: bytes },
+      });
+      if (!res?.file_key) throw new Error(`lark file.create: no file_key for ${file.name}`);
+      content = { file_key: res.file_key };
+    }
+    ok(
+      "message.reply",
+      await this.client.im.v1.message.reply({
+        path: { message_id: rootId },
+        data: {
+          msg_type: file.image ? "image" : "file",
+          content: JSON.stringify(content),
+          reply_in_thread: true,
+        },
+      }),
+    );
   }
 
   async patchCard(messageId: string, card: LarkCard): Promise<void> {

@@ -550,11 +550,13 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   private async open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
     let live: PiAgentSession | undefined;
-    // Capability gates read per open, like extensions: the Console's switch
-    // reaches the next session, and a switched-off tool is not offered at all.
-    const offered = this.extraTools.filter((tool) => tool.enabled?.() ?? true);
+    // Asked per open, not captured at wiring: a tool whose channel is not
+    // configured yet — or whose capability the Console switched off — would
+    // otherwise cost context on every turn of every session and be able to
+    // answer nothing.
+    const active = this.extraTools.filter((tool) => tool.available?.() ?? true);
     // Generic translation only — tool contracts are data owned by their feature.
-    const customTools = offered.map((tool) =>
+    const customTools = active.map((tool) =>
       defineTool({
         name: tool.name,
         label: tool.label,
@@ -590,7 +592,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     this.credentials?.assertUnlocked();
     if (opts.name) sessionManager.appendSessionInfo(opts.name);
     const tools = opts.capabilities === "read"
-      ? ["read", "grep", "find", "ls", ...offered.map((tool) => tool.name)]
+      ? ["read", "grep", "find", "ls", ...active.map((tool) => tool.name)]
       : undefined;
     const created = await createAgentSession({
       cwd,

@@ -40,6 +40,7 @@ src/
                web tools)
   channels/    types.ts (config contract), config.ts (store + permission gate),
                gatekeeper.ts (verdict + drop log), chains.ts (ordering),
+               attach.ts (outbound file links → uploads),
                chunk.ts, commands.ts (slash-command parse), control.ts,
                conversations.ts (durable chat → session map),
                receipts.ts (durable pending-reaction set),

@@ -7,6 +7,7 @@
 
 import type { AgentReply, SystemInputOrigin, TurnMeta } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
+import { sendAttachments, splitAttachments } from "./attach.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
 import {
   actions,
@@ -35,7 +36,7 @@ export class SlackOutbound {
   private markdownBlocks = true;
 
   constructor(
-    private readonly api: Pick<SlackClient, "postMessage">,
+    private readonly api: Pick<SlackClient, "postMessage" | "uploadFile">,
     private readonly log: (message: string) => void,
   ) {}
 
@@ -44,7 +45,10 @@ export class SlackOutbound {
    * and that is still something to show.
    */
   async reply(channel: string, threadTs: string, reply: AgentReply): Promise<void> {
-    const text = reply.text.trim();
+    // A file the agent linked lives on Pier's machine, so the link is dead in
+    // Slack: the bytes are uploaded instead and the label stays in the text.
+    const { text: spoken, paths } = splitAttachments(reply.text);
+    const text = spoken.trim();
     const footer = reply.meta ? footerText(reply.meta) : "";
     const row = actions(reply.suggestions);
     // A turn that produced no text still posts its footer, and says which kind
@@ -55,7 +59,7 @@ export class SlackOutbound {
     const quiet = isSilentReply(reply)
       ? `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`
       : "";
-    if (!(text || row || footer || quiet)) return;
+    if (!(text || row || footer || quiet || paths.length)) return;
     const parts = text ? chunk(text, this.budget()) : [""];
     for (const [i, part] of parts.entries()) {
       const last = i === parts.length - 1;
@@ -68,6 +72,15 @@ export class SlackOutbound {
         ...(last && row ? [row] : []),
       ]);
     }
+    // Attachments follow the words, so the message introducing them is above
+    // them; anything that could not be sent says so in the thread.
+    const lost = await sendAttachments(
+      paths,
+      (file) => this.api.uploadFile(channel, threadTs, file),
+      this.log,
+    );
+    // Unescaped, like every other body: post() escapes on the path that needs it.
+    if (lost) await this.post(channel, threadTs, lost, []);
   }
 
   /**

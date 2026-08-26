@@ -169,6 +169,12 @@ export interface SlackClient {
   /** One thread: the parent message followed by its replies, oldest first. */
   replies(channel: string, ts: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
   downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }>;
+  /** Upload one file into a thread. Needs the `files:write` scope. */
+  uploadFile(
+    channel: string,
+    threadTs: string,
+    file: { name: string; bytes: Uint8Array },
+  ): Promise<void>;
 }
 
 interface SlackResponse {
@@ -483,5 +489,49 @@ export class SlackApi implements SlackClient {
     const mimeType = res.headers.get("content-type")?.split(";")[0] ?? file.mimetype ?? "application/octet-stream";
     // Bounded mid-stream: the event's size metadata is the platform's word.
     return { bytes: await readCapped(res.body, maxBytes), mimeType };
+  }
+
+  /**
+   * Three calls, because that is what Slack's current upload is: ask for a
+   * one-shot URL, POST the bytes to it (that host is not the Web API and
+   * answers with plain text, not JSON), then tell Slack where the file goes.
+   * `files.upload` did it in one, and is retired.
+   */
+  async uploadFile(
+    channel: string,
+    threadTs: string,
+    file: { name: string; bytes: Uint8Array },
+  ): Promise<void> {
+    // A read method: form-encoded, or Slack ignores the body (see read()).
+    const slot = await this.read<SlackResponse & { upload_url?: string; file_id?: string }>(
+      "files.getUploadURLExternal",
+      { filename: file.name, length: file.bytes.length },
+    ).catch((err: unknown) => {
+      // An app installed before Pier could upload has every other scope, so
+      // this reads as a mysterious refusal in the chat. Name the fix instead:
+      // the manifest is only applied when an app is *created*.
+      if (!/missing_scope/.test(String(err))) throw err;
+      throw new Error(
+        "the Slack app is missing the files:write scope — add it under " +
+          "OAuth & Permissions and reinstall the app",
+      );
+    });
+    if (!slot.upload_url || !slot.file_id) {
+      throw new Error("slack files.getUploadURLExternal: no upload url");
+    }
+    const put = await fetch(slot.upload_url, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      // Copied into a fresh view: a request body must be backed by an
+      // ArrayBuffer, and a Buffer read off disk is the wider ArrayBufferLike.
+      body: new Uint8Array(file.bytes),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!put.ok) throw new Error(`slack file upload: ${put.status}`);
+    await this.call("files.completeUploadExternal", {
+      files: [{ id: slot.file_id, title: file.name }],
+      channel_id: channel,
+      thread_ts: threadTs,
+    });
   }
 }

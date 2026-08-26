@@ -1,7 +1,8 @@
 // Adapter golden test: a fake Bot API client in, normalized messages and
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
@@ -11,7 +12,15 @@ import { ChannelStore } from "./config.js";
 import { ReceiptLedger } from "./receipts.js";
 import { TelegramChannel } from "./telegram.js";
 import type { ChannelControl } from "./control.js";
-import type { TelegramClient, TgEdit, TgMessage, TgSend, TgUpdate, TgUser } from "./telegram-api.js";
+import type {
+  TelegramClient,
+  TgEdit,
+  TgMessage,
+  TgSend,
+  TgSendFile,
+  TgUpdate,
+  TgUser,
+} from "./telegram-api.js";
 
 const BOT: TgUser = { id: 1, username: "pierbot", first_name: "Pier" };
 
@@ -51,6 +60,13 @@ class FakeClient implements TelegramClient {
   sendMessage(payload: TgSend): Promise<TgMessage> {
     this.sent.push(payload);
     return Promise.resolve({ message_id: this.nextMessageId++, chat: { id: 1, type: "private" } });
+  }
+
+  readonly uploads: TgSendFile[] = [];
+
+  sendFile(payload: TgSendFile): Promise<void> {
+    this.uploads.push(payload);
+    return Promise.resolve();
   }
 
   editMessage(payload: TgEdit): Promise<void> {
@@ -472,6 +488,27 @@ describe("outbound", () => {
       parse_mode: "HTML",
       reply_markup: undefined,
     }]);
+  });
+
+  it("uploads a file the agent linked and leaves its label in the sentence", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pier-tg-out-")), "shot.png");
+    writeFileSync(path, "px");
+    await channel.send("-100/7", { text: `here [shot.png](file://${path})`, suggestions: [] });
+    // The link is dead on every machine but this one, so the bytes go instead.
+    expect(client.sent.at(-1)!.text).toBe("here shot.png");
+    expect(client.uploads).toMatchObject([{
+      chat_id: "-100",
+      message_thread_id: 7,
+      file: { name: "shot.png", image: true },
+    }]);
+    expect(new TextDecoder().decode(client.uploads[0]!.file.bytes)).toBe("px");
+  });
+
+  it("says in the chat that an attachment never made it", async () => {
+    await channel.send("42", { text: "see [x.txt](file:///nope/x.txt)", suggestions: [] });
+    expect(client.uploads).toEqual([]);
+    // 5b: a file that failed must not look like a file nobody mentioned.
+    expect(client.sent.at(-1)!.text).toContain("attachment lost: x.txt");
   });
 
   it("a turn that is only its options still carries them, meta or not", async () => {

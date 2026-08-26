@@ -1,7 +1,8 @@
 // Adapter golden test: fake Socket Mode envelopes in, normalized messages and
 // recorded API calls out. Hermetic — no network, no $HOME (in-memory store).
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
@@ -107,6 +108,17 @@ class FakeClient implements SlackClient {
 
   downloadFile(): Promise<{ bytes: Uint8Array; mimeType: string }> {
     return Promise.resolve({ bytes: new TextEncoder().encode("fo"), mimeType: "image/png" });
+  }
+
+  readonly uploads: { channel: string; threadTs: string; name: string; size: number }[] = [];
+
+  uploadFile(
+    channel: string,
+    threadTs: string,
+    file: { name: string; bytes: Uint8Array },
+  ): Promise<void> {
+    this.uploads.push({ channel, threadTs, name: file.name, size: file.bytes.length });
+    return Promise.resolve();
   }
 
   // Only the agent-facing tool reads history; the adapter never does.
@@ -485,6 +497,23 @@ describe("outbound", () => {
         { action_id: "sg:1", text: { text: "Show the diff" } },
       ],
     });
+  });
+
+  it("uploads a file the agent linked into the same thread", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pier-slack-out-")), "report.md");
+    writeFileSync(path, "hi");
+    await channel.send("C100/1700.000100", {
+      text: `here [report.md](file://${path})`,
+      suggestions: [],
+    });
+    // The link is dead on every machine but this one, so the bytes go instead.
+    expect(JSON.stringify(client.sent[0]!.blocks)).toContain("here report.md");
+    expect(client.uploads).toEqual([{
+      channel: "C100",
+      threadTs: "1700.000100",
+      name: "report.md",
+      size: 2,
+    }]);
   });
 
   it("keeps a long reply in one message and one block", async () => {

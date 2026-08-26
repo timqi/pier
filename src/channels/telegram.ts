@@ -23,6 +23,7 @@ import type {
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { sendAttachments, splitAttachments } from "./attach.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
@@ -458,7 +459,10 @@ export class TelegramChannel implements Channel {
    */
   async send(conversation: string, reply: AgentReply): Promise<void> {
     const { chatId, topicId } = parseConversation(conversation);
-    const text = reply.text.trim();
+    // A file the agent linked is local to this machine, so the link is dead in
+    // Telegram: the bytes are uploaded instead and the label stays in the text.
+    const { text: spoken, paths } = splitAttachments(reply.text);
+    const text = spoken.trim();
     // A turn that produced no text still posts its footer, and says which kind
     // of nothing it was: total silence is indistinguishable from a crash, and
     // the person waiting cannot tell. See AGENTS.md — an empty turn is still an
@@ -475,16 +479,32 @@ export class TelegramChannel implements Channel {
     // settleAfter: a 👀 left up because the reply failed would sit there until
     // the stale sweep, looking like the agent is still working.
     await this.receipts.settleAfter(conversation, async () => {
-      if (!body.trim()) return;
-      const parts = chunk(body);
-      for (const [i, part] of parts.entries()) {
+      if (body.trim()) {
+        const parts = chunk(body);
+        for (const [i, part] of parts.entries()) {
+          await this.api.sendMessage({
+            chat_id: chatId,
+            message_thread_id: topicId,
+            text: part,
+            parse_mode: "HTML",
+            // Next-step buttons ride the last chunk; a click sends the label.
+            reply_markup: i === parts.length - 1 ? buttons : undefined,
+          });
+        }
+      }
+      // Attachments follow the words, so the message that introduces them is
+      // above them; anything that could not be sent says so in the chat.
+      const lost = await sendAttachments(
+        paths,
+        (file) => this.api.sendFile({ chat_id: chatId, message_thread_id: topicId, file }),
+        this.log,
+      );
+      if (lost) {
         await this.api.sendMessage({
           chat_id: chatId,
           message_thread_id: topicId,
-          text: part,
+          text: escapeHtml(lost),
           parse_mode: "HTML",
-          // Next-step buttons ride the last chunk; a click sends the label.
-          reply_markup: i === parts.length - 1 ? buttons : undefined,
         });
       }
     });
