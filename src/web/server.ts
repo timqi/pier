@@ -17,6 +17,7 @@ import { registerExplorerRoutes } from "./explorer.js";
 import { guarded, registerFileRoutes } from "./files.js";
 import type {
   AgentFactory,
+  AgentSession,
   BackgroundRun,
   BundledExtensionInfo,
   ChatTurn,
@@ -148,6 +149,27 @@ export function createServer(
   // only once the first assistant message lands. Merged into the list below
   // so every client sees a new session immediately; dropped once Pi lists it.
   const nascent = new Map<string, { cwd: string; createdAt: number }>();
+
+  /** `ensure`, plus ghost cleanup. A session created and never messaged does
+   *  not survive a restart or an eviction (Pi persisted nothing), but the rail
+   *  entry written at create time does — left alone it 404s forever, and the
+   *  Desk row made that permanent by always pointing at the newest desk
+   *  session. The load path is where a ghost is discovered, so it is where the
+   *  remembered row is dropped and every rail told; the 404 then says what
+   *  happened instead of looking like a crash (§5b). */
+  const ensureLoadable = async (id: string): Promise<AgentSession> => {
+    try {
+      return await ensure(id);
+    } catch (err) {
+      if (String(err).includes("unknown session")) {
+        nascent.delete(id);
+        state.forget(id);
+        hub.emitWorkspace({ type: "sessions-changed" });
+        throw new Error(`session ${id} no longer exists — it never got a first reply, so nothing was persisted; its rail entry was removed`);
+      }
+      throw err;
+    }
+  };
 
   // listAll parses every transcript. Concurrent consumers share that work,
   // but the result is not retained: an explicit All-sessions open stays fresh.
@@ -299,7 +321,7 @@ export function createServer(
   // deltas from SSE — transcript, live state, pending queue, model.
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
-    const session = await ensure(id);
+    const session = await ensureLoadable(id);
     return c.json({
       turns: (await session.history()).map(slim),
       lastSeq: hub.lastSeq(id),

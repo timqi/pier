@@ -885,6 +885,39 @@ describe("workbench server", () => {
     expect(res.status).toBe(404);
   });
 
+  it("drops a ghost session's rail entry when loading it proves Pi never persisted it", async () => {
+    const { factory } = setup();
+    const hub = new EventHub();
+    const router = new Router(hub, async () => {
+      throw new Error("unknown session: ghost");
+    });
+    const state = new SessionStateStore(openDb(":memory:"));
+    // The create-time write: pinned with a cwd, exactly what POST /api/desk
+    // and POST /api/sessions persist before Pi has anything on disk.
+    state.pin({ id: "ghost", cwd: "/tmp/desk", createdAt: 1 }, true);
+    const events: string[] = [];
+    hub.subscribeWorkspace((e) => events.push(e.type));
+    const app = createServer({
+      factory,
+      router,
+      hub,
+      sessions: state,
+      config: fakeConfig(),
+      providers: fakeProviders(),
+      settings: new SettingsStore(openDb(":memory:")),
+      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
+      secrets: fakeSecrets(),
+    });
+    const res = await app.request("/api/sessions/ghost/history");
+    expect(res.status).toBe(404);
+    const { error } = (await res.json()) as { error: string };
+    expect(error).toContain("never got a first reply");
+    // The row is gone and every rail was told, so the Desk row (or a project
+    // group) stops pointing at a session nothing can resume.
+    expect(state.projects().find((s) => s.id === "ghost")).toBeUndefined();
+    expect(events).toContain("sessions-changed");
+  });
+
   it("relays API-key and OAuth login flows without returning submitted secrets", async () => {
     const { app, providers } = setup();
     const start = async (type: "api_key" | "oauth") => {
