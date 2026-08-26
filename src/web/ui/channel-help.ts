@@ -19,7 +19,6 @@ import { button, helpBadge, withControl } from "./form.js";
  *    the scope would be dead weight.
  *  - no `reactions:read` — receipts only ever add and remove, never read.
  *  - no `commands` — commands are bare words, not slash commands.
- *  - no `files:write` — Pier reads inbound files and uploads nothing.
  */
 const SLACK_MANIFEST = {
   display_information: {
@@ -53,6 +52,7 @@ const SLACK_MANIFEST = {
         "mpim:write",
         "users:read", // users.info, to name a bound user
         "files:read", // download inbound files
+        "files:write", // upload a file the agent produced (channels/attach.ts)
       ],
     },
   },
@@ -160,7 +160,7 @@ export const larkTokenHelp = (): HTMLElement =>
   helpBadge("Creating a Feishu app", [
     "On [open.feishu.cn](https://open.feishu.cn/app) create a 企业自建应用 (custom app). `Credentials & Basic Info` shows the App ID (`cli_…`) and App Secret — paste both here.",
     "`Add Features` → enable **Bot** (机器人).",
-    "`Permissions` (权限管理), add: `im:message` (read messages), `im:message:send_as_bot` (send), `im:resource` (download attachments), `im:message.reactions:create` + `:read` + `:delete` (the 👀 receipt), `im:chat:readonly` (chat names for this page), `contact:user.base:readonly` (speaker names).",
+    "`Permissions` (权限管理), add: `im:message` (read messages), `im:message:send_as_bot` (send), `im:resource` (attachments, both directions), `im:message.reactions:create` + `:read` + `:delete` (the 👀 receipt), `im:chat:readonly` (chat names for this page), `contact:user.base:readonly` (speaker names).",
     "`Events & Callbacks` → set the mode to **长连接 (long connection)** — no public URL needed. Under Events subscribe `im.message.receive_v1` (接收消息); Callbacks gain `card.action.trigger` automatically once cards are sent, add it if listed.",
     "**Publish a version** (版本管理与发布 → 创建版本 → 申请发布). Nothing above takes effect until this is approved — the usual reason a configured bot stays silent.",
     "Add the bot to a group (群设置 → 群机器人), or DM it directly.",

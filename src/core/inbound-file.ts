@@ -47,7 +47,9 @@ export const fileMarker = (path: string): string =>
 /**
  * The conversation-visible line for an attachment that never made it (5b: a
  * failed download must not look like no attachment). Plain text on purpose —
- * not a link — so every surface renders it as the words it is.
+ * not a link — so every surface renders it as the words it is. Both
+ * directions: an inbound file Pier could not fetch and an outbound one it
+ * could not upload (channels/attach.ts) are the same fact to the reader.
  */
 export const lostMarker = (name: string, reason: string): string =>
   `[attachment lost: ${name} — ${reason}]`;

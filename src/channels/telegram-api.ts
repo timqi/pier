@@ -68,6 +68,14 @@ export interface TgSend {
   reply_markup?: InlineKeyboard | ForceReply;
 }
 
+/** One file on its way out. `image` picks `sendPhoto` (inline) over
+ *  `sendDocument` (a download card) — see channels/attach.ts. */
+export interface TgSendFile {
+  chat_id: string | number;
+  message_thread_id?: number;
+  file: { name: string; bytes: Uint8Array; image: boolean };
+}
+
 /** Telegram's way to ask for one typed answer: the client pre-fills a reply. */
 export interface ForceReply {
   force_reply: true;
@@ -87,6 +95,8 @@ export interface TelegramClient {
   getMe(): Promise<TgUser>;
   getUpdates(offset: number | undefined, timeoutSeconds: number): Promise<TgUpdate[]>;
   sendMessage(payload: TgSend): Promise<TgMessage>;
+  /** Upload one file into a chat (or a forum topic). */
+  sendFile(payload: TgSendFile): Promise<void>;
   /** Panels are edited in place; a new message per tap would bury the chat. */
   editMessage(payload: TgEdit): Promise<void>;
   deleteMessage(chatId: string | number, messageId: number): Promise<void>;
@@ -105,10 +115,14 @@ export class TelegramApi implements TelegramClient {
   constructor(private readonly token: string) {}
 
   private async call<T>(method: string, payload: unknown, timeoutMs = 30_000, retry = true): Promise<T> {
+    // An upload is the one call that is not JSON: FormData carries the bytes,
+    // and fetch sets its own multipart boundary. It is re-sendable, so the
+    // flood retry below still works on it.
+    const multipart = payload instanceof FormData;
     const res = await fetch(`${BASE}/bot${this.token}/${method}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+      headers: multipart ? undefined : { "content-type": "application/json" },
+      body: multipart ? payload : JSON.stringify(payload),
       signal: AbortSignal.timeout(timeoutMs),
     });
     const body = (await res.json()) as {
@@ -143,6 +157,21 @@ export class TelegramApi implements TelegramClient {
 
   sendMessage(payload: TgSend): Promise<TgMessage> {
     return this.call<TgMessage>("sendMessage", payload);
+  }
+
+  /** Bytes, not a file_id or a URL: the file is local to this machine, which
+   *  is the whole reason the agent could not just link it. */
+  async sendFile({ chat_id, message_thread_id, file }: TgSendFile): Promise<void> {
+    const form = new FormData();
+    form.set("chat_id", String(chat_id));
+    if (message_thread_id !== undefined) form.set("message_thread_id", String(message_thread_id));
+    const field = file.image ? "photo" : "document";
+    // Copied into a fresh view: a Blob part must be backed by an ArrayBuffer,
+    // and a Buffer read off disk carries the wider ArrayBufferLike type.
+    form.set(field, new Blob([new Uint8Array(file.bytes)]), file.name);
+    // A long upload on a slow link is not a hung request; 30s is the budget
+    // for a JSON call, not for megabytes.
+    await this.call(file.image ? "sendPhoto" : "sendDocument", form, 120_000);
   }
 
   async editMessage(payload: TgEdit): Promise<void> {

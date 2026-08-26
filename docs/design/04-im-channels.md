@@ -32,6 +32,7 @@ detect something itself.
 | Turn footer | `45s · 32K tok` under each reply | shared (`formatTurnMeta`) | ✅ | ✅ | ✅ |
 | Next-step buttons | The agent's `[label]` row becomes buttons; a click sends the label as an ordinary message | shared parse, adapter renders + feeds back | ✅ | ✅ | ✅ |
 | File attachments | Inbound files (images, documents) land in `$PIER_HOME/inbox/` and ride the prompt as `[name](file:///…)` lines (bytes: `core/inbox.ts`, grammar: `core/inbound-file.ts`); a failed or oversized download becomes an `[attachment lost: …]` line, never silence; the agent reads a file only when it chooses to | adapter (download after the gate) | ✅ | ✅ | ✅ |
+| Outbound attachments | A `file://` link in a reply is dead on anyone else's machine, so the file is uploaded to the platform and the link's label stays in the text; over the cap, missing or refused becomes an `[attachment lost: …]` line (shared: `channels/attach.ts`, upload per `*-api.ts`) | shared split/read/report, adapter uploads | ✅ | ✅ | ✅ |
 | System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers | shared (`Channel.notify`) | ✅ | ✅ | ✅ |
 | Failure notices | Any error reaches the conversation, not just the web timeline | shared (`Router.report`) | ✅ | ✅ | ✅ |
 | Visible empty turns | A turn with no text still posts one muted line saying why | shared (`AgentReply.silence`), adapter renders | ✅ | ✅ | ✅ |
@@ -658,10 +659,11 @@ The facts you build against. Where a fact also cost a mistake, the mistake is in
   be invited to a channel. Borrowed from avibe.
 - **The manifest is least-privilege and every scope is load-bearing.** Absent on
   purpose: `app_mentions:read` (duplicate event), `reactions:read` (receipts only
-  write), `commands` (no slash commands), `files:write` (nothing is uploaded),
-  `im:read` (a `D`-prefixed id is a DM by construction). `mpim:read` *is* needed:
-  a button click carries no `channel_type` and an mpim id is not `D`-prefixed.
-  13 scopes / 4 events against avibe's 18 / 7.
+  write), `commands` (no slash commands), `im:read` (a `D`-prefixed id is a DM
+  by construction). `mpim:read` *is* needed: a button click carries no
+  `channel_type` and an mpim id is not `D`-prefixed. `files:write` is in, for
+  the one upload path: a file the agent produced (`channels/attach.ts`).
+  14 scopes / 4 events against avibe's 18 / 7.
 - **Socket Mode, no SDK.** `apps.connections.open` plus Node's built-in
   `WebSocket` is the entire transport; `@slack/socket-mode` would add a
   dependency tree to wrap ~60 lines. Reconnection lives in `slack-api.ts`

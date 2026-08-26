@@ -8,6 +8,7 @@
 
 import type { AgentReply, NoteOrigin } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
+import { sendAttachments, splitAttachments } from "./attach.js";
 import type { LarkCard, LarkClient, LarkElement } from "./lark-api.js";
 import {
   button,
@@ -37,7 +38,7 @@ export class LarkOutbound {
   private readonly sent = new Map<string, LarkCard>();
 
   constructor(
-    private readonly api: Pick<LarkClient, "replyCard" | "patchCard">,
+    private readonly api: Pick<LarkClient, "replyCard" | "patchCard" | "uploadFile">,
     private readonly log: (message: string) => void,
   ) {}
 
@@ -53,11 +54,14 @@ export class LarkOutbound {
    * platform — the card is remembered so retire() can rebuild it without them.
    */
   async reply(root: string, reply: AgentReply): Promise<void> {
-    const text = reply.text.trim();
+    // A file the agent linked lives on Pier's machine, so the link is dead in
+    // Lark: the bytes are uploaded instead and the label stays in the text.
+    const { text: spoken, paths } = splitAttachments(reply.text);
+    const text = spoken.trim();
     const meta = reply.meta ? formatTurnMeta(reply.meta) : "";
     const quiet = isSilentReply(reply) ? quietLabel(reply.silence) : "";
     const note = [quiet, meta].filter(Boolean).join(" · ");
-    if (!(text || reply.suggestions.length || note)) return;
+    if (!(text || reply.suggestions.length || note || paths.length)) return;
     const row = reply.suggestions.length
       ? buttonRow(reply.suggestions.map((label, index) =>
         button(label, { key: `${OFFER_PREFIX}${index}`, root, label })))
@@ -73,6 +77,10 @@ export class LarkOutbound {
       const { messageId } = await this.api.replyCard(root, card(elements));
       if (last && row && messageId) this.remember(messageId, card(elements));
     }
+    // Attachments follow the words, so the card introducing them is above
+    // them; anything that could not be sent says so in the thread.
+    const lost = await sendAttachments(paths, (file) => this.api.uploadFile(root, file), this.log);
+    if (lost) await this.api.replyCard(root, card([markdown(lost)]));
   }
 
   /**
