@@ -20,6 +20,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PIER_HOME } from "../paths.js";
 import { deskDir, registerDeskRoutes, seedDesk } from "./desk.js";
+import type { AgentSession, ContextUsage, SessionState, SessionSummary } from "../core/types.js";
 
 /** A throwaway home; `realpath` because macOS's tmpdir is itself a symlink. */
 const tmp = (): string => mkdtempSync(join(realpathSync(tmpdir()), "pier-desk-"));
@@ -114,41 +115,138 @@ describe("deskDir", () => {
 describe("POST /api/desk", () => {
   afterEach(() => rmSync(deskDir(), { recursive: true, force: true }));
 
-  const setup = (busEnabled = true) => {
+  /** One pinned desk session, as `SessionStateStore.projects()` hands it over. */
+  const row = (id: string, createdAt: number, cwd = deskDir()): SessionSummary => ({
+    id,
+    cwd,
+    createdAt,
+  });
+
+  interface Options {
+    busEnabled?: boolean;
+    /** The pinned rows the rail derives Desk from. */
+    pinned?: SessionSummary[];
+    state?: SessionState;
+    /** `undefined` = a session that has not answered yet; `tokens: null` = one
+     *  that just compacted. Both mean "unknown". */
+    usage?: ContextUsage;
+    activeRuns?: number;
+    /** A ghost: Pi persisted nothing, so resuming it fails and the rail entry
+     *  is dropped by the server's `ensureLoadable` (server.ts). */
+    ghost?: boolean;
+  }
+
+  const setup = (
+    { busEnabled = true, pinned = [], state = "idle", usage, activeRuns = 0, ghost }: Options = {},
+  ) => {
     mkdirSync(PIER_HOME, { recursive: true });
     const openSession = vi.fn(async (cwd: string) => `session-in-${cwd}`);
+    const load = vi.fn(async (id: string): Promise<Pick<AgentSession, "id" | "state" | "contextUsage">> => {
+      if (ghost) throw new Error(`session ${id} no longer exists`);
+      return { id, state, contextUsage: usage };
+    });
     const app = new Hono();
-    registerDeskRoutes(app, openSession, () => busEnabled);
-    return { app, openSession };
+    registerDeskRoutes(app, {
+      openSession,
+      pinned: () => pinned,
+      load,
+      activeRuns: () => activeRuns,
+      busEnabled: () => busEnabled,
+    });
+    return { app, openSession, load };
   };
+
+  const post = (app: Hono) => app.request("/api/desk", { method: "POST" });
+
+  const FULL: ContextUsage = { tokens: 160_000, contextWindow: 200_000 }; // 0.8
 
   it("seeds the folder, then opens one session in it", async () => {
     const { app, openSession } = setup();
-    const res = await app.request("/api/desk", { method: "POST" });
+    const res = await post(app);
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ id: `session-in-${deskDir()}`, cwd: deskDir() });
+    expect(await res.json()).toEqual({ id: `session-in-${deskDir()}`, cwd: deskDir(), fresh: true });
     expect(openSession.mock.calls).toEqual([[deskDir()]]);
     expect(statSync(join(deskDir(), "AGENTS.md")).size).toBeGreaterThan(0);
   });
 
-  it("is the reset button: a second click seeds nothing and opens another", async () => {
-    const { app, openSession } = setup();
-    await app.request("/api/desk", { method: "POST" });
-    writeFileSync(join(deskDir(), "projects.md"), "mine");
-    expect((await app.request("/api/desk", { method: "POST" })).status).toBe(201);
-    expect(readFileSync(join(deskDir(), "projects.md"), "utf8")).toBe("mine");
-    expect(openSession).toHaveBeenCalledTimes(2);
+  it("opens the newest desk session again while it still has room", async () => {
+    const { app, openSession } = setup({
+      pinned: [row("old", 1), row("newest", 9), row("elsewhere", 99, "/code/pier")],
+      usage: { tokens: 20_000, contextWindow: 200_000 },
+    });
+    const res = await post(app);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "newest", cwd: deskDir(), fresh: false });
+    expect(openSession).not.toHaveBeenCalled();
   });
 
-  it("refuses while the bus is off, seeding nothing", async () => {
-    const { app, openSession } = setup(false);
-    const res = await app.request("/api/desk", { method: "POST" });
-    // Desk's continuity across its own reset is bus facts; with the capability
-    // off this click would open a conversation with no recovery story.
+  it("resets on open when the newest one is idle and nearly full", async () => {
+    const { app, openSession } = setup({ pinned: [row("newest", 9)], usage: FULL });
+    const res = await post(app);
+    expect(res.status).toBe(201);
+    // The user's own click is the reset boundary: nothing mid-flight is cut,
+    // and the folder it lands in is the one already there.
+    expect(await res.json()).toEqual({ id: `session-in-${deskDir()}`, cwd: deskDir(), fresh: true });
+    expect(openSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("never resets a session that is mid-turn, however full it is", async () => {
+    const { app, openSession } = setup({ pinned: [row("busy", 9)], state: "streaming", usage: FULL });
+    expect(await (await post(app)).json()).toEqual({ id: "busy", cwd: deskDir(), fresh: false });
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it("never resets while a run it delegated is still in flight", async () => {
+    const { app, openSession } = setup({ pinned: [row("dispatching", 9)], usage: FULL, activeRuns: 2 });
+    // The worker reports back into *this* conversation; a fresh one would be
+    // waiting for a report nobody sends it.
+    expect(await (await post(app)).json()).toEqual({ id: "dispatching", cwd: deskDir(), fresh: false });
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it("does not reset on unknown usage — not before the first turn, not after a compaction", async () => {
+    for (const usage of [undefined, { tokens: null, contextWindow: 200_000 }]) {
+      const { app, openSession } = setup({ pinned: [row("quiet", 9)], usage });
+      expect(await (await post(app)).json()).toEqual({ id: "quiet", cwd: deskDir(), fresh: false });
+      expect(openSession).not.toHaveBeenCalled();
+    }
+  });
+
+  it("treats a ghost as no session at all and opens a real one", async () => {
+    const { app, openSession, load } = setup({ pinned: [row("ghost", 9)], ghost: true });
+    const res = await post(app);
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ id: `session-in-${deskDir()}`, cwd: deskDir(), fresh: true });
+    // The cleanup is `load`'s (server.ts drops the rail entry there); this
+    // route's job is not to hand back an id nothing can resume.
+    expect(load).toHaveBeenCalledWith("ghost");
+    expect(openSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("with the bus off, opens the session that exists — and never resets it", async () => {
+    const { app, openSession } = setup({ busEnabled: false, pinned: [row("newest", 9)], usage: FULL });
+    // Rehydration after a reset *is* the bus, so with it off a reset would
+    // throw the conversation away and give the successor nothing to read.
+    expect(await (await post(app)).json()).toEqual({ id: "newest", cwd: deskDir(), fresh: false });
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses with the bus off and no session at all, seeding nothing", async () => {
+    const { app, openSession } = setup({ busEnabled: false });
+    const res = await post(app);
     expect(res.status).toBe(409);
     expect((await res.json() as { error: string }).error).toContain("bus is off");
     expect(existsSync(deskDir())).toBe(false);
     expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it("restores a deleted template on the click that opens the existing session", async () => {
+    const { app } = setup({ pinned: [row("newest", 9)], usage: { tokens: 1, contextWindow: 200_000 } });
+    mkdirSync(deskDir(), { recursive: true, mode: 0o700 });
+    writeFileSync(join(deskDir(), "projects.md"), "mine");
+    expect((await post(app)).status).toBe(200);
+    expect(readFileSync(join(deskDir(), "projects.md"), "utf8")).toBe("mine");
+    expect(statSync(join(deskDir(), "AGENTS.md")).size).toBeGreaterThan(0);
   });
 
   it("says so when the folder cannot be created", async () => {
@@ -156,7 +254,7 @@ describe("POST /api/desk", () => {
     // A file where the directory belongs — the one seeding failure a user can
     // cause, and it must not look like a session that quietly never opened.
     writeFileSync(deskDir(), "not a directory");
-    const res = await app.request("/api/desk", { method: "POST" });
+    const res = await post(app);
     expect(res.status).toBe(500);
     expect((await res.json() as { error: string }).error).toContain("desk folder");
     expect(openSession).not.toHaveBeenCalled();

@@ -408,9 +408,15 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
 /** The Desk row: one row, at the Projects header's own level, pointing at the
  *  newest desk conversation. With none it is the "open" row — that is how the
  *  feature is discovered, and having it always present is what makes a stored
- *  "seeded" flag unnecessary. With the bus off there is nothing to open yet:
- *  the row stays and says so, because a vanished row and an absent feature read
- *  the same (§5b). Sessions that already exist are never gated. */
+ *  "seeded" flag unnecessary. With the bus off and no session yet there is
+ *  nothing to open: the row stays and says so, because a vanished row and an
+ *  absent feature read the same (§5b). Sessions that already exist are never
+ *  gated — that row still opens its conversation.
+ *
+ *  Every state clicks the same way, through POST /api/desk: whether the click
+ *  continues the old conversation or starts a fresh one is the server's call
+ *  (web/desk.ts, reset-on-open), and a rail that guessed would be a second
+ *  copy of that rule. */
 function deskRow(dir: string, newest: SessionInfo | null, busEnabled: boolean): HTMLElement {
   const active = newest?.id === deps.currentId();
   const row = h(
@@ -428,8 +434,9 @@ function deskRow(dir: string, newest: SessionInfo | null, busEnabled: boolean): 
   );
   if (newest) {
     row.append(stateDot(newest), h("span", "truncate text-[12.5px] text-neutral-500", newest.title ?? "untitled"));
-    row.title = `${dir}\nOlder desk conversations are in \u2318K`;
-    row.onclick = () => deps.select(newest.id);
+    row.title =
+      `${dir}\nOpens the desk conversation \u2014 a fresh one when this one is idle and nearly full\nOlder desk conversations are in \u2318K`;
+    row.onclick = () => deps.openDesk();
     return row;
   }
   if (!busEnabled) {

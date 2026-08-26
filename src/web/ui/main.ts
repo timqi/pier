@@ -121,16 +121,18 @@ let turnOpen = false;
 
 // --- sessions --------------------------------------------------------------------
 
-/** Open a session the server just created: list it, select it, put the cursor
- *  in the composer. The two routes that create one differ in nothing else. */
+/** Open the session a route just answered with: list it, select it, put the
+ *  cursor in the composer. The two routes that open one differ in nothing
+ *  else — `fresh: false` (Desk decided against a reset) means no row was
+ *  created, so there is nothing to re-list before selecting it. */
 async function opened(post: Promise<Response>, what: string): Promise<void> {
   const res = await post;
   if (!res.ok) {
     appendTurn("error", `${what} failed: ${await failure(res, "no reason given")}`);
     return;
   }
-  const { id } = (await res.json()) as { id: string };
-  await refreshProjects();
+  const { id, fresh } = (await res.json()) as { id: string; fresh?: boolean };
+  if (fresh !== false) await refreshProjects();
   await select(id);
   focusInput();
 }
@@ -138,8 +140,11 @@ async function opened(post: Promise<Response>, what: string): Promise<void> {
 const createSession = (cwd: string): Promise<void> =>
   opened(sendJson("/api/sessions", { cwd }), "session create");
 
-/** The Desk row: the folder is seeded server-side if it is not there yet, and
- *  what comes back is an ordinary session that happens to live in it. */
+/** The Desk row, whichever state it is in: the folder is seeded server-side if
+ *  it is not there yet, and what comes back is an ordinary session that happens
+ *  to live in it — the one already there, or a new one when the server found
+ *  that one cold (web/desk.ts). Which of the two is the server's call, so this
+ *  is the row's only click path. */
 const openDesk = (): Promise<void> => opened(sendJson("/api/desk", {}), "desk open");
 
 /** `complete` = every session Pi knows, so it replaces the list. A Projects

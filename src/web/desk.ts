@@ -1,5 +1,6 @@
 // The desk folder: seeded on the user's click, then opened as an ordinary
-// session in it. One reason to exist — everything that makes `$PIER_HOME/desk`
+// session in it — the same click that resets it, when the conversation it would
+// have continued is provably spent. One reason to exist — everything that makes `$PIER_HOME/desk`
 // a dispatcher is two prose files and a cwd, and this is the only module that
 // knows which two files and which cwd. Nothing here is stored: delete the
 // folder and Desk is gone, with no row to reconcile (docs/design/06-desk.md).
@@ -11,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import type { Hono } from "hono";
 import { logger } from "../log.js";
 import { DESK_DIR, PIER_HOME } from "../paths.js";
+import type { AgentSession, SessionSummary } from "../core/types.js";
 
 const log = logger("desk");
 
@@ -92,34 +94,111 @@ export async function seedDesk(dir: string): Promise<void> {
 }
 
 /**
- * `POST /api/desk` — seed the folder, then open a session in it.
+ * Past this share of the context window, opening Desk means a *new*
+ * conversation rather than the old one.
  *
- * That is the whole route: opening a session is `openSession`, the one
+ * Why 0.7 and not "when it is full": past it Pi's own auto-compaction is near,
+ * and a lossy summary of a transcript is exactly what Desk's state makes
+ * unnecessary — the successor rehydrates from `AGENTS.md`, `projects.md` and
+ * the bus facts, which is the whole reason a desk reset is cheap (decision 3,
+ * docs/design/06-desk.md). Under it, continuing costs nothing.
+ */
+const RESET_ABOVE_CONTEXT_SHARE = 0.7;
+
+/** What the cold test reads off a session — narrowed on purpose: this route
+ *  decides whether to open a new conversation, it does not drive one. */
+type DeskSession = Pick<AgentSession, "id" | "state" | "contextUsage">;
+
+/** What the route needs from the server that registers it (server.ts). */
+export interface DeskDeps {
+  /** Create, attach, pin and announce a session in `cwd` — the one sequence
+   *  `POST /api/sessions` is also made of. */
+  openSession: (cwd: string) => Promise<string>;
+  /** The pinned sessions, the same rows the rail derives Desk from. */
+  pinned: () => SessionSummary[];
+  /** Resume one: the server's `ensureLoadable`, which rejects for a session Pi
+   *  never persisted *and* drops its rail entry on the way out. */
+  load: (id: string) => Promise<DeskSession>;
+  /** Background runs this session launched that are still in flight. */
+  activeRuns: (id: string) => number;
+  busEnabled: () => boolean;
+}
+
+/**
+ * The desk conversation the rail's row points at, resumed — or null when there
+ * is none.
+ *
+ * The derivation is `splitDesk`'s (ui/sidebar.ts), over the same pinned rows
+ * the rail draws: newest `createdAt` whose cwd is the desk folder. A ghost
+ * counts as none — `load` is where one is discovered and its rail entry
+ * dropped, so the click that found it opens a real conversation instead of
+ * failing on a dead id.
+ */
+async function newestDesk(deps: DeskDeps, dir: string): Promise<DeskSession | null> {
+  const row = deps.pinned()
+    .filter((s) => s.cwd === dir)
+    .reduce<SessionSummary | null>((a, b) => (a && a.createdAt >= b.createdAt ? a : b), null);
+  if (!row) return null;
+  return await deps.load(row.id).catch((err: unknown) => {
+    log.warn(`desk session ${row.id} could not be resumed; opening a new one`, err);
+    return null;
+  });
+}
+
+/**
+ * Provably done with: nothing running, nothing it delegated still in flight,
+ * and a context far enough along that continuing buys a summary instead of the
+ * files and facts a successor reads anyway.
+ *
+ * Unknown usage is not cold — before the first turn, and right after a
+ * compaction, `tokens` is null — because a reset is only ever the answer when
+ * the evidence for it is there. Deliberately *not* consulted: `desk/threads`
+ * and a finished run still waiting for a decision reply. The first would drag
+ * bus knowledge into this route for a fact the prompt already writes; the
+ * second is an accepted edge, recorded in docs/design/06-desk.md.
+ */
+const spent = (session: DeskSession, activeRuns: number): boolean => {
+  const usage = session.contextUsage;
+  return session.state === "idle" && activeRuns === 0 &&
+    usage?.tokens != null && usage.contextWindow > 0 &&
+    usage.tokens / usage.contextWindow >= RESET_ABOVE_CONTEXT_SHARE;
+};
+
+/**
+ * `POST /api/desk` — seed the folder, then hand back the desk conversation to
+ * open: the existing one, or a new one when the existing one is provably cold.
+ *
+ * This is the entire Desk click, so the rail decides nothing: `fresh` says
+ * which of the two it got. Opening a session is `openSession`, the one
  * sequence `POST /api/sessions` is also made of (server.ts), so a desk session
  * is pinned, attached and announced exactly like every other one.
  *
+ * **The reset is the user's own click, and nothing else.** No timer, no sweep:
+ * a boundary drawn by the person who drew it can never interrupt a turn they
+ * were watching, and it creates no conversation nobody asked for.
+ *
  * Gated on the bus, like seeding a librarian is: the dispatcher's continuity
- * across its own reset *is* `desk/threads` on the bus (desk-AGENTS.md), so
- * with the capability off this click would open a conversation whose whole
- * recovery story is missing. Sessions that already exist are untouched — only
- * the affordance that makes one is refused.
+ * across its own reset *is* `desk/threads` (desk-AGENTS.md), so with the
+ * capability off there is nothing for a successor to rehydrate from. The gate
+ * is therefore on *making* a desk conversation, not on having one — an
+ * existing one still opens, and is never reset while the bus is off.
  */
-export function registerDeskRoutes(
-  app: Hono,
-  openSession: (cwd: string) => Promise<string>,
-  busEnabled: () => boolean,
-): void {
+export function registerDeskRoutes(app: Hono, deps: DeskDeps): void {
   app.post("/api/desk", async (c) => {
-    if (!busEnabled()) {
+    const dir = deskDir();
+    const existing = await newestDesk(deps, dir);
+    if (!existing && !deps.busEnabled()) {
       return c.json({ error: "the bus is off — turn it on in Console → Bus before opening the desk" }, 409);
     }
-    const dir = deskDir();
     try {
       await seedDesk(dir);
     } catch (err) {
       log.error(`could not seed ${dir}`, err);
       return c.json({ error: `could not create the desk folder: ${String(err)}` }, 500);
     }
-    return c.json({ id: await openSession(dir), cwd: dir }, 201);
+    if (existing && (!deps.busEnabled() || !spent(existing, deps.activeRuns(existing.id)))) {
+      return c.json({ id: existing.id, cwd: dir, fresh: false });
+    }
+    return c.json({ id: await deps.openSession(dir), cwd: dir, fresh: true }, 201);
   });
 }

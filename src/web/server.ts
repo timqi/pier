@@ -584,7 +584,16 @@ export function createServer(
     }
   });
 
-  registerDeskRoutes(app, openSession, () => settings.get().busEnabled);
+  registerDeskRoutes(app, {
+    openSession,
+    // The rail's own derivation, server-side: the pinned rows, the desk cwd,
+    // newest first. `ensureLoadable` is what makes the newest one's fullness
+    // askable at all — and drops it when it turns out to be a ghost.
+    pinned: () => state.projects(),
+    load: ensureLoadable,
+    activeRuns,
+    busEnabled: () => settings.get().busEnabled,
+  });
   registerInstanceRoutes(app, {
     settings,
     updates,

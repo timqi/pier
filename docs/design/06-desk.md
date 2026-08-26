@@ -72,7 +72,11 @@ $PIER_HOME/desk/
   rail's row stays visible saying "bus off", with Console → Bus named in its
   tooltip. Only the affordance is gated: desk sessions that already exist keep
   working as ordinary sessions if the switch is turned off later, and nothing
-  about them is hidden.
+  about them is hidden. *(refined in phase 1e, since the click now also creates:
+  the gate is on **making** a desk conversation, not on having one. With the bus
+  off, a desk session that exists is still opened by the row — and never reset,
+  because a successor would have nothing to rehydrate from — and only the
+  no-session-at-all case answers 409.)*
 - **The path is canonical or the bus splits.** `main.ts:102-113` resolves a
   session's cwd through `realpath` before it becomes a bus scope, because two
   spellings of one directory are two disjoint blackboards. So: `DESK_DIR` is
@@ -120,7 +124,8 @@ already produces Projects.
 - **More than one desk session is normal** (each reset makes one). *(landed:
   operator decision, replacing the group this paragraph described — the rail
   shows **one** row, "Desk", at the Projects header's own level, pointing at the
-  newest desk session; clicking it selects that conversation. The predecessors
+  newest desk session; clicking it opens that conversation — through `POST
+  /api/desk`, which as of phase 1e is also where a reset is decided. The predecessors
   are pinned sessions, so ⌘K lists them under Projects like every other pinned
   one — not hidden state, just not rail rows, and a group here was a second
   place keeping the same list. `splitDesk` shrank to `newest + rest`, still pure
@@ -134,7 +139,7 @@ already produces Projects.
 | Touch | File | What |
 | --- | --- | --- |
 | the path | `src/paths.ts` | `export const DESK_DIR = pierPath("desk")` — one line, and `paths.ts` is the leaf that already answers "where does Pier keep this" |
-| seeding + open | `src/web/desk.ts` (new) | idempotent seed (mkdir, write each template only if absent) and `POST /api/desk`: seed → open a session in the folder. *(landed: the create/attach/pin/announce sequence was **extracted** from `POST /api/sessions` into one `openSession(cwd)` closure in `server.ts` and handed to `registerDeskRoutes` — repeating it here would have been the second copy, budget rule 3. The desk route's own job is the seed and nothing else.)* |
+| seeding + open | `src/web/desk.ts` (new) | idempotent seed (mkdir, write each template only if absent) and `POST /api/desk`: seed → open a session in the folder. *(landed: the create/attach/pin/announce sequence was **extracted** from `POST /api/sessions` into one `openSession(cwd)` closure in `server.ts` and handed to `registerDeskRoutes` — repeating it here would have been the second copy, budget rule 3. The desk route's own job is the seed and nothing else — plus, from phase 1e, the one decision of whether this click continues the newest desk conversation or replaces it.)* |
 | the browser learns the path | `src/web/instance.ts:110` | `deskDir` added to `instanceSettings()` (derived, not stored) |
 | the rail | `src/web/ui/sidebar.ts` | `splitDesk()`, the one Desk row, the "open" row; `pinnedProjects()` excludes the desk cwd. *(landed: one row pointing at the newest desk session, gated on `busEnabled` — which reaches the browser on the same `/api/settings` read as `deskDir`.)* |
 | boot wiring | `src/web/ui/main.ts` | read `deskDir` from the settings fetch, hand it to `initSidebar` deps |
@@ -294,6 +299,46 @@ demand and nothing is loaded that was not asked for.
   the divider that was clicked, which is why it is measured immediately before
   the insert and not before the fetch.
 
+**Phase 1e — reset-on-open (+33 web).** *(addendum, landed: an operator
+decision after 1d, once the stitched-history divider made a reset visually
+seamless.)* Opening Desk starts a **new** session instead of continuing the old
+one when the newest desk session is *provably cold*. The user's own click is the
+reset boundary — there is no timer and no sweep, so nothing mid-flight is ever
+interrupted and no session nobody asked for is ever created.
+
+- **One endpoint decides, the rail decides nothing.** Every state of the Desk
+  row clicks `POST /api/desk`, which was already "seed if needed, open a
+  session". It answers `{ id, cwd, fresh }` and the client selects `id` either
+  way; `fresh: false` also tells it no row was created, so the select-existing
+  path skips the Projects re-read. A rail that decided select-vs-create would
+  have been a second copy of the rule (budget rule 3).
+- **The decision, in order.** (1) the newest pinned session whose cwd is the
+  desk folder — `splitDesk`'s derivation, server-side over
+  `SessionStateStore.projects()`; none → seed and create. (2) resume it through
+  the existing `ensureLoadable`, which drops the rail entry of a ghost on its
+  way out — a ghost therefore counts as none. (3) the cold test:
+  `state === "idle"` **and** `activeRuns(id) === 0` **and** usage known **and**
+  `tokens / contextWindow >= 0.7` → create. Anything else returns the existing
+  id.
+- **Why 0.7, one named constant.** Past it Pi's own auto-compaction is near,
+  and a lossy summary is exactly what the desk's file and bus state make
+  unnecessary: the successor rehydrates from `AGENTS.md`, `projects.md` and
+  `desk/threads`, which is decision 3's whole claim. Under it, continuing costs
+  nothing.
+- **Unknown usage is not cold.** Before the first turn, and right after a
+  compaction, `contextUsage.tokens` is null. A reset is only ever the answer
+  when the evidence for it is there.
+- **What the test deliberately does not read.** `desk/threads` facts and pending
+  decisions. `activeRuns` already covers everything in flight, and importing bus
+  or task knowledge into this route to re-derive "is a thread open" would put a
+  fact the prompt writes for the *dispatcher* in the way of a click. **The
+  accepted edge:** a delegated run that has *finished* while waiting for a
+  decision reply is terminal, so it does not hold the reset back — a click at
+  that moment can open a fresh conversation while a subagent waits for an answer
+  from the old one. Recorded rather than fixed: the run's own surface still shows
+  the request, and the fix would be exactly the bus/tasks import this route is
+  refusing.
+
 **Phase 2 (recorded, not designed here).** IM DM default cwd at
 `discoverChat`; a Desk badge for owed bus deliveries; "Reset template"; and a
 compaction that is still visible after a reload — which is a change to the
@@ -303,8 +348,15 @@ transcript rebuild (`toChatTurns`), not to Desk.
 
 Recorded so they are refusals, not omissions:
 
-- **No automatic session-reset heuristics.** Tokens × idle × no-open-threads is
-  a later phase; phase 1's reset is a button a human presses.
+- **~~No automatic session-reset heuristics.~~ Partially landed in phase 1e as
+  reset-on-open.** What *is* automatic: the decision — tokens × idle × no runs
+  in flight, evaluated server-side, and the successor is created without anyone
+  choosing to. What still is not: the *moment*. Nothing but a click ever
+  evaluates it, so Pier never resets a desk conversation on a timer, a sweep or
+  a turn boundary, and the click can never land mid-turn. And "no-open-threads"
+  is still not in the test at all: `desk/threads` is the dispatcher's own
+  bookkeeping, and the accepted consequence is the decision-pending edge in
+  phase 1e.
 - **No `<fact…>` reply-convention auto-publish block.** Durable facts are
   explicit `bus publish` calls the prompt asks for.
 - **No change to project or session management.** No new session kind, no
@@ -318,6 +370,12 @@ Recorded so they are refusals, not omissions:
   a second seed does not overwrite an edited `AGENTS.md`; a missing
   `projects.md` is restored while the edited `AGENTS.md` is left alone; the
   seeded dir is 0700.
+- Reset-on-open, one matrix over the route's fakes (`web/desk.test.ts`): busy →
+  existing; a run in flight → existing; idle at 0.8 of the window → `fresh:
+  true` and one `openSession`; usage unknown (absent, and `tokens: null`) →
+  existing; no session → created; a ghost newest → cleaned by `load` and
+  created; bus off with an existing session → existing and never reset; bus off
+  with none → 409, nothing seeded.
 - `sidebar` unit on `splitDesk(list, deskDir)`: desk rows leave Projects; a
   symlinked desk path still matches (realpath applied server-side); no desk
   rows → the "open" row.
@@ -340,6 +398,10 @@ Recorded so they are refusals, not omissions:
   guessing a directory.
 - Compact, then continue: the conversation keeps working and the surface says
   the context was compacted.
+- Clicking **Desk** on a nearly-full idle conversation lands in an empty one
+  with the history divider above it; clicking it while that conversation is
+  streaming, or while a delegation of its own is still running, returns to it
+  unchanged.
 - New session from the Desk header: the new conversation, given only
   `AGENTS.md` + `projects.md` + the bus, states the open threads it recovered
   and picks up the last decision — without the previous transcript.
