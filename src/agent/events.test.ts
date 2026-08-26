@@ -73,6 +73,27 @@ describe("toSessionEvents", () => {
       expected: [{ type: "tool-end", toolCallId: "t1", isError: false, output: "a.txt\nb.txt" }],
     },
     {
+      // The transcript renders nothing for a compaction (see toChatTurns
+      // below), so this event is the only thing that ever says the context
+      // shrank.
+      name: "compaction_end → context-compacted with the tokens either side",
+      input: {
+        type: "compaction_end",
+        result: { tokensBefore: 148_000, estimatedTokensAfter: 12_400 },
+      },
+      expected: [{ type: "context-compacted", before: 148_000, after: 12_400 }],
+    },
+    {
+      name: "compaction_end without an estimate reports no shrink rather than guessing",
+      input: { type: "compaction_end", result: { tokensBefore: 900 } },
+      expected: [{ type: "context-compacted", before: 900, after: 900 }],
+    },
+    {
+      name: "compaction_end with no result is a failure, not a silence",
+      input: { type: "compaction_end", errorMessage: "Compaction failed: 429" },
+      expected: [{ type: "error", message: "Compaction failed: 429" }],
+    },
+    {
       name: "queue_update → queue-state snapshot",
       input: { type: "queue_update", steering: ["a"], followUp: ["b", "c"] },
       expected: [{ type: "queue-state", steering: ["a"], followUp: ["b", "c"] }],
@@ -180,6 +201,23 @@ describe("toChatTurns", () => {
           { kind: "tool", id: "t1", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false, done: true },
         ],
       },
+    ]);
+  });
+
+  // Kept as a test because it is the reason the `context-compacted` event
+  // exists. Pi replaces the summarized entries with one `compactionSummary`
+  // message (session-manager.ts, sessionEntryToContextMessages) — a role this
+  // rebuild does not know, so the compaction leaves *no* trace in the
+  // transcript a reload renders. If that ever changes, this expectation changes
+  // with it and the event's reason for existing has to be re-argued.
+  it("renders nothing for a compaction — which is why the event exists", () => {
+    expect(toChatTurns([
+      { role: "compactionSummary", content: "earlier work, summarized", timestamp: 1000 } as PiMessage,
+      { role: "user", content: "carry on", timestamp: 2000 },
+      { role: "assistant", content: "ok", timestamp: 3000 },
+    ])).toEqual([
+      { role: "user", text: "carry on" },
+      { role: "assistant", text: "ok", meta: { completedAt: 3000, durationMs: 1000, tokens: 0 } },
     ]);
   });
 

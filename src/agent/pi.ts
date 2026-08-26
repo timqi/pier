@@ -232,9 +232,46 @@ export class PiSession implements AgentSession {
     if (cancelled) throw new Error("rewind cancelled");
   }
 
+  /** The compaction running right now, or null. Pi keeps no lock of its own —
+   *  a second `compact()` aborts the first's turn and summarizes a transcript
+   *  that is being replaced under it — and two POSTs a millisecond apart both
+   *  pass the route's idle check, so the gate has to be here. */
+  private compacting: Promise<void> | null = null;
+
+  /** Pi's own compaction, minus its `CompactionResult`: the numbers reach
+   *  surfaces as the `context-compacted` event the seam already emits for the
+   *  automatic one, so a caller has nothing to do with them. Refused while one
+   *  is running, rather than run twice over one context. */
+  async compact(): Promise<void> {
+    this.live();
+    if (this.compacting) throw new Error(`session ${this.pi.sessionId} is already compacting`);
+    // Started and recorded in the same tick, with no await between: that is
+    // what makes the check above a gate and not a hint.
+    const running = this.pi.compact().then(() => undefined);
+    this.compacting = running;
+    try {
+      await running;
+    } finally {
+      this.compacting = null;
+    }
+  }
+
+  /** Compaction replaces the context a turn would run against, so a dispatch
+   *  that lands mid-compaction waits for the summary instead of starting a turn
+   *  over it — the follow-up promise ("delivered when idle") without Pi's
+   *  follow-up queue, which is only drained by the *next* turn: a message
+   *  parked there while nothing is running would sit unsent, and Pi's own
+   *  `prompt()` guard would have thrown the user's message away (§5b). */
+  private async whenCompacted(): Promise<void> {
+    while (this.compacting) await this.compacting.catch(() => undefined);
+  }
+
   // Async, so a refusal is a rejected promise: the seam promises callers they
   // may only `.catch()` (core/types.ts), and dispatch does exactly that.
   async prompt(text: string): Promise<void> {
+    this.live();
+    await this.whenCompacted();
+    // Re-checked: the wait above is long enough for a dispose to land.
     this.live();
     return this.pi.prompt(text);
   }
@@ -254,6 +291,11 @@ export class PiSession implements AgentSession {
     origin: SystemInputOrigin,
     mode: "prompt" | "steer" | "followUp",
   ): Promise<void> {
+    this.live();
+    // Same gate as prompt(): an idle session takes a system input as a turn
+    // whatever the mode says, so a callback landing mid-compaction would race
+    // the summary too.
+    await this.whenCompacted();
     this.live();
     return this.pi.sendCustomMessage(
       { customType: "pier.system-input", content: text, display: true, details: origin },

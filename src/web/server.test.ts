@@ -88,6 +88,7 @@ function fakeSession(id: string): AgentSession & {
       state = "idle";
     },
     rewindToUserTurn: async (i: number) => void calls.push(`rewind:${i}`),
+    compact: async () => void calls.push("compact"),
     pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
     clearQueue: async () => {
       calls.push("clearQueue");
@@ -1426,6 +1427,51 @@ describe("workbench server", () => {
       if ((await post({ message: `distinct ${String(i)}` })).status === 429) capped += 1;
     }
     expect(capped).toBeGreaterThan(0);
+  });
+
+  it("compacts a session's context through the seam, once", async () => {
+    const { app, session } = setup();
+    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
+    expect(res.status).toBe(202);
+    expect(session.calls.filter((c) => c === "compact")).toEqual(["compact"]);
+  });
+
+  it("refuses to compact a running turn instead of aborting it", async () => {
+    const { app, session } = setup();
+    session.setState("streaming");
+    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(session.calls).not.toContain("compact");
+  });
+
+  it("answers a seam refusal with 409, not the 404 of an unknown session", async () => {
+    const { app, session } = setup();
+    // The idle check is one tick old by the time the route dispatches, so the
+    // exclusivity gate is the seam's (agent/pi.ts); this is how it reads here.
+    session.compact = () => Promise.reject(new Error("session s1 is already compacting"));
+    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: string }).error).toContain("already compacting");
+  });
+
+  it("404s a compact for a session that does not exist", async () => {
+    const { factory } = setup();
+    const hub = new EventHub();
+    const router = new Router(hub, async () => {
+      throw new Error("unknown session: nope");
+    });
+    const app = createServer({
+      factory,
+      router,
+      hub,
+      sessions: new SessionStateStore(openDb(":memory:")),
+      config: fakeConfig(),
+      providers: fakeProviders(),
+      settings: new SettingsStore(openDb(":memory:")),
+      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
+      secrets: fakeSecrets(),
+    });
+    expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
   });
 
   it("aborts via the router", async () => {

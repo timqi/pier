@@ -6,6 +6,9 @@
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
 import "./style.css";
+// One formatter from core, at runtime: how a token count is spelled is the
+// same question on every surface (session-header.ts asks it too).
+import { compact as tokens } from "../../core/reply.js";
 import { coalesce, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
@@ -241,6 +244,13 @@ function handleEvent(e: SessionEvent): void {
     case "queue-state":
       renderQueue(e.steering, e.followUp);
       break;
+    case "context-compacted":
+      // The transcript keeps no trace of a compaction, so this line is the
+      // only place the button's effect — or an automatic one — is ever seen.
+      finalizeStreaming();
+      appendTurn("system", `Context compacted — ${tokens(e.before)} → ${tokens(e.after)}`);
+      scrollBottom();
+      break;
     case "error":
       noteTurnError();
       appendTurn("error", e.message);
@@ -419,6 +429,7 @@ initSidebar({
 initHeader({
   currentId: () => currentId,
   currentSession,
+  createSession: (cwd) => void createSession(cwd),
   syncBar,
   openFiles: showFiles,
   toggleFiles,

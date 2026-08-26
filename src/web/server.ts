@@ -480,6 +480,26 @@ export function createServer(
     return c.json({ messages: [...steering, ...followUp] });
   });
 
+  // Shrink the context on demand: Pi summarizes the older transcript away and
+  // the session continues from the summary. Refused while streaming, like the
+  // edit route above and for the same reason — Pi's own compaction aborts a
+  // running turn to do it, and losing a turn is not what the button offered.
+  // The result is not in this response: it arrives on the session's stream as
+  // `context-compacted` (agent/events.ts), which is also the only place the
+  // automatic compaction can be seen.
+  guarded(app, "POST", "/api/sessions/:id/compact", 404, async (c) => {
+    const session = await ensure(c.req.param("id"));
+    if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
+    // The check above is a courtesy, not the lock: two clicks pass it on the
+    // same tick, so the seam refuses the second one (agent/pi.ts) and its
+    // refusal keeps the status this route already uses for "not now" — a 404
+    // from `guarded` would have read as "no such session".
+    return await session.compact().then(
+      () => c.json({ ok: true }, 202),
+      (err: unknown) => c.json({ error: String(err) }, 409),
+    );
+  });
+
   app.post("/api/sessions/:id/abort", async (c) => {
     const id = c.req.param("id");
     await router.abort(id);
