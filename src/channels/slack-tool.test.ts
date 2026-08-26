@@ -6,7 +6,13 @@ import { openDb } from "../db.js";
 import { ChannelStore } from "./config.js";
 import { SlackDirectory } from "./slack-directory.js";
 import type { SlackClient, SlackHistoryPage, SlackHistoryQuery, SlackSend } from "./slack-api.js";
-import { handleSlackTool, type SlackToolDeps, toTs } from "./slack-tool.js";
+import {
+  handleSlackTool,
+  slackToolAvailable,
+  slackToolSpec,
+  type SlackToolDeps,
+  toTs,
+} from "./slack-tool.js";
 
 const T = (seconds: number): string => `${seconds}.000100`;
 
@@ -23,8 +29,10 @@ class FakeClient {
   readonly repliesCalls: { channel: string; ts: string; cursor?: string }[] = [];
   readonly posted: SlackSend[] = [];
   readonly deleted: { channel: string; ts: string }[] = [];
+  readonly updated: (SlackSend & { ts: string })[] = [];
   /** What Slack refuses with, when a test is about the refusal. */
   deleteError: string | null = null;
+  updateError: string | null = null;
   /**
    * What `conversations.history` will answer with, in Slack's own order:
    * newest first. Anything that reverses it is the code under test.
@@ -77,6 +85,12 @@ class FakeClient {
   postMessage(payload: SlackSend): Promise<{ ts: string }> {
     this.posted.push(payload);
     return Promise.resolve({ ts: T(9000) });
+  }
+
+  updateMessage(payload: SlackSend & { ts: string }): Promise<void> {
+    this.updated.push(payload);
+    if (this.updateError) return Promise.reject(new Error(this.updateError));
+    return Promise.resolve();
   }
 
   deleteMessage(channel: string, ts: string): Promise<void> {
@@ -144,6 +158,66 @@ describe("gates", () => {
   it("is on by default for a configured channel", async () => {
     configure();
     await expect(call({ operation: "channels" })).resolves.toBeTruthy();
+  });
+
+  it("is not handed to a session at all until Slack is usable", () => {
+    // An unconfigured tool is not a disabled tool: its schema and description
+    // would sit in the prompt of every turn and could answer nothing.
+    expect(slackToolAvailable(store)).toBe(false);
+    configure({ token: "" });
+    expect(slackToolAvailable(store)).toBe(false);
+    configure({ enabled: false });
+    expect(slackToolAvailable(store)).toBe(false);
+    configure({ agentTool: false });
+    expect(slackToolAvailable(store)).toBe(false);
+    configure();
+    expect(slackToolAvailable(store)).toBe(true);
+  });
+
+  it("asks that question per session open, through the spec", () => {
+    const spec = slackToolSpec(() => Promise.resolve(null), () => slackToolAvailable(store));
+    expect(spec.available?.()).toBe(false);
+    configure();
+    expect(spec.available?.()).toBe(true);
+  });
+
+  it("still refuses with a reason when a live session outlives the switch", async () => {
+    // The session was opened while Slack was on; the operator switched it off
+    // mid-turn. Silence here reads as a broken tool.
+    configure();
+    configure({ agentTool: false });
+    await expect(call({ operation: "channels" })).rejects.toThrow(/switched off/);
+  });
+});
+
+describe("the advertised contract", () => {
+  beforeEach(() => configure());
+
+  /** What the model is actually offered — the schema, not the TS union. */
+  const advertised = (): string[] => {
+    const spec = slackToolSpec(() => Promise.resolve(null), () => true);
+    return (spec.parameters as { properties: { operation: { enum: string[] } } })
+      .properties.operation.enum;
+  };
+
+  it("offers every operation the handler answers, and nothing it does not", async () => {
+    expect(advertised()).toEqual([
+      "context",
+      "read_channel",
+      "read_thread",
+      "read_message",
+      "post",
+      "edit",
+      "delete",
+      "channels",
+    ]);
+    for (const operation of advertised()) {
+      // Called bare: a missing argument is the expected refusal. "unknown
+      // operation" is not — it means the schema offers a word the handler
+      // never answers, which no test of a single operation can catch.
+      const outcome = await call({ operation }).catch((err: Error) => err.message);
+      expect(String(outcome)).not.toMatch(/unknown slack operation/);
+    }
   });
 });
 
@@ -439,6 +513,42 @@ describe("posting", () => {
     await expect(call({ operation: "post", channel: "C100" })).rejects.toThrow(/text is required/);
     await expect(call({ operation: "read_thread", channel: "C100" }))
       .rejects.toThrow(/thread_ts is required/);
+  });
+});
+
+describe("editing", () => {
+  beforeEach(() => configure());
+
+  it("replaces the text of the named message, as markdown", async () => {
+    expect(await call({ operation: "edit", channel: "#ops", ts: T(100), text: "## fixed" }))
+      .toMatchObject({ channel: "C100", ts: T(100), edited: true });
+    expect(client.updated[0]).toMatchObject({
+      channel: "C100",
+      ts: T(100),
+      text: "## fixed",
+      blocks: [{ type: "markdown", text: "## fixed" }],
+    });
+    // The previous text is gone from Slack, so the log is the only record.
+    expect(logs.some((l) => l.includes(`edited ${T(100)}`))).toBe(true);
+  });
+
+  it("never guesses the target, even inside a thread", async () => {
+    at = { channel: "C100", threadTs: T(100) };
+    await expect(call({ operation: "edit", text: "x" })).rejects.toThrow(/ts is required/);
+    await expect(call({ operation: "edit", ts: T(100) })).rejects.toThrow(/text is required/);
+    expect(client.updated).toEqual([]);
+  });
+
+  it("refuses text past Slack's per-message limit instead of truncating it", async () => {
+    await expect(call({ operation: "edit", channel: "C100", ts: T(100), text: "x".repeat(12_000) }))
+      .rejects.toThrow(/11000 per message/);
+    expect(client.updated).toEqual([]);
+  });
+
+  it("turns Slack's refusal into what it means", async () => {
+    client.updateError = "slack chat.update: cant_update_message";
+    await expect(call({ operation: "edit", channel: "C100", ts: T(100), text: "x" }))
+      .rejects.toThrow(/own bot posted/);
   });
 });
 

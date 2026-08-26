@@ -15,7 +15,7 @@ import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
 import { SlackApi } from "./channels/slack-api.js";
 import { SlackDirectory } from "./channels/slack-directory.js";
-import { handleSlackTool, slackToolSpec } from "./channels/slack-tool.js";
+import { handleSlackTool, slackToolAvailable, slackToolSpec } from "./channels/slack-tool.js";
 import { parseConversation as parseSlackConversation } from "./channels/slack.js";
 import { EventHub } from "./core/hub.js";
 import { pierDb } from "./db.js";
@@ -93,26 +93,31 @@ const piConfig = new PiConfigStore();
 const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
-    slackToolSpec((params, callerSessionId) =>
-      handleSlackTool({
-        store: channelStore,
-        directory: slackDirectory,
-        // Rebuilt per call: the Console can change the token underneath us,
-        // and a client captured at boot would keep using the old one.
-        client: () => {
-          const config = channelStore.get("slack");
-          return config.token ? new SlackApi(config.token, config.appToken) : null;
-        },
-        // Which Slack thread this session is answering, so "post here" needs no
-        // ids. Looked up per call: the mapping is durable, the session is not.
-        here: (sessionId) => {
-          const key = router.conversationOf(sessionId);
-          if (key?.channelId !== "slack") return null;
-          const { channel, threadTs } = parseSlackConversation(key.conversationId);
-          return channel && threadTs ? { channel, threadTs } : null;
-        },
-        log: (m) => logger("slack.tool").warn(m),
-      }, params, callerSessionId)
+    slackToolSpec(
+      (params, callerSessionId) =>
+        handleSlackTool({
+          store: channelStore,
+          directory: slackDirectory,
+          // Rebuilt per call: the Console can change the token underneath us,
+          // and a client captured at boot would keep using the old one.
+          client: () => {
+            const config = channelStore.get("slack");
+            return config.token ? new SlackApi(config.token, config.appToken) : null;
+          },
+          // Which Slack thread this session is answering, so "post here" needs
+          // no ids. Looked up per call: the mapping is durable, the session is
+          // not.
+          here: (sessionId) => {
+            const key = router.conversationOf(sessionId);
+            if (key?.channelId !== "slack") return null;
+            const { channel, threadTs } = parseSlackConversation(key.conversationId);
+            return channel && threadTs ? { channel, threadTs } : null;
+          },
+          log: (m) => logger("slack.tool").warn(m),
+        }, params, callerSessionId),
+      // No Slack, no schema: an unconfigured tool would sit in every prompt of
+      // every session and be able to answer nothing.
+      () => slackToolAvailable(channelStore),
     ),
   ],
   // Called per session open, so a setting changed in the Console reaches the

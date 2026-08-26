@@ -306,6 +306,16 @@ export interface AgentCustomTool {
   description: string;
   parameters: object; // JSON Schema
   execute(params: unknown, callerSessionId: string, signal?: AbortSignal): Promise<unknown>;
+  /**
+   * Whether a session opened now should be given this tool at all. Asked per
+   * open; absent means always.
+   *
+   * A tool nobody configured is not free to leave switched on: its schema and
+   * description sit in the prompt of every turn of every session, paid for
+   * whether or not it could have answered. `execute` still refuses with a
+   * reason — this answer can go stale while a long-lived session is open.
+   */
+  available?(): boolean;
 }
 
 export interface AgentLaunchOptions {

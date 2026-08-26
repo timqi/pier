@@ -132,10 +132,12 @@ export function slackTokenHelp(): HTMLElement {
  */
 export const slackAgentToolHelp = (): HTMLElement =>
   helpBadge("What agent access allows", [
-    "Gives agent sessions a `slack` tool: read a channel's history for a time range, read one thread, and post a message.",
+    "Gives agent sessions a `slack` tool: read a channel's history for a time range, read one thread, and post, edit or delete a message.",
+    "Editing and deleting reach only what Pier's own bot posted — Slack refuses either on anyone else's message.",
     "Pier performs every call itself — the bot token is never given to the agent, and Slack's own membership rules still apply, so the bot reaches only channels it was invited to.",
     "Every read fetches live from Slack — Pier keeps no message archive.",
     "This includes sessions started by tasks and subagents. Switch it off if an agent should never post to your workspace on its own.",
+    "The tool is only given to sessions opened while Slack is connected and this is on, so an unused tool costs no context. A session opened earlier keeps it, and a call made after you switch it off is refused with the reason.",
   ]);
 
 /**
