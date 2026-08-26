@@ -108,6 +108,14 @@ export class SessionStateStore {
     return row?.title || row?.cwd?.split("/").filter(Boolean).at(-1) || "Pier session";
   }
 
+  /** Drop a session's organization row entirely — pin, order, unread. For
+   *  ghosts: Pi persists a session only once its first assistant reply lands,
+   *  so a created-and-never-messaged one cannot be resumed, and its remembered
+   *  row would otherwise sit in the rail 404ing forever. */
+  forget(sessionId: string): void {
+    this.#db.prepare("DELETE FROM session_state WHERE session_id = ?").run(sessionId);
+  }
+
   needsProjectBackfill(): boolean {
     return this.#db.prepare(
       "SELECT 1 FROM session_state WHERE pinned = 1 AND (cwd IS NULL OR created_at IS NULL) LIMIT 1",
