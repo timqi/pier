@@ -6,6 +6,13 @@ import { Outbox } from "./outbox.js";
 import { TaskStore } from "./store.js";
 import type { TaskCallback, TaskRun } from "./types.js";
 
+/** How a run is named to the session that gets its result: the run id, and the
+ *  session that did the work — a relayer's next move is a deep link to it
+ *  (`#/session/<id>`), and without this line that costs a second tool call.
+ *  Shared with the group callback, which has always carried both. */
+export const runRef = (run: TaskRun): string =>
+  `Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`;
+
 export function runResultText(run: TaskRun): string {
   let result = run.error ?? "No result";
   if (run.result?.type === "agent") result = run.result.text;
@@ -73,7 +80,7 @@ export class TaskCallbacks {
   private text(runs: TaskRun[]): string {
     const sections = runs.map((run) => [
       `Task "${run.context.definition.name}" finished with state: ${run.state}`,
-      `Run: ${run.id}`,
+      runRef(run),
       "",
       runResultText(run),
     ].join("\n"));

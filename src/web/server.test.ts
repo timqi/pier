@@ -1441,6 +1441,16 @@ describe("workbench server", () => {
     expect(session.calls).not.toContain("compact");
   });
 
+  it("answers a seam refusal with 409, not the 404 of an unknown session", async () => {
+    const { app, session } = setup();
+    // The idle check is one tick old by the time the route dispatches, so the
+    // exclusivity gate is the seam's (agent/pi.ts); this is how it reads here.
+    session.compact = () => Promise.reject(new Error("session s1 is already compacting"));
+    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: string }).error).toContain("already compacting");
+  });
+
   it("404s a compact for a session that does not exist", async () => {
     const { factory } = setup();
     const hub = new EventHub();

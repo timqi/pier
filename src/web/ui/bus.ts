@@ -119,6 +119,9 @@ export function createBusView(
   /** A seeded librarian is an ordinary task, so its row links to the panel that
    *  owns it instead of growing a second editor here. */
   openTask: (taskId: string) => void,
+  /** The switch below is also read elsewhere — the rail's Desk row is gated on
+   *  it — so flipping it here tells the page that drew the other surface. */
+  onSwitched: () => void,
 ): BusView {
   let data: BusOverview = EMPTY;
   let loaded = false;
@@ -131,6 +134,8 @@ export function createBusView(
   /** The last read or write that did not take. A view that re-renders the old
    *  state silently is indistinguishable from one nobody clicked. */
   let problem = "";
+  /** Which `load()` is current; see the comment there. */
+  let generation = 0;
   const switchStatus = h("span", "text-[11.5px]", "");
 
   const header = h(
@@ -172,6 +177,7 @@ export function createBusView(
     );
     // Re-read rather than trust the flip: enabling reveals whatever the tables
     // were already holding from the last time it was on.
+    onSwitched();
     await load();
   }
 
@@ -183,67 +189,59 @@ export function createBusView(
   // must not draw a state nobody stored.
 
   const seedStatus = h("span", "text-[11.5px]", "");
-  /** The project the button would seed for. Re-pinned to the inventory on every
-   *  render, so a cwd whose last session is gone cannot linger as the target. */
+  /** The project the picker is on. Re-pinned to the inventory whenever the
+   *  picker opens, so a cwd whose last session is gone cannot linger. */
   let seedCwd = "";
-  const librarianBar = h("div", "mb-4 rounded-xl border border-neutral-200 bg-white px-4 py-3");
-
-  const librarianHint = (text: string): HTMLElement =>
-    h("p", "mt-2 max-w-2xl text-[11.5px] leading-snug text-neutral-500", text);
+  /** The picker is what "Seed…" opens; the control is one line the rest of the
+   *  time. A section for it was a page's worth of chrome around one button. */
+  let picking = false;
+  const librarianBar = h("div", "mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[12.5px]");
 
   function renderLibrarian(): void {
-    const cwds = projects();
-    if (!cwds.includes(seedCwd)) seedCwd = cwds[0] ?? "";
-    const picker = select(cwds.map((cwd) => [cwd, cwd] as [string, string]), seedCwd);
-    picker.disabled = cwds.length === 0;
-    // Picking another project repaints from data already in hand: the librarians
-    // are all in the last response, so this costs no round trip.
-    picker.onchange = () => {
-      seedCwd = picker.value;
-      // The status line belongs to the project it was about: keeping "already
-      // maintains /a" beside a button now aimed at /b would be a lie.
-      setStatus(seedStatus, "idle", "");
-      renderLibrarian();
-    };
-    const head = h(
-      "div",
-      "flex flex-wrap items-center gap-x-3 gap-y-2",
-      h("span", "flex-none text-[13px] font-medium text-neutral-700", "Librarian"),
-      h("div", "min-w-0 flex-1 basis-64", picker),
-    );
-    const existing = data.librarians.find((row) => row.cwd === seedCwd);
-    if (existing) {
-      const open = btn("Open in Tasks", "flex-none cursor-pointer text-[12.5px] text-indigo-600 hover:underline");
-      open.onclick = () => openTask(existing.taskId);
-      head.append(
-        h("span", "flex-none font-mono text-[12px] text-neutral-700", existing.name),
-        h("span", "flex-none text-[11.5px] text-neutral-500", existing.schedule),
-        ...(existing.enabled ? [] : [badge("paused", "bg-amber-50 text-amber-700 ring-amber-200")]),
-        open,
-      );
-      librarianBar.replaceChildren(head, librarianHint(
-        "A daily pass already maintains this project. It is an ordinary scheduled task — the Tasks panel "
-          + "owns its schedule and prompt, pauses it, and deletes it; this page only reports that it exists.",
-      ));
-      return;
+    const line: (Node | string)[] = [h("span", "flex-none text-neutral-500", "Librarian:")];
+    // Detected on every load, so this line reports what the task store holds —
+    // several when several projects have one, and nothing invented when none do.
+    for (const row of data.librarians) {
+      const open = btn(`${row.cwd} · ${row.schedule}`, "cursor-pointer text-indigo-600 hover:underline");
+      open.title = `Open ${row.name} in Tasks — the panel that owns its schedule, prompt, pause and delete`;
+      open.onclick = () => openTask(row.taskId);
+      line.push(open, ...(row.enabled ? [] : [badge("paused", "bg-amber-50 text-amber-700 ring-amber-200")]));
     }
-    const seed = button("Seed librarian", true);
-    // Disabled always says why: a dead button with no sentence beside it is
+    if (!data.librarians.length) line.push(h("span", "text-neutral-400", "none"));
+    const cwds = projects();
+    // Disabled always says why: a dead control with no reason beside it is
     // indistinguishable from a broken one.
     const blocked = !data.enabled
-      ? "The bus is off — a librarian's runs would find no bus tool to work with."
+      ? "the bus is off — a librarian's runs would find no bus tool to work with"
       : cwds.length === 0
-      ? "No projects yet — a project is a session's working directory, so open a session first."
+      ? "no projects yet — a librarian maintains a session's working directory"
       : "";
-    seed.disabled = blocked !== "";
-    seed.onclick = () => void createLibrarian();
-    head.append(seed, seedStatus);
-    librarianBar.replaceChildren(head, librarianHint(
-      blocked
-        || "Creates an ordinary scheduled task named bus-librarian: a daily 05:00 run in this instance's "
-          + "timezone that distills stable conclusions into facts, archives what nobody reads, and writes "
-          + "promotion proposals to .librarian/proposals (docs/bus.md). Edit or delete it in Tasks.",
-    ));
+    if (picking) {
+      if (!cwds.includes(seedCwd)) seedCwd = cwds[0] ?? "";
+      const picker = select(cwds.map((cwd) => [cwd, cwd] as [string, string]), seedCwd);
+      picker.disabled = cwds.length === 0;
+      // The status belongs to the project it was about: keeping "already
+      // maintains /a" beside a button now aimed at /b would be a lie.
+      picker.onchange = () => {
+        seedCwd = picker.value;
+        setStatus(seedStatus, "idle", "");
+      };
+      const seed = button("Seed", true);
+      seed.disabled = blocked !== "";
+      seed.onclick = () => void createLibrarian();
+      line.push(h("span", "w-72 max-w-full flex-none", picker), seed);
+    } else {
+      const start = btn("Seed…", "cursor-pointer text-indigo-600 hover:underline");
+      start.title = blocked
+        || "Create the daily bus-librarian task for a project: distill, archive, propose (docs/bus.md)";
+      start.onclick = () => {
+        picking = true;
+        renderLibrarian();
+      };
+      line.push(h("span", "text-neutral-300", "·"), start);
+    }
+    if (blocked) line.push(h("span", "text-neutral-400", `— ${blocked}`));
+    librarianBar.replaceChildren(...line, seedStatus);
   }
 
   async function createLibrarian(): Promise<void> {
@@ -253,6 +251,7 @@ export function createBusView(
       setStatus(seedStatus, "failed", await failure(res, "Could not seed the librarian"));
       return;
     }
+    picking = false;
     setStatus(seedStatus, "saved", "Created — the Tasks panel owns it now.");
     // Re-read rather than patch the row in: the created task is the state, and
     // this page shows what the store holds.
@@ -551,12 +550,20 @@ export function createBusView(
   }
 
   async function load(): Promise<void> {
+    // Every load is stamped and only the newest one may paint: a `bus-changed`
+    // refetch, a tab click and a filter keystroke can be in flight together,
+    // and the slowest answer is not the truest one — an older response landing
+    // last would show rows for a query nobody has typed any more.
+    const mine = ++generation;
     const res = await fetch(`/api/bus${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+    if (mine !== generation) return;
     if (!res.ok) {
       problem = await failure(res, "Could not load the bus");
       return render();
     }
-    data = (await res.json()) as BusOverview;
+    const next = (await res.json()) as BusOverview;
+    if (mine !== generation) return;
+    data = next;
     loaded = true;
     // Cleared before the render, or a recovered fetch keeps showing the old
     // failure until something else repaints.

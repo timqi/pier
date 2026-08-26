@@ -79,7 +79,7 @@ function setup() {
   );
   const publish = (payload: string, topic = "proj/auth") => {
     const event = store.publish({ topic, payload: JSON.stringify(payload), scope: SCOPE, writerSession: "writer" });
-    delivery.notify(event);
+    delivery.noteFor(event)();
     return event;
   };
   return { db, store, subs, session, delivery, publish, given, announced };
@@ -232,7 +232,7 @@ describe("BusDelivery", () => {
     const delivery = new BusDelivery(router, store, subs, () => {}, () => on);
     subs.upsert("b", "proj/*", "queue", [SCOPE], "");
     b.setState("streaming"); // owed but deferred while the switch is still on
-    delivery.notify(store.publish({ topic: "proj/auth", payload: "1", scope: SCOPE, writerSession: "w" }));
+    delivery.noteFor(store.publish({ topic: "proj/auth", payload: "1", scope: SCOPE, writerSession: "w" }))();
     await new Promise((resolve) => setTimeout(resolve, 20));
     const owed = subs.dueNotes(Number.MAX_SAFE_INTEGER);
     expect(owed).toHaveLength(1);
@@ -265,7 +265,7 @@ describe("BusDelivery", () => {
       () => announced.push(Date.now()),
     );
     subs.upsert("dead", "proj/*", "queue", [SCOPE], "");
-    delivery.notify(store.publish({ topic: "proj/auth", payload: '"x"', scope: SCOPE, writerSession: "w" }));
+    delivery.noteFor(store.publish({ topic: "proj/auth", payload: '"x"', scope: SCOPE, writerSession: "w" }))();
     // Burn the retry ladder: each sweep lands past the backoff and fails.
     for (let i = 1; given.length === 0 && i <= 20; i++) {
       delivery.recover(Date.now() + i * 600_000);
@@ -284,11 +284,61 @@ describe("BusDelivery", () => {
 
     // A later publish on the same topic no longer matches: no fresh note,
     // no second ladder, no second abandoned row.
-    delivery.notify(store.publish({ topic: "proj/auth", payload: '"y"', scope: SCOPE, writerSession: "w" }));
+    delivery.noteFor(store.publish({ topic: "proj/auth", payload: '"y"', scope: SCOPE, writerSession: "w" }))();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]);
     expect(subs.adminNotes().notes).toHaveLength(1);
     expect(given).toHaveLength(1);
+  });
+
+  it("the notes ride the publish's own transaction — a failing save takes the event with it", () => {
+    const { store, subs, delivery } = setup();
+    subs.upsert("b", "proj/*", "queue", [SCOPE], "");
+    subs.saveNote = () => { throw new Error("disk full"); };
+    // The crash window: the event inserted, the note not. Left durable, it is
+    // an event no recovery will ever deliver — the sweep's worklist is notes —
+    // and the caller is told the publish failed, so it writes it again.
+    expect(() => store.transact(() => delivery.noteFor(
+      store.publish({ topic: "proj/auth", payload: '"1"', scope: SCOPE, writerSession: "w" }),
+    ))).toThrow(/disk full/);
+    expect(store.log("proj/*", [SCOPE]).events).toEqual([]);
+    expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]);
+  });
+
+  it("delivery starts only after the write commits", async () => {
+    const { store, subs, session, delivery } = setup();
+    subs.upsert("b", "proj/*", "queue", [SCOPE], store.tip());
+    const b = session("b");
+    const kick = store.transact(() => delivery.noteFor(
+      store.publish({ topic: "proj/auth", payload: '"1"', scope: SCOPE, writerSession: "w" }),
+    ));
+    // Inside the transaction the note exists but nobody has been woken: a
+    // delivery of a write that then rolled back would point at nothing.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(b.inputs).toEqual([]);
+    kick();
+    await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
+  });
+
+  it("archiving an unacked backlog does not swallow the wake it still owes", async () => {
+    const { store, subs, session, delivery } = setup();
+    const b = session("b");
+    b.setState("streaming"); // owed, deferred to the turn boundary
+    subs.upsert("b", "proj/*", "queue", ["run:gone"], "");
+    delivery.noteFor(store.publish(
+      { topic: "proj/auth", payload: '"1"', scope: "run:gone", writerSession: "w" },
+    ))();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toHaveLength(1);
+
+    // The run tree ends and the hourly sweep moves the whole scope out from
+    // under the reader. Counted over live rows only, the note settles as
+    // "caught up on its own" and the backlog is never mentioned again.
+    expect(store.archiveDeadRunScope("run:gone")).toBe(1);
+    b.setState("idle");
+    delivery.recover(Date.now() + 60_000);
+    await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
+    expect(b.inputs[0]!.text).toContain("1 new event on 'proj/*'");
   });
 
   it("a subscriber that caught up on its own is not woken for nothing", async () => {

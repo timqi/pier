@@ -107,6 +107,10 @@ let sessions: SessionInfo[] = [];
 /** The desk folder, derived server-side from PIER_HOME; null until the boot
  *  settings read answers, which is the one thing the rail waits for. */
 let deskDir: string | null = null;
+/** The bus capability, from the same read. The rail's Desk row is gated on it
+ *  (sidebar.ts), so the copy is re-read whenever the switch is flipped rather
+ *  than left claiming what the operator just changed. */
+let busEnabled = false;
 let selectionSeq = 0;
 let currentId: string | null = null;
 let currentState: SessionState = "idle";
@@ -449,6 +453,7 @@ initSidebar({
   sessionMenu,
   createSession,
   deskDir: () => deskDir,
+  busEnabled: () => busEnabled,
   openDesk: () => void openDesk(),
   openFiles: showFiles,
   openTerminal: showTerminal,
@@ -470,6 +475,7 @@ initViews({
   currentSession,
   select: (id) => void select(id),
   maybeAckRead,
+  reloadInstance: () => void loadInstance(),
 });
 
 initVersion(__PIER_VERSION__);
@@ -482,15 +488,19 @@ void initPush();
 document.addEventListener("visibilitychange", maybeAckRead);
 window.addEventListener("focus", maybeAckRead);
 
+/** The two instance facts the rail reads: where the desk folder is (derived
+ *  from PIER_HOME by the server, never guessed here) and whether the bus is on.
+ *  One read, re-run when the Bus view flips the switch — the rail draws fine
+ *  without the answer and gains its Desk row a moment later. */
+async function loadInstance(): Promise<void> {
+  const res = await fetch("/api/settings");
+  if (!res.ok) return;
+  const s = (await res.json()) as { deskDir?: string; busEnabled?: boolean };
+  deskDir = s.deskDir ?? null;
+  busEnabled = s.busEnabled ?? false;
+  renderSessions();
+}
+
 connectWorkspace();
-// One boot read for the one instance fact the rail needs: where the desk
-// folder is. Derived from PIER_HOME by the server (web/desk.ts) rather than
-// guessed here, and re-rendered when it lands — the rail draws fine without it
-// and gains its Desk section a moment later.
-void fetch("/api/settings")
-  .then((res) => (res.ok ? (res.json() as Promise<{ deskDir?: string }>) : null))
-  .then((s) => {
-    deskDir = s?.deskDir ?? null;
-    renderSessions();
-  });
+void loadInstance();
 void refreshProjects().then(applyRoute);

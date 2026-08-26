@@ -70,10 +70,19 @@ export class BusDelivery {
     }, unreachable);
   }
 
-  /** Fans a fresh write out to its subscribers. One open note per sub is the
-   * coalescing: a subscriber that is already owed a pointer is not owed two. */
-  notify(event: BusEvent): void {
-    if (!this.enabled()) return;
+  /** Fans a fresh write out to its subscribers, in two halves. The durable
+   * half runs here and synchronously — matching the subscriptions and writing
+   * the notes — so the caller can hold it inside the publish's own transaction
+   * (BusStore.transact): an event whose notes were never written is durable
+   * and undeliverable forever, since the recovery sweep's worklist is notes.
+   * The returned kick is the async half and runs after the commit, because a
+   * delivery must never see — or be started by — a write that rolled back.
+   *
+   * One open note per sub is the coalescing: a subscriber that is already owed
+   * a pointer is not owed two. */
+  noteFor(event: BusEvent): () => void {
+    if (!this.enabled()) return () => {};
+    const woken = new Set<string>();
     for (const sub of this.subs.matching(event.topic, event.scope, event.writerSession)) {
       // Coalesce only into a note nothing has been done with. A sent-but-
       // unproven note may settle any moment — the transcript proves its id,
@@ -86,9 +95,14 @@ export class BusDelivery {
       } else {
         this.subs.saveNote(this.note(sub, event));
       }
-      void this.deliver(sub.sessionId).catch((err: unknown) =>
-        log.error(`bus delivery to session ${sub.sessionId} failed`, err));
+      woken.add(sub.sessionId);
     }
+    return () => {
+      for (const sessionId of woken) {
+        void this.deliver(sessionId).catch((err: unknown) =>
+          log.error(`bus delivery to session ${sessionId} failed`, err));
+      }
+    };
   }
 
   /** Everything *due* to one session rides in one input. Due, not pending:

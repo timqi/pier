@@ -476,8 +476,14 @@ export function createServer(
   guarded(app, "POST", "/api/sessions/:id/compact", 404, async (c) => {
     const session = await ensure(c.req.param("id"));
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-    await session.compact();
-    return c.json({ ok: true }, 202);
+    // The check above is a courtesy, not the lock: two clicks pass it on the
+    // same tick, so the seam refuses the second one (agent/pi.ts) and its
+    // refusal keeps the status this route already uses for "not now" — a 404
+    // from `guarded` would have read as "no such session".
+    return await session.compact().then(
+      () => c.json({ ok: true }, 202),
+      (err: unknown) => c.json({ error: String(err) }, 409),
+    );
   });
 
   app.post("/api/sessions/:id/abort", async (c) => {
@@ -556,7 +562,7 @@ export function createServer(
     }
   });
 
-  registerDeskRoutes(app, openSession);
+  registerDeskRoutes(app, openSession, () => settings.get().busEnabled);
   registerInstanceRoutes(app, {
     settings,
     updates,

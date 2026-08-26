@@ -5,8 +5,9 @@
 > the templates ship as `src/web/desk-AGENTS.md` / `src/web/desk-projects.md`
 > beside the module that reads them (not `src/desk/`); `POST /api/desk`
 > delegates to the one `openSession` function `POST /api/sessions` also calls,
-> instead of repeating its sequence; the Desk group is capped at the newest 5
-> with an "older in ⌘K" line; and open question 1's probe was run — the answer
+> instead of repeating its sequence; the rail shows **one** Desk row rather than
+> a group, and opening one is gated on `busEnabled` (see *The sidebar pin*); and
+> open question 1's probe was run — the answer
 > was "the transcript renders nothing", so the `context-compacted` event
 > exists. Phase 2 is still unbuilt.
 
@@ -64,6 +65,14 @@ $PIER_HOME/desk/
   (see *Seeding*), and never again.
 - Anything else the user puts in the folder (notes, scratch files) is theirs;
   Pier does not scan or interpret the folder's contents.
+- **Desk follows `busEnabled`.** The whole continuity story is bus facts —
+  `desk/threads` written at delegation time, read back after a reset
+  (desk-AGENTS.md) — so with the capability off there is nothing to open:
+  `POST /api/desk` refuses with 409 the way seeding a librarian does, and the
+  rail's row stays visible saying "bus off", with Console → Bus named in its
+  tooltip. Only the affordance is gated: desk sessions that already exist keep
+  working as ordinary sessions if the switch is turned off later, and nothing
+  about them is hidden.
 - **The path is canonical or the bus splits.** `main.ts:102-113` resolves a
   session's cwd through `realpath` before it becomes a bus scope, because two
   spellings of one directory are two disjoint blackboards. So: `DESK_DIR` is
@@ -108,15 +117,17 @@ already produces Projects.
   drops them so Desk never also appears as a project. The split is a pure
   exported function (`splitDesk(list, deskDir)`) beside `groupByCwd`, so it is
   unit-testable without a DOM.
-- **More than one desk session is normal** (each reset makes one), so the Desk
-  section is a *group*, newest first, exactly like a project group — the
-  current conversation is the newest row, the older ones stay visible and
-  clickable rather than becoming state only ⌘K can find. That is the whole
-  reason it is a group and not a single row: a hidden predecessor would be
-  state nobody can see (AGENTS.md 5b).
-- **When no desk session exists**, the section is one row: "Desk — open". It is
-  always present; that row is how Desk is discovered, and it is what makes a
-  stored "seeded" flag unnecessary.
+- **More than one desk session is normal** (each reset makes one). *(landed:
+  operator decision, replacing the group this paragraph described — the rail
+  shows **one** row, "Desk", at the Projects header's own level, pointing at the
+  newest desk session; clicking it selects that conversation. The predecessors
+  are pinned sessions, so ⌘K lists them under Projects like every other pinned
+  one — not hidden state, just not rail rows, and a group here was a second
+  place keeping the same list. `splitDesk` shrank to `newest + rest`, still pure
+  and still unit-tested.)*
+- **When no desk session exists**, the row reads "Desk — open" (or "— bus off",
+  the gate above). It is always present; that row is how Desk is discovered,
+  and it is what makes a stored "seeded" flag unnecessary.
 
 ### Every code touch, by seam
 
@@ -125,7 +136,7 @@ already produces Projects.
 | the path | `src/paths.ts` | `export const DESK_DIR = pierPath("desk")` — one line, and `paths.ts` is the leaf that already answers "where does Pier keep this" |
 | seeding + open | `src/web/desk.ts` (new) | idempotent seed (mkdir, write each template only if absent) and `POST /api/desk`: seed → open a session in the folder. *(landed: the create/attach/pin/announce sequence was **extracted** from `POST /api/sessions` into one `openSession(cwd)` closure in `server.ts` and handed to `registerDeskRoutes` — repeating it here would have been the second copy, budget rule 3. The desk route's own job is the seed and nothing else.)* |
 | the browser learns the path | `src/web/instance.ts:110` | `deskDir` added to `instanceSettings()` (derived, not stored) |
-| the rail | `src/web/ui/sidebar.ts` | `splitDesk()`, the Desk section, the "open" row; `pinnedProjects()` excludes the desk cwd. *(landed: `splitDesk` also applies the cap — newest `DESK_CAP` = 5 — and returns how many it hid, so the "older in ⌘K" line is a pure value and not a render-time decision, open question 4.)* |
+| the rail | `src/web/ui/sidebar.ts` | `splitDesk()`, the one Desk row, the "open" row; `pinnedProjects()` excludes the desk cwd. *(landed: one row pointing at the newest desk session, gated on `busEnabled` — which reaches the browser on the same `/api/settings` read as `deskDir`.)* |
 | boot wiring | `src/web/ui/main.ts` | read `deskDir` from the settings fetch, hand it to `initSidebar` deps |
 | the two controls | `src/web/ui/session-header.ts:256` | two rows in `sessionMenu`: **Compact context** and **New session here** — for *every* session, not a Desk-only copy (rule 3: the third copy is a bug, and this would be the second) |
 | compact, server | `src/web/server.ts` | `POST /api/sessions/:id/compact` via the existing `guarded(...)` helper |
@@ -315,9 +326,10 @@ them.
    channels panel names the desk folder under it; no channel-layer behavior
    changed, and an empty field still means Pier's own directory (the hint says
    so, because a placeholder would have read as a default that is not one).
-4. **Should a reset unpin its predecessor?** — **No: cap the section.** Newest
-   5, with an "older in ⌘K" line when it cuts; nothing is unpinned and nothing
-   is hidden without saying so.
+4. **Should a reset unpin its predecessor?** — **No, and the section is not a
+   section.** *(revised: one row for the newest; predecessors are reachable in
+   ⌘K, which lists every pinned session. Nothing is unpinned and nothing is
+   dropped — the rail just stops keeping a second copy of the session list.)*
 5. **Should `projects.md` be validated?** — **No.** The dispatcher's `ls -d` at
    routing time is the check, and it costs no code.
 6. **One Desk per instance.** Multiple desks stay undesigned.

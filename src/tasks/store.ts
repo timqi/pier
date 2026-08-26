@@ -108,10 +108,16 @@ export class TaskStore {
     `, sessionId);
   }
 
-  listRunsForSession(sessionId: string, limit = 50): TaskRun[] {
+  /** Runs a session delegated, newest first. `activeOnly` filters in SQL and
+   * is not a convenience: the limit is a page of the *newest* runs, so a
+   * long-running child filtered out in JS afterwards disappears once enough
+   * newer runs have finished above it — and with it, for its coordinator, the
+   * bus run scope that child writes into (src/main.ts). One query either way. */
+  listRunsForSession(sessionId: string, limit = 50, activeOnly = false): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs
       WHERE json_extract(json, '$.invokedBySessionId') = ?
+        ${activeOnly ? "AND state IN ('queued', 'running')" : ""}
       ORDER BY queued_at DESC LIMIT ?
     `, sessionId, clamp(limit, 200));
   }

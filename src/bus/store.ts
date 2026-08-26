@@ -42,6 +42,9 @@ export interface PublishInput {
 
 /** Payload lives in every reader's context; big content belongs in a file. */
 export const MAX_PAYLOAD_BYTES = 8192;
+/** A key is a name, not a payload: it rides in every get, every index row and
+ * every error message, and nothing reads more of it than a name's worth. */
+export const MAX_KEY_BYTES = 256;
 /** A causal chain longer than this is a feedback loop, not a workflow. */
 export const MAX_HOPS = 4;
 /** Per (writer, topic): more than this per minute is a storm, not a writer. */
@@ -134,6 +137,24 @@ const fromRow = (row: Row): BusEvent => ({
   createdAt: row.created_at,
 });
 
+/** A key several active run trees answer differently: between siblings there
+ * is no narrow-to-wide order, so a keyless read names the contest instead of
+ * picking one and instead of hiding the rest of the topic behind a throw. */
+export interface BusContested {
+  key: string;
+  scopes: string[];
+}
+
+/** What node:sqlite raises when the *caller's* MATCH string is bad grammar —
+ * probed, not guessed: FTS5 says 'fts5: syntax error near …', but also 'no
+ * such column: x' for a stray colon, 'unterminated string' for a lone quote
+ * and 'unknown special query: …' for a leading '*'. Anything else — BUSY, I/O,
+ * corruption — is the database failing, not the query, and relabelling it as
+ * the caller's typo would send whoever debugs it to the wrong place. */
+const FTS_QUERY_SYNTAX = /^(fts5: |no such column: |unterminated string|unknown special query)/;
+const isQuerySyntax = (err: unknown): boolean =>
+  err instanceof Error && FTS_QUERY_SYNTAX.test(err.message);
+
 const live = (event: BusEvent, nowMs: number): boolean =>
   event.kind !== "tombstone" &&
   (event.ttlSeconds === undefined ||
@@ -203,6 +224,9 @@ export class BusStore {
     }
     if (kind !== "event" && input.key === undefined) {
       throw new Error(`kind '${kind}' needs a key`);
+    }
+    if (input.key !== undefined && Buffer.byteLength(input.key) > MAX_KEY_BYTES) {
+      throw new Error(`key exceeds ${MAX_KEY_BYTES} bytes — a key is a name; put the content in the payload`);
     }
     if (Buffer.byteLength(input.payload) > MAX_PAYLOAD_BYTES) {
       throw new Error(`payload exceeds ${MAX_PAYLOAD_BYTES} bytes — write the content to a file and publish its path as file_ptr`);
@@ -292,7 +316,10 @@ export class BusStore {
         .map(fromRow).filter((event) => live(event, now)).slice(0, want);
     try {
       return match(query);
-    } catch {
+    } catch (err) {
+      // Only the caller's grammar is retryable: a locked, broken or corrupt
+      // database must reach the caller as itself, not as "your query is wrong".
+      if (!isQuerySyntax(err)) throw err;
       // FTS5's query language treats a bare hyphen (or colon, or unbalanced
       // quote) as syntax — and "nothing-here" is a perfectly reasonable thing
       // to search for. Retry with every token quoted: plain text always works,
@@ -300,7 +327,8 @@ export class BusStore {
       try {
         return match(query.split(/\s+/).filter(Boolean)
           .map((token) => `"${token.replaceAll('"', '""')}"`).join(" "));
-      } catch {
+      } catch (retried) {
+        if (!isQuerySyntax(retried)) throw retried;
         throw new Error('not a valid search query — use words, "quoted phrases", AND/OR/NOT');
       }
     }
@@ -326,18 +354,33 @@ export class BusStore {
 
   /** The move both archive paths share: rows go to the archive whole (so a
    * future need can move them back), the FTS rows follow the DELETE by
-   * trigger. A savepoint, not BEGIN: composable if a caller ever owns a
-   * transaction. */
+   * trigger. */
   #moveToArchive(where: string, args: string[]): number {
-    this.#db.exec("SAVEPOINT bus_archive");
-    try {
+    return this.transact(() => {
       this.#db.prepare(`INSERT INTO bus_events_archive SELECT * FROM bus_events WHERE ${where}`).run(...args);
-      const moved = this.#db.prepare(`DELETE FROM bus_events WHERE ${where}`).run(...args);
-      this.#db.exec("RELEASE bus_archive");
-      return Number(moved.changes);
+      return Number(this.#db.prepare(`DELETE FROM bus_events WHERE ${where}`).run(...args).changes);
+    });
+  }
+
+  /** One savepoint around a write and the bookkeeping that may not outlive it.
+   * A savepoint, not BEGIN, so an inner write composes — publish and the
+   * archive move both run inside one.
+   *
+   * Delivery is why this is public: the subscriber notes a publish opens are
+   * the delivery sweep's whole worklist, so an event written without them is
+   * durable and undeliverable forever, and a note save that throws after the
+   * insert reports a failure for a publish that persisted — inviting the
+   * caller to write it twice. Both halves commit together or neither does
+   * (bus/tool.ts); the async delivery kick runs after the commit. */
+  transact<T>(fn: () => T): T {
+    this.#db.exec("SAVEPOINT bus_write");
+    try {
+      const result = fn();
+      this.#db.exec("RELEASE bus_write");
+      return result;
     } catch (err) {
-      this.#db.exec("ROLLBACK TO bus_archive");
-      this.#db.exec("RELEASE bus_archive");
+      this.#db.exec("ROLLBACK TO bus_write");
+      this.#db.exec("RELEASE bus_write");
       throw err;
     }
   }
@@ -394,9 +437,11 @@ export class BusStore {
    * Sibling run scopes are the one place shadowing has no answer: between two
    * active run trees there is no narrow-to-wide order, so two live values
    * under one key are refused as ambiguous — the scope set's insertion order
-   * would be a silent guess, exactly what the write side refuses. */
-  latest(topic: string, scopes: readonly string[], key?: string, now = Date.now(), peek = false): BusEvent[] {
-    if (scopes.length === 0) return [];
+   * would be a silent guess, exactly what the write side refuses. Keyed, that
+   * refusal is a throw; keyless it is an `ambiguous` entry beside the winners,
+   * because a read of the whole topic must not be hidden by one contested key. */
+  latest(topic: string, scopes: readonly string[], key?: string, now = Date.now(), peek = false): { winners: BusEvent[]; ambiguous: BusContested[] } {
+    if (scopes.length === 0) return { winners: [], ambiguous: [] };
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
       WHERE e.topic = ? AND e.key IS NOT NULL AND e.scope IN (${holes(scopes)})
@@ -413,6 +458,7 @@ export class BusStore {
       byKey.set(event.key!, perScope);
     }
     const winners: BusEvent[] = [];
+    const ambiguous: BusContested[] = [];
     for (const [factKey, perScope] of byKey) {
       // Two sibling run trees each holding a live value is not a shadowing
       // question: run scopes have no order between them, and picking by the
@@ -423,7 +469,15 @@ export class BusStore {
         return candidate !== undefined && live(candidate, now);
       });
       if (liveRuns.length > 1) {
-        throw new Error(`key '${factKey}' is ambiguous: several active run trees hold a live value — pass scope to disambiguate`);
+        // Keyed, the caller asked about this one key and a wrong answer is
+        // worse than none. Keyless, it asked about the topic: a throw would
+        // let one contested key hide every uncontested one, so the contest
+        // becomes a result and the rest of the topic still answers.
+        if (key !== undefined) {
+          throw new Error(`key '${factKey}' is ambiguous: several active run trees hold a live value — pass scope 'run:<rootRunId>' (${liveRuns.join(" or ")}) to name one`);
+        }
+        ambiguous.push({ key: factKey, scopes: liveRuns });
+        continue;
       }
       for (const scope of scopes) {
         const candidate = perScope.get(scope);
@@ -435,7 +489,7 @@ export class BusStore {
     // Asking is reading — the stamp lands even on an empty answer — and it
     // lands after the read, not in front of it.
     if (!peek) this.stampRead([topic], now);
-    return winners;
+    return { winners, ambiguous };
   }
 
   /** Incremental read: everything after the cursor, tombstones included —
@@ -518,13 +572,22 @@ export class BusStore {
   }
 
   /** How many events a cursor is behind — the number a pointer notification
-   * carries, computed at delivery time so it is true when read. */
+   * carries and the Console's lag column, computed at delivery time so it is
+   * true when read.
+   *
+   * Live *and* archive, because this is subscription accounting: archiving
+   * unacked events (the librarian, or the dead-run sweep) must not erase a
+   * wake that is still owed. Counting live rows only, stillOwed settles the
+   * note as delivered and the pointer text says '0 new events' — the backlog
+   * still exists, and the reader is never told it does. */
   countSince(topicGlob: string, scopes: readonly string[], after: string): number {
     if (scopes.length === 0) return 0;
+    const where = `topic GLOB ? AND id > ? AND scope IN (${holes(scopes)})`;
+    const args = [topicGlob, after, ...scopes];
     const row = this.#db.prepare(`
-      SELECT COUNT(*) AS n FROM bus_events
-      WHERE topic GLOB ? AND id > ? AND scope IN (${holes(scopes)})
-    `).get(topicGlob, after, ...scopes) as { n: number };
+      SELECT (SELECT COUNT(*) FROM bus_events WHERE ${where})
+           + (SELECT COUNT(*) FROM bus_events_archive WHERE ${where}) AS n
+    `).get(...args, ...args) as { n: number };
     return row.n;
   }
 
@@ -593,18 +656,23 @@ export class BusStore {
   /** The live facts of one exact (topic, scope), newest write per key. No
    * cross-scope shadowing: which scope wins is a *caller's* question, and here
    * every scope is its own row — collapsing them would hide the override.
-   * Liveness (tombstone in SQL, TTL against the clock here) is settled
-   * *before* the caller's cap — a page cut first could hide a live key behind
-   * twenty expired ones and claim there was nothing more. The 1000 is a
-   * safety stop, not a page: a topic with that many keys is a table. */
+   * Liveness is settled *before* the caller's cap, so both halves of it are in
+   * the SQL: a LIMIT taken first could fill the page with expired facts and
+   * claim the live key behind them was not there. The clock arrives as a
+   * parameter; unixepoch() truncates created_at's millisecond, so the SQL
+   * boundary is rounded a second *out* — never stricter than live(), which
+   * stays the exact rule the returned rows pass. The 1000 is a safety stop,
+   * not a page: a topic with that many keys is a table. */
   adminFacts(topic: string, scope: string, now = Date.now()): BusEvent[] {
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
       WHERE e.topic = ? AND e.scope = ? AND e.key IS NOT NULL AND e.kind != 'tombstone'
+        AND (e.ttl_seconds IS NULL
+             OR (unixepoch(e.created_at) + 1 + e.ttl_seconds) * 1000 > ?)
         AND e.id = (SELECT MAX(id) FROM bus_events
                     WHERE topic = e.topic AND key = e.key AND scope = e.scope)
       ORDER BY e.key LIMIT 1000
-    `).all(topic, scope) as unknown as Row[];
+    `).all(topic, scope, now) as unknown as Row[];
     return rows.map(fromRow).filter((event) => live(event, now));
   }
 

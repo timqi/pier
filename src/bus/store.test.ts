@@ -30,9 +30,9 @@ describe("BusStore", () => {
     publish(s, { key: "owner", kind: "fact", payload: '"bob"', writerSession: "b" }, 2000);
     publish(s, { key: "status", kind: "fact", payload: '"open"' }, 3000);
 
-    const all = s.latest("proj/auth", SCOPES);
+    const all = s.latest("proj/auth", SCOPES).winners;
     expect(all.map((e) => [e.key, e.payload])).toEqual([["owner", '"bob"'], ["status", '"open"']]);
-    expect(s.latest("proj/auth", SCOPES, "owner")[0]?.payload).toBe('"bob"');
+    expect(s.latest("proj/auth", SCOPES, "owner").winners[0]?.payload).toBe('"bob"');
   });
 
   it("log reads incrementally by cursor and in write order", () => {
@@ -55,7 +55,7 @@ describe("BusStore", () => {
     const s = store();
     publish(s, { key: "owner", kind: "fact" }, 1000);
     s.forget("proj/auth", "owner", SCOPE, "a", undefined, 2000);
-    expect(s.latest("proj/auth", SCOPES, "owner")).toEqual([]);
+    expect(s.latest("proj/auth", SCOPES, "owner").winners).toEqual([]);
     const kinds = s.log("proj/auth", SCOPES).events.map((e) => e.kind);
     expect(kinds).toEqual(["fact", "tombstone"]);
   });
@@ -64,8 +64,8 @@ describe("BusStore", () => {
     const s = store();
     publish(s, { key: "k", kind: "fact", payload: '"old"' }, 0);
     publish(s, { key: "k", kind: "fact", payload: '"new"', ttlSeconds: 10 }, 1000);
-    expect(s.latest("proj/auth", SCOPES, "k", 5000)[0]?.payload).toBe('"new"');
-    expect(s.latest("proj/auth", SCOPES, "k", 12_000)).toEqual([]);
+    expect(s.latest("proj/auth", SCOPES, "k", 5000).winners[0]?.payload).toBe('"new"');
+    expect(s.latest("proj/auth", SCOPES, "k", 12_000).winners).toEqual([]);
   });
 
   it("ids stay monotonic across a restart even when the clock steps back", () => {
@@ -88,10 +88,10 @@ describe("BusStore", () => {
     publish(s, { key: "k", kind: "fact", payload: '"override"', scope: "project:/p" }, 2000);
     publish(s, { key: "k", kind: "fact", payload: '"new-default"', scope: "instance" }, 3000);
     // The newer instance write does not poison the project's own fact …
-    expect(s.latest("proj/auth", scopes, "k")[0]?.payload).toBe('"override"');
+    expect(s.latest("proj/auth", scopes, "k").winners[0]?.payload).toBe('"override"');
     // … and a tombstone ends only its own scope's claim.
     s.forget("proj/auth", "k", "project:/p", "a", undefined, 4000);
-    expect(s.latest("proj/auth", scopes, "k")[0]?.payload).toBe('"new-default"');
+    expect(s.latest("proj/auth", scopes, "k").winners[0]?.payload).toBe('"new-default"');
   });
 
   it("latest refuses two sibling run scopes each holding a live value under one key", () => {
@@ -102,11 +102,19 @@ describe("BusStore", () => {
     // Sibling run trees have no narrow-to-wide order; picking by the scope
     // set's insertion order would silently drop the other sibling's value.
     expect(() => s.latest("proj/auth", scopes, "k")).toThrow(/ambiguous/);
+    // The refusal names the escape it expects the caller to use.
+    expect(() => s.latest("proj/auth", scopes, "k")).toThrow(/run:r1 or run:r2/);
+    // Keyless, the contest is a result: a throw would let one contested key
+    // hide every uncontested one on the topic.
+    publish(s, { key: "other", kind: "fact", payload: '"plain"', scope: "run:r1" }, 2500);
+    const both = s.latest("proj/auth", scopes, undefined, 2600);
+    expect(both.winners.map((e) => [e.key, e.payload])).toEqual([["other", '"plain"']]);
+    expect(both.ambiguous).toEqual([{ key: "k", scopes: ["run:r1", "run:r2"] }]);
     // One live sibling is not an ambiguity — tombstoning the other resolves it …
     s.forget("proj/auth", "k", "run:r2", "a", undefined, 3000);
-    expect(s.latest("proj/auth", scopes, "k", 4000)[0]?.payload).toBe('"one"');
+    expect(s.latest("proj/auth", scopes, "k", 4000).winners[0]?.payload).toBe('"one"');
     // … and a single-run caller never trips it.
-    expect(s.latest("proj/auth", ["run:r2", "instance"], "k", 4000)).toEqual([]);
+    expect(s.latest("proj/auth", ["run:r2", "instance"], "k", 4000).winners).toEqual([]);
   });
 
   it("reads are fenced by scope", () => {
@@ -115,9 +123,9 @@ describe("BusStore", () => {
     publish(s, { key: "k", kind: "fact", scope: "project:/q", payload: '"theirs"' });
     publish(s, { key: "k", kind: "fact", scope: "instance", payload: '"shared"' });
 
-    expect(s.latest("proj/auth", ["project:/p"], "k")[0]?.payload).toBe('"v"');
+    expect(s.latest("proj/auth", ["project:/p"], "k").winners[0]?.payload).toBe('"v"');
     expect(s.log("proj/auth", ["project:/p", "instance"]).events).toHaveLength(2);
-    expect(s.latest("proj/auth", [], "k")).toEqual([]);
+    expect(s.latest("proj/auth", [], "k").winners).toEqual([]);
   });
 
   it("computes hops from caused_by and refuses a chain past the ceiling", () => {
@@ -240,7 +248,7 @@ describe("BusStore", () => {
     // no live event a caller could name as a boundary.
     expect(s.archiveDeadRunScope("run:r1")).toBe(2);
     expect(s.log("proj/*", ["run:r1", SCOPE]).events.map((e) => e.id)).toEqual([kept.id]);
-    expect(s.latest("proj/auth", ["run:r1"], "k")).toEqual([]);
+    expect(s.latest("proj/auth", ["run:r1"], "k").winners).toEqual([]);
     expect(s.search("run-chatter", ["run:r1", SCOPE])).toEqual([]); // FTS followed the DELETE
     expect(s.search("run-fact", ["run:r1", SCOPE])).toEqual([]);
     // History and identity survive, so a cursor into the swept scope still acks.
@@ -267,7 +275,7 @@ describe("BusStore", () => {
     expect(s.archive("proj/auth", old2.id, SCOPE)).toBe(2);
     // Default reads see only what stayed live …
     expect(s.log("proj/*", SCOPES).events.map((e) => e.id)).toEqual([fresh.id]);
-    expect(s.latest("proj/auth", SCOPES, "k")).toEqual([]);
+    expect(s.latest("proj/auth", SCOPES, "k").winners).toEqual([]);
     expect(s.search("old-1", SCOPES)).toEqual([]);
     // … history is one flag away, in order, cursor semantics intact.
     const all = s.log("proj/*", SCOPES, "", 50, true);
@@ -331,6 +339,36 @@ describe("BusStore", () => {
     expect(after[1]!.lastReadAt).toBeNull();
   });
 
+  it("adminFacts settles liveness before the cap, so the page cannot be all expired", () => {
+    const s = store();
+    // The safety stop is 1000 rows in key order. With the TTL filter applied
+    // after it, a topic holding 1000 expired facts answers with an empty page
+    // and the live key behind them is simply not there.
+    for (let i = 0; i < 1000; i++) {
+      publish(s, {
+        key: `k${String(i).padStart(4, "0")}`, kind: "fact", payload: '"gone"',
+        ttlSeconds: 10, writerSession: `w${i}`,
+      }, 1000);
+    }
+    publish(s, { key: "zzz-live", kind: "fact", payload: '"here"' }, 1000);
+    const facts = s.adminFacts("proj/auth", SCOPE, 100_000);
+    expect(facts.map((e) => e.key)).toEqual(["zzz-live"]);
+    // Before it expires, the same page answers with everything.
+    expect(s.adminFacts("proj/auth", SCOPE, 2000)).toHaveLength(1000); // capped at the stop
+  });
+
+  it("search relabels only the caller's grammar — a broken database reaches them as itself", () => {
+    const db = openDb(":memory:");
+    const s = new BusStore(db);
+    s.publish({ topic: "proj/auth", payload: '"token"', scope: SCOPE, writerSession: "a" });
+    const locked = Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5 });
+    (db as unknown as { prepare: () => never }).prepare = () => { throw locked; };
+    // The retry exists for FTS5 query syntax. Catching everything sent
+    // SQLITE_BUSY, I/O errors and corruption to whoever debugs a typo.
+    expect(() => s.search("token", SCOPES)).toThrow(locked);
+    expect(() => s.search("token", SCOPES)).not.toThrow(/valid search query/);
+  });
+
   it("read stamps coalesce to the hour — the read paths are hot", () => {
     const s = store();
     publish(s, { topic: "proj/auth", payload: '"1"' }, 1000);
@@ -352,6 +390,10 @@ describe("BusStore", () => {
     expect(() => publish(s, { ttlSeconds: 60 })).toThrow(/facts/);
     expect(() => publish(s, { key: "k", kind: "fact", ttlSeconds: -1 })).toThrow(/positive integer/);
     expect(() => publish(s, { filePtr: "relative/path.md" })).toThrow(/absolute/);
+    // A key is a name: it rides in every get, index row and error message.
+    expect(() => publish(s, { key: "k".repeat(257), kind: "fact" })).toThrow(/key exceeds 256 bytes/);
+    expect(() => publish(s, { key: "\u00e9".repeat(129), kind: "fact" })).toThrow(/key exceeds 256 bytes/); // bytes, not chars
+    expect(() => publish(s, { key: "k".repeat(256), kind: "fact" })).not.toThrow();
     expect(() => s.log("proj/{bad}", SCOPES)).toThrow(/topic_glob/);
   });
 });

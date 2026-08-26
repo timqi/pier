@@ -43,6 +43,10 @@ export interface SidebarDeps {
   /** The desk folder's canonical path, from GET /api/settings; `null` until
    *  that answer lands. A session whose cwd is it renders as Desk. */
   deskDir: () => string | null;
+  /** The bus capability, from the same answer. Desk's continuity across its own
+   *  reset *is* the bus (`desk/threads`), so opening one is gated on it — the
+   *  row stays, saying why, rather than vanishing. */
+  busEnabled: () => boolean;
   /** Seed the folder if needed and open a desk session — POST /api/desk. */
   openDesk: () => void;
   /** Open the Files view on a project's cwd (views.ts, wired through main). */
@@ -139,24 +143,20 @@ function moved(keys: string[], key: string, target: string, after: boolean): str
 // stored about it: it is a pinned session whose cwd is the desk folder, so the
 // rail derives it exactly the way it derives Projects.
 
-/** Newest desk sessions the rail draws. A reset makes a session rather than
- *  reusing one, so an instance that resets weekly would otherwise grow the
- *  section forever; the ones past the cap are still in ⌘K, and the section
- *  says so rather than dropping them silently. */
-export const DESK_CAP = 5;
-
-/** The Desk group, how many older desk sessions the cap hid, and everything
- *  left for Projects. Pure and exported because "is this cwd the desk?" is the
- *  entire feature and deserves a test without a DOM. */
+/** The desk conversation the rail points at — the newest, because a reset
+ *  makes a session rather than reusing one — and everything left for Projects.
+ *  Pure and exported because "is this cwd the desk?" is the entire feature and
+ *  deserves a test without a DOM. The predecessors are not lost: they are
+ *  pinned sessions, so ⌘K lists them like every other one, and a group here
+ *  would have been a second place keeping the same list. */
 export function splitDesk(
   list: SessionInfo[],
   deskDir: string | null,
-): { desk: SessionInfo[]; older: number; rest: SessionInfo[] } {
-  if (!deskDir) return { desk: [], older: 0, rest: list };
-  const desk = list.filter((s) => s.cwd === deskDir).sort((a, b) => b.createdAt - a.createdAt);
+): { newest: SessionInfo | null; rest: SessionInfo[] } {
+  if (!deskDir) return { newest: null, rest: list };
+  const desk = list.filter((s) => s.cwd === deskDir);
   return {
-    desk: desk.slice(0, DESK_CAP),
-    older: Math.max(0, desk.length - DESK_CAP),
+    newest: desk.reduce<SessionInfo | null>((a, b) => (a && a.createdAt >= b.createdAt ? a : b), null),
     rest: list.filter((s) => s.cwd !== deskDir),
   };
 }
@@ -378,46 +378,42 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   return el;
 }
 
-/** The Desk section, above Projects. With no desk session it is a single
- *  "Desk — open" row: that row is how the feature is discovered, and having it
- *  always present is what makes a stored "seeded" flag unnecessary. */
-function deskSection(dir: string, list: SessionInfo[], older: number): HTMLElement {
-  const label = (extra: string): HTMLElement =>
+/** The Desk row: one row, at the Projects header's own level, pointing at the
+ *  newest desk conversation. With none it is the "open" row — that is how the
+ *  feature is discovered, and having it always present is what makes a stored
+ *  "seeded" flag unnecessary. With the bus off there is nothing to open yet:
+ *  the row stays and says so, because a vanished row and an absent feature read
+ *  the same (§5b). Sessions that already exist are never gated. */
+function deskRow(dir: string, newest: SessionInfo | null, busEnabled: boolean): HTMLElement {
+  const active = newest?.id === deps.currentId();
+  const row = h(
+    "div",
+    `flex items-center gap-1.5 border-b border-neutral-200/70 px-3 py-1.5 ${
+      newest || busEnabled ? "cursor-pointer hover:bg-neutral-100" : ""
+    } ${active ? "bg-indigo-50 hover:bg-indigo-50" : ""}`,
     h(
       "span",
-      `flex-none font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500 ${extra}`,
+      `flex-none font-mono text-[11px] font-semibold uppercase tracking-wide ${
+        newest || busEnabled ? "text-neutral-500" : "text-neutral-300"
+      }`,
       "Desk",
-    );
-  if (!list.length) {
-    const row = h(
-      "div",
-      "flex cursor-pointer items-center gap-1.5 border-b border-neutral-200/70 px-3 py-1.5 hover:bg-neutral-100",
-      label(""),
-      h("span", "truncate text-[12.5px] text-neutral-400", "\u2014 open"),
-    );
-    row.title = `Create ${dir} and open the dispatcher conversation`;
-    row.onclick = () => deps.openDesk();
+    ),
+  );
+  if (newest) {
+    row.append(stateDot(newest), h("span", "truncate text-[12.5px] text-neutral-500", newest.title ?? "untitled"));
+    row.title = `${dir}\nOlder desk conversations are in \u2318K`;
+    row.onclick = () => deps.select(newest.id);
     return row;
   }
-  const { el, summary } = detailsRow("border-b border-neutral-200/70", [
-    label("truncate"),
-    h("span", "ml-auto flex-none text-[11px] text-neutral-400", String(list.length + older)),
-  ]);
-  summary.className += " px-3 py-1.5 hover:bg-neutral-100";
-  summary.title = dir;
-  el.open = !collapsed.has(dir);
-  el.ontoggle = () => setCollapsed(dir, !el.open);
-  const rows = h("ul", "pb-1");
-  rows.append(...list.map(sessionRow));
-  if (older) {
-    rows.append(h(
-      "li",
-      "px-6 py-1 text-[11.5px] italic text-neutral-400",
-      `${String(older)} older in \u2318K`,
-    ));
+  if (!busEnabled) {
+    row.append(h("span", "truncate text-[12.5px] text-neutral-300", "\u2014 bus off"));
+    row.title = "Desk keeps what it recovers after a reset on the bus — turn it on in Console → Bus";
+    return row;
   }
-  el.append(rows);
-  return el;
+  row.append(h("span", "truncate text-[12.5px] text-neutral-400", "\u2014 open"));
+  row.title = `Create ${dir} and open the dispatcher conversation`;
+  row.onclick = () => deps.openDesk();
+  return row;
 }
 
 export function renderSessions(): void {
@@ -432,10 +428,10 @@ export function renderSessions(): void {
   // attention state, it is a session counter.
   setUnreadBadge(sessions.filter((s) => s.unread && s.channel === "web").length);
   const dir = deps.deskDir();
-  const { desk, older } = splitDesk(sessions.filter((s) => s.pinned), dir);
+  const { newest } = splitDesk(sessions.filter((s) => s.pinned), dir);
   const projects = pinnedProjects();
   projectTree.replaceChildren(
-    ...(dir ? [deskSection(dir, desk, older)] : []),
+    ...(dir ? [deskRow(dir, newest, deps.busEnabled())] : []),
     ...(projects.length
       ? projects.map(([cwd, list]) => projectNode(cwd, list))
       : [

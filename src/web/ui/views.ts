@@ -29,6 +29,10 @@ export interface ViewsDeps {
   select: (id: string) => void;
   /** The selected session's turns just came (back) on screen. */
   maybeAckRead: () => void;
+  /** Re-read the instance facts the rail draws from — the Bus view can flip the
+   *  switch the Desk row is gated on, and a rail still claiming the old answer
+   *  would contradict the control the operator just used. */
+  reloadInstance: () => void;
 }
 
 let deps: ViewsDeps;
@@ -233,6 +237,7 @@ export function initViews(d: ViewsDeps): void {
     // A seeded librarian is a task like any other, so its row hands off to the
     // panel that owns it.
     showTasks,
+    d.reloadInstance,
   );
   consoleViews = [
     { name: "tasks", view: tasksView },

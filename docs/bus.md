@@ -18,12 +18,18 @@ The `bus` tool's operations:
   plain event, a moment on the stream. Payload is JSON, 8KB max: large content
   goes to a file, whose absolute path rides in `file_ptr`.
 - `get {topic, key?}` returns the newest live fact per `(topic, key)` — with
-  `key` one value or `null`, without it every live pair on the topic.
+  `key` one value or `null`, without it every live pair on the topic. A key two
+  of the caller's active run trees answer differently is the one thing it
+  cannot decide (Scope below): keyed, that is a refusal naming the
+  `run:<rootRunId>` escape; keyless it is a `{key, ambiguous: true, scopes}`
+  entry beside the other keys, because one contested key must not hide a topic.
 - `log {topic_glob, after?, limit?}` returns events after the cursor in write
   order plus the next cursor. Tombstones appear here — a reader syncing state
   needs the deletions too. A glob that exactly matches one of the caller's
-  subscriptions reads the subscription's pinned scopes, and the response says
-  so in `pinned_scopes` (Delivery below explains why the fence is pinned).
+  subscriptions reads the subscription's pinned scopes and the live+archive
+  union, and the response says so in `pinned_scopes` (Delivery below explains
+  why the fence is pinned, and archive below why the union is not optional
+  there).
 - `subscribe {topic_glob, mode?}` asks to be told about writes the caller can
   see; `unsubscribe` stops it; `ack {topic_glob, cursor}` confirms progress —
   `get` and `log` never move a cursor, only `ack` does, and only forward: an
@@ -83,15 +89,22 @@ The `bus` tool's operations:
   terminal and moves the dead ones to the archive wholesale, no glob and no
   anchor, because nothing in them is reachable. It is loud per scope (a log
   line naming the scope and the count, and a `bus-changed` announce) and
-  silent only in the ordinary hour that sweeps nothing. Whether a tree is dead
-  is not the bus's knowledge: main.ts injects the predicate, and a root run id
+  silent only in the ordinary hour that sweeps nothing. Every read that counts
+  a *subscription's* backlog counts the union — the pointer's number and the
+  check that settles a note — so archiving unacked events can never quietly
+  retire a wake that is still owed. Whether a tree is dead is not the bus's
+  knowledge: main.ts injects the predicate, and a root run id
   the task store does not know counts as *alive* — task_runs rows are never
   pruned, so an unknown root is a run being created, not one Pier forgot. One
   consequence, since the sweep runs on the clock and not on a reader: a
-  subscriber draining its dead tree's backlog after that hour reads it with
-  `log {include_archived: true}`, and so does a *resumed* run, which revives
-  its root's scope with its facts already moved; cursors stay valid either way
-  — `ack` and `caused_by` read the live+archive union. Both are the ephemerality
+  subscriber's backlog can be archived between the pointer and the read. That
+  is why the subscription's own drain — a `log` whose glob exactly matches it —
+  reads the union with no flag asked for: the count it was woken with was
+  computed over the union, so the read has to answer from the same rows.
+  `include_archived` remains for everyone else, a *resumed* run included, which
+  revives its root's scope with its facts already moved and is reading history
+  rather than draining a wake. Cursors stay valid either way — `ack` and
+  `caused_by` read the live+archive union. Both are the ephemerality
   the scope was declared with, now enforced instead of merely stated.
 - `forget {topic, key, caused_by?}` writes a tombstone — into the scope where
   the currently visible winner lives, so forgetting a project fact from inside
@@ -132,10 +145,16 @@ newest write wins and a tombstoned or expired winner does not resurface older
 writes; it only lets a *wider* scope's live value show through, which is what
 makes forgetting an override reveal the default. Sibling run trees are the
 one place shadowing has no answer — between two active trees there is no
-narrow-to-wide order — so a `get` that finds a live value in each is refused
-as ambiguous rather than picked by the scope set's insertion order, mirroring
-the write-side refusal of `scope: 'run'` across several trees; an explicit
-`scope` disambiguates.
+narrow-to-wide order — so a keyed `get` that finds a live value in each is
+refused as ambiguous rather than picked by the scope set's insertion order,
+mirroring the write-side refusal of `scope: 'run'` across several trees. The
+escape both refusals name is `scope: 'run:<rootRunId>'` — one tree by id,
+validated against the caller's own memberships (its own tree, or the active
+ones it delegated), an exact fence wherever `scope` is accepted; naming a tree
+the caller does not stand in is refused, so the parameter widens nothing. A
+*keyless* `get` refuses nothing: it returns the uncontested winners and marks
+each contested key `{key, ambiguous: true, scopes}`, because a topic-wide read
+that throws lets one contested key hide every other key on the topic.
 
 Two declared limits: run scope is **ephemeral** — when the run tree ends,
 nothing resolves to it any more and the hourly sweep above moves its events to
@@ -155,8 +174,9 @@ All of these live in the store, under every write path, so no future caller
 (P2 delivery, P3 librarian) can publish around them — including shape: kind
 must agree with key presence (a keyed write is a fact, a tombstone needs a
 key), the payload must parse as JSON (one unparseable row would throw for
-every reader of every page containing it), `ttl_seconds` needs a fact,
-`file_ptr` must be absolute:
+every reader of every page containing it), `ttl_seconds` needs a fact, a key
+is a name and not a payload (256 bytes — it rides in every `get`, index row and
+error message), `file_ptr` must be absolute:
 
 - **Hop ceiling.** A publish reacting to a read event names it in `caused_by`;
   the new event's `hops` is the parent's plus one, and past 4 the write is
@@ -187,7 +207,12 @@ own transcript already shows the write) and leaves each matched subscriber a
 **note**: at most one open per subscription, which *is* the coalescing — a
 reader owed a pointer is not owed two, and the count in the text is computed
 against the sub's cursor at delivery time, so it is true when read, not when
-queued. The notification names the newest event id so a reactive publish can
+queued. The event and the notes it opens are **one transaction**: an event
+written without its notes is durable and undeliverable forever — the recovery
+sweep's worklist is notes, not events — and a note that fails to save after the
+insert would report a failure for a publish that persisted, inviting a second
+copy of it. The delivery itself starts after the commit, never inside it. The
+notification names the newest event id so a reactive publish can
 carry it as `caused_by`; the hop ceiling closes the notify→publish→notify loop.
 
 One accepted risk, recorded rather than hidden: `caused_by` is voluntary. Two
@@ -220,9 +245,9 @@ interrupted. A steer already handed to Pi rides an in-memory queue until the
 next step boundary, where the transcript cannot prove it yet — the engine
 treats it as in-flight, not late, so a long tool call is never "undeliverable".
 
-A subscription's `log` reads its **pinned** scopes (an exact `topic_glob`
-match), not the caller's live ones: the pointer's count was computed against
-the pinned set, and a run-scoped subscriber must be able to drain its backlog
+A subscription's `log` reads its **pinned** scopes and the live+archive union
+(an exact `topic_glob` match), not the caller's live ones: the pointer's count
+was computed against the pinned set, and a run-scoped subscriber must be able to drain its backlog
 after its run tree ends — with live scopes it would be woken forever for
 events its log could no longer show. The re-fenced read is never silent: the
 response carries the pinned set as `pinned_scopes`, so the same query's
@@ -276,10 +301,24 @@ Keep the name: `bus-librarian` is the marker detection reads, so a hand-written
 task called something else is invisible to the Bus view, which will go on
 offering to seed one.
 
-The librarian sees the scopes of the cwd it is given (plus `instance`); an
-instance with several active projects runs one librarian per project root, or
-one in any cwd for `instance`-scoped topics only. Two rules make its runs
-safe: a cron/watch/manual *root* run has no run-scope default — a run scope is
+The librarian sees the scopes of the cwd it is given (plus `instance`), and
+maintains exactly one of them: **the project scope of its own cwd.** It skips
+`run:…` rows (live coordination space) and — the operator's decision, recorded
+here because the prompt enforces it — `instance` rows too: every project's
+librarian sees the same `instance` rows, so several of them would distill and
+archive the same topics against each other every night. So an instance with
+several active projects runs one librarian per project root, and each stays
+behind its own fence.
+
+**Instance-scope maintenance is therefore nobody's until someone creates it on
+purpose** — a single librarian for `instance` topics, made with the recipe
+above (cwd anywhere, its prompt edited in the Tasks panel to maintain `scope:
+"instance"` instead of `project`) and never from the Console button, which only
+ever seeds a project's. Recorded as a future concern, not built: nothing today
+summarizes or archives `instance` topics, and a librarian that reports an
+`instance` row it left alone is how that shows up.
+
+Two rules make its runs safe: a cron/watch/manual *root* run has no run-scope default — a run scope is
 a coordination space, and a run nobody delegated has no one standing in it, so
 the librarian's unscoped writes would otherwise vanish with the run (main.ts
 resolves this; the prompt still demands explicit scopes) — and its archive
@@ -290,7 +329,11 @@ summarized twice.
 ## The Console view
 
 Console → Bus is the bus's one visible surface: four read-only sections, one tab
-each, plus the two writes above them — the capability switch and Seed librarian.
+each, plus the two writes above them — the capability switch, and the librarian
+on one line (`Librarian: <cwd> · <schedule>`, or `none — Seed…` which opens the
+project picker inline). One line because that control is a link and a button:
+it had a section's worth of chrome around it, and the prose in it is in this
+document.
 Per section: per (topic, scope) the live and archived counts, when it last moved
 and when anyone last read it, with the live facts expandable underneath; every
 subscription with its cursor **lag as a number** against its pinned scopes; the
@@ -333,7 +376,14 @@ endpoint (`POST /api/bus/librarian`) is the area's one write, and it creates
 nothing bus-shaped: listing and creating tasks arrive as an injected seam wired
 in `main.ts`, because the bus must not import `tasks` (delivery stays the one
 sideways edge) while the librarian's marker, schedule and prompt are the bus's
-own. The
+own. That seam — `librarianSeam`, in `bus/librarian.ts` — answers "which
+directory already has one" in a single step, because the route cannot: it
+canonicalizes the cwd first (`/home/u/x` and `/essd/u/x` are one directory, and
+two spellings of it were two librarians over one project's topics) and
+serializes the check and the create per directory, since SQLite offers no
+transaction across that await and two clicks both saw "none". A refusal comes
+back as the row that already has the directory, so the second click is told it
+created nothing rather than shown a 201 for someone else's task. The
 queries behind it (`BusStore.adminTopics/adminFacts/adminTail`,
 `SubStore.adminSubs/adminNotes`) carry no scope fence: the fence answers "what
 may this *session* see" and the operator has no session — they are the person

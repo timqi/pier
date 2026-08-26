@@ -63,10 +63,14 @@ export interface LibrarianSeam {
    *  view's button has no second boolean to draw from and nothing to drift out
    *  of step with the Tasks panel. */
   list(): BusLibrarianRow[];
-  /** Creates an ordinary cron task for `cwd`; the Tasks panel owns it from the
-   *  moment it exists. Throws the task layer's own refusal (a cwd that is not a
-   *  directory, an unusable timezone) rather than translating it. */
-  seed(cwd: string): Promise<BusLibrarianRow>;
+  /** Finds or creates the librarian for `cwd` — one step, and one at a time:
+   *  the cwd is canonicalized first (two spellings of a directory are two
+   *  librarians over one project's topics) and a second call queues behind the
+   *  first instead of racing its list check. `created: false` carries the row
+   *  that already has the directory. Throws the task layer's own refusal (a cwd
+   *  that is not a directory, an unusable timezone) rather than translating it.
+   *  Implemented by `librarianSeam` (librarian.ts) over main.ts's task store. */
+  seed(cwd: string): Promise<{ librarian: BusLibrarianRow; created: boolean }>;
 }
 
 export function registerBusRoutes(
@@ -142,13 +146,16 @@ export function registerBusRoutes(
     // A relative path would make a librarian whose scope depends on where Pier
     // was started from; the task layer checks that it is a directory.
     if (!cwd.startsWith("/")) return c.json({ error: "an absolute cwd is required" }, 400);
-    const existing = deps.librarian.list().find((row) => row.cwd === cwd);
-    // Refused with the row, not silently ignored and not created twice: two
-    // librarians in one cwd would summarize and archive the same topics against
-    // each other every night, and the caller needs to know which one won.
-    if (existing) return c.json({ error: `a librarian already maintains ${cwd}`, librarian: existing }, 409);
     try {
-      return c.json({ librarian: await deps.librarian.seed(cwd) }, 201);
+      // The check *is* the create (the seam's own contract): asking here whether
+      // one exists and then creating one is two awaits, and two clicks fit
+      // between them. Refused with the row rather than silently ignored — two
+      // librarians in one cwd would archive the same topics against each other
+      // every night, and the caller needs to know which one won.
+      const { librarian, created } = await deps.librarian.seed(cwd);
+      return created
+        ? c.json({ librarian }, 201)
+        : c.json({ error: `a librarian already maintains ${librarian.cwd}`, librarian }, 409);
     } catch (err) {
       return c.json({ error: String(err) }, 400);
     }

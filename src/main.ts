@@ -14,6 +14,7 @@ import {
   LIBRARIAN_DESCRIPTION,
   LIBRARIAN_NAME,
   librarianPrompt,
+  librarianSeam,
 } from "./bus/librarian.js";
 import { registerBusRoutes } from "./bus/routes.js";
 import { BusStore } from "./bus/store.js";
@@ -166,16 +167,21 @@ const factory = new PiAgentFactory(
               const delegated = run && (run.depth > 0 || run.triggerSource === "agent");
               return {
                 rootRunId: delegated ? run.rootRunId : undefined,
+                // Active in SQL, not a newest-50 page filtered afterwards: a
+                // child that has been running for hours falls off that page as
+                // newer runs finish above it, and its tree's facts would
+                // vanish from the coordinator's reads while it is still alive.
                 invokedRootRunIds: [...new Set(
-                  taskStore.listRunsForSession(sessionId)
-                    .filter((child) => !isTerminal(child.state))
+                  taskStore.listRunsForSession(sessionId, 200, true)
                     .map((child) => child.rootRunId),
                 )],
                 cwd: await sessionCwd(sessionId),
               };
             },
           },
-          notify: (event) => busDelivery.notify(event),
+          // The notes, written inside the publish's transaction; the returned
+          // kick starts delivery after it commits (bus/tool.ts).
+          notify: (event) => busDelivery.noteFor(event),
         }, params, callerSessionId);
         // Every accepted operation moved durable state the Bus view shows —
         // a write, a subscription, or a read stamp. A refused one threw,
@@ -441,7 +447,10 @@ const librarianRow = (task: TaskDefinition): BusLibrarianRow | null =>
     ? {
       taskId: task.id,
       name: task.name,
-      cwd: task.action.session.cwd,
+      // The same canonicalization the bus scope gets, for the same reason: a
+      // librarian seeded under an alias before this rule existed still has to
+      // be recognized as the one that maintains that directory.
+      cwd: canonicalCwd(task.action.session.cwd) ?? task.action.session.cwd,
       schedule: task.trigger.type === "cron"
         ? `${task.trigger.expression} (${task.trigger.timezone})`
         : task.trigger.type,
@@ -452,9 +461,13 @@ registerBusRoutes(app, {
   events: busStore,
   subs: busSubs,
   enabled: () => settings.get().busEnabled,
-  librarian: {
+  // One librarian per directory, in one spelling, created once even under two
+  // clicks: the seam owns that rule (bus/librarian.ts), this hands it the task
+  // store it has no business importing.
+  librarian: librarianSeam({
+    canonical: canonicalCwd,
     list: () => taskStore.listTasks().flatMap((task) => librarianRow(task) ?? []),
-    seed: async (cwd) => {
+    create: async (cwd) => {
       // A plain cron task, and deliberately without a model: catalogs move, and
       // a pinned id would outlive the model it names — the operator picks one in
       // the Tasks panel if they want a specific one.
@@ -479,7 +492,7 @@ registerBusRoutes(app, {
       if (!row) throw new Error("seeded librarian does not match its own marker");
       return row;
     },
-  },
+  }),
 });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);

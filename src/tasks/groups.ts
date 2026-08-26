@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { runResultText } from "./callbacks.js";
+import { runRef, runResultText } from "./callbacks.js";
 import { Outbox } from "./outbox.js";
 import { TaskStore } from "./store.js";
 import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
@@ -153,7 +153,7 @@ export class TaskGroups {
     const sections = members.map((run) => {
       const head = [
         `- "${run.context.definition.name}" \u2014 state: ${run.state}`,
-        `  Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`,
+        `  ${runRef(run)}`,
       ];
       const decision = this.host.openDecisionId(run.id);
       if (decision) head.push(`  Needs a decision: reply to message ${decision}`);

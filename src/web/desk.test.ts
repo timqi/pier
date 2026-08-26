@@ -3,7 +3,17 @@
 // the templates' prose — freezing a prompt's wording freezes the one thing
 // that must stay editable (docs/design/06-desk.md).
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -53,6 +63,43 @@ describe("desk seeding", () => {
     await seedDesk(dir);
     expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
   });
+
+  it("writes the templates 0600 — a dispatcher prompt is this instance's", async () => {
+    const dir = join(tmp(), "desk");
+    await seedDesk(dir);
+    expect(mode(join(dir, "AGENTS.md"))).toBe(0o600);
+    expect(mode(join(dir, "projects.md"))).toBe(0o600);
+  });
+
+  it("tightens a folder that already existed with a wider mode", async () => {
+    const dir = join(tmp(), "desk");
+    mkdirSync(dir, { mode: 0o755 });
+    // mkdir's mode applies only to a directory it creates, so without the
+    // chmod an existing 0755 desk folder kept it forever.
+    await seedDesk(dir);
+    expect(mode(dir)).toBe(0o700);
+  });
+
+  it("refuses a symlinked leaf instead of writing through it", async () => {
+    const home = tmp();
+    const elsewhere = join(home, "elsewhere");
+    mkdirSync(elsewhere);
+    const dir = join(home, "desk");
+    symlinkSync(elsewhere, dir);
+    // mkdir follows the link rather than failing, so the templates would have
+    // landed in whatever it points at — named, not silently accepted.
+    await expect(seedDesk(dir)).rejects.toThrow("symlink");
+    expect(existsSync(join(elsewhere, "AGENTS.md"))).toBe(false);
+  });
+
+  it("refuses a leaf whose parent link takes it out of PIER_HOME", async () => {
+    const home = tmp();
+    const real = join(home, "real");
+    mkdirSync(join(real, "desk"), { recursive: true });
+    symlinkSync(real, join(home, "link"));
+    await expect(seedDesk(join(home, "link", "desk"))).rejects.toThrow("resolves to");
+    expect(existsSync(join(real, "desk", "AGENTS.md"))).toBe(false);
+  });
 });
 
 describe("deskDir", () => {
@@ -67,11 +114,11 @@ describe("deskDir", () => {
 describe("POST /api/desk", () => {
   afterEach(() => rmSync(deskDir(), { recursive: true, force: true }));
 
-  const setup = () => {
+  const setup = (busEnabled = true) => {
     mkdirSync(PIER_HOME, { recursive: true });
     const openSession = vi.fn(async (cwd: string) => `session-in-${cwd}`);
     const app = new Hono();
-    registerDeskRoutes(app, openSession);
+    registerDeskRoutes(app, openSession, () => busEnabled);
     return { app, openSession };
   };
 
@@ -91,6 +138,17 @@ describe("POST /api/desk", () => {
     expect((await app.request("/api/desk", { method: "POST" })).status).toBe(201);
     expect(readFileSync(join(deskDir(), "projects.md"), "utf8")).toBe("mine");
     expect(openSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses while the bus is off, seeding nothing", async () => {
+    const { app, openSession } = setup(false);
+    const res = await app.request("/api/desk", { method: "POST" });
+    // Desk's continuity across its own reset is bus facts; with the capability
+    // off this click would open a conversation with no recovery story.
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: string }).error).toContain("bus is off");
+    expect(existsSync(deskDir())).toBe(false);
+    expect(openSession).not.toHaveBeenCalled();
   });
 
   it("says so when the folder cannot be created", async () => {

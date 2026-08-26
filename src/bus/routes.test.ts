@@ -14,8 +14,9 @@ function setup(enabled = true) {
   const events = new BusStore(db);
   const subs = new SubStore(db);
   const app = new Hono();
-  // The librarian seam stands in for main.ts's task-store wiring: the route
-  // only ever reads the list and asks for one to be created.
+  // The librarian seam stands in for main.ts's task-store wiring (the real one
+  // is librarianSeam, tested in librarian.test.ts): the route only ever reads
+  // the list and asks for the one that maintains a directory.
   const librarians: BusLibrarianRow[] = [];
   const seeded: string[] = [];
   let refuse: string | null = null;
@@ -27,6 +28,8 @@ function setup(enabled = true) {
       list: () => librarians,
       seed: (cwd) => {
         if (refuse) return Promise.reject(new Error(refuse));
+        const existing = librarians.find((row) => row.cwd === cwd);
+        if (existing) return Promise.resolve({ librarian: existing, created: false });
         seeded.push(cwd);
         const row: BusLibrarianRow = {
           taskId: `task-${String(librarians.length)}`,
@@ -36,7 +39,7 @@ function setup(enabled = true) {
           enabled: true,
         };
         librarians.push(row);
-        return Promise.resolve(row);
+        return Promise.resolve({ librarian: row, created: true });
       },
     },
   });
