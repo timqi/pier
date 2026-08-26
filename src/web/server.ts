@@ -12,6 +12,7 @@ import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
 import { Router } from "../core/router.js";
+import { registerDeskRoutes } from "./desk.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { guarded, registerFileRoutes } from "./files.js";
 import type {
@@ -234,18 +235,25 @@ export function createServer(
     );
   });
 
+  /** Open a session in `cwd` and make it part of the workspace: attached to
+   *  the web channel, pinned (Projects lists the pinned ones) and announced.
+   *  Every route that opens one — the dialog's, and the desk's — is this
+   *  sequence and nothing else, so it exists once (budget rule 3). */
+  const openSession = async (cwd: string): Promise<string> => {
+    const session = await factory.create({ cwd });
+    const createdAt = Date.now();
+    nascent.set(session.id, { cwd, createdAt });
+    router.attach({ channelId: "web", conversationId: session.id }, session);
+    state.pin({ id: session.id, cwd, createdAt }, true);
+    hub.emitWorkspace({ type: "sessions-changed" });
+    return session.id;
+  };
+
   app.post("/api/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     // A session always starts in its project directory — never in pier's own.
     if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
-    const session = await factory.create({ cwd: body.cwd });
-    const createdAt = Date.now();
-    nascent.set(session.id, { cwd: body.cwd, createdAt });
-    router.attach({ channelId: "web", conversationId: session.id }, session);
-    // Created here = part of the workspace; pinning is what Projects lists.
-    state.pin({ id: session.id, cwd: body.cwd, createdAt }, true);
-    hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ id: session.id }, 201);
+    return c.json({ id: await openSession(body.cwd) }, 201);
   });
 
   // Seen = read: a client with the session selected and the tab visible acks
@@ -458,6 +466,20 @@ export function createServer(
     return c.json({ messages: [...steering, ...followUp] });
   });
 
+  // Shrink the context on demand: Pi summarizes the older transcript away and
+  // the session continues from the summary. Refused while streaming, like the
+  // edit route above and for the same reason — Pi's own compaction aborts a
+  // running turn to do it, and losing a turn is not what the button offered.
+  // The result is not in this response: it arrives on the session's stream as
+  // `context-compacted` (agent/events.ts), which is also the only place the
+  // automatic compaction can be seen.
+  guarded(app, "POST", "/api/sessions/:id/compact", 404, async (c) => {
+    const session = await ensure(c.req.param("id"));
+    if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
+    await session.compact();
+    return c.json({ ok: true }, 202);
+  });
+
   app.post("/api/sessions/:id/abort", async (c) => {
     const id = c.req.param("id");
     await router.abort(id);
@@ -534,6 +556,7 @@ export function createServer(
     }
   });
 
+  registerDeskRoutes(app, openSession);
   registerInstanceRoutes(app, {
     settings,
     updates,

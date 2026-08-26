@@ -14,6 +14,7 @@ import {
   type SettingsStore,
 } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
+import { deskDir } from "./desk.js";
 
 /** How this instance replaces itself, or `null` where nothing supervises it.
  *  Injected so web/ never learns what systemd is — and so the install never
@@ -107,7 +108,14 @@ export function registerInstanceRoutes(
   // The catalog rides along: one round trip for the whole page, and the
   // switches cannot disagree with the setting they are drawn from. One shape
   // for both the read and the write, or the page reconciles two answers.
-  const instanceSettings = () => ({ ...settings.get(), extensionCatalog: extensions?.() ?? [] });
+  // `deskDir` rides along for the same reason and is *derived*, never stored:
+  // it is where PIER_HOME is, and the rail needs the canonical spelling to
+  // recognize a desk session by its cwd (web/desk.ts).
+  const instanceSettings = () => ({
+    ...settings.get(),
+    extensionCatalog: extensions?.() ?? [],
+    deskDir: deskDir(),
+  });
 
   app.get("/api/settings", (c) => c.json(instanceSettings()));
 

@@ -6,7 +6,10 @@
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
 import "./style.css";
-import { sendJson } from "./api.js";
+// One formatter from core, at runtime: how a token count is spelled is the
+// same question on every surface (session-header.ts asks it too).
+import { compact as tokens } from "../../core/reply.js";
+import { failure, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -101,6 +104,9 @@ declare const __PIER_VERSION__: string; // injected by vite.config.ts
 // --- state ---------------------------------------------------------------------
 
 let sessions: SessionInfo[] = [];
+/** The desk folder, derived server-side from PIER_HOME; null until the boot
+ *  settings read answers, which is the one thing the rail waits for. */
+let deskDir: string | null = null;
 let selectionSeq = 0;
 let currentId: string | null = null;
 let currentState: SessionState = "idle";
@@ -110,10 +116,12 @@ let turnOpen = false;
 
 // --- sessions --------------------------------------------------------------------
 
-async function createSession(cwd: string): Promise<void> {
-  const res = await sendJson("/api/sessions", { cwd });
+/** Open a session the server just created: list it, select it, put the cursor
+ *  in the composer. The two routes that create one differ in nothing else. */
+async function opened(post: Promise<Response>, what: string): Promise<void> {
+  const res = await post;
   if (!res.ok) {
-    appendTurn("error", `session create failed: ${res.status}`);
+    appendTurn("error", `${what} failed: ${await failure(res, "no reason given")}`);
     return;
   }
   const { id } = (await res.json()) as { id: string };
@@ -121,6 +129,13 @@ async function createSession(cwd: string): Promise<void> {
   await select(id);
   focusInput();
 }
+
+const createSession = (cwd: string): Promise<void> =>
+  opened(sendJson("/api/sessions", { cwd }), "session create");
+
+/** The Desk row: the folder is seeded server-side if it is not there yet, and
+ *  what comes back is an ordinary session that happens to live in it. */
+const openDesk = (): Promise<void> => opened(sendJson("/api/desk", {}), "desk open");
 
 /** `complete` = every session Pi knows, so it replaces the list. A Projects
  *  read speaks only for the pinned ones and merges instead: dropping the rest
@@ -259,6 +274,13 @@ function handleEvent(e: SessionEvent): void {
       break;
     case "queue-state":
       renderQueue(e.steering, e.followUp);
+      break;
+    case "context-compacted":
+      // The transcript keeps no trace of a compaction, so this line is the
+      // only place the button's effect — or an automatic one — is ever seen.
+      finalizeStreaming();
+      appendTurn("system", `Context compacted — ${tokens(e.before)} → ${tokens(e.after)}`);
+      scrollBottom();
       break;
     case "error":
       noteTurnError();
@@ -426,6 +448,8 @@ initSidebar({
   select: (id) => void select(id),
   sessionMenu,
   createSession,
+  deskDir: () => deskDir,
+  openDesk: () => void openDesk(),
   openFiles: showFiles,
   openTerminal: showTerminal,
   openConsole: showConsole,
@@ -434,6 +458,7 @@ initSidebar({
 initHeader({
   currentId: () => currentId,
   currentSession,
+  createSession: (cwd) => void createSession(cwd),
   syncBar,
   openFiles: showFiles,
   toggleFiles,
@@ -458,4 +483,14 @@ document.addEventListener("visibilitychange", maybeAckRead);
 window.addEventListener("focus", maybeAckRead);
 
 connectWorkspace();
+// One boot read for the one instance fact the rail needs: where the desk
+// folder is. Derived from PIER_HOME by the server (web/desk.ts) rather than
+// guessed here, and re-rendered when it lands — the rail draws fine without it
+// and gains its Desk section a moment later.
+void fetch("/api/settings")
+  .then((res) => (res.ok ? (res.json() as Promise<{ deskDir?: string }>) : null))
+  .then((s) => {
+    deskDir = s?.deskDir ?? null;
+    renderSessions();
+  });
 void refreshProjects().then(applyRoute);

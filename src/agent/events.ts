@@ -47,7 +47,11 @@ export interface PiEvent {
   toolName?: string;
   args?: unknown;
   isError?: boolean;
-  result?: { content?: TextPart[] };
+  // One field, two events: a tool's result content, and compaction's token
+  // counts. Structural typing is the seam's whole trick here — Pi's own union
+  // keeps them apart, and widening the mirror is cheaper than a second one.
+  result?: { content?: TextPart[]; tokensBefore?: number; estimatedTokensAfter?: number };
+  errorMessage?: string;
   steering?: readonly string[];
   followUp?: readonly string[];
 }
@@ -265,6 +269,24 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
           followUp: [...(e.followUp ?? [])],
         },
       ];
+    case "compaction_end": {
+      // The only trace compaction leaves anywhere: Pi replaces the summarized
+      // entries with a `compactionSummary` message, which `toChatTurns` above
+      // renders nothing for — so without this event the button's effect is
+      // invisible and the automatic one is invisible twice over (§5b).
+      const r = e.result;
+      if (r && typeof r.tokensBefore === "number") {
+        return [{
+          type: "context-compacted",
+          before: r.tokensBefore,
+          after: r.estimatedTokensAfter ?? r.tokensBefore,
+        }];
+      }
+      // No result means the context was *not* shrunk — cancelled, or the
+      // summarization call failed. A manual compact reports through its route
+      // as well; an automatic one has no route, and this is all it has.
+      return [{ type: "error", message: e.errorMessage ?? "compaction cancelled" }];
+    }
     case "tool_execution_end":
       return [
         {

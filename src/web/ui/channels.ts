@@ -43,6 +43,11 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     : "telegram";
   let config: ChannelConfig | null = null;
   let models: ModelRef[] = [];
+  // Offered under the per-chat directory field, never written into it: a DM
+  // that lands in the desk folder reaches the dispatcher instead of a session
+  // in Pier's own cwd, and this is the whole of phase 1's "IM default"
+  // (docs/design/06-desk.md) — a suggestion, not a behaviour change.
+  let deskDir = "";
 
   // Embedded under Settings → Channels, so the platform strip is the only
   // chrome this view owns. Sticky inside its own scroll container: a config
@@ -151,6 +156,10 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     if (!models.length) {
       const list = await fetch("/api/models");
       if (list.ok) models = (await list.json()) as ModelRef[];
+    }
+    if (!deskDir) {
+      const instance = await fetch("/api/settings");
+      if (instance.ok) deskDir = ((await instance.json()) as { deskDir?: string }).deskDir ?? "";
     }
     const res = await fetch(`/api/channels/${platform}`);
     if (!res.ok) {
@@ -324,7 +333,9 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const grid = h(
       "div",
       "mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2",
-      field("Working directory", cwd.el),
+      field("Working directory", cwd.el, {
+        hint: deskDir ? `Empty = Pier's own directory. The desk folder is ${deskDir}` : "",
+      }),
       launchField("Model & reasoning", chat, models, set((next) => {
         chat.model = next.model;
         chat.thinking = next.thinking;

@@ -25,7 +25,7 @@
     "dev": "npm run build:web && tsx watch src/main.ts",
     "dev:web": "vite",
     "build": "tsc && npm run build:web && npm run build:assets",
-    "build:assets": "mkdir -p dist/boards dist/bus dist/web && cp src/boards/pier.css dist/boards/ && cp src/bus/librarian-prompt.md dist/bus/ && rm -rf dist/web/public && cp -r src/web/public dist/web/public",
+    "build:assets": "mkdir -p dist/boards dist/bus dist/web && cp src/boards/pier.css dist/boards/ && cp src/bus/librarian-prompt.md dist/bus/ && cp src/web/desk-AGENTS.md src/web/desk-projects.md dist/web/ && rm -rf dist/web/public && cp -r src/web/public dist/web/public",
     "prepack": "npm run build",
     "build:web": "vite build",
     "check": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",

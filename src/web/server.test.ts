@@ -27,6 +27,7 @@ import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
+import { deskDir } from "./desk.js";
 import { createServer, tabPrefix, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
 
@@ -88,6 +89,7 @@ function fakeSession(id: string): AgentSession & {
       state = "idle";
     },
     rewindToUserTurn: async (i: number) => void calls.push(`rewind:${i}`),
+    compact: async () => void calls.push("compact"),
     pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
     clearQueue: async () => {
       calls.push("clearQueue");
@@ -116,6 +118,9 @@ const SETTINGS_JSON = {
   extensions: [],
   busEnabled: false,
   extensionCatalog: CATALOG.map((ext) => ({ ...ext, enabled: false })),
+  // Derived from PIER_HOME, never stored — the rail needs it to tell a desk
+  // session from a project one (web/desk.ts).
+  deskDir: deskDir(),
 };
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
@@ -1419,6 +1424,41 @@ describe("workbench server", () => {
     const res = await app.request("/api/sessions/s1/abort", { method: "POST" });
     expect(res.status).toBe(202);
     expect(session.calls).toContain("abort");
+  });
+
+  it("compacts a session's context through the seam, once", async () => {
+    const { app, session } = setup();
+    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
+    expect(res.status).toBe(202);
+    expect(session.calls.filter((c) => c === "compact")).toEqual(["compact"]);
+  });
+
+  it("refuses to compact a running turn instead of aborting it", async () => {
+    const { app, session } = setup();
+    session.setState("streaming");
+    const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(session.calls).not.toContain("compact");
+  });
+
+  it("404s a compact for a session that does not exist", async () => {
+    const { factory } = setup();
+    const hub = new EventHub();
+    const router = new Router(hub, async () => {
+      throw new Error("unknown session: nope");
+    });
+    const app = createServer({
+      factory,
+      router,
+      hub,
+      sessions: new SessionStateStore(openDb(":memory:")),
+      config: fakeConfig(),
+      providers: fakeProviders(),
+      settings: new SettingsStore(openDb(":memory:")),
+      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
+      secrets: fakeSecrets(),
+    });
+    expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
   });
 
   it("SSE replays buffered events after Last-Event-ID", async () => {

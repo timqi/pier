@@ -123,6 +123,11 @@ export type SessionEventPayload =
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-end"; toolCallId: string; isError: boolean; output: string }
   | { type: "turn-end"; text: string; meta?: TurnMeta } // full assistant text of the turn
+  // The context was summarized away and replaced by that summary: the token
+  // counts either side of it. Not a `system-input` — nothing entered the
+  // model's context, the opposite happened — and the only trace compaction
+  // leaves on a surface, because the transcript renders none.
+  | { type: "context-compacted"; before: number; after: number }
   | { type: "state"; state: SessionState }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
   | { type: "queue-state"; steering: string[]; followUp: string[] }
@@ -241,6 +246,14 @@ export interface AgentSession {
    * Rejects while streaming.
    */
   rewindToUserTurn(index: number): Promise<void>;
+  /**
+   * Shrink the context: summarize the older transcript and continue from the
+   * summary. Backend-neutral — anything that can compact its own context can
+   * implement it — and deliberately returns nothing: what happened reaches
+   * surfaces as a `context-compacted` event, which auto-compaction emits too
+   * and no caller of this method would otherwise ever see.
+   */
+  compact(): Promise<void>;
   prompt(text: string): Promise<void>; // resolves when the turn settles
   steer(text: string): Promise<void>; // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle

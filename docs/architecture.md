@@ -53,6 +53,8 @@ src/
   web/         server.ts (sessions + events), instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
                auth.ts, files.ts, session-state.ts,
+               desk.ts (the desk folder: seed it, open a session in it) +
+               desk-AGENTS.md/desk-projects.md (the templates it writes once),
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,
                ui/ modules (form.ts + dom.ts are the shared vocabulary;
@@ -74,7 +76,7 @@ src/
                arrives through an injected resolver, wired in main.ts —
                see docs/bus.md
   main.ts      wiring only
-  paths.ts     where PIER_HOME resolves, once
+  paths.ts     where PIER_HOME resolves, once (the db, the boards, the desk)
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
@@ -297,3 +299,12 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   No project store exists; the sidebar groups by cwd and the new-session
   dialog suggests known cwds. A real registry only arrives if derivation
   proves insufficient.
+- Desk is derived the same way: the dispatcher conversation is a pinned
+  session whose cwd is `$PIER_HOME/desk`, and everything that makes it a
+  dispatcher is prose in that folder's own `AGENTS.md`, which Pi injects
+  because it is the cwd's agent file. No session kind, no table, no seeded
+  flag — delete the folder and Desk is gone with no row to reconcile. The
+  path the rail compares against is the *canonical* one (realpath, resolved
+  server-side), because a `$PIER_HOME` under a symlink is two spellings of one
+  directory and the bus already pays for that distinction.
+  Design: `docs/design/06-desk.md`.

@@ -46,6 +46,7 @@ function fakeSession(id: string): AgentSession & {
     pendingQueue: async () => ({ steering: [], followUp: [] }),
     clearQueue: async () => ({ steering: [], followUp: [] }),
     rewindToUserTurn: async () => {},
+    compact: async () => {},
     prompt: async () => {},
     steer: async () => {},
     followUp: async () => {},

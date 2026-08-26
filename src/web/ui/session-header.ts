@@ -1,12 +1,13 @@
 // The selected session's header: its title row, the meta chips (model,
 // reasoning, context usage) and the ⋯ menu — info panel, pin, model and
-// reasoning pickers. Owns the model/context state the snapshot reports;
-// main.ts owns which session is selected and feeds state in through init.
+// reasoning pickers, compacting the context and starting a session beside it.
+// Owns the model/context state the snapshot reports; main.ts owns which
+// session is selected and feeds state in through init.
 
 import { compact } from "../../core/reply.js";
-import { sendJson } from "./api.js";
+import { failure, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
-import { $, copyBtn, h } from "./dom.js";
+import { $, basename, copyBtn, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel } from "./shortcut.js";
@@ -19,6 +20,9 @@ export interface HeaderDeps {
   /** The selected session's listed summary. `select` guarantees one exists
    *  for any session that does — the header hides itself when it does not. */
   currentSession: () => SessionInfo | undefined;
+  /** Start another session in a cwd (main.ts) — the ⋯ menu offers it for the
+   *  session's own directory, which is where the next one usually belongs. */
+  createSession: (cwd: string) => void;
   /** Mobile top bar mirror (views.ts). */
   syncBar: () => void;
   /** Open the Files view on a cwd, or on nothing — which reopens the folder
@@ -252,6 +256,15 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
   }
 }
 
+/** Summarize the older transcript away. Success says nothing here: what
+ *  happened arrives on the session's own stream as `context-compacted`, which
+ *  is where an automatic compaction shows up too — and the route is refused
+ *  outright while a turn is running, which is a sentence the user must see. */
+async function compactContext(id: string): Promise<void> {
+  const res = await sendJson(`/api/sessions/${id}/compact`, {});
+  if (!res.ok) appendTurn("error", `compact failed: ${await failure(res, "no reason given")}`);
+}
+
 /** Same menu from the chat header and from a project row's ⋯ button. */
 export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
   const current = s.id === deps.currentId();
@@ -273,6 +286,24 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       label: "Model",
       hint: current ? (currentModel?.id ?? "…") : "",
       onSelect: () => void pickModel(anchor, s.id),
+    },
+    {
+      // For every session, not only Desk's: a conversation is compacted and
+      // continued from where it is read, and a Desk-only copy of either row
+      // would be the second copy of both (budget rule 3).
+      label: "Compact context",
+      onSelect: () => {
+        closeMenu();
+        void compactContext(s.id);
+      },
+    },
+    {
+      label: "New session here",
+      hint: basename(s.cwd),
+      onSelect: () => {
+        closeMenu();
+        deps.createSession(s.cwd);
+      },
     },
     {
       label: "Browse files",

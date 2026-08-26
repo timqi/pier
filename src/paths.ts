@@ -15,6 +15,12 @@ export const PIER_HOME = process.env.PIER_HOME ?? join(homedir(), ".pier");
 /** A path inside it — `pierPath("boards")`. */
 export const pierPath = (...parts: string[]): string => join(PIER_HOME, ...parts);
 
+/** The desk folder: the dispatcher conversation's cwd, and its identity —
+ *  its `AGENTS.md` is the prompt, its `projects.md` the routing index
+ *  (docs/design/06-desk.md). Nothing stores that it exists; the folder is the
+ *  record. */
+export const DESK_DIR = pierPath("desk");
+
 /** The one SQLite file; every store opens this same path. In its own
  *  directory so db.ts can lock that directory down to 0700 without touching
  *  the boards PIER_HOME also holds. */

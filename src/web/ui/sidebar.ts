@@ -1,6 +1,7 @@
-// The left rail: pinned sessions grouped by cwd (Projects), the search palette
-// that reaches everything (⌘K), and the New-session dialog. main.ts owns the
-// session list; this module renders it and reports interactions back.
+// The left rail: the Desk conversation, pinned sessions grouped by cwd
+// (Projects), the search palette that reaches everything (⌘K), and the
+// New-session dialog. main.ts owns the session list; this module renders it
+// and reports interactions back.
 
 import { sendJson } from "./api.js";
 import { browseButton } from "./dir-picker.js";
@@ -39,6 +40,11 @@ export interface SidebarDeps {
   select: (id: string) => void;
   sessionMenu: (anchor: HTMLElement, s: SessionInfo) => void;
   createSession: (cwd: string) => Promise<void>;
+  /** The desk folder's canonical path, from GET /api/settings; `null` until
+   *  that answer lands. A session whose cwd is it renders as Desk. */
+  deskDir: () => string | null;
+  /** Seed the folder if needed and open a desk session — POST /api/desk. */
+  openDesk: () => void;
   /** Open the Files view on a project's cwd (views.ts, wired through main). */
   openFiles: (cwd: string) => void;
   /** Open the Terminal view on a project's cwd (views.ts, wired through main). */
@@ -128,9 +134,38 @@ function moved(keys: string[], key: string, target: string, after: boolean): str
   return rest;
 }
 
-/** What the rail is showing: the pinned sessions, arranged. */
+// --- desk ---------------------------------------------------------------------------
+// The dispatcher conversation is not a new kind of session and nothing is
+// stored about it: it is a pinned session whose cwd is the desk folder, so the
+// rail derives it exactly the way it derives Projects.
+
+/** Newest desk sessions the rail draws. A reset makes a session rather than
+ *  reusing one, so an instance that resets weekly would otherwise grow the
+ *  section forever; the ones past the cap are still in ⌘K, and the section
+ *  says so rather than dropping them silently. */
+export const DESK_CAP = 5;
+
+/** The Desk group, how many older desk sessions the cap hid, and everything
+ *  left for Projects. Pure and exported because "is this cwd the desk?" is the
+ *  entire feature and deserves a test without a DOM. */
+export function splitDesk(
+  list: SessionInfo[],
+  deskDir: string | null,
+): { desk: SessionInfo[]; older: number; rest: SessionInfo[] } {
+  if (!deskDir) return { desk: [], older: 0, rest: list };
+  const desk = list.filter((s) => s.cwd === deskDir).sort((a, b) => b.createdAt - a.createdAt);
+  return {
+    desk: desk.slice(0, DESK_CAP),
+    older: Math.max(0, desk.length - DESK_CAP),
+    rest: list.filter((s) => s.cwd !== deskDir),
+  };
+}
+
+/** What the rail is showing: the pinned sessions minus Desk's own, arranged.
+ *  Desk leaves this list so it never also appears as a project — and so a drag
+ *  never tries to reorder a section that is not in the order. */
 const pinnedProjects = (): [string, SessionInfo[]][] =>
-  orderedProjects(deps.sessions().filter((s) => s.pinned));
+  orderedProjects(splitDesk(deps.sessions().filter((s) => s.pinned), deps.deskDir()).rest);
 
 /** Optimistic, like the pin toggle: the new places are on the rows and drawn
  *  before the write, and whatever the server says wins over them. A rejected
@@ -343,6 +378,48 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
   return el;
 }
 
+/** The Desk section, above Projects. With no desk session it is a single
+ *  "Desk — open" row: that row is how the feature is discovered, and having it
+ *  always present is what makes a stored "seeded" flag unnecessary. */
+function deskSection(dir: string, list: SessionInfo[], older: number): HTMLElement {
+  const label = (extra: string): HTMLElement =>
+    h(
+      "span",
+      `flex-none font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500 ${extra}`,
+      "Desk",
+    );
+  if (!list.length) {
+    const row = h(
+      "div",
+      "flex cursor-pointer items-center gap-1.5 border-b border-neutral-200/70 px-3 py-1.5 hover:bg-neutral-100",
+      label(""),
+      h("span", "truncate text-[12.5px] text-neutral-400", "\u2014 open"),
+    );
+    row.title = `Create ${dir} and open the dispatcher conversation`;
+    row.onclick = () => deps.openDesk();
+    return row;
+  }
+  const { el, summary } = detailsRow("border-b border-neutral-200/70", [
+    label("truncate"),
+    h("span", "ml-auto flex-none text-[11px] text-neutral-400", String(list.length + older)),
+  ]);
+  summary.className += " px-3 py-1.5 hover:bg-neutral-100";
+  summary.title = dir;
+  el.open = !collapsed.has(dir);
+  el.ontoggle = () => setCollapsed(dir, !el.open);
+  const rows = h("ul", "pb-1");
+  rows.append(...list.map(sessionRow));
+  if (older) {
+    rows.append(h(
+      "li",
+      "px-6 py-1 text-[11.5px] italic text-neutral-400",
+      `${String(older)} older in \u2318K`,
+    ));
+  }
+  el.append(rows);
+  return el;
+}
+
 export function renderSessions(): void {
   const sessions = deps.sessions();
   // The one place the unread dots are painted, so also the one place the
@@ -354,8 +431,11 @@ export function renderSessions(): void {
   // badge on a closed app showing a number no action of yours can clear is not
   // attention state, it is a session counter.
   setUnreadBadge(sessions.filter((s) => s.unread && s.channel === "web").length);
+  const dir = deps.deskDir();
+  const { desk, older } = splitDesk(sessions.filter((s) => s.pinned), dir);
   const projects = pinnedProjects();
   projectTree.replaceChildren(
+    ...(dir ? [deskSection(dir, desk, older)] : []),
     ...(projects.length
       ? projects.map(([cwd, list]) => projectNode(cwd, list))
       : [

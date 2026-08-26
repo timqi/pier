@@ -224,6 +224,14 @@ export class PiSession implements AgentSession {
     if (cancelled) throw new Error("rewind cancelled");
   }
 
+  /** Pi's own compaction, minus its `CompactionResult`: the numbers reach
+   *  surfaces as the `context-compacted` event the seam already emits for the
+   *  automatic one, so a caller has nothing to do with them. */
+  async compact(): Promise<void> {
+    this.live();
+    await this.pi.compact();
+  }
+
   // Async, so a refusal is a rejected promise: the seam promises callers they
   // may only `.catch()` (core/types.ts), and dispatch does exactly that.
   async prompt(text: string): Promise<void> {
