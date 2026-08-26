@@ -12,8 +12,17 @@ import type { BusEventRow, BusFactRow, BusOverview } from "./types.js";
 /** How much of a payload a row carries. A page of 50 events at the 8KB cap is
  * a download, not a page — and the whole value is one `bus get` away. */
 const PREVIEW = 200;
-/** One page of the stream. Newest-first, so this is the tail that matters. */
+// One page per section. None of these tables has a natural ceiling — topics
+// grow until someone archives, subscriptions outlive the sessions that made
+// them, abandoned notes are never deleted — so the page is capped and says so
+// next to the real total, rather than growing until it stops loading.
+/** Newest-first, so this is the tail that matters. */
 const TAIL = 50;
+const TOPICS = 200;
+/** Per topic row. A topic with more keys than this is a table, not a fact. */
+const FACTS = 20;
+const SUBS = 200;
+const NOTES = 100;
 
 const preview = (payload: string): string =>
   payload.length > PREVIEW ? `${payload.slice(0, PREVIEW)}…` : payload;
@@ -45,18 +54,27 @@ export function registerBusRoutes(
 ): void {
   app.get("/api/bus", (c) => {
     const { events, subs } = deps;
+    const topics = events.adminTopics(TOPICS);
+    const subscriptions = subs.adminSubs(SUBS);
+    const owed = subs.adminNotes(NOTES);
+    const tail = events.adminTail(TAIL);
     const overview: BusOverview = {
       // The switch rides with the data instead of costing a second request,
       // and the rows come along even when it is off: delivery freezes rather
       // than emptying, so "off" must not read as "nothing is owed".
       enabled: deps.enabled(),
-      // One facts query per topic row. A bus with enough topics for that to
-      // matter has a retention problem this page is how you find.
-      topics: events.adminTopics().map((row) => ({
-        ...row,
-        facts: events.adminFacts(row.topic, row.scope).map(factRow),
-      })),
-      subs: subs.adminSubs().map((sub) => ({
+      // One facts query per topic row, which is why the topic page is capped:
+      // the N in N+1 is bounded before it is paid, not after.
+      topics: topics.rows.map((row) => {
+        const facts = events.adminFacts(row.topic, row.scope, FACTS + 1);
+        return {
+          ...row,
+          facts: facts.slice(0, FACTS).map(factRow),
+          factsMore: facts.length > FACTS,
+        };
+      }),
+      topicsTotal: topics.total,
+      subs: subscriptions.rows.map((sub) => ({
         sessionId: sub.sessionId,
         topicGlob: sub.topicGlob,
         mode: sub.mode,
@@ -66,7 +84,8 @@ export function registerBusRoutes(
         scopes: sub.scopes,
         createdAt: sub.createdAt,
       })),
-      notes: subs.adminNotes().map((note) => ({
+      subsTotal: subscriptions.total,
+      notes: owed.notes.map((note) => ({
         sessionId: note.sessionId,
         topicGlob: note.topicGlob,
         mode: note.mode,
@@ -77,7 +96,9 @@ export function registerBusRoutes(
         createdAt: note.createdAt,
         lastEventId: note.lastEventId,
       })),
-      events: events.adminTail(TAIL).map(eventRow),
+      notesTotal: owed.total,
+      events: tail.events.map(eventRow),
+      eventsTotal: tail.total,
     };
     return c.json(overview);
   });

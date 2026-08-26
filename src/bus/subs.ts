@@ -47,6 +47,9 @@ interface SubRow {
   created_at: string;
 }
 
+/** The same ceiling the event store's admin pages use, for the same reason. */
+const cap = (limit: number): number => Math.min(Math.max(limit, 1), 500);
+
 const subOf = (row: SubRow): BusSub => ({
   id: row.id,
   sessionId: row.session_id,
@@ -155,23 +158,31 @@ export class SubStore {
   // Read-only, fence-free admin queries for the Console's Bus view; the reason
   // there is no session fence is recorded once, in bus/store.ts.
 
-  /** Every subscription, ordered so one session's patterns sit together. */
-  adminSubs(): BusSub[] {
+  /** Subscriptions, newest first, capped: nothing removes a row when the
+   * session behind it dies, so the table grows with the months — and each row
+   * costs the caller one countSince, which is the real reason for a ceiling. */
+  adminSubs(limit = 200): { rows: BusSub[]; total: number } {
+    const total = this.#db.prepare("SELECT COUNT(*) AS n FROM bus_subs").get() as { n: number };
     const rows = this.#db.prepare(
-      "SELECT * FROM bus_subs ORDER BY session_id, topic_glob",
-    ).all() as unknown as SubRow[];
-    return rows.map(subOf);
+      "SELECT * FROM bus_subs ORDER BY created_at DESC, session_id, topic_glob LIMIT ?",
+    ).all(cap(limit)) as unknown as SubRow[];
+    return { rows: rows.map(subOf), total: total.n };
   }
 
-  /** Notes still owed or given up on, newest first — settled ones only. An
-   * abandoned delivery is the row that most needs a surface, so it is listed
-   * rather than filtered out (AGENTS.md 5b). */
-  adminNotes(): BusNote[] {
-    const rows = this.#db.prepare(
-      "SELECT json FROM bus_notes WHERE state IS NULL OR state != 'delivered'",
-    ).all() as unknown as { json: string }[];
-    return rows.map((row) => JSON.parse(row.json) as BusNote)
-      .sort((a, b) => b.createdAt - a.createdAt);
+  /** Notes still owed or given up on — settled ones only. Abandoned first,
+   * then newest: nothing ever deletes an abandoned note, so on a long-lived
+   * instance they are also the *oldest* rows, and a plain newest-first page
+   * would truncate away exactly the failures this list exists to show
+   * (AGENTS.md 5b). */
+  adminNotes(limit = 100): { notes: BusNote[]; total: number } {
+    const open = "WHERE state IS NULL OR state != 'delivered'";
+    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM bus_notes ${open}`).get() as { n: number };
+    const rows = this.#db.prepare(`
+      SELECT json FROM bus_notes ${open}
+      ORDER BY (state = 'abandoned') DESC, json_extract(json, '$.createdAt') DESC
+      LIMIT ?
+    `).all(cap(limit)) as unknown as { json: string }[];
+    return { notes: rows.map((row) => JSON.parse(row.json) as BusNote), total: total.n };
   }
 
   /** Notes whose retry is due — the delivery sweep's worklist. */

@@ -31,6 +31,8 @@ export interface BusFactRow {
  *  history is here" and "what does it currently say". */
 export interface BusTopicRow extends BusTopicCounts {
   facts: BusFactRow[];
+  /** More live facts than this row carries; the rest are one `bus get` away. */
+  factsMore: boolean;
 }
 
 export interface BusSubRow {
@@ -72,11 +74,18 @@ export interface BusEventRow {
   createdAt: string;
 }
 
-/** One round trip: the switch and all four sections. */
+/** One round trip: the switch and all four sections. Every section is a capped
+ *  page beside the true total — the count is what the tab label shows and what
+ *  makes "200 of 431" sayable, and a surface that quietly shows a prefix is a
+ *  surface that lies about how much is there. */
 export interface BusOverview {
   enabled: boolean;
   topics: BusTopicRow[];
+  topicsTotal: number;
   subs: BusSubRow[];
+  subsTotal: number;
   notes: BusNoteRow[];
+  notesTotal: number;
   events: BusEventRow[];
+  eventsTotal: number;
 }

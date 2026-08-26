@@ -216,14 +216,26 @@ summarized twice.
 
 ## The Console view
 
-Console → Bus is the bus's one visible surface, read-only: per (topic, scope)
-the live and archived counts, when it last moved and when anyone last read it,
-with the live facts expandable underneath; every subscription with its cursor
-**lag as a number** against its pinned scopes; the pointer notifications still
-owed — pending, failed with their attempts and next retry, and abandoned ones
-listed rather than filtered, because a delivery nobody can complete is a
-failure and not an absence (AGENTS.md 5b); and the tail of the stream, newest
-first, with payload previews as text. It hosts the `busEnabled` switch: off,
+Console → Bus is the bus's one visible surface, read-only, one tab per
+section: per (topic, scope) the live and archived counts, when it last moved
+and when anyone last read it, with the live facts expandable underneath; every
+subscription with its cursor **lag as a number** against its pinned scopes; the
+pointer notifications still owed — pending, failed with their attempts and next
+retry, and abandoned ones listed rather than filtered, because a delivery
+nobody can complete is a failure and not an absence (AGENTS.md 5b); and the
+tail of the stream, newest first, with payload previews as text.
+
+Every section is a **capped page beside its true total** — the number on the
+tab, and the "showing 200 of 431" under the list. None of these tables has a
+natural ceiling: topics grow until someone archives, a subscription outlives
+the session that made it, and an abandoned note is never deleted by anything.
+So the ceiling is in SQL, not in the browser, and three ordering rules keep the
+page the useful end of the list — topics by what moved last, notes with the
+abandoned ones **first** (they are also the oldest, so newest-first would page
+out exactly the failures the list exists for), and a topic's facts capped per
+row with a `+` when there are more. There is no paginator: a filter box over
+the loaded page does more for this shape of data, and the stream's older events
+are what `search` and the archive are for. It hosts the `busEnabled` switch: off,
 the page is the explanation and the toggle, and nothing else — but the tab
 itself is always reachable, because hiding it would hide the switch. The
 queries behind it (`BusStore.adminTopics/adminFacts/adminTail`,

@@ -51,11 +51,14 @@ describe("GET /api/bus", () => {
     expect(body.enabled).toBe(true);
 
     // Topics: one row per (topic, scope), each carrying its own live facts —
-    // no shadowing, so the instance row shows its own tombstoned state.
+    // no shadowing, so the instance row shows its own tombstoned state. Most
+    // recently written first, which is why the instance row leads.
     expect(body.topics.map((t) => [t.topic, t.scope, t.events, t.facts.map((f) => f.key)])).toEqual([
       ["proj/auth", "instance", 2, []],
       ["proj/auth", SCOPE, 2, ["owner"]],
     ]);
+    // Every section's page sits beside the true total.
+    expect([body.topicsTotal, body.subsTotal, body.notesTotal, body.eventsTotal]).toEqual([2, 1, 1, 4]);
     expect(body.topics[1]?.facts[0]).toMatchObject({ payload: '"alice"', writerSession: "writer-session-1" });
     // A read stamp is a fact this page shows and must never write.
     expect(body.topics.every((t) => t.lastReadAt === null)).toBe(true);
@@ -94,11 +97,14 @@ describe("GET /api/bus", () => {
   it("lists a failed and an abandoned note, and drops the delivered one", async () => {
     const { subs, get } = setup();
     const sub = subs.upsert("reader-session-9", "proj/*", "queue", [SCOPE], "");
-    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, callbackState: "failed", callbackAttempts: 3, callbackError: "session busy", callbackNextAttemptAt: 9_000, createdAt: 2000 }));
-    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, callbackState: "abandoned", callbackAttempts: 8, callbackError: "nothing can reach it", createdAt: 3000 }));
-    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, callbackState: "delivered", createdAt: 4000 }));
+    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, callbackState: "failed", callbackAttempts: 3, callbackError: "session busy", callbackNextAttemptAt: 9_000, createdAt: 5000 }));
+    // Deliberately the *oldest* row: nothing deletes an abandoned note, so a
+    // plain newest-first page would eventually truncate the failures away.
+    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, callbackState: "abandoned", callbackAttempts: 8, callbackError: "nothing can reach it", createdAt: 1000 }));
+    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, callbackState: "delivered", createdAt: 9000 }));
 
-    // Newest first, and a failure is never filtered out (AGENTS.md 5b).
+    // Abandoned first, then newest — a failure is never filtered out or
+    // paged out (AGENTS.md 5b).
     expect((await get()).notes.map((n) => [n.state, n.attempts, n.error, n.nextAttemptAt])).toEqual([
       ["abandoned", 8, "nothing can reach it", null],
       ["failed", 3, "session busy", 9_000],
@@ -129,5 +135,25 @@ describe("GET /api/bus", () => {
     expect(topic).toMatchObject({ topic: "proj/log", events: 1, archived: 1 });
     // The tail is the live stream; the archived event is out of it.
     expect((await get()).events).toHaveLength(1);
+    expect((await get()).eventsTotal).toBe(1);
+  });
+
+  it("caps a topic's facts and says there are more, instead of shipping them all", async () => {
+    const { events, get } = setup();
+    for (let i = 0; i < 25; i++) {
+      events.publish({ topic: "proj/wide", key: `k${i}`, kind: "fact", payload: '"v"', scope: SCOPE, writerSession: "s1" });
+    }
+    const [topic] = (await get()).topics;
+    expect(topic?.facts).toHaveLength(20);
+    expect(topic?.factsMore).toBe(true);
+    // The count of events is untouched by the facts page — it is the history.
+    expect(topic?.events).toBe(25);
+  });
+
+  it("orders topics by what moved last, so a capped page keeps the live ones", async () => {
+    const { events, get } = setup();
+    events.publish({ topic: "proj/old", payload: '"1"', scope: SCOPE, writerSession: "s1" }, 1000);
+    events.publish({ topic: "proj/new", payload: '"2"', scope: SCOPE, writerSession: "s1" }, 90_000);
+    expect((await get()).topics.map((t) => t.topic)).toEqual(["proj/new", "proj/old"]);
   });
 });

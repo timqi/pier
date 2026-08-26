@@ -1,11 +1,13 @@
 // Console → Bus view: the shared blackboard's first visible surface — the
 // state that exists, who listens to it, what delivery is still owed, and what
-// just happened. Read-only; the one write on the page is the capability
-// switch, which lives here because this is where its consequences show.
+// just happened. One tab each, because four full sections on one page is a
+// scroll nobody reads to the end of. Read-only; the single write here is the
+// capability switch, which lives on this page because this is where its
+// consequences show.
 
 import { failure, sendJson } from "./api.js";
 import { basename, consoleView, h, relTime, type ConsoleView } from "./dom.js";
-import { badge, btn, empty, setStatus, toggle } from "./form.js";
+import { badge, btn, empty, setStatus, tabButton, textInput, toggle } from "./form.js";
 // Type-only: the wire shapes stay single-sourced in the area that fills them.
 import type {
   BusEventRow,
@@ -18,7 +20,22 @@ import type {
 
 export type BusView = ConsoleView & { refresh(): void };
 
-const EMPTY: BusOverview = { enabled: false, topics: [], subs: [], notes: [], events: [] };
+const EMPTY: BusOverview = {
+  enabled: false,
+  topics: [], topicsTotal: 0,
+  subs: [], subsTotal: 0,
+  notes: [], notesTotal: 0,
+  events: [], eventsTotal: 0,
+};
+
+type Tab = "topics" | "subs" | "owed" | "events";
+const TABS: [Tab, string][] = [
+  ["topics", "Topics"],
+  ["subs", "Subscriptions"],
+  ["owed", "Deliveries owed"],
+  ["events", "Recent events"],
+];
+const isTab = (v: string | undefined): v is Tab => TABS.some(([id]) => id === v);
 
 // --- vocabulary ------------------------------------------------------------------
 // Three badge families, tinted like the rest of the Console: the neutral thing,
@@ -89,18 +106,20 @@ function table(headers: [string, string][], rows: HTMLElement[]): HTMLElement {
   return h("div", "overflow-x-auto rounded-xl border border-neutral-200 bg-white", el);
 }
 
-function section(title: string, hint: string, body: HTMLElement): HTMLElement {
-  return h(
-    "section",
-    "mb-6",
-    h("h2", "text-[13px] font-semibold text-neutral-700", title),
-    h("p", "mb-1 text-[11.5px] leading-snug text-neutral-500", hint),
-    body,
-  );
-}
+/** What the filter matches on, lowercased once per row. */
+const hay = (...parts: (string | null | undefined)[]): string =>
+  parts.filter(Boolean).join(" ").toLowerCase();
 
-export function createBusView(root: HTMLElement, openSession: (id: string) => void): BusView {
+export function createBusView(
+  root: HTMLElement,
+  openSession: (id: string) => void,
+  /** Tab clicks route (#/bus/<tab>) so refresh and Back keep the tab. */
+  onTab: (tab: string) => void,
+): BusView {
   let data: BusOverview = EMPTY;
+  let loaded = false;
+  let tab: Tab = "topics";
+  let needle = "";
   /** The last read or write that did not take. A view that re-renders the old
    *  state silently is indistinguishable from one nobody clicked. */
   let problem = "";
@@ -148,9 +167,15 @@ export function createBusView(root: HTMLElement, openSession: (id: string) => vo
     await load();
   }
 
-  // --- sections ---------------------------------------------------------------
+  // --- rows -------------------------------------------------------------------
+
+  /** Which topic rows the reader had expanded, so a live refetch does not
+   *  collapse what they were reading. Keyed by (topic, scope), the row's own
+   *  identity — an index would drift the moment a topic moves up the list. */
+  const opened = new Set<string>();
 
   function topicRow(topic: BusTopicRow): HTMLElement {
+    const id = `${topic.topic}\n${topic.scope}`;
     const counts = [
       `${topic.events} live`,
       ...(topic.archived ? [`${topic.archived} archived`] : []),
@@ -171,13 +196,20 @@ export function createBusView(root: HTMLElement, openSession: (id: string) => vo
     }
     const el = document.createElement("details");
     el.className = "border-b border-neutral-200/70 px-3 py-2.5 last:border-b-0";
+    el.open = opened.has(id);
+    el.ontoggle = () => void (el.open ? opened.add(id) : opened.delete(id));
     const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
     summary.append(h("span", "chev", "▶"), head, h(
       "span",
       "ml-auto flex-none text-[11px] text-neutral-400",
-      `${topic.facts.length} fact${topic.facts.length === 1 ? "" : "s"}`,
+      `${topic.facts.length}${topic.factsMore ? "+" : ""} fact${topic.facts.length === 1 && !topic.factsMore ? "" : "s"}`,
     ));
-    el.append(summary, h("div", "mt-2 flex flex-col gap-1 pl-4", ...topic.facts.map(factRow)));
+    const facts = h("div", "mt-2 flex flex-col gap-1 pl-4", ...topic.facts.map(factRow));
+    // The cap is stated where it bites, not only in the section note.
+    if (topic.factsMore) {
+      facts.append(h("p", "pl-2.5 text-[11px] text-neutral-400", "More keys than this page shows — read them with bus get."));
+    }
+    el.append(summary, facts);
     return el;
   }
 
@@ -252,78 +284,166 @@ export function createBusView(root: HTMLElement, openSession: (id: string) => vo
     );
   }
 
-  // --- render -----------------------------------------------------------------
+  // --- tab strip, filter, body -------------------------------------------------
+  // Built once and never replaced wholesale: retyping in the filter re-renders
+  // only the body, so the input keeps focus and the caret keeps its place.
 
-  function render(): void {
-    const column = h("div", "mx-auto flex w-full min-w-0 max-w-5xl flex-col");
-    if (problem) column.append(h("p", "mb-3 text-[13px] text-red-600", problem));
-    if (!data.enabled) {
-      // Only the explanation and the switch: the sections below would describe
-      // a capability no session can reach. The view itself stays reachable —
-      // hiding it would hide the switch with it.
-      column.append(h(
-        "section",
-        "rounded-xl border border-neutral-200 bg-white p-4",
-        h("h2", "text-[13px] font-semibold text-neutral-700", "The bus is off"),
-        h(
-          "p",
-          "mb-3 mt-0.5 max-w-2xl text-[12.5px] leading-snug text-neutral-500",
-          "Shared memory and cross-session events: sessions publish facts, read each other's, "
-            + "and subscribe to be notified of writes (docs/bus.md). While it is off the tool is "
-            + "not offered to new sessions and owed notifications are frozen — nothing stored is lost.",
-        ),
-        busSwitch(),
-        switchStatus,
-      ));
-      pane.replaceChildren(column);
-      return;
+  const tabBtns = h("div", "flex flex-wrap items-center gap-1");
+  const filter = textInput("", "Filter…", (v) => {
+    needle = v.trim().toLowerCase();
+    renderBody();
+  });
+  const strip = h(
+    "div",
+    "tabstrip",
+    tabBtns,
+    h("div", "ml-auto w-56 flex-none max-md:ml-0 max-md:w-full", filter),
+  );
+  const hint = h("p", "mb-2 mt-3 text-[11.5px] leading-snug text-neutral-500", "");
+  const body = h("div", "");
+
+  const HINTS: Record<Tab, string> = {
+    topics: "Per topic and scope: how much history is there, when it last moved, when anyone last read it — and the live facts underneath. Most recently written first.",
+    subs: "Who asked to hear about writes. Lag is counted against the scopes the subscription pinned when it was made; a row outlives the session that made it.",
+    owed: "Pointer notifications not yet in a recipient's transcript. Abandoned ones are listed first and never truncated away — a delivery nobody can complete is a failure, not an absence.",
+    events: "The tail of the stream, newest first. Payloads are previews; the full value is one bus get away, and older events are what search and the archive are for.",
+  };
+
+  function renderTabs(): void {
+    const counts: Record<Tab, number> = {
+      topics: data.topicsTotal,
+      subs: data.subsTotal,
+      owed: data.notesTotal,
+      events: data.eventsTotal,
+    };
+    const stuck = data.notes.some((note) => note.state === "abandoned");
+    tabBtns.replaceChildren(...TABS.map(([id, label]) => {
+      const el = tabButton(`${label} (${counts[id]})`, id === tab, () => onTab(id));
+      // A given-up delivery has to be visible from a tab nobody opened —
+      // otherwise the tab strip is exactly the place the failure hides.
+      if (id === "owed" && stuck) el.classList.add("text-red-600", "font-medium");
+      return el;
+    }));
+  }
+
+  const note = (text: string): HTMLElement => h("p", "mt-2 text-[11.5px] text-neutral-400", text);
+
+  /** The active tab's list, and the two numbers that keep it honest: how many
+   *  rows the page holds, and how many exist. */
+  function tabBody(): { list: HTMLElement; shown: number; total: number; matched: number } {
+    const nothing = (its: string): HTMLElement => empty(needle ? "Nothing matches." : its);
+    if (tab === "topics") {
+      const rows = data.topics.filter((t) =>
+        hay(t.topic, t.scope, ...t.facts.map((f) => `${f.key} ${f.payload}`)).includes(needle));
+      return {
+        list: rows.length
+          ? h("div", "rounded-xl border border-neutral-200 bg-white", ...rows.map(topicRow))
+          : nothing("No events yet. A session's first publish creates its topic."),
+        shown: data.topics.length, total: data.topicsTotal, matched: rows.length,
+      };
     }
-    column.append(h(
-      "div",
-      "mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-neutral-200 bg-white px-4 py-3",
-      busSwitch(),
-      switchStatus,
-    ));
-    column.append(
-      section(
-        "Topics",
-        "Per topic and scope: how much history is there, when it last moved, when anyone last read it — and the live facts underneath.",
-        data.topics.length
-          ? h("div", "rounded-xl border border-neutral-200 bg-white", ...data.topics.map(topicRow))
-          : empty("No events yet. A session's first publish creates its topic."),
-      ),
-      section(
-        "Subscriptions",
-        "Who asked to hear about writes. Lag is counted against the scopes the subscription pinned when it was made.",
-        data.subs.length
+    if (tab === "subs") {
+      const rows = data.subs.filter((s) => hay(s.sessionId, s.topicGlob, s.mode, ...s.scopes).includes(needle));
+      return {
+        list: rows.length
           ? table(
             [["Session", "w-[14%]"], ["Pattern", "w-[26%]"], ["Mode", "w-[10%]"], ["Lag", "w-[14%]"], ["Pinned scopes", ""]],
-            data.subs.map(subRow),
+            rows.map(subRow),
           )
-          : empty("Nobody is subscribed."),
-      ),
-      section(
-        "Deliveries owed",
-        "Pointer notifications not yet in a recipient's transcript. Abandoned ones stay listed — a delivery nobody can complete is a failure, not an absence.",
-        data.notes.length
+          : nothing("Nobody is subscribed."),
+        shown: data.subs.length, total: data.subsTotal, matched: rows.length,
+      };
+    }
+    if (tab === "owed") {
+      const rows = data.notes.filter((n) => hay(n.sessionId, n.topicGlob, n.state, n.error).includes(needle));
+      return {
+        list: rows.length
           ? table(
             [["Recipient", "w-[14%]"], ["Pattern", "w-[24%]"], ["State", "w-[28%]"], ["Reason", ""]],
-            data.notes.map(noteRow),
+            rows.map(noteRow),
           )
-          : empty("Nothing owed — every notification landed."),
-      ),
-      section(
-        "Recent events",
-        `The tail of the stream, newest first (${data.events.length} shown). Payloads are previews; the full value is one bus get away.`,
-        data.events.length
-          ? table(
-            [["Age", "w-[8%]"], ["Topic", "w-[22%]"], ["Key", "w-[14%]"], ["Payload", ""], ["Writer", "w-[10%]"]],
-            data.events.map(eventRow),
-          )
-          : empty("The stream is empty."),
-      ),
-    );
-    pane.replaceChildren(column);
+          : nothing("Nothing owed — every notification landed."),
+        shown: data.notes.length, total: data.notesTotal, matched: rows.length,
+      };
+    }
+    const rows = data.events.filter((e) =>
+      hay(e.topic, e.scope, e.kind, e.key, e.payload, e.writerSession).includes(needle));
+    return {
+      list: rows.length
+        ? table(
+          [["Age", "w-[8%]"], ["Topic", "w-[22%]"], ["Key", "w-[14%]"], ["Payload", ""], ["Writer", "w-[10%]"]],
+          rows.map(eventRow),
+        )
+        : nothing("The stream is empty."),
+      shown: data.events.length, total: data.eventsTotal, matched: rows.length,
+    };
+  }
+
+  function renderBody(): void {
+    hint.textContent = HINTS[tab];
+    const { list, shown, total, matched } = tabBody();
+    const lines: HTMLElement[] = [];
+    // Never a silent prefix, and never a silent filter: whichever is hiding
+    // rows says so, with the number it is hiding them from.
+    if (needle) lines.push(note(`${matched} of ${shown} loaded rows match.`));
+    else if (shown < total) {
+      // A tail is not a truncated list, and saying "capped" about one would
+      // invite a paginator the stream does not want.
+      lines.push(note(tab === "events"
+        ? `The newest ${shown} of ${total} events — older ones are what bus search and the archive are for.`
+        : `Showing ${shown} of ${total} — this page is capped; narrow it with the filter above.`));
+    }
+    body.replaceChildren(list, ...lines);
+  }
+
+  // --- render -----------------------------------------------------------------
+  // The frame is built once and kept: a live `bus-changed` refetch that
+  // replaced the whole page would blur the filter box mid-word and collapse
+  // every expanded topic.
+
+  const problemBox = h("p", "mb-3 hidden text-[13px] text-red-600", "");
+  const switchBar = h(
+    "div",
+    "mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-neutral-200 bg-white px-4 py-3",
+  );
+  const column = h(
+    "div",
+    "mx-auto flex w-full min-w-0 max-w-5xl flex-col",
+    problemBox, switchBar, strip, hint, body,
+  );
+
+  function render(): void {
+    problemBox.textContent = problem;
+    problemBox.classList.toggle("hidden", !problem);
+    switchBar.replaceChildren(busSwitch(), switchStatus);
+    if (!data.enabled) {
+      // Only the explanation and the switch: the tabs would describe a
+      // capability no session can reach. The view itself stays reachable —
+      // hiding it would hide the switch with it.
+      pane.replaceChildren(h(
+        "div",
+        "mx-auto flex w-full min-w-0 max-w-5xl flex-col",
+        problemBox,
+        h(
+          "section",
+          "rounded-xl border border-neutral-200 bg-white p-4",
+          h("h2", "text-[13px] font-semibold text-neutral-700", "The bus is off"),
+          h(
+            "p",
+            "mb-3 mt-0.5 max-w-2xl text-[12.5px] leading-snug text-neutral-500",
+            "Shared memory and cross-session events: sessions publish facts, read each other's, "
+              + "and subscribe to be notified of writes (docs/bus.md). While it is off the tool is "
+              + "not offered to new sessions and owed notifications are frozen — nothing stored is lost.",
+          ),
+          switchBar,
+        ),
+      ));
+      return;
+    }
+    // Re-seating the same node would still blur what is inside it.
+    if (pane.firstElementChild !== column) pane.replaceChildren(column);
+    renderTabs();
+    renderBody();
   }
 
   async function load(): Promise<void> {
@@ -333,13 +453,22 @@ export function createBusView(root: HTMLElement, openSession: (id: string) => vo
       return render();
     }
     data = (await res.json()) as BusOverview;
+    loaded = true;
     render();
     // Cleared only after a good render, so the reason survives the reload it
     // caused and disappears on the next clean one.
     problem = "";
   }
 
-  const view = consoleView(root, () => void load());
+  const view = consoleView(root, (arg) => {
+    if (isTab(arg)) tab = arg;
+    // Switching tabs repaints from what is already in hand and reconciles from
+    // the refetch; a tab that waits on a round trip is a tab that feels slow.
+    // Before the first answer there is nothing to claim — least of all "off".
+    if (loaded) render();
+    else pane.replaceChildren(h("p", "p-4 text-[13px] text-neutral-400", "Loading…"));
+    void load();
+  });
   return Object.assign(view, {
     refresh() {
       if (view.visible) void load();

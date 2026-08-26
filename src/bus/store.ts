@@ -141,6 +141,11 @@ const live = (event: BusEvent, nowMs: number): boolean =>
 
 const holes = (scopes: readonly string[]): string => scopes.map(() => "?").join(", ");
 
+/** Every admin page is capped in SQL: the tables these read have no natural
+ * ceiling, and a page that loads the whole bus is how a debugging surface
+ * becomes the thing that needs debugging. */
+const cap = (limit: number): number => Math.min(Math.max(limit, 1), 500);
+
 export class BusStore {
   readonly #db: DatabaseSync;
   readonly #ulid = new Ulid();
@@ -467,37 +472,48 @@ export class BusStore {
   // librarian's retention question.
 
   /** Per (topic, scope): live count, archived count, newest write, last read.
-   * Split by scope like topics() — a row is a scope, because archive is. */
-  adminTopics(): BusTopicCounts[] {
-    return this.#db.prepare(`
+   * Split by scope like topics() — a row is a scope, because archive is.
+   * Capped and newest-active first, with the true total beside it: an
+   * instance nobody archives grows topics without bound, and the row that
+   * moved this morning is the one being looked for. */
+  adminTopics(limit = 200): { rows: BusTopicCounts[]; total: number } {
+    const all = `
       SELECT e.topic, e.scope, SUM(e.live) AS events, SUM(1 - e.live) AS archived,
              MAX(e.created_at) AS newestAt, r.last_read_at AS lastReadAt
       FROM (SELECT topic, scope, created_at, 1 AS live FROM bus_events
             UNION ALL SELECT topic, scope, created_at, 0 AS live FROM bus_events_archive) e
       LEFT JOIN bus_topic_reads r ON r.topic = e.topic
-      GROUP BY e.topic, e.scope ORDER BY e.topic, e.scope
-    `).all() as unknown as BusTopicCounts[];
+      GROUP BY e.topic, e.scope`;
+    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM (${all})`).get() as { n: number };
+    const rows = this.#db.prepare(`${all} ORDER BY newestAt DESC, e.topic, e.scope LIMIT ?`)
+      .all(cap(limit)) as unknown as BusTopicCounts[];
+    return { rows, total: total.n };
   }
 
   /** The live facts of one exact (topic, scope), newest write per key. No
    * cross-scope shadowing: which scope wins is a *caller's* question, and here
-   * every scope is its own row — collapsing them would hide the override. */
-  adminFacts(topic: string, scope: string, now = Date.now()): BusEvent[] {
+   * every scope is its own row — collapsing them would hide the override.
+   * A tombstoned winner is dropped in SQL so the limit is a page of *live*
+   * facts; an expired one still needs the clock, which SQL does not have. */
+  adminFacts(topic: string, scope: string, limit = 20, now = Date.now()): BusEvent[] {
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
-      WHERE e.topic = ? AND e.scope = ? AND e.key IS NOT NULL
+      WHERE e.topic = ? AND e.scope = ? AND e.key IS NOT NULL AND e.kind != 'tombstone'
         AND e.id = (SELECT MAX(id) FROM bus_events
                     WHERE topic = e.topic AND key = e.key AND scope = e.scope)
-      ORDER BY e.key
-    `).all(topic, scope) as unknown as Row[];
+      ORDER BY e.key LIMIT ?
+    `).all(topic, scope, cap(limit)) as unknown as Row[];
     return rows.map(fromRow).filter((event) => live(event, now));
   }
 
-  /** Tail of the live stream, newest first — one page, not a query language. */
-  adminTail(limit = 50): BusEvent[] {
+  /** Tail of the live stream, newest first — one page, not a query language.
+   * The total says what the page is a tail *of*; older events are the
+   * librarian's and `search`'s business, not a paginator's. */
+  adminTail(limit = 50): { events: BusEvent[]; total: number } {
+    const total = this.#db.prepare("SELECT COUNT(*) AS n FROM bus_events").get() as { n: number };
     const rows = this.#db.prepare("SELECT * FROM bus_events ORDER BY id DESC LIMIT ?")
-      .all(Math.min(Math.max(limit, 1), 200)) as unknown as Row[];
-    return rows.map(fromRow);
+      .all(cap(limit)) as unknown as Row[];
+    return { events: rows.map(fromRow), total: total.n };
   }
 
   #throttle(writer: string, topic: string, now: number): void {

@@ -223,7 +223,9 @@ export function initViews(d: ViewsDeps): void {
     (arg) => showConsole("activity", arg),
   );
   activityView = createActivityView($("#activity-view"), d.select, showTasks);
-  busView = createBusView($("#bus-view"), d.select);
+  // Tabs route like Settings' do: the hash is the one copy of "where am I",
+  // so Back walks the Bus tabs too.
+  busView = createBusView($("#bus-view"), d.select, (t) => showConsole("bus", t));
   consoleViews = [
     { name: "tasks", view: tasksView },
     { name: "activity", view: activityView },
