@@ -37,7 +37,17 @@ export class BusDelivery {
       save: (note) => { this.subs.saveNote(note); },
       // The Console's Bus view renders exactly this — the stub stood until
       // there was a surface to tell.
-      changed: () => { this.announce(); },
+      changed: (note) => {
+        // Abandonment is the engine concluding nothing can reach the session,
+        // and nothing else ever removes a dead session's subscription — Pier
+        // has no session-delete seam; a session dies when its Pi session file
+        // leaves the disk. Left in place, every later event on the pattern
+        // would open a fresh note and burn the full retry ladder again,
+        // forever. The announce right after carries the retirement to the
+        // Console with the note's own state change.
+        if (note.callbackState === "abandoned") this.retire(note);
+        this.announce();
+      },
       proven: (origin) => (origin.kind === "bus-notify" ? origin.noteIds : []),
       urgency: (note) => (note.mode === "steer" ? "steer" : "followUp"),
       // One line per subscription even when it is owed several notes (a note
@@ -108,6 +118,16 @@ export class BusDelivery {
 
   stop(): void {
     if (this.#timer) clearInterval(this.#timer);
+  }
+
+  /** The loud half of retirement (AGENTS.md 5b): the sub and the notes still
+   * owed go, the abandoned note stays as the visible record, and the log says
+   * which sub on which glob was retired and why. retire() reports an
+   * already-gone sub, so two abandoned notes of one sub log this once. */
+  private retire(note: BusNote): void {
+    if (this.subs.retire(note.subId)) {
+      log.warn(`retired subscription ${note.subId} of session ${note.sessionId} on '${note.topicGlob}' — its notification was abandoned as undeliverable, and nothing else removes a dead session's subscription`);
+    }
   }
 
   /** A reader that caught up on its own (log + ack) is not woken for nothing:

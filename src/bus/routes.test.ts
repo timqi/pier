@@ -15,8 +15,8 @@ function setup(enabled = true) {
   const subs = new SubStore(db);
   const app = new Hono();
   registerBusRoutes(app, { events, subs, enabled: () => enabled });
-  const get = async (): Promise<BusOverview> => {
-    const res = await app.request("/api/bus");
+  const get = async (q = ""): Promise<BusOverview> => {
+    const res = await app.request(`/api/bus${q ? `?q=${encodeURIComponent(q)}` : ""}`);
     expect(res.status).toBe(200);
     return (await res.json()) as BusOverview;
   };
@@ -148,6 +148,53 @@ describe("GET /api/bus", () => {
     expect(topic?.factsMore).toBe(true);
     // The count of events is untouched by the facts page — it is the history.
     expect(topic?.events).toBe(25);
+  });
+
+  it("searches the whole table, not the page — an event far past the tail is found", async () => {
+    const { events, get } = setup();
+    events.publish({ topic: "proj/old", key: "needle", kind: "fact", payload: '"buried"', scope: SCOPE, writerSession: "s1" }, 1000);
+    for (let i = 0; i < 60; i++) {
+      // Spread in time: 60 writes in one minute is the storm guard's business.
+      events.publish({ topic: "proj/noise", payload: '"n"', scope: SCOPE, writerSession: "s1" }, 2000 + i * 3000);
+    }
+    // The unsearched page is the tail, and the buried event is not on it.
+    const plain = await get();
+    expect(plain.events).toHaveLength(50);
+    expect(plain.eventsTotal).toBe(61);
+    expect(plain.events.some((e) => e.key === "needle")).toBe(false);
+
+    // Searched, it is — by key, by payload, and by topic, with the total
+    // counted in SQL rather than over what happened to load.
+    for (const term of ["needle", "buried", "proj/old"]) {
+      const hit = await get(term);
+      expect(hit.eventsTotal).toBe(1);
+      expect(hit.events[0]?.key).toBe("needle");
+    }
+    // Topics narrow by name and scope, over live and archived rows alike.
+    const topics = await get("proj/old");
+    expect(topics.topics.map((t) => t.topic)).toEqual(["proj/old"]);
+    expect(topics.topicsTotal).toBe(1);
+  });
+
+  it("treats LIKE wildcards as text, and searches subs and notes too", async () => {
+    const { events, subs, get } = setup();
+    events.publish({ topic: "proj/odd", payload: '"100% done"', scope: SCOPE, writerSession: "s1" });
+    events.publish({ topic: "proj/odd", payload: '"nothing here"', scope: SCOPE, writerSession: "s1" });
+    const sub = subs.upsert("reader-session-9", "alerts/*", "steer", [SCOPE], "");
+    subs.saveNote(note({ subId: sub.id, sessionId: sub.sessionId, topicGlob: "alerts/*", callbackState: "abandoned", callbackError: "session gone" }));
+
+    // '%' is the searcher's data, not their syntax — without escaping this
+    // would match every row in the table.
+    const literal = await get("100%");
+    expect(literal.eventsTotal).toBe(1);
+    expect(literal.events[0]?.payload).toContain("100% done");
+
+    const bySub = await get("alerts");
+    expect(bySub.subs.map((s) => s.topicGlob)).toEqual(["alerts/*"]);
+    expect(bySub.notes).toHaveLength(1);
+    // Notes match on their reason, which is the column an operator reads.
+    expect((await get("session gone")).notes[0]?.state).toBe("abandoned");
+    expect((await get("session gone")).events).toEqual([]);
   });
 
   it("orders topics by what moved last, so a capped page keeps the live ones", async () => {

@@ -21,15 +21,31 @@ The `bus` tool's operations:
   `key` one value or `null`, without it every live pair on the topic.
 - `log {topic_glob, after?, limit?}` returns events after the cursor in write
   order plus the next cursor. Tombstones appear here — a reader syncing state
-  needs the deletions too.
+  needs the deletions too. A glob that exactly matches one of the caller's
+  subscriptions reads the subscription's pinned scopes, and the response says
+  so in `pinned_scopes` (Delivery below explains why the fence is pinned).
 - `subscribe {topic_glob, mode?}` asks to be told about writes the caller can
   see; `unsubscribe` stops it; `ack {topic_glob, cursor}` confirms progress —
-  `get` and `log` never move a cursor, only `ack` does.
+  `get` and `log` never move a cursor, only `ack` does, and only forward: an
+  ack at or below the current cursor is refused rather than silently
+  reopening the confirmed backlog and re-triggering a wake.
 - `search {query, scope?, limit?}` is full-text over topic and payload,
   visible scopes only (`scope` narrows the fence, never widens it), most
   relevant first with newest as the tie-break. Plain FTS5 syntax; a query FTS5
   would reject as syntax (bare hyphens, stray quotes) is retried with each
-  token quoted, so plain text always works. The index is a plain FTS5 table
+  token quoted, so plain text always works. A **retracted value is not
+  findable**: the index holds only the newest revision of each `(topic, key,
+  scope)` — a trigger prunes the older ones on every keyed write, and a
+  tombstone (never indexed itself) fires it too, so `forget` clears the key out
+  of the index rather than leaving the dead value to be returned, unmarked and
+  often ranked above the live one because relevance knows nothing about
+  recency. TTL is the one thing a trigger cannot do — expiry depends on the
+  clock and no write happens at the moment it passes — so expired facts are
+  dropped from the hits after the query; the scope fence stays *inside* the
+  SQL, where a page of better-ranked hits the caller may not see cannot starve
+  the ones it may. The query overfetches to absorb the dropped ones, and a page
+  where even the overfetch is all expired returns short of `limit` rather than
+  paying for a second query on every search. The index is a plain FTS5 table
   with its own copy of the text — `bus_events` has a TEXT primary key, and an
   implicit rowid is not stable across VACUUM, so external-content indexing
   could silently drift — kept consistent by triggers, not application code,
@@ -60,12 +76,30 @@ The `bus` tool's operations:
   read the union. One scope on purpose — a librarian summarizing into its own
   scope must not take other scopes' history with it — and `before` must name
   a live event there: an arbitrary ceiling would archive the scope whole, live
-  facts included, with no restore tool. One accepted gap: run-scoped events of
-  a dead run tree resolve for nobody, so nobody can archive them — they stay
-  in the live table, invisible to every read, costing only size.
+  facts included, with no restore tool. The one thing no caller can reach —
+  run-scoped events of a dead run tree, which resolve for nobody and therefore
+  have no anchor — is swept by the instance instead: an hourly pass
+  (`bus/sweep.ts`) asks the task store whether each live `run:` scope's tree is
+  terminal and moves the dead ones to the archive wholesale, no glob and no
+  anchor, because nothing in them is reachable. It is loud per scope (a log
+  line naming the scope and the count, and a `bus-changed` announce) and
+  silent only in the ordinary hour that sweeps nothing. Whether a tree is dead
+  is not the bus's knowledge: main.ts injects the predicate, and a root run id
+  the task store does not know counts as *alive* — task_runs rows are never
+  pruned, so an unknown root is a run being created, not one Pier forgot. One
+  consequence, since the sweep runs on the clock and not on a reader: a
+  subscriber draining its dead tree's backlog after that hour reads it with
+  `log {include_archived: true}`, and so does a *resumed* run, which revives
+  its root's scope with its facts already moved; cursors stay valid either way
+  — `ack` and `caused_by` read the live+archive union. Both are the ephemerality
+  the scope was declared with, now enforced instead of merely stated.
 - `forget {topic, key, caused_by?}` writes a tombstone — into the scope where
   the currently visible winner lives, so forgetting a project fact from inside
-  a run does not merely mask it until the run ends. Never a `DELETE`: cursors
+  a run does not merely mask it until the run ends. Following the winner stops
+  at `instance`: when the winner is instance-wide and the caller passed no
+  scope, the forget is refused — deleting a fact every project sees takes an
+  explicit `scope: 'instance'`, for the same reason `publish` refuses to land
+  there implicitly. Never a `DELETE`: cursors
   must see it, and a future multi-host merge cannot union an absence. A
   reactive forget carries `caused_by` like any other write and counts against
   the hop ceiling.
@@ -96,11 +130,16 @@ project fact beats an instance fact, regardless of write order — so a newer
 instance write cannot poison a project's own value. Within one scope the
 newest write wins and a tombstoned or expired winner does not resurface older
 writes; it only lets a *wider* scope's live value show through, which is what
-makes forgetting an override reveal the default.
+makes forgetting an override reveal the default. Sibling run trees are the
+one place shadowing has no answer — between two active trees there is no
+narrow-to-wide order — so a `get` that finds a live value in each is refused
+as ambiguous rather than picked by the scope set's insertion order, mirroring
+the write-side refusal of `scope: 'run'` across several trees; an explicit
+`scope` disambiguates.
 
 Two declared limits: run scope is **ephemeral** — when the run tree ends,
-nothing resolves to it any more and its events await P3's archive rather than
-any reader; and because scope membership is resolved per call while a cursor
+nothing resolves to it any more and the hourly sweep above moves its events to
+the archive, since no reader will ever ask for them again; and because scope membership is resolved per call while a cursor
 is just an id, a reader whose scope set grows mid-stream does not see the
 older events of its new scope (`id > cursor` never revisits). That is why a
 subscription pins its scope set at subscribe time.
@@ -162,7 +201,15 @@ Delivery rides the tasks outbox — the one system-input engine with transcript
 proof, backoff and a ceiling — as a third `Deliverable` beside run and group
 callbacks (the named sideways edge in docs/architecture.md). A note that can
 never land is abandoned out loud on the same three surfaces as a task
-callback. A subscriber that caught up on its own (log + ack while the note
+callback — and abandonment **retires the subscription**: the sub and any notes
+still owed go, the abandoned note stays as the visible record in the Console's
+owed list. Pier has no session-delete seam (a session dies when its Pi session
+file leaves the disk), so nothing else ever removes a dead reader's `bus_subs`
+row, and without retirement every later event on the pattern would open a
+fresh note and burn the full retry ladder again, forever. The retirement is
+loud, never silent: a log line names the sub, its glob and why, and the same
+`bus-changed` announce that carries every note lifecycle change repaints the
+Console. A subscriber that caught up on its own (log + ack while the note
 waited) is settled without being woken for nothing.
 
 Three modes, differing only against a busy recipient: `queue` (default) and
@@ -177,9 +224,15 @@ A subscription's `log` reads its **pinned** scopes (an exact `topic_glob`
 match), not the caller's live ones: the pointer's count was computed against
 the pinned set, and a run-scoped subscriber must be able to drain its backlog
 after its run tree ends — with live scopes it would be woken forever for
-events its log could no longer show. `ack` takes a real event id, because a
+events its log could no longer show. The re-fenced read is never silent: the
+response carries the pinned set as `pinned_scopes`, so the same query's
+different fence is explicit — unsubscribing restores the live fence,
+re-subscribing re-pins it. `ack` takes a real event id, because a
 cursor above every real id would silence the subscription with no error
-anywhere. Cursors start at the tip: a subscription hears the future, not a
+anywhere — and it only moves forward: a cursor at or below the current one is
+refused, not applied, because silently reopening the backlog would re-wake
+the subscriber for events it already confirmed. Cursors start at the tip: a
+subscription hears the future, not a
 replay of what it could already have read. Scopes are pinned at subscribe time
 (the P1 caveat below is why); re-subscribing re-pins them and keeps the cursor.
 
@@ -227,15 +280,31 @@ tail of the stream, newest first, with payload previews as text.
 
 Every section is a **capped page beside its true total** — the number on the
 tab, and the "showing 200 of 431" under the list. None of these tables has a
-natural ceiling: topics grow until someone archives, a subscription outlives
-the session that made it, and an abandoned note is never deleted by anything.
+natural ceiling: topics grow until someone archives, a subscription lives
+until its reader unsubscribes or an abandoned delivery retires it, and an
+abandoned note is never deleted by anything.
 So the ceiling is in SQL, not in the browser, and three ordering rules keep the
 page the useful end of the list — topics by what moved last, notes with the
 abandoned ones **first** (they are also the oldest, so newest-first would page
 out exactly the failures the list exists for), and a topic's facts capped per
-row with a `+` when there are more. There is no paginator: a filter box over
-the loaded page does more for this shape of data, and the stream's older events
-are what `search` and the archive are for. It hosts the `busEnabled` switch: off,
+row with a `+` when there are more.
+
+Instead of a paginator there is one search box, and it runs **in SQL over the
+whole table** — `?q=` on the endpoint, debounced in the browser, with every
+total becoming the matched total. That is what makes the page a window on the
+database rather than on the 200 rows that happened to load: with client-side
+filtering the 201st topic was unreachable from this surface entirely. Each tab
+searches its own columns (topics: name and scope; events: topic, scope, kind,
+key, payload, writer — so a *value* is found there, tombstones included), and
+the hint under the tab strip says which. It is a `LIKE` scan, deliberately not
+the FTS5 index `search` uses: that index holds no tombstones, no superseded
+revision of a fact and no row the librarian has archived, so an operator asking
+"what happened to this key" would be searching the one copy that cannot answer — a different
+question, of a different table, than the model's `search`, and not the second
+code path the no-LIKE-fallback rule above refuses. LIKE wildcards in the query
+are escaped: `%` is something you search *for*.
+
+The view hosts the `busEnabled` switch: off,
 the page is the explanation and the toggle, and nothing else — but the tab
 itself is always reachable, because hiding it would hide the switch. The
 queries behind it (`BusStore.adminTopics/adminFacts/adminTail`,

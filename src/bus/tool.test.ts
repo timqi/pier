@@ -13,6 +13,7 @@ const caller: BusCaller = {
     "b": { cwd: "/p" },
     "c": { cwd: "/q" },
     "run-child": { rootRunId: "r1", cwd: "/p" },
+    "run-child-2": { rootRunId: "r2", cwd: "/p" },
     "coordinator": { cwd: "/p", invokedRootRunIds: ["r1"] },
     "fanout": { cwd: "/p", invokedRootRunIds: ["r1", "r2"] },
   }[id] ?? {}),
@@ -76,6 +77,33 @@ describe("bus tool", () => {
     expect(await call({ operation: "get", topic: "proj/auth", key: "owner" }, "a")).toBeNull();
   });
 
+  it("forget refuses to follow the winner into instance scope without explicit confirmation", async () => {
+    const call = tool();
+    await call({ operation: "publish", topic: "t", key: "k", payload: "shared", scope: "instance" }, "a");
+    // Following the winner here would tombstone an instance-wide fact from a
+    // project-scoped call — the silent widening publish's writeScope refuses.
+    await expect(call({ operation: "forget", topic: "t", key: "k" }, "b"))
+      .rejects.toThrow(/pass scope 'instance'/);
+    await expect(call({ operation: "forget", topic: "t", key: "k" }, "run-child"))
+      .rejects.toThrow(/pass scope 'instance'/);
+    // Explicit confirmation deletes it for everyone, other projects included.
+    await call({ operation: "forget", topic: "t", key: "k", scope: "instance" }, "b");
+    expect(await call({ operation: "get", topic: "t", key: "k" }, "c")).toBeNull();
+  });
+
+  it("get refuses when two sibling run trees each hold a live fact under one key", async () => {
+    const call = tool();
+    await call({ operation: "publish", topic: "t", key: "k", payload: "one" }, "run-child");
+    await call({ operation: "publish", topic: "t", key: "k", payload: "two" }, "run-child-2");
+    // The fan-out coordinator stands in both trees; runRoots insertion order
+    // must not silently pick which sibling's value wins.
+    await expect(call({ operation: "get", topic: "t", key: "k" }, "fanout"))
+      .rejects.toThrow(/ambiguous/);
+    // An explicit scope reads past the siblings; one tree alone still resolves.
+    expect(await call({ operation: "get", topic: "t", key: "k", scope: "project" }, "fanout")).toBeNull();
+    expect(await call({ operation: "get", topic: "t", key: "k" }, "coordinator")).toMatchObject({ payload: "one" });
+  });
+
   it("scope defaults to the run tree for a subagent, else the project, else errors", async () => {
     const call = tool();
     const inRun = await call({ operation: "publish", topic: "t", payload: 1 }, "run-child") as { scope: string };
@@ -134,8 +162,15 @@ describe("bus tool", () => {
     // Hears the future, not a replay; sees exactly what B saw when it asked.
     expect(sub).toMatchObject({ mode: "queue", cursor: before.id, scopes: ["project:/p", "instance"] });
 
-    const ack = await call({ operation: "ack", topic_glob: "proj/*", cursor: before.id }, "b") as { cursor: string };
-    expect(ack.cursor).toBe(before.id);
+    const next = await call({ operation: "publish", topic: "proj/auth", payload: 1 }, "a") as { id: string };
+    const ack = await call({ operation: "ack", topic_glob: "proj/*", cursor: next.id }, "b") as { cursor: string };
+    expect(ack.cursor).toBe(next.id);
+    // A cursor at or below the current one would silently reopen the backlog
+    // and re-wake the subscriber for events it already confirmed.
+    await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: next.id }, "b"))
+      .rejects.toThrow(/already at/);
+    await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: before.id }, "b"))
+      .rejects.toThrow(/already at/);
     // A cursor that is not a real event id would silence the subscription
     // forever — every future note would settle as "already caught up".
     await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: "zzz" }, "b"))
@@ -145,7 +180,7 @@ describe("bus tool", () => {
     await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: foreign.id }, "b"))
       .rejects.toThrow(/this subscription reads/);
     // Every write reaches the notifier — who hears it is delivery's decision.
-    expect(notified.map((e) => e.payload)).toEqual(["0", "1"]);
+    expect(notified.map((e) => e.payload)).toEqual(["0", "1", "1"]);
 
     expect(await call({ operation: "unsubscribe", topic_glob: "proj/*" }, "b")).toEqual({ removed: "proj/*" });
     await expect(call({ operation: "unsubscribe", topic_glob: "proj/*" }, "b")).rejects.toThrow(/no subscription/);
@@ -164,9 +199,35 @@ describe("bus tool", () => {
     // shape of a run-scoped sub after its run tree ended.
     subs.upsert("a", "proj/*", "queue", ["run:gone"], "");
     store.publish({ topic: "proj/auth", payload: "1", scope: "run:gone", writerSession: "w" });
-    const page = await call({ operation: "log", topic_glob: "proj/*" }, "a") as { events: unknown[] };
+    const page = await call({ operation: "log", topic_glob: "proj/*" }, "a") as
+      { events: unknown[]; pinned_scopes?: string[] };
     // Without the pinned view this is [], and the pointer's count lies forever.
     expect(page.events).toHaveLength(1);
+    // The re-fenced read says so — a fence the response never names would
+    // silently change what the same glob means before and after subscribing.
+    expect(page.pinned_scopes).toEqual(["run:gone"]);
+    const plain = await call({ operation: "log", topic_glob: "other/*" }, "a") as { pinned_scopes?: string[] };
+    expect(plain.pinned_scopes).toBeUndefined();
+  });
+
+  it("a cursor into a swept dead run scope still acks and still drains", async () => {
+    const db = openDb(":memory:");
+    const store = new BusStore(db);
+    const subs = new SubStore(db);
+    const call = (params: unknown, sessionId: string) =>
+      handleBusTool({ store, subs, caller, notify: () => {}, enabled: () => true }, params, sessionId);
+    subs.upsert("a", "proj/*", "queue", ["run:gone"], "");
+    const event = store.publish({ topic: "proj/auth", payload: "1", scope: "run:gone", writerSession: "w" });
+    // The tree ended and bus/sweep.ts moved the whole scope to the archive.
+    expect(store.archiveDeadRunScope("run:gone")).toBe(1);
+    // The subscriber's backlog is still readable and its cursor still valid:
+    // an ack that started failing because maintenance moved a row would leave
+    // the sub owed a note forever, with nothing anywhere saying why.
+    const page = await call({ operation: "log", topic_glob: "proj/*", include_archived: true }, "a") as
+      { events: { id: string }[] };
+    expect(page.events.map((e) => e.id)).toEqual([event.id]);
+    expect(await call({ operation: "ack", topic_glob: "proj/*", cursor: event.id }, "a"))
+      .toEqual({ topic_glob: "proj/*", cursor: event.id });
   });
 
   it("search, topics and archive run behind the same scope fence as every read", async () => {

@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
 import { BusStore, MAX_HOPS, RATE_LIMIT } from "./store.js";
@@ -91,6 +94,21 @@ describe("BusStore", () => {
     expect(s.latest("proj/auth", scopes, "k")[0]?.payload).toBe('"new-default"');
   });
 
+  it("latest refuses two sibling run scopes each holding a live value under one key", () => {
+    const s = store();
+    const scopes = ["run:r1", "run:r2", "project:/p", "instance"];
+    publish(s, { key: "k", kind: "fact", payload: '"one"', scope: "run:r1" }, 1000);
+    publish(s, { key: "k", kind: "fact", payload: '"two"', scope: "run:r2" }, 2000);
+    // Sibling run trees have no narrow-to-wide order; picking by the scope
+    // set's insertion order would silently drop the other sibling's value.
+    expect(() => s.latest("proj/auth", scopes, "k")).toThrow(/ambiguous/);
+    // One live sibling is not an ambiguity — tombstoning the other resolves it …
+    s.forget("proj/auth", "k", "run:r2", "a", undefined, 3000);
+    expect(s.latest("proj/auth", scopes, "k", 4000)[0]?.payload).toBe('"one"');
+    // … and a single-run caller never trips it.
+    expect(s.latest("proj/auth", ["run:r2", "instance"], "k", 4000)).toEqual([]);
+  });
+
   it("reads are fenced by scope", () => {
     const s = store();
     publish(s, { key: "k", kind: "fact", scope: "project:/p" });
@@ -140,10 +158,12 @@ describe("BusStore", () => {
     expect(s.search("auth", SCOPES)).toHaveLength(2); // topic words match too
     expect(s.search("rolled", SCOPES)).toHaveLength(1);
     expect(s.search("nothing-here", SCOPES)).toEqual([]);
-    // A tombstone has no text worth finding.
+    // A tombstone has no text worth finding, and it takes the value it
+    // retracted out of the index with it (the case below has the detail).
     publish(s, { key: "k", kind: "fact", payload: JSON.stringify("findable-fact") }, 5000);
+    expect(s.search("findable-fact", SCOPES)).toHaveLength(1);
     s.forget("proj/auth", "k", SCOPE, "a", undefined, 6000);
-    expect(s.search("findable-fact", SCOPES)).toHaveLength(1); // the fact, not its tombstone
+    expect(s.search("findable-fact", SCOPES)).toEqual([]);
     // FTS5 would call these syntax errors; the token-quoting retry makes
     // plain text — hyphens, stray quotes — just work as literal words.
     expect(s.search('"unbalanced', SCOPES)).toEqual([]);
@@ -151,6 +171,91 @@ describe("BusStore", () => {
     // … and a quoted hyphenated token is a phrase: adjacent words match.
     expect(s.search("login-token", SCOPES)).toHaveLength(1);
     expect(() => s.search("  ", SCOPES)).toThrow(/query required/);
+  });
+
+  it("search answers with the current value only — superseded, forgotten and expired are gone", () => {
+    const s = store();
+    publish(s, { key: "owner", kind: "fact", payload: JSON.stringify("alice-the-first") }, 1000);
+    publish(s, { key: "owner", kind: "fact", payload: JSON.stringify("bob-the-second") }, 2000);
+    // A superseded revision is not a hit: relevance knows nothing about
+    // recency, so an indexed old value would often rank above the live one.
+    expect(s.search("alice-the-first", SCOPES)).toEqual([]);
+    expect(s.search("bob-the-second", SCOPES)).toHaveLength(1);
+    // Same key in another scope is its own fact: pruning is per (topic, key,
+    // scope), so a project override must not evict the instance default.
+    publish(s, { key: "owner", kind: "fact", payload: JSON.stringify("wide-default"), scope: "instance" }, 2500);
+    publish(s, { key: "owner", kind: "fact", payload: JSON.stringify("narrow-override") }, 2600);
+    expect(s.search("wide-default", [...SCOPES, "instance"])).toHaveLength(1);
+    // Forgetting clears the key out of the index: the tombstone is never
+    // indexed itself, and it prunes what it retracts.
+    s.forget("proj/auth", "owner", SCOPE, "a", undefined, 3000);
+    expect(s.search("narrow-override", SCOPES)).toEqual([]);
+    // An unkeyed event is a moment on the stream — nothing supersedes it.
+    publish(s, { payload: JSON.stringify("plain-moment") }, 3100);
+    publish(s, { payload: JSON.stringify("plain-moment") }, 3200);
+    expect(s.search("plain-moment", SCOPES)).toHaveLength(2);
+    // TTL cannot be a trigger — nothing is written when it passes — so the
+    // expired hit is dropped against the clock the caller passes.
+    publish(s, { key: "tmp", kind: "fact", payload: JSON.stringify("expiring-soon"), ttlSeconds: 10 }, 4000);
+    expect(s.search("expiring-soon", SCOPES, 20, 5000)).toHaveLength(1);
+    expect(s.search("expiring-soon", SCOPES, 20, 20_000)).toEqual([]);
+  });
+
+  it("the migration backfills an index that already holds superseded revisions", () => {
+    // The operator's database is the one this has to work on: written at
+    // schema 9, where every revision was indexed. Reproduced by stepping a
+    // real database back to 9 — the trigger gone, the version with it — and
+    // writing the dead revisions the way that Pier would have.
+    const path = join(mkdtempSync(join(tmpdir(), "pier-bus-")), "pier.db");
+    const old = openDb(path);
+    old.exec("DROP TRIGGER bus_events_fts_supersede; PRAGMA user_version = 9");
+    const before = new BusStore(old);
+    const write = (key: string, value: string, now: number) =>
+      before.publish({
+        topic: "proj/auth", key, kind: "fact", payload: JSON.stringify(value),
+        scope: SCOPE, writerSession: "a",
+      }, now);
+    write("k", "stale-value", 1000);
+    write("k", "fresh-value", 2000);
+    write("gone", "retracted-value", 3000);
+    before.forget("proj/auth", "gone", SCOPE, "a", undefined, 4000);
+    // Pre-upgrade, finding the dead values *is* the bug.
+    expect(before.search("stale-value", SCOPES)).toHaveLength(1);
+    expect(before.search("retracted-value", SCOPES)).toHaveLength(1);
+    old.close();
+
+    const after = new BusStore(openDb(path));
+    expect(after.search("stale-value", SCOPES)).toEqual([]);
+    expect(after.search("retracted-value", SCOPES)).toEqual([]);
+    expect(after.search("fresh-value", SCOPES)).toHaveLength(1);
+  });
+
+  it("archiveDeadRunScope moves a whole unreachable run scope, index included", () => {
+    const s = store();
+    const first = publish(s, { payload: JSON.stringify("run-chatter"), scope: "run:r1" }, 1000);
+    publish(s, { key: "k", kind: "fact", payload: JSON.stringify("run-fact"), scope: "run:r1" }, 2000);
+    const kept = publish(s, { payload: JSON.stringify("project-chatter") }, 3000);
+
+    // No glob, no anchor: nothing in a dead scope is reachable, so there is
+    // no live event a caller could name as a boundary.
+    expect(s.archiveDeadRunScope("run:r1")).toBe(2);
+    expect(s.log("proj/*", ["run:r1", SCOPE]).events.map((e) => e.id)).toEqual([kept.id]);
+    expect(s.latest("proj/auth", ["run:r1"], "k")).toEqual([]);
+    expect(s.search("run-chatter", ["run:r1", SCOPE])).toEqual([]); // FTS followed the DELETE
+    expect(s.search("run-fact", ["run:r1", SCOPE])).toEqual([]);
+    // History and identity survive, so a cursor into the swept scope still acks.
+    expect(s.log("proj/*", ["run:r1"], "", 50, true).events).toHaveLength(2);
+    expect(s.seenBy(first.id, "proj/*", ["run:r1"])).toBe(true);
+    expect(s.byId(first.id)?.payload).toBe(JSON.stringify("run-chatter"));
+    // A second sweep of the same scope is a no-op, not a duplicate row.
+    expect(s.archiveDeadRunScope("run:r1")).toBe(0);
+    // Only a run scope has a lifetime that can end; the others would lose
+    // live facts with no restore tool.
+    expect(() => s.archiveDeadRunScope(SCOPE)).toThrow(/only a run scope/);
+    expect(() => s.archiveDeadRunScope("instance")).toThrow(/only a run scope/);
+    expect(s.runScopes()).toEqual([]); // nothing live left under run:
+    publish(s, { payload: '"x"', scope: "run:r2" }, 5000);
+    expect(s.runScopes()).toEqual(["run:r2"]);
   });
 
   it("archive moves one scope's events out of every default read, but not out of history", () => {

@@ -143,8 +143,32 @@ const holes = (scopes: readonly string[]): string => scopes.map(() => "?").join(
 
 /** Every admin page is capped in SQL: the tables these read have no natural
  * ceiling, and a page that loads the whole bus is how a debugging surface
- * becomes the thing that needs debugging. */
-const cap = (limit: number): number => Math.min(Math.max(limit, 1), 500);
+ * becomes the thing that needs debugging. Shared with bus/subs.ts — the pages
+ * are one surface and must not disagree about their own ceiling. */
+export const adminCap = (limit: number): number => Math.min(Math.max(limit, 1), 500);
+
+/**
+ * The operator page's search, over a whole table — also shared with subs.ts,
+ * because all four sections ask the same question of different columns.
+ *
+ * LIKE, not the FTS5 index `search()` uses, and the difference is the reason
+ * this exists: the index deliberately holds no tombstones (db.ts's trigger
+ * skips them), no superseded revision of a fact (the next one prunes it) and
+ * no row the librarian has archived, so an operator asking "what happened to
+ * this key" would be searching the one copy that cannot answer. docs/bus.md's "no LIKE fallback" rule is about the
+ * *model's* search growing a second code path for a hypothetical Node build;
+ * this is a different question, of a different table, for a different reader.
+ */
+export function adminMatch(cols: readonly string[], q: string): { sql: string; args: string[] } {
+  if (!q) return { sql: "", args: [] };
+  // The wildcards are the searcher's data, not their syntax: a payload full of
+  // '%' must be findable by typing '%'.
+  const term = `%${q.replaceAll(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  return {
+    sql: `(${cols.map((col) => `${col} LIKE ? ESCAPE '\\'`).join(" OR ")})`,
+    args: cols.map(() => term),
+  };
+}
 
 export class BusStore {
   readonly #db: DatabaseSync;
@@ -232,26 +256,42 @@ export class BusStore {
       event.filePtr ?? null, event.scope, event.writerSession,
       event.causedBy ?? null, event.hops, event.ttlSeconds ?? null, event.createdAt,
     );
-    // The FTS index follows by trigger (db.ts migration 9), atomically.
+    // The FTS index follows by trigger (db.ts migrations 9 and 10), atomically:
+    // the row is indexed unless it is a tombstone, and a keyed write drops its
+    // own key's older revisions from the index, so search never answers with a
+    // superseded or retracted value.
     return event;
   }
 
   /** Full-text over topic and payload, visible scopes only, most relevant
    * first (newest breaks ties). Archived events are not searched: what nobody
-   * read while it was live is not what a search is looking for. */
-  search(query: string, scopes: readonly string[], limit = 20): BusEvent[] {
+   * read while it was live is not what a search is looking for.
+   *
+   * A retracted value is not findable: the index holds only the newest
+   * revision of each (topic, key, scope) — migration 10's trigger prunes the
+   * rest, and a tombstone (never indexed itself) clears the key out. TTL
+   * cannot be a trigger, because expiry depends on the clock and no write
+   * happens at the moment it passes, so expired facts are dropped here
+   * instead. That is the one post-filter: the scope fence stays in the SQL,
+   * where a page of better-ranked hits the caller may not see cannot starve
+   * the ones it may. */
+  search(query: string, scopes: readonly string[], limit = 20, now = Date.now()): BusEvent[] {
     if (!query.trim()) throw new Error("query required");
     if (scopes.length === 0) return [];
-    // Scope inside the query, not after the cap: a page of better-ranked hits
-    // the caller may not see must not starve the ones it may.
-    const match = (q: string): Row[] =>
-      this.#db.prepare(`
+    const want = Math.min(Math.max(limit, 1), 100);
+    // Overfetch modestly so a handful of expired facts ranked above the live
+    // hits does not thin the page. A page where even the overfetch is all
+    // expired undershoots `limit` — a rare miss on a stale topic, accepted
+    // rather than paid for with a second query on every search.
+    const match = (q: string): BusEvent[] =>
+      (this.#db.prepare(`
         SELECT e.* FROM bus_events_fts f JOIN bus_events e ON e.id = f.id
         WHERE bus_events_fts MATCH ? AND e.scope IN (${holes(scopes)})
         ORDER BY f.rank, e.id DESC LIMIT ?
-      `).all(q, ...scopes, Math.min(Math.max(limit, 1), 100)) as unknown as Row[];
+      `).all(q, ...scopes, want * 2) as unknown as Row[])
+        .map(fromRow).filter((event) => live(event, now)).slice(0, want);
     try {
-      return match(query).map(fromRow);
+      return match(query);
     } catch {
       // FTS5's query language treats a bare hyphen (or colon, or unbalanced
       // quote) as syntax — and "nothing-here" is a perfectly reasonable thing
@@ -259,7 +299,7 @@ export class BusStore {
       // operator syntax still available to whoever writes it correctly.
       try {
         return match(query.split(/\s+/).filter(Boolean)
-          .map((token) => `"${token.replaceAll('"', '""')}"`).join(" ")).map(fromRow);
+          .map((token) => `"${token.replaceAll('"', '""')}"`).join(" "));
       } catch {
         throw new Error('not a valid search query — use words, "quoted phrases", AND/OR/NOT');
       }
@@ -281,14 +321,18 @@ export class BusStore {
       "SELECT 1 AS hit FROM bus_events WHERE id = ? AND topic GLOB ? AND scope = ?",
     ).get(before, topicGlob, scope);
     if (!anchor) throw new Error("before must be the id of a live event matching topic_glob in the target scope");
-    const move = "topic GLOB ? AND id <= ? AND scope = ?";
-    // A savepoint, not BEGIN: composable if a caller ever owns a transaction.
+    return this.#moveToArchive("topic GLOB ? AND id <= ? AND scope = ?", [topicGlob, before, scope]);
+  }
+
+  /** The move both archive paths share: rows go to the archive whole (so a
+   * future need can move them back), the FTS rows follow the DELETE by
+   * trigger. A savepoint, not BEGIN: composable if a caller ever owns a
+   * transaction. */
+  #moveToArchive(where: string, args: string[]): number {
     this.#db.exec("SAVEPOINT bus_archive");
     try {
-      this.#db.prepare(`INSERT INTO bus_events_archive SELECT * FROM bus_events WHERE ${move}`)
-        .run(topicGlob, before, scope);
-      // The FTS rows follow the DELETE by trigger.
-      const moved = this.#db.prepare(`DELETE FROM bus_events WHERE ${move}`).run(topicGlob, before, scope);
+      this.#db.prepare(`INSERT INTO bus_events_archive SELECT * FROM bus_events WHERE ${where}`).run(...args);
+      const moved = this.#db.prepare(`DELETE FROM bus_events WHERE ${where}`).run(...args);
       this.#db.exec("RELEASE bus_archive");
       return Number(moved.changes);
     } catch (err) {
@@ -296,6 +340,29 @@ export class BusStore {
       this.#db.exec("RELEASE bus_archive");
       throw err;
     }
+  }
+
+  /** Everything left in one dead run scope, moved to the archive wholesale —
+   * no topic glob, no `before` anchor, no scope fence. Every other read and
+   * `archive` is fenced by what a caller may see, and that is exactly why this
+   * exists: a run tree that ended resolves for nobody, so its events are
+   * reachable by no reader and no caller's anchor, and they would otherwise
+   * sit in the live table, in every topic GLOB scan and in the index forever.
+   * Whether the tree is dead is not the bus's knowledge — bus/sweep.ts is
+   * handed that predicate. */
+  archiveDeadRunScope(scope: string): number {
+    // The one guard a fence-free move needs: 'instance' or a project scope has
+    // no lifetime that could make it unreachable, and archiving one whole
+    // would take live facts with it.
+    if (!scope.startsWith("run:")) throw new Error("only a run scope can be archived wholesale");
+    return this.#moveToArchive("scope = ?", [scope]);
+  }
+
+  /** The sweep's worklist: every run scope still holding live events. */
+  runScopes(): string[] {
+    return (this.#db.prepare(
+      "SELECT DISTINCT scope FROM bus_events WHERE scope LIKE 'run:%'",
+    ).all() as unknown as { scope: string }[]).map((row) => row.scope);
   }
 
   /** Per-(topic, scope) shape of the visible bus — what the librarian reasons
@@ -323,7 +390,11 @@ export class BusStore {
    * within a scope the newest write wins — a tombstoned or expired winner ends
    * its own scope's claim without resurfacing older writes there, but a wider
    * scope's live value still shows through. So a project fact overrides an
-   * instance default, and forgetting the override reveals the default. */
+   * instance default, and forgetting the override reveals the default.
+   * Sibling run scopes are the one place shadowing has no answer: between two
+   * active run trees there is no narrow-to-wide order, so two live values
+   * under one key are refused as ambiguous — the scope set's insertion order
+   * would be a silent guess, exactly what the write side refuses. */
   latest(topic: string, scopes: readonly string[], key?: string, now = Date.now(), peek = false): BusEvent[] {
     if (scopes.length === 0) return [];
     const rows = this.#db.prepare(`
@@ -342,7 +413,18 @@ export class BusStore {
       byKey.set(event.key!, perScope);
     }
     const winners: BusEvent[] = [];
-    for (const perScope of byKey.values()) {
+    for (const [factKey, perScope] of byKey) {
+      // Two sibling run trees each holding a live value is not a shadowing
+      // question: run scopes have no order between them, and picking by the
+      // scope set's insertion order would silently drop a sibling's value.
+      const liveRuns = scopes.filter((scope) => {
+        if (!scope.startsWith("run:")) return false;
+        const candidate = perScope.get(scope);
+        return candidate !== undefined && live(candidate, now);
+      });
+      if (liveRuns.length > 1) {
+        throw new Error(`key '${factKey}' is ambiguous: several active run trees hold a live value — pass scope to disambiguate`);
+      }
       for (const scope of scopes) {
         const candidate = perScope.get(scope);
         if (!candidate || !live(candidate, now)) continue; // dead scope: look wider
@@ -487,17 +569,24 @@ export class BusStore {
    * Capped and newest-active first, with the true total beside it: an
    * instance nobody archives grows topics without bound, and the row that
    * moved this morning is the one being looked for. */
-  adminTopics(limit = 200): { rows: BusTopicCounts[]; total: number } {
+  adminTopics(limit = 200, q = ""): { rows: BusTopicCounts[]; total: number } {
+    // Name and scope only. A topic found by one of its *values* is the Events
+    // tab's answer, which searches key and payload across the whole table —
+    // matching values here would either lie about a topic's counts or cost a
+    // correlated scan per group.
+    const match = adminMatch(["e.topic", "e.scope"], q);
     const all = `
       SELECT e.topic, e.scope, SUM(e.live) AS events, SUM(1 - e.live) AS archived,
              MAX(e.created_at) AS newestAt, r.last_read_at AS lastReadAt
       FROM (SELECT topic, scope, created_at, 1 AS live FROM bus_events
             UNION ALL SELECT topic, scope, created_at, 0 AS live FROM bus_events_archive) e
       LEFT JOIN bus_topic_reads r ON r.topic = e.topic
+      ${match.sql ? `WHERE ${match.sql}` : ""}
       GROUP BY e.topic, e.scope`;
-    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM (${all})`).get() as { n: number };
+    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM (${all})`)
+      .get(...match.args) as { n: number };
     const rows = this.#db.prepare(`${all} ORDER BY newestAt DESC, e.topic, e.scope LIMIT ?`)
-      .all(cap(limit)) as unknown as BusTopicCounts[];
+      .all(...match.args, adminCap(limit)) as unknown as BusTopicCounts[];
     return { rows, total: total.n };
   }
 
@@ -521,11 +610,19 @@ export class BusStore {
 
   /** Tail of the live stream, newest first — one page, not a query language.
    * The total says what the page is a tail *of*; older events are the
-   * librarian's and `search`'s business, not a paginator's. */
-  adminTail(limit = 50): { events: BusEvent[]; total: number } {
-    const total = this.#db.prepare("SELECT COUNT(*) AS n FROM bus_events").get() as { n: number };
-    const rows = this.#db.prepare("SELECT * FROM bus_events ORDER BY id DESC LIMIT ?")
-      .all(cap(limit)) as unknown as Row[];
+   * librarian's and `search`'s business, not a paginator's. With `q` the tail
+   * is of the matches instead, scanned across the whole live table, so the
+   * page stops being only "what happened lately". */
+  adminTail(limit = 50, q = ""): { events: BusEvent[]; total: number } {
+    const match = adminMatch(
+      ["topic", "scope", "kind", "key", "payload", "writer_session"],
+      q,
+    );
+    const where = match.sql ? `WHERE ${match.sql}` : "";
+    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM bus_events ${where}`)
+      .get(...match.args) as { n: number };
+    const rows = this.#db.prepare(`SELECT * FROM bus_events ${where} ORDER BY id DESC LIMIT ?`)
+      .all(...match.args, adminCap(limit)) as unknown as Row[];
     return { events: rows.map(fromRow), total: total.n };
   }
 

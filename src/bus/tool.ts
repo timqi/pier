@@ -72,14 +72,14 @@ export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomToo
     description:
       "Append-only event log shared across sessions; one table, two reads. " +
       "get {topic, key?, scope?} reads shared state: the newest value per (topic, key), narrower scopes shadowing wider ones; scope reads one scope without the shadowing. " +
-      "log {topic_glob, after?, limit?} reads the stream: events after a cursor in write order, returning the next cursor — use it to catch up, then pass the cursor back in. " +
+      "log {topic_glob, after?, limit?} reads the stream: events after a cursor in write order, returning the next cursor — use it to catch up, then pass the cursor back in; a glob exactly matching one of your subscriptions reads that subscription's pinned scopes instead of your live ones, and the response says so in pinned_scopes (unsubscribe restores your live scopes, re-subscribing re-pins them). " +
       "publish {topic, key?, payload, ...} appends: with key it is a fact that overwrites in get; without key a plain event. " +
-      "forget {topic, key} deletes a fact (as a tombstone). " +
-      "search {query, scope?, limit?} is full-text over topic and payload (FTS5: words, \"quoted phrases\", AND/OR/NOT), most relevant first; scope narrows to one of your scopes. " +
+      "forget {topic, key, scope?} deletes a fact (as a tombstone) in the scope where the visible winner lives, and the value stops being findable by search too; when that winner is instance-wide, pass scope 'instance' to confirm deleting it for every project. " +
+      "search {query, scope?, limit?} is full-text over topic and payload (FTS5: words, \"quoted phrases\", AND/OR/NOT), most relevant first; scope narrows to one of your scopes. Only a fact's current value is searchable — superseded, forgotten and expired ones are not — so a hit is never a retracted value; archived events are not searched either (log {include_archived: true} reaches those). " +
       "topics {} lists every visible topic with its event count, newest id, newest timestamp and when anyone last read it (epoch ms, null = never). " +
       "archive {topic_glob, before, scope?} moves matched events with id <= before, in one scope (default: your narrowest), out of every default read (log {include_archived: true} still reaches them) — for aged topics nobody reads, not for deleting mistakes (that is forget); before must be a live event id there. " +
       "peek: true on get/log reads without counting as a reader — for maintenance passes over topics you do not consume, so they can still age out. " +
-      "subscribe {topic_glob, mode?} asks to be told about writes you can see: mode 'queue' (default) delivers a pointer at your next turn boundary, 'steer' interrupts your running turn, 'wake' is 'queue' that also starts your turn when idle (they differ only when busy). The notification is a pointer, never the payload — read with log, then ack {topic_glob, cursor} to confirm progress; unsubscribe {topic_glob} stops it. " +
+      "subscribe {topic_glob, mode?} asks to be told about writes you can see: mode 'queue' (default) delivers a pointer at your next turn boundary, 'steer' interrupts your running turn, 'wake' is 'queue' that also starts your turn when idle (they differ only when busy). The notification is a pointer, never the payload — read with log, then ack {topic_glob, cursor} to confirm progress (the cursor only moves forward); unsubscribe {topic_glob} stops it. " +
       "Topics are lowercase 'a/b/c' paths. Keep payload small (JSON, 8KB max); write large content to a file and pass its absolute path as file_ptr. " +
       "Scope defaults to your run tree when you are a subagent, else your project; pass scope 'instance' only for facts every project should see. A narrower scope's fact shadows a wider one's under the same key; run scope lives only while its run tree is active. " +
       "When you publish in reaction to an event you read, pass that event's id as caused_by — chains deeper than 4 are refused as feedback loops.",
@@ -178,7 +178,14 @@ export async function handleBusTool(
         input.include_archived === true,
         input.peek === true,
       );
-      return { events: events.map(echoStream), cursor };
+      // A re-fenced read must say so: the same glob without the subscription
+      // answers from live scopes, and a fence the response never names is a
+      // silent change of the query's meaning.
+      return {
+        events: events.map(echoStream),
+        cursor,
+        ...(pinned === undefined ? {} : { pinned_scopes: pinned }),
+      };
     }
     case "search": {
       if (input.limit !== undefined && !Number.isInteger(input.limit)) {
@@ -211,6 +218,13 @@ export async function handleBusTool(
       // project override in the caller's default (run) scope would only mask
       // it for the run and let it resurface when the run ends.
       const winner = input.scope === undefined ? store.latest(topic, scopes, key)[0] : undefined;
+      // Following the winner stops at the instance boundary: publish refuses
+      // to land there implicitly, and a deletion every project sees deserves
+      // the same explicitness — the winner-follow must not become the way
+      // around writeScope's refusal.
+      if (winner?.scope === "instance") {
+        throw new Error(`the live fact for '${key}' is instance-wide — pass scope 'instance' to confirm deleting it for every project`);
+      }
       const event = store.forget(
         topic,
         key,

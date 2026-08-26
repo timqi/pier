@@ -106,10 +106,6 @@ function table(headers: [string, string][], rows: HTMLElement[]): HTMLElement {
   return h("div", "overflow-x-auto rounded-xl border border-neutral-200 bg-white", el);
 }
 
-/** What the filter matches on, lowercased once per row. */
-const hay = (...parts: (string | null | undefined)[]): string =>
-  parts.filter(Boolean).join(" ").toLowerCase();
-
 export function createBusView(
   root: HTMLElement,
   openSession: (id: string) => void,
@@ -119,7 +115,11 @@ export function createBusView(
   let data: BusOverview = EMPTY;
   let loaded = false;
   let tab: Tab = "topics";
-  let needle = "";
+  /** Sent to the server, not applied here: the page is 200 rows of a table
+   *  with no ceiling, so a box that only sifted what had loaded could not see
+   *  the 201st topic at all — which is most of what an operator opens this
+   *  page to find. */
+  let query = "";
   /** The last read or write that did not take. A view that re-renders the old
    *  state silently is indistinguishable from one nobody clicked. */
   let problem = "";
@@ -289,24 +289,32 @@ export function createBusView(
   // only the body, so the input keeps focus and the caret keeps its place.
 
   const tabBtns = h("div", "flex flex-wrap items-center gap-1");
-  const filter = textInput("", "Filter…", (v) => {
-    needle = v.trim().toLowerCase();
-    renderBody();
+  let typing: ReturnType<typeof setTimeout> | undefined;
+  const filter = textInput("", "Search the whole bus…", (v) => {
+    query = v.trim();
+    // Debounced: this is the only control on the page that costs a database
+    // query per keystroke. 250ms is under the threshold where typing stops
+    // feeling answered.
+    clearTimeout(typing);
+    typing = setTimeout(() => void load(), 250);
   });
   const strip = h(
     "div",
     "tabstrip",
     tabBtns,
-    h("div", "ml-auto w-56 flex-none max-md:ml-0 max-md:w-full", filter),
+    h("div", "ml-auto w-64 flex-none max-md:ml-0 max-md:w-full", filter),
   );
   const hint = h("p", "mb-2 mt-3 text-[11.5px] leading-snug text-neutral-500", "");
   const body = h("div", "");
 
+  // Each hint ends by naming what the search reaches on that tab: the same
+  // word finds different things per section, and guessing which is not the
+  // operator's job.
   const HINTS: Record<Tab, string> = {
-    topics: "Per topic and scope: how much history is there, when it last moved, when anyone last read it — and the live facts underneath. Most recently written first.",
-    subs: "Who asked to hear about writes. Lag is counted against the scopes the subscription pinned when it was made; a row outlives the session that made it.",
-    owed: "Pointer notifications not yet in a recipient's transcript. Abandoned ones are listed first and never truncated away — a delivery nobody can complete is a failure, not an absence.",
-    events: "The tail of the stream, newest first. Payloads are previews; the full value is one bus get away, and older events are what search and the archive are for.",
+    topics: "Per topic and scope: how much history is there, when it last moved, when anyone last read it — and the live facts underneath. Most recently written first; search matches topic and scope, over live and archived rows alike.",
+    subs: "Who asked to hear about writes. Lag is counted against the scopes the subscription pinned when it was made; a row lives until its reader unsubscribes or an abandoned delivery retires it. Search matches session, pattern, mode and pinned scope.",
+    owed: "Pointer notifications not yet in a recipient's transcript. Abandoned ones are listed first and never truncated away — a delivery nobody can complete is a failure, not an absence. Search matches recipient, pattern, state and reason.",
+    events: "The tail of the stream, newest first. Payloads are previews; the full value is one bus get away. Search runs over the whole live table — topic, scope, kind, key, payload, writer — so this is the tab where a *value* is found, tombstones included.",
   };
 
   function renderTabs(): void {
@@ -330,68 +338,64 @@ export function createBusView(
 
   /** The active tab's list, and the two numbers that keep it honest: how many
    *  rows the page holds, and how many exist. */
-  function tabBody(): { list: HTMLElement; shown: number; total: number; matched: number } {
-    const nothing = (its: string): HTMLElement => empty(needle ? "Nothing matches." : its);
+  function tabBody(): { list: HTMLElement; shown: number; total: number } {
+    const nothing = (its: string): HTMLElement =>
+      empty(query ? `Nothing in the bus matches “${query}”.` : its);
     if (tab === "topics") {
-      const rows = data.topics.filter((t) =>
-        hay(t.topic, t.scope, ...t.facts.map((f) => `${f.key} ${f.payload}`)).includes(needle));
       return {
-        list: rows.length
-          ? h("div", "rounded-xl border border-neutral-200 bg-white", ...rows.map(topicRow))
+        list: data.topics.length
+          ? h("div", "rounded-xl border border-neutral-200 bg-white", ...data.topics.map(topicRow))
           : nothing("No events yet. A session's first publish creates its topic."),
-        shown: data.topics.length, total: data.topicsTotal, matched: rows.length,
+        shown: data.topics.length, total: data.topicsTotal,
       };
     }
     if (tab === "subs") {
-      const rows = data.subs.filter((s) => hay(s.sessionId, s.topicGlob, s.mode, ...s.scopes).includes(needle));
       return {
-        list: rows.length
+        list: data.subs.length
           ? table(
             [["Session", "w-[14%]"], ["Pattern", "w-[26%]"], ["Mode", "w-[10%]"], ["Lag", "w-[14%]"], ["Pinned scopes", ""]],
-            rows.map(subRow),
+            data.subs.map(subRow),
           )
           : nothing("Nobody is subscribed."),
-        shown: data.subs.length, total: data.subsTotal, matched: rows.length,
+        shown: data.subs.length, total: data.subsTotal,
       };
     }
     if (tab === "owed") {
-      const rows = data.notes.filter((n) => hay(n.sessionId, n.topicGlob, n.state, n.error).includes(needle));
       return {
-        list: rows.length
+        list: data.notes.length
           ? table(
             [["Recipient", "w-[14%]"], ["Pattern", "w-[24%]"], ["State", "w-[28%]"], ["Reason", ""]],
-            rows.map(noteRow),
+            data.notes.map(noteRow),
           )
           : nothing("Nothing owed — every notification landed."),
-        shown: data.notes.length, total: data.notesTotal, matched: rows.length,
+        shown: data.notes.length, total: data.notesTotal,
       };
     }
-    const rows = data.events.filter((e) =>
-      hay(e.topic, e.scope, e.kind, e.key, e.payload, e.writerSession).includes(needle));
     return {
-      list: rows.length
+      list: data.events.length
         ? table(
           [["Age", "w-[8%]"], ["Topic", "w-[22%]"], ["Key", "w-[14%]"], ["Payload", ""], ["Writer", "w-[10%]"]],
-          rows.map(eventRow),
+          data.events.map(eventRow),
         )
         : nothing("The stream is empty."),
-      shown: data.events.length, total: data.eventsTotal, matched: rows.length,
+      shown: data.events.length, total: data.eventsTotal,
     };
   }
 
   function renderBody(): void {
     hint.textContent = HINTS[tab];
-    const { list, shown, total, matched } = tabBody();
+    const { list, shown, total } = tabBody();
     const lines: HTMLElement[] = [];
-    // Never a silent prefix, and never a silent filter: whichever is hiding
-    // rows says so, with the number it is hiding them from.
-    if (needle) lines.push(note(`${matched} of ${shown} loaded rows match.`));
-    else if (shown < total) {
-      // A tail is not a truncated list, and saying "capped" about one would
-      // invite a paginator the stream does not want.
+    // Never a silent prefix: whatever is hiding rows says so, against the
+    // number counted in the database rather than the number that loaded.
+    if (shown < total) {
+      // A tail is not a truncated list, and calling it capped would invite a
+      // paginator the stream does not want.
       lines.push(note(tab === "events"
-        ? `The newest ${shown} of ${total} events — older ones are what bus search and the archive are for.`
-        : `Showing ${shown} of ${total} — this page is capped; narrow it with the filter above.`));
+        ? `The newest ${shown} of ${total} matching events${query ? "" : " — search to reach older ones"}.`
+        : `Showing ${shown} of ${total}${query ? " matches" : ""} — this page is capped; narrow the search above.`));
+    } else if (query && total > 0) {
+      lines.push(note(`${total} match${total === 1 ? "" : "es"} in the whole bus.`));
     }
     body.replaceChildren(list, ...lines);
   }
@@ -450,7 +454,7 @@ export function createBusView(
   }
 
   async function load(): Promise<void> {
-    const res = await fetch("/api/bus");
+    const res = await fetch(`/api/bus${query ? `?q=${encodeURIComponent(query)}` : ""}`);
     if (!res.ok) {
       problem = await failure(res, "Could not load the bus");
       return render();

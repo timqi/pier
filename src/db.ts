@@ -289,6 +289,32 @@ const MIGRATIONS: readonly string[] = [
     last_read_at INTEGER NOT NULL
   );
   `,
+  // 10 — forgetting a fact also removes it from search.
+  `
+  -- A fact's older revisions stayed in the index, so search kept returning
+  -- superseded and retracted values — often ranked above the live one, since
+  -- relevance knows nothing about recency. The index follows the table by
+  -- trigger here too: only the newest revision of each (topic, key, scope) is
+  -- searchable. A tombstone is itself never indexed (migration 9's insert
+  -- trigger skips it) and still fires this one, which is what makes a forget
+  -- clear the key out of the index entirely. Unkeyed events are moments on the
+  -- stream, nothing supersedes them: they stay indexed until archived.
+  CREATE TRIGGER bus_events_fts_supersede AFTER INSERT ON bus_events
+    WHEN NEW.key IS NOT NULL
+    BEGIN
+      DELETE FROM bus_events_fts WHERE id IN (
+        SELECT id FROM bus_events
+        WHERE topic = NEW.topic AND key = NEW.key AND scope = NEW.scope AND id < NEW.id);
+    END;
+
+  -- The revisions already indexed before the trigger existed: every keyed
+  -- event that is no longer the newest of its (topic, key, scope).
+  DELETE FROM bus_events_fts WHERE id IN (
+    SELECT e.id FROM bus_events e
+    WHERE e.key IS NOT NULL AND e.id < (
+      SELECT MAX(id) FROM bus_events
+      WHERE topic = e.topic AND key = e.key AND scope = e.scope));
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

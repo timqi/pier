@@ -77,7 +77,8 @@ export interface BusEventRow {
 /** One round trip: the switch and all four sections. Every section is a capped
  *  page beside the true total — the count is what the tab label shows and what
  *  makes "200 of 431" sayable, and a surface that quietly shows a prefix is a
- *  surface that lies about how much is there. */
+ *  surface that lies about how much is there. Under `?q=` every total is the
+ *  *matched* total, counted in SQL across the whole table. */
 export interface BusOverview {
   enabled: boolean;
   topics: BusTopicRow[];

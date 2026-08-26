@@ -6,6 +6,9 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { CallbackFields } from "../tasks/types.js";
 import { pierDb } from "../db.js";
+// The admin pages are one surface across two stores; the ceiling and the
+// search predicate are shared so the halves cannot disagree (bus/store.ts).
+import { adminCap as cap, adminMatch } from "./store.js";
 
 export type BusSubMode = "steer" | "queue" | "wake";
 
@@ -46,9 +49,6 @@ interface SubRow {
   cursor: string;
   created_at: string;
 }
-
-/** The same ceiling the event store's admin pages use, for the same reason. */
-const cap = (limit: number): number => Math.min(Math.max(limit, 1), 500);
 
 const subOf = (row: SubRow): BusSub => ({
   id: row.id,
@@ -108,10 +108,33 @@ export class SubStore {
     return true;
   }
 
-  /** Confirms progress: get never moves a cursor, only ack does. */
+  /** Retires a subscription whose session nothing can reach: the sub and the
+   * notes still owed go, but abandoned notes stay — the record of the failure
+   * remains visible in adminNotes (AGENTS.md 5b). Distinct from remove():
+   * that is the reader asking, this is the delivery engine concluding the
+   * reader is gone (delivery.ts owns the when and the log line). Returns
+   * false when already retired, so the caller logs it once. */
+  retire(subId: string): boolean {
+    if (!this.bySubId(subId)) return false;
+    this.#db.prepare(
+      "DELETE FROM bus_notes WHERE sub_id = ? AND (state IS NULL OR state != 'abandoned')",
+    ).run(subId);
+    this.#db.prepare("DELETE FROM bus_subs WHERE id = ?").run(subId);
+    return true;
+  }
+
+  /** Confirms progress: get never moves a cursor, only ack does — and only
+   * forward. An ack at or below the current cursor would silently reopen the
+   * confirmed backlog and re-trigger a wake for events already read; refusing
+   * here, not in the tool, so no caller can move a cursor backwards. ULIDs
+   * compare lexicographically and '' means everything unread, so any real id
+   * passes a fresh subscription. */
   ack(sessionId: string, topicGlob: string, cursor: string): BusSub {
     const sub = this.get(sessionId, topicGlob);
     if (!sub) throw new Error(`no subscription on '${topicGlob}' — subscribe first`);
+    if (cursor <= sub.cursor) {
+      throw new Error(`cursor must advance — the subscription is already at '${sub.cursor}'`);
+    }
     this.#db.prepare("UPDATE bus_subs SET cursor = ? WHERE id = ?").run(cursor, sub.id);
     return { ...sub, cursor };
   }
@@ -158,14 +181,18 @@ export class SubStore {
   // Read-only, fence-free admin queries for the Console's Bus view; the reason
   // there is no session fence is recorded once, in bus/store.ts.
 
-  /** Subscriptions, newest first, capped: nothing removes a row when the
-   * session behind it dies, so the table grows with the months — and each row
-   * costs the caller one countSince, which is the real reason for a ceiling. */
-  adminSubs(limit = 200): { rows: BusSub[]; total: number } {
-    const total = this.#db.prepare("SELECT COUNT(*) AS n FROM bus_subs").get() as { n: number };
+  /** Subscriptions, newest first, capped: a row lives until its reader
+   * unsubscribes or an abandoned delivery retires it (delivery.ts), so the
+   * table still grows with the months — and each row costs the caller one
+   * countSince, which is the real reason for a ceiling. */
+  adminSubs(limit = 200, q = ""): { rows: BusSub[]; total: number } {
+    const match = adminMatch(["session_id", "topic_glob", "mode", "scopes"], q);
+    const where = match.sql ? `WHERE ${match.sql}` : "";
+    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM bus_subs ${where}`)
+      .get(...match.args) as { n: number };
     const rows = this.#db.prepare(
-      "SELECT * FROM bus_subs ORDER BY created_at DESC, session_id, topic_glob LIMIT ?",
-    ).all(cap(limit)) as unknown as SubRow[];
+      `SELECT * FROM bus_subs ${where} ORDER BY created_at DESC, session_id, topic_glob LIMIT ?`,
+    ).all(...match.args, cap(limit)) as unknown as SubRow[];
     return { rows: rows.map(subOf), total: total.n };
   }
 
@@ -174,14 +201,24 @@ export class SubStore {
    * instance they are also the *oldest* rows, and a plain newest-first page
    * would truncate away exactly the failures this list exists to show
    * (AGENTS.md 5b). */
-  adminNotes(limit = 100): { notes: BusNote[]; total: number } {
-    const open = "WHERE state IS NULL OR state != 'delivered'";
-    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM bus_notes ${open}`).get() as { n: number };
+  adminNotes(limit = 100, q = ""): { notes: BusNote[]; total: number } {
+    // Named columns, not the whole JSON document: matching that would also hit
+    // internal ids, and a search that answers with rows the searcher cannot
+    // see the reason for is worse than one that misses.
+    const match = adminMatch([
+      "session_id",
+      "state",
+      "json_extract(json, '$.topicGlob')",
+      "json_extract(json, '$.callbackError')",
+    ], q);
+    const open = `WHERE (state IS NULL OR state != 'delivered')${match.sql ? ` AND ${match.sql}` : ""}`;
+    const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM bus_notes ${open}`)
+      .get(...match.args) as { n: number };
     const rows = this.#db.prepare(`
       SELECT json FROM bus_notes ${open}
       ORDER BY (state = 'abandoned') DESC, json_extract(json, '$.createdAt') DESC
       LIMIT ?
-    `).all(cap(limit)) as unknown as { json: string }[];
+    `).all(...match.args, cap(limit)) as unknown as { json: string }[];
     return { notes: rows.map((row) => JSON.parse(row.json) as BusNote), total: total.n };
   }
 

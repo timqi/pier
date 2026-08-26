@@ -249,6 +249,47 @@ describe("BusDelivery", () => {
     await vi.waitFor(() => expect(b.inputs).toHaveLength(1)); // resumes, nothing lost
   });
 
+  it("an unreachable session's abandonment retires the sub, keeps the record, and announces", async () => {
+    const db = openDb(":memory:");
+    const store = new BusStore(db);
+    const subs = new SubStore(db);
+    // The session's file is gone from disk: every ensure() rejects, forever.
+    const router = new Router(new EventHub(), () => Promise.reject(new Error("unknown session: dead")));
+    const given: string[] = [];
+    const announced: number[] = [];
+    const delivery = new BusDelivery(
+      router, store, subs,
+      (sid, what, why) => given.push(`${sid}|${what}|${why}`),
+      () => true,
+      () => announced.push(Date.now()),
+    );
+    subs.upsert("dead", "proj/*", "queue", [SCOPE], "");
+    delivery.notify(store.publish({ topic: "proj/auth", payload: '"x"', scope: SCOPE, writerSession: "w" }));
+    // Burn the retry ladder: each sweep lands past the backoff and fails.
+    for (let i = 1; given.length === 0 && i <= 20; i++) {
+      delivery.recover(Date.now() + i * 600_000);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await vi.waitFor(() => expect(given).toHaveLength(1)); // reported, not silent
+
+    // The subscription is gone — with the notes it was owed …
+    expect(subs.get("dead", "proj/*")).toBeUndefined();
+    expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]);
+    // … but the abandoned note stays: the failure is visible, not erased.
+    const { notes } = subs.adminNotes();
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.callbackState).toBe("abandoned");
+    expect(announced.length).toBeGreaterThan(0); // the Console was told
+
+    // A later publish on the same topic no longer matches: no fresh note,
+    // no second ladder, no second abandoned row.
+    delivery.notify(store.publish({ topic: "proj/auth", payload: '"y"', scope: SCOPE, writerSession: "w" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]);
+    expect(subs.adminNotes().notes).toHaveLength(1);
+    expect(given).toHaveLength(1);
+  });
+
   it("a subscriber that caught up on its own is not woken for nothing", async () => {
     const { subs, session, publish, delivery } = setup();
     const b = session("b");

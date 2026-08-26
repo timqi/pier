@@ -13,8 +13,8 @@ import type { BusEventRow, BusFactRow, BusOverview } from "./types.js";
  * a download, not a page — and the whole value is one `bus get` away. */
 const PREVIEW = 200;
 // One page per section. None of these tables has a natural ceiling — topics
-// grow until someone archives, subscriptions outlive the sessions that made
-// them, abandoned notes are never deleted — so the page is capped and says so
+// grow until someone archives, subscriptions live until unsubscribed or
+// retired, abandoned notes are never deleted — so the page is capped and says so
 // next to the real total, rather than growing until it stops loading.
 /** Newest-first, so this is the tail that matters. */
 const TAIL = 50;
@@ -23,6 +23,8 @@ const TOPICS = 200;
 const FACTS = 20;
 const SUBS = 200;
 const NOTES = 100;
+/** A search term longer than this is a paste, not a search. */
+const MAX_QUERY = 64;
 
 const preview = (payload: string): string =>
   payload.length > PREVIEW ? `${payload.slice(0, PREVIEW)}…` : payload;
@@ -54,10 +56,14 @@ export function registerBusRoutes(
 ): void {
   app.get("/api/bus", (c) => {
     const { events, subs } = deps;
-    const topics = events.adminTopics(TOPICS);
-    const subscriptions = subs.adminSubs(SUBS);
-    const owed = subs.adminNotes(NOTES);
-    const tail = events.adminTail(TAIL);
+    // The search runs in SQL over whole tables, so the page is a window on the
+    // database and not on the 200 rows that happened to load first — without
+    // it the 201st topic is unreachable from this surface entirely.
+    const q = (c.req.query("q") ?? "").trim().slice(0, MAX_QUERY);
+    const topics = events.adminTopics(TOPICS, q);
+    const subscriptions = subs.adminSubs(SUBS, q);
+    const owed = subs.adminNotes(NOTES, q);
+    const tail = events.adminTail(TAIL, q);
     const overview: BusOverview = {
       // The switch rides with the data instead of costing a second request,
       // and the rows come along even when it is off: delivery freezes rather

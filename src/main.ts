@@ -11,6 +11,7 @@ import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { BusDelivery } from "./bus/delivery.js";
 import { registerBusRoutes } from "./bus/routes.js";
 import { BusStore } from "./bus/store.js";
+import { BusSweep } from "./bus/sweep.js";
 import { SubStore } from "./bus/subs.js";
 import { busToolSpec, handleBusTool } from "./bus/tool.js";
 import { ChannelStore } from "./channels/config.js";
@@ -258,6 +259,19 @@ busDelivery = new BusDelivery(router, busStore, busSubs, (sessionId, what, why) 
   router.reportTo(sessionId, `${what} could not be delivered — ${why}`);
 }, () => settings.get().busEnabled, busChanged);
 busDelivery.start();
+// A run tree is dead when every run under its root is terminal — then nobody's
+// scope set resolves to `run:<root>` any more and its events are reachable by
+// no reader, so the sweep archives them. An id the task store does not know is
+// treated as *alive*: task_runs rows are never pruned, so an unknown root can
+// only be one this process has not written yet (a run being created while the
+// sweep walks), never one Pier forgot — and the same for a page too full to
+// conclude from.
+const busSweep = new BusSweep(busStore, (rootRunId) => {
+  const runs = taskStore.listRunsByRoot(rootRunId, 500);
+  if (runs.length === 0 || runs.length === 500) return false;
+  return runs.every((run) => isTerminal(run.state));
+}, busChanged, () => settings.get().busEnabled);
+busSweep.start();
 
 channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
@@ -488,6 +502,7 @@ const shutdown = (stopTasks = true): void => {
   // boot-time interrupted marking is the recovery that was promised.
   if (stopTasks) tasks.stop();
   busDelivery.stop();
+  busSweep.stop();
   void channels.stop().finally(() => {
     server.close(() => process.exit(0));
     // Every workbench tab holds an SSE stream open, so `close()` alone would
