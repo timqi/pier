@@ -22,6 +22,10 @@ export interface TurnsPane {
   scroll: (force?: boolean) => void;
   /** A whole snapshot is being replayed: no step may measure layout. */
   bulk: () => boolean;
+  /** The session the rows going in belong to — the attached one, except while
+   *  an earlier transcript is being rendered as a static block. A step's
+   *  detail is fetched per session, so it is captured when the row is built. */
+  session: () => string | null;
 }
 
 let deps: ChatDeps;
@@ -450,7 +454,7 @@ export function replayActivity(
     if (s.done) activityToolEnd(id, s.isError ?? false, s.output ?? "");
   }
   if (turnIndex !== undefined && steps.some((s) => s.kind === "tool" && s.args === undefined)) {
-    onFirstOpen(group, turnIndex);
+    onFirstOpen(group, turnIndex, turns.session());
   }
   // The turn still running keeps its group open, so the live stream counts on
   // into it instead of opening a second bubble beneath the replayed one.
@@ -461,17 +465,16 @@ export function replayActivity(
 /** Args and output are ~90% of a transcript and live behind this very toggle,
  *  so they travel per opened group instead of per page load. One request for
  *  the whole group: a curious click must not become one round trip per step. */
-function onFirstOpen(group: HTMLDetailsElement, turnIndex: number): void {
+function onFirstOpen(group: HTMLDetailsElement, turnIndex: number, sessionId: string | null): void {
   const load = (): void => {
     if (!group.open) return;
     group.removeEventListener("toggle", load);
-    void fillDetail(group, turnIndex);
+    void fillDetail(group, turnIndex, sessionId);
   };
   group.addEventListener("toggle", load);
 }
 
-async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise<void> {
-  const sessionId = deps.sessionId();
+async function fillDetail(group: HTMLDetailsElement, turnIndex: number, sessionId: string | null): Promise<void> {
   const rows = rowsOf(group);
   // A group can also hold steps the live stream delivered in full: those keep
   // their place in the pairing below, but nothing here writes over them — not

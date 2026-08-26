@@ -162,6 +162,32 @@ export function splitDesk(
   };
 }
 
+/**
+ * The desk conversation that ran before `currentId`, or null — the one link of
+ * the chain the transcript's history divider walks backwards (chat's
+ * desk-history.ts). Same derivation as `splitDesk`, one step further, and pure
+ * for the same reason.
+ *
+ * Desk only, deliberately: a session outside the desk folder has no lineage
+ * here, because the only reason this exists is that a desk *reset* is meant to
+ * be cheap. Ordering is `createdAt` over the list the client holds, which is
+ * every *pinned* session — a reset pins the session it creates, so that is the
+ * whole chain unless a predecessor was unpinned by hand, and an equal
+ * `createdAt` ends the chain rather than risking a cycle through it.
+ */
+export function previousDesk(
+  list: SessionInfo[],
+  deskDir: string | null,
+  currentId: string | null,
+): SessionInfo | null {
+  if (!deskDir || !currentId) return null;
+  const current = list.find((s) => s.id === currentId);
+  if (!current || current.cwd !== deskDir) return null;
+  return list
+    .filter((s) => s.cwd === deskDir && s.id !== currentId && s.createdAt < current.createdAt)
+    .reduce<SessionInfo | null>((a, b) => (a && a.createdAt >= b.createdAt ? a : b), null);
+}
+
 /** What the rail is showing: the pinned sessions minus Desk's own, arranged.
  *  Desk leaves this list so it never also appears as a project — and so a drag
  *  never tries to reorder a section that is not in the order. */

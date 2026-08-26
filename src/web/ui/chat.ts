@@ -52,8 +52,15 @@ export const turnsPane = $("#turns");
 export function initChat(d: ChatDeps): void {
   deps = d;
   // The pane is handed over rather than imported back: see TurnsPane there.
-  initTurnActivity(d, { el: turnsPane, append: appendTurn, scroll: scrollBottom, bulk: () => bulk });
+  initTurnActivity(d, { el: turnsPane, append: appendTurn, scroll: scrollBottom, bulk: () => bulk, session: rowSession });
 }
+
+/** Non-null only inside `renderPast`: the session whose rows are being
+ *  appended, which is not the one the composer is attached to. */
+let archiveOf: string | null = null;
+
+/** Whose attachments, file links and tool detail a row points at. */
+const rowSession = (): string | null => archiveOf ?? deps.sessionId();
 
 // --- scrolling -------------------------------------------------------------------
 // Stick to the bottom only when the user is already there (avibe behavior);
@@ -113,8 +120,14 @@ export function followTail(): void {
   if (atBottom()) follow = true;
 }
 
+/** The reader has gone up — reading an earlier conversation, say. Nothing may
+ *  re-pin the pane to the bottom until they come back down themselves. */
+export function holdTail(): void {
+  follow = false;
+}
+
 export function scrollBottom(force = false): void {
-  if (bulk) return;
+  if (bulk || archiveOf) return;
   if (force) follow = true;
   if (follow) turnsPane.scrollTop = turnsPane.scrollHeight;
 }
@@ -137,10 +150,21 @@ let trimmedRows = 0;
  *  is indistinguishable from a transcript that lost its beginning. */
 let trimNotice: HTMLElement | null = null;
 
+/** The pane's first row of *this* conversation. A desk session may carry the
+ *  expanded history stack above it (desk-history.ts): those rows belong to an
+ *  earlier conversation, so the trim never eats them and the notice about this
+ *  transcript's own missing rows goes under them. */
+const liveTop = (): HTMLElement | null => {
+  const first = turnsPane.firstElementChild as HTMLElement | null;
+  return first?.dataset.kind === "desk-history" ? (first.nextElementSibling as HTMLElement | null) : first;
+};
+
 /** Called after every append: the pane grows only from the bottom. */
 function trimRows(): void {
+  if (archiveOf) return; // on their way into a static block, not the tail
   while (turnsPane.childElementCount > MAX_ROWS) {
-    const row = turnsPane.firstElementChild as HTMLElement;
+    const row = liveTop();
+    if (!row) return;
     row.remove();
     if (row === trimNotice) continue; // re-placed at the top below
     if (row.dataset.kind === "user") trimmedUserTurns++;
@@ -152,7 +176,8 @@ function trimRows(): void {
     trimNotice.dataset.kind = "trim"; // every row in the pane names its kind
   }
   trimNotice.textContent = `${trimmedRows} earlier row${trimmedRows === 1 ? "" : "s"} not shown — still in the transcript, not on this screen`;
-  if (turnsPane.firstElementChild !== trimNotice) turnsPane.prepend(trimNotice);
+  const top = liveTop();
+  if (top !== trimNotice) turnsPane.insertBefore(trimNotice, top);
 }
 
 const ROW_STYLE: Record<string, { row: string; body: string }> = {
@@ -200,12 +225,12 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   }
   if (named) row.append(speakerLine(named));
   row.append(node);
-  const sessionId = deps.sessionId();
+  const sessionId = rowSession();
   if (files?.paths.length && sessionId) {
     const strip = imageRow(row);
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
-  if (kind === "user") {
+  if (kind === "user" && !archiveOf) {
     const edit = h("button", "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex");
     edit.title = "Edit — resends from here; this message and later turns leave the context";
     edit.setAttribute("aria-label", "Edit message");
@@ -258,7 +283,8 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
     run.onclick = () => deps.showTasks(origin.taskId);
     head.append(run);
-    if (origin.kind === "task-message" && origin.messageKind === "decision") {
+    // A reply is sent *as* the attached session, so an archived row offers none.
+    if (origin.kind === "task-message" && origin.messageKind === "decision" && !archiveOf) {
       head.append(decisionReplyBtn(origin.messageId));
     }
   }
@@ -341,7 +367,7 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   if (!id) return;
   // The Nth user row on screen is the Nth user turn of history() — plus the
   // ones the trim took off the top, which history() still holds.
-  const index = trimmedUserTurns + [...turnsPane.querySelectorAll('[data-kind="user"]')].indexOf(row);
+  const index = trimmedUserTurns + [...turnsPane.querySelectorAll(':scope > [data-kind="user"]')].indexOf(row);
   // Drawn before the round trip: reloading the snapshot instead blanked the
   // pane for the length of a fetch, so the transcript flashed away and came
   // back (principle 7). A rewind is exactly "this row and everything under it
@@ -396,7 +422,7 @@ function addCodeCopy(root: HTMLElement): void {
 function renderMarkdown(node: HTMLElement, raw: string, streaming = false): void {
   // Attachment links are rewritten to the session's files route first: the
   // sanitizer drops `file:` URLs (rightly), so they'd vanish otherwise.
-  const id = deps.sessionId();
+  const id = rowSession();
   const md = id ? rewriteFileLinks(raw, id) : raw;
   node.innerHTML = DOMPurify.sanitize(marked.parse(md, { async: false }));
   node.classList.remove("whitespace-pre-wrap");
@@ -606,7 +632,9 @@ export function renderSnapshot(
         continue;
       }
       // meta is assistant-only (core/types.ts), so plain turns need no hint.
-      if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
+      // Next-step buttons would send into the live session, so an archived
+      // transcript never offers them — its last turn's choice is long gone.
+      if (t.role === "assistant") appendAssistant(t.text, t.meta, !archiveOf && state === "idle" && i === lastAssistant);
       else appendTurn(t.role, t.text);
     }
     // Whatever is left never appeared in the transcript at all — the bottom is
@@ -616,6 +644,35 @@ export function renderSnapshot(
     bulk = false; // a row that threw must not leave the pane unable to scroll
   }
   scrollBottom(true);
+}
+
+/**
+ * Another session's finished transcript, as one static block for a caller to
+ * place (desk-history.ts puts it above the live one).
+ *
+ * `archiveOf` is the whole mechanism, and it exists so there is no second turn
+ * renderer (budget rule 3): the rows go in through `renderSnapshot` at the
+ * bottom of the pane like any other, then are lifted out into the block before
+ * anything can paint. The flag is also what makes the block read-only — the
+ * edit pencil, the next-step buttons and a decision Reply all act as the
+ * session the composer is attached to — and what points a row's attachments
+ * and tool detail at the session it actually came from.
+ */
+export function renderPast(turns: ChatTurn[], sessionId: string): HTMLElement {
+  // What was already there, rather than a count: the render is free to drop a
+  // row of its own (the loading skeleton), and an index would then take a live
+  // row into the block with it.
+  const live = new Set(turnsPane.children);
+  holdTail();
+  archiveOf = sessionId;
+  try {
+    renderSnapshot(turns, "idle", []);
+  } finally {
+    archiveOf = null;
+  }
+  // Background-run cards are deliberately not replayed: every control on one
+  // steers a run from the attached session (turn-activity.ts).
+  return h("div", "", ...[...turnsPane.children].filter((el) => !live.has(el)));
 }
 
 

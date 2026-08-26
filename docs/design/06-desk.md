@@ -1,6 +1,6 @@
 # Desk (design)
 
-> **Status: phases 1a, 1b and 1c are implemented.** What landed differs from
+> **Status: phases 1a, 1b, 1c and 1d are implemented.** What landed differs from
 > the text below in four places, each marked *(landed: …)* where it occurs:
 > the templates ship as `src/web/desk-AGENTS.md` / `src/web/desk-projects.md`
 > beside the module that reads them (not `src/desk/`); `POST /api/desk`
@@ -250,6 +250,50 @@ rehydration reads `desk/threads`, `desk/decisions` and `desk/preferences` by
 name instead of `desk/*`, and the prompt now names those three topics as the
 places facts go.)*
 
+**Phase 1d — the reset keeps its history in view (+119 web).** *(addendum,
+landed: an operator decision after 1a–1c, because the reset button was not
+actually cheap to press.)* Decision 3 says a reset is cheap because the
+transcript is not the state — true of the *dispatcher*, and false of the person
+watching it: pressing New session here dropped the screen to an empty pane, and
+the conversation it replaced was only reachable by leaving the view through ⌘K.
+So the transcript of a desk session now carries a slim clickable divider at its
+top — `↑ earlier desk conversation · <title, else its date>` — which expands the
+**previous** desk session's transcript inline above it, read-only, and the
+divider stays put as the seam between the two. The expanded block gets its own
+divider when an even older desk session exists, so history chains backward on
+demand and nothing is loaded that was not asked for.
+
+- **Desk only, and the same derivation as everything else here.** The chain is
+  `previousDesk(list, deskDir, currentId)` beside `splitDesk` in
+  `src/web/ui/sidebar.ts` — pure, unit-tested, and null for any session whose
+  cwd is not the desk folder. There is no generic session-lineage feature: the
+  reason this exists is that a *desk reset* is meant to be routine.
+- **Ordered by `createdAt` over the list the browser already holds**, which is
+  every *pinned* session (a reset pins the session it creates, so that is the
+  whole chain unless a predecessor was unpinned by hand). An equal `createdAt`
+  ends the chain rather than risking a cycle through it.
+- **Zero server changes.** `GET /api/sessions/:id/history` already serves any
+  session. A **404 while expanding** — a ghost the server has just cleaned —
+  renders the divider's slot as one quiet line, `history unavailable — this
+  conversation is gone` (any other status names itself instead): principle 5b,
+  not silence and not an error toast, and the chain past it still works.
+- **No second turn renderer** (budget rule 3). `renderPast()` in `chat.ts`
+  drives the *live* `renderSnapshot` with one flag set (`archiveOf`), then
+  lifts the rows it produced out of the pane into a static block. The flag is
+  also what makes the block read-only: no edit pencil, no next-step buttons, no
+  decision Reply — each of those acts as the session the composer is attached
+  to — and it is what points a row's attachments, file links and tool-step
+  detail at the session the row actually came from. Tool steps therefore expand
+  in an archived block too. Background-run cards are *not* replayed there:
+  every control on one steers a run from the attached session.
+- **Only the newest session is live.** Input, SSE deltas and the state dot are
+  untouched; the expanded blocks are static DOM above them, they are not
+  trimmed with the live tail, and selecting another session or reloading drops
+  them. Nothing is stored about an expansion anywhere.
+- **Expanding does not yank the viewport:** the pane's scroll is re-anchored on
+  the divider that was clicked, which is why it is measured immediately before
+  the insert and not before the fetch.
+
 **Phase 2 (recorded, not designed here).** IM DM default cwd at
 `discoverChat`; a Desk badge for owed bus deliveries; "Reset template"; and a
 compaction that is still visible after a reload — which is a change to the
@@ -330,6 +374,10 @@ them.
    section.** *(revised: one row for the newest; predecessors are reachable in
    ⌘K, which lists every pinned session. Nothing is unpinned and nothing is
    dropped — the rail just stops keeping a second copy of the session list.)*
+   *(revised again, phase 1d: they are reachable in the conversation as well,
+   through the divider at the top of the transcript — still no second list, and
+   still nothing stored: the divider is derived from the same pinned sessions
+   ⌘K is listing.)*
 5. **Should `projects.md` be validated?** — **No.** The dispatcher's `ls -d` at
    routing time is the check, and it costs no code.
 6. **One Desk per instance.** Multiple desks stay undesigned.

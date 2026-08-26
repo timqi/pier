@@ -1,5 +1,7 @@
-// The rail's one pure rule: which pinned sessions are Desk's and which are
-// Projects'. `splitDesk` is a function, but it lives in a module that grabs
+// The rail's pure rules: which pinned sessions are Desk's and which are
+// Projects' (`splitDesk`), and which desk conversation came before the one on
+// screen (`previousDesk`, the transcript's history chain). Both are functions,
+// but they live in a module that grabs
 // its DOM nodes at import time — so the handful of globals that import touches
 // are stubbed here, rather than adding a DOM implementation to the dev
 // dependencies for one pure function (AGENTS.md, principle 8).
@@ -12,7 +14,14 @@ type Split = (
   deskDir: string | null,
 ) => { newest: SessionInfo | null; rest: SessionInfo[] };
 
+type Previous = (
+  list: SessionInfo[],
+  deskDir: string | null,
+  currentId: string | null,
+) => SessionInfo | null;
+
 let splitDesk: Split;
+let previousDesk: Previous;
 
 beforeAll(async () => {
   vi.stubGlobal("document", { querySelector: () => ({ append() {} }), addEventListener() {} });
@@ -20,6 +29,7 @@ beforeAll(async () => {
   vi.stubGlobal("navigator", { userAgent: "test" });
   const mod = await import("./sidebar.js");
   splitDesk = mod.splitDesk;
+  previousDesk = mod.previousDesk;
 });
 
 const DESK = "/home/t/.pier/desk";
@@ -74,5 +84,44 @@ describe("splitDesk", () => {
     const { newest, rest } = splitDesk(rows, null);
     expect(newest).toBeNull();
     expect(rest).toEqual(rows);
+  });
+});
+
+describe("previousDesk", () => {
+  const chain = [
+    session("desk-1", DESK, 100),
+    session("desk-2", DESK, 200),
+    session("desk-3", DESK, 300),
+    session("work", "/code/pier", 250),
+  ];
+
+  it("walks back one reset at a time", () => {
+    expect(previousDesk(chain, DESK, "desk-3")?.id).toBe("desk-2");
+    expect(previousDesk(chain, DESK, "desk-2")?.id).toBe("desk-1");
+    expect(previousDesk(chain, DESK, "desk-1")).toBeNull();
+  });
+
+  it("is Desk only — an ordinary session has no lineage here", () => {
+    expect(previousDesk(chain, DESK, "work")).toBeNull();
+  });
+
+  it("ignores everything outside the desk folder", () => {
+    const rows = [...chain, session("other", "/code/other", 290)];
+    expect(previousDesk(rows, DESK, "desk-3")?.id).toBe("desk-2");
+  });
+
+  it("has nothing to chain before the desk path is known", () => {
+    expect(previousDesk(chain, null, "desk-3")).toBeNull();
+  });
+
+  it("says null for a session the client does not hold, and for none selected", () => {
+    expect(previousDesk(chain, DESK, "ghost")).toBeNull();
+    expect(previousDesk(chain, DESK, null)).toBeNull();
+  });
+
+  it("ends the chain on an equal createdAt rather than cycling through it", () => {
+    const tied = [session("a", DESK, 500), session("b", DESK, 500)];
+    expect(previousDesk(tied, DESK, "a")).toBeNull();
+    expect(previousDesk(tied, DESK, "b")).toBeNull();
   });
 });

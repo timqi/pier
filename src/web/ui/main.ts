@@ -36,6 +36,7 @@ import {
   send,
   updateComposer,
 } from "./composer.js";
+import { initDeskHistory, mountDeskHistory } from "./desk-history.js";
 import { readableTitle } from "./dom.js";
 import { initPush } from "./notifications.js";
 import { initReport } from "./report.js";
@@ -396,6 +397,9 @@ async function loadSession(id: string, missing = false): Promise<void> {
     return;
   }
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
+  // A desk session's predecessors sit above it, one click each: the reset that
+  // made this session stops costing the history it came from.
+  mountDeskHistory();
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
   // run state (composer buttons) and the pending queue panel.
@@ -460,6 +464,11 @@ initSidebar({
   openConsole: showConsole,
   onPinsChanged: renderHeader,
 });
+initDeskHistory({
+  sessions: () => sessions,
+  deskDir: () => deskDir,
+  currentId: () => currentId,
+});
 initHeader({
   currentId: () => currentId,
   currentSession,
@@ -499,6 +508,9 @@ async function loadInstance(): Promise<void> {
   deskDir = s.deskDir ?? null;
   busEnabled = s.busEnabled ?? false;
   renderSessions();
+  // This read races a deep link into a desk session, and the divider cannot be
+  // derived before the answer lands. Mounting is a no-op once it is there.
+  mountDeskHistory();
 }
 
 connectWorkspace();
