@@ -281,6 +281,112 @@ describe("artifacts", () => {
     expect(written).not.toMatch(/hunter2/);
     expect(written).toMatch(/body text$/);
   });
+
+  it("keeps one file per document, not one per URL", async () => {
+    globalThis.fetch = realFetch;
+    const url = new URL("https://x.example/changing");
+    const first = await saveArtifact(url, "version one", "2026-01-01T00:00:00Z");
+    const second = await saveArtifact(url, "version two", "2026-01-02T00:00:00Z");
+    // An older transcript's artifactPath still resolves to what it described.
+    expect(second).not.toBe(first);
+    expect(await readFile(first, "utf8")).toMatch(/version one$/);
+    expect(await readFile(second, "utf8")).toMatch(/version two$/);
+    // Refetching an unchanged page is not a second copy of it.
+    expect(await saveArtifact(url, "version two", "2026-01-03T00:00:00Z")).toBe(second);
+  });
+});
+
+describe("auditing every query, not just the pinned one", () => {
+  const twoQueries = (first: string, second: string) => ({
+    model: "claude-haiku-4-5-20251001",
+    stop_reason: "end_turn",
+    usage: { input_tokens: 5, output_tokens: 20 },
+    content: [
+      { type: "server_tool_use", id: "s1", name: "web_search", input: { query: first } },
+      { type: "server_tool_use", id: "s2", name: "web_search", input: { query: second } },
+      {
+        type: "web_search_tool_result",
+        tool_use_id: "s1",
+        content: [{ type: "web_search_result", url: "https://a.example/x", title: "A page" }],
+      },
+      { type: "text", text: first === second ? "ONE LANGUAGE" : "MIXED ROUNDS" },
+    ],
+  });
+  const search = async (params: { query: string; language_mode?: string }) => {
+    const { webSearch } = await import("./tools.js");
+    return webSearch.execute(
+      "c",
+      params as never,
+      undefined as never,
+      (() => {}) as never,
+      ctx([haiku], haiku),
+    );
+  };
+
+  it("retries in preserve mode when a later search left the language", async () => {
+    let call = 0;
+    globalThis.fetch = (async () => {
+      call++;
+      return ok(
+        call === 1
+          ? twoQueries("阿里巴巴 股价", "alibaba stock price")
+          : twoQueries("阿里巴巴 股价", "阿里巴巴 9988 实时股价"),
+      );
+    }) as never;
+
+    const result = await search({ query: "阿里巴巴 股价", language_mode: "preserve" });
+    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    // The first query was verbatim, so the old first-query-only audit passed here.
+    expect(call).toBe(2);
+    expect(text).not.toContain("translated the query out of");
+    expect(result.details).toMatchObject({
+      queryLanguagePreserved: true,
+      queriesOffLanguage: undefined,
+    });
+  });
+
+  it("says out loud when preserve mode had no queries to audit", async () => {
+    let call = 0;
+    globalThis.fetch = (async () => {
+      call++;
+      return ok({
+        model: "claude-haiku-4-5-20251001",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 5, output_tokens: 20 },
+        content: [
+          {
+            type: "web_search_tool_result",
+            tool_use_id: "s1",
+            content: [{ type: "web_search_result", url: "https://a.example/x", title: "A page" }],
+          },
+          { type: "text", text: "AN ANSWER WITH NO QUERY METADATA" },
+        ],
+      });
+    }) as never;
+
+    const result = await search({ query: "阿里巴巴 股价", language_mode: "preserve" });
+    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    expect(call, "nothing to re-audit, so no retry").toBe(1);
+    expect(text).toContain("could not be audited");
+    expect(result.details).toMatchObject({ queryLanguagePreserved: undefined });
+  });
+
+  it("lets auto expand into English, and still says which searches did", async () => {
+    let call = 0;
+    globalThis.fetch = (async () => {
+      call++;
+      return ok(twoQueries("阿里巴巴 股价", "alibaba stock price"));
+    }) as never;
+
+    const result = await search({ query: "阿里巴巴 股价" });
+    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    expect(call, "supplementary English is not worth a second search").toBe(1);
+    expect(text).not.toContain("translated the query out of");
+    expect(result.details).toMatchObject({
+      queryLanguagePreserved: true,
+      queriesOffLanguage: ["alibaba stock price"],
+    });
+  });
 });
 
 describe("the search tool end to end", () => {

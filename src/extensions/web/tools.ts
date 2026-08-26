@@ -31,11 +31,14 @@ const FULL_MAX_CHARS = 60_000;
  * not be the binding constraint: `DEFAULT_CONTEXT_CHARS` is what we are willing
  * to hand back (6k characters, which is ~1.5k English tokens and ~4k Chinese
  * ones), so a budget below that only produces briefings that stop mid-sentence.
- * It used to be 900, half the smaller of those. Output tokens are not the cost
- * here either — a hosted search is worth an order of magnitude more than the
- * prose about it — and a truncated answer is paid for twice.
+ * It used to be 900, half the smaller of those, and then 2k, which is the same
+ * bug in Chinese: it covered the English reading of 6k characters and cut every
+ * CJK briefing at the point this comment claimed was fixed. So the budget is
+ * the *larger* reading plus room for the search calls themselves. Output tokens
+ * are not the cost here either — a hosted search is worth an order of magnitude
+ * more than the prose about it — and a truncated answer is paid for twice.
  */
-const SEARCH_TOKENS = 2_000;
+const SEARCH_TOKENS = 4_500;
 
 /**
  * Same rule for a fetch, and one dial for it: `mode` says how much of the page
@@ -159,25 +162,39 @@ export const webSearch = defineTool({
       const run = { ctx, query: params.query, domains, backend: params.backend, signal: until, note };
       let outcome = await runSearch({ ...run, mode, maxUses: searchRounds(mode) });
       const wantedLanguage = languageLabel(params.query);
-      const inLanguage = (o: SearchOutcome): boolean =>
-        preservesLanguage(params.query, o.queries[0]?.query);
-      let preserved = inLanguage(outcome);
+      const strayed = (o: SearchOutcome): string[] =>
+        o.queries.filter((q) => !preservesLanguage(params.query, q.query)).map((q) => q.query);
+      // The prompt pins the first query verbatim, so auditing only that one
+      // audits the query that cannot fail. `preserve` promised every search
+      // stays in the language, so it audits all of them; auto and expand buy
+      // English supplements on purpose, so there the first query still decides
+      // and the strays are named in `details` instead of warned about.
+      const inLanguage = (o: SearchOutcome, auditAll: boolean): boolean =>
+        auditAll
+          ? o.queries.length > 0 && strayed(o).length === 0
+          : preservesLanguage(params.query, o.queries[0]?.query);
+      let preserved = inLanguage(outcome, mode === "preserve");
       if (outcome.queries.length && !preserved) {
         note(`the backend left ${wantedLanguage} — searching again, that language only`);
         const retried = await runSearch({ ...run, mode: "preserve", maxUses: 1 });
         // Only if it worked. The retry is one narrowed search against the
         // first's three rounds, so a retry that *also* leaves the language is
         // a worse answer, and swapping it in spent a search to get there.
-        if (inLanguage(retried)) {
+        if (inLanguage(retried, true)) {
           outcome = retried;
           preserved = true;
         }
       }
       const auditAvailable = outcome.queries.length > 0;
+      const offLanguage = strayed(outcome);
+      // No query metadata means the audit never ran — under `preserve`, the one
+      // mode that promised it, an unaudited answer must not read like a clean one.
       const warning =
         auditAvailable && !preserved
           ? `Warning: the search backend translated the query out of ${wantedLanguage} despite strict preservation.`
-          : "";
+          : mode === "preserve" && !auditAvailable
+            ? "Note: the backend returned no query metadata, so strict language preservation could not be audited."
+            : "";
       // A briefing that stopped at the output ceiling reads exactly like a
       // finished one; the caller decides whether to ask again, but only if it
       // is told (§5b).
@@ -212,6 +229,10 @@ export const webSearch = defineTool({
           languageMode: mode,
           queries: outcome.queries,
           queryLanguagePreserved: auditAvailable ? preserved : undefined,
+          // Legitimate under auto/expand, so not a warning — but the caller
+          // cannot weigh a briefing built partly from English searches if it
+          // is never told which searches those were.
+          queriesOffLanguage: offLanguage.length ? offLanguage : undefined,
           originalQueryVerbatim: auditAvailable
             ? outcome.queries[0]?.query === params.query
             : undefined,
