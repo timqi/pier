@@ -218,7 +218,88 @@ export class BusStore {
       event.filePtr ?? null, event.scope, event.writerSession,
       event.causedBy ?? null, event.hops, event.ttlSeconds ?? null, event.createdAt,
     );
+    // Tombstones carry no text worth finding; everything else is searchable.
+    if (event.kind !== "tombstone") {
+      this.#db.prepare("INSERT INTO bus_events_fts(id, topic, payload) VALUES (?, ?, ?)")
+        .run(event.id, event.topic, event.payload);
+    }
     return event;
+  }
+
+  /** Full-text over topic and payload, visible scopes only, newest first.
+   * Archived events are not searched: what nobody read while it was live is
+   * not what a search is looking for. */
+  search(query: string, scopes: readonly string[], limit = 20): BusEvent[] {
+    if (!query.trim()) throw new Error("query required");
+    if (scopes.length === 0) return [];
+    const cap = Math.min(Math.max(limit, 1), 100);
+    const match = (q: string): { id: string }[] =>
+      this.#db.prepare(
+        "SELECT id FROM bus_events_fts WHERE bus_events_fts MATCH ? ORDER BY rank LIMIT ?",
+      ).all(q, cap * 4) as unknown as { id: string }[];
+    let ids: { id: string }[];
+    try {
+      ids = match(query);
+    } catch {
+      // FTS5's query language treats a bare hyphen (or colon, or unbalanced
+      // quote) as syntax — and "nothing-here" is a perfectly reasonable thing
+      // to search for. Retry with every token quoted: plain text always works,
+      // operator syntax still available to whoever writes it correctly.
+      try {
+        ids = match(query.split(/\s+/).filter(Boolean)
+          .map((token) => `"${token.replaceAll('"', '""')}"`).join(" "));
+      } catch {
+        throw new Error('not a valid search query — use words, "quoted phrases", AND/OR/NOT');
+      }
+    }
+    if (ids.length === 0) return [];
+    const found = ids.map((row) => row.id);
+    const rows = this.#db.prepare(`
+      SELECT * FROM bus_events WHERE id IN (${holes(found)}) AND scope IN (${holes(scopes)})
+    `).all(...found, ...scopes) as unknown as Row[];
+    const byId = new Map(rows.map((row) => [row.id, fromRow(row)]));
+    // Rank order from FTS, membership from the scope fence.
+    return ids.map((row) => byId.get(row.id)).filter((e): e is BusEvent => !!e)
+      .slice(0, Math.min(Math.max(limit, 1), 100));
+  }
+
+  /** Moves everything a pattern matches, up to and including `before`, into
+   * the archive — out of every default read but never deleted (the rows move
+   * whole, so a future need can move them back). Fenced by the caller's
+   * scopes like every read: what it cannot see it cannot archive. */
+  archive(topicGlob: string, before: string, scopes: readonly string[]): number {
+    if (!validTopicGlob(topicGlob)) {
+      throw new Error("topic_glob may use the topic alphabet plus GLOB wildcards (* ? [])");
+    }
+    if (scopes.length === 0) return 0;
+    const move = `topic GLOB ? AND id <= ? AND scope IN (${holes(scopes)})`;
+    const params = [topicGlob, before, ...scopes];
+    this.#db.exec("BEGIN");
+    try {
+      this.#db.prepare(`INSERT INTO bus_events_archive SELECT * FROM bus_events WHERE ${move}`)
+        .run(...params);
+      this.#db.prepare(`
+        DELETE FROM bus_events_fts WHERE id IN (SELECT id FROM bus_events WHERE ${move})
+      `).run(...params);
+      const moved = this.#db.prepare(`DELETE FROM bus_events WHERE ${move}`).run(...params);
+      this.#db.exec("COMMIT");
+      return Number(moved.changes);
+    } catch (err) {
+      this.#db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** Per-topic shape of the visible bus — what the librarian reasons over:
+   * how much, how fresh, and when anyone last read it (null = never). */
+  topics(scopes: readonly string[]): { topic: string; events: number; newestId: string; lastReadAt: number | null }[] {
+    if (scopes.length === 0) return [];
+    return this.#db.prepare(`
+      SELECT e.topic, COUNT(*) AS events, MAX(e.id) AS newestId, r.last_read_at AS lastReadAt
+      FROM bus_events e LEFT JOIN bus_topic_reads r ON r.topic = e.topic
+      WHERE e.scope IN (${holes(scopes)})
+      GROUP BY e.topic ORDER BY e.topic
+    `).all(...scopes) as unknown as { topic: string; events: number; newestId: string; lastReadAt: number | null }[];
   }
 
   /** Value per key: scopes shadow narrow-to-wide (the order of `scopes`), and
@@ -228,6 +309,7 @@ export class BusStore {
    * instance default, and forgetting the override reveals the default. */
   latest(topic: string, scopes: readonly string[], key?: string, now = Date.now()): BusEvent[] {
     if (scopes.length === 0) return [];
+    this.stampRead([topic], now);
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
       WHERE e.topic = ? AND e.key IS NOT NULL AND e.scope IN (${holes(scopes)})
@@ -256,19 +338,41 @@ export class BusStore {
   }
 
   /** Incremental read: everything after the cursor, tombstones included —
-   * a reader tracking state needs to see the deletions too. */
-  log(topicGlob: string, scopes: readonly string[], after = "", limit = 50): { events: BusEvent[]; cursor: string } {
+   * a reader tracking state needs to see the deletions too. Archived events
+   * only on request: the default reader wants the live stream, the librarian
+   * (and whoever audits it) wants history. */
+  log(
+    topicGlob: string,
+    scopes: readonly string[],
+    after = "",
+    limit = 50,
+    includeArchived = false,
+  ): { events: BusEvent[]; cursor: string } {
     if (!validTopicGlob(topicGlob)) {
       throw new Error("topic_glob may use the topic alphabet plus GLOB wildcards (* ? [])");
     }
     if (scopes.length === 0) return { events: [], cursor: after };
-    const rows = this.#db.prepare(`
-      SELECT * FROM bus_events
-      WHERE topic GLOB ? AND id > ? AND scope IN (${holes(scopes)})
-      ORDER BY id LIMIT ?
-    `).all(topicGlob, after, ...scopes, Math.min(Math.max(limit, 1), 200)) as unknown as Row[];
+    const where = `topic GLOB ? AND id > ? AND scope IN (${holes(scopes)})`;
+    const params = [topicGlob, after, ...scopes];
+    const rows = this.#db.prepare(includeArchived
+      ? `SELECT * FROM (SELECT * FROM bus_events WHERE ${where}
+         UNION ALL SELECT * FROM bus_events_archive WHERE ${where})
+         ORDER BY id LIMIT ?`
+      : `SELECT * FROM bus_events WHERE ${where} ORDER BY id LIMIT ?`,
+    ).all(...(includeArchived ? [...params, ...params] : params), Math.min(Math.max(limit, 1), 200)) as unknown as Row[];
     const events = rows.map(fromRow);
+    this.stampRead(events.map((event) => event.topic));
     return { events, cursor: events.at(-1)?.id ?? after };
+  }
+
+  /** A topic was read — the one fact the librarian's archiving question needs.
+   * Called by the read paths themselves so no caller can forget it. */
+  stampRead(topicsRead: string[], now = Date.now()): void {
+    const stamp = this.#db.prepare(`
+      INSERT INTO bus_topic_reads(topic, last_read_at) VALUES (?, ?)
+      ON CONFLICT(topic) DO UPDATE SET last_read_at = excluded.last_read_at
+    `);
+    for (const topic of new Set(topicsRead)) stamp.run(topic, now);
   }
 
   /** A deletion is a tombstone event, never a DELETE: readers syncing by

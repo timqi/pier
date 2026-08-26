@@ -23,12 +23,21 @@ const tables = (db: DatabaseSync): string[] =>
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(8);
+    expect(version(db)).toBe(9);
     expect(tables(db)).toEqual([
       "auth",
       "bus_events",
+      "bus_events_archive",
+      // The five shadow tables are FTS5's own storage for bus_events_fts.
+      "bus_events_fts",
+      "bus_events_fts_config",
+      "bus_events_fts_content",
+      "bus_events_fts_data",
+      "bus_events_fts_docsize",
+      "bus_events_fts_idx",
       "bus_notes",
       "bus_subs",
+      "bus_topic_reads",
       "channels",
       "conversations",
       "credentials",
@@ -57,7 +66,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(8);
+    expect(version(second)).toBe(9);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -70,7 +79,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 8/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 9/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {

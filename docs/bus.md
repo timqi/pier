@@ -4,8 +4,9 @@ One append-only table (`bus_events`, migration 7) read two ways: `latest(topic,
 key)` is shared state between sessions — memory; `log(topic_glob, after)` is a
 message stream. They are the same rows, so there is no second bookkeeping to
 drift. P2 adds delivery: a write finds its subscribers and each is owed a
-pointer notification (`bus_subs` + `bus_notes`, migration 8). Search and the
-librarian are P3.
+pointer notification (`bus_subs` + `bus_notes`, migration 8). P3 adds search
+(FTS5), per-topic read stamps, an archive, and the librarian — a cron task,
+not core code (migration 9).
 
 ## The model's contract
 
@@ -24,6 +25,23 @@ Four operations on the `bus` tool:
 - `subscribe {topic_glob, mode?}` asks to be told about writes the caller can
   see; `unsubscribe` stops it; `ack {topic_glob, cursor}` confirms progress —
   `get` and `log` never move a cursor, only `ack` does.
+- `search {query, limit?}` is full-text over topic and payload, visible scopes
+  only, newest first. Plain FTS5 syntax; a query FTS5 would reject as syntax
+  (bare hyphens, stray quotes) is retried with each token quoted, so plain
+  text always works. The index is a plain FTS5 table with its own copy of the
+  text — `bus_events` has a TEXT primary key, and an implicit rowid is not
+  stable across VACUUM, so external-content indexing could silently drift.
+- `topics {}` is the visible inventory: per topic, the event count, newest id,
+  and when anyone last read it (`get`/`log` stamp `bus_topic_reads`,
+  topic-grained — the librarian's "does anyone still read this?" needs no
+  per-event bookkeeping).
+- `archive {topic_glob, before}` moves matched events with `id <= before` into
+  `bus_events_archive` — out of `get`, `log` and `search`, never deleted; a
+  `log {include_archived: true}` still reads them in order. Fenced by the
+  caller's scopes like every read: what it cannot see it cannot archive. One
+  accepted gap: run-scoped events of a dead run tree resolve for nobody, so
+  nobody can archive them — they stay in the live table, invisible to every
+  read, costing only size.
 - `forget {topic, key, caused_by?}` writes a tombstone — into the scope where
   the currently visible winner lives, so forgetting a project fact from inside
   a run does not merely mask it until the run ends. Never a `DELETE`: cursors
@@ -141,8 +159,32 @@ anywhere. Cursors start at the tip: a subscription hears the future, not a
 replay of what it could already have read. Scopes are pinned at subscribe time
 (the P1 caveat below is why); re-subscribing re-pins them and keeps the cursor.
 
-## What P1+P2 deliberately do not do
+## The librarian
 
-No search, no distillation, no archive — P3. No payload in notifications, no
-embedding, no CRDTs, no transcript mining, no multi-host sync; those are
-recorded as non-goals in the plan, not omissions.
+Daily maintenance is an agent with the same `bus` tool as everyone, not core
+code: it distills stable conclusions into facts, archives topics nobody reads,
+and writes promotion proposals to `.librarian/proposals/` — proposals only, it
+never edits AGENTS.md or anyone's files. Its prompt lives in
+`src/bus/librarian-prompt.md`. It is not auto-seeded; create it once, from any
+session, with the task tool:
+
+```json
+{"operation": "create", "task": {
+  "name": "bus-librarian",
+  "description": "Daily bus maintenance: distill, archive, propose (docs/bus.md)",
+  "trigger": {"type": "cron", "expression": "0 5 * * *", "timezone": "Asia/Shanghai"},
+  "action": {"type": "agent", "session": {"mode": "fresh", "cwd": "<project root>"},
+             "prompt": "<contents of src/bus/librarian-prompt.md>"},
+  "callback": {"type": "none"}
+}}
+```
+
+The librarian sees the scopes of the cwd it is given (plus `instance`); an
+instance with several active projects runs one librarian per project root, or
+one in any cwd for `instance`-scoped topics only.
+
+## What the bus deliberately does not do
+
+No payload in notifications, no embedding, no CRDTs, no transcript mining, no
+multi-host sync, no automatic librarian seeding; those are recorded as
+non-goals in the plan, not omissions.

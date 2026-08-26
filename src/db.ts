@@ -236,6 +236,41 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX bus_notes_due ON bus_notes(state, next_attempt_at);
   CREATE INDEX bus_notes_sub ON bus_notes(sub_id);
   `,
+  // 9 — the bus can be searched, and what nobody reads can be archived.
+  `
+  -- Full-text over topic+payload. A plain FTS5 table (own copy of the text,
+  -- id carried UNINDEXED) rather than external-content: bus_events has a TEXT
+  -- primary key, and an implicit rowid is not stable across VACUUM — a copy
+  -- that cannot drift beats one that silently can. Requires an SQLite built
+  -- with FTS5, which official Node builds bundle; a Node without it fails
+  -- loudly here, at boot, not at the first search.
+  CREATE VIRTUAL TABLE bus_events_fts USING fts5(id UNINDEXED, topic, payload);
+
+  -- The archive: same shape as bus_events, read only when a log says
+  -- include_archived. Rows move here whole so a future need can move them back.
+  CREATE TABLE bus_events_archive (
+    id TEXT PRIMARY KEY,
+    topic TEXT NOT NULL,
+    key TEXT,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    file_ptr TEXT,
+    scope TEXT NOT NULL,
+    writer_session TEXT NOT NULL,
+    caused_by TEXT,
+    hops INTEGER NOT NULL,
+    ttl_seconds INTEGER,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX bus_events_archive_topic ON bus_events_archive(topic, id);
+
+  -- When each topic was last read (get/log), topic-grained on purpose: the
+  -- librarian's "does anyone still read this?" needs no per-event bookkeeping.
+  CREATE TABLE bus_topic_reads (
+    topic TEXT PRIMARY KEY,
+    last_read_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

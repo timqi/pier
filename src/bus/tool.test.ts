@@ -169,6 +169,29 @@ describe("bus tool", () => {
     expect(page.events).toHaveLength(1);
   });
 
+  it("search, topics and archive run behind the same scope fence as every read", async () => {
+    const call = tool();
+    await call({ operation: "publish", topic: "notes/a", payload: "the deploy broke login" }, "a");
+    const { id } = await call({ operation: "publish", topic: "notes/b", payload: "login fixed" }, "a") as { id: string };
+
+    const hits = await call({ operation: "search", query: "login" }, "b") as { topic: string }[];
+    expect(hits.map((h) => h.topic).sort()).toEqual(["notes/a", "notes/b"]);
+    expect(await call({ operation: "search", query: "login" }, "c")).toEqual([]); // other project
+
+    const inventory = await call({ operation: "topics" }, "b") as { topic: string; events: number }[];
+    expect(inventory.map((t) => t.topic)).toEqual(["notes/a", "notes/b"]);
+
+    const archived = await call({ operation: "archive", topic_glob: "notes/*", before: id }, "b") as { archived: number };
+    expect(archived.archived).toBe(2);
+    const live = await call({ operation: "log", topic_glob: "notes/*" }, "a") as { events: unknown[] };
+    expect(live.events).toEqual([]);
+    const history = await call({ operation: "log", topic_glob: "notes/*", include_archived: true }, "a") as { events: unknown[] };
+    expect(history.events).toHaveLength(2);
+
+    await expect(call({ operation: "search" }, "a")).rejects.toThrow(/query required/);
+    await expect(call({ operation: "archive", topic_glob: "notes/*" }, "a")).rejects.toThrow(/before required/);
+  });
+
   it("is a refusal with a reason when the operator switched it off", async () => {
     const db = openDb(":memory:");
     const off = (params: unknown, sessionId: string) =>

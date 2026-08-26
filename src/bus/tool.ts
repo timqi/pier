@@ -75,14 +75,20 @@ export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomToo
       "log {topic_glob, after?, limit?} reads the stream: events after a cursor in write order, returning the next cursor — use it to catch up, then pass the cursor back in. " +
       "publish {topic, key?, payload, ...} appends: with key it is a fact that overwrites in get; without key a plain event. " +
       "forget {topic, key} deletes a fact (as a tombstone). " +
+      "search {query, limit?} is full-text over topic and payload (FTS5: words, \"quoted phrases\", AND/OR/NOT), newest first. " +
+      "topics {} lists every visible topic with its event count, newest id and when anyone last read it. " +
+      "archive {topic_glob, before} moves matched events with id <= before out of every default read (log {include_archived: true} still reaches them) — for aged topics nobody reads, not for deleting mistakes (that is forget). " +
       "subscribe {topic_glob, mode?} asks to be told about writes you can see: mode 'queue' (default) delivers a pointer at your next turn boundary, 'steer' interrupts your running turn, 'wake' is 'queue' that also starts your turn when idle (they differ only when busy). The notification is a pointer, never the payload — read with log, then ack {topic_glob, cursor} to confirm progress; unsubscribe {topic_glob} stops it. " +
       "Topics are lowercase 'a/b/c' paths. Keep payload small (JSON, 8KB max); write large content to a file and pass its absolute path as file_ptr. " +
       "Scope defaults to your run tree when you are a subagent, else your project; pass scope 'instance' only for facts every project should see. A narrower scope's fact shadows a wider one's under the same key; run scope lives only while its run tree is active. " +
       "When you publish in reaction to an event you read, pass that event's id as caused_by — chains deeper than 4 are refused as feedback loops.",
     parameters: Type.Object({
-      operation: strEnum("publish", "get", "log", "forget", "subscribe", "unsubscribe", "ack"),
+      operation: strEnum("publish", "get", "log", "forget", "subscribe", "unsubscribe", "ack", "search", "topics", "archive"),
       mode: Type.Optional(strEnum("queue", "steer", "wake")),
       cursor: Type.Optional(Type.String()),
+      query: Type.Optional(Type.String()),
+      before: Type.Optional(Type.String()),
+      include_archived: Type.Optional(Type.Boolean()),
       topic: Type.Optional(Type.String()),
       key: Type.Optional(Type.String()),
       payload: Type.Optional(Type.Unknown()),
@@ -162,8 +168,30 @@ export async function handleBusTool(
         pinned ?? scopes,
         input.after === undefined ? "" : String(input.after),
         input.limit as number | undefined,
+        input.include_archived === true,
       );
       return { events: events.map(echoStream), cursor };
+    }
+    case "search": {
+      if (input.limit !== undefined && !Number.isInteger(input.limit)) {
+        throw new Error("limit must be an integer");
+      }
+      const hits = store.search(
+        requiredString(input.query, "query"),
+        scopes,
+        input.limit as number | undefined,
+      );
+      return hits.map(echoStream);
+    }
+    case "topics":
+      return store.topics(scopes);
+    case "archive": {
+      const moved = store.archive(
+        requiredString(input.topic_glob, "topic_glob"),
+        requiredString(input.before, "before"),
+        scopes,
+      );
+      return { archived: moved };
     }
     case "forget": {
       const topic = requiredString(input.topic, "topic");

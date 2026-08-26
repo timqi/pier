@@ -128,6 +128,67 @@ describe("BusStore", () => {
     expect(() => publish(s, {}, 1000 + 61_000)).not.toThrow();
   });
 
+  it("search finds payload and topic words, scope-fenced, newest first", () => {
+    const s = store();
+    publish(s, { topic: "proj/auth", payload: JSON.stringify("the login token expired") }, 1000);
+    publish(s, { topic: "proj/deploy", payload: JSON.stringify("rolled back the release") }, 2000);
+    publish(s, { topic: "proj/auth", payload: JSON.stringify("token refreshed") }, 3000);
+    publish(s, { topic: "other/auth", payload: JSON.stringify("token elsewhere"), scope: "project:/q" }, 4000);
+
+    const hits = s.search("token", SCOPES);
+    expect(hits.map((e) => e.topic)).toEqual(["proj/auth", "proj/auth"]); // /q fenced out
+    expect(s.search("auth", SCOPES)).toHaveLength(2); // topic words match too
+    expect(s.search("rolled", SCOPES)).toHaveLength(1);
+    expect(s.search("nothing-here", SCOPES)).toEqual([]);
+    // A tombstone has no text worth finding.
+    publish(s, { key: "k", kind: "fact", payload: JSON.stringify("findable-fact") }, 5000);
+    s.forget("proj/auth", "k", SCOPE, "a", undefined, 6000);
+    expect(s.search("findable-fact", SCOPES)).toHaveLength(1); // the fact, not its tombstone
+    // FTS5 would call these syntax errors; the token-quoting retry makes
+    // plain text — hyphens, stray quotes — just work as literal words.
+    expect(s.search('"unbalanced', SCOPES)).toEqual([]);
+    expect(s.search("nothing-here", SCOPES)).toEqual([]);
+    // … and a quoted hyphenated token is a phrase: adjacent words match.
+    expect(s.search("login-token", SCOPES)).toHaveLength(1);
+    expect(() => s.search("  ", SCOPES)).toThrow(/query required/);
+  });
+
+  it("archive moves events out of every default read, but not out of history", () => {
+    const s = store();
+    const old1 = publish(s, { payload: '"old-1"' }, 1000);
+    const old2 = publish(s, { key: "k", kind: "fact", payload: '"old-fact"' }, 2000);
+    const fresh = publish(s, { payload: '"fresh"' }, 3000);
+
+    expect(s.archive("proj/auth", old2.id, SCOPES)).toBe(2);
+    // Default reads see only what stayed live …
+    expect(s.log("proj/*", SCOPES).events.map((e) => e.id)).toEqual([fresh.id]);
+    expect(s.latest("proj/auth", SCOPES, "k")).toEqual([]);
+    expect(s.search("old-1", SCOPES)).toEqual([]);
+    // … history is one flag away, in order, cursor semantics intact.
+    const all = s.log("proj/*", SCOPES, "", 50, true);
+    expect(all.events.map((e) => e.id)).toEqual([old1.id, old2.id, fresh.id]);
+    // Scope fence holds: another project archives nothing.
+    expect(s.archive("proj/*", fresh.id, ["project:/q"])).toBe(0);
+  });
+
+  it("topics reports counts, freshness and who was last read", () => {
+    const s = store();
+    publish(s, { topic: "proj/auth", payload: '"1"' }, 1000);
+    const newest = publish(s, { topic: "proj/auth", payload: '"2"' }, 2000);
+    publish(s, { topic: "proj/deploy", payload: '"3"' }, 3000);
+
+    const before = s.topics(SCOPES);
+    expect(before).toEqual([
+      { topic: "proj/auth", events: 2, newestId: newest.id, lastReadAt: null },
+      { topic: "proj/deploy", events: 3 - 2, newestId: expect.any(String) as unknown as string, lastReadAt: null },
+    ]);
+    // get and log stamp the read; the stamp is what "nobody reads this" means.
+    s.log("proj/auth", SCOPES, "", 50);
+    const after = s.topics(SCOPES);
+    expect(after[0]!.lastReadAt).not.toBeNull();
+    expect(after[1]!.lastReadAt).toBeNull();
+  });
+
   it("rejects the writes that would sit half in each world", () => {
     const s = store();
     expect(() => publish(s, { topic: "Bad/Topic" })).toThrow(/topic/);
