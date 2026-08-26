@@ -181,6 +181,28 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_state ADD COLUMN sort INTEGER;
   ALTER TABLE session_state ADD COLUMN project_sort INTEGER;
   `,
+  // 7 — sessions can share state and events without sharing a transcript.
+  `
+  -- Append-only event log read two ways: latest(topic, key) is shared memory,
+  -- log(topic, after) is a message stream. Rows are immutable — a change is a
+  -- new event, a deletion is a tombstone. Owned by bus/store.ts.
+  CREATE TABLE bus_events (
+    id TEXT PRIMARY KEY,              -- ULID: lexicographic order is time order
+    topic TEXT NOT NULL,              -- 'a/b/c' hierarchy
+    key TEXT,                         -- NULL = plain event; set = latest() semantics
+    kind TEXT NOT NULL DEFAULT 'event',  -- 'event' | 'fact' | 'tombstone'
+    payload TEXT NOT NULL,            -- small JSON; large content goes to file_ptr
+    file_ptr TEXT,
+    scope TEXT NOT NULL,              -- 'run:<rootRunId>' | 'project:<cwd>' | 'instance'
+    writer_session TEXT NOT NULL,
+    caused_by TEXT,                   -- event id that triggered this write (storm guard)
+    hops INTEGER NOT NULL DEFAULT 0,
+    ttl_seconds INTEGER,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX bus_events_topic ON bus_events(topic, id);
+  CREATE INDEX bus_events_latest ON bus_events(topic, key, id) WHERE key IS NOT NULL;
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

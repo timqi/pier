@@ -23,9 +23,10 @@ const tables = (db: DatabaseSync): string[] =>
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(6);
+    expect(version(db)).toBe(7);
     expect(tables(db)).toEqual([
       "auth",
+      "bus_events",
       "channels",
       "conversations",
       "credentials",
@@ -54,7 +55,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(6);
+    expect(version(second)).toBe(7);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -67,7 +68,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 6/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 7/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {

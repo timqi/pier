@@ -61,6 +61,10 @@ src/
                runs, groups, agent (the child-run runner),
                execution, callbacks, messages, command, service, store, tool,
                HTTP routes
+  bus/         store (the append-only event table read as memory or as a
+               stream) and the `bus` tool; who a caller is (its run tree, its
+               cwd) arrives through an injected resolver, wired in main.ts —
+               see docs/bus.md
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   db.ts        the one connection, and the migration list that owns the schema
@@ -75,7 +79,7 @@ src/
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
 ```
 
-Dependency direction: `channels | web | tasks | boards → core → agent`. Core
+Dependency direction: `channels | web | tasks | boards | bus → core → agent`. Core
 never imports platform SDKs or Pi, and runtime dependencies never go sideways.
 `extensions/` sits beside `agent/` rather than under it: an extension takes an
 `ExtensionAPI`, so it is Pi-shaped by construction and is the second area

@@ -8,6 +8,8 @@ import { PiConfigStore } from "./agent/config.js";
 import { CredentialStore } from "./agent/credentials.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
+import { BusStore } from "./bus/store.js";
+import { busToolSpec, handleBusTool } from "./bus/tool.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
@@ -81,6 +83,9 @@ const settings = new SettingsStore(db);
 const secrets = new Secrets();
 
 let tasks: TaskService;
+const taskStore = new TaskStore(db);
+// One instance, not per call: the publish rate limiter lives in its memory.
+const busStore = new BusStore(db);
 const conversations = new ConversationStore(db);
 let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
 // Declared before the store exists because the factory is built first; the tool
@@ -93,6 +98,16 @@ const piConfig = new PiConfigStore();
 const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
+    busToolSpec((params, callerSessionId) =>
+      handleBusTool(busStore, {
+        // Who owns which half of "where does this caller stand": tasks know
+        // run trees, the factory knows every session's cwd. Resolved per call
+        // because a session may enter or leave a run between two writes.
+        resolve: async (sessionId) => ({
+          rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
+          cwd: (await factory.list()).find((s) => s.id === sessionId)?.cwd,
+        }),
+      }, params, callerSessionId)),
     slackToolSpec((params, callerSessionId) =>
       handleSlackTool({
         store: channelStore,
@@ -144,7 +159,7 @@ const router = new Router(hub, (key) => {
 // An attached session holds a live Pi runtime and its transcript, and nothing
 // else ever lets one go: without this, one per conversation ever answered.
 const stopEviction = router.startIdleEviction();
-tasks = new TaskService(new TaskStore(db), factory, router, hub, {
+tasks = new TaskService(taskStore, factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
 });
 tasks.start();
