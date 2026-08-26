@@ -181,12 +181,19 @@ describe("bus tool", () => {
     const inventory = await call({ operation: "topics" }, "b") as { topic: string; events: number }[];
     expect(inventory.map((t) => t.topic)).toEqual(["notes/a", "notes/b"]);
 
+    // The scope param narrows the fence — it never widens it.
+    await call({ operation: "publish", topic: "notes/wide", payload: "login instance-wide", scope: "instance" }, "a");
+    const narrowed = await call({ operation: "search", query: "login", scope: "instance" }, "b") as { topic: string }[];
+    expect(narrowed.map((h) => h.topic)).toEqual(["notes/wide"]);
+
+    // Archive defaults to the caller's narrowest scope: the two project
+    // events move, the instance-wide one is untouched.
     const archived = await call({ operation: "archive", topic_glob: "notes/*", before: id }, "b") as { archived: number };
     expect(archived.archived).toBe(2);
-    const live = await call({ operation: "log", topic_glob: "notes/*" }, "a") as { events: unknown[] };
-    expect(live.events).toEqual([]);
+    const live = await call({ operation: "log", topic_glob: "notes/*" }, "a") as { events: { topic: string }[] };
+    expect(live.events.map((e) => e.topic)).toEqual(["notes/wide"]);
     const history = await call({ operation: "log", topic_glob: "notes/*", include_archived: true }, "a") as { events: unknown[] };
-    expect(history.events).toHaveLength(2);
+    expect(history.events).toHaveLength(3);
 
     await expect(call({ operation: "search" }, "a")).rejects.toThrow(/query required/);
     await expect(call({ operation: "archive", topic_glob: "notes/*" }, "a")).rejects.toThrow(/before required/);

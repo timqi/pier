@@ -153,13 +153,13 @@ describe("BusStore", () => {
     expect(() => s.search("  ", SCOPES)).toThrow(/query required/);
   });
 
-  it("archive moves events out of every default read, but not out of history", () => {
+  it("archive moves one scope's events out of every default read, but not out of history", () => {
     const s = store();
     const old1 = publish(s, { payload: '"old-1"' }, 1000);
     const old2 = publish(s, { key: "k", kind: "fact", payload: '"old-fact"' }, 2000);
     const fresh = publish(s, { payload: '"fresh"' }, 3000);
 
-    expect(s.archive("proj/auth", old2.id, SCOPES)).toBe(2);
+    expect(s.archive("proj/auth", old2.id, SCOPE)).toBe(2);
     // Default reads see only what stayed live …
     expect(s.log("proj/*", SCOPES).events.map((e) => e.id)).toEqual([fresh.id]);
     expect(s.latest("proj/auth", SCOPES, "k")).toEqual([]);
@@ -167,26 +167,65 @@ describe("BusStore", () => {
     // … history is one flag away, in order, cursor semantics intact.
     const all = s.log("proj/*", SCOPES, "", 50, true);
     expect(all.events.map((e) => e.id)).toEqual([old1.id, old2.id, fresh.id]);
-    // Scope fence holds: another project archives nothing.
-    expect(s.archive("proj/*", fresh.id, ["project:/q"])).toBe(0);
+    // Identity survives the move: a held cursor still acks, a reaction to
+    // archived history still counts its hops.
+    expect(s.seenBy(old1.id, "proj/*", SCOPES)).toBe(true);
+    expect(publish(s, { causedBy: old1.id }, 4000).hops).toBe(1);
+    // The boundary must be a real event in the target scope — not a made-up
+    // ceiling that would archive the scope whole, not another scope's id.
+    expect(() => s.archive("proj/*", "ZZZZZZZZZZZZZZZZZZZZZZZZZZ", SCOPE)).toThrow(/live event/);
+    expect(() => s.archive("proj/*", fresh.id, "project:/q")).toThrow(/live event/);
   });
 
-  it("topics reports counts, freshness and who was last read", () => {
+  it("ids stay monotonic across a restart even when the tip was archived", () => {
+    const db = openDb(":memory:");
+    const first = new BusStore(db);
+    const tip = first.publish({ topic: "t", payload: "1", scope: SCOPE, writerSession: "a" }, 10_000);
+    first.archive("t", tip.id, SCOPE);
+    const after = new BusStore(db).publish(
+      { topic: "t", payload: "2", scope: SCOPE, writerSession: "a" }, 5_000);
+    expect(after.id > tip.id).toBe(true);
+  });
+
+  it("topics reports counts, freshness and who was last read; peek does not count", () => {
     const s = store();
     publish(s, { topic: "proj/auth", payload: '"1"' }, 1000);
     const newest = publish(s, { topic: "proj/auth", payload: '"2"' }, 2000);
     publish(s, { topic: "proj/deploy", payload: '"3"' }, 3000);
 
-    const before = s.topics(SCOPES);
-    expect(before).toEqual([
-      { topic: "proj/auth", events: 2, newestId: newest.id, lastReadAt: null },
-      { topic: "proj/deploy", events: 3 - 2, newestId: expect.any(String) as unknown as string, lastReadAt: null },
+    expect(s.topics(SCOPES)).toEqual([
+      {
+        topic: "proj/auth", events: 2, newestId: newest.id,
+        newestCreatedAt: new Date(2000).toISOString(), lastReadAt: null,
+      },
+      {
+        topic: "proj/deploy", events: 1,
+        newestId: expect.any(String) as unknown as string,
+        newestCreatedAt: new Date(3000).toISOString(), lastReadAt: null,
+      },
     ]);
-    // get and log stamp the read; the stamp is what "nobody reads this" means.
-    s.log("proj/auth", SCOPES, "", 50);
+    // A maintenance pass must not look like a reader, or nothing ever ages out.
+    s.log("proj/auth", SCOPES, "", 50, false, true);
+    s.latest("proj/auth", SCOPES, undefined, 4000, true);
+    expect(s.topics(SCOPES).every((t) => t.lastReadAt === null)).toBe(true);
+    // A real reader stamps — including a poller whose page came back empty:
+    // it is monitoring the topic, which is exactly what "still read" means.
+    const tip = s.log("proj/auth", SCOPES, "", 50, false, true).cursor;
+    const polled = s.log("proj/auth", SCOPES, tip);
+    expect(polled.events).toEqual([]);
     const after = s.topics(SCOPES);
     expect(after[0]!.lastReadAt).not.toBeNull();
     expect(after[1]!.lastReadAt).toBeNull();
+  });
+
+  it("read stamps coalesce to the hour — the read paths are hot", () => {
+    const s = store();
+    publish(s, { topic: "proj/auth", payload: '"1"' }, 1000);
+    s.stampRead(["proj/auth"], 10_000);
+    s.stampRead(["proj/auth"], 20_000); // within the hour: kept, not rewritten
+    expect(s.topics(SCOPES)[0]!.lastReadAt).toBe(10_000);
+    s.stampRead(["proj/auth"], 10_000 + 3_600_001);
+    expect(s.topics(SCOPES)[0]!.lastReadAt).toBe(3_610_001);
   });
 
   it("rejects the writes that would sit half in each world", () => {

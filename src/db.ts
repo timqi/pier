@@ -243,8 +243,26 @@ const MIGRATIONS: readonly string[] = [
   -- primary key, and an implicit rowid is not stable across VACUUM — a copy
   -- that cannot drift beats one that silently can. Requires an SQLite built
   -- with FTS5, which official Node builds bundle; a Node without it fails
-  -- loudly here, at boot, not at the first search.
+  -- loudly here, at boot, not at the first search (docs/bus.md records why
+  -- there is no LIKE fallback).
   CREATE VIRTUAL TABLE bus_events_fts USING fts5(id UNINDEXED, topic, payload);
+
+  -- Events written before this migration are as searchable as the next one.
+  INSERT INTO bus_events_fts(id, topic, payload)
+    SELECT id, topic, payload FROM bus_events WHERE kind != 'tombstone';
+
+  -- The index follows the table by trigger, not by application code: two
+  -- autocommit statements can crash apart, and every future write path —
+  -- including the archive's DELETE — stays consistent without remembering to.
+  CREATE TRIGGER bus_events_fts_insert AFTER INSERT ON bus_events
+    WHEN NEW.kind != 'tombstone'
+    BEGIN
+      INSERT INTO bus_events_fts(id, topic, payload) VALUES (NEW.id, NEW.topic, NEW.payload);
+    END;
+  CREATE TRIGGER bus_events_fts_delete AFTER DELETE ON bus_events
+    BEGIN
+      DELETE FROM bus_events_fts WHERE id = OLD.id;
+    END;
 
   -- The archive: same shape as bus_events, read only when a log says
   -- include_archived. Rows move here whole so a future need can move them back.

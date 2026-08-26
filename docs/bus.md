@@ -25,23 +25,38 @@ Four operations on the `bus` tool:
 - `subscribe {topic_glob, mode?}` asks to be told about writes the caller can
   see; `unsubscribe` stops it; `ack {topic_glob, cursor}` confirms progress —
   `get` and `log` never move a cursor, only `ack` does.
-- `search {query, limit?}` is full-text over topic and payload, visible scopes
-  only, newest first. Plain FTS5 syntax; a query FTS5 would reject as syntax
-  (bare hyphens, stray quotes) is retried with each token quoted, so plain
-  text always works. The index is a plain FTS5 table with its own copy of the
-  text — `bus_events` has a TEXT primary key, and an implicit rowid is not
-  stable across VACUUM, so external-content indexing could silently drift.
+- `search {query, scope?, limit?}` is full-text over topic and payload,
+  visible scopes only (`scope` narrows the fence, never widens it), most
+  relevant first with newest as the tie-break. Plain FTS5 syntax; a query FTS5
+  would reject as syntax (bare hyphens, stray quotes) is retried with each
+  token quoted, so plain text always works. The index is a plain FTS5 table
+  with its own copy of the text — `bus_events` has a TEXT primary key, and an
+  implicit rowid is not stable across VACUUM, so external-content indexing
+  could silently drift — kept consistent by triggers, not application code,
+  and backfilled by the migration so pre-upgrade events are as searchable as
+  the next one. There is deliberately no LIKE fallback: the plan's probe ran
+  at implementation time (official Node builds bundle FTS5), and a permanent
+  second search path for a hypothetical custom build is exactly the
+  speculative generality the budgets forbid — a Node without FTS5 fails at
+  boot, in the migration, loudly.
 - `topics {}` is the visible inventory: per topic, the event count, newest id,
-  and when anyone last read it (`get`/`log` stamp `bus_topic_reads`,
-  topic-grained — the librarian's "does anyone still read this?" needs no
-  per-event bookkeeping).
-- `archive {topic_glob, before}` moves matched events with `id <= before` into
+  newest timestamp (ISO 8601, for age arithmetic), and when anyone last read
+  it (epoch ms; null = never). `get`/`log` stamp `bus_topic_reads` themselves
+  — topic-grained, coalesced to the hour, and a poller whose page came back
+  empty still counts: it is monitoring the topic. Maintenance reads pass
+  `peek: true` and do not count — the librarian's own daily pass must not keep
+  every topic eternally "read".
+- `archive {topic_glob, before, scope?}` moves matched events with
+  `id <= before`, in one scope (explicit, or the caller's narrowest), into
   `bus_events_archive` — out of `get`, `log` and `search`, never deleted; a
-  `log {include_archived: true}` still reads them in order. Fenced by the
-  caller's scopes like every read: what it cannot see it cannot archive. One
-  accepted gap: run-scoped events of a dead run tree resolve for nobody, so
-  nobody can archive them — they stay in the live table, invisible to every
-  read, costing only size.
+  `log {include_archived: true}` still reads them in order, and identity
+  survives the move: `caused_by` hop accounting and `ack` cursor validation
+  read the union. One scope on purpose — a librarian summarizing into its own
+  scope must not take other scopes' history with it — and `before` must name
+  a live event there: an arbitrary ceiling would archive the scope whole, live
+  facts included, with no restore tool. One accepted gap: run-scoped events of
+  a dead run tree resolve for nobody, so nobody can archive them — they stay
+  in the live table, invisible to every read, costing only size.
 - `forget {topic, key, caused_by?}` writes a tombstone — into the scope where
   the currently visible winner lives, so forgetting a project fact from inside
   a run does not merely mask it until the run ends. Never a `DELETE`: cursors

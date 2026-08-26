@@ -149,7 +149,13 @@ export class BusStore {
 
   constructor(db: DatabaseSync = pierDb()) {
     this.#db = db;
-    const top = this.#db.prepare("SELECT MAX(id) AS id FROM bus_events").get() as { id: string | null };
+    // Both tables: archiving the live tip must not let a clock step mint ids
+    // below history, or a cursor could skip the next event forever.
+    const top = this.#db.prepare(`
+      SELECT MAX(id) AS id FROM (
+        SELECT MAX(id) AS id FROM bus_events
+        UNION ALL SELECT MAX(id) FROM bus_events_archive)
+    `).get() as { id: string | null };
     if (top.id) this.#ulid.seed(top.id);
   }
 
@@ -218,88 +224,88 @@ export class BusStore {
       event.filePtr ?? null, event.scope, event.writerSession,
       event.causedBy ?? null, event.hops, event.ttlSeconds ?? null, event.createdAt,
     );
-    // Tombstones carry no text worth finding; everything else is searchable.
-    if (event.kind !== "tombstone") {
-      this.#db.prepare("INSERT INTO bus_events_fts(id, topic, payload) VALUES (?, ?, ?)")
-        .run(event.id, event.topic, event.payload);
-    }
+    // The FTS index follows by trigger (db.ts migration 9), atomically.
     return event;
   }
 
-  /** Full-text over topic and payload, visible scopes only, newest first.
-   * Archived events are not searched: what nobody read while it was live is
-   * not what a search is looking for. */
+  /** Full-text over topic and payload, visible scopes only, most relevant
+   * first (newest breaks ties). Archived events are not searched: what nobody
+   * read while it was live is not what a search is looking for. */
   search(query: string, scopes: readonly string[], limit = 20): BusEvent[] {
     if (!query.trim()) throw new Error("query required");
     if (scopes.length === 0) return [];
-    const cap = Math.min(Math.max(limit, 1), 100);
-    const match = (q: string): { id: string }[] =>
-      this.#db.prepare(
-        "SELECT id FROM bus_events_fts WHERE bus_events_fts MATCH ? ORDER BY rank LIMIT ?",
-      ).all(q, cap * 4) as unknown as { id: string }[];
-    let ids: { id: string }[];
+    // Scope inside the query, not after the cap: a page of better-ranked hits
+    // the caller may not see must not starve the ones it may.
+    const match = (q: string): Row[] =>
+      this.#db.prepare(`
+        SELECT e.* FROM bus_events_fts f JOIN bus_events e ON e.id = f.id
+        WHERE bus_events_fts MATCH ? AND e.scope IN (${holes(scopes)})
+        ORDER BY f.rank, e.id DESC LIMIT ?
+      `).all(q, ...scopes, Math.min(Math.max(limit, 1), 100)) as unknown as Row[];
     try {
-      ids = match(query);
+      return match(query).map(fromRow);
     } catch {
       // FTS5's query language treats a bare hyphen (or colon, or unbalanced
       // quote) as syntax — and "nothing-here" is a perfectly reasonable thing
       // to search for. Retry with every token quoted: plain text always works,
       // operator syntax still available to whoever writes it correctly.
       try {
-        ids = match(query.split(/\s+/).filter(Boolean)
-          .map((token) => `"${token.replaceAll('"', '""')}"`).join(" "));
+        return match(query.split(/\s+/).filter(Boolean)
+          .map((token) => `"${token.replaceAll('"', '""')}"`).join(" ")).map(fromRow);
       } catch {
         throw new Error('not a valid search query — use words, "quoted phrases", AND/OR/NOT');
       }
     }
-    if (ids.length === 0) return [];
-    const found = ids.map((row) => row.id);
-    const rows = this.#db.prepare(`
-      SELECT * FROM bus_events WHERE id IN (${holes(found)}) AND scope IN (${holes(scopes)})
-    `).all(...found, ...scopes) as unknown as Row[];
-    const byId = new Map(rows.map((row) => [row.id, fromRow(row)]));
-    // Rank order from FTS, membership from the scope fence.
-    return ids.map((row) => byId.get(row.id)).filter((e): e is BusEvent => !!e)
-      .slice(0, Math.min(Math.max(limit, 1), 100));
   }
 
-  /** Moves everything a pattern matches, up to and including `before`, into
-   * the archive — out of every default read but never deleted (the rows move
-   * whole, so a future need can move them back). Fenced by the caller's
-   * scopes like every read: what it cannot see it cannot archive. */
-  archive(topicGlob: string, before: string, scopes: readonly string[]): number {
+  /** Moves everything a pattern matches in *one* scope, up to and including
+   * `before`, into the archive — out of every default read but never deleted
+   * (the rows move whole, so a future need can move them back). One scope on
+   * purpose: a librarian summarizing into its own scope must not take other
+   * scopes' history with it. `before` must name a real event the caller sees
+   * there — an arbitrary boundary like 'ZZZZ' would archive a scope whole,
+   * live facts included, with no restore tool. */
+  archive(topicGlob: string, before: string, scope: string): number {
     if (!validTopicGlob(topicGlob)) {
       throw new Error("topic_glob may use the topic alphabet plus GLOB wildcards (* ? [])");
     }
-    if (scopes.length === 0) return 0;
-    const move = `topic GLOB ? AND id <= ? AND scope IN (${holes(scopes)})`;
-    const params = [topicGlob, before, ...scopes];
-    this.#db.exec("BEGIN");
+    const anchor = this.#db.prepare(
+      "SELECT 1 AS hit FROM bus_events WHERE id = ? AND topic GLOB ? AND scope = ?",
+    ).get(before, topicGlob, scope);
+    if (!anchor) throw new Error("before must be the id of a live event matching topic_glob in the target scope");
+    const move = "topic GLOB ? AND id <= ? AND scope = ?";
+    // A savepoint, not BEGIN: composable if a caller ever owns a transaction.
+    this.#db.exec("SAVEPOINT bus_archive");
     try {
       this.#db.prepare(`INSERT INTO bus_events_archive SELECT * FROM bus_events WHERE ${move}`)
-        .run(...params);
-      this.#db.prepare(`
-        DELETE FROM bus_events_fts WHERE id IN (SELECT id FROM bus_events WHERE ${move})
-      `).run(...params);
-      const moved = this.#db.prepare(`DELETE FROM bus_events WHERE ${move}`).run(...params);
-      this.#db.exec("COMMIT");
+        .run(topicGlob, before, scope);
+      // The FTS rows follow the DELETE by trigger.
+      const moved = this.#db.prepare(`DELETE FROM bus_events WHERE ${move}`).run(topicGlob, before, scope);
+      this.#db.exec("RELEASE bus_archive");
       return Number(moved.changes);
     } catch (err) {
-      this.#db.exec("ROLLBACK");
+      this.#db.exec("ROLLBACK TO bus_archive");
+      this.#db.exec("RELEASE bus_archive");
       throw err;
     }
   }
 
   /** Per-topic shape of the visible bus — what the librarian reasons over:
-   * how much, how fresh, and when anyone last read it (null = never). */
-  topics(scopes: readonly string[]): { topic: string; events: number; newestId: string; lastReadAt: number | null }[] {
+   * how much, how fresh (as a timestamp it can do arithmetic on), and when
+   * anyone last read it (epoch ms; null = never). */
+  topics(scopes: readonly string[]): {
+    topic: string; events: number; newestId: string; newestCreatedAt: string; lastReadAt: number | null;
+  }[] {
     if (scopes.length === 0) return [];
     return this.#db.prepare(`
-      SELECT e.topic, COUNT(*) AS events, MAX(e.id) AS newestId, r.last_read_at AS lastReadAt
+      SELECT e.topic, COUNT(*) AS events, MAX(e.id) AS newestId,
+             MAX(e.created_at) AS newestCreatedAt, r.last_read_at AS lastReadAt
       FROM bus_events e LEFT JOIN bus_topic_reads r ON r.topic = e.topic
       WHERE e.scope IN (${holes(scopes)})
       GROUP BY e.topic ORDER BY e.topic
-    `).all(...scopes) as unknown as { topic: string; events: number; newestId: string; lastReadAt: number | null }[];
+    `).all(...scopes) as unknown as {
+      topic: string; events: number; newestId: string; newestCreatedAt: string; lastReadAt: number | null;
+    }[];
   }
 
   /** Value per key: scopes shadow narrow-to-wide (the order of `scopes`), and
@@ -307,9 +313,11 @@ export class BusStore {
    * its own scope's claim without resurfacing older writes there, but a wider
    * scope's live value still shows through. So a project fact overrides an
    * instance default, and forgetting the override reveals the default. */
-  latest(topic: string, scopes: readonly string[], key?: string, now = Date.now()): BusEvent[] {
+  latest(topic: string, scopes: readonly string[], key?: string, now = Date.now(), peek = false): BusEvent[] {
     if (scopes.length === 0) return [];
-    this.stampRead([topic], now);
+    // Asking is reading: the stamp records interest, so it lands even when
+    // the answer is empty — but after the query, not in front of it.
+    if (!peek) this.stampRead([topic], now);
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
       WHERE e.topic = ? AND e.key IS NOT NULL AND e.scope IN (${holes(scopes)})
@@ -347,6 +355,7 @@ export class BusStore {
     after = "",
     limit = 50,
     includeArchived = false,
+    peek = false,
   ): { events: BusEvent[]; cursor: string } {
     if (!validTopicGlob(topicGlob)) {
       throw new Error("topic_glob may use the topic alphabet plus GLOB wildcards (* ? [])");
@@ -361,16 +370,27 @@ export class BusStore {
       : `SELECT * FROM bus_events WHERE ${where} ORDER BY id LIMIT ?`,
     ).all(...(includeArchived ? [...params, ...params] : params), Math.min(Math.max(limit, 1), 200)) as unknown as Row[];
     const events = rows.map(fromRow);
-    this.stampRead(events.map((event) => event.topic));
+    // Every topic the pattern reaches, not only the ones this page returned:
+    // a poller at its cursor reads 0 events and is still a reader — archiving
+    // a topic someone actively monitors is the bug this stamp exists to stop.
+    if (!peek) {
+      const matched = this.#db.prepare(
+        `SELECT DISTINCT topic FROM bus_events WHERE topic GLOB ? AND scope IN (${holes(scopes)})`,
+      ).all(topicGlob, ...scopes) as unknown as { topic: string }[];
+      this.stampRead(matched.map((row) => row.topic));
+    }
     return { events, cursor: events.at(-1)?.id ?? after };
   }
 
   /** A topic was read — the one fact the librarian's archiving question needs.
-   * Called by the read paths themselves so no caller can forget it. */
+   * Called by the read paths themselves so no caller can forget it; hourly
+   * granularity, because "read this month?" never needs the exact millisecond
+   * and the read paths are hot. */
   stampRead(topicsRead: string[], now = Date.now()): void {
     const stamp = this.#db.prepare(`
       INSERT INTO bus_topic_reads(topic, last_read_at) VALUES (?, ?)
       ON CONFLICT(topic) DO UPDATE SET last_read_at = excluded.last_read_at
+      WHERE excluded.last_read_at - last_read_at > 3600000
     `);
     for (const topic of new Set(topicsRead)) stamp.run(topic, now);
   }
@@ -403,17 +423,26 @@ export class BusStore {
 
   /** Whether one event is readable through a pattern and scope set — the
    * test an ack cursor must pass: an id from an unrelated topic or scope
-   * would silently skip the subscription's unread backlog. */
+   * would silently skip the subscription's unread backlog. Archive included:
+   * a cursor a reader legitimately holds must not become un-ackable because
+   * the librarian moved the row. */
   seenBy(id: string, topicGlob: string, scopes: readonly string[]): boolean {
     if (scopes.length === 0) return false;
+    const fence = `id = ? AND topic GLOB ? AND scope IN (${holes(scopes)})`;
     const row = this.#db.prepare(`
-      SELECT 1 AS hit FROM bus_events WHERE id = ? AND topic GLOB ? AND scope IN (${holes(scopes)})
-    `).get(id, topicGlob, ...scopes);
+      SELECT 1 AS hit FROM bus_events WHERE ${fence}
+      UNION ALL SELECT 1 FROM bus_events_archive WHERE ${fence}
+    `).get(id, topicGlob, ...scopes, id, topicGlob, ...scopes);
     return row !== undefined;
   }
 
+  /** Identity lookup, archive included: hops accounting (caused_by) and cursor
+   * validation must keep working on history the librarian moved. */
   byId(id: string): BusEvent | undefined {
-    const row = this.#db.prepare("SELECT * FROM bus_events WHERE id = ?").get(id) as unknown as Row | undefined;
+    const row = this.#db.prepare(`
+      SELECT * FROM bus_events WHERE id = ?
+      UNION ALL SELECT * FROM bus_events_archive WHERE id = ?
+    `).get(id, id) as unknown as Row | undefined;
     return row ? fromRow(row) : undefined;
   }
 
