@@ -68,6 +68,7 @@ const archiveSearch = $<HTMLInputElement>("#archive-search");
 const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const knownProjects = $("#known-projects");
+const deskSlot = $("#desk-slot");
 
 // --- projects (pinned sessions, grouped by cwd) ------------------------------------
 // Projects lists pinned sessions only — those created in Pier (auto-pinned) or
@@ -429,9 +430,11 @@ export function renderSessions(): void {
   setUnreadBadge(sessions.filter((s) => s.unread && s.channel === "web").length);
   const dir = deps.deskDir();
   const { newest } = splitDesk(sessions.filter((s) => s.pinned), dir);
+  // Desk renders in its own slot between Console and Projects — a peer of
+  // both, because it is an entrance, not a project under the Projects header.
+  deskSlot.replaceChildren(...(dir ? [deskRow(dir, newest, deps.busEnabled())] : []));
   const projects = pinnedProjects();
   projectTree.replaceChildren(
-    ...(dir ? [deskRow(dir, newest, deps.busEnabled())] : []),
     ...(projects.length
       ? projects.map(([cwd, list]) => projectNode(cwd, list))
       : [
