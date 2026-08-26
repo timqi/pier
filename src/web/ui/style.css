@@ -388,8 +388,13 @@ html {
      background is swapped for a faint tint that keeps the page's light weight,
      and inline code loses prose's literal backtick pseudo-elements. */
   .md pre {
-    @apply overflow-x-auto rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
+    @apply overflow-x-hidden whitespace-pre-wrap rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
+    overflow-wrap: anywhere;
     color: var(--color-neutral-800);
+  }
+  .md pre code {
+    white-space: inherit;
+    overflow-wrap: inherit;
   }
   .md :not(pre) > code {
     @apply rounded bg-black/[0.055] px-1 py-px text-[0.9em] font-normal text-neutral-800 dark:bg-neutral-100;
