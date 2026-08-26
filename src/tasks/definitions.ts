@@ -20,21 +20,33 @@ import type {
 const DEFAULT_TIMEOUT = 900;
 const MIN_WATCH_SECONDS = 5;
 
-/** Crockford's base32, lowercased: no vowels to spell a word by accident, no
- *  i/l/o/u to misread, one case so a model re-types an id it read verbatim. */
+/** Crockford's base32, lowercased: i, l, o and u are gone — the three that
+ *  misread as 1/0 and the one that completes most accidental words — and one
+ *  case throughout, so a model re-types an id it read verbatim. */
 const ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 
+/** The one byte → symbol step, exported only so a test can walk all 256 byte
+ *  values: a repeated or omitted character in the alphabet above biases every
+ *  id ever minted, and no sample of finished ids can show it. */
+export const idSymbol = (byte: number): string => ID_ALPHABET.charAt(byte & 31);
+
 /** The id every task record is minted with — runs, definitions, groups and
- *  messages alike. Twelve characters, 60 bits (`& 31` is unbiased because 256
- *  is a multiple of 32), because these ids ride through model context
- *  constantly: every run summary, callback, get, steer and reply echoes one,
- *  and a UUID spends ~12 tokens where this spends ~5. Nothing parses or orders
- *  by them — every comparison in the area is string equality and every listing
- *  orders by a timestamp column — so rows minted as UUIDs before this keep
- *  working untouched; there is nothing to migrate. It lives here rather than in
- *  types.ts because the browser type-checks that file and it stays node-free. */
-export const newId = (): string =>
-  Array.from(randomBytes(12), (byte) => ID_ALPHABET.charAt(byte & 31)).join("");
+ *  messages alike — because these ids ride through model context constantly:
+ *  every run summary, callback, get, steer and reply echoes one, and a UUID
+ *  spends ~12 tokens where this spends ~6. Nothing parses or orders by them —
+ *  every comparison in the area is string equality and every listing orders by
+ *  a timestamp column — so rows minted as UUIDs before this keep working
+ *  untouched; there is nothing to migrate. It lives here rather than in
+ *  types.ts because the browser type-checks that file and it stays node-free.
+ *
+ *  Sixteen characters, 80 bits (`& 31` is unbiased because 256 is a multiple
+ *  of 32). Sixty would have read the same and cost a token less, but a watch
+ *  task on a 5-second interval mints ~6M runs a year, and a collision here is
+ *  not an error: `saveRun`'s ON CONFLICT DO UPDATE would quietly overwrite the
+ *  older run with the newer one. Four more characters buy ~16 million times
+ *  the headroom for four bytes — cheaper than the alternative fix, which is a
+ *  strict INSERT and a retry loop on every one of the four mint sites. */
+export const newId = (): string => Array.from(randomBytes(16), idSymbol).join("");
 
 export const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)

@@ -17,7 +17,7 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { TaskCallbacks } from "./callbacks.js";
-import { newId } from "./definitions.js";
+import { idSymbol, newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
@@ -143,13 +143,34 @@ const bashDraft = (cwd: string, script: string) => ({
 });
 
 describe("newId", () => {
-  it("mints 12 unambiguous lowercase characters that do not repeat", () => {
+  // Spelled out rather than derived: a character that drifts out of the
+  // alphabet has to fail against something written independently of it.
+  const alphabet = "0123456789abcdefghjkmnpqrstvwxyz";
+
+  it("maps all 256 byte values onto Crockford's 32 lowercase symbols, evenly", () => {
+    const counts = new Map<string, number>();
+    for (let byte = 0; byte < 256; byte++) {
+      const symbol = idSymbol(byte);
+      counts.set(symbol, (counts.get(symbol) ?? 0) + 1);
+    }
+    // Exact set, exact order, and no symbol reachable more often than another:
+    // duplication, omission and modulo bias all show up here and nowhere else.
+    expect([...Array(32).keys()].map(idSymbol).join("")).toBe(alphabet);
+    expect([...counts.keys()].sort().join("")).toBe([...alphabet].sort().join(""));
+    expect([...counts.values()]).toEqual(Array(32).fill(8));
+    expect("ilou".split("").some((c) => counts.has(c))).toBe(false);
+  });
+
+  it("mints 16 characters from that alphabet, distinct across a large sample", () => {
     const ids = new Set<string>();
     for (let i = 0; i < 10_000; i++) {
       const id = newId();
-      expect(id).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
+      expect(id).toHaveLength(16);
+      expect([...id].every((c) => alphabet.includes(c))).toBe(true);
       ids.add(id);
     }
+    // Not a guarantee — 80 bits makes a repeat here a ~1e-13 event, so one
+    // would mean the source stopped being random, not that luck ran out.
     expect(ids.size).toBe(10_000);
   });
 });
