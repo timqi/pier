@@ -575,7 +575,7 @@ export function initSidebar(d: SidebarDeps): void {
   archiveSearch.onkeydown = (ev) => {
     // Bare Ctrl only: ⌃⇧N is the browser's incognito window, and claiming a
     // chord someone meant for the browser is worse than not having it.
-    const step = ev.altKey || ev.metaKey || ev.shiftKey
+    const step = ev.altKey || ev.metaKey || ev.shiftKey || !ev.key // no `key`: synthetic event
       ? undefined
       : (ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key]);
     if (step !== undefined) {
