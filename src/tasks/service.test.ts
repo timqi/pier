@@ -1198,6 +1198,20 @@ describe("task service", () => {
     }
   });
 
+  it("names the worker's session in a single run's callback, not only a group's", async () => {
+    const { cwd, service, session, factory } = setup();
+    vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("worker-1"));
+    const task = await service.tool({
+      operation: "run",
+      task: { name: "review", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review" } },
+    }, "s1") as RunSummary;
+    const run = await service.waitForRun(task.runId);
+    await vi.waitFor(() => expect(service.getRun(run.id).callbackState).toBe("delivered"));
+    // The relay's next move is a deep link to the session that did the work;
+    // without this line finding it costs the reader another tool call.
+    expect(session.systemInputs.at(-1)!.text).toContain(`Run: ${run.id} / Session: worker-1`);
+  });
+
   it("batches pending callbacks for one session into a single input", async () => {
     const { cwd, service, session } = setup();
     const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo done") }, "s1") as TaskDefinition;
