@@ -59,6 +59,21 @@ export interface BusNoteRow {
   lastEventId: string;
 }
 
+/** A seeded librarian, as the Bus view needs to see it: an ordinary scheduled
+ *  task the Tasks panel owns, keyed by the cwd it maintains. Its presence *is*
+ *  the view's display state — there is no stored flag saying a librarian was
+ *  seeded, because the task is the only thing that could make it true. */
+export interface BusLibrarianRow {
+  taskId: string;
+  name: string;
+  /** The working directory its runs get, and therefore the scopes it sees. */
+  cwd: string;
+  /** Human-readable trigger, e.g. `0 5 * * * (Asia/Shanghai)`. */
+  schedule: string;
+  /** Paused in the Tasks panel: it exists and will not run. */
+  enabled: boolean;
+}
+
 export interface BusEventRow {
   id: string;
   topic: string;
@@ -81,6 +96,10 @@ export interface BusEventRow {
  *  *matched* total, counted in SQL across the whole table. */
 export interface BusOverview {
   enabled: boolean;
+  /** Every librarian task that exists right now. Not searched and not capped:
+   *  it is one row per maintained project, and the button above the tabs is
+   *  drawn from it. */
+  librarians: BusLibrarianRow[];
   topics: BusTopicRow[];
   topicsTotal: number;
   subs: BusSubRow[];

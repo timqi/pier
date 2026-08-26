@@ -5,7 +5,7 @@ import { registerBusRoutes } from "./routes.js";
 import { BusStore } from "./store.js";
 import { SubStore } from "./subs.js";
 import type { BusNote } from "./subs.js";
-import type { BusOverview } from "./types.js";
+import type { BusLibrarianRow, BusOverview } from "./types.js";
 
 const SCOPE = "project:/p";
 
@@ -14,13 +14,52 @@ function setup(enabled = true) {
   const events = new BusStore(db);
   const subs = new SubStore(db);
   const app = new Hono();
-  registerBusRoutes(app, { events, subs, enabled: () => enabled });
+  // The librarian seam stands in for main.ts's task-store wiring: the route
+  // only ever reads the list and asks for one to be created.
+  const librarians: BusLibrarianRow[] = [];
+  const seeded: string[] = [];
+  let refuse: string | null = null;
+  registerBusRoutes(app, {
+    events,
+    subs,
+    enabled: () => enabled,
+    librarian: {
+      list: () => librarians,
+      seed: (cwd) => {
+        if (refuse) return Promise.reject(new Error(refuse));
+        seeded.push(cwd);
+        const row: BusLibrarianRow = {
+          taskId: `task-${String(librarians.length)}`,
+          name: "bus-librarian",
+          cwd,
+          schedule: "0 5 * * * (UTC)",
+          enabled: true,
+        };
+        librarians.push(row);
+        return Promise.resolve(row);
+      },
+    },
+  });
   const get = async (q = ""): Promise<BusOverview> => {
     const res = await app.request(`/api/bus${q ? `?q=${encodeURIComponent(q)}` : ""}`);
     expect(res.status).toBe(200);
     return (await res.json()) as BusOverview;
   };
-  return { events, subs, get };
+  const seed = async (body: unknown): Promise<Response> =>
+    await app.request("/api/bus/librarian", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  return {
+    events,
+    subs,
+    get,
+    seed,
+    librarians,
+    seeded,
+    refuseSeed: (why: string) => (refuse = why),
+  };
 }
 
 const note = (over: Partial<BusNote> & Pick<BusNote, "subId" | "sessionId">): BusNote => ({
@@ -202,5 +241,71 @@ describe("GET /api/bus", () => {
     events.publish({ topic: "proj/old", payload: '"1"', scope: SCOPE, writerSession: "s1" }, 1000);
     events.publish({ topic: "proj/new", payload: '"2"', scope: SCOPE, writerSession: "s1" }, 90_000);
     expect((await get()).topics.map((t) => t.topic)).toEqual(["proj/new", "proj/old"]);
+  });
+});
+
+describe("POST /api/bus/librarian", () => {
+  it("seeds one, and the overview reports it from the task store afterwards", async () => {
+    const { get, seed, seeded } = setup();
+    // Nothing stored says "not seeded": the empty list is the whole state.
+    expect((await get()).librarians).toEqual([]);
+
+    const res = await seed({ cwd: "/p" });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { librarian: BusLibrarianRow }).librarian).toMatchObject({
+      cwd: "/p",
+      name: "bus-librarian",
+      schedule: "0 5 * * * (UTC)",
+    });
+    expect(seeded).toEqual(["/p"]);
+    // Detected, not remembered: the next read of the page finds the task.
+    expect((await get()).librarians.map((row) => row.cwd)).toEqual(["/p"]);
+  });
+
+  it("refuses a second librarian for the same cwd, and names the one that has it", async () => {
+    const { seed, seeded } = setup();
+    expect((await seed({ cwd: "/p" })).status).toBe(201);
+
+    const again = await seed({ cwd: "/p" });
+    // Two librarians in one cwd would summarize and archive the same topics
+    // against each other every night, so the second attempt creates nothing.
+    expect(again.status).toBe(409);
+    const body = (await again.json()) as { error: string; librarian: BusLibrarianRow };
+    expect(body.error).toContain("/p");
+    expect(body.librarian.taskId).toBe("task-0");
+    expect(seeded).toEqual(["/p"]);
+  });
+
+  it("keys detection by cwd, so another project may still be seeded", async () => {
+    const { get, seed, seeded } = setup();
+    expect((await seed({ cwd: "/p" })).status).toBe(201);
+    expect((await seed({ cwd: "/other" })).status).toBe(201);
+    expect(seeded).toEqual(["/p", "/other"]);
+    expect((await get()).librarians.map((row) => row.cwd)).toEqual(["/p", "/other"]);
+  });
+
+  it("refuses while the bus is off, without creating anything", async () => {
+    const { seed, seeded } = setup(false);
+    const res = await seed({ cwd: "/p" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain("off");
+    expect(seeded).toEqual([]);
+  });
+
+  it("needs an absolute cwd: a relative one would depend on where Pier started", async () => {
+    const { seed, seeded } = setup();
+    for (const body of [{}, { cwd: "" }, { cwd: "p" }, { cwd: 7 }]) {
+      expect((await seed(body)).status).toBe(400);
+    }
+    expect(seeded).toEqual([]);
+  });
+
+  it("passes the task layer's refusal through, because it names what to fix", async () => {
+    const { get, seed, refuseSeed } = setup();
+    refuseSeed("working directory does not exist: /gone");
+    const res = await seed({ cwd: "/gone" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("/gone");
+    expect((await get()).librarians).toEqual([]);
   });
 });

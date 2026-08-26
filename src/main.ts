@@ -9,8 +9,15 @@ import { CredentialStore } from "./agent/credentials.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { BusDelivery } from "./bus/delivery.js";
+import {
+  LIBRARIAN_CRON,
+  LIBRARIAN_DESCRIPTION,
+  LIBRARIAN_NAME,
+  librarianPrompt,
+} from "./bus/librarian.js";
 import { registerBusRoutes } from "./bus/routes.js";
 import { BusStore } from "./bus/store.js";
+import type { BusLibrarianRow } from "./bus/types.js";
 import { BusSweep } from "./bus/sweep.js";
 import { SubStore } from "./bus/subs.js";
 import { busToolSpec, handleBusTool } from "./bus/tool.js";
@@ -35,6 +42,7 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
+import type { TaskDefinition } from "./tasks/types.js";
 import { isTerminal } from "./tasks/types.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
 import { Secrets } from "./secrets.js";
@@ -422,7 +430,57 @@ const auth = new AuthStore(db);
 app.use("*", requireAuth(auth));
 registerAuthRoutes(app, auth);
 registerTaskRoutes(app, tasks, { factory, router });
-registerBusRoutes(app, { events: busStore, subs: busSubs, enabled: () => settings.get().busEnabled });
+// The Bus view's Seed librarian button is wired here because it spans two areas
+// that do not import each other: the librarian's marker, schedule and prompt are
+// the bus's (bus/librarian.ts), and creating or listing a task is the task
+// service's. A librarian is an ordinary task from the moment it exists, so the
+// Tasks panel edits, pauses and deletes it with no help from here.
+const librarianRow = (task: TaskDefinition): BusLibrarianRow | null =>
+  task.name === LIBRARIAN_NAME && !task.archived
+    && task.action.type === "agent" && task.action.session.mode === "fresh"
+    ? {
+      taskId: task.id,
+      name: task.name,
+      cwd: task.action.session.cwd,
+      schedule: task.trigger.type === "cron"
+        ? `${task.trigger.expression} (${task.trigger.timezone})`
+        : task.trigger.type,
+      enabled: task.enabled,
+    }
+    : null;
+registerBusRoutes(app, {
+  events: busStore,
+  subs: busSubs,
+  enabled: () => settings.get().busEnabled,
+  librarian: {
+    list: () => taskStore.listTasks().flatMap((task) => librarianRow(task) ?? []),
+    seed: async (cwd) => {
+      // A plain cron task, and deliberately without a model: catalogs move, and
+      // a pinned id would outlive the model it names — the operator picks one in
+      // the Tasks panel if they want a specific one.
+      const task = await tasks.create({
+        name: LIBRARIAN_NAME,
+        description: LIBRARIAN_DESCRIPTION,
+        trigger: {
+          type: "cron",
+          expression: LIBRARIAN_CRON,
+          // The instance's own timezone: 05:00 means the operator's night, and a
+          // cron task stores the zone explicitly (tasks/types.ts) rather than
+          // inheriting a process default that a restart elsewhere could change.
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+        action: { type: "agent", session: { mode: "fresh", cwd }, prompt: librarianPrompt() },
+        callback: { type: "none" },
+      });
+      const row = librarianRow(task);
+      // Unreachable by construction (this function built the definition), but a
+      // silent null here would draw a view with no librarian in it after a
+      // successful seed.
+      if (!row) throw new Error("seeded librarian does not match its own marker");
+      return row;
+    },
+  },
+});
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);

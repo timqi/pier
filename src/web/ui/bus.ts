@@ -7,7 +7,7 @@
 
 import { failure, sendJson } from "./api.js";
 import { basename, consoleView, h, relTime, type ConsoleView } from "./dom.js";
-import { badge, btn, empty, setStatus, tabButton, textInput, toggle } from "./form.js";
+import { badge, btn, button, empty, select, setStatus, tabButton, textInput, toggle } from "./form.js";
 // Type-only: the wire shapes stay single-sourced in the area that fills them.
 import type {
   BusEventRow,
@@ -22,6 +22,7 @@ export type BusView = ConsoleView & { refresh(): void };
 
 const EMPTY: BusOverview = {
   enabled: false,
+  librarians: [],
   topics: [], topicsTotal: 0,
   subs: [], subsTotal: 0,
   notes: [], notesTotal: 0,
@@ -111,6 +112,13 @@ export function createBusView(
   openSession: (id: string) => void,
   /** Tab clicks route (#/bus/<tab>) so refresh and Back keep the tab. */
   onTab: (tab: string) => void,
+  /** The workbench's project inventory — distinct session cwds, derived, the
+   *  same list Files, Terminal and Settings pick from. There is no project
+   *  store to ask (docs/architecture.md). */
+  projects: () => string[],
+  /** A seeded librarian is an ordinary task, so its row links to the panel that
+   *  owns it instead of growing a second editor here. */
+  openTask: (taskId: string) => void,
 ): BusView {
   let data: BusOverview = EMPTY;
   let loaded = false;
@@ -164,6 +172,90 @@ export function createBusView(
     );
     // Re-read rather than trust the flip: enabling reveals whatever the tables
     // were already holding from the last time it was on.
+    await load();
+  }
+
+  // --- the librarian ----------------------------------------------------------
+  // Detection, not stored state: whether this offers to seed a librarian or
+  // names the one already maintaining the chosen project is a question the task
+  // store answers on every load. Nothing here records that a librarian was
+  // seeded — the task is the only thing that could make it true, and a control
+  // must not draw a state nobody stored.
+
+  const seedStatus = h("span", "text-[11.5px]", "");
+  /** The project the button would seed for. Re-pinned to the inventory on every
+   *  render, so a cwd whose last session is gone cannot linger as the target. */
+  let seedCwd = "";
+  const librarianBar = h("div", "mb-4 rounded-xl border border-neutral-200 bg-white px-4 py-3");
+
+  const librarianHint = (text: string): HTMLElement =>
+    h("p", "mt-2 max-w-2xl text-[11.5px] leading-snug text-neutral-500", text);
+
+  function renderLibrarian(): void {
+    const cwds = projects();
+    if (!cwds.includes(seedCwd)) seedCwd = cwds[0] ?? "";
+    const picker = select(cwds.map((cwd) => [cwd, cwd] as [string, string]), seedCwd);
+    picker.disabled = cwds.length === 0;
+    // Picking another project repaints from data already in hand: the librarians
+    // are all in the last response, so this costs no round trip.
+    picker.onchange = () => {
+      seedCwd = picker.value;
+      // The status line belongs to the project it was about: keeping "already
+      // maintains /a" beside a button now aimed at /b would be a lie.
+      setStatus(seedStatus, "idle", "");
+      renderLibrarian();
+    };
+    const head = h(
+      "div",
+      "flex flex-wrap items-center gap-x-3 gap-y-2",
+      h("span", "flex-none text-[13px] font-medium text-neutral-700", "Librarian"),
+      h("div", "min-w-0 flex-1 basis-64", picker),
+    );
+    const existing = data.librarians.find((row) => row.cwd === seedCwd);
+    if (existing) {
+      const open = btn("Open in Tasks", "flex-none cursor-pointer text-[12.5px] text-indigo-600 hover:underline");
+      open.onclick = () => openTask(existing.taskId);
+      head.append(
+        h("span", "flex-none font-mono text-[12px] text-neutral-700", existing.name),
+        h("span", "flex-none text-[11.5px] text-neutral-500", existing.schedule),
+        ...(existing.enabled ? [] : [badge("paused", "bg-amber-50 text-amber-700 ring-amber-200")]),
+        open,
+      );
+      librarianBar.replaceChildren(head, librarianHint(
+        "A daily pass already maintains this project. It is an ordinary scheduled task — the Tasks panel "
+          + "owns its schedule and prompt, pauses it, and deletes it; this page only reports that it exists.",
+      ));
+      return;
+    }
+    const seed = button("Seed librarian", true);
+    // Disabled always says why: a dead button with no sentence beside it is
+    // indistinguishable from a broken one.
+    const blocked = !data.enabled
+      ? "The bus is off — a librarian's runs would find no bus tool to work with."
+      : cwds.length === 0
+      ? "No projects yet — a project is a session's working directory, so open a session first."
+      : "";
+    seed.disabled = blocked !== "";
+    seed.onclick = () => void createLibrarian();
+    head.append(seed, seedStatus);
+    librarianBar.replaceChildren(head, librarianHint(
+      blocked
+        || "Creates an ordinary scheduled task named bus-librarian: a daily 05:00 run in this instance's "
+          + "timezone that distills stable conclusions into facts, archives what nobody reads, and writes "
+          + "promotion proposals to .librarian/proposals (docs/bus.md). Edit or delete it in Tasks.",
+    ));
+  }
+
+  async function createLibrarian(): Promise<void> {
+    setStatus(seedStatus, "saving", "creating…");
+    const res = await sendJson("/api/bus/librarian", { cwd: seedCwd });
+    if (!res.ok) {
+      setStatus(seedStatus, "failed", await failure(res, "Could not seed the librarian"));
+      return;
+    }
+    setStatus(seedStatus, "saved", "Created — the Tasks panel owns it now.");
+    // Re-read rather than patch the row in: the created task is the state, and
+    // this page shows what the store holds.
     await load();
   }
 
@@ -413,13 +505,14 @@ export function createBusView(
   const column = h(
     "div",
     "mx-auto flex w-full min-w-0 max-w-5xl flex-col",
-    problemBox, switchBar, strip, hint, body,
+    problemBox, switchBar, librarianBar, strip, hint, body,
   );
 
   function render(): void {
     problemBox.textContent = problem;
     problemBox.classList.toggle("hidden", !problem);
     switchBar.replaceChildren(busSwitch(), switchStatus);
+    renderLibrarian();
     if (!data.enabled) {
       // Only the explanation and the switch: the tabs would describe a
       // capability no session can reach. The view itself stays reachable —
@@ -440,6 +533,10 @@ export function createBusView(
               + "not offered to new sessions and owed notifications are frozen — nothing stored is lost.",
           ),
           switchBar,
+          // The seed control comes along, disabled and saying why: the one
+          // affordance this page offers besides the switch must not simply
+          // vanish, or "off" and "gone" read the same.
+          librarianBar,
         ),
       ));
       return;
@@ -447,7 +544,7 @@ export function createBusView(
     // Re-seating the same node would still blur what is inside it. The
     // off-state moved problemBox and switchBar into its own tree; coming
     // back, they must be re-seated too or enabling leaves no switch to see.
-    if (problemBox.parentElement !== column) column.prepend(problemBox, switchBar);
+    if (problemBox.parentElement !== column) column.prepend(problemBox, switchBar, librarianBar);
     if (pane.firstElementChild !== column) pane.replaceChildren(column);
     renderTabs();
     renderBody();

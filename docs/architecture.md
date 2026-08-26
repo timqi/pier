@@ -66,8 +66,10 @@ src/
   bus/         store (the append-only event table read as memory or as a
                stream), subs (who hears about a write, and what is still
                owed), delivery (pointer notifications over the tasks outbox),
-               routes + types (the operator's read-only HTTP view of all
-               three, and its wire DTOs) and the `bus` tool; who a caller is
+               librarian (the maintenance task's marker, schedule and prompt),
+               routes + types (the operator's HTTP view of all
+               three plus the one write that seeds a librarian, and its wire
+               DTOs) and the `bus` tool; who a caller is
                (its run tree, its cwd)
                arrives through an injected resolver, wired in main.ts —
                see docs/bus.md

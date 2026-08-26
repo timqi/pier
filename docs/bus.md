@@ -242,8 +242,24 @@ Daily maintenance is an agent with the same `bus` tool as everyone, not core
 code: it distills stable conclusions into facts, archives topics nobody reads,
 and writes promotion proposals to `.librarian/proposals/` — proposals only, it
 never edits AGENTS.md or anyone's files. Its prompt lives in
-`src/bus/librarian-prompt.md`. It is not auto-seeded; create it once, from any
-session, with the task tool:
+`src/bus/librarian-prompt.md` — the one canonical copy, read at seed time and
+copied into `dist/` by `npm run build:assets` like every other non-TS asset.
+
+Nothing seeds it unasked. **Console → Bus → Seed librarian** creates it in one
+click for a project you pick: a *normal* scheduled task (`0 5 * * *` in the
+instance's timezone, a fresh session in that cwd, no callback, no pinned model —
+catalogs move), which the Tasks panel then owns entirely — edit its schedule or
+prompt, pause it, delete it. That is also why the button needs no stored flag:
+whether the Bus view offers to seed one or names the one that exists is read back
+from the task store, keyed by the marker name `bus-librarian` plus the cwd in its
+action, so the two surfaces cannot disagree about a librarian that was deleted in
+the other one. One per cwd: a second in the same directory would summarize and
+archive the same topics against the first every night, so it is refused with the
+row that already has it. Seeding is refused while the capability is off — a
+librarian whose runs find no `bus` tool is a scheduled daily no-op.
+
+The click is a convenience, not a mechanism: the same task from any session, with
+the task tool, is still the whole recipe —
 
 ```json
 {"operation": "create", "task": {
@@ -255,6 +271,10 @@ session, with the task tool:
   "callback": {"type": "none"}
 }}
 ```
+
+Keep the name: `bus-librarian` is the marker detection reads, so a hand-written
+task called something else is invisible to the Bus view, which will go on
+offering to seed one.
 
 The librarian sees the scopes of the cwd it is given (plus `instance`); an
 instance with several active projects runs one librarian per project root, or
@@ -269,8 +289,9 @@ summarized twice.
 
 ## The Console view
 
-Console → Bus is the bus's one visible surface, read-only, one tab per
-section: per (topic, scope) the live and archived counts, when it last moved
+Console → Bus is the bus's one visible surface: four read-only sections, one tab
+each, plus the two writes above them — the capability switch and Seed librarian.
+Per section: per (topic, scope) the live and archived counts, when it last moved
 and when anyone last read it, with the live facts expandable underneath; every
 subscription with its cursor **lag as a number** against its pinned scopes; the
 pointer notifications still owed — pending, failed with their attempts and next
@@ -305,8 +326,14 @@ code path the no-LIKE-fallback rule above refuses. LIKE wildcards in the query
 are escaped: `%` is something you search *for*.
 
 The view hosts the `busEnabled` switch: off,
-the page is the explanation and the toggle, and nothing else — but the tab
-itself is always reachable, because hiding it would hide the switch. The
+the page is the explanation, the toggle and the (disabled, with its reason) seed
+control, and nothing else — but the tab
+itself is always reachable, because hiding it would hide the switch. The seed
+endpoint (`POST /api/bus/librarian`) is the area's one write, and it creates
+nothing bus-shaped: listing and creating tasks arrive as an injected seam wired
+in `main.ts`, because the bus must not import `tasks` (delivery stays the one
+sideways edge) while the librarian's marker, schedule and prompt are the bus's
+own. The
 queries behind it (`BusStore.adminTopics/adminFacts/adminTail`,
 `SubStore.adminSubs/adminNotes`) carry no scope fence: the fence answers "what
 may this *session* see" and the operator has no session — they are the person
@@ -319,5 +346,6 @@ accepted `bus` tool call and on every note lifecycle change), never on a timer.
 ## What the bus deliberately does not do
 
 No payload in notifications, no embedding, no CRDTs, no transcript mining, no
-multi-host sync, no automatic librarian seeding; those are recorded as
-non-goals in the plan, not omissions.
+multi-host sync, and no librarian that appears by itself — a person clicks Seed
+librarian (or writes the task) and can delete it in the panel that lists every
+other task; those are recorded as non-goals in the plan, not omissions.

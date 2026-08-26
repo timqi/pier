@@ -1,13 +1,13 @@
-// The bus over HTTP, read-only: one GET answering the four questions the
-// Console's Bus view asks — what shared state exists, who listens, what
-// delivery is owed, what just happened. The area owns its routes (the
-// tasks/routes.ts pattern); the only bus write a browser may make stays the
-// existing PUT /api/settings busEnabled.
+// The Console Bus view's HTTP surface: one GET answering the four questions it
+// asks — what shared state exists, who listens, what delivery is owed, what
+// just happened — plus the one write it makes, seeding the librarian. The area
+// owns its routes (the tasks/routes.ts pattern); the capability switch stays
+// where every instance setting is, PUT /api/settings busEnabled.
 
 import type { Hono } from "hono";
 import type { BusEvent, BusStore } from "./store.js";
 import type { SubStore } from "./subs.js";
-import type { BusEventRow, BusFactRow, BusOverview } from "./types.js";
+import type { BusEventRow, BusFactRow, BusLibrarianRow, BusOverview } from "./types.js";
 
 /** How much of a payload a row carries. A page of 50 events at the 8KB cap is
  * a download, not a page — and the whole value is one `bus get` away. */
@@ -50,9 +50,28 @@ const eventRow = (event: BusEvent): BusEventRow => ({
   createdAt: event.createdAt,
 });
 
+/**
+ * Seeding and finding the librarian, as an injected collaborator rather than an
+ * import: listing and creating *tasks* is the task area's business and the bus
+ * must not depend on it (docs/architecture.md's one sideways edge stays
+ * delivery), while the librarian's marker, schedule and prompt are the bus's own
+ * (librarian.ts). main.ts joins the two halves; this file only decides what the
+ * answer is.
+ */
+export interface LibrarianSeam {
+  /** Read from the task store on every call. The task *is* the state, so the
+   *  view's button has no second boolean to draw from and nothing to drift out
+   *  of step with the Tasks panel. */
+  list(): BusLibrarianRow[];
+  /** Creates an ordinary cron task for `cwd`; the Tasks panel owns it from the
+   *  moment it exists. Throws the task layer's own refusal (a cwd that is not a
+   *  directory, an unusable timezone) rather than translating it. */
+  seed(cwd: string): Promise<BusLibrarianRow>;
+}
+
 export function registerBusRoutes(
   app: Hono,
-  deps: { events: BusStore; subs: SubStore; enabled: () => boolean },
+  deps: { events: BusStore; subs: SubStore; enabled: () => boolean; librarian: LibrarianSeam },
 ): void {
   app.get("/api/bus", (c) => {
     const { events, subs } = deps;
@@ -69,6 +88,9 @@ export function registerBusRoutes(
       // and the rows come along even when it is off: delivery freezes rather
       // than emptying, so "off" must not read as "nothing is owed".
       enabled: deps.enabled(),
+      // Detected, never stored: whether the Bus view offers to seed a librarian
+      // or names the one that exists is a question about the task store.
+      librarians: deps.librarian.list(),
       // One facts query per topic row, which is why the topic page is capped:
       // the N in N+1 is bounded before it is paid, not after.
       topics: topics.rows.map((row) => {
@@ -107,5 +129,28 @@ export function registerBusRoutes(
       eventsTotal: tail.total,
     };
     return c.json(overview);
+  });
+
+  // The Bus view's one write besides the capability switch, and it creates
+  // nothing bus-shaped: everything after this click happens in the Tasks panel.
+  app.post("/api/bus/librarian", async (c) => {
+    // Off, every run would open a session with no bus tool and report exactly
+    // that (the prompt says so) — a daily scheduled no-op.
+    if (!deps.enabled()) return c.json({ error: "the bus is off — turn it on before seeding a librarian" }, 409);
+    const body = (await c.req.json().catch(() => null)) as { cwd?: unknown } | null;
+    const cwd = typeof body?.cwd === "string" ? body.cwd.trim() : "";
+    // A relative path would make a librarian whose scope depends on where Pier
+    // was started from; the task layer checks that it is a directory.
+    if (!cwd.startsWith("/")) return c.json({ error: "an absolute cwd is required" }, 400);
+    const existing = deps.librarian.list().find((row) => row.cwd === cwd);
+    // Refused with the row, not silently ignored and not created twice: two
+    // librarians in one cwd would summarize and archive the same topics against
+    // each other every night, and the caller needs to know which one won.
+    if (existing) return c.json({ error: `a librarian already maintains ${cwd}`, librarian: existing }, 409);
+    try {
+      return c.json({ librarian: await deps.librarian.seed(cwd) }, 201);
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
   });
 }

@@ -225,7 +225,15 @@ export function initViews(d: ViewsDeps): void {
   activityView = createActivityView($("#activity-view"), d.select, showTasks);
   // Tabs route like Settings' do: the hash is the one copy of "where am I",
   // so Back walks the Bus tabs too.
-  busView = createBusView($("#bus-view"), d.select, (t) => showConsole("bus", t));
+  busView = createBusView(
+    $("#bus-view"),
+    d.select,
+    (t) => showConsole("bus", t),
+    () => [...groupByCwd(deps.sessions()).keys()],
+    // A seeded librarian is a task like any other, so its row hands off to the
+    // panel that owns it.
+    showTasks,
+  );
   consoleViews = [
     { name: "tasks", view: tasksView },
     { name: "activity", view: activityView },
