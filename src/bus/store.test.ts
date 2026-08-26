@@ -193,13 +193,21 @@ describe("BusStore", () => {
     const newest = publish(s, { topic: "proj/auth", payload: '"2"' }, 2000);
     publish(s, { topic: "proj/deploy", payload: '"3"' }, 3000);
 
-    expect(s.topics(SCOPES)).toEqual([
+    // Per (topic, scope): archive targets one scope, so an aggregate row
+    // spanning scopes could name no usable boundary.
+    publish(s, { topic: "proj/auth", payload: '"wide"', scope: "instance" }, 3500);
+    expect(s.topics([...SCOPES, "instance"])).toEqual([
       {
-        topic: "proj/auth", events: 2, newestId: newest.id,
+        topic: "proj/auth", scope: "instance", events: 1,
+        newestId: expect.any(String) as unknown as string,
+        newestCreatedAt: new Date(3500).toISOString(), lastReadAt: null,
+      },
+      {
+        topic: "proj/auth", scope: SCOPE, events: 2, newestId: newest.id,
         newestCreatedAt: new Date(2000).toISOString(), lastReadAt: null,
       },
       {
-        topic: "proj/deploy", events: 1,
+        topic: "proj/deploy", scope: SCOPE, events: 1,
         newestId: expect.any(String) as unknown as string,
         newestCreatedAt: new Date(3000).toISOString(), lastReadAt: null,
       },

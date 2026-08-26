@@ -290,21 +290,24 @@ export class BusStore {
     }
   }
 
-  /** Per-topic shape of the visible bus — what the librarian reasons over:
-   * how much, how fresh (as a timestamp it can do arithmetic on), and when
-   * anyone last read it (epoch ms; null = never). */
+  /** Per-(topic, scope) shape of the visible bus — what the librarian reasons
+   * over: how much, how fresh (as a timestamp it can do arithmetic on), and
+   * when anyone last read it (epoch ms; null = never). Split by scope because
+   * archive targets one scope: an aggregate row spanning scopes could name no
+   * usable boundary. Read stamps stay topic-grained — reading is one act
+   * whatever scope answered. */
   topics(scopes: readonly string[]): {
-    topic: string; events: number; newestId: string; newestCreatedAt: string; lastReadAt: number | null;
+    topic: string; scope: string; events: number; newestId: string; newestCreatedAt: string; lastReadAt: number | null;
   }[] {
     if (scopes.length === 0) return [];
     return this.#db.prepare(`
-      SELECT e.topic, COUNT(*) AS events, MAX(e.id) AS newestId,
+      SELECT e.topic, e.scope, COUNT(*) AS events, MAX(e.id) AS newestId,
              MAX(e.created_at) AS newestCreatedAt, r.last_read_at AS lastReadAt
       FROM bus_events e LEFT JOIN bus_topic_reads r ON r.topic = e.topic
       WHERE e.scope IN (${holes(scopes)})
-      GROUP BY e.topic ORDER BY e.topic
+      GROUP BY e.topic, e.scope ORDER BY e.topic, e.scope
     `).all(...scopes) as unknown as {
-      topic: string; events: number; newestId: string; newestCreatedAt: string; lastReadAt: number | null;
+      topic: string; scope: string; events: number; newestId: string; newestCreatedAt: string; lastReadAt: number | null;
     }[];
   }
 
@@ -315,9 +318,6 @@ export class BusStore {
    * instance default, and forgetting the override reveals the default. */
   latest(topic: string, scopes: readonly string[], key?: string, now = Date.now(), peek = false): BusEvent[] {
     if (scopes.length === 0) return [];
-    // Asking is reading: the stamp records interest, so it lands even when
-    // the answer is empty — but after the query, not in front of it.
-    if (!peek) this.stampRead([topic], now);
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
       WHERE e.topic = ? AND e.key IS NOT NULL AND e.scope IN (${holes(scopes)})
@@ -342,6 +342,9 @@ export class BusStore {
         break;
       }
     }
+    // Asking is reading — the stamp lands even on an empty answer — and it
+    // lands after the read, not in front of it.
+    if (!peek) this.stampRead([topic], now);
     return winners;
   }
 
@@ -370,14 +373,19 @@ export class BusStore {
       : `SELECT * FROM bus_events WHERE ${where} ORDER BY id LIMIT ?`,
     ).all(...(includeArchived ? [...params, ...params] : params), Math.min(Math.max(limit, 1), 200)) as unknown as Row[];
     const events = rows.map(fromRow);
-    // Every topic the pattern reaches, not only the ones this page returned:
-    // a poller at its cursor reads 0 events and is still a reader — archiving
-    // a topic someone actively monitors is the bug this stamp exists to stop.
+    // A page with events stamps their topics from the rows already in hand —
+    // no extra query on the hot path. An *empty* page still stamps every
+    // topic the pattern reaches: a poller at its cursor reads 0 events and is
+    // still a reader, and archiving a topic someone actively monitors is the
+    // bug this stamp exists to stop. That poll was cheap; the DISTINCT walks
+    // the (topic, id) index once and pays for the retention answer.
     if (!peek) {
-      const matched = this.#db.prepare(
-        `SELECT DISTINCT topic FROM bus_events WHERE topic GLOB ? AND scope IN (${holes(scopes)})`,
-      ).all(topicGlob, ...scopes) as unknown as { topic: string }[];
-      this.stampRead(matched.map((row) => row.topic));
+      const read = events.length > 0
+        ? events.map((event) => event.topic)
+        : (this.#db.prepare(
+            `SELECT DISTINCT topic FROM bus_events WHERE topic GLOB ? AND scope IN (${holes(scopes)})`,
+          ).all(topicGlob, ...scopes) as unknown as { topic: string }[]).map((row) => row.topic);
+      this.stampRead(read);
     }
     return { events, cursor: events.at(-1)?.id ?? after };
   }

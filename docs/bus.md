@@ -39,13 +39,16 @@ Four operations on the `bus` tool:
   second search path for a hypothetical custom build is exactly the
   speculative generality the budgets forbid — a Node without FTS5 fails at
   boot, in the migration, loudly.
-- `topics {}` is the visible inventory: per topic, the event count, newest id,
-  newest timestamp (ISO 8601, for age arithmetic), and when anyone last read
-  it (epoch ms; null = never). `get`/`log` stamp `bus_topic_reads` themselves
-  — topic-grained, coalesced to the hour, and a poller whose page came back
-  empty still counts: it is monitoring the topic. Maintenance reads pass
-  `peek: true` and do not count — the librarian's own daily pass must not keep
-  every topic eternally "read".
+- `topics {}` is the visible inventory: per **(topic, scope)** — archive
+  targets one scope, so an aggregate row spanning scopes could name no usable
+  boundary — the event count, newest id, newest timestamp (ISO 8601, for age
+  arithmetic), and when anyone last read the topic (epoch ms; null = never).
+  `get`/`log` stamp `bus_topic_reads` themselves — topic-grained, coalesced to
+  the hour, and a poller whose page came back empty still counts: it is
+  monitoring the topic (a page *with* events stamps from the rows in hand; only
+  the empty poll pays a DISTINCT walk of the topic index). Maintenance reads
+  pass `peek: true` and do not count — the librarian's own daily pass must not
+  keep every topic eternally "read".
 - `archive {topic_glob, before, scope?}` moves matched events with
   `id <= before`, in one scope (explicit, or the caller's narrowest), into
   `bus_events_archive` — out of `get`, `log` and `search`, never deleted; a
@@ -196,7 +199,14 @@ session, with the task tool:
 
 The librarian sees the scopes of the cwd it is given (plus `instance`); an
 instance with several active projects runs one librarian per project root, or
-one in any cwd for `instance`-scoped topics only.
+one in any cwd for `instance`-scoped topics only. Two rules make its runs
+safe: a cron/watch/manual *root* run has no run-scope default — a run scope is
+a coordination space, and a run nobody delegated has no one standing in it, so
+the librarian's unscoped writes would otherwise vanish with the run (main.ts
+resolves this; the prompt still demands explicit scopes) — and its archive
+summaries are durable keyed facts (`key: "librarian-summary"`), so a run that
+dies between summarizing and archiving is finished by the next one instead of
+summarized twice.
 
 ## What the bus deliberately does not do
 

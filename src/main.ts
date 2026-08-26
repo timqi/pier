@@ -124,15 +124,25 @@ const factory = new PiAgentFactory(
           // never does, so it is cached to keep factory.list()'s directory
           // scan off every bus call.
           caller: {
-            resolve: async (sessionId) => ({
-              rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
-              invokedRootRunIds: [...new Set(
-                taskStore.listRunsForSession(sessionId)
-                  .filter((run) => !isTerminal(run.state))
-                  .map((run) => run.rootRunId),
-              )],
-              cwd: await sessionCwd(sessionId),
-            }),
+            resolve: async (sessionId) => {
+              const run = taskStore.findActiveRunForTarget(sessionId);
+              // A run scope is a *coordination* space: it exists when someone
+              // else stands in the tree — a parent (depth > 0) or the session
+              // that delegated the run. A cron/watch/manual root run has
+              // neither: defaulting its writes to run scope would send a
+              // librarian's facts into a space that dies with the run and
+              // that nobody — including its next daily self — can read.
+              const delegated = run && (run.depth > 0 || run.triggerSource === "agent");
+              return {
+                rootRunId: delegated ? run.rootRunId : undefined,
+                invokedRootRunIds: [...new Set(
+                  taskStore.listRunsForSession(sessionId)
+                    .filter((child) => !isTerminal(child.state))
+                    .map((child) => child.rootRunId),
+                )],
+                cwd: await sessionCwd(sessionId),
+              };
+            },
           },
           notify: (event) => busDelivery.notify(event),
         }, params, callerSessionId)),
