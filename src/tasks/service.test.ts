@@ -17,6 +17,7 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { TaskCallbacks } from "./callbacks.js";
+import { newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
@@ -139,6 +140,18 @@ const bashDraft = (cwd: string, script: string) => ({
   trigger: { type: "manual" },
   action: { type: "bash", cwd, script },
   timeoutSeconds: 5,
+});
+
+describe("newId", () => {
+  it("mints 12 unambiguous lowercase characters that do not repeat", () => {
+    const ids = new Set<string>();
+    for (let i = 0; i < 10_000; i++) {
+      const id = newId();
+      expect(id).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
+      ids.add(id);
+    }
+    expect(ids.size).toBe(10_000);
+  });
 });
 
 describe("outbox backoff", () => {

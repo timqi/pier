@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { logger } from "../log.js";
 import { TaskCallbacks } from "./callbacks.js";
+import { newId } from "./definitions.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
 
@@ -39,7 +39,7 @@ export class TaskRunQueue {
     parentRunId: string | null,
     provenance: RunProvenance,
   ): TaskRun {
-    const id = randomUUID();
+    const id = newId();
     const parent = parentRunId ? this.getRun(parentRunId) : null;
     const depth = provenance.depth ?? (parent ? parent.depth + 1 : 0);
     const rootRunId = provenance.rootRunId ?? parent?.rootRunId ?? id;

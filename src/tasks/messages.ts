@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import type { SystemInputOrigin } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
+import { newId } from "./definitions.js";
 import { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
 import { isTerminal, MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable } from "./types.js";
@@ -164,7 +164,7 @@ export class TaskMessenger {
     replyTo: string | null,
   ): TaskMessage {
     const message: TaskMessage = {
-      id: randomUUID(),
+      id: newId(),
       runId: run.id,
       kind,
       fromSessionId,

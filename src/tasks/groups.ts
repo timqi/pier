@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runResultText } from "./callbacks.js";
+import { newId } from "./definitions.js";
 import { Outbox } from "./outbox.js";
 import { TaskStore } from "./store.js";
 import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
@@ -79,7 +79,7 @@ export class TaskGroups {
 
   private create(join: GroupJoinMode, invokedBySessionId: string, callbackSessionId: string | null): TaskGroup {
     const group: TaskGroup = {
-      id: randomUUID(),
+      id: newId(),
       join,
       invokedBySessionId,
       callbackSessionId,
