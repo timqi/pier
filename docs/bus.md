@@ -46,8 +46,11 @@ Four operations on the `bus` tool:
   `get`/`log` stamp `bus_topic_reads` themselves — topic-grained, coalesced to
   the hour, and a poller whose page came back empty still counts: it is
   monitoring the topic (a page *with* events stamps from the rows in hand; only
-  the empty poll pays a DISTINCT walk of the topic index). Maintenance reads
-  pass `peek: true` and do not count — the librarian's own daily pass must not
+  the empty poll pays a DISTINCT walk of the topic index). The stamp is
+  topic-grained *across scopes* — reading `x/y` anywhere marks `x/y` read
+  everywhere, which slightly over-protects a same-named topic in another scope
+  from archiving; accepted, never wrong-in-the-dangerous-direction.
+  Maintenance reads pass `peek: true` and do not count — the librarian's own daily pass must not
   keep every topic eternally "read".
 - `archive {topic_glob, before, scope?}` moves matched events with
   `id <= before`, in one scope (explicit, or the caller's narrowest), into
@@ -75,7 +78,10 @@ incremental read.
 ## Scope: default narrow, widen explicitly
 
 Every event carries one scope string: `run:<rootRunId>`, `project:<abs cwd>` or
-`instance`. A publish without `scope` lands in the caller's run tree when it is
+`instance`. The project cwd is **canonical** — main.ts resolves it through
+realpath before it becomes identity, because two spellings of one directory
+(a symlink alias) would otherwise be two disjoint blackboards; manual test 6
+paid for this sentence. A publish without `scope` lands in the caller's run tree when it is
 a subagent, else its project; a caller with neither gets an error, not a silent
 widening — a leaked blackboard is harder to clean up than a missing one.
 

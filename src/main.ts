@@ -1,6 +1,6 @@
 // Wiring only — no logic lives here. See docs/architecture.md.
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
@@ -94,9 +94,21 @@ const busSubs = new SubStore(db);
 // Constructed after the router exists; the tool only runs long after wiring.
 let busDelivery: BusDelivery;
 const knownCwd = new Map<string, string>();
+// Canonicalized (realpath) because this string *is* project-scope identity:
+// /home/…/code is a symlink to /essd/…/code on this very machine, and two
+// spellings of one directory are two disjoint blackboards — a librarian handed
+// the physical path saw none of the facts the sessions wrote under the alias.
+// Fallback to the raw path: a cwd that no longer exists still names its scope.
+const canonicalCwd = (cwd: string): string => {
+  try {
+    return realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+};
 const sessionCwd = async (sessionId: string): Promise<string | undefined> => {
   if (!knownCwd.has(sessionId)) {
-    for (const summary of await factory.list()) knownCwd.set(summary.id, summary.cwd);
+    for (const summary of await factory.list()) knownCwd.set(summary.id, canonicalCwd(summary.cwd));
   }
   return knownCwd.get(sessionId);
 };
