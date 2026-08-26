@@ -440,7 +440,10 @@ export function createBusView(
       ));
       return;
     }
-    // Re-seating the same node would still blur what is inside it.
+    // Re-seating the same node would still blur what is inside it. The
+    // off-state moved problemBox and switchBar into its own tree; coming
+    // back, they must be re-seated too or enabling leaves no switch to see.
+    if (problemBox.parentElement !== column) column.prepend(problemBox, switchBar);
     if (pane.firstElementChild !== column) pane.replaceChildren(column);
     renderTabs();
     renderBody();
@@ -454,10 +457,10 @@ export function createBusView(
     }
     data = (await res.json()) as BusOverview;
     loaded = true;
-    render();
-    // Cleared only after a good render, so the reason survives the reload it
-    // caused and disappears on the next clean one.
+    // Cleared before the render, or a recovered fetch keeps showing the old
+    // failure until something else repaints.
     problem = "";
+    render();
   }
 
   const view = consoleView(root, (arg) => {

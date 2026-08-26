@@ -71,7 +71,7 @@ export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomToo
     label: "Pier Bus",
     description:
       "Append-only event log shared across sessions; one table, two reads. " +
-      "get {topic, key?} reads shared state: the newest value per (topic, key) — use it for facts other sessions maintain. " +
+      "get {topic, key?, scope?} reads shared state: the newest value per (topic, key), narrower scopes shadowing wider ones; scope reads one scope without the shadowing. " +
       "log {topic_glob, after?, limit?} reads the stream: events after a cursor in write order, returning the next cursor — use it to catch up, then pass the cursor back in. " +
       "publish {topic, key?, payload, ...} appends: with key it is a fact that overwrites in get; without key a plain event. " +
       "forget {topic, key} deletes a fact (as a tombstone). " +
@@ -113,7 +113,7 @@ export async function handleBusTool(
 ): Promise<unknown> {
   const { store, subs, caller, notify } = deps;
   if (!deps.enabled()) {
-    throw new Error("the bus is switched off — the operator can enable it in Console → Settings → Instance");
+    throw new Error("the bus is switched off — the operator can enable it in Console → Bus");
   }
   const input = record(raw);
   if (!input) throw new Error("bus tool parameters required");
@@ -150,7 +150,10 @@ export async function handleBusTool(
     case "get": {
       const values = store.latest(
         requiredString(input.topic, "topic"),
-        scopes,
+        // Narrowed, a get answers "what does *this* scope say" — without it a
+        // project fact shadows the instance one under the same key, and a
+        // maintenance pass can never see past the override.
+        input.scope === undefined ? scopes : [writeScope(input.scope, rootRunId, cwd, invokedRootRunIds)],
         input.key === undefined ? undefined : requiredString(input.key, "key"),
         undefined,
         input.peek === true,

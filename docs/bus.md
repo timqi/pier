@@ -10,7 +10,7 @@ not core code (migration 9).
 
 ## The model's contract
 
-Four operations on the `bus` tool:
+The `bus` tool's operations:
 
 - `publish {topic, key?, payload, file_ptr?, scope?, caused_by?, ttl_seconds?}`
   appends an event and returns `{id, scope}`. With `key` the write is a
@@ -130,8 +130,8 @@ every reader of every page containing it), `ttl_seconds` needs a fact,
 ## One switch for the whole capability
 
 The bus is optional — memory and cross-session delivery are two reads of the
-same table, so one setting (`busEnabled`, Console → Settings → Instance,
-**off** by default) covers both. It is a capability switch like the Slack
+same table, so one setting (`busEnabled`, the switch at the top of the
+Console's **Bus** view, **off** by default) covers both. It is a capability switch like the Slack
 tool's configuration, not an extension: off, the tool is not offered to new
 sessions at all (`AgentCustomTool.enabled`, read at session open — a
 present-but-refusing tool would waste the model's attention), a session opened

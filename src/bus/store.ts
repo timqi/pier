@@ -152,6 +152,8 @@ export class BusStore {
   // In memory on purpose: the limit exists to break a publish storm inside one
   // process's lifetime, and a restart resetting it loses nothing worth keeping.
   readonly #recent = new Map<string, number[]>();
+  // When each (glob, scopes) last paid the empty-page DISTINCT stamp walk.
+  readonly #stamped = new Map<string, number>();
 
   constructor(db: DatabaseSync = pierDb()) {
     this.#db = db;
@@ -383,15 +385,24 @@ export class BusStore {
     // no extra query on the hot path. An *empty* page still stamps every
     // topic the pattern reaches: a poller at its cursor reads 0 events and is
     // still a reader, and archiving a topic someone actively monitors is the
-    // bug this stamp exists to stop. That poll was cheap; the DISTINCT walks
-    // the (topic, id) index once and pays for the retention answer.
+    // bug this stamp exists to stop. The DISTINCT walk is memoized per
+    // (pattern, scopes) for the stamp's own hourly granularity — a tight
+    // polling loop pays it once an hour, not once a second.
     if (!peek) {
-      const read = events.length > 0
-        ? events.map((event) => event.topic)
-        : (this.#db.prepare(
+      if (events.length > 0) {
+        this.stampRead(events.map((event) => event.topic));
+      } else {
+        const memo = `${topicGlob}\n${scopes.join(",")}`;
+        const now = Date.now();
+        if (now - (this.#stamped.get(memo) ?? 0) > RATE_WINDOW_MS * 60) {
+          if (this.#stamped.size > 512) this.#stamped.clear(); // bounded, self-healing
+          this.#stamped.set(memo, now);
+          const read = this.#db.prepare(
             `SELECT DISTINCT topic FROM bus_events WHERE topic GLOB ? AND scope IN (${holes(scopes)})`,
-          ).all(topicGlob, ...scopes) as unknown as { topic: string }[]).map((row) => row.topic);
-      this.stampRead(read);
+          ).all(topicGlob, ...scopes) as unknown as { topic: string }[];
+          this.stampRead(read.map((row) => row.topic));
+        }
+      }
     }
     return { events, cursor: events.at(-1)?.id ?? after };
   }
@@ -493,16 +504,18 @@ export class BusStore {
   /** The live facts of one exact (topic, scope), newest write per key. No
    * cross-scope shadowing: which scope wins is a *caller's* question, and here
    * every scope is its own row — collapsing them would hide the override.
-   * A tombstoned winner is dropped in SQL so the limit is a page of *live*
-   * facts; an expired one still needs the clock, which SQL does not have. */
-  adminFacts(topic: string, scope: string, limit = 20, now = Date.now()): BusEvent[] {
+   * Liveness (tombstone in SQL, TTL against the clock here) is settled
+   * *before* the caller's cap — a page cut first could hide a live key behind
+   * twenty expired ones and claim there was nothing more. The 1000 is a
+   * safety stop, not a page: a topic with that many keys is a table. */
+  adminFacts(topic: string, scope: string, now = Date.now()): BusEvent[] {
     const rows = this.#db.prepare(`
       SELECT * FROM bus_events e
       WHERE e.topic = ? AND e.scope = ? AND e.key IS NOT NULL AND e.kind != 'tombstone'
         AND e.id = (SELECT MAX(id) FROM bus_events
                     WHERE topic = e.topic AND key = e.key AND scope = e.scope)
-      ORDER BY e.key LIMIT ?
-    `).all(topic, scope, cap(limit)) as unknown as Row[];
+      ORDER BY e.key LIMIT 1000
+    `).all(topic, scope) as unknown as Row[];
     return rows.map(fromRow).filter((event) => live(event, now));
   }
 

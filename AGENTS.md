@@ -54,14 +54,19 @@ scheduled tasks, live observability, and static Show pages.
 - `tasks/` scheduler; cron + prompt + session config; one custom tool is the
   entire agent-collaboration surface
 - `boards/` static Show pages: a filesystem scan plus a file handler
+- `bus/` the cross-session event log read as shared memory or as a stream,
+  its subscriptions and pointer delivery, and the `bus` tool — docs/bus.md
 - Root `src/*.ts` is the instance layer — entry points (`main.ts`, `cli.ts`),
   ops (`service.ts`, `update.ts`, `drain.ts`) and the leaves any area may import
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`); one reason per
   file, named in docs/architecture.md
-- Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
-  Runtime dependencies never go sideways. The browser may import owner-defined
-  HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only; those
-  imports are erased at build and do not let web implement either area.
+- Dependency direction: `channels/ | web/ | tasks/ | boards/ | bus/ → core/ → agent/`.
+  Runtime dependencies never go sideways — one named exception: `bus →
+  tasks/outbox.ts`, the single system-input delivery engine (docs/
+  architecture.md carries the sentence). The browser may import owner-defined
+  HTTP DTOs from `tasks/types.ts`, `channels/types.ts` and `bus/types.ts`
+  type-only; those imports are erased at build and do not let web implement
+  any of the three areas.
 
 ## Budgets
 

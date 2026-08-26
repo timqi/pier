@@ -66,7 +66,7 @@ export function registerBusRoutes(
       // One facts query per topic row, which is why the topic page is capped:
       // the N in N+1 is bounded before it is paid, not after.
       topics: topics.rows.map((row) => {
-        const facts = events.adminFacts(row.topic, row.scope, FACTS + 1);
+        const facts = events.adminFacts(row.topic, row.scope);
         return {
           ...row,
           facts: facts.slice(0, FACTS).map(factRow),

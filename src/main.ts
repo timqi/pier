@@ -99,16 +99,25 @@ const knownCwd = new Map<string, string>();
 // spellings of one directory are two disjoint blackboards — a librarian handed
 // the physical path saw none of the facts the sessions wrote under the alias.
 // Fallback to the raw path: a cwd that no longer exists still names its scope.
-const canonicalCwd = (cwd: string): string => {
+const canonicalCwd = (cwd: string): string | undefined => {
   try {
     return realpathSync(cwd);
-  } catch {
-    return cwd;
+  } catch (err) {
+    // ENOENT is a fact (the directory is gone; its raw spelling still names
+    // the scope). Anything else — permissions, a transient mount — must not
+    // be cached: that would silently recreate the alias split, and silently
+    // is the part 5b forbids.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return cwd;
+    log.warn(`could not canonicalize ${cwd} for bus scope — will retry`, err);
+    return undefined;
   }
 };
 const sessionCwd = async (sessionId: string): Promise<string | undefined> => {
   if (!knownCwd.has(sessionId)) {
-    for (const summary of await factory.list()) knownCwd.set(summary.id, canonicalCwd(summary.cwd));
+    for (const summary of await factory.list()) {
+      const canon = canonicalCwd(summary.cwd);
+      if (canon !== undefined) knownCwd.set(summary.id, canon);
+    }
   }
   return knownCwd.get(sessionId);
 };

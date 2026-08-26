@@ -38,17 +38,23 @@ existing fact (check with `get`, `peek: true`) is not republished.
 ## 2. Archive
 
 **Resume first, age gate second.** For every (topic, scope) row:
-`get {topic, key: "librarian-summary", peek: true}`. A live summary fact whose
-`caused_by` names a *still-live* event means a previous run died between
-summarizing and archiving — finish it now, regardless of any age gate:
-`archive {topic_glob: <the exact topic>, before: <the summary's caused_by>, scope: <its scope>}`.
+`get {topic, key: "librarian-summary", scope: <the row's scope>, peek: true}` —
+the `scope` is required: without it a project summary shadows an instance one
+under the same key and you would never see the instance topic's marker. A live
+summary fact whose `caused_by` names a *still-live* event means a previous run
+died between summarizing and archiving — finish it now, regardless of any age
+gate: `archive {topic_glob: <the exact topic>, before: <the summary's caused_by>, scope: <its scope>}`.
 (Your summary is newer than its `caused_by`, so it stays live. A fresh summary
 makes `newestCreatedAt` recent — that is exactly why the resume check must not
 sit behind the age gate.)
 
 Then the age gate, per (topic, scope) row: it qualifies when *both* its
 `newestCreatedAt` and its `lastReadAt` are older than the cutoff (null
-`lastReadAt` = never read — qualifies). For each qualifying row:
+`lastReadAt` = never read — qualifies) — **and it holds something besides your
+own summary**: a row whose only live event is the `librarian-summary` fact is
+already archived; summarizing the summary would restate it every cycle and
+walk the `caused_by` chain into the hop ceiling. Leave it. For each qualifying
+row:
 
 1. Note its `newestId` — call it BOUNDARY.
 2. Publish the summary as a durable marker — a fact, so a future run can find
