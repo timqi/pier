@@ -109,6 +109,13 @@ against the sub's cursor at delivery time, so it is true when read, not when
 queued. The notification names the newest event id so a reactive publish can
 carry it as `caused_by`; the hop ceiling closes the notify→publish→notify loop.
 
+One accepted risk, recorded rather than hidden: `caused_by` is voluntary. Two
+subscribers reacting to each other's topics *without* passing it ping-pong at
+`hops=0`, bounded only by the per-writer rate limit (30/topic/minute) — a
+sustained loop the ceiling never trips. It is visible (both sessions burn
+turns on every surface) and bounded, but not prevented; a per-session wake
+budget is P3 material if it ever happens in practice.
+
 Delivery rides the tasks outbox — the one system-input engine with transcript
 proof, backoff and a ceiling — as a third `Deliverable` beside run and group
 callbacks (the named sideways edge in docs/architecture.md). A note that can
@@ -120,7 +127,17 @@ Three modes, differing only against a busy recipient: `queue` (default) and
 `wake` deliver at the next turn boundary and start a turn when idle — they are
 one implementation, `wake` is the name for "I am usually idle, resume me";
 `steer` interrupts the running turn, for subscribers who asked to be
-interrupted. Cursors start at the tip: a subscription hears the future, not a
+interrupted. A steer already handed to Pi rides an in-memory queue until the
+next step boundary, where the transcript cannot prove it yet — the engine
+treats it as in-flight, not late, so a long tool call is never "undeliverable".
+
+A subscription's `log` reads its **pinned** scopes (an exact `topic_glob`
+match), not the caller's live ones: the pointer's count was computed against
+the pinned set, and a run-scoped subscriber must be able to drain its backlog
+after its run tree ends — with live scopes it would be woken forever for
+events its log could no longer show. `ack` takes a real event id, because a
+cursor above every real id would silence the subscription with no error
+anywhere. Cursors start at the tip: a subscription hears the future, not a
 replay of what it could already have read. Scopes are pinned at subscribe time
 (the P1 caveat below is why); re-subscribing re-pins them and keeps the cursor.
 

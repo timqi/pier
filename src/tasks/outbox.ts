@@ -70,7 +70,15 @@ export class Outbox<T extends CallbackFields> {
       let batch = live;
       let mode: "steer" | "followUp" = "followUp";
       if (session.state === "streaming") {
-        batch = live.filter((record) => this.kind.urgency?.(record) === "steer");
+        batch = live.filter((record) =>
+          this.kind.urgency?.(record) === "steer" &&
+          // A steer already handed to Pi rides an in-memory queue until the
+          // next step boundary, where the transcript cannot prove it yet.
+          // Re-sending it on the retry curve would queue duplicates and spend
+          // the attempts of an input that is not late, only unprovable — up
+          // to a false abandonment while every copy still lands. Deferred,
+          // not counted, like any other wait on a busy target.
+          !(record.callbackState === "pending" && record.callbackAttempts > 0));
         for (const record of live) if (!batch.includes(record)) this.defer(record);
         if (batch.length === 0) return;
         mode = "steer";

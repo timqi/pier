@@ -123,6 +123,9 @@ export class SubStore {
   }
 
   saveNote(note: BusNote): void {
+    // An unsubscribe can race a delivery still holding this object; the
+    // engine's bookkeeping write must not resurrect the deleted row.
+    if (!this.bySubId(note.subId)) return;
     this.#db.prepare(`
       INSERT INTO bus_notes(id, sub_id, session_id, state, next_attempt_at, json)
       VALUES (?, ?, ?, ?, ?, ?)

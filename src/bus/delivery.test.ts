@@ -32,8 +32,13 @@ function fakeSession(id: string): AgentSession & {
     model: undefined,
     thinkingLevel: "off",
     contextUsage: undefined,
+    // Honest proof timing: an input reaches the transcript at the step
+    // boundary, not while the turn is still streaming — the window where a
+    // steer sits in Pi's in-memory queue is exactly what these tests exercise.
     history: async (): Promise<ChatTurn[]> =>
-      inputs.map(({ text, origin }) => ({ role: "system" as const, text, origin })),
+      state === "streaming"
+        ? []
+        : inputs.map(({ text, origin }) => ({ role: "system" as const, text, origin })),
     setModel: async () => {},
     availableModels: async () => [],
     availableThinkingLevels: () => ["off"],
@@ -115,6 +120,50 @@ describe("BusDelivery", () => {
     publish("urgent");
     await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
     expect(b.inputs[0]!.mode).toBe("steer");
+  });
+
+  it("a steer handed to Pi is not re-sent while the same turn still runs", async () => {
+    const { subs, session, publish, delivery, store } = setup();
+    subs.upsert("b", "proj/*", "steer", [SCOPE], store.tip());
+    const b = session("b");
+    b.setState("streaming");
+    publish("urgent");
+    await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
+    // The proof cannot land until the boundary; the retry sweep must treat
+    // the steer as in-flight, not late — re-sending would queue duplicates
+    // and spend the attempts of an input that already arrived.
+    for (let i = 1; i <= 5; i++) delivery.recover(Date.now() + i * 600_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(b.inputs).toHaveLength(1);
+    const note = subs.dueNotes(Number.MAX_SAFE_INTEGER)[0]!;
+    expect(note.callbackState).toBe("pending");
+    expect(note.callbackAttempts).toBe(1); // not spent, not abandoned
+
+    b.setState("idle"); // the boundary: the transcript now proves it
+    delivery.recover(Date.now() + 600_000);
+    await vi.waitFor(() => expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]));
+    expect(b.inputs).toHaveLength(1);
+  });
+
+  it("an event landing in the proof window gets its own wake instead of vanishing", async () => {
+    const { subs, session, publish, delivery, store } = setup();
+    subs.upsert("b", "proj/*", "queue", [SCOPE], store.tip());
+    const b = session("b");
+    // The delivered input starts a turn: the note is sent but its proof is
+    // hidden until the boundary — the window the second event lands in.
+    b.systemInput = async (text, origin, mode) => {
+      b.setState("streaming");
+      b.inputs.push({ text, origin, mode: mode as string });
+    };
+    publish("first");
+    await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
+    publish("second"); // absorbed into the sent note = lost forever
+    expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toHaveLength(2);
+
+    b.setState("idle");
+    delivery.recover(Date.now() + 600_000);
+    // The first note settles by proof; the second wakes the reader again.
+    await vi.waitFor(() => expect(b.inputs).toHaveLength(2));
   });
 
   it("never notifies the writer of its own write, nor outside the pinned scopes", async () => {

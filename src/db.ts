@@ -231,7 +231,10 @@ const MIGRATIONS: readonly string[] = [
     next_attempt_at INTEGER,
     json TEXT NOT NULL
   );
-  CREATE INDEX bus_notes_session ON bus_notes(session_id, state);
+  -- Shaped by the two queries that exist: the due sweep and the open-note
+  -- lookup per subscription (bus/subs.ts).
+  CREATE INDEX bus_notes_due ON bus_notes(state, next_attempt_at);
+  CREATE INDEX bus_notes_sub ON bus_notes(sub_id);
   `,
 ];
 

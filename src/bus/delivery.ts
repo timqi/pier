@@ -35,10 +35,19 @@ export class BusDelivery {
       changed: () => {},
       proven: (origin) => (origin.kind === "bus-notify" ? origin.noteIds : []),
       urgency: (note) => (note.mode === "steer" ? "steer" : "followUp"),
-      input: (notes) => ({
-        text: notes.map((note) => this.text(note)).join("\n"),
-        origin: { kind: "bus-notify", noteIds: notes.map((note) => note.id) },
-      }),
+      // One line per subscription even when it is owed several notes (a note
+      // sent into the proof window plus the fresh one a newer event opened):
+      // the count is against the sub's cursor, so a second line says nothing.
+      input: (notes) => {
+        const seen = new Set<string>();
+        const lines = notes
+          .filter((note) => !seen.has(note.subId) && seen.add(note.subId))
+          .map((note) => this.text(note));
+        return {
+          text: lines.join("\n"),
+          origin: { kind: "bus-notify", noteIds: notes.map((note) => note.id) },
+        };
+      },
       describe: (note) => `bus events on '${note.topicGlob}'`,
     }, unreachable);
   }
@@ -49,7 +58,11 @@ export class BusDelivery {
     if (!this.enabled()) return;
     for (const sub of this.subs.matching(event.topic, event.scope, event.writerSession)) {
       const open = this.subs.openNote(sub.id);
-      if (open) {
+      // Coalesce only into a note nothing has been done with. A sent-but-
+      // unproven note may settle any moment — the transcript proves its id,
+      // not the cursor — so an event absorbed into it in that window would
+      // never wake anyone again.
+      if (open && open.callbackAttempts === 0) {
         open.lastEventId = event.id;
         this.subs.saveNote(open);
       } else {
@@ -60,9 +73,11 @@ export class BusDelivery {
     }
   }
 
-  /** Everything owed to one session rides in one input. */
-  async deliver(sessionId: string): Promise<void> {
-    const batch = this.subs.dueNotes(Number.MAX_SAFE_INTEGER)
+  /** Everything *due* to one session rides in one input. Due, not pending:
+   * a fresh note (no attempt yet) is due immediately, but a chatty topic must
+   * not burn an unrelated failing note's attempts off its backoff curve. */
+  async deliver(sessionId: string, now = Date.now()): Promise<void> {
+    const batch = this.subs.dueNotes(now)
       .filter((note) => note.sessionId === sessionId)
       .filter((note) => this.stillOwed(note));
     if (batch.length > 0) await this.#outbox.deliver(sessionId, batch);
@@ -72,7 +87,7 @@ export class BusDelivery {
   recover(now = Date.now()): void {
     if (!this.enabled()) return;
     for (const sessionId of new Set(this.subs.dueNotes(now).map((note) => note.sessionId))) {
-      void this.deliver(sessionId).catch((err: unknown) =>
+      void this.deliver(sessionId, now).catch((err: unknown) =>
         log.error(`bus delivery sweep for session ${sessionId} failed`, err));
     }
   }
@@ -115,12 +130,14 @@ export class BusDelivery {
     };
   }
 
-  /** The pointer: count is computed against the sub's cursor at render time,
-   * so it is true when read, not when queued. */
+  /** The pointer: count is computed against the sub's cursor and *current*
+   * pinned scopes at render time, so it is true when read, not when queued —
+   * and it agrees with what the reader's log will return, which honors the
+   * same pinned set (bus/tool.ts). */
   private text(note: BusNote): string {
     const sub = this.subs.bySubId(note.subId);
     const cursor = sub?.cursor ?? "";
-    const count = this.events.countSince(note.topicGlob, note.scopes, cursor);
+    const count = this.events.countSince(note.topicGlob, sub?.scopes ?? note.scopes, cursor);
     return [
       `[bus] ${count} new event${count === 1 ? "" : "s"} on '${note.topicGlob}'${cursor ? ` since ${cursor}` : ""}.`,
       `Read with bus log {topic_glob: '${note.topicGlob}', after: '${cursor}'}, then ack {topic_glob, cursor}.`,

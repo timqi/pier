@@ -151,9 +151,15 @@ export async function handleBusTool(
       if (input.limit !== undefined && !Number.isInteger(input.limit)) {
         throw new Error("limit must be an integer");
       }
+      const glob = requiredString(input.topic_glob, "topic_glob");
+      // A subscription's log view is its pinned scopes: the pointer's count
+      // was computed against them, and a run-scoped subscriber must be able
+      // to drain its own backlog after the run tree ends — with live scopes
+      // it would be woken for events its log can no longer show.
+      const pinned = subs.get(callerSessionId, glob)?.scopes;
       const { events, cursor } = store.log(
-        requiredString(input.topic_glob, "topic_glob"),
-        scopes,
+        glob,
+        pinned ?? scopes,
         input.after === undefined ? "" : String(input.after),
         input.limit as number | undefined,
       );
@@ -198,11 +204,18 @@ export async function handleBusTool(
       return { removed: glob };
     }
     case "ack": {
-      const sub = subs.ack(
-        callerSessionId,
-        requiredString(input.topic_glob, "topic_glob"),
-        requiredString(input.cursor, "cursor"),
-      );
+      const glob = requiredString(input.topic_glob, "topic_glob");
+      const cursor = requiredString(input.cursor, "cursor");
+      if (!subs.get(callerSessionId, glob)) {
+        throw new Error(`no subscription on '${glob}' — subscribe first`);
+      }
+      // A cursor above every real id would silence the subscription forever —
+      // countSince stays 0, every future note settles without waking anyone,
+      // and nothing anywhere would say why.
+      if (!store.byId(cursor)) {
+        throw new Error("cursor must be an event id returned by log");
+      }
+      const sub = subs.ack(callerSessionId, glob, cursor);
       return { topic_glob: sub.topicGlob, cursor: sub.cursor };
     }
     default:

@@ -134,8 +134,12 @@ describe("bus tool", () => {
     // Hears the future, not a replay; sees exactly what B saw when it asked.
     expect(sub).toMatchObject({ mode: "queue", cursor: before.id, scopes: ["project:/p", "instance"] });
 
-    const ack = await call({ operation: "ack", topic_glob: "proj/*", cursor: "zzz" }, "b") as { cursor: string };
-    expect(ack.cursor).toBe("zzz");
+    const ack = await call({ operation: "ack", topic_glob: "proj/*", cursor: before.id }, "b") as { cursor: string };
+    expect(ack.cursor).toBe(before.id);
+    // A cursor that is not a real event id would silence the subscription
+    // forever — every future note would settle as "already caught up".
+    await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: "zzz" }, "b"))
+      .rejects.toThrow(/event id/);
     // Every write reaches the notifier — who hears it is delivery's decision.
     expect(notified.map((e) => e.payload)).toEqual(["0"]);
 
@@ -144,6 +148,21 @@ describe("bus tool", () => {
     await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: "z" }, "b")).rejects.toThrow(/subscribe first/);
     await expect(call({ operation: "subscribe", topic_glob: "proj/*", mode: "loud" }, "b")).rejects.toThrow(/mode/);
     await expect(call({ operation: "subscribe", topic_glob: "{bad}" }, "b")).rejects.toThrow(/topic_glob/);
+  });
+
+  it("log through a subscription reads its pinned scopes, not the caller's live ones", async () => {
+    const db = openDb(":memory:");
+    const store = new BusStore(db);
+    const subs = new SubStore(db);
+    const call = (params: unknown, sessionId: string) =>
+      handleBusTool({ store, subs, caller, notify: () => {}, enabled: () => true }, params, sessionId);
+    // A subscription whose pinned scope 'a' can no longer resolve live — the
+    // shape of a run-scoped sub after its run tree ended.
+    subs.upsert("a", "proj/*", "queue", ["run:gone"], "");
+    store.publish({ topic: "proj/auth", payload: "1", scope: "run:gone", writerSession: "w" });
+    const page = await call({ operation: "log", topic_glob: "proj/*" }, "a") as { events: unknown[] };
+    // Without the pinned view this is [], and the pointer's count lies forever.
+    expect(page.events).toHaveLength(1);
   });
 
   it("is a refusal with a reason when the operator switched it off", async () => {
