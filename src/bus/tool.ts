@@ -206,14 +206,15 @@ export async function handleBusTool(
     case "ack": {
       const glob = requiredString(input.topic_glob, "topic_glob");
       const cursor = requiredString(input.cursor, "cursor");
-      if (!subs.get(callerSessionId, glob)) {
+      const owned = subs.get(callerSessionId, glob);
+      if (!owned) {
         throw new Error(`no subscription on '${glob}' — subscribe first`);
       }
-      // A cursor above every real id would silence the subscription forever —
-      // countSince stays 0, every future note settles without waking anyone,
-      // and nothing anywhere would say why.
-      if (!store.byId(cursor)) {
-        throw new Error("cursor must be an event id returned by log");
+      // The cursor must be an event this subscription actually reads: a made-up
+      // id above every real one — or a real id from an unrelated topic — would
+      // skip the unread backlog forever, and nothing anywhere would say why.
+      if (!store.seenBy(cursor, owned.topicGlob, owned.scopes)) {
+        throw new Error("cursor must be the id of an event this subscription reads (from log)");
       }
       const sub = subs.ack(callerSessionId, glob, cursor);
       return { topic_glob: sub.topicGlob, cursor: sub.cursor };

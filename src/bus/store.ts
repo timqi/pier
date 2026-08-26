@@ -297,6 +297,17 @@ export class BusStore {
     return row.n;
   }
 
+  /** Whether one event is readable through a pattern and scope set — the
+   * test an ack cursor must pass: an id from an unrelated topic or scope
+   * would silently skip the subscription's unread backlog. */
+  seenBy(id: string, topicGlob: string, scopes: readonly string[]): boolean {
+    if (scopes.length === 0) return false;
+    const row = this.#db.prepare(`
+      SELECT 1 AS hit FROM bus_events WHERE id = ? AND topic GLOB ? AND scope IN (${holes(scopes)})
+    `).get(id, topicGlob, ...scopes);
+    return row !== undefined;
+  }
+
   byId(id: string): BusEvent | undefined {
     const row = this.#db.prepare("SELECT * FROM bus_events WHERE id = ?").get(id) as unknown as Row | undefined;
     return row ? fromRow(row) : undefined;

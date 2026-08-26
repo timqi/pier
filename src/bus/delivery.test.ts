@@ -158,12 +158,21 @@ describe("BusDelivery", () => {
     publish("first");
     await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
     publish("second"); // absorbed into the sent note = lost forever
+    const third = publish("third"); // …but the *unsent* note still coalesces
     expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toHaveLength(2);
 
     b.setState("idle");
     delivery.recover(Date.now() + 600_000);
-    // The first note settles by proof; the second wakes the reader again.
+    // The first note settles by proof; the second wakes the reader again —
+    // pointing at the *newest* event, the head of the causal chain.
     await vi.waitFor(() => expect(b.inputs).toHaveLength(2));
+    expect(b.inputs[1]!.text).toContain(`caused_by: '${third.id}'`);
+    // Everything owed is settled once that turn ends and the transcript
+    // proves the second input.
+    b.setState("idle");
+    delivery.recover(Date.now() + 1_200_000);
+    await vi.waitFor(() => expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)).toEqual([]));
+    expect(b.inputs).toHaveLength(2);
   });
 
   it("never notifies the writer of its own write, nor outside the pinned scopes", async () => {

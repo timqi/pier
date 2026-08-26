@@ -139,9 +139,13 @@ describe("bus tool", () => {
     // A cursor that is not a real event id would silence the subscription
     // forever — every future note would settle as "already caught up".
     await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: "zzz" }, "b"))
-      .rejects.toThrow(/event id/);
+      .rejects.toThrow(/event/);
+    // So would a real id the subscription never reads (other topic).
+    const foreign = await call({ operation: "publish", topic: "elsewhere", payload: 1 }, "a") as { id: string };
+    await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: foreign.id }, "b"))
+      .rejects.toThrow(/this subscription reads/);
     // Every write reaches the notifier — who hears it is delivery's decision.
-    expect(notified.map((e) => e.payload)).toEqual(["0"]);
+    expect(notified.map((e) => e.payload)).toEqual(["0", "1"]);
 
     expect(await call({ operation: "unsubscribe", topic_glob: "proj/*" }, "b")).toEqual({ removed: "proj/*" });
     await expect(call({ operation: "unsubscribe", topic_glob: "proj/*" }, "b")).rejects.toThrow(/no subscription/);

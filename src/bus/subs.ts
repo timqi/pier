@@ -139,11 +139,16 @@ export class SubStore {
     return row ? JSON.parse(row.json) as BusNote : undefined;
   }
 
-  /** The open (undelivered, not given up) note for a subscription, if any. */
-  openNote(subId: string): BusNote | undefined {
-    const row = this.#db.prepare(
-      "SELECT json FROM bus_notes WHERE sub_id = ? AND state IN ('pending', 'failed') LIMIT 1",
-    ).get(subId) as { json: string } | undefined;
+  /** The *unsent* open note for a subscription — the only one a new event may
+   * coalesce into. A sent or failed note (attempts > 0) may settle any moment,
+   * and an arbitrary open row here would fan new events out into one note
+   * each instead of coalescing them. */
+  unsentNote(subId: string): BusNote | undefined {
+    const row = this.#db.prepare(`
+      SELECT json FROM bus_notes
+      WHERE sub_id = ? AND state = 'pending'
+        AND json_extract(json, '$.callbackAttempts') = 0 LIMIT 1
+    `).get(subId) as { json: string } | undefined;
     return row ? JSON.parse(row.json) as BusNote : undefined;
   }
 

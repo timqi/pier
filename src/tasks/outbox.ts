@@ -110,7 +110,11 @@ export class Outbox<T extends CallbackFields> {
     }
     const unproven: T[] = [];
     for (const stale of records) {
-      const record = this.kind.reload(this.kind.id(stale)) ?? stale;
+      const record = this.kind.reload(this.kind.id(stale));
+      // Gone from the store (an unsubscribe raced this delivery): nobody is
+      // owed anything, and delivering the stale copy would instruct an ack
+      // that can only error.
+      if (!record) continue;
       if (!seen.has(this.kind.id(record))) unproven.push(record);
       else if (record.callbackState !== "delivered") this.delivered(record);
     }

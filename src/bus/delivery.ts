@@ -38,13 +38,16 @@ export class BusDelivery {
       // One line per subscription even when it is owed several notes (a note
       // sent into the proof window plus the fresh one a newer event opened):
       // the count is against the sub's cursor, so a second line says nothing.
+      // The rendered note is the one naming the *newest* event — caused_by
+      // must point at the head of the causal chain, not an older sibling.
       input: (notes) => {
-        const seen = new Set<string>();
-        const lines = notes
-          .filter((note) => !seen.has(note.subId) && seen.add(note.subId))
-          .map((note) => this.text(note));
+        const newest = new Map<string, BusNote>();
+        for (const note of notes) {
+          const current = newest.get(note.subId);
+          if (!current || note.lastEventId > current.lastEventId) newest.set(note.subId, note);
+        }
         return {
-          text: lines.join("\n"),
+          text: [...newest.values()].map((note) => this.text(note)).join("\n"),
           origin: { kind: "bus-notify", noteIds: notes.map((note) => note.id) },
         };
       },
@@ -57,12 +60,12 @@ export class BusDelivery {
   notify(event: BusEvent): void {
     if (!this.enabled()) return;
     for (const sub of this.subs.matching(event.topic, event.scope, event.writerSession)) {
-      const open = this.subs.openNote(sub.id);
       // Coalesce only into a note nothing has been done with. A sent-but-
       // unproven note may settle any moment — the transcript proves its id,
       // not the cursor — so an event absorbed into it in that window would
       // never wake anyone again.
-      if (open && open.callbackAttempts === 0) {
+      const open = this.subs.unsentNote(sub.id);
+      if (open) {
         open.lastEventId = event.id;
         this.subs.saveNote(open);
       } else {
