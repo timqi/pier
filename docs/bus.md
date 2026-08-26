@@ -85,6 +85,19 @@ every reader of every page containing it), `ttl_seconds` needs a fact,
   is refused. In memory on purpose: it exists to break a storm inside one
   process's lifetime, and a restart resetting it loses nothing.
 
+## One switch for the whole capability
+
+The bus is optional — memory and cross-session delivery are two reads of the
+same table, so one setting (`busEnabled`, Console → Settings → Instance,
+**off** by default) covers both. It is a capability switch like the Slack
+tool's configuration, not an extension: off, the tool is not offered to new
+sessions at all (`AgentCustomTool.enabled`, read at session open — a
+present-but-refusing tool would waste the model's attention), a session opened
+before the flip gets a refusal with the reason as backstop, and delivery
+freezes — owed notes keep their attempts and resume on re-enable, nothing is
+deleted. The tables stay in the schema either way; empty tables are not
+pollution.
+
 ## Delivery: notify-then-pull
 
 A publish never carries its payload to anyone. It matches the subscriptions

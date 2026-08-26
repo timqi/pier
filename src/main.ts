@@ -111,29 +111,35 @@ const piConfig = new PiConfigStore();
 const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
-    busToolSpec((params, callerSessionId) =>
-      handleBusTool({
-        store: busStore,
-        subs: busSubs,
-        // Who owns which half of "where does this caller stand": tasks know
-        // run trees (the one targeting the session, and the active ones it
-        // delegated), the factory knows every session's cwd. Run membership is
-        // resolved per call because it changes between two writes; a cwd never
-        // does, so it is cached to keep factory.list()'s directory scan off
-        // every bus call.
-        caller: {
-          resolve: async (sessionId) => ({
-            rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
-            invokedRootRunIds: [...new Set(
-              taskStore.listRunsForSession(sessionId)
-                .filter((run) => !isTerminal(run.state))
-                .map((run) => run.rootRunId),
-            )],
-            cwd: await sessionCwd(sessionId),
-          }),
-        },
-        notify: (event) => busDelivery.notify(event),
-      }, params, callerSessionId)),
+    {
+      ...busToolSpec((params, callerSessionId) =>
+        handleBusTool({
+          store: busStore,
+          subs: busSubs,
+          enabled: () => settings.get().busEnabled,
+          // Who owns which half of "where does this caller stand": tasks know
+          // run trees (the one targeting the session, and the active ones it
+          // delegated), the factory knows every session's cwd. Run membership
+          // is resolved per call because it changes between two writes; a cwd
+          // never does, so it is cached to keep factory.list()'s directory
+          // scan off every bus call.
+          caller: {
+            resolve: async (sessionId) => ({
+              rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
+              invokedRootRunIds: [...new Set(
+                taskStore.listRunsForSession(sessionId)
+                  .filter((run) => !isTerminal(run.state))
+                  .map((run) => run.rootRunId),
+              )],
+              cwd: await sessionCwd(sessionId),
+            }),
+          },
+          notify: (event) => busDelivery.notify(event),
+        }, params, callerSessionId)),
+      // The whole bus is one capability (docs/bus.md): off hides the tool from
+      // the next session, exactly like an extension switch.
+      enabled: () => settings.get().busEnabled,
+    },
     slackToolSpec((params, callerSessionId) =>
       handleSlackTool({
         store: channelStore,
@@ -194,7 +200,7 @@ busDelivery = new BusDelivery(router, busStore, busSubs, (sessionId, what, why) 
   // record, and the event stream of whoever was owed the delivery.
   log.error(`gave up delivering ${what} to session ${sessionId}: ${why}`);
   router.reportTo(sessionId, `${what} could not be delivered — ${why}`);
-});
+}, () => settings.get().busEnabled);
 busDelivery.start();
 
 channelStore = new ChannelStore(db, secrets);

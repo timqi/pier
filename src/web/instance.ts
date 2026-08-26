@@ -181,14 +181,15 @@ export function registerInstanceRoutes(
         autoUpdate?: unknown;
         terminalInitCommand?: unknown;
         extensions?: unknown;
+        busEnabled?: unknown;
       }
       | null;
     const given = body &&
-      [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions]
+      [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.busEnabled]
         .some((v) => v !== undefined);
     if (!given) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand or extensions required",
+        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions or busEnabled required",
       }, 400);
     }
     if (body.publicUrl !== undefined) {
@@ -224,9 +225,16 @@ export function registerInstanceRoutes(
       }
       settings.setExtensions(names);
     }
-    // The URL and the extension set are both read when a session opens; the
-    // model menu is read per picker call, so it needs no recycle.
-    if (body.publicUrl !== undefined || body.extensions !== undefined) onSettingsChanged?.();
+    if (body.busEnabled !== undefined) {
+      if (typeof body.busEnabled !== "boolean") return c.json({ error: "busEnabled must be a boolean" }, 400);
+      settings.setBusEnabled(body.busEnabled);
+    }
+    // The URL, the extension set and the bus switch are all read when a
+    // session opens; the model menu is read per picker call, so it needs no
+    // recycle.
+    if (body.publicUrl !== undefined || body.extensions !== undefined || body.busEnabled !== undefined) {
+      onSettingsChanged?.();
+    }
     return c.json(instanceSettings());
   });
 

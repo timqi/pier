@@ -21,6 +21,10 @@ export class BusDelivery {
     private readonly events: BusStore,
     private readonly subs: SubStore,
     unreachable: (sessionId: string, what: string, why: string) => void,
+    /** The capability switch: off freezes delivery — owed notes keep their
+     * attempts and resume when the operator re-enables, rather than being
+     * spent against sessions that were told the bus is off. */
+    private readonly enabled: () => boolean = () => true,
   ) {
     this.#outbox = new Outbox<BusNote>(router, {
       id: (note) => note.id,
@@ -42,6 +46,7 @@ export class BusDelivery {
   /** Fans a fresh write out to its subscribers. One open note per sub is the
    * coalescing: a subscriber that is already owed a pointer is not owed two. */
   notify(event: BusEvent): void {
+    if (!this.enabled()) return;
     for (const sub of this.subs.matching(event.topic, event.scope, event.writerSession)) {
       const open = this.subs.openNote(sub.id);
       if (open) {
@@ -65,6 +70,7 @@ export class BusDelivery {
 
   /** Crash recovery and retry backoff, swept like the tasks service does. */
   recover(now = Date.now()): void {
+    if (!this.enabled()) return;
     for (const sessionId of new Set(this.subs.dueNotes(now).map((note) => note.sessionId))) {
       void this.deliver(sessionId).catch((err: unknown) =>
         log.error(`bus delivery sweep for session ${sessionId} failed`, err));

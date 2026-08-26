@@ -114,6 +114,7 @@ const SETTINGS_JSON = {
   autoUpdate: false,
   terminalInitCommand: "",
   extensions: [],
+  busEnabled: false,
   extensionCatalog: CATALOG.map((ext) => ({ ...ext, enabled: false })),
 };
 
@@ -746,6 +747,22 @@ describe("workbench server", () => {
     expect(settings.get().autoUpdate).toBe(true);
     expect((await put(false)).status).toBe(200);
     expect(settings.get().autoUpdate).toBe(false);
+  });
+
+  it("stores the bus switch and rejects a non-boolean", async () => {
+    const { app, settings } = setup();
+    const put = (busEnabled: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ busEnabled }),
+      });
+    expect((await put(true)).status).toBe(200);
+    expect(settings.get().busEnabled).toBe(true);
+    expect((await put("on")).status).toBe(400);
+    expect(settings.get().busEnabled).toBe(true);
+    expect((await put(false)).status).toBe(200);
+    expect(settings.get().busEnabled).toBe(false);
   });
 
   it("switches a bundled extension on, refuses a mis-shaped list, and recycles", async () => {

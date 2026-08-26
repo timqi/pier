@@ -9,7 +9,7 @@ import { failure, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, empty, field, input, pill, setStatus } from "./form.js";
+import { badge, button, card, empty, field, input, pill, setStatus, toggle } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
@@ -135,6 +135,44 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", pwSave, pwStatus),
   );
 
+  // --- Instance: the bus -------------------------------------------------------------
+  // A capability switch, not an extension: one flag covers shared memory and
+  // cross-session delivery, because they are two reads of the same table.
+
+  const busStatus = h("span", "text-[11.5px]", "");
+  let busOn = false;
+  const busCard = card(
+    "Session bus",
+    "Shared memory and cross-session events — sessions publish facts, read each other's, and subscribe to be notified of writes (docs/bus.md).",
+    h("div", "flex flex-col gap-2"),
+  );
+  // Redrawn from confirmed state, never from the click: the switch must not
+  // show something nobody stored.
+  function drawBusToggle(): void {
+    const host = busCard.lastElementChild as HTMLElement;
+    host.replaceChildren(
+      toggle(
+        "Enabled",
+        "Off hides the bus tool from new sessions and freezes owed notifications; nothing is deleted. A session mid-turn keeps the tools it started with; the next message picks this up.",
+        busOn,
+        (checked) => void saveBus(checked),
+      ),
+      busStatus,
+    );
+  }
+  async function saveBus(checked: boolean): Promise<void> {
+    setStatus(busStatus, "saving", "saving…");
+    const res = await sendJson("/api/settings", { busEnabled: checked }, "PUT");
+    if (!res.ok) {
+      setStatus(busStatus, "failed", await failure(res, "Could not save"));
+      return drawBusToggle();
+    }
+    busOn = ((await res.json()) as { busEnabled: boolean }).busEnabled;
+    setStatus(busStatus, "saved", busOn ? "On — sessions take it on their next message." : "Off — hidden from the next session.");
+    drawBusToggle();
+  }
+  drawBusToggle();
+
   // --- Instance: reload ------------------------------------------------------------
   // Saving in the Console already recycles sessions. This is for the changes
   // the Console never saw: an agent that rewrote AGENTS.md, a skill dropped in
@@ -189,6 +227,7 @@ export function createSettingsView(
     // configure Pier, and a second place for one toggle would be a third copy
     // of the same vocabulary.
     createNotificationsCard(),
+    busCard,
     reloadCard,
     pwCard,
     signOutCard,
@@ -225,8 +264,12 @@ export function createSettingsView(
     void (async () => {
       const res = await fetch("/api/settings");
       if (!res.ok) return setStatus(urlStatus, "failed", await failure(res, "Could not load settings"));
-      urlInput.value = ((await res.json()) as { publicUrl: string }).publicUrl;
+      const loaded = (await res.json()) as { publicUrl: string; busEnabled: boolean };
+      urlInput.value = loaded.publicUrl;
       urlStatus.textContent = "";
+      busOn = loaded.busEnabled;
+      busStatus.textContent = "";
+      drawBusToggle();
     })();
   }
 

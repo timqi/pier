@@ -23,7 +23,8 @@ const tool = (db = openDb(":memory:"), notified: BusEvent[] = []) => {
     store: new BusStore(db),
     subs: new SubStore(db),
     caller,
-    notify: (event: BusEvent) => notified.push(event),
+    notify: (event: BusEvent) => { notified.push(event); },
+    enabled: () => true,
   };
   return (params: unknown, sessionId: string) => handleBusTool(deps, params, sessionId);
 };
@@ -143,6 +144,16 @@ describe("bus tool", () => {
     await expect(call({ operation: "ack", topic_glob: "proj/*", cursor: "z" }, "b")).rejects.toThrow(/subscribe first/);
     await expect(call({ operation: "subscribe", topic_glob: "proj/*", mode: "loud" }, "b")).rejects.toThrow(/mode/);
     await expect(call({ operation: "subscribe", topic_glob: "{bad}" }, "b")).rejects.toThrow(/topic_glob/);
+  });
+
+  it("is a refusal with a reason when the operator switched it off", async () => {
+    const db = openDb(":memory:");
+    const off = (params: unknown, sessionId: string) =>
+      handleBusTool(
+        { store: new BusStore(db), subs: new SubStore(db), caller, notify: () => {}, enabled: () => false },
+        params, sessionId,
+      );
+    await expect(off({ operation: "get", topic: "t" }, "a")).rejects.toThrow(/switched off/);
   });
 
   it("rejects what the boundary must not half-handle", async () => {

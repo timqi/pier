@@ -41,6 +41,11 @@ export interface Settings {
    *  default: an extension gives every session new tools, which is the
    *  operator's call, and a name nobody ships any more is simply not found. */
   extensions: string[];
+  /** The bus — shared memory and cross-session delivery (docs/bus.md) — is a
+   *  capability, not a default: off, sessions never see the tool. Off by
+   *  default for the same reason as extensions: it changes what every
+   *  session can do, which is the operator's call. */
+  busEnabled: boolean;
 }
 
 /**
@@ -140,6 +145,7 @@ export class SettingsStore {
       autoUpdate: this.#value("autoUpdate") === "1",
       terminalInitCommand: this.#value("terminalInitCommand") ?? "",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
+      busEnabled: this.#value("busEnabled") === "1",
     };
   }
 
@@ -184,6 +190,11 @@ export class SettingsStore {
 
   setAutoUpdate(on: boolean): Settings {
     this.#set("autoUpdate", on ? "1" : "0");
+    return this.get();
+  }
+
+  setBusEnabled(on: boolean): Settings {
+    this.#set("busEnabled", on ? "1" : "0");
     return this.get();
   }
 

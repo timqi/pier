@@ -38,6 +38,10 @@ export interface BusToolDeps {
   subs: SubStore;
   caller: BusCaller;
   notify: (event: BusEvent) => void;
+  /** The capability switch. The tool is hidden from new sessions when off
+   * (pi.ts reads `enabled` at open); this is the backstop for sessions that
+   * opened before the operator flipped it. */
+  enabled: () => boolean;
 }
 
 /** Model-facing event shape: payload parsed back to a value. */
@@ -100,6 +104,9 @@ export async function handleBusTool(
   callerSessionId: string,
 ): Promise<unknown> {
   const { store, subs, caller, notify } = deps;
+  if (!deps.enabled()) {
+    throw new Error("the bus is switched off — the operator can enable it in Console → Settings → Instance");
+  }
   const input = record(raw);
   if (!input) throw new Error("bus tool parameters required");
   const { rootRunId, cwd, invokedRootRunIds = [] } = await caller.resolve(callerSessionId);

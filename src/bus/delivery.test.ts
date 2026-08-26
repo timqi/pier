@@ -144,6 +144,34 @@ describe("BusDelivery", () => {
     await vi.waitFor(() => expect(b.inputs).toHaveLength(1));
   });
 
+  it("the switch freezes delivery without spending or deleting what is owed", async () => {
+    const db = openDb(":memory:");
+    const store = new BusStore(db);
+    const subs = new SubStore(db);
+    const b = fakeSession("b");
+    const router = new Router(new EventHub(), () => Promise.resolve(b));
+    let on = true;
+    const delivery = new BusDelivery(router, store, subs, () => {}, () => on);
+    subs.upsert("b", "proj/*", "queue", [SCOPE], "");
+    b.setState("streaming"); // owed but deferred while the switch is still on
+    delivery.notify(store.publish({ topic: "proj/auth", payload: "1", scope: SCOPE, writerSession: "w" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const owed = subs.dueNotes(Number.MAX_SAFE_INTEGER);
+    expect(owed).toHaveLength(1);
+
+    on = false;
+    b.setState("idle");
+    delivery.recover(Date.now() + 60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(b.inputs).toEqual([]); // frozen …
+    expect(subs.dueNotes(Number.MAX_SAFE_INTEGER)[0]!.callbackAttempts)
+      .toBe(owed[0]!.callbackAttempts); // … not spent against a session that was told the bus is off
+
+    on = true;
+    delivery.recover(Date.now() + 60_000);
+    await vi.waitFor(() => expect(b.inputs).toHaveLength(1)); // resumes, nothing lost
+  });
+
   it("a subscriber that caught up on its own is not woken for nothing", async () => {
     const { subs, session, publish, delivery } = setup();
     const b = session("b");

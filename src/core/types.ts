@@ -310,6 +310,10 @@ export interface AgentCustomTool {
   label: string;
   description: string;
   parameters: object; // JSON Schema
+  /** Capability gate, read at session open (absent = always on): a switched-off
+   * tool is invisible to the model, not present-but-refusing — a tool that
+   * always errors wastes the model's attention and invites retries. */
+  enabled?(): boolean;
   execute(params: unknown, callerSessionId: string, signal?: AbortSignal): Promise<unknown>;
 }
 

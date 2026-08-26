@@ -17,6 +17,7 @@ const EMPTY = {
   autoUpdate: false,
   terminalInitCommand: "",
   extensions: [],
+  busEnabled: false,
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
