@@ -51,7 +51,7 @@ describe("BusStore", () => {
   it("a tombstone hides the fact from latest but shows in log", () => {
     const s = store();
     publish(s, { key: "owner", kind: "fact" }, 1000);
-    s.forget("proj/auth", "owner", SCOPE, "a", 2000);
+    s.forget("proj/auth", "owner", SCOPE, "a", undefined, 2000);
     expect(s.latest("proj/auth", SCOPES, "owner")).toEqual([]);
     const kinds = s.log("proj/auth", SCOPES).events.map((e) => e.kind);
     expect(kinds).toEqual(["fact", "tombstone"]);
@@ -63,6 +63,32 @@ describe("BusStore", () => {
     publish(s, { key: "k", kind: "fact", payload: '"new"', ttlSeconds: 10 }, 1000);
     expect(s.latest("proj/auth", SCOPES, "k", 5000)[0]?.payload).toBe('"new"');
     expect(s.latest("proj/auth", SCOPES, "k", 12_000)).toEqual([]);
+  });
+
+  it("ids stay monotonic across a restart even when the clock steps back", () => {
+    const db = openDb(":memory:");
+    const before = new BusStore(db).publish(
+      { topic: "t", payload: "1", scope: SCOPE, writerSession: "a" }, 10_000);
+    // Second store on the same database = the process restarted; the wall
+    // clock stepped back (NTP). An id below `before.id` would hide this event
+    // from every cursor that already passed it.
+    const after = new BusStore(db).publish(
+      { topic: "t", payload: "2", scope: SCOPE, writerSession: "a" }, 5_000);
+    expect(after.id > before.id).toBe(true);
+    expect(new BusStore(db).log("t", SCOPES, before.id).events.map((e) => e.id)).toEqual([after.id]);
+  });
+
+  it("a narrower scope's fact shadows a wider one's; forgetting it reveals the wider", () => {
+    const s = store();
+    const scopes = ["project:/p", "instance"];
+    publish(s, { key: "k", kind: "fact", payload: '"default"', scope: "instance" }, 1000);
+    publish(s, { key: "k", kind: "fact", payload: '"override"', scope: "project:/p" }, 2000);
+    publish(s, { key: "k", kind: "fact", payload: '"new-default"', scope: "instance" }, 3000);
+    // The newer instance write does not poison the project's own fact …
+    expect(s.latest("proj/auth", scopes, "k")[0]?.payload).toBe('"override"');
+    // … and a tombstone ends only its own scope's claim.
+    s.forget("proj/auth", "k", "project:/p", "a", undefined, 4000);
+    expect(s.latest("proj/auth", scopes, "k")[0]?.payload).toBe('"new-default"');
   });
 
   it("reads are fenced by scope", () => {
@@ -78,13 +104,18 @@ describe("BusStore", () => {
 
   it("computes hops from caused_by and refuses a chain past the ceiling", () => {
     const s = store();
-    let parent = publish(s, {});
+    const first = publish(s, {});
+    let parent = first;
     for (let hop = 1; hop <= MAX_HOPS; hop++) {
       parent = publish(s, { causedBy: parent.id });
       expect(parent.hops).toBe(hop);
     }
     expect(() => publish(s, { causedBy: parent.id })).toThrow(/causal chain exceeds 4 hops/);
     expect(() => publish(s, { causedBy: "nope" })).toThrow(/not found/);
+    // forget is a write like any other: a reactive delete cannot evade the ceiling.
+    const tombstone = s.forget("proj/auth", "k", SCOPE, "a", first.id);
+    expect(tombstone.hops).toBe(1);
+    expect(() => s.forget("proj/auth", "k", SCOPE, "a", parent.id)).toThrow(/feedback loop/);
   });
 
   it("rate-limits a writer per topic within the window", () => {
@@ -97,12 +128,17 @@ describe("BusStore", () => {
     expect(() => publish(s, {}, 1000 + 61_000)).not.toThrow();
   });
 
-  it("rejects malformed topics, oversized payloads and bad TTLs", () => {
+  it("rejects the writes that would sit half in each world", () => {
     const s = store();
     expect(() => publish(s, { topic: "Bad/Topic" })).toThrow(/topic/);
     expect(() => publish(s, { topic: "a".repeat(129) })).toThrow(/topic/);
     expect(() => publish(s, { payload: JSON.stringify("x".repeat(9000)) })).toThrow(/file_ptr/);
-    expect(() => publish(s, { ttlSeconds: -1 })).toThrow(/ttl/);
+    expect(() => publish(s, { payload: "not json" })).toThrow(/JSON/);
+    expect(() => publish(s, { key: "k" })).toThrow(/omit key/);
+    expect(() => publish(s, { kind: "fact" })).toThrow(/needs a key/);
+    expect(() => publish(s, { ttlSeconds: 60 })).toThrow(/facts/);
+    expect(() => publish(s, { key: "k", kind: "fact", ttlSeconds: -1 })).toThrow(/positive integer/);
+    expect(() => publish(s, { filePtr: "relative/path.md" })).toThrow(/absolute/);
     expect(() => s.log("proj/{bad}", SCOPES)).toThrow(/topic_glob/);
   });
 });

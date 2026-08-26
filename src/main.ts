@@ -31,6 +31,7 @@ import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
+import { isTerminal } from "./tasks/types.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
@@ -86,6 +87,13 @@ let tasks: TaskService;
 const taskStore = new TaskStore(db);
 // One instance, not per call: the publish rate limiter lives in its memory.
 const busStore = new BusStore(db);
+const knownCwd = new Map<string, string>();
+const sessionCwd = async (sessionId: string): Promise<string | undefined> => {
+  if (!knownCwd.has(sessionId)) {
+    for (const summary of await factory.list()) knownCwd.set(summary.id, summary.cwd);
+  }
+  return knownCwd.get(sessionId);
+};
 const conversations = new ConversationStore(db);
 let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
 // Declared before the store exists because the factory is built first; the tool
@@ -101,11 +109,19 @@ const factory = new PiAgentFactory(
     busToolSpec((params, callerSessionId) =>
       handleBusTool(busStore, {
         // Who owns which half of "where does this caller stand": tasks know
-        // run trees, the factory knows every session's cwd. Resolved per call
-        // because a session may enter or leave a run between two writes.
+        // run trees (the one targeting the session, and the active ones it
+        // delegated), the factory knows every session's cwd. Run membership is
+        // resolved per call because it changes between two writes; a cwd never
+        // does, so it is cached to keep factory.list()'s directory scan off
+        // every bus call.
         resolve: async (sessionId) => ({
           rootRunId: taskStore.findActiveRunForTarget(sessionId)?.rootRunId,
-          cwd: (await factory.list()).find((s) => s.id === sessionId)?.cwd,
+          invokedRootRunIds: [...new Set(
+            taskStore.listRunsForSession(sessionId)
+              .filter((run) => !isTerminal(run.state))
+              .map((run) => run.rootRunId),
+          )],
+          cwd: await sessionCwd(sessionId),
         }),
       }, params, callerSessionId)),
     slackToolSpec((params, callerSessionId) =>

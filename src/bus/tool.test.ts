@@ -4,13 +4,16 @@ import { BusStore } from "./store.js";
 import { handleBusTool, type BusCaller } from "./tool.js";
 
 // Sessions the resolver knows: A and B share a project, "run-child" is a
-// subagent inside run tree r1, "nowhere" resolves to nothing.
+// subagent inside run tree r1, "coordinator" delegated r1 (and "fanout" two
+// trees), "nowhere" resolves to nothing.
 const caller: BusCaller = {
   resolve: async (id) => ({
     "a": { cwd: "/p" },
     "b": { cwd: "/p" },
     "c": { cwd: "/q" },
     "run-child": { rootRunId: "r1", cwd: "/p" },
+    "coordinator": { cwd: "/p", invokedRootRunIds: ["r1"] },
+    "fanout": { cwd: "/p", invokedRootRunIds: ["r1", "r2"] },
   }[id] ?? {}),
 };
 
@@ -48,8 +51,20 @@ describe("bus tool", () => {
     await call({ operation: "publish", topic: "proj/auth", key: "owner", payload: "alice" }, "a");
     await call({ operation: "forget", topic: "proj/auth", key: "owner" }, "b");
     expect(await call({ operation: "get", topic: "proj/auth", key: "owner" }, "a")).toBeNull();
-    const page = await call({ operation: "log", topic_glob: "proj/auth" }, "a") as { events: { kind: string }[] };
+    const page = await call({ operation: "log", topic_glob: "proj/auth" }, "a") as
+      { events: { kind: string; writer_session: string }[] };
     expect(page.events.map((e) => e.kind)).toEqual(["fact", "tombstone"]);
+    // The stream names its writers; a subscriber skips its own events by this.
+    expect(page.events.map((e) => e.writer_session)).toEqual(["a", "b"]);
+  });
+
+  it("a subagent's forget lands where the winner lives, not in its run scope", async () => {
+    const call = tool();
+    await call({ operation: "publish", topic: "proj/auth", key: "owner", payload: "alice" }, "a");
+    await call({ operation: "forget", topic: "proj/auth", key: "owner" }, "run-child");
+    // A run-scoped tombstone would hide it from the run only — and reveal it
+    // again the moment the run ends.
+    expect(await call({ operation: "get", topic: "proj/auth", key: "owner" }, "a")).toBeNull();
   });
 
   it("scope defaults to the run tree for a subagent, else the project, else errors", async () => {
@@ -64,7 +79,23 @@ describe("bus tool", () => {
     const wide = await call({ operation: "publish", topic: "t", payload: 1, scope: "instance" }, "a") as { scope: string };
     expect(wide.scope).toBe("instance");
     await expect(call({ operation: "publish", topic: "t", payload: 1, scope: "run" }, "a"))
-      .rejects.toThrow(/inside a task run/);
+      .rejects.toThrow(/task run/);
+  });
+
+  it("a coordinator reads its children's run tree; writes to it only explicitly and unambiguously", async () => {
+    const call = tool();
+    await call({ operation: "publish", topic: "t", key: "k", payload: "from-child" }, "run-child");
+    // The delegator stands in the tree it started — a null here would be
+    // indistinguishable from "no fact yet".
+    expect(await call({ operation: "get", topic: "t", key: "k" }, "coordinator")).toMatchObject({ payload: "from-child" });
+    // Its default write scope is still its project, not the child's tree …
+    const write = await call({ operation: "publish", topic: "t", payload: 1 }, "coordinator") as { scope: string };
+    expect(write.scope).toBe("project:/p");
+    // … explicit 'run' addresses the one tree it runs; two trees is a guess.
+    const explicit = await call({ operation: "publish", topic: "t", payload: 1, scope: "run" }, "coordinator") as { scope: string };
+    expect(explicit.scope).toBe("run:r1");
+    await expect(call({ operation: "publish", topic: "t", payload: 1, scope: "run" }, "fanout"))
+      .rejects.toThrow(/ambiguous/);
   });
 
   it("run-scoped writes stay invisible outside the run tree, instance reaches everyone", async () => {
@@ -92,6 +123,7 @@ describe("bus tool", () => {
     await expect(call({ operation: "publish", payload: 1 }, "a")).rejects.toThrow(/topic required/);
     await expect(call({ operation: "get" }, "a")).rejects.toThrow(/topic required/);
     await expect(call({ operation: "log" }, "a")).rejects.toThrow(/topic_glob required/);
+    await expect(call({ operation: "log", topic_glob: "t", limit: "abc" }, "a")).rejects.toThrow(/integer/);
     await expect(call({ operation: "forget", topic: "t" }, "a")).rejects.toThrow(/key required/);
     await expect(call({ operation: "wat" }, "a")).rejects.toThrow(/unknown bus operation/);
   });

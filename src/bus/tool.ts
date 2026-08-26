@@ -21,13 +21,16 @@ const requiredString = (value: unknown, field: string): string => {
 };
 
 /** Where a caller stands, answered by whoever owns that knowledge (tasks know
- * run trees, the agent factory knows cwds) — bus never imports either. */
+ * run trees, the agent factory knows cwds) — bus never imports either.
+ * `rootRunId` is the tree the session is the target of (its default write
+ * scope); `invokedRootRunIds` are active trees it delegated, which it may
+ * read — without them a coordinator's `get` would return null on its own
+ * children's blackboard, indistinguishable from "no fact". */
 export interface BusCaller {
-  resolve(sessionId: string): Promise<{ rootRunId?: string; cwd?: string }>;
+  resolve(sessionId: string): Promise<{ rootRunId?: string; cwd?: string; invokedRootRunIds?: string[] }>;
 }
 
-/** Model-facing event shape: payload parsed back to a value, bookkeeping the
- * reader cannot act on (hops, writer) left out of `get`, kept in `log`. */
+/** Model-facing event shape: payload parsed back to a value. */
 const echo = (event: BusEvent) => ({
   id: event.id,
   topic: event.topic,
@@ -38,6 +41,14 @@ const echo = (event: BusEvent) => ({
   scope: event.scope,
   ...(event.causedBy === undefined ? {} : { caused_by: event.causedBy }),
   created_at: event.createdAt,
+});
+
+/** The stream additionally names the writer and the causal depth — a reader
+ * skipping its own events or debugging a storm acts on both. */
+const echoStream = (event: BusEvent) => ({
+  ...echo(event),
+  writer_session: event.writerSession,
+  hops: event.hops,
 });
 
 export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTool {
@@ -51,7 +62,7 @@ export function busToolSpec(execute: AgentCustomTool["execute"]): AgentCustomToo
       "publish {topic, key?, payload, ...} appends: with key it is a fact that overwrites in get; without key a plain event. " +
       "forget {topic, key} deletes a fact (as a tombstone). " +
       "Topics are lowercase 'a/b/c' paths. Keep payload small (JSON, 8KB max); write large content to a file and pass its absolute path as file_ptr. " +
-      "Scope defaults to your run tree when you are a subagent, else your project; pass scope 'instance' only for facts every project should see. " +
+      "Scope defaults to your run tree when you are a subagent, else your project; pass scope 'instance' only for facts every project should see. A narrower scope's fact shadows a wider one's under the same key; run scope lives only while its run tree is active. " +
       "When you publish in reaction to an event you read, pass that event's id as caused_by — chains deeper than 4 are refused as feedback loops.",
     parameters: Type.Object({
       operation: strEnum("publish", "get", "log", "forget"),
@@ -78,11 +89,12 @@ export async function handleBusTool(
 ): Promise<unknown> {
   const input = record(raw);
   if (!input) throw new Error("bus tool parameters required");
-  const { rootRunId, cwd } = await caller.resolve(callerSessionId);
-  // Narrowest first: what the caller writes by default is also everything it
-  // may read — its own run tree, its project, and the instance blackboard.
+  const { rootRunId, cwd, invokedRootRunIds = [] } = await caller.resolve(callerSessionId);
+  // Narrowest first — the order is also latest()'s shadowing order: the run
+  // trees the caller stands in, its project, then the instance blackboard.
+  const runRoots = [...new Set([...(rootRunId ? [rootRunId] : []), ...invokedRootRunIds])];
   const scopes = [
-    ...(rootRunId ? [`run:${rootRunId}`] : []),
+    ...runRoots.map((root) => `run:${root}`),
     ...(cwd ? [`project:${cwd}`] : []),
     "instance",
   ];
@@ -99,7 +111,7 @@ export async function handleBusTool(
         kind: key === undefined ? "event" : "fact",
         payload: JSON.stringify(input.payload),
         filePtr: input.file_ptr === undefined ? undefined : requiredString(input.file_ptr, "file_ptr"),
-        scope: writeScope(input.scope, rootRunId, cwd),
+        scope: writeScope(input.scope, rootRunId, cwd, invokedRootRunIds),
         writerSession: callerSessionId,
         causedBy: input.caused_by === undefined ? undefined : requiredString(input.caused_by, "caused_by"),
         ttlSeconds: input.ttl_seconds === undefined ? undefined : Number(input.ttl_seconds),
@@ -115,20 +127,30 @@ export async function handleBusTool(
       return input.key === undefined ? values.map(echo) : (values[0] ? echo(values[0]) : null);
     }
     case "log": {
+      if (input.limit !== undefined && !Number.isInteger(input.limit)) {
+        throw new Error("limit must be an integer");
+      }
       const { events, cursor } = store.log(
         requiredString(input.topic_glob, "topic_glob"),
         scopes,
         input.after === undefined ? "" : String(input.after),
-        input.limit === undefined ? undefined : Number(input.limit),
+        input.limit as number | undefined,
       );
-      return { events: events.map(echo), cursor };
+      return { events: events.map(echoStream), cursor };
     }
     case "forget": {
+      const topic = requiredString(input.topic, "topic");
+      const key = requiredString(input.key, "key");
+      // The tombstone lands where the visible winner lives: forgetting a
+      // project override in the caller's default (run) scope would only mask
+      // it for the run and let it resurface when the run ends.
+      const winner = input.scope === undefined ? store.latest(topic, scopes, key)[0] : undefined;
       const event = store.forget(
-        requiredString(input.topic, "topic"),
-        requiredString(input.key, "key"),
-        writeScope(input.scope, rootRunId, cwd),
+        topic,
+        key,
+        winner?.scope ?? writeScope(input.scope, rootRunId, cwd, invokedRootRunIds),
         callerSessionId,
+        input.caused_by === undefined ? undefined : requiredString(input.caused_by, "caused_by"),
       );
       return { id: event.id, scope: event.scope };
     }
@@ -141,11 +163,18 @@ export async function handleBusTool(
  * A caller neither in a run nor in a known cwd gets an error, not a silent
  * widening to instance — a leaked blackboard is harder to clean up than a
  * missing one. */
-function writeScope(requested: unknown, rootRunId?: string, cwd?: string): string {
+function writeScope(requested: unknown, rootRunId?: string, cwd?: string, invoked: string[] = []): string {
   if (requested !== undefined) {
     if (requested === "run") {
-      if (!rootRunId) throw new Error("scope 'run' needs a caller inside a task run");
-      return `run:${rootRunId}`;
+      // A coordinator may address the one tree it is running; two would be a
+      // guess, and guessing a scope is how a blackboard leaks.
+      const root = rootRunId ?? (invoked.length === 1 ? invoked[0] : undefined);
+      if (!root) {
+        throw new Error(invoked.length > 1
+          ? "scope 'run' is ambiguous: several active run trees — P1 cannot address one by id"
+          : "scope 'run' needs a caller inside (or running) a task run");
+      }
+      return `run:${root}`;
     }
     if (requested === "project") {
       if (!cwd) throw new Error("scope 'project' needs a caller with a known working directory");
