@@ -1,6 +1,6 @@
 ---
 name: pier-tasks
-description: Delegate work to Pier subagents with the task tool — one-shot delegation, core-joined parallel fan-out, chained steps, and mid-run control (steer/resume/contact). Read before delegating to a subagent, coordinating multiple agents, or running long background work.
+description: Delegate work to Pier subagents with the task tool — one-shot, parallel fan-out, chains, mid-run control. Read before delegating to a subagent, coordinating agents, or running long background work.
 ---
 
 # Orchestrating Pier tasks

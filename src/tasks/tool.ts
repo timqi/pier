@@ -102,48 +102,18 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMess
   members: members.map((run) => trimResult(summarize(run, messages.openDecisionId(run.id)))),
 });
 
-// Model-facing draft shape. Guidance only: runtime truth stays in parseDraft,
-// so schema drift can never loosen boundary validation.
-const DraftSchema = Type.Object({
-  name: Type.String(),
-  description: Type.Optional(Type.String()),
-  trigger: Type.Optional(Type.Union([
-    Type.Object({ type: Type.Literal("manual") }),
-    Type.Object({ type: Type.Literal("cron"), expression: Type.String(), timezone: Type.String() }),
-    Type.Object({
-      type: Type.Literal("watch"),
-      script: Type.String(),
-      cwd: Type.String(),
-      intervalSeconds: Type.Number(),
-      mode: strEnum("once", "repeat"),
-    }),
-  ])),
-  action: Type.Union([
-    Type.Object({
-      type: Type.Literal("agent"),
-      session: Type.Union([
-        Type.Object({ mode: Type.Literal("fresh"), cwd: Type.String() }),
-        Type.Object({ mode: Type.Literal("fork"), cwd: Type.Optional(Type.String()) }),
-        Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
-      ]),
-      prompt: Type.String(),
-      // No `capabilities` here on purpose: a child gets the same tools as any
-      // Pier session, so the model never spends a decision on it. Read-only
-      // children stay configurable through the Console and HTTP.
-      launch: Type.Optional(Type.Object({
-        model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
-        thinking: Type.Optional(Type.String()),
-      })),
-    }),
-    Type.Object({ type: Type.Literal("bash"), script: Type.String(), cwd: Type.String() }),
-    Type.Object({ type: Type.Literal("task"), taskId: Type.String() }),
-  ]),
-  callback: Type.Optional(Type.Union([
-    Type.Object({ type: Type.Literal("none") }),
-    Type.Object({ type: Type.Literal("origin") }),
-    Type.Object({ type: Type.Literal("session"), sessionId: Type.String() }),
-  ])),
-  timeoutSeconds: Type.Optional(Type.Number()),
+// Model-facing draft shape: one description, not the expanded union — spelled
+// out it cost ~500 tokens in every session, and runtime truth stays in
+// parseDraft either way, so schema drift can never loosen boundary validation.
+// (No `capabilities` on purpose: a child gets the same tools as any Pier
+// session, so the model never spends a decision on it. Read-only children
+// stay configurable through the Console and HTTP.)
+const DraftSchema = Type.Unsafe<Record<string, unknown>>({
+  type: "object",
+  description:
+    'A task draft. Common case: {name, action:{type:"agent", session:{mode:"fresh",cwd} | {mode:"fork"} | {mode:"reuse",sessionId}, prompt, launch?:{model?:{provider,id}, thinking?}}}. ' +
+    'Other actions: {type:"bash",script,cwd}, {type:"task",taskId}. Optional: description, trigger ({type:"manual"} | cron | watch), callback ({type:"none"|"origin"} | {type:"session",sessionId}), timeoutSeconds. ' +
+    "Full contract: the pier-tasks skill.",
 });
 
 /** The model-facing `task` tool contract, injected into the agent seam as data. */

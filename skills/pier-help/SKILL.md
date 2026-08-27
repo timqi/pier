@@ -1,6 +1,6 @@
 ---
 name: pier-help
-description: How Pier itself works — durable sessions and what survives a restart, how messages and files reach you from Slack and Telegram, in-chat commands (/stop, /settings, /bind), interrupting a running turn, and what only the operator's Console can change. Read before explaining Pier's behavior or advising a user on how to use it.
+description: How Pier itself works — durable sessions, what survives a restart, how messages and files reach you from IM, in-chat commands, and what only the operator's Console can change. Read before explaining Pier's behavior or advising a user on it.
 ---
 
 # How Pier works

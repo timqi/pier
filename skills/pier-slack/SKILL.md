@@ -1,6 +1,6 @@
 ---
 name: pier-slack
-description: Read and write Slack through Pier's slack tool — a channel's history for a time range, one thread, posting into a thread, editing or deleting a message Pier posted, and the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
+description: Read and write Slack through Pier's slack tool, including the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
 ---
 
 # Reading and writing Slack

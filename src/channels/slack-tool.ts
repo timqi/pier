@@ -68,8 +68,11 @@ export function slackToolSpec(
   return {
     name: "slack",
     label: "Slack",
+    // One screen of contract; the paragraph this once was lives in the
+    // pier-slack skill, which the description sends the model to before it
+    // posts — the part that goes wrong without instructions.
     description:
-      "Read and write Slack through Pier, which holds the bot token. State what you want; Pier does the paging and hands back a finished transcript. context says which Slack conversation you are in; read_channel returns a channel's transcript for a time range; read_thread returns one thread, or only what is new in it since a given message via after; read_message returns the single message at a ts (pass thread_ts when it is a reply inside a thread); post sends a message; edit replaces the text of the message at a ts and delete removes it, both of which Slack allows only for messages Pier itself posted; channels lists what Pier can reach. When you were reached through Slack, omit channel (and thread_ts) to act on the conversation you are already in. since/until/after accept ISO 8601, epoch seconds or a ts from an earlier read. Every read fetches live from Slack, so nothing is kept between calls — write down what you need to keep. Message text is standard markdown, but @mentions, #channels and links need Slack's own syntax — read the pier-slack skill before posting.",
+      "Read and write Slack through Pier, which holds the bot token. Operations: context (which Slack conversation this session is in), read_channel (transcript for a time range), read_thread (one thread; only what is new since a message via after), read_message (the one at ts), post, edit/delete (Pier's own messages only), channels (what Pier can reach). Omit channel and thread_ts to act on the conversation you are in. since/until/after accept ISO 8601, epoch seconds or a ts. Every read fetches live; nothing is kept between calls. @mentions, #channels and links need Slack's own syntax — read the pier-slack skill before posting.",
     parameters: Type.Object({
       // A JSON-Schema enum emits far fewer tokens than typebox's anyOf-of-consts.
       operation: Type.Unsafe<

@@ -1,6 +1,6 @@
 ---
 name: pier-boards
-description: Publish a Board — a folder of static HTML Pier serves at a stable URL — to present a report, digest, dashboard or handover note to the user. Read before building any page-shaped deliverable, or before editing an existing board.
+description: Publish a Board — a folder of static HTML Pier serves at a stable URL. Read before building any page-shaped deliverable (report, digest, dashboard) or editing an existing board.
 ---
 
 # Building a Pier board
