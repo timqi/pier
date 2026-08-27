@@ -588,21 +588,6 @@ const CONSOLE_TARGETS: { name: "activity" | "boards" | "settings"; label: string
 let rows: { el: HTMLElement; open: () => void }[] = [];
 let active = 0;
 
-/** Where the pointer last actually was; null until it has moved at all.
- *
- *  A browser re-runs hit-testing after the layout changes and delivers a mouse
- *  move at the position the pointer already had — so a list appearing under a
- *  resting cursor fires `mouseenter` on whatever row landed there. Opening ⌘K
- *  with the mouse anywhere over the page handed the highlight to that row
- *  instead of the first one, and every ↓ that scrolled the list did it again.
- *  A move that did not move is not hover. */
-let pointer: { x: number; y: number } | null = null;
-
-/** Read before the document listener below updates it, so this is the *previous*
- *  position: a genuine move differs from it, a synthetic one repeats it. */
-const pointerMoved = (ev: MouseEvent): boolean =>
-  pointer !== null && (pointer.x !== ev.clientX || pointer.y !== ev.clientY);
-
 // Three idioms for the same two moves. The arrows; readline's ⌃P/⌃N, for hands
 // that would rather not leave the home row; and ⌃J/⌃K, because ⌃N is a
 // *reserved* chord in Chrome and Firefox on Linux and Windows — it opens a new
@@ -614,7 +599,10 @@ const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1
 function setActive(index: number): void {
   if (!rows.length) return;
   active = (index + rows.length) % rows.length;
-  rows.forEach(({ el }, i) => el.classList.toggle("bg-indigo-50", i === active));
+  for (const [i, { el }] of rows.entries()) {
+    el.classList.toggle("bg-indigo-100", i === active);
+    el.classList.toggle("border-indigo-500", i === active);
+  }
   rows[active]?.el.scrollIntoView({ block: "nearest" });
 }
 
@@ -637,7 +625,11 @@ function pinButton(s: SessionInfo): HTMLElement {
 }
 
 function paletteRow(t: Target): HTMLElement {
-  const li = h("li", "flex cursor-pointer items-center gap-2 px-3 py-1.5");
+  // The transparent bar is always there so gaining it costs no reflow.
+  const li = h(
+    "li",
+    "flex cursor-pointer items-center gap-2 border-l-2 border-transparent px-3 py-1.5 hover:bg-neutral-100",
+  );
   // A Console row keeps the dot's width so both kinds of row start on the
   // same column; only a session has a state to report there.
   li.append(t.session ? stateDot(t.session) : h("span", "h-2 w-2 flex-none"));
@@ -651,11 +643,13 @@ function paletteRow(t: Target): HTMLElement {
       pinButton(t.session),
     );
   }
-  // Pointer and keyboard drive the same highlight, so the two never disagree
-  // about which row Enter would open — but only a pointer that moved counts.
-  li.onmouseenter = (ev) => {
-    if (pointerMoved(ev)) setActive(rows.findIndex((r) => r.el === li));
-  };
+  // Hover is its own grey, and it does not move the selection. Driving one
+  // highlight from both pointer and keyboard meant the browser could aim it:
+  // after a layout change it re-runs hit-testing and delivers a mouse move at
+  // the position the pointer already had, so opening ⌘K with the mouse resting
+  // anywhere over the list fired `mouseenter` there and Enter no longer opened
+  // the first row. What the keyboard selected is now only ever moved by the
+  // keyboard; the pointer opens what it clicks.
   li.onclick = t.open;
   return li;
 }
@@ -743,12 +737,6 @@ function toggleArchive(): void {
 
 export function initSidebar(d: SidebarDeps): void {
   deps = d;
-  // Bubble phase, so a row's own `mouseenter` still sees the previous position.
-  document.addEventListener(
-    "pointermove",
-    (ev) => (pointer = { x: ev.clientX, y: ev.clientY }),
-    { passive: true },
-  );
   // The new session nearly always belongs to a project the rail already shows,
   // so the field itself offers those directories in the rail's own order, with
   // the folder tree under them; typing a path still works.
