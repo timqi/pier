@@ -165,7 +165,12 @@ const ROW_STYLE: Record<string, { row: string; body: string }> = {
 // No rules between rows: tint and accent say who is speaking, the gap only says
 // whether the speaker changed (4px within a run, 6px across one), and the
 // padding is generous — the block breathes, the lines don't.
-export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown = false): HTMLElement {
+export function appendTurn(
+  kind: keyof typeof ROW_STYLE,
+  text: string,
+  markdown = false,
+  at?: number,
+): HTMLElement {
   sealActivity();
   // The steps that just ran are this message's own: they move inside the row
   // as its caption line. Detaching first also restores sender grouping, which
@@ -210,6 +215,10 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
     const strip = imageRow(row);
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
+  // Same hover chip an agent turn gets, and for the same question: a message
+  // sitting above an answer says nothing about when either happened. Pushed
+  // clear of the pencil on a user row, which owns the top-right corner.
+  if (at !== undefined) row.append(hoverChip(clockTime(at), kind === "user" ? "right-10" : "right-3"));
   if (kind === "user") {
     const edit = h("button", "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex");
     edit.title = "Edit — resends from here; this message and later turns leave the context";
@@ -239,15 +248,16 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
   return line;
 }
 
-export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
+export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: number): void {
   const kind = origin.kind === "task-callback"
     ? "Task callback"
     : origin.kind === "task-message"
       ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
       : "Agent task input";
   sealActivity();
-  const row = h("div", "mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
+  const row = h("div", "group relative mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
   row.dataset.kind = "system";
+  if (at !== undefined) row.append(hoverChip(clockTime(at)));
   const head = h("div", "mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase text-cyan-800", h("span", "", kind));
   if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
     const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
@@ -360,16 +370,26 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   }
 }
 
+/** 24-hour, local timezone — every clock in the transcript. */
+const clockTime = (ms: number): string =>
+  new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** The chip a row shows on hover, notched into its top edge. One builder: the
+ *  agent's meta hint and the plain time on the other rows are the same object
+ *  to a reader, so they may not drift apart. */
+const hoverChip = (text: string, right = "right-3"): HTMLElement =>
+  h(
+    "span",
+    `absolute -top-2.5 ${right} z-10 hidden rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] text-neutral-500 shadow-sm group-hover:inline`,
+    text,
+  );
+
 /** Row-hover meta chip on agent turns: completion time · duration · tokens. */
 function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
   if (!meta) return;
-  // 24-hour, local timezone.
-  const time = new Date(meta.completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  (node.parentElement ?? node).append(h(
-    "span",
-    "absolute -top-2.5 right-3 z-10 hidden rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] text-neutral-500 shadow-sm group-hover:inline",
-    `${time} · ${formatTurnMeta(meta)}`,
-  ));
+  (node.parentElement ?? node).append(
+    hoverChip(`${clockTime(meta.completedAt)} · ${formatTurnMeta(meta)}`),
+  );
 }
 
 /** Wrap each fenced block so a copy button can sit in its corner without
@@ -599,12 +619,12 @@ export function renderSnapshot(
         // that delivered it is the earliest place it can be shown. A batched one
         // carries every run id it delivers.
         placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
-        appendSystemInput(t.text, t.origin);
+        appendSystemInput(t.text, t.origin, t.at);
         continue;
       }
       // meta is assistant-only (core/types.ts), so plain turns need no hint.
       if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
-      else appendTurn(t.role, t.text);
+      else appendTurn(t.role, t.text, false, t.at);
     }
     // Whatever is left never appeared in the transcript at all — the bottom is
     // the only honest place for it.

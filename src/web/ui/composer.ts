@@ -290,7 +290,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     // appendTurn renders the marker lines as attachment thumbs/cards itself.
     if (startsTurn || mode === "steer") {
       markOptimisticUser(text);
-      appendTurn("user", text);
+      appendTurn("user", text, false, Date.now());
       scrollBottom(true);
     }
     const res = await sendJson(`/api/sessions/${id}/messages`, { text, mode });

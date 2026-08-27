@@ -191,7 +191,7 @@ describe("toChatTurns", () => {
       { role: "assistant", timestamp: 3000, content: [{ type: "text", text: "done" }] },
     ]);
     expect(turns).toEqual([
-      { role: "user", text: "go" },
+      { role: "user", text: "go", at: 1000 },
       {
         role: "assistant",
         text: "done",
@@ -216,7 +216,7 @@ describe("toChatTurns", () => {
       { role: "user", content: "carry on", timestamp: 2000 },
       { role: "assistant", content: "ok", timestamp: 3000 },
     ])).toEqual([
-      { role: "user", text: "carry on" },
+      { role: "user", text: "carry on", at: 2000 },
       { role: "assistant", text: "ok", meta: { completedAt: 3000, durationMs: 1000, tokens: 0 } },
     ]);
   });
@@ -227,9 +227,18 @@ describe("toChatTurns", () => {
       { role: "custom", customType: "pier.system-input", content: "result", details: origin, timestamp: 1000 },
       { role: "assistant", content: "handled", timestamp: 2000 },
     ])).toEqual([
-      { role: "system", text: "result", origin },
+      { role: "system", text: "result", origin, at: 1000 },
       { role: "assistant", text: "handled", meta: { completedAt: 2000, durationMs: 1000, tokens: 0 } },
     ]);
+  });
+
+  it("stamps user and system turns with when they arrived, and invents nothing", () => {
+    // An assistant turn carries `meta.completedAt`; these two had no time at
+    // all after a reload, so the hover chip had nothing to show.
+    expect(toChatTurns([{ role: "user", content: "go", timestamp: 1000 }]))
+      .toEqual([{ role: "user", text: "go", at: 1000 }]);
+    expect(toChatTurns([{ role: "user", content: "go" }]))
+      .toEqual([{ role: "user", text: "go" }]);
   });
 
   it("keeps activity from an aborted run as a text-less turn", () => {

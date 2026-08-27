@@ -209,7 +209,7 @@ function handleEvent(e: SessionEvent): void {
       break;
     case "system-input":
       finalizeStreaming();
-      appendSystemInput(e.text, e.origin);
+      appendSystemInput(e.text, e.origin, e.ts);
       break;
     case "task-status":
       renderBackgroundRun(e.run);
@@ -223,7 +223,7 @@ function handleEvent(e: SessionEvent): void {
       // Already on screen from our own optimistic render? Just reconcile.
       if (reconcileOptimisticUser(typed)) break;
       finalizeStreaming(); // a delivered queue message ends the text block
-      appendTurn("user", e.text);
+      appendTurn("user", e.text, false, e.ts);
       scrollBottom();
       break;
     }
@@ -253,7 +253,7 @@ function handleEvent(e: SessionEvent): void {
       // The transcript keeps no trace of a compaction, so this line is the
       // only place the button's effect — or an automatic one — is ever seen.
       finalizeStreaming();
-      appendTurn("system", `Context compacted — ${tokens(e.before)} → ${tokens(e.after)}`);
+      appendTurn("system", `Context compacted — ${tokens(e.before)} → ${tokens(e.after)}`, false, e.ts);
       scrollBottom();
       break;
     case "error":

@@ -149,10 +149,15 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     text: string,
     meta?: TurnMeta,
     origin?: SystemInputOrigin,
+    at?: number,
   ): void => {
     const turn: ChatTurn = { role, text };
     if (meta) turn.meta = meta;
     if (origin) turn.origin = origin;
+    // An assistant turn already says when it finished; these two would have no
+    // time at all after a reload, which is the one place the live stream's own
+    // stamp is gone.
+    if (at !== undefined && role !== "assistant") turn.at = at;
     if (steps.length) {
       turn.steps = steps;
       steps = [];
@@ -177,7 +182,7 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     const origin = systemOrigin(m);
     if (origin) {
       const text = textOf(m.content);
-      if (text) flush("system", text, undefined, origin);
+      if (text) flush("system", text, undefined, origin, m.timestamp);
       continue;
     }
     if (m.role !== "user" && m.role !== "assistant") continue;
@@ -202,7 +207,7 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     const text = textOf(m.content);
     // step-only assistant messages keep buffering activity
     if (!text) continue;
-    flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined);
+    flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined, undefined, m.timestamp);
   }
   // Activity with no answer after it (aborted run) still belongs on the page.
   if (steps.length) flush("assistant", "");

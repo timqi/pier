@@ -182,6 +182,9 @@ export interface ChatTurn {
   origin?: SystemInputOrigin; // system inputs only
   meta?: TurnMeta; // assistant turns only
   steps?: ActivityStep[]; // assistant turns only; activity preceding the text
+  /** When it arrived, ms epoch — user and system turns, which have no `meta`
+   *  to carry it. Absent when Pi stamped the message without one. */
+  at?: number;
 }
 
 /** Completion metadata of an assistant turn (bubble hover hints). */
