@@ -136,6 +136,10 @@ export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsRes
   };
 };
 
+/** Shared with the runtime wrapper in `open()`, which reads it per request —
+ *  so tasks can downgrade a session's cache TTL after it is already open. */
+type CacheRetentionBox = { value: "short" | "long" };
+
 export class PiSession implements AgentSession {
   constructor(
     private readonly pi: PiAgentSession,
@@ -147,6 +151,7 @@ export class PiSession implements AgentSession {
      *  unrelated event moved the list again. Same drop `create` and `fork`
      *  do — a callback only because the session is what knows it happened. */
     private readonly wrote: () => void = () => {},
+    private readonly retention: CacheRetentionBox = { value: "long" },
   ) {}
 
   /** Pi's dispose unhooks the one listener that persists and emits, so a turn
@@ -216,6 +221,10 @@ export class PiSession implements AgentSession {
 
   setThinkingLevel(level: ThinkingLevel): void {
     this.pi.setThinkingLevel(level);
+  }
+
+  setCacheRetention(retention: "short" | "long"): void {
+    this.retention.value = retention;
   }
 
   async pendingQueue(): Promise<{ steering: string[]; followUp: string[] }> {
@@ -695,18 +704,29 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     const tools = opts.capabilities === "read"
       ? ["read", "grep", "find", "ls", ...active.map((tool) => tool.name)]
       : undefined;
+    // This runtime serves exactly this one session, so shadowing its
+    // streamSimple is the per-session seam for the Anthropic cache TTL:
+    // interactive sessions keep "long" (1h — turns arrive minutes apart),
+    // tasks downgrade to "short" (5m) via setCacheRetention. The default sits
+    // before the spread so an explicit per-request value still wins —
+    // compaction passes cacheRetention: "none" and must keep it.
+    const runtime = await this.createRuntime();
+    const retention: CacheRetentionBox = { value: "long" };
+    const stream = runtime.streamSimple.bind(runtime);
+    runtime.streamSimple = ((model, context, options) =>
+      stream(model, context, { cacheRetention: retention.value, ...options })) as typeof runtime.streamSimple;
     const created = await createAgentSession({
       cwd,
       sessionManager,
       customTools,
       tools,
-      modelRuntime: await this.createRuntime(),
+      modelRuntime: runtime,
       resourceLoader: await this.resourceLoader(cwd),
     });
     live = created.session;
     const session = new PiSession(live, this.pinned, () => {
       this.listing = undefined;
-    });
+    }, retention);
     if (opts.model) await session.setModel(opts.model);
     if (opts.thinking) session.setThinkingLevel(opts.thinking);
     log.info(`session ${session.id} open in ${cwd}${opts.name ? ` (${opts.name})` : ""}`);

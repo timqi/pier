@@ -25,7 +25,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
       return { path: `${cwd}/new`, getSessionDir: () => cwd };
     },
   },
-  ModelRuntime: { create: async () => ({}) },
+  ModelRuntime: { create: async () => ({ streamSimple: () => ({}) }) },
   DefaultResourceLoader: class {
     async reload(): Promise<void> {}
   },

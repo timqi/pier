@@ -60,6 +60,7 @@ function fakeSession(id: string): AgentSession & {
       thinkingLevel = level;
       calls.push(`setThinkingLevel:${level}`);
     },
+    setCacheRetention: () => {},
     contextUsage: { tokens: 1200, contextWindow: 200_000 },
     availableModels: async (): Promise<ModelRef[]> => [
       { provider: "anthropic", id: "claude-opus-4-5" },

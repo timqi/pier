@@ -226,6 +226,11 @@ export interface AgentSession {
   availableModels(): Promise<ModelRef[]>;
   availableThinkingLevels(): ThinkingLevel[];
   setThinkingLevel(level: ThinkingLevel): void;
+  /** Anthropic prompt-cache TTL for this session's requests: "long" = 1h
+   * (interactive chat — turns arrive minutes apart), "short" = 5m (task runs —
+   * requests arrive seconds apart, the 1h write premium never pays off).
+   * Read per request, so it may change after open; other providers ignore it. */
+  setCacheRetention(retention: "short" | "long"): void;
   /** Pending queue as-is, for snapshotting a session into a fresh client. */
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** Drop all pending queued messages and return them (for recall-to-composer). */

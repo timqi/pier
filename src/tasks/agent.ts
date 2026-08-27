@@ -51,6 +51,12 @@ export class AgentTaskRunner {
       const session = await this.resolveSession(run, action);
       return await this.withSession(session.id, async () => {
         await this.waitUntilIdle(session, signal);
+        // Task requests come seconds apart — the 1h Anthropic cache-write premium
+        // never earns its 2× back, so task runs use the 5m TTL. Set here, not in
+        // resolveSession: this covers create, fork, reuse and resume alike, on
+        // every attempt — and only after the session is idle, so a reused
+        // interactive session's in-flight turn keeps its 1h writes.
+        session.setCacheRetention("short");
         start();
         // No input is no block: `<task_input>\nnull\n</task_input>` is four
         // lines telling the agent nothing, on every run that has no input.
@@ -109,6 +115,10 @@ export class AgentTaskRunner {
           const reply = splitReply(text);
           return { type: "agent", text: reply.text || quietLabel(reply.silence), sessionId: session.id };
         } finally {
+          // The run is what earns "short"; a reused interactive session goes
+          // back to chat afterwards. For task-created sessions this is moot —
+          // idle until the next run downgrades them again.
+          session.setCacheRetention("long");
           signal.removeEventListener("abort", abort);
           unsubscribe();
         }

@@ -57,14 +57,6 @@ const log = logger("pier");
 process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
 process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
-// Anthropic prompt cache at 1h instead of 5m (pi-ai reads this per request;
-// OpenAI ignores it, compaction opts itself out). A chat message usually
-// arrives minutes after the last one — past the 5m TTL, so every turn was
-// re-writing the whole context at 1.25×. The 1h write costs 2× and earns it
-// back on the first reuse inside the hour. `??=`: the operator's own value
-// stays an override.
-process.env.PI_CACHE_RETENTION ??= "long";
-
 // First, and explicitly: every store below shares this one connection, and a
 // schema that cannot be migrated must stop the process here — before a port is
 // open and before anything has written a row.
