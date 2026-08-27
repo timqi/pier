@@ -11,6 +11,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Hono } from "hono";
 import type { EventHub } from "../core/hub.js";
+import { readableTitle } from "../core/identity.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
 import {
@@ -32,12 +33,15 @@ const MAX_SUBSCRIPTIONS = 20;
 const SETTLE_MS = 6_000;
 const MAX_BODY_CHARS = 160;
 
-/** What to call the session where there is room for one line. Falls back to the
- *  project directory, then to the fact that it is a session at all: a
- *  notification with no title reads as a browser bug rather than as an unnamed
- *  session — and a listing that could not answer must not silence the push. */
+/** What to call the session where there is room for one line. The title is put
+ *  through the same reader the sidebar uses — untouched, a session titled by
+ *  its first prompt announces itself on the lock screen as
+ *  `[operator<web> 12:01]`. Falls back to the project directory, then to the
+ *  fact that it is a session at all: a notification with no title reads as a
+ *  browser bug rather than as an unnamed session — and a listing that could
+ *  not answer must not silence the push. */
 const label = (s?: { title?: string; cwd: string }): string =>
-  s?.title || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
+  readableTitle(s?.title) || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
 
 export interface PushSubscriptionRow extends PushTarget {
   /** The browser that subscribed, as it described itself — the only way to

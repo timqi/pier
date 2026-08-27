@@ -49,7 +49,7 @@ function decryptPush(body: Uint8Array, sub: ReturnType<typeof fakeSubscription>)
   return plain.subarray(0, -1).toString();
 }
 
-function setup(settleMs = 0) {
+function setup(settleMs = 0, title = "pier") {
   const db = openDb(":memory:");
   const hub = new EventHub();
   const store = new PushStore(db);
@@ -61,7 +61,7 @@ function setup(settleMs = 0) {
     hub,
     unread,
     channelOf,
-    summary: async () => ({ title: "pier", cwd: "/tmp/pier" }),
+    summary: async () => ({ title, cwd: "/tmp/pier" }),
     publicUrl: () => "https://pier.example.com",
     settleMs,
   });
@@ -246,6 +246,18 @@ describe("the finished-turn trigger", () => {
       url: "/#/session/s1",
       tag: "s1",
     });
+  });
+
+  it("names the session without the speaker header its title carries", async () => {
+    // The header is the model's (core/identity.ts). Left on, every session
+    // opened from the workbench announces itself on a lock screen as
+    // "[operator<web> 12:01]" and the notification says nothing at all.
+    const { app, hub, sent } = setup(6_000, "[operator<web> 12:01]\nfix the parser");
+    const sub = await subscribe(app);
+    finishTurn(hub);
+    await vi.advanceTimersByTimeAsync(6_000);
+    const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
+    expect(payload.title).toBe("fix the parser");
   });
 
   it("still says something when the turn ended with no text", async () => {

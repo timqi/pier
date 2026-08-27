@@ -10,7 +10,7 @@ import "./style.css";
 // same question on every surface (session-header.ts asks it too).
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
-import { splitSpeaker } from "../../core/identity.js";
+import { readableTitle, splitSpeaker } from "../../core/identity.js";
 import { coalesce, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
@@ -38,7 +38,6 @@ import {
   send,
   updateComposer,
 } from "./composer.js";
-import { readableTitle } from "./dom.js";
 import { initPush } from "./notifications.js";
 import { initReport } from "./report.js";
 import {

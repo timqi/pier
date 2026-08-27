@@ -1,7 +1,8 @@
+import { readableTitle } from "../../core/identity.js";
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
 import { coalesce } from "./api.js";
-import { consoleView, fmtDuration, h, readableTitle, type ConsoleView } from "./dom.js";
+import { consoleView, fmtDuration, h, type ConsoleView } from "./dom.js";
 import { tabButton as control } from "./form.js";
 
 interface ActivitySession {

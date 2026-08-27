@@ -2,7 +2,7 @@
 // message is pure token waste in a conversation whose speaker never changes.
 
 import { describe, expect, it } from "vitest";
-import { sanitizeIdentity, SenderPrefix, splitSpeaker, withPrefix } from "./identity.js";
+import { readableTitle, sanitizeIdentity, SenderPrefix, splitSpeaker, withPrefix } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
 const bob = { id: "U2", name: "Bob" };
@@ -128,5 +128,24 @@ describe("splitSpeaker", () => {
     for (const text of ["[report.md](file:///tmp/report.md)", "[TODO] fix it", "[]\nhi", "[14:23] on my way", "[Ada<U1>] said no", "plain"]) {
       expect(splitSpeaker(text)).toEqual({ text });
     }
+  });
+});
+
+describe("readableTitle", () => {
+  it("drops the header a first-prompt title inherited and keeps what was said", () => {
+    expect(readableTitle("[operator<web> 12:01]\nfix   the\nparser")).toBe("fix the parser");
+    expect(readableTitle("[<U9>]\nfix it")).toBe("fix it");
+  });
+
+  it("hands back a title that never had a header, byte for byte", () => {
+    // The sidebar searches these strings; reflowing one for nothing would
+    // change what a query matches.
+    expect(readableTitle("[TODO] fix   it")).toBe("[TODO] fix   it");
+    expect(readableTitle(undefined)).toBeUndefined();
+  });
+
+  it("falls back to the raw title when the header was all there was", () => {
+    // Better a title only the operator can parse than a blank row.
+    expect(readableTitle("[operator<web> 12:01]\n")).toBe("[operator<web> 12:01]\n");
   });
 });

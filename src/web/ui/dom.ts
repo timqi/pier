@@ -2,7 +2,6 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { splitSpeaker } from "../../core/identity.js";
 
 export const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -25,21 +24,6 @@ export function h(tag: string, cls: string, ...children: (Node | string)[]): HTM
   if (cls) node.className = cls;
   node.append(...children);
   return node;
-}
-
-/** A session titled by its first prompt inherits that prompt's speaker header
- *  (core/identity.ts). That header is a token-saving device for the model, not
- *  something a list row should carry: every session opened here would read
- *  "operator: …", and the row already sits beside its channel. So the speaker
- *  comes off and what they said is the title. Shared so the sidebar, the
- *  header and the Console name a session the same way. */
-export function readableTitle(title: string | undefined): string | undefined {
-  if (!title) return title;
-  const { text } = splitSpeaker(title);
-  // No header — the title is what the person typed, and reflowing it would
-  // change what the sidebar's search is matching against for nothing.
-  if (text === title) return title;
-  return text.replace(/\s+/g, " ").trim() || title;
 }
 
 /** Last path segment — how every surface names a cwd or a file. */

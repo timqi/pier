@@ -121,3 +121,20 @@ export function splitSpeaker(text: string): Speaker {
     text: text.slice(m[0].length),
   };
 }
+
+/**
+ * A session titled by its first prompt inherits that prompt's header, and the
+ * header is for the model: anything a person reads — a list row, a session
+ * header, a notification on a phone — would say "operator: …" on every session
+ * the workbench ever opened. So the speaker comes off and what they said is
+ * the title. Here rather than in a UI module because the push notification
+ * needs the same answer and a second copy of this would drift (AGENTS.md §3).
+ */
+export function readableTitle(title: string | undefined): string | undefined {
+  if (!title) return title;
+  const { text } = splitSpeaker(title);
+  // No header — the title is what the person typed, and reflowing it would
+  // change what the sidebar's search is matching against for nothing.
+  if (text === title) return title;
+  return text.replace(/\s+/g, " ").trim() || title;
+}
