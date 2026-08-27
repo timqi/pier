@@ -186,6 +186,11 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
   // under a raw platform id — so it becomes the row's caption instead.
   const speaker = kind === "user" ? splitSpeaker(body) : null;
   const named = speaker?.id || speaker?.when ? speaker : null;
+  // A Console turn is headed `operator<web>` so a shared session can tell it
+  // from the IM speakers — but here the operator is the reader, and their own
+  // name over every message they typed is noise. The time still earned its
+  // line: identity.ts only wrote a header because the day or the gap changed.
+  const caption = named && (named.id === "web" ? (named.when ? { when: named.when } : null) : named);
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
   // Editing resends the raw text, markers and header included — stripping them
   // from the bubble must not detach the files, or drop who was speaking.
@@ -198,7 +203,7 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
     row.classList.add("flow-root");
     row.append(steps);
   }
-  if (named) row.append(speakerLine(named));
+  if (caption) row.append(speakerLine(caption));
   row.append(node);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
@@ -222,7 +227,7 @@ export function appendTurn(kind: keyof typeof ROW_STYLE, text: string, markdown 
 
 /** The speaker caption above an IM user message: who, when, and the mention id
  *  on hover — the one thing the header carries that a name cannot replace. */
-function speakerLine(speaker: Speaker): HTMLElement {
+function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
   const line = h("div", "mb-1 flex items-baseline gap-2 text-[11.5px] leading-tight");
   const who = speaker.name ?? speaker.id;
   if (who) {

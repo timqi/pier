@@ -9,6 +9,8 @@ import "./style.css";
 // One formatter from core, at runtime: how a token count is spelled is the
 // same question on every surface (session-header.ts asks it too).
 import { compact as tokens } from "../../core/reply.js";
+// Same reason: a header this deployment wrote is read back, not re-parsed here.
+import { splitSpeaker } from "../../core/identity.js";
 import { coalesce, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
@@ -214,9 +216,13 @@ function handleEvent(e: SessionEvent): void {
       renderBackgroundRun(e.run);
       break;
     case "user-message": {
-      maybeSetTitle(e.sessionId, e.text); // first prompt names the session
+      // The event carries core/identity.ts's speaker header; the ledger holds
+      // what was typed, and a session name is not a timestamp. Only the turn
+      // itself keeps the header — chat.ts renders it as the row's caption.
+      const typed = splitSpeaker(e.text).text;
+      maybeSetTitle(e.sessionId, typed); // first prompt names the session
       // Already on screen from our own optimistic render? Just reconcile.
-      if (reconcileOptimisticUser(e.text)) break;
+      if (reconcileOptimisticUser(typed)) break;
       finalizeStreaming(); // a delivered queue message ends the text block
       appendTurn("user", e.text);
       scrollBottom();
