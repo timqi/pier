@@ -11,7 +11,7 @@
 import { sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn } from "./form.js";
-import { closeMenu, openPanel } from "./menu.js";
+import { closeMenu, openMenu, openPanel } from "./menu.js";
 
 interface Listing {
   path: string;
@@ -135,6 +135,47 @@ export function openBrowser(
   void open(start);
 }
 
+/** A folder this surface already knows about, offered before the full tree. */
+export interface PathOption {
+  path: string;
+  hint?: string;
+}
+
+/**
+ * The paths a surface can name, then the tree for everything else. Every
+ * picker that has candidates shows them the same way — the Files view's
+ * worktrees and the New-session dialog's projects are the same question — so
+ * the menu lives here rather than once per caller.
+ */
+export function openPathMenu(
+  anchor: HTMLElement,
+  options: PathOption[],
+  current: string | undefined,
+  onPick: (path: string) => void,
+): void {
+  openMenu(anchor, [
+    ...options.map((o) => ({
+      label: o.path,
+      ...(o.hint ? { hint: o.hint } : {}),
+      checked: o.path === current,
+      onSelect: () => {
+        closeMenu();
+        onPick(o.path);
+      },
+    })),
+    { label: "Browse…", onSelect: () => openBrowser(anchor, current || undefined, onPick) },
+  ]);
+}
+
+/** Writes a picked path into a field the way a typing user would. */
+const writer =
+  (input: HTMLInputElement, onPick?: (path: string) => void) =>
+  (path: string): void => {
+    input.value = path;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    onPick?.(path);
+  };
+
 /**
  * A "Browse…" button for a path input. Picking a folder writes it into the
  * input and fires `onPick`, so an optimistic caller can mark itself dirty
@@ -146,13 +187,38 @@ export function browseButton(input: HTMLInputElement, onPick?: (path: string) =>
     "flex-none cursor-pointer rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-600 hover:bg-neutral-100",
   );
   // Start where the field points, falling back to the user's home directory.
-  button.onclick = () =>
-    openBrowser(button, input.value.trim() || undefined, (path) => {
-      input.value = path;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      onPick?.(path);
-    });
+  button.onclick = () => openBrowser(button, input.value.trim() || undefined, writer(input, onPick));
   return button;
+}
+
+/**
+ * The field *is* the button: clicking it offers the folders this surface knows
+ * (`options`, read at click time — they move while the form is open) with the
+ * tree one row below, and typing dismisses that, because someone naming a path
+ * is not choosing one. Returns the ▾ to sit at the end of the field's row,
+ * which is the whole affordance a select-shaped control needs.
+ */
+export function pathTrigger(
+  input: HTMLInputElement,
+  options: () => PathOption[],
+  onPick?: (path: string) => void,
+): HTMLElement {
+  const take = writer(input, onPick);
+  const open = (): void => {
+    const start = input.value.trim() || undefined;
+    const candidates = options();
+    if (candidates.length) return openPathMenu(input, candidates, start, take);
+    openBrowser(input, start, take);
+  };
+  input.onclick = open;
+  input.addEventListener("input", () => closeMenu());
+  const chevron = btn(
+    "\u25be",
+    "flex-none cursor-pointer rounded-md px-1.5 py-1 text-[12px] text-neutral-500 hover:bg-neutral-100",
+  );
+  chevron.title = "Recent projects and folders";
+  chevron.onclick = open;
+  return chevron;
 }
 
 /** Input + Browse button as one row, for surfaces building fields in code. */

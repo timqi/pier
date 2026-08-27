@@ -7,10 +7,9 @@
 // server-side to known project cwds, and nothing here writes.
 
 import { codePane, plainRows, type CodeRow } from "./code.js";
-import { openBrowser } from "./dir-picker.js";
+import { openPathMenu } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
 import { langFor } from "./highlight.js";
-import { closeMenu, openMenu } from "./menu.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
 import { letterKey } from "./shortcut.js";
 
@@ -621,18 +620,12 @@ export function createExplorerView(
     // is a list of places this view is not about. Those are one "Browse…"
     // away, and that panel takes a typed path.
     cwdChip.onclick = () =>
-      openMenu(cwdChip, [
-        ...git.worktrees.map((w) => ({
-          label: w.path,
-          ...(w.branch ? { hint: w.branch } : {}),
-          checked: w.path === cwd,
-          onSelect: () => {
-            closeMenu();
-            openDir(w.path); // hash first; show() reloads
-          },
-        })),
-        { label: "Browse…", onSelect: () => openBrowser(cwdChip, cwd || undefined, openDir) },
-      ]);
+      openPathMenu(
+        cwdChip,
+        git.worktrees.map((w) => ({ path: w.path, ...(w.branch ? { hint: w.branch } : {}) })),
+        cwd || undefined,
+        openDir, // hash first; show() reloads
+      );
     const closeBtn = h("button", "icon-btn ml-auto", "✕") as HTMLButtonElement;
     closeBtn.type = "button";
     closeBtn.title = "Close Files";

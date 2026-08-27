@@ -4,7 +4,7 @@
 // interactions back.
 
 import { sendJson } from "./api.js";
-import { browseButton } from "./dir-picker.js";
+import { pathTrigger, type PathOption } from "./dir-picker.js";
 import { $, basename, detailsRow, h, relTime } from "./dom.js";
 import { closeMenu, openMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
@@ -73,7 +73,6 @@ const archiveList = $("#archive-list");
 const archiveSearch = $<HTMLInputElement>("#archive-search");
 const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
-const knownProjects = $("#known-projects");
 
 // --- projects (the listed sessions, grouped by repository) --------------------------
 // Projects lists what it owns and is still showing — sessions created in Pier
@@ -191,6 +190,15 @@ function moved(keys: string[], key: string, target: string, after: boolean): str
 /** What the rail is showing: the listed sessions, arranged. */
 const pinnedProjects = (): [string, SessionInfo[]][] =>
   orderedProjects(deps.sessions().filter((s) => s.listed));
+
+/** Those projects as picker candidates: one row per checkout, branch as hint. */
+const projectPaths = (): PathOption[] =>
+  pinnedProjects().flatMap(([key, list]) =>
+    cwdsOf(key, list).map((path) => {
+      const branch = list.find((s) => s.cwd === path)?.branch;
+      return { path, ...(branch ? { hint: branch } : {}) };
+    }),
+  );
 
 /** Optimistic, like the pin toggle: the new places are on the rows and drawn
  *  before the write, and whatever the server says wins over them. A rejected
@@ -551,13 +559,6 @@ export function renderSessions(): void {
           ),
         ]),
   );
-  knownProjects.replaceChildren(
-    ...[...groupByCwd(sessions).keys()].map((cwd) => {
-      const opt = document.createElement("option");
-      opt.value = cwd;
-      return opt;
-    }),
-  );
   if (archiveDialog.open) renderArchive();
 }
 
@@ -586,6 +587,21 @@ const CONSOLE_TARGETS: { name: "activity" | "boards" | "settings"; label: string
 /** Rebuilt on every render; the index is what ↑/↓ and Enter address. */
 let rows: { el: HTMLElement; open: () => void }[] = [];
 let active = 0;
+
+/** Where the pointer last actually was; null until it has moved at all.
+ *
+ *  A browser re-runs hit-testing after the layout changes and delivers a mouse
+ *  move at the position the pointer already had — so a list appearing under a
+ *  resting cursor fires `mouseenter` on whatever row landed there. Opening ⌘K
+ *  with the mouse anywhere over the page handed the highlight to that row
+ *  instead of the first one, and every ↓ that scrolled the list did it again.
+ *  A move that did not move is not hover. */
+let pointer: { x: number; y: number } | null = null;
+
+/** Read before the document listener below updates it, so this is the *previous*
+ *  position: a genuine move differs from it, a synthetic one repeats it. */
+const pointerMoved = (ev: MouseEvent): boolean =>
+  pointer !== null && (pointer.x !== ev.clientX || pointer.y !== ev.clientY);
 
 // Three idioms for the same two moves. The arrows; readline's ⌃P/⌃N, for hands
 // that would rather not leave the home row; and ⌃J/⌃K, because ⌃N is a
@@ -636,8 +652,10 @@ function paletteRow(t: Target): HTMLElement {
     );
   }
   // Pointer and keyboard drive the same highlight, so the two never disagree
-  // about which row Enter would open.
-  li.onmouseenter = () => setActive(rows.findIndex((r) => r.el === li));
+  // about which row Enter would open — but only a pointer that moved counts.
+  li.onmouseenter = (ev) => {
+    if (pointerMoved(ev)) setActive(rows.findIndex((r) => r.el === li));
+  };
   li.onclick = t.open;
   return li;
 }
@@ -725,8 +743,16 @@ function toggleArchive(): void {
 
 export function initSidebar(d: SidebarDeps): void {
   deps = d;
-  // Same picker the channel config uses; the input keeps its own semantics.
-  $("#new-cwd-row").append(browseButton($<HTMLInputElement>("#new-cwd")));
+  // Bubble phase, so a row's own `mouseenter` still sees the previous position.
+  document.addEventListener(
+    "pointermove",
+    (ev) => (pointer = { x: ev.clientX, y: ev.clientY }),
+    { passive: true },
+  );
+  // The new session nearly always belongs to a project the rail already shows,
+  // so the field itself offers those directories in the rail's own order, with
+  // the folder tree under them; typing a path still works.
+  $("#new-cwd-row").append(pathTrigger($<HTMLInputElement>("#new-cwd"), projectPaths));
   const newBtn = $("#new-session");
   // Prefilled with wherever you are: the next session almost always belongs to
   // the project on screen, and the text is selected so typing another path
