@@ -425,11 +425,14 @@ function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
   // Kept has to be visible where the exemption applies, or the rail cannot say
   // why one row outlived the rest. Same idiom as a project's count: resident,
   // and out of the way of the controls on hover.
-  const badge = h(
-    "span",
-    "flex-none text-[10px] uppercase tracking-wide text-indigo-400 group-hover:hidden",
-    "kept",
-  );
+  // An emoji pushpin would draw its own colour and its own angle; the outline
+  // takes the row's grey and points its tip down, which is a pin that is in.
+  const badge = h("span", "flex-none text-neutral-400 group-hover:hidden");
+  badge.innerHTML =
+    `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">` +
+    `<path d="M8 11.33v3.34"/>` +
+    `<path d="M3.33 11.33h9.34v-1.17a1.33 1.33 0 0 0-.74-1.19l-1.19-.6A1.33 1.33 0 0 1 10 7.17V4h.67a1.33 1.33 0 0 0 0-2.67H5.33A1.33 1.33 0 0 0 5.33 4H6v3.17a1.33 1.33 0 0 1-.74 1.19l-1.19.6a1.33 1.33 0 0 0-.74 1.19Z"/></svg>`;
+  badge.title = "Kept in Projects";
   li.append(
     stateDot(s),
     h("span", "truncate", s.title ?? "untitled"),
