@@ -11,7 +11,7 @@ import { $, basename, copyBtn, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel } from "./shortcut.js";
-import { setPinned, type SessionInfo } from "./sidebar.js";
+import { leaseDaysLeft, renameSession, setKept, setPinned, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
@@ -43,7 +43,7 @@ export function initHeader(d: HeaderDeps): void {
     const s = deps.currentSession();
     if (!s) return;
     closeMenu();
-    void setPinned(s, !s.pinned);
+    void setPinned(s, !s.listed);
   }, modal);
   chord(FILES_KEY, () => {
     const s = deps.currentSession();
@@ -274,14 +274,39 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       onSelect: () => sessionInfo(anchor, s),
     },
     {
-      label: s.pinned ? "Remove from Projects" : "Pin to Projects",
-      hint: current ? chordLabel(PIN_KEY) : "",
-      checked: s.pinned,
+      label: "Rename…",
       onSelect: () => {
         closeMenu();
-        void setPinned(s, !s.pinned);
+        void renameSession(s);
       },
     },
+    // Three rows, three answers to "how long does this stay in Projects": now
+    // (Done), a while (the default, which says how long), forever (Keep). The
+    // word for leaving is the one the rail's own ✓ button uses — one action,
+    // one name, whichever surface you reach it from.
+    {
+      label: s.listed ? "Done — remove from Projects" : "Pin to Projects",
+      hint: current ? chordLabel(PIN_KEY) : "",
+      // No checkmark: it would sit on a verb, so a listed session reads as
+      // "already removed". The label is the state, and it already switched.
+      onSelect: () => {
+        closeMenu();
+        void setPinned(s, !s.listed);
+      },
+    },
+    // Only where it can mean anything: a session Projects does not hold has no
+    // lease to be exempt from.
+    ...(s.listed
+      ? [{
+        label: "Keep — never let it age out",
+        hint: s.kept ? "" : `leaves in ${leaseDaysLeft(s)}d`,
+        checked: s.kept,
+        onSelect: () => {
+          closeMenu();
+          void setKept(s, !s.kept);
+        },
+      }]
+      : []),
     {
       label: "Model",
       hint: current ? (currentModel?.id ?? "…") : "",

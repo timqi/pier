@@ -23,7 +23,7 @@ const tables = (db: DatabaseSync): string[] =>
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(6);
+    expect(version(db)).toBe(10);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -33,6 +33,7 @@ describe("openDb", () => {
       "push_subscriptions",
       "receipts",
       "restart_ledger",
+      "session_index",
       "session_state",
       "settings",
       "task_groups",
@@ -43,7 +44,19 @@ describe("openDb", () => {
     expect(
       (db.prepare("PRAGMA table_info(session_state)").all() as unknown as { name: string }[])
         .map((column) => column.name),
-    ).toEqual(["session_id", "pinned", "unread", "cwd", "title", "created_at", "sort", "project_sort"]);
+    ).toEqual([
+      // The summary a transcript already carries (title, created_at,
+      // last_active) is not here: migration 9 dropped it. cwd stays as the key
+      // a project's manual place is stamped on.
+      "session_id",
+      "pinned",
+      "unread",
+      "cwd",
+      "sort",
+      "project_sort",
+      "kept",
+      "pinned_at",
+    ]);
     db.close();
   });
 
@@ -54,7 +67,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(6);
+    expect(version(second)).toBe(10);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -67,7 +80,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 6/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 10/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {

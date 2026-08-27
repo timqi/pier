@@ -27,9 +27,11 @@ import type {
   ThinkingLevel,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
+import { SESSION_TITLE_MAX } from "../limits.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
-import type { SessionStateStore } from "./session-state.js";
+import { RepoIndex } from "./repos.js";
+import { isListed, type SessionFlags, type SessionStateStore } from "./session-state.js";
 import type { SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
@@ -134,8 +136,13 @@ export function createServer(
     }
     if (!runningNow.delete(e.sessionId)) return;
     state.setUnread(e.sessionId, true);
+    // The Projects lease renews itself: the turn just wrote the transcript, and
+    // its mtime is what the lease is counted from.
     hub.emitWorkspace({ type: "sessions-changed" });
   });
+
+  // Repository identity per project directory, refreshed off the request path.
+  const repos = new RepoIndex(() => hub.emitWorkspace({ type: "sessions-changed" }));
 
   /** Background runs this session launched that are still in flight. */
   const activeRuns = (id: string): number =>
@@ -150,11 +157,12 @@ export function createServer(
   const nascent = new Map<string, { cwd: string; createdAt: number }>();
 
   /** `ensure`, plus ghost cleanup. A session created and never messaged does
-   *  not survive a restart or an eviction (Pi persisted nothing), but the rail
-   *  entry written at create time does — left alone, clicking it 404s forever.
-   *  The load path is where a ghost is discovered, so it is where the
-   *  remembered row is dropped and every rail told; the 404 then says what
-   *  happened instead of looking like a crash (§5b). */
+   *  not survive a restart or an eviction (Pi persisted nothing), but while
+   *  this process lives it is in `nascent` and therefore in the rail — left
+   *  alone, clicking it 404s forever. The load path is where a ghost is
+   *  discovered, so it is where the entry and its pin are dropped and every
+   *  rail told; the 404 then says what happened instead of looking like a
+   *  crash (§5b). */
   const ensureLoadable = async (id: string): Promise<AgentSession> => {
     try {
       return await ensure(id);
@@ -169,51 +177,73 @@ export function createServer(
     }
   };
 
-  // listAll parses every transcript. Concurrent consumers share that work and
-  // the metadata repair below, whatever the factory behind the seam retains of
-  // its own scan; nothing here is cached past the last of them.
+  // A listing stats every session file and parses whatever grew — milliseconds
+  // warm, one scan cold. Concurrent consumers share it, whatever the factory
+  // behind the seam retains of its own; nothing here is cached past the last
+  // of them.
   let listing: Promise<SessionSummary[]> | undefined;
-  let projectBackfillNeeded = state.needsProjectBackfill();
   const listSessions = (): Promise<SessionSummary[]> =>
-    listing ??= factory.list()
-      .then((rows) => {
-        state.remember(rows);
-        return rows;
-      })
-      .finally(() => {
-        listing = undefined;
-      });
+    listing ??= factory.list().finally(() => {
+      listing = undefined;
+    });
 
-  // `order` is where the workbench was arranged to put this row, not a fact
-  // about the Pi session — it rides along so one Projects read is enough.
+  /** Every session a surface may show: what Pi has written, plus the ones
+   *  created here that it has not persisted yet. A nascent session's own
+   *  creation time stands in for a transcript mtime it does not have — it was
+   *  made seconds ago, which is the warmest a lease gets. */
+  const allSessions = async (): Promise<SessionSummary[]> => {
+    const sessions = await listSessions();
+    for (const s of sessions) nascent.delete(s.id);
+    // A session created but never prompted would otherwise be listed forever.
+    for (const [id, n] of nascent) if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
+    return [
+      ...[...nascent].map(([id, n]) => ({ id, ...n, modified: n.createdAt })),
+      ...sessions,
+    ];
+  };
+
+  // One session as every list renders it: the summary, what the workbench
+  // decided about it, and what is true of it right now.
   const present = (
-    s: SessionSummary,
-    pinned: boolean,
-    unread: boolean,
-    order: { sort?: number; projectSort?: number } = {},
-  ) => ({
-    ...s,
-    ...order,
-    state: router.stateOf(s.id) ?? "idle",
-    pinned,
-    unread,
-    channel: channelOf?.(s.id) ?? "web",
-    activeRuns: activeRuns(s.id),
-  });
+    { modified, ...s }: SessionSummary,
+    own: SessionFlags | undefined,
+    now: number = Date.now(),
+  ) => {
+    // The one thing the lease is counted from, computed once and spent twice:
+    // the later of the transcript being written and a hand pinning the session.
+    // Two computations would let the rail list a row for a week while its
+    // tooltip says it leaves today.
+    const lastActive = Math.max(modified ?? s.createdAt, own?.pinnedAt ?? 0);
+    return {
+      ...s,
+      lastActive,
+      ...(own?.sort === undefined ? {} : { sort: own.sort }),
+      ...(own?.projectSort === undefined ? {} : { projectSort: own.projectSort }),
+      // Which repository the directory belongs to, on every list and not only
+      // on the rail's: All sessions replaces the client's whole list, so a row
+      // without it there un-groups the worktrees the rail had just grouped.
+      // Whatever is known now — the probe is never waited on, and its answer
+      // arrives as a `sessions-changed`.
+      ...repos.get(s.cwd),
+      state: router.stateOf(s.id) ?? "idle",
+      listed: isListed(own, lastActive, now),
+      unread: own?.unread ?? false,
+      kept: own?.kept ?? false,
+      channel: channelOf?.(s.id) ?? "web",
+      activeRuns: activeRuns(s.id),
+    };
+  };
 
+  // The rail: the same rows as the full list, minus everything Projects is not
+  // showing. One source, one shape — the rail used to read a second copy of
+  // the summaries out of SQLite, which is what had to be kept in step.
   app.get("/api/projects", async (c) => {
-    // Existing databases have pin booleans but no summaries. Pay one legacy
-    // scan, fill those rows, then every later Projects read is SQLite-only.
-    if (projectBackfillNeeded) {
-      await listSessions();
-      // Do not retry on every request, and do not clear a pin whose transcript
-      // happened to be unreadable. A later explicit full listing can repair it.
-      projectBackfillNeeded = false;
-    }
+    const flags = state.flags();
+    const now = Date.now();
     return c.json(
-      state.projects().map(({ sort, projectSort, ...s }) =>
-        present(s, true, s.unread, { sort, projectSort })
-      ),
+      (await allSessions())
+        .map((s) => present(s, flags.get(s.id), now))
+        .filter((row) => row.listed),
     );
   });
 
@@ -240,20 +270,9 @@ export function createServer(
   });
 
   app.get("/api/sessions", async (c) => {
-    const sessions = await listSessions();
-    for (const s of sessions) nascent.delete(s.id);
-    // A session created but never prompted would otherwise be listed forever.
-    for (const [id, n] of nascent) if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
     const flags = state.flags();
-    return c.json(
-      [...[...nascent].map(([id, n]) => ({ id, ...n })), ...sessions].map((s) => {
-        const row = flags.get(s.id);
-        return present(s, row?.pinned ?? false, row?.unread ?? false, {
-          sort: row?.sort,
-          projectSort: row?.projectSort,
-        });
-      }),
-    );
+    const now = Date.now();
+    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), now)));
   });
 
   app.post("/api/sessions", async (c) => {
@@ -265,7 +284,7 @@ export function createServer(
     nascent.set(session.id, { cwd: body.cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
     // Created here = part of the workspace; pinning is what Projects lists.
-    state.pin({ id: session.id, cwd: body.cwd, createdAt }, true);
+    state.pin(session.id, body.cwd, true);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
@@ -283,24 +302,30 @@ export function createServer(
 
   app.post("/api/sessions/:id/pin", async (c) => {
     const body = await c.req.json().catch(() => null);
-    if (
-      typeof body?.pinned !== "boolean" ||
-      typeof body.cwd !== "string" || !body.cwd ||
-      typeof body.createdAt !== "number" || !Number.isFinite(body.createdAt) ||
-      (body.title !== undefined && typeof body.title !== "string")
-    ) {
-      return c.json({ error: "pinned and session summary required" }, 400);
-    }
-    // The summary came from this authenticated surface's own list. Persisting
-    // it here makes the next Projects read independent of Pi's transcript scan.
-    state.pin({
-      id: c.req.param("id"),
-      cwd: body.cwd,
-      createdAt: body.createdAt,
-      ...(body.title ? { title: body.title.slice(0, 80) } : {}),
-    }, body.pinned);
+    if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
+    const id = c.req.param("id");
+    // The directory comes from the listing, not from the client that clicked:
+    // it is the one fact this row keeps about the session, it is the key a
+    // project's manual place is stamped on, and the browser is not where a
+    // path should come from when the server already knows it.
+    const cwd = (await factory.find(id))?.cwd ?? nascent.get(id)?.cwd;
+    if (!cwd) return c.json({ error: `session ${id} has no directory Pier can find` }, 404);
+    state.pin(id, cwd, body.pinned);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ pinned: body.pinned });
+  });
+
+  // Kept = exempt from the lease. Separate from pin because they answer
+  // different questions: pin is whether Projects holds the session at all,
+  // keep is whether going quiet is allowed to end that.
+  app.post("/api/sessions/:id/keep", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.kept !== "boolean") return c.json({ error: "kept required" }, 400);
+    if (!state.keep(c.req.param("id"), body.kept)) {
+      return c.json({ error: "session is not in Projects" }, 404);
+    }
+    hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ kept: body.kept });
   });
 
   // The two responses big enough to matter: a transcript, and one turn's tool
@@ -418,7 +443,6 @@ export function createServer(
       text: body.text,
       mode,
     });
-    if (state.title(id, body.text)) hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ sessionId }, 202);
   });
 
@@ -498,6 +522,22 @@ export function createServer(
       () => c.json({ ok: true }, 202),
       (err: unknown) => c.json({ error: String(err) }, 409),
     );
+  });
+
+  // A name, so a title is what you called it instead of the first 80
+  // characters you happened to type. Not refused while streaming: a rename has
+  // nothing to do with the turn running, and the transcript takes an append.
+  guarded(app, "POST", "/api/sessions/:id/rename", 404, async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.name !== "string") return c.json({ error: "name required" }, 400);
+    const id = c.req.param("id");
+    await (await ensure(id)).rename(body.name.trim().slice(0, SESSION_TITLE_MAX));
+    // Nothing to write and nothing to report: the name went into the
+    // transcript, which is what every list reads. The event is how the
+    // surfaces learn to re-read it, and the seam dropped its retained scan on
+    // the way out so the re-read sees the new name.
+    hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ ok: true });
   });
 
   app.post("/api/sessions/:id/abort", async (c) => {

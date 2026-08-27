@@ -11,9 +11,12 @@ table and growing it past 500 means logic is leaking in.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/sessions` | `AgentFactory.list()` + live state from router + `pinned` from the pin store |
+| `GET /api/sessions` | `AgentFactory.list()` + live state from router + `listed`/`kept`/`unread` from the pin store (`listed` = in Projects now: owned and either kept or still on lease, counted from the transcript's mtime) |
+| `GET /api/projects` | the same rows, filtered to `listed` — the rail reads no second store |
 | `POST /api/sessions` | body `{cwd?}` → create session (auto-pinned), returns `{id}` |
-| `POST /api/sessions/:id/pin` | body `{pinned}` → add/remove from Projects, returns `{pinned}` |
+| `POST /api/sessions/:id/pin` | body `{pinned}` → add/remove from Projects, returns `{pinned}`; the directory it records comes from the listing, 404 when nothing can place the session |
+| `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
+| `POST /api/sessions/:id/keep` | body `{kept}` → exempt the session from the Projects lease, returns `{kept}`; 404 if Projects does not hold it |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn and re-dispatch the new text; 409 while streaming |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown |
@@ -82,9 +85,23 @@ the list). `npm run dev:web` gives HMR with an
 Single page, with chat plus Console views (the raw timeline pane was folded into
 per-turn Activity groups):
 
-- **Projects** (left): only *pinned* sessions, grouped by project (derived from
-  session cwd). Sessions created in Pier are pinned automatically; everything
-  else stays out of the sidebar. Each project is a collapsible group (collapse
+- **Projects** (left): a working set, not an archive — the pinned sessions
+  whose lease is still warm (the transcript written within `PROJECT_LEASE_MS`,
+  which a finished turn renews by writing it) plus the `kept` ones, which never
+  expire. A hand restarts the lease too: pinning a session back from All
+  sessions, or toggling Keep, stamps `pinned_at`, and the lease runs from
+  whichever is later — otherwise pinning a month-old session would answer the
+  click with a row the next read drops. The rows are the listing joined with what `session_state` owns:
+  no second copy of a summary, so nothing to keep in step. Grouped
+  by project (derived from session cwd). Sessions created in Pier are pinned
+  automatically; everything else stays out of the sidebar. Expiry only stops
+  *listing* a row — membership, order and the unread mark survive, so one more
+  turn brings it back; the row's `✓` gives membership up for good and All
+  sessions pins it again. One group is one *repository*, not one directory:
+  `web/repos.ts` reports the common git dir behind each cwd (off the request
+  path — the first read answers without it and a `sessions-changed` regroups
+  the rail), so every worktree of a repo lands in the same group with its
+  branch on the row, and "New session" offers one row per checkout. Each project is a collapsible group (collapse
   state in `localStorage`) whose header shows the session count, or a green dot
   while any of its sessions stream; rows carry a state dot, relative time and a
   hover `⋯` opening the session menu. The section header carries the only two
@@ -92,10 +109,11 @@ per-turn Activity groups):
   "New session" dialog with cwd input + known-project suggestions.
 - **All sessions** (search icon → modal): everything `AgentFactory.list()`
   knows about, searchable over title + cwd, grouped by project, each row with a
-  pin toggle; click opens the session. Pins and the unread dot are the only
-  UI-owned persisted state — flags on the `session_state` table
-  (`src/web/session-state.ts`),
-  outside the seams, injected into `createServer` so tests stay hermetic.
+  pin toggle; click opens the session. Pins, keeps, the unread dot and the two
+  manual orders are the only UI-owned persisted state — ownership flags on the
+  `session_state` table (`src/web/session-state.ts`), everything else derived
+  from the transcript; outside the seams, injected into `createServer` so tests
+  stay hermetic.
 - **Snapshot then deltas**: the stream carries deltas only, so a fresh client
   starts from `/history` — transcript (including each assistant turn's `steps`,
   the thinking/tool activity rebuilt from the Pi transcript), run `state` and

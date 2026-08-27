@@ -32,6 +32,13 @@ const MAX_SUBSCRIPTIONS = 20;
 const SETTLE_MS = 6_000;
 const MAX_BODY_CHARS = 160;
 
+/** What to call the session where there is room for one line. Falls back to the
+ *  project directory, then to the fact that it is a session at all: a
+ *  notification with no title reads as a browser bug rather than as an unnamed
+ *  session — and a listing that could not answer must not silence the push. */
+const label = (s?: { title?: string; cwd: string }): string =>
+  s?.title || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
+
 export interface PushSubscriptionRow extends PushTarget {
   /** The browser that subscribed, as it described itself — the only way to
    *  tell two rows apart in the Console. */
@@ -119,8 +126,10 @@ export interface PushDeps {
    *  or nothing when it answers none. A turn Pier already delivered to a chat
    *  is not notified about again. */
   channelOf(sessionId: string): string | undefined;
-  /** What to call the session in the notification's title. */
-  name(sessionId: string): string;
+  /** The session as the listing knows it, for what to call it. Async because
+   *  the answer comes off disk (a stat, warm) rather than out of a table this
+   *  process keeps in step. */
+  summary(sessionId: string): Promise<{ title?: string; cwd: string } | undefined>;
   /** This Pier's public URL, for the VAPID `sub` claim (a push service wants
    *  a way to contact whoever is sending) and for nothing else. */
   publicUrl(): string;
@@ -156,7 +165,7 @@ function parseTarget(body: unknown): PushTarget | null {
 }
 
 export function registerPushRoutes(app: Hono, deps: PushDeps): void {
-  const { store, hub, unread, channelOf, name, publicUrl, settleMs = SETTLE_MS } = deps;
+  const { store, hub, unread, channelOf, summary, publicUrl, settleMs = SETTLE_MS } = deps;
 
   /** Who a push service should complain to. It has to be a mailto: or https:
    *  URL or Apple rejects the token outright, so an instance that never had
@@ -243,12 +252,18 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
         log.debug(`no push for ${e.sessionId}: a client reported the turn as seen`);
         return; // somebody has it on screen
       }
-      void deliver({
-        title: name(e.sessionId),
-        body: preview(text) || "Turn finished.",
-        url: `/#/session/${encodeURIComponent(e.sessionId)}`,
-        tag: e.sessionId,
-      }).catch((err: unknown) => log.error("delivering a push failed", err));
+      // One async step before the send, so a failure in *either* half is
+      // reported: a notification nobody received and one nobody sent look
+      // identical from here, and "why did my phone stay quiet" is the only
+      // question this feature is ever asked (§5b).
+      void (async () => {
+        await deliver({
+          title: label(await summary(e.sessionId)),
+          body: preview(text) || "Turn finished.",
+          url: `/#/session/${encodeURIComponent(e.sessionId)}`,
+          tag: e.sessionId,
+        });
+      })().catch((err: unknown) => log.error(`delivering a push for ${e.sessionId} failed`, err));
     }, settleMs);
     // A pending notification must never hold a shutting-down process open.
     timer.unref?.();

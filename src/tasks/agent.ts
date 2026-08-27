@@ -122,9 +122,8 @@ export class AgentTaskRunner {
     if (run.targetSessionId) {
       return this.router.ensure({ channelId: "task", conversationId: run.targetSessionId });
     }
-    const listed = await this.factory.list();
     const source = run.sourceSessionId
-      ? listed.find((session) => session.id === run.sourceSessionId)
+      ? await this.factory.find(run.sourceSessionId)
       : undefined;
     const policy = action.session;
     let cwd: string;
@@ -134,7 +133,7 @@ export class AgentTaskRunner {
     } else if (policy.mode === "fresh") {
       cwd = policy.cwd;
     } else if (policy.mode === "reuse") {
-      cwd = listed.find((session) => session.id === policy.sessionId)?.cwd ?? "";
+      cwd = (await this.factory.find(policy.sessionId))?.cwd ?? "";
     } else {
       cwd = policy.cwd ?? source?.cwd ?? "";
     }

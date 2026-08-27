@@ -19,6 +19,8 @@ interface GitInfo {
   branch: string | null;
   refs: { name: string; subject: string }[];
   commits: Commit[];
+  /** Every checkout of this repository, this one included — the folder menu. */
+  worktrees: { path: string; branch?: string }[];
 }
 
 const IMG_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
@@ -86,7 +88,6 @@ const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonE
 
 export function createExplorerView(
   root: HTMLElement,
-  projectCwds: () => string[],
   /** The chat this was opened from: its id keys the remembered folder+diff,
    *  its cwd is where a bare open lands the first time. */
   session: () => { id: string; cwd: string } | undefined,
@@ -97,7 +98,7 @@ export function createExplorerView(
 ): ConsoleView {
   let cwd = "";
   let sessionKey = ""; // whose folder+diff is on screen, and where it is saved
-  let git: GitInfo = { branch: null, refs: [], commits: [] };
+  let git: GitInfo = { branch: null, refs: [], commits: [], worktrees: [] };
   let base = "HEAD";
   let head = ""; // "" = working tree
   let changes = new Map<string, { status: string; add: number; del: number }>();
@@ -614,17 +615,20 @@ export function createExplorerView(
     const cwdChip = chip(cwd || "Choose a folder…", "neutral");
     cwdChip.className += " max-w-72";
     cwdChip.title = "Switch folder";
-    // Projects first, because that is the usual answer — but a session's work
-    // often lands in a worktree or a sibling of its cwd, so any readable
-    // directory is one "Browse…" away.
+    // Every checkout of the repository on screen, and nothing else. Parallel
+    // work means hopping between worktrees of one project, which is worth a
+    // click; a list of every directory the instance has ever had a session in
+    // is a list of places this view is not about. Those are one "Browse…"
+    // away, and that panel takes a typed path.
     cwdChip.onclick = () =>
       openMenu(cwdChip, [
-        ...projectCwds().map((c) => ({
-          label: c,
-          checked: c === cwd,
+        ...git.worktrees.map((w) => ({
+          label: w.path,
+          ...(w.branch ? { hint: w.branch } : {}),
+          checked: w.path === cwd,
           onSelect: () => {
             closeMenu();
-            openDir(c); // hash first; show() reloads
+            openDir(w.path); // hash first; show() reloads
           },
         })),
         { label: "Browse…", onSelect: () => openBrowser(cwdChip, cwd || undefined, openDir) },
@@ -676,7 +680,7 @@ export function createExplorerView(
     try {
       git = await getJson<GitInfo>(api("git", {}));
     } catch (err) {
-      git = { branch: null, refs: [], commits: [] };
+      git = { branch: null, refs: [], commits: [], worktrees: [] };
       viewer.replaceChildren(note(String(err), "text-red-600"));
     }
     // The diff this session last chose here, when it still resolves.
@@ -691,11 +695,14 @@ export function createExplorerView(
   return consoleView(root, (arg) => {
     const s = session();
     const id = s?.id ?? "";
-    // Any absolute path is addressable; a stale or relative one falls back to
-    // what this session last browsed, then to its own project directory.
+    // Any absolute path is addressable.
+    // A stale or relative argument falls back to what this session last
+    // browsed, then to its own project directory. No first-project fallback:
+    // landing in somebody else's repository is worse than the empty chip that
+    // asks which folder you meant.
     const next = arg?.startsWith("/")
       ? arg
-      : (id === sessionKey ? cwd : "") || readPrefs(id)?.cwd || s?.cwd || projectCwds()[0] || "";
+      : (id === sessionKey ? cwd : "") || readPrefs(id)?.cwd || s?.cwd || "";
     if (next === cwd && id === sessionKey && tree.childElementCount) {
       // Back to the view: keep tree + selection, but re-read git and the diff —
       // both moved while it was away.

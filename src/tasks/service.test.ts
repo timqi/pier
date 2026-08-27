@@ -76,6 +76,7 @@ function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
     clearQueue: async () => ({ steering: [], followUp: [] }),
     rewindToUserTurn: async () => {},
     compact: async () => {},
+    rename: async () => {},
     prompt: runPrompt,
     steer: async () => {},
     followUp: async () => {},
@@ -110,6 +111,9 @@ function setup(session = fakeSession()) {
     fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
     list: vi.fn(async () => [{ id: session.id, cwd, createdAt: 1 }]),
+    // Derived from the same list, like the real seam: a fake that answers the
+    // two independently can agree with nothing.
+    find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
@@ -796,6 +800,7 @@ describe("task service", () => {
       fork: vi.fn(async () => child),
       resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
       list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
+      find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
     };
     const hub = new EventHub();
     const router = new Router(hub, (key) => factory.resume(key.conversationId));

@@ -1,6 +1,7 @@
-// The left rail: pinned sessions grouped by cwd (Projects), the search palette
-// that reaches everything (⌘K), and the New-session dialog. main.ts owns the
-// session list; this module renders it and reports interactions back.
+// The left rail: the sessions Projects is listing, grouped by repository, the
+// search palette that reaches everything (⌘K), and the New-session dialog.
+// main.ts owns the session list; this module renders it and reports
+// interactions back.
 
 import { sendJson } from "./api.js";
 import { browseButton } from "./dir-picker.js";
@@ -9,6 +10,10 @@ import { closeMenu, openMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
+// A value import, unlike the type-only line above: src/limits.ts is a leaf of
+// numbers with no runtime behind it, and a hand-copied 7 in this file is
+// exactly the drift it exists to stop.
+import { PROJECT_LEASE_MS } from "../../limits.js";
 
 /** GET /api/projects or /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -17,9 +22,15 @@ export interface SessionInfo {
   createdAt: number;
   title?: string;
   state: SessionState;
-  pinned: boolean;
+  /** In Projects *now*. Not the database's `pinned`, which is ownership and
+   *  outlives an expired lease: this is what the rail draws. */
+  listed: boolean;
   /** Turn finished, no client has viewed it yet (server-side, all clients agree). */
   unread: boolean;
+  /** Exempt from the Projects lease: it stays in the rail however quiet it goes. */
+  kept: boolean;
+  /** When its last turn finished — what the lease is counted from. */
+  lastActive?: number;
   /** The IM channel that owns it, or `"web"` for everything else. */
   channel: string;
   /** Background runs this session launched that are still in flight. */
@@ -29,6 +40,11 @@ export interface SessionInfo {
   /** Where its *project* was dragged to; every row of a cwd carries the same
    *  one, so a session's arrival never moves the project it arrived in. */
   projectSort?: number;
+  /** The repository behind `cwd` — shared by every worktree of it, which is
+   *  what makes them one project here. Absent when cwd is not a checkout. */
+  repo?: string;
+  /** Which branch that checkout has, when it has one. */
+  branch?: string;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -59,9 +75,10 @@ const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 const knownProjects = $("#known-projects");
 
-// --- projects (pinned sessions, grouped by cwd) ------------------------------------
-// Projects lists pinned sessions only — those created in Pier (auto-pinned) or
-// pinned from the All-sessions dialog — so Pi history never floods the sidebar.
+// --- projects (the listed sessions, grouped by repository) --------------------------
+// Projects lists what it owns and is still showing — sessions created in Pier
+// (pinned on creation) or pinned from the All-sessions dialog, minus the ones
+// whose lease ran out — so Pi history never floods the sidebar.
 
 const COLLAPSED_KEY = "pier.collapsedProjects";
 const collapsed = new Set<string>(loadCollapsed());
@@ -81,14 +98,48 @@ function setCollapsed(cwd: string, closed: boolean): void {
   localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
 }
 
-export function groupByCwd(list: SessionInfo[]): Map<string, SessionInfo[]> {
+function groupBy(list: SessionInfo[], key: (s: SessionInfo) => string): Map<string, SessionInfo[]> {
   const groups = new Map<string, SessionInfo[]>();
   for (const s of list) {
-    const existing = groups.get(s.cwd);
+    const at = key(s);
+    const existing = groups.get(at);
     if (existing) existing.push(s);
-    else groups.set(s.cwd, [s]);
+    else groups.set(at, [s]);
   }
   return groups;
+}
+
+/** Distinct directories, for the things that address one: the New-session
+ *  suggestions and the Files/Terminal pickers. */
+export const groupByCwd = (list: SessionInfo[]): Map<string, SessionInfo[]> =>
+  groupBy(list, (s) => s.cwd);
+
+// --- one project, however many checkouts ---------------------------------------------
+// A project is a repository, not a directory. Parallel work means worktrees —
+// sibling checkouts of one repo, one branch each — and one rail entry per
+// directory turned a repo worked on three branches into three unrelated
+// projects, each with its own place in the order. The grouping key is the
+// common git dir the server reports; a directory that is not a checkout is its
+// own project, exactly as before.
+
+const groupKey = (s: SessionInfo): string => s.repo ?? s.cwd;
+
+/** The working copy a group key names, when it names one: the key is either a
+ *  repository's common git dir (`…/thing/.git`) or a plain directory. */
+const mainCheckout = (key: string): string | undefined =>
+  key.endsWith("/.git") ? key.slice(0, -5) : undefined;
+
+/** What to call the group: the repository's own directory, not whichever
+ *  worktree happens to sort first — `pier`, never `pier.some-branch`. */
+const groupName = (key: string, list: SessionInfo[]): string =>
+  basename(mainCheckout(key) ?? list[0]?.cwd ?? key);
+
+/** The checkouts in a group, main one first when it is among them: the actions
+ *  that take a single directory (files, terminal) mean that one. */
+function cwdsOf(key: string, list: SessionInfo[]): string[] {
+  const main = mainCheckout(key);
+  const cwds = [...new Set(list.map((s) => s.cwd))];
+  return main && cwds.includes(main) ? [main, ...cwds.filter((c) => c !== main)] : cwds;
 }
 
 // --- manual order -------------------------------------------------------------------
@@ -111,12 +162,21 @@ function byRank(a: number | undefined, b: number | undefined): number {
  *  and when a session was created (newest first) — both immutable, so nothing
  *  below moves because something new appeared above it. */
 function orderedProjects(list: SessionInfo[]): [string, SessionInfo[]][] {
-  const groups = [...groupByCwd(list)].map(([cwd, rows]): [string, SessionInfo[]] => [
-    cwd,
-    [...rows].sort((a, b) => byRank(a.sort, b.sort) || b.createdAt - a.createdAt),
+  const groups = [...groupBy(list, groupKey)].map(([key, rows]): [string, SessionInfo[]] => [
+    key,
+    // Same repo, several checkouts: the branch groups the rows inside the
+    // project, so switching between two worktrees is not a scan of the list.
+    [...rows].sort((a, b) =>
+      (a.branch ?? a.cwd).localeCompare(b.branch ?? b.cwd) ||
+      byRank(a.sort, b.sort) || b.createdAt - a.createdAt
+    ),
   ]);
-  const rank = (rows: SessionInfo[]): number | undefined =>
-    rows.find((s) => s.projectSort !== undefined)?.projectSort;
+  // The lowest place any of a group's checkouts was given — not the first one
+  // found, which for a multi-worktree project depends on the row order above.
+  const rank = (rows: SessionInfo[]): number | undefined => {
+    const places = rows.map((s) => s.projectSort).filter((at) => at !== undefined);
+    return places.length ? Math.min(...places) : undefined;
+  };
   const born = (rows: SessionInfo[]): number => Math.min(...rows.map((s) => s.createdAt));
   return groups.sort(([, a], [, b]) => byRank(rank(a), rank(b)) || born(b) - born(a));
 }
@@ -128,9 +188,9 @@ function moved(keys: string[], key: string, target: string, after: boolean): str
   return rest;
 }
 
-/** What the rail is showing: the pinned sessions, arranged. */
+/** What the rail is showing: the listed sessions, arranged. */
 const pinnedProjects = (): [string, SessionInfo[]][] =>
-  orderedProjects(deps.sessions().filter((s) => s.pinned));
+  orderedProjects(deps.sessions().filter((s) => s.listed));
 
 /** Optimistic, like the pin toggle: the new places are on the rows and drawn
  *  before the write, and whatever the server says wins over them. A rejected
@@ -154,16 +214,23 @@ function place(
   }, reload);
 }
 
-function dropSession(cwd: string, id: string, target: string, after: boolean): void {
-  const rows = pinnedProjects().find(([c]) => c === cwd);
+function dropSession(key: string, id: string, target: string, after: boolean): void {
+  const rows = pinnedProjects().find(([k]) => k === key);
   if (!rows) return;
   const sessions = moved(rows[1].map((s) => s.id), id, target, after);
   place(sessions, (s) => s.id, (s, at) => (s.sort = at), { sessions });
 }
 
-function dropProject(cwd: string, target: string, after: boolean): void {
-  const projects = moved(pinnedProjects().map(([c]) => c), cwd, target, after);
-  place(projects, (s) => s.cwd, (s, at) => (s.projectSort = at), { projects });
+function dropProject(key: string, target: string, after: boolean): void {
+  const groups = pinnedProjects();
+  const order = moved(groups.map(([k]) => k), key, target, after);
+  // The server stamps a place per *directory*, so a group ships every checkout
+  // it holds, in its own order: no worktree can be dragged out of its repo.
+  const projects = order.flatMap((k) => {
+    const rows = groups.find(([g]) => g === k);
+    return rows ? cwdsOf(k, rows[1]) : [];
+  });
+  place(order, groupKey, (s, at) => (s.projectSort = at), { projects });
 }
 
 /** Which row is being dragged, and which list it may be dropped in: a session
@@ -215,7 +282,28 @@ function sortable(row: HTMLElement, list: string, key: string, drop: (target: st
 
 /** Row action revealed on hover (resident on touch, which has no hover). */
 const HOVER_BTN =
-  "ml-auto hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block";
+  "hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block";
+
+/** Whole days before the lease runs out. Counted from the same constant the
+ *  server enforces (src/limits.ts), not a copy of the number it holds: a
+ *  surface promising seven days while the server drops the row at eight is
+ *  worse than one that says nothing. Two of them say it — the row's tooltip and
+ *  the Keep row in the session menu — so they say it from here. */
+export const leaseDaysLeft = (s: SessionInfo): number =>
+  Math.max(0, Math.ceil((PROJECT_LEASE_MS - (Date.now() - (s.lastActive ?? s.createdAt))) / DAY_MS));
+
+/** Why this row is in the rail, and for how long. A session leaving on its own
+ *  is the point of the lease, so the row says so before it happens rather than
+ *  looking like something went missing. */
+function leaseNote(s: SessionInfo): string {
+  if (s.kept) return "Kept in Projects";
+  const days = Math.floor((Date.now() - (s.lastActive ?? s.createdAt)) / DAY_MS);
+  return `Quiet ${days === 0 ? "today" : `${days}d`} — leaves Projects in ${
+    leaseDaysLeft(s)
+  }d unless kept`;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
  *  sky = idle itself but subagents still in flight, grey = idle. */
@@ -233,25 +321,83 @@ function stateDot(s: SessionInfo): HTMLElement {
   return dot;
 }
 
-/** Unpin keeps the session — it just moves back into the All-sessions list. */
-export async function setPinned(s: SessionInfo, pinned: boolean): Promise<void> {
-  s.pinned = pinned;
-  renderSessions();
-  deps.onPinsChanged();
-  const res = await sendJson(`/api/sessions/${s.id}/pin`, {
-    pinned,
-    cwd: s.cwd,
-    createdAt: s.createdAt,
-    ...(s.title ? { title: s.title } : {}),
-  });
-  if (!res.ok) {
-    s.pinned = !pinned; // reconcile: the server is the truth
+// --- row actions ---------------------------------------------------------------------
+// All three do the same thing: draw the new state, send it, and let the server
+// have the last word. Only the field, the request and whether the answer can
+// correct the guess differ.
+
+/** `set` writes the row — with the new value, and again with the old one if the
+ *  write failed. What a successful write settles on comes back as a
+ *  `sessions-changed` re-read, like every other change to a session. */
+async function optimistic<T>(
+  set: (value: T) => void,
+  next: T,
+  previous: T,
+  url: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const draw = (value: T): void => {
+    set(value);
     renderSessions();
     deps.onPinsChanged();
-  }
+  };
+  draw(next);
+  if (!(await sendJson(url, body)).ok) draw(previous); // the server is the truth
 }
 
-function sessionRow(s: SessionInfo): HTMLElement {
+/** Give the session a name. The transcript is where it lands, so it is the
+ *  title on every surface and after every restart — including the IM panels,
+ *  which read the same listing.
+ *
+ *  `prompt` is the idiom already in use for a one-line answer (ui/api.ts):
+ *  a dialog of our own would be the third place this page asks for a string. */
+export async function renameSession(s: SessionInfo): Promise<void> {
+  const typed = window.prompt("Session name — empty resets it to the first message", s.title ?? "");
+  if (typed === null) return; // cancelled, which is not the same as cleared
+  // A cleared name shows as untitled for the moment between here and the
+  // re-read: the title it falls back to is derived from a transcript, and this
+  // page has none.
+  await optimistic<string | undefined>(
+    (title) => (s.title = title),
+    typed.trim() || undefined,
+    s.title,
+    `/api/sessions/${s.id}/rename`,
+    { name: typed },
+  );
+}
+
+/** Kept = never ages out of the rail. */
+export function setKept(s: SessionInfo, kept: boolean): Promise<void> {
+  // Not rolled back with the flag: the lease was renewed by asking, and the
+  // next Projects read carries the server's own stamp either way.
+  s.lastActive = Date.now();
+  return optimistic((v) => (s.kept = v), kept, !kept, `/api/sessions/${s.id}/keep`, { kept });
+}
+
+/** Unpin keeps the session — it just moves back into the All-sessions list. */
+export const setPinned = (s: SessionInfo, pinned: boolean): Promise<void> =>
+  optimistic((v) => (s.listed = v), pinned, !pinned, `/api/sessions/${s.id}/pin`, { pinned });
+
+/** The branch checked out in `at`, for the menu row that offers it. Falls back
+ *  to the directory's own name, which is what a non-repo project has. */
+const branchAt = (list: SessionInfo[], at: string): string =>
+  list.find((s) => s.cwd === at)?.branch ?? basename(at);
+
+/** Which checkout this session works in, when its project has more than one.
+ *  A single-worktree project would only be telling you its own branch. */
+function branchChip(s: SessionInfo, show: boolean): HTMLElement[] {
+  if (!show || !s.branch) return [];
+  const chip = h(
+    "span",
+    "flex-none truncate rounded bg-neutral-200/70 px-1 font-mono text-[10px] leading-[15px] text-neutral-500",
+    s.branch,
+  );
+  chip.style.maxWidth = "40%";
+  chip.title = s.cwd;
+  return [chip];
+}
+
+function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
   const active = s.id === deps.currentId();
   const li = h(
     "li",
@@ -267,15 +413,47 @@ function sessionRow(s: SessionInfo): HTMLElement {
     ev.stopPropagation();
     deps.sessionMenu(more, s);
   };
-  li.append(stateDot(s), h("span", "truncate", s.title ?? "untitled"), more);
+  // The action a throwaway session ends with, one click from the row it is on:
+  // it used to be two, inside the ⋯ menu, which is deep enough that the rail
+  // filled up instead.
+  const done = h("button", HOVER_BTN, "\u2713");
+  done.title = "Done — remove from Projects (the session and its transcript stay)";
+  done.onclick = (ev) => {
+    ev.stopPropagation();
+    void setPinned(s, false);
+  };
+  // Kept has to be visible where the exemption applies, or the rail cannot say
+  // why one row outlived the rest. Same idiom as a project's count: resident,
+  // and out of the way of the controls on hover.
+  const badge = h(
+    "span",
+    "flex-none text-[10px] uppercase tracking-wide text-indigo-400 group-hover:hidden",
+    "kept",
+  );
+  li.append(
+    stateDot(s),
+    h("span", "truncate", s.title ?? "untitled"),
+    h(
+      "div",
+      "ml-auto flex flex-none items-center gap-1",
+      ...branchChip(s, branches),
+      ...(s.kept ? [badge] : []),
+      done,
+      more,
+    ),
+  );
   li.onclick = () => deps.select(s.id);
-  li.title = "Drag to reorder";
-  sortable(li, s.cwd, s.id, (id, after) => dropSession(s.cwd, id, s.id, after));
+  li.title = `${leaseNote(s)}\nDrag to reorder`;
+  const key = groupKey(s);
+  sortable(li, key, s.id, (id, after) => dropSession(key, id, s.id, after));
   return li;
 }
 
-/** One collapsible project = one cwd; collapse state lives in localStorage. */
-function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
+/** One collapsible project = one repository (or one plain directory); collapse
+ *  state lives in localStorage. */
+function projectNode(key: string, list: SessionInfo[]): HTMLElement {
+  const cwds = cwdsOf(key, list);
+  const cwd = cwds[0] ?? key;
   const count = h(
     "span",
     "flex-none text-[11px] text-neutral-400 group-hover:hidden",
@@ -290,14 +468,16 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
     ev.preventDefault(); // a click inside <summary> would toggle the project
     ev.stopPropagation();
     openMenu(more, [
-      {
-        label: "New session here",
-        hint: basename(cwd),
+      // One row per checkout, because "here" is ambiguous the moment a repo has
+      // worktrees, and the branch is what the choice is actually between.
+      ...cwds.map((at) => ({
+        label: cwds.length > 1 ? `New session in ${branchAt(list, at)}` : "New session here",
+        hint: basename(at),
         onSelect: () => {
           closeMenu();
-          void deps.createSession(cwd);
+          void deps.createSession(at);
         },
-      },
+      })),
       {
         label: "Browse files",
         onSelect: () => {
@@ -324,21 +504,23 @@ function projectNode(cwd: string, list: SessionInfo[]): HTMLElement {
     ]);
   };
   const { el, summary } = detailsRow("border-b border-neutral-200/70", [
-    h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", basename(cwd)),
+    h("span", "truncate font-mono text-[11px] font-semibold uppercase tracking-wide text-neutral-500", groupName(key, list)),
     // On a coarse pointer the ⋯ is resident, so count and button are visible
     // together: two ml-autos would split the free space and leave the count
     // mid-row. One wrapper owns it.
     h("div", "ml-auto flex flex-none items-center gap-1.5", count, more),
   ]);
   summary.className += " group px-3 py-1.5 hover:bg-neutral-100";
-  summary.title = `${cwd}\nDrag to reorder`;
+  // Every checkout the group covers, because the heading now names a repository
+  // and the directories are what a session actually runs in.
+  summary.title = `${cwds.join("\n")}\nDrag to reorder`;
   // The summary is the handle and the drop zone: an open project is as tall as
   // its sessions, and "above or below" has to mean above or below its heading.
-  sortable(summary, "", cwd, (from, after) => dropProject(from, cwd, after));
-  el.open = !collapsed.has(cwd);
-  el.ontoggle = () => setCollapsed(cwd, !el.open);
+  sortable(summary, "", key, (from, after) => dropProject(from, key, after));
+  el.open = !collapsed.has(key);
+  el.ontoggle = () => setCollapsed(key, !el.open);
   const rows = h("ul", "pb-1");
-  rows.append(...list.map(sessionRow));
+  rows.append(...list.map((s) => sessionRow(s, cwds.length > 1)));
   el.append(rows);
   return el;
 }
@@ -357,7 +539,7 @@ export function renderSessions(): void {
   const projects = pinnedProjects();
   projectTree.replaceChildren(
     ...(projects.length
-      ? projects.map(([cwd, list]) => projectNode(cwd, list))
+      ? projects.map(([key, list]) => projectNode(key, list))
       : [
           h(
             "p",
@@ -421,16 +603,16 @@ function pinButton(s: SessionInfo): HTMLElement {
   const pin = h(
     "button",
     `flex-none rounded px-1.5 py-0.5 text-[11.5px] ${
-      s.pinned
+      s.listed
         ? "bg-indigo-50 text-indigo-600"
         : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"
     }`,
-    s.pinned ? "pinned" : "pin",
+    s.listed ? "pinned" : "pin",
   );
-  pin.title = s.pinned ? "Remove from Projects" : "Pin to Projects";
+  pin.title = s.listed ? "Remove from Projects" : "Pin to Projects";
   pin.onclick = (ev) => {
     ev.stopPropagation();
-    void setPinned(s, !s.pinned);
+    void setPinned(s, !s.listed);
   };
   return pin;
 }
@@ -492,8 +674,8 @@ function renderArchive(): void {
   ];
   const sections: [string, Target[]][] = [
     ["Running", streaming.sort(byAge).map(target)],
-    ["Projects", idle.filter((s) => s.pinned).sort(byAge).map(target)],
-    ["Other sessions", idle.filter((s) => !s.pinned).sort(byAge).map(target)],
+    ["Projects", idle.filter((s) => s.listed).sort(byAge).map(target)],
+    ["Other sessions", idle.filter((s) => !s.listed).sort(byAge).map(target)],
   ];
   // A query is a question about everything, so the Console answers it up top;
   // an empty box is the session list it has always been, with the Console

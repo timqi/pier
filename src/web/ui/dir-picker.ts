@@ -3,6 +3,10 @@
 // The panel is the shared part; `browseButton` decorates an existing text
 // input rather than replacing it, so form semantics (required, datalist of
 // known projects) stay where they are and typing a path still works.
+//
+// Inside the panel the path line is an input for the same reason: clicking
+// down from home is the slow way to reach a directory the person can already
+// name.
 
 import { sendJson } from "./api.js";
 import { h } from "./dom.js";
@@ -83,10 +87,38 @@ export function openBrowser(
     const content = h("div", "flex max-h-80 w-80 flex-col");
     const use = btn("Use", "ml-auto flex-none cursor-pointer rounded bg-indigo-600 px-2 py-0.5 text-[11.5px] text-white dark:text-neutral-50");
     use.onclick = () => commit(list.path);
+    // The path is typed as often as it is clicked to — a directory nobody has a
+    // session in is several clicks from home and one paste from anywhere — so
+    // the line that names where you are is the line you can edit. Enter takes
+    // it, once the server confirms it is a folder this can read.
+    const typed = document.createElement("input");
+    typed.className =
+      "min-w-0 flex-1 border-0 bg-transparent font-mono text-[11.5px] text-neutral-500 focus:outline-none";
+    typed.value = list.path;
+    typed.spellcheck = false;
+    typed.title = "Type or paste a path, then Enter";
+    typed.onfocus = () => typed.select();
+    const error = h("p", "hidden flex-none px-3 pb-1 text-[11.5px] text-red-600");
+    typed.onkeydown = async (ev) => {
+      // Escape belongs to the panel (menu.ts). Enter must not reach an
+      // enclosing form — in the New session dialog that would submit it.
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const want = typed.value.trim();
+      if (!want) return;
+      const found = await listing(want);
+      if (!found) {
+        error.textContent = `${want} is not a folder this can read`;
+        error.classList.remove("hidden");
+        return;
+      }
+      commit(found.path); // the server's spelling of it, not the one typed
+    };
     const head = h(
       "div",
       "flex flex-none items-center gap-2 border-b border-neutral-200 px-3 py-1.5",
-      h("span", "truncate font-mono text-[11.5px] text-neutral-500", list.path),
+      typed,
       use,
     );
     const body = h("div", "min-h-0 flex-1 overflow-y-auto py-0.5 text-[12.5px]");
@@ -96,7 +128,7 @@ export function openBrowser(
     }
     if (!list.entries.length) body.append(h("p", "px-3 py-1.5 text-[12px] text-neutral-400", "No sub-folders."));
     // Creating navigates into the new folder, so "Use" is one click away.
-    content.append(head, body, newFolderRow(list.path, (path) => void open(path)));
+    content.append(head, error, body, newFolderRow(list.path, (path) => void open(path)));
     openPanel(anchor, content);
   }
 

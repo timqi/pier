@@ -87,8 +87,21 @@ export function registerExplorerRoutes(app: Hono): void {
     try {
       branch = (await git(root, "rev-parse", "--abbrev-ref", "HEAD")).trim();
     } catch {
-      return c.json({ branch: null, refs: [], commits: [] }); // not a repo, or no commits yet
+      // not a repo, or no commits yet
+      return c.json({ branch: null, refs: [], commits: [], worktrees: [] });
     }
+    // Every checkout of this repository, from git rather than from the
+    // sessions that happen to live in one: a worktree created ten seconds ago
+    // has no session in it yet, and that is exactly when its files are worth
+    // opening. Detached heads have no `branch` line, so the path stands alone.
+    const worktrees = (await git(root, "worktree", "list", "--porcelain"))
+      .split("\n\n")
+      .map((block) => {
+        const path = /^worktree (.+)$/m.exec(block)?.[1];
+        const on = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1];
+        return path ? { path, ...(on ? { branch: on } : {}) } : null;
+      })
+      .filter((w): w is { path: string; branch?: string } => w !== null);
     const refs = (await git(root, "for-each-ref", "--format=%(refname:short)\t%(subject)", "refs/heads", "refs/tags"))
       .split("\n")
       .filter(Boolean)
@@ -105,7 +118,7 @@ export function registerExplorerRoutes(app: Hono): void {
         const [hash = "", at = "", author = "", email = "", subject = "", body = ""] = r.split("\u001f");
         return { hash, at: Number(at) * 1000, author, email, subject, body: body.trim() };
       });
-    return c.json({ branch, refs, commits });
+    return c.json({ branch, refs, commits, worktrees });
   });
 
   // One endpoint, two shapes: without `file` the changed-file list

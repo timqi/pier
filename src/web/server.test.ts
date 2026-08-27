@@ -26,6 +26,7 @@ import { SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
+import { PROJECT_LEASE_MS } from "../limits.js";
 import { SessionStateStore } from "./session-state.js";
 import { createServer, tabPrefix, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
@@ -89,6 +90,7 @@ function fakeSession(id: string): AgentSession & {
     },
     rewindToUserTurn: async (i: number) => void calls.push(`rewind:${i}`),
     compact: async () => void calls.push("compact"),
+    rename: async (name: string) => void calls.push(`rename:${name}`),
     pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
     clearQueue: async () => {
       calls.push("clearQueue");
@@ -241,7 +243,12 @@ function setup(
     create: vi.fn(async () => session),
     fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
-    list: vi.fn(async () => [{ id: "s1", cwd, createdAt: 1 }]),
+    // `modified` is what the Projects lease is dated from: a listed session
+    // whose transcript was written just now is a warm one.
+    list: vi.fn(async () => [{ id: "s1", cwd, createdAt: 1, modified: Date.now() }]),
+    // Derived from the same list, like the real seam: a fake that answers the
+    // two independently can agree with nothing.
+    find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
@@ -277,6 +284,7 @@ function setup(
   }));
   return {
     app,
+    db,
     imOwners,
     session,
     factory,
@@ -293,13 +301,19 @@ function setup(
   };
 }
 
+/** The rail, as a surface reads it. `state.projects()` is gone: membership is
+ *  the listing joined with what the store owns, and the route is where that
+ *  happens. */
+const rail = async (app: Hono): Promise<{ id: string; title?: string }[]> =>
+  (await (await app.request("/api/projects")).json()) as { id: string; title?: string }[];
+
 describe("workbench server", () => {
   it("lists sessions with live state", async () => {
     const { app } = setup();
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", listed: false, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -312,31 +326,21 @@ describe("workbench server", () => {
     expect(rows[0]?.channel).toBe("slack");
   });
 
-  it("lists complete Projects metadata without scanning Pi sessions", async () => {
+  // One source for both lists: the rail is the full listing minus what
+  // Projects is not showing, and the title comes off the transcript like
+  // everywhere else.
+  it("renders Projects from the listing, joined with what it owns", async () => {
     const { app, factory, state } = setup();
-    state.pin({ id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned" }, true);
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: Date.now() },
+      { id: "s2", cwd: "/other", createdAt: 2, modified: Date.now() },
+    ]);
+    state.pin("s1", "/tmp", true);
     const res = await app.request("/api/projects");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", listed: true, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
     ]);
-    expect(factory.list).not.toHaveBeenCalled();
-  });
-
-  it("backfills legacy pins once, then serves Projects from SQLite", async () => {
-    const { app, factory } = setup(
-      "/tmp",
-      fakeSecrets(),
-      {},
-      (db) => db.prepare("INSERT INTO session_state(session_id, pinned) VALUES ('s1', 1)").run(),
-    );
-    const first = await app.request("/api/projects");
-    expect(first.status).toBe(200);
-    expect((await first.json()) as { cwd: string }[]).toEqual([
-      expect.objectContaining({ id: "s1", cwd: "/tmp", createdAt: 1 }),
-    ]);
-    expect((await app.request("/api/projects")).status).toBe(200);
-    expect(factory.list).toHaveBeenCalledOnce();
   });
 
   it("coalesces concurrent full session listings", async () => {
@@ -405,13 +409,14 @@ describe("workbench server", () => {
 
   it("lists a created session before Pi persists it, without duplicating later", async () => {
     const session = fakeSession("s2");
-    const listed: { id: string; cwd: string; createdAt: number }[] = [];
+    const listed: { id: string; cwd: string; createdAt: number; modified?: number }[] = [];
     const factory: AgentFactory = {
       availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
     create: vi.fn(async () => session),
       fork: vi.fn(async () => session),
       resume: vi.fn(async () => session),
       list: vi.fn(async () => listed),
+      find: vi.fn(async (id: string) => listed.find((s) => s.id === id)),
     };
     const hub = new EventHub();
     const app = createServer({
@@ -430,52 +435,220 @@ describe("workbench server", () => {
     // Not on disk yet — the nascent entry fills the gap.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", listed: true, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
-    listed.push({ id: "s2", cwd: "/tmp", createdAt: 1 });
+    listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: Date.now() });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", listed: true, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
     ]);
   });
 
   it("pins sessions created here, and toggles pins on demand", async () => {
-    const { app, state } = setup();
+    const { app } = setup();
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
-    expect(state.projects()).toHaveLength(1);
+    expect((await rail(app)).map((r) => r.id)).toEqual(["s1"]);
 
     const off = await app.request("/api/sessions/s1/pin", {
       method: "POST",
-      body: JSON.stringify({ pinned: false, cwd: "/tmp", createdAt: 1 }),
+      body: JSON.stringify({ pinned: false }),
     });
     expect(off.status).toBe(200);
-    expect(state.projects()).toEqual([]);
+    expect(await rail(app)).toEqual([]);
 
     const bad = await app.request("/api/sessions/s1/pin", { method: "POST", body: "{}" });
     expect(bad.status).toBe(400);
-    expect((await app.request("/api/sessions/s1/pin", {
+  });
+
+  // The directory is the server's own fact now. A session it cannot place has
+  // no row to pin, and saying so beats writing a row keyed on nothing.
+  it("refuses to pin a session no listing knows a directory for", async () => {
+    const { app, factory } = setup();
+    vi.mocked(factory.list).mockResolvedValue([]);
+    vi.mocked(factory.find).mockResolvedValue(undefined);
+    const res = await app.request("/api/sessions/nowhere/pin", {
       method: "POST",
-      body: JSON.stringify({ pinned: true, cwd: "/tmp" }),
-    })).status).toBe(400);
+      body: JSON.stringify({ pinned: true }),
+    });
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toContain("no directory");
+  });
+
+  // The name goes into the transcript and nowhere else; the rail re-reads it
+  // like every other title, so there is no second copy to keep in step.
+  it("names a session in its transcript, and tells the surfaces to re-read", async () => {
+    const { app, session, router, hub } = setup();
+    router.attach({ channelId: "web", conversationId: "s1" }, session);
+    const changed = vi.fn();
+    hub.subscribeWorkspace(changed);
+
+    const res = await app.request("/api/sessions/s1/rename", {
+      method: "POST",
+      body: JSON.stringify({ name: "  parser work  " }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(session.calls).toContain("rename:parser work");
+    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
+
+    expect((await app.request("/api/sessions/s1/rename", { method: "POST", body: "{}" })).status)
+      .toBe(400);
+  });
+
+  // The rail groups a repository's worktrees together, so the route has to
+  // carry the identity git reports for the directory. Against this checkout,
+  // because a fake would only prove the spread operator works.
+  it("says which repository a project directory belongs to", async () => {
+    const { app, state, factory } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: process.cwd(), createdAt: 1, modified: Date.now() },
+    ]);
+    state.pin("s1", process.cwd(), true);
+    await vi.waitFor(async () => {
+      const rows = (await (await app.request("/api/projects")).json()) as
+        { repo?: string; branch?: string }[];
+      // A worktree of this repository reports the *main* .git dir, which is the
+      // grouping key; what it maps to is repos.test.ts's business.
+      expect(rows[0]?.repo).toMatch(/\/\.git$/);
+      expect(rows[0]?.branch).toEqual(expect.any(String));
+    });
+  });
+
+  // Projects is a working set: a session leaves it by going quiet, so the
+  // action that clears a finished one is doing nothing at all.
+  it("drops a session that went quiet past its lease, and never a kept one", async () => {
+    const { app, state, factory } = setup();
+    const cold = Date.now() - PROJECT_LEASE_MS - 1;
+    // The transcript's own mtime is the lease: nobody has written to either of
+    // these in over a week.
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: cold },
+      { id: "s2", cwd: "/tmp", createdAt: 2, modified: cold },
+    ]);
+    // Pinned back when they were last written, too: the lease starts at
+    // whichever came later, so a hand that touched these yesterday would keep
+    // them here on its own.
+    state.pin("s1", "/tmp", true, cold);
+    state.pin("s2", "/tmp", true, cold);
+    expect(await rail(app)).toEqual([]);
+
+    // Kept is the exemption, and the same row is back — with its place in the
+    // list intact, because leaving the rail never gave up membership.
+    expect((await app.request("/api/sessions/s2/keep", {
+      method: "POST",
+      body: JSON.stringify({ kept: true }),
+    })).status).toBe(200);
+    expect((await rail(app)).map((r) => r.id)).toEqual(["s2"]);
+
+    // And one more turn renews the other one's lease, by writing its file.
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: Date.now() },
+      { id: "s2", cwd: "/tmp", createdAt: 2, modified: cold },
+    ]);
+    expect((await rail(app)).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
+  });
+
+  // Pinning is an act with a date. Without one the rail answered a click with
+  // nothing: the row flashed in optimistically and the re-read that followed
+  // dropped it, because the transcript it was counted from is a month old.
+  it("puts a cold session back in the rail when a hand pins it", async () => {
+    const { app, state, factory } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: Date.now() - PROJECT_LEASE_MS - 1 },
+    ]);
+    expect(await rail(app)).toEqual([]);
+
+    const res = await app.request("/api/sessions/s1/pin", {
+      method: "POST",
+      body: JSON.stringify({ pinned: true }),
+    });
+    expect(res.status).toBe(200);
+    const rows = (await (await app.request("/api/projects")).json()) as
+      { id: string; lastActive: number }[];
+    expect(rows.map((r) => r.id)).toEqual(["s1"]);
+    // And the row says the same thing the server counted, so the tooltip
+    // cannot promise it leaves today while the server holds it for a week.
+    expect(rows[0]!.lastActive).toBeGreaterThan(Date.now() - 5_000);
+    expect(state.flags().get("s1")?.pinnedAt).toEqual(expect.any(Number));
+  });
+
+  // Un-keeping is the other end of the same act: the exemption goes, a lease
+  // starts. Without it the row the hand just touched vanishes on the next read.
+  it("keeps a cold session on screen after its exemption is taken off", async () => {
+    const { app, state, factory } = setup();
+    const cold = Date.now() - PROJECT_LEASE_MS - 1;
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: cold },
+    ]);
+    state.pin("s1", "/tmp", true, cold);
+    state.keep("s1", true, cold);
+    expect((await rail(app)).map((r) => r.id)).toEqual(["s1"]);
+
+    expect((await app.request("/api/sessions/s1/keep", {
+      method: "POST",
+      body: JSON.stringify({ kept: false }),
+    })).status).toBe(200);
+    expect((await rail(app)).map((r) => r.id)).toEqual(["s1"]);
+  });
+
+  it("refuses to keep a session Projects does not hold", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/sessions/s1/keep", {
+      method: "POST",
+      body: JSON.stringify({ kept: true }),
+    });
+    expect(res.status).toBe(404);
+    expect((await app.request("/api/sessions/s1/keep", { method: "POST", body: "{}" })).status)
+      .toBe(400);
+  });
+
+  // A row that predates all of this holds a pin and a directory and nothing
+  // else. Everything the rail draws comes off the listing, so there is no
+  // backfill to run and no stale summary to repair — including the lease,
+  // which is dated by the transcript and not by when the row was written.
+  it("renders a pin that carries no summary at all", async () => {
+    const month = Date.now() - 30 * 86_400_000;
+    const { app, factory } = setup(
+      "/tmp",
+      fakeSecrets(),
+      {},
+      (db) =>
+        db.prepare("INSERT INTO session_state(session_id, pinned, cwd) VALUES ('s1', 1, '/tmp')")
+          .run(),
+    );
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: month, title: "from the transcript", modified: Date.now() },
+    ]);
+    expect(await rail(app)).toEqual([
+      expect.objectContaining({ id: "s1", title: "from the transcript" }),
+    ]);
   });
 
   it("keeps the manual order, and a new session never moves its project", async () => {
-    const { app, state } = setup();
-    state.pin({ id: "a1", cwd: "/a", createdAt: 1 }, true);
-    state.pin({ id: "b1", cwd: "/b", createdAt: 2 }, true);
+    const { app, state, factory } = setup();
+    const listed = [
+      { id: "a1", cwd: "/a", createdAt: 1, modified: Date.now() },
+      { id: "b1", cwd: "/b", createdAt: 2, modified: Date.now() },
+    ];
+    vi.mocked(factory.list).mockImplementation(async () => listed);
+    state.pin("a1", "/a", true);
+    state.pin("b1", "/b", true);
     const order = (body: unknown) =>
       app.request("/api/projects/order", { method: "POST", body: JSON.stringify(body) });
 
     expect((await order({ projects: ["/b", "/a"], sessions: ["b1", "a1"] })).status).toBe(200);
-    expect(state.projects().map((s) => [s.id, s.sort, s.projectSort])).toEqual([
-      ["b1", 0, 0],
+    const placed = (await (await app.request("/api/projects")).json()) as
+      { id: string; sort?: number; projectSort?: number }[];
+    expect(placed.map((r) => [r.id, r.sort, r.projectSort]).sort()).toEqual([
       ["a1", 1, 1],
+      ["b1", 0, 0],
     ]);
 
     // The jump this exists to stop: a second session in /a inherits /a's place.
-    state.pin({ id: "a2", cwd: "/a", createdAt: 3 }, true);
+    listed.push({ id: "a2", cwd: "/a", createdAt: 3, modified: Date.now() });
+    state.pin("a2", "/a", true);
     const rows = (await (await app.request("/api/projects")).json()) as
       { id: string; sort?: number; projectSort?: number }[];
     expect(rows.find((r) => r.id === "a2")).toMatchObject({ projectSort: 1 });
@@ -873,7 +1046,7 @@ describe("workbench server", () => {
     const state = new SessionStateStore(openDb(":memory:"));
     // The create-time write: pinned with a cwd, exactly what POST /api/desk
     // and POST /api/sessions persist before Pi has anything on disk.
-    state.pin({ id: "ghost", cwd: "/tmp/desk", createdAt: 1 }, true);
+    state.pin("ghost", "/tmp/desk", true);
     const events: string[] = [];
     hub.subscribeWorkspace((e) => events.push(e.type));
     const app = createServer({
@@ -893,7 +1066,7 @@ describe("workbench server", () => {
     expect(error).toContain("never got a first reply");
     // The row is gone and every rail was told, so the Desk row (or a project
     // group) stops pointing at a session nothing can resume.
-    expect(state.projects().find((s) => s.id === "ghost")).toBeUndefined();
+    expect(state.flags().get("ghost")).toBeUndefined();
     expect(events).toContain("sessions-changed");
   });
 
@@ -1304,8 +1477,7 @@ describe("workbench server", () => {
   });
 
   it("routes messages through the queue policy", async () => {
-    const { app, session, state } = setup();
-    state.pin({ id: "s1", cwd: "/tmp", createdAt: 1 }, true);
+    const { app, session } = setup();
     const post = (body: unknown) =>
       app.request("/api/sessions/s1/messages", {
         method: "POST",
@@ -1316,7 +1488,6 @@ describe("workbench server", () => {
     let res = await post({ text: "hello" });
     expect(res.status).toBe(202);
     expect(session.calls).toEqual(["prompt:hello"]);
-    expect(state.projects()[0]?.title).toBe("hello");
 
     session.setState("streaming");
     await post({ text: "wait for it" });

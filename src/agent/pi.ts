@@ -47,12 +47,24 @@ import {
   type PiMessage,
 } from "./events.js";
 import { defaultAgentDir, PiConfigStore } from "./config.js";
+import { IndexedListing, type SessionListing, type SessionRecord } from "./listing.js";
 import type { CredentialStore, ProviderCredential } from "./credentials.js";
 import { curateModels, pinFirst } from "./models.js";
 
 const log = logger("agent");
 
-type SessionInfos = Awaited<ReturnType<typeof SessionManager.listAll>>;
+/** A listed record as the seam reports it. The one mapping, because `list` and
+ *  `find` answer with the same shape and drifting would mean two answers about
+ *  one session. */
+const summaryOf = (s: SessionRecord): SessionSummary => ({
+  id: s.id,
+  cwd: s.cwd,
+  createdAt: s.created,
+  modified: s.modified,
+  ...(s.title ? { title: s.title } : {}),
+});
+
+type SessionInfos = SessionRecord[];
 
 /** Pi's bash tool has no default timeout, so a hung command holds the turn
  * until someone aborts it — nobody is watching in a scheduled task. Kept below
@@ -129,6 +141,12 @@ export class PiSession implements AgentSession {
     private readonly pi: PiAgentSession,
     /** Operator pins, read per call — the menu can change while we run. */
     private readonly pinned: () => ModelRef[] = () => [],
+    /** "What I just wrote is not in your listing yet." The factory retains a
+     *  scan for a few seconds, which is exactly the window a rename lands in:
+     *  every surface would re-read the old title and keep it until some
+     *  unrelated event moved the list again. Same drop `create` and `fork`
+     *  do — a callback only because the session is what knows it happened. */
+    private readonly wrote: () => void = () => {},
   ) {}
 
   /** Pi's dispose unhooks the one listener that persists and emits, so a turn
@@ -256,6 +274,26 @@ export class PiSession implements AgentSession {
     }
   }
 
+  /** One `session_info` entry, which Pi's own reader takes the latest of — so
+   *  a rename is an append like everything else in a transcript, and nothing
+   *  has to be rewritten. Never refused for being busy: a name has nothing to
+   *  do with the turn running.
+   *
+   *  Returns nothing, because the transcript is the answer: what the session is
+   *  called after this — the name, or the title a cleared one falls back to —
+   *  is what the next listing reads off the file, and deriving it here as well
+   *  was a second copy of a rule agent/listing.ts already owns.
+   *
+   *  TODO: renaming a cold session costs a whole resume, because the route
+   *  reaches it through `ensure` and this method needs a live Pi session to
+   *  append through. The work is one line in a file. Revisit when Pi offers a
+   *  lightweight append to a session it has not loaded. */
+  async rename(name: string): Promise<void> {
+    this.live();
+    this.pi.sessionManager.appendSessionInfo(name);
+    this.wrote();
+  }
+
   /** Compaction replaces the context a turn would run against, so a dispatch
    *  that lands mid-compaction waits for the summary instead of starting a turn
    *  over it — the follow-up promise ("delivered when idle") without Pi's
@@ -353,14 +391,17 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     /** Which bundled extensions the Console has switched on. A getter for the
      * same reason again: the toggle takes effect on the next session open. */
     private readonly enabledExtensions: () => string[] = () => [],
+    /** What exists on disk. Injected so a test can hand this factory a listing
+     * instead of a session directory and a database. */
+    private readonly listings: SessionListing = new IndexedListing(),
   ) {}
 
   /** One runtime for the whole process; catalogs are global, not per session. */
   private catalog?: Promise<ModelRuntime>;
-  /** Where each listed session lives. `listAll` reads the head of every
-   *  session file on disk (~250ms at 200 sessions, and it only grows), which
-   *  `resume` paid on every cold open — web selection, an IM message, a task
-   *  run. The sidebar's own listing keeps this warm; a miss still lists. */
+  /** Where each listed session lives. A scan still stats every session file on
+   *  disk, which `resume` would pay on every cold open — web selection, an IM
+   *  message, a task run. The sidebar's own listing keeps this warm; a miss
+   *  still lists. */
   private located = new Map<string, { path: string; cwd: string }>();
   /** That same scan, retained for LIST_TTL_MS instead of paid once per asking
    *  surface — one workspace event has three (sidebar, Activity, task lookups).
@@ -657,7 +698,9 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       resourceLoader: await this.resourceLoader(cwd),
     });
     live = created.session;
-    const session = new PiSession(live, this.pinned);
+    const session = new PiSession(live, this.pinned, () => {
+      this.listing = undefined;
+    });
     if (opts.model) await session.setModel(opts.model);
     if (opts.thinking) session.setThinkingLevel(opts.thinking);
     log.info(`session ${session.id} open in ${cwd}${opts.name ? ` (${opts.name})` : ""}`);
@@ -700,27 +743,50 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
         this.located.delete(sessionId);
       }
     }
-    const find = (infos: SessionInfos) => infos.find((s) => s.id === sessionId);
-    // A retained listing is not evidence that a session is gone: it may have
-    // been written since — by another Pier, or by the first turn of a session
-    // this factory opened. The miss is what earns a fresh scan, because the
-    // caller above reads "unknown" as permission to start a replacement session
-    // (channels/conversations.ts) and that costs a conversation its history.
-    // `reused` is how we know a scan is owed: same entry back, same disk state.
-    const reused = this.listing;
-    const info = find(await this.listed()) ??
-      (reused && this.listing === reused ? find(await this.listed(true)) : undefined);
+    const info = await this.locate(sessionId);
     if (!info) throw new Error(`unknown session: ${sessionId}`);
     return this.open(info.cwd || process.cwd(), SessionManager.open(info.path));
   }
+
+  /** The listed record for one id, and the one place "no such session" is
+   *  decided. A retained listing is not evidence that a session is gone: it may
+   *  have been written since — by another Pier, or by the first turn of a
+   *  session this factory opened. The miss is what earns a fresh scan, because
+   *  callers read it as permission to start a replacement session
+   *  (channels/conversations.ts), which costs a conversation its history, or as
+   *  a session that no longer exists (tasks/, web/files.ts). `reused` is how we
+   *  know a scan is owed: same entry back, same disk state. */
+  private async locate(sessionId: string): Promise<SessionRecord | undefined> {
+    const find = (infos: SessionInfos) => infos.find((s) => s.id === sessionId);
+    const reused = this.listing;
+    return find(await this.listed()) ??
+      (reused && this.listing === reused ? find(await this.listed(true)) : undefined);
+  }
+
+  async find(sessionId: string): Promise<SessionSummary | undefined> {
+    const info = await this.locate(sessionId);
+    return info ? summaryOf(info) : undefined;
+  }
+
+  /** Once per process, after the first listing: agent/listing.ts reads Pi's
+   *  transcripts with a parser of its own, and only a comparison notices when
+   *  that format moves under it. */
+  private audited = false;
 
   /** Every listing goes through here, so it also refreshes `located`. */
   private listed(force = false): Promise<SessionInfos> {
     const now = Date.now();
     if (!force && this.listing && now - this.listing.at < LIST_TTL_MS) return this.listing.infos;
-    const infos = SessionManager.listAll().then((listed) => {
+    const infos = this.listings.scan().then((listed) => {
       for (const s of listed) {
         this.located.set(s.id, { path: s.path, cwd: s.cwd || process.cwd() });
+      }
+      if (!this.audited && this.listings.audit) {
+        this.audited = true;
+        void this.listings.audit(() => SessionManager.listAll()).then(
+          (wrong) => wrong || log.debug("session index agrees with Pi's own listing"),
+          (err: unknown) => log.warn("session index cross-check failed", err),
+        );
       }
       return listed;
     });
@@ -733,12 +799,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   async list(): Promise<SessionSummary[]> {
-    const infos = await this.listed();
-    return infos.map((s) => ({
-      id: s.id,
-      cwd: s.cwd,
-      createdAt: s.created.getTime(),
-      title: s.name ?? (s.firstMessage ? s.firstMessage.slice(0, 80) : undefined),
-    }));
+    return (await this.listed()).map(summaryOf);
   }
 }

@@ -3,7 +3,7 @@
 // every delivery path upstream would count a lost message as delivered.
 // Plus the one rule that decides which copy of a bundled extension runs.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PiSession, standDownShadowed } from "./pi.js";
 
 /** Only what PiSession touches on these paths. */
@@ -20,7 +20,19 @@ function fakePi() {
     pi: {
       sessionId: "s1",
       isStreaming: false,
-      messages: [],
+      messages: [] as { role: string; content: unknown }[],
+      // Pi's manager, as far as a rename is concerned: one append, and the
+      // latest name is what it reads back.
+      sessionManager: {
+        name: undefined as string | undefined,
+        appendSessionInfo(name: string) {
+          calls.push(`appendSessionInfo:${name}`);
+          this.name = name.trim() || undefined;
+        },
+        getSessionName() {
+          return this.name;
+        },
+      },
       compact: () => {
         calls.push("compact");
         return new Promise<void>((resolve, reject) => {
@@ -168,5 +180,24 @@ describe("a session that is compacting", () => {
     const retry = s.compact();
     fake.finishCompaction();
     await retry;
+  });
+});
+
+describe("naming a session", () => {
+  it("appends the name to the transcript and answers nothing", async () => {
+    const { fake, session: s } = session();
+    await expect(s.rename("parser work")).resolves.toBeUndefined();
+    expect(fake.calls).toContain("appendSessionInfo:parser work");
+  });
+
+  // The factory keeps a listing for a few seconds, and a rename lands inside
+  // that window: without this, every surface re-reads the old title and keeps
+  // it until something unrelated moves the list again.
+  it("tells the factory its retained listing is out of date", async () => {
+    const wrote = vi.fn();
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never, () => [], wrote);
+    await s.rename("");
+    expect(wrote).toHaveBeenCalledOnce();
   });
 });

@@ -194,7 +194,7 @@ export function applyRoute(): void {
   const sessions = deps.sessions();
   const currentId = deps.currentId();
   const wanted = route?.kind === "session" ? route.id : null;
-  const id = wanted ?? (currentId ?? (sessions.find((s) => s.pinned) ?? sessions[0])?.id ?? null);
+  const id = wanted ?? (currentId ?? (sessions.find((s) => s.listed) ?? sessions[0])?.id ?? null);
   applyingRoute = true;
   try {
     if (id && id !== currentId) deps.select(id);
@@ -227,7 +227,6 @@ export function initViews(d: ViewsDeps): void {
       name: "files",
       view: createExplorerView(
         $("#files-view"),
-        () => [...groupByCwd(deps.sessions()).keys()],
         // Whose folder+diff to restore: a bare open is "the files of this chat".
         () => deps.currentSession(),
         // Through the router, so Back walks directory switches too.

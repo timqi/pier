@@ -32,7 +32,9 @@ src/
                inbox.ts, inbound-file.ts
   agent/       pi.ts (the only file outside extensions/ importing
                @earendil-works/pi-*), events.ts (Pi → Pier event translation,
-               no SDK imports), config.ts (provider/model files),
+               no SDK imports), listing.ts (what is on disk, indexed in
+               pier.db so a transcript is read once), config.ts
+               (provider/model files),
                credentials.ts (sealed store + auth.json import), models.ts
                (catalog curation)
   extensions/  index.ts (the list Pier ships and nothing else),
@@ -52,7 +54,9 @@ src/
   boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         server.ts (sessions + events), instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
-               auth.ts, files.ts, session-state.ts,
+               auth.ts, files.ts, session-state.ts (what the workbench
+               decided about a session: pinned, kept, unread, order),
+               repos.ts (which repository a project directory belongs to),
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,
                ui/ modules (form.ts + dom.ts are the shared vocabulary;
@@ -66,6 +70,7 @@ src/
   paths.ts     where PIER_HOME resolves, once
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
+  limits.ts    the numbers more than one area has to agree on
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   settings.ts  the instance facts a human owns (the public URL, the model menu,
                the auto-update switch, which bundled extensions are on)
@@ -139,9 +144,10 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   only — an inbound file is saved to `$PIER_HOME/inbox/` by the surface that
   received it and rides the prompt as a `[name](file:///…)` line; bytes in
   `core/inbox.ts`, marker grammar in `core/inbound-file.ts`), persisted
-  system input, abort, history,
-  model get/set/list, clearQueue, create/fork/resume, and a payload-only
-  `subscribe`. Must stay implementable over RPC.
+  system input, abort, history, rename,
+  model get/set/list, clearQueue, create/fork/resume, `list`/`find` (one
+  session by id, so no surface scans the whole listing for one), and a
+  payload-only `subscribe`. Must stay implementable over RPC.
 - `SessionEventPayload` — the only observability currency: turn/text/thinking/
   tool events, persisted `system-input`, linked `task-status`, state and queue
   snapshots, and errors. Delegation, callback, steer, and supervisor-message

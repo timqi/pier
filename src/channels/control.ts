@@ -89,11 +89,11 @@ export function createControl({ router, factory, conversations, store }: Control
       const session = router.sessionOf(key);
       if (!session) return null;
       // AgentSession has no cwd; the factory's listing is where it lives.
-      const listed = await factory.list();
+      const summary = await factory.find(session.id);
       const usage = session.contextUsage;
       return {
         sessionId: session.id,
-        cwd: listed.find((s) => s.id === session.id)?.cwd ?? "",
+        cwd: summary?.cwd ?? "",
         state: session.state,
         model: session.model,
         thinking: session.thinkingLevel,

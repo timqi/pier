@@ -181,6 +181,58 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_state ADD COLUMN sort INTEGER;
   ALTER TABLE session_state ADD COLUMN project_sort INTEGER;
   `,
+  // 7 — the session listing, so a transcript is read once (agent/listing.ts).
+  `
+  -- One row per session file. (size, mtime) is what makes the row usable
+  -- without opening the file; parsed_bytes is where reading resumes when it
+  -- grew, and is always a line boundary. Derived from disk and disposable: a
+  -- deleted row costs one re-read, never a fact.
+  CREATE TABLE session_index (
+    path TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    name TEXT,
+    first_message TEXT,
+    size INTEGER NOT NULL,
+    mtime INTEGER NOT NULL,
+    parsed_bytes INTEGER NOT NULL
+  );
+  `,
+  // 8 — Projects holds a working set: what is warm, plus what is kept.
+  `
+  -- Membership was permanent, so every throwaway session stayed in the rail
+  -- until someone removed it by hand. last_active is the lease: the end of a
+  -- turn renews it, and web/session-state.ts stops listing a row that ran out.
+  -- kept opts one row out of expiry entirely — what the pin control now means.
+  ALTER TABLE session_state ADD COLUMN kept INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE session_state ADD COLUMN last_active INTEGER;
+  -- Left NULL on purpose: the honest value is when the transcript was last
+  -- written, which only a listing knows. web/server.ts pays one for a database
+  -- carrying rows without it, the same gate the pin backfill already uses, so
+  -- the first rail after an upgrade is dated by use and not by creation.
+  `,
+  // 9 — the summary a transcript already carries is read, not mirrored.
+  `
+  -- Dropped rather than left unread: a column nobody writes still answers when
+  -- somebody selects it, and the next reader has no way to tell a stale title
+  -- from a current one. The pre-migration backup beside the database is the
+  -- way back, not a row of fossils. cwd stays — it is the key a project's
+  -- manual place is stamped on, and it never changes for a session.
+  ALTER TABLE session_state DROP COLUMN title;
+  ALTER TABLE session_state DROP COLUMN created_at;
+  ALTER TABLE session_state DROP COLUMN last_active;
+  `,
+  // 10 — taking a session into Projects is itself an act, and it is dated.
+  `
+  -- When a hand last put this session in Projects (pin, or a keep toggle).
+  -- Not the mirror migration 9 removed: last_active was a copy of a fact the
+  -- transcript owns, while this one exists nowhere else — pinning a cold
+  -- session back is a statement that it is warm again, and without a record of
+  -- *when* it was made the row is dropped by the same read that drew it.
+  -- NULL for every row that predates this: never pinned within a lease.
+  ALTER TABLE session_state ADD COLUMN pinned_at INTEGER;
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

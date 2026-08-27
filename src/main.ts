@@ -314,7 +314,7 @@ registerPushRoutes(app, {
   hub,
   unread: (id) => sessionState.unread(id),
   channelOf: (id) => router.conversationOf(id)?.channelId,
-  name: (id) => sessionState.name(id),
+  summary: (id) => factory.find(id),
   publicUrl: () => settings.get().publicUrl,
 });
 app.route("/", createServer({

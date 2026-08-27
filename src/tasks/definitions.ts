@@ -233,7 +233,7 @@ export class TaskDefinitions {
   }
   async sessionExists(sessionId: string): Promise<boolean> {
     return this.router.stateOf(sessionId) !== undefined ||
-      (await this.factory.list()).some((session) => session.id === sessionId);
+      (await this.factory.find(sessionId)) !== undefined;
   }
 
   private async parseDraft(raw: unknown): Promise<TaskDraft> {

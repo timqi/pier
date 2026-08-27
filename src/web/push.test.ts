@@ -61,7 +61,7 @@ function setup(settleMs = 0) {
     hub,
     unread,
     channelOf,
-    name: () => "pier",
+    summary: async () => ({ title: "pier", cwd: "/tmp/pier" }),
     publicUrl: () => "https://pier.example.com",
     settleMs,
   });

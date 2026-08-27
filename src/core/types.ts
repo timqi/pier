@@ -245,6 +245,14 @@ export interface AgentSession {
    * and no caller of this method would otherwise ever see.
    */
   compact(): Promise<void>;
+  /**
+   * Name the session. Persisted in the transcript, not beside it, so every
+   * surface and every later listing reads the same title and a restart keeps
+   * it. An empty name clears it, and the title then falls back to whatever a
+   * listing derives — which is also why nothing comes back: the transcript is
+   * the answer, and a second derivation here would be a second rule.
+   */
+  rename(name: string): Promise<void>;
   prompt(text: string): Promise<void>; // resolves when the turn settles
   steer(text: string): Promise<void>; // interrupt mid-run
   followUp(text: string): Promise<void>; // deliver when idle
@@ -344,6 +352,10 @@ export interface SessionSummary {
   cwd: string;
   createdAt: number;
   title?: string;
+  /** When its transcript was last written — the one record of activity that
+   *  survives a restart and counts turns this process never saw. Absent only
+   *  from a summary that did not come from a listing. */
+  modified?: number;
 }
 
 export interface AgentFactory {
@@ -358,6 +370,19 @@ export interface AgentFactory {
   fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
   list(): Promise<SessionSummary[]>;
+  /**
+   * One session by id — the lookup four surfaces were each doing by scanning
+   * the whole list for it (a chat's cwd, a task's source or reuse target, a
+   * task asking whether a session still exists, a file served out of a
+   * session's directory).
+   *
+   * A miss is checked against disk before it is reported, for the reason
+   * `resume` does the same: every caller reads `undefined` as a fact and acts
+   * on it — starting a session in the wrong directory, refusing a file,
+   * rejecting a task's target — and a listing retained for a few seconds is
+   * not evidence that a session does not exist.
+   */
+  find(sessionId: string): Promise<SessionSummary | undefined>;
 }
 
 export type ProviderAuthType = "api_key" | "oauth";

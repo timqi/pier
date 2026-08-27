@@ -136,7 +136,7 @@ function commitSessions(rows: SessionInfo[], complete: boolean): void {
     sessions = next;
   } else {
     const fresh = new Map(next.map((s) => [s.id, s]));
-    sessions = sessions.map((s) => fresh.get(s.id) ?? (s.pinned ? { ...s, pinned: false } : s));
+    sessions = sessions.map((s) => fresh.get(s.id) ?? (s.listed ? { ...s, listed: false } : s));
     const known = new Set(sessions.map((s) => s.id));
     sessions.push(...next.filter((s) => !known.has(s.id)));
   }

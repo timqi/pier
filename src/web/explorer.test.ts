@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Hono } from "hono";
 import { beforeAll, describe, expect, it } from "vitest";
 import { registerExplorerRoutes } from "./explorer.js";
@@ -79,6 +79,24 @@ describe("explorer routes", () => {
     const first = info.commits[0]! as unknown as { author: string; at: number };
     expect(first.author).toBe("t");
     expect(first.at).toBeGreaterThan(1_000_000_000_000); // epoch ms, not seconds
+  });
+
+  // The folder menu is built from this: a worktree with no session in it is
+  // still a place the same repository is checked out.
+  it("lists every checkout of the repository, branch by branch", async () => {
+    const side = join(root, "..", `${basename(root)}.side`);
+    git("worktree", "add", "-q", side, "-b", "side");
+    try {
+      const info = (await (await get("git", {})).json()) as {
+        worktrees: { path: string; branch?: string }[];
+      };
+      expect(info.worktrees).toEqual([
+        { path: realpathSync(root), branch: "main" },
+        { path: realpathSync(side), branch: "side" },
+      ]);
+    } finally {
+      git("worktree", "remove", "--force", side);
+    }
   });
 
   it("diffs ref↔ref and ref↔worktree, list then per-file", async () => {

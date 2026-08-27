@@ -40,6 +40,27 @@ export function closeMenu(): void {
   panel = null;
 }
 
+/** Where the last panel was placed, and what it was placed against.
+ *
+ *  A follow-up panel — Session info, the model picker — is opened from inside
+ *  the menu it replaces, and by then the pointer is on the menu rather than on
+ *  the row that owns the anchor. In the Projects rail the ⋯ is revealed on
+ *  hover, so it is `display: none` again and measures 0×0; the same is true of
+ *  a row the list re-rendered under the open menu. Anchoring to a box like that
+ *  put the panel in the top-left corner of the window, which is how this was
+ *  found. The panel it replaces belongs in the same place, so that is the
+ *  fallback. */
+let placed: { anchor: HTMLElement; top: number; left: number } | null = null;
+
+/** Under the anchor, or where the panel this one replaces already sat when the
+ *  anchor is no longer laid out. */
+function anchorBox(anchor: HTMLElement): { top: number; left: number } {
+  const r = anchor.getBoundingClientRect();
+  const under = { top: r.bottom + 4, left: r.left };
+  if (r.width || r.height) return under;
+  return placed?.anchor === anchor ? { top: placed.top, left: placed.left } : under;
+}
+
 /** A narrow screen has no room beside the anchor and thumbs reach the bottom,
  *  so the panel becomes a sheet there — anchoring below is a desktop idea, and
  *  a sheet's rows are sized for a fingertip rather than a cursor. */
@@ -63,9 +84,12 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   // or no z-index can bring it in front (the folder picker in New session).
   (anchor.closest("dialog[open]") ?? document.body).append(panel);
   if (!sheet) {
-    const r = anchor.getBoundingClientRect();
-    panel.style.top = `${Math.max(8, Math.min(r.bottom + 4, window.innerHeight - panel.offsetHeight - 8))}px`;
-    panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - panel.offsetWidth - 8))}px`;
+    // Remembered before the clamp: it is where the panel was *meant* to go, and
+    // the next panel is a different size with a clamp of its own.
+    const box = anchorBox(anchor);
+    placed = { anchor, ...box };
+    panel.style.top = `${Math.max(8, Math.min(box.top, window.innerHeight - panel.offsetHeight - 8))}px`;
+    panel.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - panel.offsetWidth - 8))}px`;
   }
   // Safe to bind now: the pointerdown that opened this already fired.
   document.addEventListener("pointerdown", onOutside, true);

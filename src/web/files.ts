@@ -120,7 +120,7 @@ export function registerFileRoutes(
   /** Real path of a file a session may expose: inside its cwd or the inbox
    *  (where inbound user attachments land — core/inbox.ts), nothing else. */
   const resolveFile = async (id: string, raw: string): Promise<string | null> => {
-    const cwd = nascentCwd(id) ?? (await factory.list()).find((s) => s.id === id)?.cwd;
+    const cwd = nascentCwd(id) ?? (await factory.find(id))?.cwd;
     if (!cwd || !isAbsolute(raw)) return null;
     try {
       // realpath both ends, so neither `..` nor a symlink can step outside.
