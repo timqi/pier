@@ -241,6 +241,28 @@ describe("toChatTurns", () => {
       .toEqual([{ role: "user", text: "go" }]);
   });
 
+  it("carries a system input's provenance back out of the transcript, checked", () => {
+    const origin = { kind: "task-callback" as const, taskId: "t1", runId: "r1", sourceSessionId: "s2" };
+    const source = { taskName: "review-web", model: { provider: "anthropic", id: "claude-opus-5" }, thinking: "high" };
+    expect(toChatTurns([
+      { role: "custom", customType: "pier.system-input", content: "done", details: { ...origin, source }, timestamp: 1 },
+    ])).toEqual([{ role: "system", text: "done", origin: { ...origin, source }, at: 1 }]);
+    // A source is metadata read off disk, so each half is kept only in the
+    // shape it claims: a card drawing `undefined` in a chip reads as a bug in
+    // the card, not as bad metadata.
+    expect(toChatTurns([{
+      role: "custom",
+      customType: "pier.system-input",
+      content: "done",
+      details: { ...origin, source: { taskName: "review-web", model: "claude-opus-5", thinking: "very" } },
+    }])).toEqual([{ role: "system", text: "done", origin: { ...origin, source: { taskName: "review-web" } } }]);
+    // Nameless, or not an object at all: no card caption rather than an empty one.
+    for (const bad of [{ model: { provider: "a", id: "b" } }, "review-web", null]) {
+      expect(toChatTurns([{ role: "custom", customType: "pier.system-input", content: "done", details: { ...origin, source: bad } }]))
+        .toEqual([{ role: "system", text: "done", origin }]);
+    }
+  });
+
   it("keeps activity from an aborted run as a text-less turn", () => {
     const turns = toChatTurns([
       { role: "user", content: "go" },

@@ -3,12 +3,13 @@
 // and Pi types never leak past the seam. The golden-table test in
 // events.test.ts is the mapping's spec; extend types.ts before adding events.
 
-import { MAX_STEP_OUTPUT } from "../core/types.js";
+import { isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
 import type {
   ActivityStep,
   ChatTurn,
   SessionEventPayload,
   SystemInputOrigin,
+  SystemInputSource,
   TurnMeta,
 } from "../core/types.js";
 
@@ -70,22 +71,44 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   if (message.role !== "custom" || message.customType !== "pier.system-input") return null;
   const value = message.details;
   if (!value || typeof value !== "object") return null;
-  const origin = value as Record<string, unknown>;
+  const { source: raw, ...origin } = value as Record<string, unknown>;
   if (
     typeof origin.taskId !== "string" ||
     typeof origin.runId !== "string" ||
     (origin.sourceSessionId !== null && typeof origin.sourceSessionId !== "string")
   ) return null;
+  // Rebuilt around a checked `source` rather than cast through it: a
+  // half-valid one drawn by the card is an `undefined` in a chip, which reads
+  // as a bug in the card rather than as bad metadata.
+  const source = inputSource(raw);
+  const shape = { ...origin, ...(source ? { source } : {}) };
   if (origin.kind === "task-delegation" || origin.kind === "task-callback") {
-    return origin as SystemInputOrigin;
+    return shape as SystemInputOrigin;
   }
   if (
     origin.kind === "task-message" &&
     typeof origin.messageId === "string" &&
     (origin.messageKind === "steer" || origin.messageKind === "follow_up" ||
       origin.messageKind === "progress" || origin.messageKind === "decision" || origin.messageKind === "reply")
-  ) return origin as SystemInputOrigin;
+  ) return shape as SystemInputOrigin;
   return null;
+}
+
+/** What produced a system input, as read back off disk: the name is the whole
+ *  point of it, the model and the effort are each kept only if they are the
+ *  shape they claim to be (core/types.ts). */
+function inputSource(value: unknown): SystemInputSource | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { taskName, model, thinking } = value as Record<string, unknown>;
+  if (typeof taskName !== "string") return undefined;
+  const ref = (model ?? {}) as Record<string, unknown>;
+  return {
+    taskName,
+    ...(typeof ref.provider === "string" && typeof ref.id === "string"
+      ? { model: { provider: ref.provider, id: ref.id } }
+      : {}),
+    ...(isThinkingLevel(thinking) ? { thinking } : {}),
+  };
 }
 
 function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {

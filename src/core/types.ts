@@ -85,8 +85,9 @@ export type NoteOrigin = SystemInputOrigin | { kind: "error" };
  * it.
  */
 export interface SystemInputSource {
-  /** The task's own name — what the operator called the work. */
-  taskName?: string;
+  /** The task's own name — what the operator called the work. Required: every
+   *  run has one, so a source without it is a source with nothing to say. */
+  taskName: string;
   model?: ModelRef;
   thinking?: ThinkingLevel;
 }

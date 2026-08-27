@@ -1246,6 +1246,10 @@ describe("task service", () => {
       kind: "task-callback",
       runIds: expect.arrayContaining([first.runId, second.runId]) as unknown,
     });
+    // Several runs in one input: the first one's name and model as the card's
+    // caption would attribute the others' results to it, so the batch carries
+    // no provenance at all — the text names every run it contains.
+    expect(session.systemInputs.at(-1)!.origin.source).toBeUndefined();
     service.stop();
   });
 

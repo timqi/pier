@@ -56,7 +56,11 @@ export class TaskCallbacks {
           runId: runs[0]!.id,
           sourceSessionId: runs[0]!.targetSessionId,
           runIds: runs.map((run) => run.id),
-          source: runSource(runs[0]!),
+          // Only when the input is about one run: a batch is several tasks in
+          // one delivery, and the first one's name and model as the card's
+          // caption would attribute every other result to it. The text names
+          // each run; the card says nothing rather than something false.
+          ...(runs.length === 1 ? { source: runSource(runs[0]!) } : {}),
         },
       }),
       describe: (run) => `the result of "${run.context.definition.name}"`,

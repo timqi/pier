@@ -264,9 +264,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: 
   // has to fetch a run to say what it is. Same vocabulary as the session
   // header's chips — a model is a chip, an effort is plain text beside it.
   const src = origin.source;
-  if (src?.taskName) {
-    head.append(h("span", "min-w-0 truncate font-medium normal-case text-cyan-700", src.taskName));
-  }
+  if (src) head.append(h("span", "min-w-0 truncate font-medium normal-case text-cyan-700", src.taskName));
   if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
     const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
     source.title = "Open source session";
@@ -376,7 +374,10 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   while (row.nextElementSibling) row.nextElementSibling.remove();
   row.remove();
   deps.ownTurn(text);
-  appendTurn("user", text);
+  // Timestamped like the composer's optimistic turn: the event this row
+  // reconciles never draws a second one, so a row without it would have no
+  // clock until the next reload.
+  appendTurn("user", text, false, Date.now());
   scrollBottom(true);
   const res = await sendJson(`/api/sessions/${id}/turns/${index}/edit`, { text });
   if (!res.ok) {
