@@ -405,17 +405,29 @@ export const setPinned = (s: SessionInfo, pinned: boolean): Promise<void> =>
 const branchAt = (list: SessionInfo[], at: string): string =>
   list.find((s) => s.cwd === at)?.branch ?? basename(at);
 
+const CHIP = "flex-none truncate rounded bg-neutral-200/70 px-1 font-mono text-[10px] leading-[15px] text-neutral-500";
+
 /** Which checkout this session works in, when its project has more than one.
  *  A single-worktree project would only be telling you its own branch. */
 function branchChip(s: SessionInfo, show: boolean): HTMLElement[] {
   if (!show || !s.branch) return [];
-  const chip = h(
-    "span",
-    "flex-none truncate rounded bg-neutral-200/70 px-1 font-mono text-[10px] leading-[15px] text-neutral-500",
-    s.branch,
-  );
+  const chip = h("span", CHIP, s.branch);
   chip.style.maxWidth = "40%";
   chip.title = s.cwd;
+  return [chip];
+}
+
+/** Short enough for a chip; `telegram` is the only name that isn't. */
+const CHANNEL_LABEL: Record<string, string | undefined> = { telegram: "tg" };
+
+/** Which conversation a session answers, when it is not this workbench. Typing
+ *  into a Slack thread's session sends to the people in that thread, and the
+ *  row is the last place to notice — but `web` is nearly every row, so saying
+ *  it would be the constant that means nothing. */
+function channelChip(s: SessionInfo): HTMLElement[] {
+  if (!s.channel || s.channel === "web") return [];
+  const chip = h("span", CHIP, CHANNEL_LABEL[s.channel] ?? s.channel);
+  chip.title = `answering ${s.channel}`;
   return [chip];
 }
 
@@ -461,6 +473,7 @@ function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
     h(
       "div",
       "ml-auto flex flex-none items-center gap-1",
+      ...channelChip(s),
       ...branchChip(s, branches),
       ...(s.kept ? [badge] : []),
       done,
@@ -687,11 +700,16 @@ function renderArchive(): void {
     archiveDialog.close();
     run();
   };
-  const matched = deps.sessions().filter((s) => hit(`${s.title ?? ""} ${s.cwd}`));
+  // The chat a session answers is both searchable and shown, by its full name
+  // here — the palette has room the rail's chip does not, and "telegram" is
+  // what someone types. Empty for the workbench's own sessions, which is most
+  // of them: `web` in every detail line would only push the cwd out.
+  const chatOf = (s: SessionInfo): string => (s.channel && s.channel !== "web" ? s.channel : "");
+  const matched = deps.sessions().filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`));
   const byAge = (a: SessionInfo, b: SessionInfo): number => b.createdAt - a.createdAt;
   const target = (s: SessionInfo): Target => ({
     label: s.title ?? "untitled",
-    detail: basename(s.cwd),
+    detail: [basename(s.cwd), chatOf(s)].filter(Boolean).join(" · "),
     open: open(() => deps.select(s.id)),
     session: s,
   });
