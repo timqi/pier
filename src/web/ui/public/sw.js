@@ -59,6 +59,10 @@ self.addEventListener("push", (event) => {
     await self.registration.showNotification(title, {
       body: data.body || "A turn finished.",
       tag: data.tag || "pier",
+      // The tag collapses a session's turns into one banner; without this the
+      // second turn silently replaces the first — no sound, no re-alert, which
+      // reads as "notifications stopped working". Ignored where unsupported.
+      renotify: true,
       icon: "/icon-192.png",
       badge: "/icon-32.png",
       timestamp: Date.now(),
