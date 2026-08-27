@@ -260,6 +260,15 @@ export class Router {
             });
           });
       }
+      // A queued message with no turn left to deliver it. `decide` reads the
+      // state once, so a steer chosen against a turn that ends before the call
+      // lands sits in Pi's queue until some *later* turn reads it — on IM that
+      // is indistinguishable from the message never arriving (§5b). Pi drains
+      // its own queues up to the agent_end handler, so a non-empty queue on an
+      // idle session is exactly the message that missed that window.
+      if (payload.type === "queue-state" && (payload.steering.length || payload.followUp.length)) {
+        this.promoteQueued(session, key);
+      }
       // Every turn-end reaches the channel, empty text included: an adapter's
       // per-turn UI (Telegram's 👀 receipts) is retired here, and a turn that
       // settled with nothing to say still has to settle.
@@ -284,8 +293,72 @@ export class Router {
     });
   }
 
+  /** Sessions whose queue is being promoted right now. `clearQueue` and the
+   *  prompt that follows it both emit queue-state of their own, so without
+   *  this the handler would re-enter on its own effects. */
+  private readonly promoting = new Set<string>();
+
+  /**
+   * Turn a stranded queue into the turn it was waiting for. Not routed through
+   * `dispatch`: the text was prefixed when it was first dispatched
+   * (identity.ts), and sending it back through would head it a second time.
+   *
+   * Only ever reached from a queue-state event, never from a turn ending: Pi
+   * leaves the queue alone on `abort()`, so promoting on idle would make /stop
+   * start the very turn it was asked to stop. Recovering *those* messages stays
+   * the web's recall route, which hands them back to the composer.
+   */
+  private promoteQueued(session: AgentSession, key: ConversationKey): void {
+    if (session.state !== "idle" || this.promoting.has(session.id)) return;
+    this.promoting.add(session.id);
+    void (async () => {
+      try {
+        // Re-read: a turn may have started since the event, and it will drain
+        // the queue itself — clearing it here would take the messages out of it.
+        if (session.state !== "idle") return;
+        const { steering, followUp } = await session.clearQueue();
+        const text = [...steering, ...followUp].join("\n").trim();
+        if (!text) return;
+        // A drain is "no new turns", and this would be one. Told to the
+        // conversation rather than dropped, because the message is now out of
+        // the queue and nothing else would ever mention it (§5b).
+        if (this.draining) {
+          this.report(
+            session.id,
+            key,
+            `queued message not taken — Pier is restarting; send it again: ${truncate(text)}`,
+          );
+          return;
+        }
+        log.info(
+          `promoting ${String(steering.length + followUp.length)} queued message(s) → session ${session.id}`,
+        );
+        await session.prompt(text);
+      } catch (err) {
+        this.report(session.id, key, `delivering the queued messages failed: ${String(err)}`);
+      } finally {
+        this.promoting.delete(session.id);
+      }
+    })();
+  }
+
   async abort(sessionId: string): Promise<void> {
     await this.bySession.get(sessionId)?.session.abort();
+  }
+
+  /**
+   * Drop what this session was told about who is speaking, so the next message
+   * carries a full header again.
+   *
+   * For the surfaces that take a prefixed message back *out* of the context it
+   * was counted into — a recalled queue, a rewound turn. The tracker's whole
+   * job is "the model has already been told" (identity.ts), and a header that
+   * never reached the model, or reached it and was then rewound away, makes
+   * every later message from that speaker unattributed in a group chat. One
+   * redundant header is the same price eviction already pays.
+   */
+  forgetSender(sessionId: string): void {
+    this.senders.forget(sessionId);
   }
 
   /** Refuse new work from every surface; in-flight turns keep running. */
@@ -429,6 +502,9 @@ export class Router {
     // Turn outcomes flow through the event stream; a rejected call surfaces
     // there too, never as a thrown exception across the seam.
     session[action](prompt).catch((err) => {
+      // The header was counted as delivered a line above; this message never
+      // arrived, so the next one from this speaker must carry it again.
+      this.senders.forget(session.id);
       this.report(session.id, msg.key, String(err));
     });
     return { sessionId: session.id };

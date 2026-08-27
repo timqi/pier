@@ -311,7 +311,13 @@ export class PiSession implements AgentSession {
     await this.whenCompacted();
     // Re-checked: the wait above is long enough for a dispose to land.
     this.live();
-    return this.pi.prompt(text);
+    // A turn may have started since the caller read the state this prompt was
+    // decided against — two messages arriving together, or several released at
+    // once by the wait above. Bare, Pi throws that back as "already
+    // processing" and the message is gone (§5b); queued, it is the same
+    // "delivered when idle" the core's own policy picks for an auto message
+    // that lands mid-turn (core/queue.ts).
+    return this.pi.prompt(text, { streamingBehavior: "followUp" });
   }
 
   async steer(text: string): Promise<void> {

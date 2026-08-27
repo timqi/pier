@@ -440,6 +440,11 @@ export function createServer(
     const { sessionId } = await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
+      // Named, not anonymous: a session reached from a group chat as well as
+      // from here attributes an unheaded message to whoever spoke last
+      // (core/identity.ts), which is the operator's own words in someone
+      // else's mouth.
+      sender: { id: "web", name: "operator" },
       text: body.text,
       mode,
     });
@@ -462,9 +467,13 @@ export function createServer(
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
     await session.rewindToUserTurn(index);
+    // The rewind took the turns after this one out of the context, headers and
+    // all; what the model was told about who is speaking went with them.
+    router.forgetSender(id);
     await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
+      sender: { id: "web", name: "operator" },
       text: body.text,
       mode: "auto",
     });
@@ -488,6 +497,9 @@ export function createServer(
     const text = [...steering, ...followUp].join("\n").trim();
     if (!text) return c.json({ error: "queue is empty" }, 409);
     if (mode === "restart") await router.abort(id); // resolves once idle
+    // No sender here, unlike the other dispatches: the queued texts were
+    // headed when they were first dispatched — and in a shared session they
+    // are other speakers' words, which an operator header would claim.
     await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
@@ -499,8 +511,12 @@ export function createServer(
 
   // Recall: drop all pending queued messages and hand them back (composer restore).
   guarded(app, "POST", "/api/sessions/:id/queue/recall", 404, async (c) => {
-    const session = await ensure(c.req.param("id"));
+    const id = c.req.param("id");
+    const session = await ensure(id);
     const { steering, followUp } = await session.clearQueue();
+    // Those messages carried the header that told the session who is speaking,
+    // and they are going back to the composer instead of to the model.
+    if (steering.length || followUp.length) router.forgetSender(id);
     return c.json({ messages: [...steering, ...followUp] });
   });
 

@@ -1487,7 +1487,12 @@ describe("workbench server", () => {
 
     let res = await post({ text: "hello" });
     expect(res.status).toBe(202);
-    expect(session.calls).toEqual(["prompt:hello"]);
+    // The first web message carries the operator header (core/identity.ts);
+    // the follow-ups below are the same speaker in the same minute, so none.
+    expect(session.calls).toHaveLength(1);
+    expect(session.calls[0]).toMatch(
+      /^prompt:\[operator<web> \d{4}-\d{2}-\d{2} \d{1,2}:\d{2}\]\nhello$/,
+    );
 
     session.setState("streaming");
     await post({ text: "wait for it" });
@@ -1518,7 +1523,12 @@ describe("workbench server", () => {
       body: JSON.stringify({ text: "fixed" }),
     });
     expect(res.status).toBe(202);
-    expect(session.calls).toEqual(["rewind:0", "prompt:fixed"]);
+    expect(session.calls).toHaveLength(2);
+    expect(session.calls[0]).toBe("rewind:0");
+    // The rewind forgot the sender, so the re-dispatch is headed again.
+    expect(session.calls[1]).toMatch(
+      /^prompt:\[operator<web> \d{4}-\d{2}-\d{2} \d{1,2}:\d{2}\]\nfixed$/,
+    );
   });
 
   it("rejects edits while streaming or with bad input", async () => {

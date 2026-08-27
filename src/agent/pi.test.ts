@@ -9,10 +9,14 @@ import { PiSession, standDownShadowed } from "./pi.js";
 /** Only what PiSession touches on these paths. */
 function fakePi() {
   const calls: string[] = [];
+  /** What each prompt was queued as, kept apart from `calls` so the ordering
+   *  assertions elsewhere stay about ordering. */
+  const promptOptions: unknown[] = [];
   /** Held open, so a test can be *inside* a compaction when it dispatches. */
   let release: ((err?: Error) => void) | undefined;
   return {
     calls,
+    promptOptions,
     finishCompaction: (err?: Error) => {
       release?.(err);
       release = undefined;
@@ -39,8 +43,9 @@ function fakePi() {
           release = (err) => (err ? reject(err) : resolve());
         });
       },
-      prompt: () => {
+      prompt: (_text: string, options?: unknown) => {
         calls.push("prompt");
+        promptOptions.push(options);
         return Promise.resolve();
       },
       steer: () => {
@@ -127,6 +132,34 @@ describe("a disposed session", () => {
       "followUp",
     );
     expect(fake.calls).toEqual(["prompt", "sendCustomMessage"]);
+  });
+});
+
+describe("a prompt that races a turn", () => {
+  it("is queued rather than thrown away", async () => {
+    const { fake, session: s } = session();
+    await s.prompt("hi");
+    // Bare, Pi refuses a prompt that arrives while a turn is running and the
+    // message is gone. The core decided "prompt" against a state it read one
+    // step earlier, so the queue is where a turn that started since must put
+    // it — the same place core/queue.ts sends an auto message mid-turn.
+    expect(fake.promptOptions).toEqual([{ streamingBehavior: "followUp" }]);
+  });
+
+  it("queues the ones the compaction gate released together, not just the first", async () => {
+    const { fake, session: s } = session();
+    const compaction = s.compact();
+    const first = s.prompt("one");
+    const second = s.prompt("two");
+    fake.finishCompaction();
+    await compaction;
+    await Promise.all([first, second]);
+    // Both were decided against an idle session and both reach Pi; without the
+    // option the second is the one that disappears.
+    expect(fake.promptOptions).toEqual([
+      { streamingBehavior: "followUp" },
+      { streamingBehavior: "followUp" },
+    ]);
   });
 });
 

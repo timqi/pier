@@ -18,6 +18,10 @@ import type {
 function fakeSession(id: string) {
   const listeners = new Set<(e: SessionEventPayload) => void>();
   const calls: string[] = [];
+  /** Every text that reached the session, prefix and all. */
+  const prompts: string[] = [];
+  let promptError: Error | undefined;
+  let queued: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
   const session = {
     id,
     state: "idle" as const,
@@ -29,9 +33,19 @@ function fakeSession(id: string) {
       calls.push("abort");
       return Promise.resolve();
     },
-    prompt: () => Promise.resolve(),
+    prompt: (text: string) => {
+      calls.push("prompt");
+      prompts.push(text);
+      return promptError ? Promise.reject(promptError) : Promise.resolve();
+    },
     steer: () => Promise.resolve(),
     followUp: () => Promise.resolve(),
+    clearQueue: () => {
+      calls.push("clearQueue");
+      const drained = queued;
+      queued = { steering: [], followUp: [] };
+      return Promise.resolve(drained);
+    },
     dispose: () => {
       calls.push("dispose");
       return Promise.resolve();
@@ -41,6 +55,14 @@ function fakeSession(id: string) {
     // The router reads a handful of members; a full double would be noise.
     session: session as unknown as AgentSession,
     calls,
+    prompts,
+    /** Park messages in Pi's queue, as a steer delivered too late does. */
+    setQueue: (q: { steering?: string[]; followUp?: string[] }) => {
+      queued = { steering: q.steering ?? [], followUp: q.followUp ?? [] };
+    },
+    failPrompts: (err: Error | undefined) => {
+      promptError = err;
+    },
     emit: (e: SessionEventPayload) => {
       for (const fn of listeners) fn(e);
     },
@@ -358,6 +380,123 @@ describe("drain", () => {
     // The fake's state field is static; busy() reads the live session state.
     Object.assign(fake.session, { state: "streaming" });
     expect(router.busy()).toEqual([{ session: fake.session, key: KEY }]);
+  });
+});
+
+/** One macrotask: long enough for the promotion's clear-then-prompt to land. */
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+describe("a queue with no turn left to drain it", () => {
+  // `decide` reads the session state once. A steer chosen against a turn that
+  // ends before the call lands stays in Pi's queue, and the next turn — which
+  // may never come — is the first thing that would read it. On IM that is
+  // indistinguishable from the message never having arrived (§5b).
+  it("promotes it into a turn of its own", async () => {
+    await router.ensure(KEY);
+    fake.setQueue({ steering: ["one"], followUp: ["two"] });
+    fake.emit({ type: "queue-state", steering: ["one"], followUp: ["two"] });
+    await settle();
+    expect(fake.prompts).toEqual(["one\ntwo"]);
+  });
+
+  it("sends the text as it stands — the header was spent on the first dispatch", async () => {
+    await router.ensure(KEY);
+    fake.setQueue({ steering: ["[Ada<U1> 09:00]\nand another thing"] });
+    fake.emit({ type: "queue-state", steering: ["[Ada<U1> 09:00]\nand another thing"], followUp: [] });
+    await settle();
+    // Back through dispatch() it would be headed twice, by two clocks.
+    expect(fake.prompts).toEqual(["[Ada<U1> 09:00]\nand another thing"]);
+  });
+
+  it("leaves a queue alone while a turn is running — that turn drains it", async () => {
+    await router.ensure(KEY);
+    Object.assign(fake.session, { state: "streaming" });
+    fake.setQueue({ steering: ["one"] });
+    fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
+    await settle();
+    expect(fake.prompts).toEqual([]);
+    expect(fake.calls).not.toContain("clearQueue");
+  });
+
+  it("ignores the empty queue-state a clear emits", async () => {
+    await router.ensure(KEY);
+    fake.emit({ type: "queue-state", steering: [], followUp: [] });
+    await settle();
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("does not re-enter on the events its own promotion emits", async () => {
+    await router.ensure(KEY);
+    fake.setQueue({ steering: ["one"] });
+    fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
+    fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
+    await settle();
+    expect(fake.prompts).toEqual(["one"]);
+    expect(fake.calls.filter((c) => c === "clearQueue")).toHaveLength(1);
+  });
+
+  it("never turns a /stop into the turn it was asked to stop", async () => {
+    await router.ensure(KEY);
+    fake.setQueue({ steering: ["one"] });
+    // Pi leaves the queue in place on abort, and emits no queue-state for it;
+    // the web's recall route is how those messages come back to the composer.
+    await router.abortConversation(KEY);
+    fake.emit({ type: "state", state: "idle" });
+    await settle();
+    expect(fake.prompts).toEqual([]);
+  });
+
+  it("tells the conversation when a drain refuses the promotion (§5b)", async () => {
+    await router.ensure(KEY);
+    router.beginDrain();
+    fake.setQueue({ steering: ["the thing I typed"] });
+    fake.emit({ type: "queue-state", steering: ["the thing I typed"], followUp: [] });
+    await settle();
+    expect(fake.prompts).toEqual([]);
+    // Out of the queue and into nothing, unless someone is told.
+    expect(tg.notes.at(-1)?.[1].text).toContain("the thing I typed");
+    expect(tg.notes.at(-1)?.[1].origin).toEqual({ kind: "error" });
+  });
+
+  it("reports a promotion that failed instead of losing it quietly", async () => {
+    await router.ensure(KEY);
+    fake.failPrompts(new Error("session gone"));
+    fake.setQueue({ steering: ["one"] });
+    fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
+    await settle();
+    expect(tg.notes.at(-1)?.[1].text).toContain("session gone");
+  });
+});
+
+describe("the speaker a session has been told about", () => {
+  const ada = { id: "U1", name: "Ada" };
+
+  it("is re-sent when the dispatch carrying it failed", async () => {
+    fake.failPrompts(new Error("session gone"));
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
+    await settle();
+    expect(fake.prompts[0]).toContain("Ada<U1>");
+    // The model never saw that header: counting it as delivered leaves every
+    // later message from Ada attributed to whoever spoke before her.
+    fake.failPrompts(undefined);
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "again", mode: "auto" });
+    expect(fake.prompts[1]).toContain("Ada<U1>");
+  });
+
+  it("is not re-sent when the dispatch worked", async () => {
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "again", mode: "auto" });
+    // Same speaker, same minute: the header would be ~15 tokens of nothing.
+    expect(fake.prompts[1]).toBe("again");
+  });
+
+  it("is dropped on demand, for a surface that took the message back", async () => {
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
+    // A recalled queue or a rewound turn: the prefixed text is out of the
+    // context it was counted into (web/server.ts).
+    router.forgetSender("s1");
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "again", mode: "auto" });
+    expect(fake.prompts[1]).toContain("Ada<U1>");
   });
 });
 

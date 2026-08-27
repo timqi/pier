@@ -63,6 +63,18 @@ describe("when a speaker line is worth its tokens", () => {
   it("emits nothing when the surface has no sender to name", () => {
     expect(new SenderPrefix().next("s1", undefined, noon)).toBe("");
   });
+
+  it("introduces her again once the session is made to forget", () => {
+    // What the tracker holds is "the model has already been told". A message
+    // that never reached it — a failed dispatch, a recalled queue, a rewound
+    // turn — makes that false, and every later message from her would be
+    // attributed to whoever spoke before (core/router.ts forgetSender).
+    const p = new SenderPrefix();
+    expect(p.next("s1", ada, noon)).toContain("Ada<U1>");
+    expect(p.next("s1", ada, noon)).toBe("");
+    p.forget("s1");
+    expect(p.next("s1", ada, noon)).toContain("Ada<U1>");
+  });
 });
 
 describe("sanitizeIdentity", () => {
