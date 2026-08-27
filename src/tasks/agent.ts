@@ -1,6 +1,7 @@
 import type { AgentFactory, AgentSession } from "../core/types.js";
 import { quietLabel, splitReply } from "../core/reply.js";
 import { Router } from "../core/router.js";
+import { runSource } from "./callbacks.js";
 import { TaskMessenger } from "./messages.js";
 import { TaskStore } from "./store.js";
 import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
@@ -68,6 +69,10 @@ export class AgentTaskRunner {
         const prompt = run.context.resumePrompt ?? `${preamble(run)}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
+        // The level the session settled on, not the one the task asked for:
+        // an unspecified effort inherits the caller's, and the card in the
+        // subagent's own transcript should say which one that was.
+        run.context.thinking = session.thinkingLevel;
         run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
         let text = "";
@@ -96,6 +101,7 @@ export class AgentTaskRunner {
               taskId: run.taskId,
               runId: run.id,
               sourceSessionId: run.sourceSessionId,
+              source: runSource(run),
             },
             "prompt",
           );

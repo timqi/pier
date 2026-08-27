@@ -76,6 +76,21 @@ export interface Channel {
  */
 export type NoteOrigin = SystemInputOrigin | { kind: "error" };
 
+/**
+ * What produced a system input, for the card that renders it: an id says which
+ * run, this says what it was. Written into the transcript with the input
+ * because a card must not have to fetch a run to name it — and every field is
+ * optional: a bash run has no model, a subagent that inherited its effort has
+ * no requested level, and an input delivered before this shipped has none of
+ * it.
+ */
+export interface SystemInputSource {
+  /** The task's own name — what the operator called the work. */
+  taskName?: string;
+  model?: ModelRef;
+  thinking?: ThinkingLevel;
+}
+
 export type SystemInputOrigin = {
   kind: "task-delegation" | "task-callback";
   taskId: string;
@@ -83,6 +98,7 @@ export type SystemInputOrigin = {
   sourceSessionId: string | null;
   /** Batched callback delivery: every run id contained in this input. */
   runIds?: string[];
+  source?: SystemInputSource;
 } | {
   kind: "task-message";
   taskId: string;
@@ -90,6 +106,7 @@ export type SystemInputOrigin = {
   sourceSessionId: string;
   messageId: string;
   messageKind: "steer" | "follow_up" | "progress" | "decision" | "reply";
+  source?: SystemInputSource;
 };
 
 export interface BackgroundRun {

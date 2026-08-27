@@ -91,6 +91,10 @@ export interface TaskRunContext {
   cwd?: string;
   sessionId?: string;
   model?: ModelRef;
+  /** What the run actually reasoned at, read off the session rather than off
+   *  the request — an unspecified level inherits the caller's, so the request
+   *  is usually blank where the answer is not. */
+  thinking?: ThinkingLevel;
   renderedPrompt?: string;
   resumePrompt?: string;
 }

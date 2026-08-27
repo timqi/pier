@@ -258,12 +258,30 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: 
   const row = h("div", "group relative mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
   row.dataset.kind = "system";
   if (at !== undefined) row.append(hoverChip(clockTime(at)));
-  const head = h("div", "mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase text-cyan-800", h("span", "", kind));
+  const head = h("div", "mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold uppercase text-cyan-800", h("span", "flex-none", kind));
+  // What produced it, not just which run did: the task's own name, the model
+  // and the effort, all riding in the origin (core/types.ts) so the card never
+  // has to fetch a run to say what it is. Same vocabulary as the session
+  // header's chips — a model is a chip, an effort is plain text beside it.
+  const src = origin.source;
+  if (src?.taskName) {
+    head.append(h("span", "min-w-0 truncate font-medium normal-case text-cyan-700", src.taskName));
+  }
   if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
     const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
     source.title = "Open source session";
     source.onclick = () => deps.select(origin.sourceSessionId!);
     head.append(h("span", "text-cyan-400", "from"), source);
+  }
+  if (src?.model) {
+    const model = h("span", "flex-none rounded bg-cyan-100 px-1.5 py-px font-mono font-medium normal-case text-cyan-800", src.model.id);
+    model.title = `${src.model.provider} / ${src.model.id}`;
+    head.append(model);
+  }
+  if (src?.thinking) {
+    const effort = h("span", "flex-none font-mono font-normal normal-case text-cyan-600", src.thinking);
+    effort.title = "Reasoning effort";
+    head.append(effort);
   }
   const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
   run.onclick = () => deps.showTasks(origin.taskId);

@@ -254,7 +254,15 @@ describe("task service", () => {
     expect(run.context.renderedPrompt).toContain('"pr":7');
     expect(session.prompts).toHaveLength(1);
     expect(session.systemInputs[0]).toMatchObject({
-      origin: { kind: "task-delegation", taskId: task.id, runId: run.id, sourceSessionId: null },
+      // The card rendering this input names what produced it without fetching
+      // the run: the task, and the model and effort the session settled on.
+      origin: {
+        kind: "task-delegation",
+        taskId: task.id,
+        runId: run.id,
+        sourceSessionId: null,
+        source: { taskName: "review", model: { provider: "test", id: "model" }, thinking: "off" },
+      },
       mode: "prompt",
     });
   });
@@ -358,9 +366,11 @@ describe("task service", () => {
     expect(statuses).toContain("running");
     expect(statuses).toContain("succeeded");
     expect(session.systemInputs.at(-1)).toMatchObject({
-      origin: { kind: "task-callback", runId: done.id },
+      origin: { kind: "task-callback", runId: done.id, source: { taskName: "command" } },
       mode: "followUp",
     });
+    // A bash run has no model and no effort, and the card must not invent one.
+    expect(session.systemInputs.at(-1)?.origin.source).toEqual({ taskName: "command" });
 
     // Simulate a crash after Pi persisted the custom message but before Pier
     // committed delivery: startup detects runId in transcript and does not resend.

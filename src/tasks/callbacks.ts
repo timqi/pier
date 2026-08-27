@@ -1,6 +1,7 @@
 // What a finished run says to the session that delegated it. Delivery itself
 // belongs to outbox.ts; this file owns the run vocabulary and the batching.
 
+import type { SystemInputSource } from "../core/types.js";
 import { Router } from "../core/router.js";
 import { Outbox } from "./outbox.js";
 import { TaskStore } from "./store.js";
@@ -12,6 +13,16 @@ import type { TaskCallback, TaskRun } from "./types.js";
  *  Shared with the group callback, which has always carried both. */
 export const runRef = (run: TaskRun): string =>
   `Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`;
+
+/** What the card in the recipient's transcript says the input came from. Part
+ *  of the run vocabulary for the same reason `runRef` is: the callback, the
+ *  subagent messages and the delegation prompt all name a run, and three
+ *  spellings of "which task, on what model" would be three cards. */
+export const runSource = (run: TaskRun): SystemInputSource => ({
+  taskName: run.context.definition.name,
+  ...(run.context.model ? { model: run.context.model } : {}),
+  ...(run.context.thinking ? { thinking: run.context.thinking } : {}),
+});
 
 export function runResultText(run: TaskRun): string {
   let result = run.error ?? "No result";
@@ -45,6 +56,7 @@ export class TaskCallbacks {
           runId: runs[0]!.id,
           sourceSessionId: runs[0]!.targetSessionId,
           runIds: runs.map((run) => run.id),
+          source: runSource(runs[0]!),
         },
       }),
       describe: (run) => `the result of "${run.context.definition.name}"`,

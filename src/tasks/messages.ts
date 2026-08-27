@@ -2,6 +2,7 @@ import type { SystemInputOrigin } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
+import { runSource } from "./callbacks.js";
 import { newId } from "./definitions.js";
 import { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
@@ -339,6 +340,7 @@ export class TaskMessenger {
       sourceSessionId: message.fromSessionId,
       messageId: message.id,
       messageKind: message.kind,
+      source: runSource(run),
     };
   }
 
