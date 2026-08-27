@@ -1,9 +1,12 @@
-// The shell around the workbench: how the sidebar yields space. Below md it
-// becomes a drawer (the slide is CSS in style.css) with a compact top bar
-// standing in for the chat header; at md and up it collapses to a slim handle
-// column instead — body[data-rail="closed"], persisted, styled in style.css.
+// One reason: how the sidebar yields space, and therefore what has to stand in
+// for it while it is gone. Below md it becomes a drawer (the slide is CSS in
+// style.css) with a compact top bar standing in for the chat header; at md and
+// up it collapses to a slim handle column instead — body[data-rail="closed"],
+// persisted, styled in style.css. The attention badge below is the same
+// sentence for the session list: the toggle carries what the list would have
+// shown.
 
-import { $ } from "./dom.js";
+import { $, h } from "./dom.js";
 import { shortcut } from "./shortcut.js";
 
 export interface ShellDeps {
@@ -47,6 +50,42 @@ function toggleDrawer(): void {
 /** Below md the rail attribute does nothing — the sidebar is the drawer there,
  *  so one chord has to mean whichever of the two this width has. */
 const isDrawer = (): boolean => window.innerWidth < 768;
+
+// --- attention ----------------------------------------------------------------------
+// With the rail collapsed — and on a phone, always — the amber dots in the
+// session list are off screen, and a turn that finished in another session then
+// looks exactly like nothing happening (§5b). Only the actionable half of what
+// those dots say: a session merely *running* elsewhere is nothing to answer,
+// and a badge that pulses all day is one nobody reads. Which sessions is one
+// click away in the list itself — the badge answers whether, not which.
+
+/** The two ways back to the sidebar — one per breakpoint, so only ever one of
+ *  them is on screen. Badging the door is the whole design: no new element,
+ *  no new place to look. */
+const doors = [$("#rail-toggle"), $("#drawer-toggle")];
+
+/** A dot for one, the number for more: a lone "1" in a 14px circle is noise,
+ *  and a bare dot for seven is a lie. Both hang off the button's top-right
+ *  corner rather than inside it, where the chevron already is. */
+const CORNER = "attention absolute -right-0.5 -top-0.5 rounded-full bg-amber-500";
+const badge = (count: number): HTMLElement =>
+  count === 1
+    ? h("span", `${CORNER} h-2 w-2`)
+    : h(
+      "span",
+      `${CORNER} flex h-3.5 min-w-3.5 items-center justify-center px-0.5 text-[9px] font-semibold text-white`,
+      count > 9 ? "9+" : String(count),
+    );
+
+/** How many sessions hold a turn nobody has looked at. Called from the one
+ *  place the list's own dots are painted (ui/sidebar.ts), so the two agree by
+ *  construction rather than by both being maintained. */
+export function setAttention(count: number): void {
+  for (const door of doors) {
+    door.querySelector(".attention")?.remove();
+    if (count) door.append(badge(count));
+  }
+}
 
 /** Where an opening drag may start, and how much of the drawer's width has to
  *  be showing on release for it to stay. */

@@ -160,6 +160,11 @@ html {
   body[data-rail="closed"] #rail-toggle svg {
     transform: rotate(180deg);
   }
+  /* The badge stands in for the list's own dots; with the rail open they are
+     on screen, and saying it twice in one band is saying it once too often. */
+  body:not([data-rail="closed"]) #rail-toggle .attention {
+    display: none;
+  }
   body[data-rail="closed"]
     :is(#chat-header, main section > header:first-child, main section > div:first-child > header:first-child) {
     padding-left: 2.75rem;

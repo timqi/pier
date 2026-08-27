@@ -8,6 +8,7 @@ import { pathTrigger, type PathOption } from "./dir-picker.js";
 import { $, basename, detailsRow, h, relTime } from "./dom.js";
 import { closeMenu, openMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
+import { setAttention } from "./shell.js";
 import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 // A value import, unlike the type-only line above: src/limits.ts is a leaf of
@@ -313,13 +314,26 @@ function leaseNote(s: SessionInfo): string {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Waiting for *you*, which is narrower than `unread`.
+ *
+ * Unread is a property of a row in Projects and of nothing else. The server
+ * marks every session whose turn ends, and most of those have no reader here:
+ * a subagent's turn was addressed to its supervisor and delivered by callback,
+ * an IM session's to the chat it came from. Nothing ever clears them either —
+ * an ack needs the session selected — so drawn as-is they are permanently
+ * amber, which is a mark nobody reads. Said once, for the dot and the two
+ * badges standing in for it.
+ */
+const waitingForYou = (s: SessionInfo): boolean => s.unread && s.listed;
+
 /** Attention dot: green = running, amber = finished and waiting for a look,
  *  sky = idle itself but subagents still in flight, grey = idle. */
 function stateDot(s: SessionInfo): HTMLElement {
   const [cls, title] =
     s.state === "streaming"
       ? ["bg-green-500 animate-pulse", "working…"]
-      : s.unread
+      : waitingForYou(s)
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
           ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
@@ -538,15 +552,20 @@ function projectNode(key: string, list: SessionInfo[]): HTMLElement {
 
 export function renderSessions(): void {
   const sessions = deps.sessions();
-  // The one place the unread dots are painted, so also the one place the
-  // installed app's icon badge is kept in step with them.
+  // The one place the dots are painted, so also the one place the two surfaces
+  // that stand in for them off screen are counted: the badge on the sidebar
+  // toggle (ui/shell.ts) and the installed app's icon. Both count what carries
+  // a dot and nothing else — this array holds far more than the rail draws,
+  // because a Projects read merges rather than replaces (ui/main.ts).
   //
-  // Not the IM sessions, for the reason web/push.ts skips them too: that turn
-  // was already delivered to the chat it came from. Their dot still says "new
-  // since you last looked here", but only a Console visit clears one — and a
-  // badge on a closed app showing a number no action of yours can clear is not
-  // attention state, it is a session counter.
-  setUnreadBadge(sessions.filter((s) => s.unread && s.channel === "web").length);
+  // The icon badge also skips the IM sessions, for the reason web/push.ts skips
+  // them: that turn was already delivered to the chat it came from. A pinned IM
+  // session's dot still says "new since you last looked here" — but only a
+  // Console visit clears one, and a badge on a closed app showing a number no
+  // action of yours can clear is not attention state, it is a session counter.
+  const waiting = sessions.filter(waitingForYou);
+  setAttention(waiting.length);
+  setUnreadBadge(waiting.filter((s) => s.channel === "web").length);
   const projects = pinnedProjects();
   projectTree.replaceChildren(
     ...(projects.length
