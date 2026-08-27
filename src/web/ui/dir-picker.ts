@@ -1,8 +1,9 @@
 // Working-directory picker, shared by every surface that asks for a path: the
-// new-session dialog, the IM channel config and the Files view's root chip.
-// The panel is the shared part; `browseButton` decorates an existing text
-// input rather than replacing it, so form semantics (required, datalist of
-// known projects) stay where they are and typing a path still works.
+// new-session dialog, the IM channel config, the Files view's root chip and
+// the Terminal's. Two shared parts: the folder tree, and the menu of paths the
+// surface can already name with the tree one row below it. Both decorate an
+// existing text input rather than replacing it, so form semantics (required,
+// validation) stay where they are and typing a path still works.
 //
 // Inside the panel the path line is an input for the same reason: clicking
 // down from home is the slow way to reach a directory the person can already
@@ -195,30 +196,22 @@ export function browseButton(input: HTMLInputElement, onPick?: (path: string) =>
  * The field *is* the button: clicking it offers the folders this surface knows
  * (`options`, read at click time — they move while the form is open) with the
  * tree one row below, and typing dismisses that, because someone naming a path
- * is not choosing one. Returns the ▾ to sit at the end of the field's row,
- * which is the whole affordance a select-shaped control needs.
+ * is not choosing one. It wears the house `.select` skin for the same reason a
+ * <select> does — a field that opens a list says so with the same chevron
+ * everywhere — while staying an input you can type into.
  */
-export function pathTrigger(
-  input: HTMLInputElement,
-  options: () => PathOption[],
-  onPick?: (path: string) => void,
-): HTMLElement {
-  const take = writer(input, onPick);
+export function pathTrigger(input: HTMLInputElement, options: () => PathOption[]): void {
+  const take = writer(input);
   const open = (): void => {
     const start = input.value.trim() || undefined;
     const candidates = options();
     if (candidates.length) return openPathMenu(input, candidates, start, take);
     openBrowser(input, start, take);
   };
+  input.classList.add("select");
+  input.title = "Pick a project folder, or type a path";
   input.onclick = open;
   input.addEventListener("input", () => closeMenu());
-  const chevron = btn(
-    "\u25be",
-    "flex-none cursor-pointer rounded-md px-1.5 py-1 text-[12px] text-neutral-500 hover:bg-neutral-100",
-  );
-  chevron.title = "Recent projects and folders";
-  chevron.onclick = open;
-  return chevron;
 }
 
 /** Input + Browse button as one row, for surfaces building fields in code. */

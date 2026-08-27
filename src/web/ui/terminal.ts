@@ -7,10 +7,10 @@
 // attaches fresh.
 
 import { failure, sendJson } from "./api.js";
-import { openBrowser } from "./dir-picker.js";
+import { openPathMenu } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { setStatus as setFieldStatus, type SaveState } from "./form.js";
-import { closeMenu, openMenu, openPanel } from "./menu.js";
+import { closeMenu, openPanel } from "./menu.js";
 
 type Ghostty = typeof import("ghostty-web");
 type TerminalPrefs = { fontFamily: string; fontSize: number; cursorBlink: boolean };
@@ -337,16 +337,13 @@ export function createTerminalView(
     const cwdChip = chip(cwd || "Choose a folder…");
     cwdChip.title = "Switch folder";
     cwdChip.onclick = () =>
-      openMenu(cwdChip, [
-        ...projectCwds().map((c) => ({
-          label: c,
-          onSelect: () => {
-            closeMenu();
-            if (c !== cwd) openDir(c); // hash first; show() reboots
-          },
-        })),
-        { label: "Browse…", onSelect: () => openBrowser(cwdChip, cwd || undefined, openDir) },
-      ]);
+      openPathMenu(
+        cwdChip,
+        projectCwds().map((path) => ({ path })),
+        cwd || undefined,
+        // Picking the folder already open must not reboot the shell in it.
+        (path) => (path === cwd ? undefined : openDir(path)), // hash first; show() reboots
+      );
     const fitBtn = chip("Fit");
     fitBtn.title = "Resize the shell to this window";
     fitBtn.onclick = () => {

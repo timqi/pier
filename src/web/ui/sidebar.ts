@@ -752,7 +752,7 @@ export function initSidebar(d: SidebarDeps): void {
   // The new session nearly always belongs to a project the rail already shows,
   // so the field itself offers those directories in the rail's own order, with
   // the folder tree under them; typing a path still works.
-  $("#new-cwd-row").append(pathTrigger($<HTMLInputElement>("#new-cwd"), projectPaths));
+  pathTrigger($<HTMLInputElement>("#new-cwd"), projectPaths);
   const newBtn = $("#new-session");
   // Prefilled with wherever you are: the next session almost always belongs to
   // the project on screen, and the text is selected so typing another path
