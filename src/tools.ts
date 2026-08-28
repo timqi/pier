@@ -12,20 +12,12 @@
 // it, because a leaf that scheduled itself would be two modules.
 
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import type { CatalogBinary, CatalogEntry } from "./core/types.js";
+import { pierDb } from "./db.js";
 import { logger } from "./log.js";
 import { pierPath, resolveAgentDir } from "./paths.js";
 
@@ -244,17 +236,97 @@ export interface EnabledTools {
   customTools: readonly CustomTool[];
 }
 
-/** How long a sync waits for another process's sync, how long a holder may
- *  hold before it is assumed dead, and how often the waiter looks. The first
- *  two are of the order of the subprocess timeout: a real sync downloading
- *  several binaries is the slowest thing in this file. */
-const LOCK_WAIT_MS = 5 * 60_000;
-const LOCK_STALE_MS = 20 * 60_000;
-const LOCK_POLL_MS = 200;
+/** What the lock below is called in the `locks` table. */
+const SYNC_LOCK = "tools-sync";
 
-/** Marks the daily update task as Pier's own, so main.ts finds the one it
- *  owns rather than one a person wrote. */
-export const TOOLS_TASK_CREATOR = "tools";
+/**
+ * How the lock decides things. `stale` is measured on the *heartbeat*, never on
+ * how long the holder has been working: a 30-minute install that is still
+ * beating keeps its lock, and a process that died stops beating within
+ * seconds. `wait` is what a waiter gives a live holder before giving up with a
+ * reason — the daily task's own 30-minute timeout is the outer bound, and a
+ * hand-typed sync that waits forever is worse than one that says why it
+ * stopped.
+ */
+const LOCK_TIMING = { heartbeatMs: 5_000, staleMs: 30_000, waitMs: 20 * 60_000, pollMs: 200 };
+
+/**
+ * One sync at a time on this machine, whichever process asked.
+ *
+ * The whole operation is inside it — the settings read, the config write,
+ * ubix's own run and the provisioning — because the file ubix reads is written
+ * by us and it reads it before taking any lock of its own.
+ *
+ * It lives in pier.db rather than in a lock file: both processes already open
+ * that database (the CLI reads the settings through it), `BEGIN IMMEDIATE` is
+ * real cross-process mutual exclusion, and a file protocol has to invent one
+ * badly. Identity is a random token, not a pid — a recycled pid cannot
+ * impersonate a dead holder, and every delete is scoped to the token that
+ * wrote the row, so neither a release nor a takeover can remove a successor's
+ * lock. No transaction is ever held for the length of a sync: acquire, refresh
+ * and release are each their own.
+ */
+export class SyncLock {
+  readonly #db: DatabaseSync;
+  readonly #timing: typeof LOCK_TIMING;
+
+  constructor(db: DatabaseSync, timing: Partial<typeof LOCK_TIMING> = {}) {
+    this.#db = db;
+    this.#timing = { ...LOCK_TIMING, ...timing };
+  }
+
+  /** Run `work` with the lock held, waiting for whoever has it. */
+  async run<T>(work: () => Promise<T>): Promise<T> {
+    const token = randomUUID();
+    const deadline = Date.now() + this.#timing.waitMs;
+    while (!this.#acquire(token)) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `another tools sync has held the lock for ${String(Math.round(this.#timing.waitMs / 60_000))}` +
+            ` minutes — nothing was changed`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, this.#timing.pollMs));
+    }
+    // Unref'd: a beating heart is not a reason for the process to stay up.
+    const beat = setInterval(() => this.#refresh(token), this.#timing.heartbeatMs);
+    beat.unref();
+    try {
+      return await work();
+    } finally {
+      clearInterval(beat);
+      this.#db.prepare("DELETE FROM locks WHERE name = ? AND token = ?").run(SYNC_LOCK, token);
+    }
+  }
+
+  /** Take the lock, or take it over from a holder that stopped beating — both
+   *  in one immediate transaction, so two waiters cannot both win. */
+  #acquire(token: string): boolean {
+    const now = Date.now();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const stale = this.#db.prepare("DELETE FROM locks WHERE name = ? AND heartbeat_at <= ?")
+        .run(SYNC_LOCK, now - this.#timing.staleMs);
+      const taken = this.#db.prepare("INSERT OR IGNORE INTO locks (name, token, heartbeat_at) VALUES (?, ?, ?)")
+        .run(SYNC_LOCK, token, now);
+      this.#db.exec("COMMIT");
+      if (stale.changes && taken.changes) log.warn("took over a tools sync lock whose holder stopped beating");
+      return taken.changes === 1;
+    } catch (err) {
+      this.#db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** Still alive. A refresh that updates nothing means the row is not ours any
+   *  more — said out loud, because a second sync is running over this one and
+   *  the report this one writes is no longer the whole truth (§5b). */
+  #refresh(token: string): void {
+    const beat = this.#db.prepare("UPDATE locks SET heartbeat_at = ? WHERE name = ? AND token = ?")
+      .run(Date.now(), SYNC_LOCK, token);
+    if (!beat.changes) log.error("this tools sync lost its lock — another sync took it over while this one was running");
+  }
+}
 
 /** What one sync request became, for the surface that asked for it.
  *  `waiting`: a sync was already running, and this request rides the run that
@@ -574,11 +646,17 @@ export class ManagedTools {
   readonly #exec: Exec;
   readonly #fetch: typeof fetch;
   readonly #root: string;
+  #lock: SyncLock | undefined;
+  readonly #db: () => DatabaseSync;
 
-  constructor(options: { exec?: Exec; fetch?: typeof fetch; root?: string } = {}) {
+  constructor(options: { exec?: Exec; fetch?: typeof fetch; root?: string; db?: () => DatabaseSync } = {}) {
     this.#exec = options.exec ?? spawnExec;
     this.#fetch = options.fetch ?? ((...args) => fetch(...args));
     this.#root = options.root ?? toolsDir();
+    // Opened on the first sync, never in the constructor: `status()` and the
+    // Console's catalog need no database, and neither does a process that only
+    // reads what is installed.
+    this.#db = options.db ?? pierDb;
   }
 
   get bin(): string {
@@ -651,7 +729,8 @@ export class ManagedTools {
    * what the switches say.
    */
   async sync(read: () => EnabledTools): Promise<ToolSyncReport> {
-    return this.#locked(async () => {
+    this.#lock ??= new SyncLock(this.#db());
+    return this.#lock.run(async () => {
       const { tools, customTools } = read();
       return this.#converge(tools, customTools);
     });
@@ -802,68 +881,6 @@ export class ManagedTools {
   }
 
   /**
-   * One sync at a time on this machine, whichever process asked.
-   *
-   * Everything is inside it — the settings read, the config write, ubix's own
-   * run and the provisioning — because the file ubix reads is written by us and
-   * it reads it before taking any lock of its own. Crash-safe without a daemon:
-   * the file carries its holder's pid, and a holder that is gone, or one that
-   * has held it longer than a subprocess may run, is taken over rather than
-   * waited on forever.
-   */
-  async #locked<T>(work: () => Promise<T>): Promise<T> {
-    mkdirSync(this.#root, { recursive: true });
-    const path = join(this.#root, "sync.lock");
-    const deadline = Date.now() + LOCK_WAIT_MS;
-    for (;;) {
-      try {
-        // Exclusive create: the one operation two processes cannot both win.
-        writeFileSync(path, `${String(process.pid)} ${new Date().toISOString()}\n`, { flag: "wx" });
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        if (this.#takeOver(path)) continue;
-        if (Date.now() > deadline) {
-          throw new Error(
-            `another tools sync has held ${path} for ${String(LOCK_WAIT_MS / 60_000)} minutes — nothing was changed`,
-          );
-        }
-        await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
-        continue;
-      }
-      try {
-        return await work();
-      } finally {
-        rmSync(path, { force: true });
-      }
-    }
-  }
-
-  /** Whether the lock's holder is gone — and if so, the lock is removed. A
-   *  crash leaves the file behind, and a sync that can never run again is a
-   *  worse failure than the double run this prevents. A file with no readable
-   *  pid is a holder mid-write, not a dead one: it is waited out, never taken
-   *  before the stale age. */
-  #takeOver(path: string): boolean {
-    let pid: number;
-    let age: number;
-    try {
-      pid = Number.parseInt(readFileSync(path, "utf8"), 10);
-      age = Date.now() - statSync(path).mtimeMs;
-    } catch {
-      return false; // it went away on its own; the next attempt takes it
-    }
-    const alive = !Number.isInteger(pid) || pid <= 0 || processAlive(pid);
-    if (alive && age < LOCK_STALE_MS) return false;
-    log.warn(`taking over ${path} from pid ${String(pid)} (${alive ? "held too long" : "gone"})`);
-    try {
-      rmSync(path);
-    } catch {
-      return false; // somebody else got there first; wait for them instead
-    }
-    return true;
-  }
-
-  /**
    * One ubix call and the document it owes us.
    *
    * A non-zero exit is *not* a reason to skip the parse: under `--json` a tool
@@ -949,17 +966,6 @@ export class ManagedTools {
  *  extensions/ and never passes through here. */
 const withBinary = (entry: CatalogEntry, patch: Partial<CatalogBinary>): CatalogEntry =>
   entry.source === "binary" ? { ...entry, binary: { ...entry.binary, ...patch } } : entry;
-
-/** Whether a pid is still running. Signal 0 is the ask-only signal; EPERM is
- *  somebody else's process, which is alive. */
-const processAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
 
 /** What a failed child said, in one line — the same shape wherever one fails,
  *  and never empty: an exit code with no words is not a report. */

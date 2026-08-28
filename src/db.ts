@@ -245,6 +245,18 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_state DROP COLUMN kept;
   ALTER TABLE session_state DROP COLUMN pinned_at;
   `,
+  // 12 — one row is how two processes take turns (src/tools.ts).
+  `
+  -- A named lock held across processes: the token says who holds it, the
+  -- heartbeat says they are still alive. Both processes already open this
+  -- database, and BEGIN IMMEDIATE is real mutual exclusion — a lock file with
+  -- a pid in it is neither, which is what this replaces.
+  CREATE TABLE locks (
+    name TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    heartbeat_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

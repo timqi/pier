@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { openDb } from "./db.js";
 import {
   coalescedSync,
   type Exec,
@@ -12,6 +14,7 @@ import {
   parseUbixJson,
   specOf,
   type SyncAttempt,
+  SyncLock,
   ubixAsset,
   ubixConfigToml,
 } from "./tools.js";
@@ -293,12 +296,17 @@ function rig(
     calls.push(call);
     return Promise.resolve(options.answer?.(call) ?? ok(upgradeJson()));
   };
+  // Its own database, like its own directory: one lock per machine, and a test
+  // is a machine of its own.
+  const db = openDb(":memory:");
   return {
     root,
     calls,
+    db,
     tools: new ManagedTools({
       root,
       exec,
+      db: () => db,
       fetch: options.fetch ?? (() => Promise.reject(new Error("the network is not open in tests"))),
     }),
     /** Every command line, in order — the assertions below are about order. */
@@ -314,6 +322,7 @@ describe("ManagedTools.sync", () => {
     const root = mkdtempSync(join(tmpdir(), "pier-tools-empty-"));
     const tools = new ManagedTools({
       root,
+      db: () => openDb(":memory:"),
       exec: () => Promise.reject(new Error("nothing may be spawned")),
       fetch: () => Promise.reject(new Error("nothing may be fetched")),
     });
@@ -461,11 +470,13 @@ describe("two syncs at once", () => {
       // The first run stays in flight until the test lets it go.
       return seen.length === 1 ? held.then(() => ok(upgradeJson())) : Promise.resolve(ok(upgradeJson()));
     };
+    // Two instances on one machine: separate connections to one database, which
+    // is what two processes have.
+    const dbPath = join(root, "pier.db");
     const options = { root, exec, fetch: () => Promise.reject(new Error("the network is not open in tests")) };
-    // Two instances, as two processes would be: they share only the directory.
-    const first = new ManagedTools(options).sync(on("rg"));
+    const first = new ManagedTools({ ...options, db: () => openDb(dbPath) }).sync(on("rg"));
     while (!seen.length) await new Promise((resolve) => setTimeout(resolve, 10));
-    const second = new ManagedTools(options).sync(on("fd"));
+    const second = new ManagedTools({ ...options, db: () => openDb(dbPath) }).sync(on("fd"));
 
     // Long enough that an unserialized second sync would have written its
     // config and launched its own ubix by now.
@@ -481,21 +492,181 @@ describe("two syncs at once", () => {
     expect(seen).toHaveLength(2);
     expect(seen[1]).toContain("[tools.fd]");
     expect(seen[1]).not.toContain("[tools.rg]");
-    expect(existsSync(join(root, "sync.lock"))).toBe(false);
+    // Nothing left holding it.
+    expect(openDb(dbPath).prepare("SELECT count(*) AS n FROM locks").get()).toEqual({ n: 0 });
+  });
+});
+
+/**
+ * The lock itself, against real processes.
+ *
+ * It is in the database rather than in a lock file because a file protocol has
+ * to invent mutual exclusion badly: the version this replaced declared a live
+ * 30-minute install dead at 20, trusted a pid a dead holder's number could be
+ * reused for, let two waiters each unlink what the other had just created, and
+ * let a finished holder delete its successor's lock.
+ */
+describe("the sync lock", () => {
+  const tsx = import.meta.resolve("tsx");
+  const toolsUrl = new URL("./tools.ts", import.meta.url).href;
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+
+  /** A rig with a database on disk and a log every party appends to. */
+  function machine() {
+    const dir = mkdtempSync(join(tmpdir(), "pier-lock-"));
+    const dbPath = join(dir, "pier.db");
+    const log = join(dir, "turns.log");
+    writeFileSync(log, "");
+    const mark = (what: string, who: string): void => {
+      writeFileSync(log, `${readFileSync(log, "utf8")}${what} ${who} ${String(Date.now())}\n`);
+    };
+    return {
+      dir,
+      dbPath,
+      log,
+      mark,
+      db: () => openDb(dbPath),
+      /** in/out pairs, in the order they were written. */
+      turns: (): { what: string; who: string }[] =>
+        readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => {
+          const [what = "", who = ""] = line.split(" ");
+          return { what, who };
+        }),
+      /** One node process that takes the lock, says so, holds, and lets go.
+       *  `holdMs: 0` means "hold it until killed". */
+      child: (who: string, holdMs: number) =>
+        spawn(process.execPath, [
+          "--import",
+          tsx,
+          "--input-type=module",
+          "-e",
+          `
+          import { appendFileSync } from "node:fs";
+          import { SyncLock } from ${JSON.stringify(toolsUrl)};
+          import { openDb } from ${JSON.stringify(dbUrl)};
+          const mark = (what) => appendFileSync(process.env.LOCK_LOG, what + " " + process.env.WHO + " " + Date.now() + "\\n");
+          const hold = Number(process.env.HOLD_MS);
+          await new SyncLock(openDb(process.env.LOCK_DB), { heartbeatMs: 50, staleMs: 3_000, pollMs: 20 })
+            .run(async () => {
+              mark("in");
+              await new Promise((resolve) => setTimeout(resolve, hold || 60_000));
+              mark("out");
+            });
+          `,
+        ], {
+          env: { ...process.env, PIER_LOG: "silent", LOCK_DB: dbPath, LOCK_LOG: log, WHO: who, HOLD_MS: String(holdMs) },
+          stdio: ["ignore", "ignore", "pipe"],
+        }),
+    };
+  }
+
+  /** Wait for a line the child writes, so nothing here sleeps on a guess. */
+  const until = async (test: () => boolean, ms = 5000): Promise<void> => {
+    const deadline = Date.now() + ms;
+    while (!test()) {
+      if (Date.now() > deadline) throw new Error("timed out waiting for the lock test to get somewhere");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+
+  /** Nobody was inside while somebody else was. */
+  const neverOverlapped = (turns: { what: string; who: string }[]): boolean => {
+    let inside: string | null = null;
+    for (const turn of turns) {
+      if (turn.what === "in") {
+        if (inside) return false;
+        inside = turn.who;
+      } else inside = null;
+    }
+    return true;
+  };
+
+  it("makes two processes take turns", async () => {
+    const m = machine();
+    const a = m.child("a", 400);
+    const b = m.child("b", 400);
+    const codes = await Promise.all([a, b].map((child) =>
+      new Promise<number | null>((resolve) => child.once("close", resolve))
+    ));
+    expect(codes).toEqual([0, 0]);
+    const turns = m.turns();
+    expect(turns).toHaveLength(4);
+    expect(neverOverlapped(turns)).toBe(true);
+    expect(new Set(turns.map((t) => t.who))).toEqual(new Set(["a", "b"]));
   });
 
-  it("takes over a lock whose holder is gone instead of waiting out a dead process", async () => {
-    // A crash leaves the file behind, and a sync that can never run again is a
-    // worse failure than the double run the lock prevents.
-    const r = rig({
-      answer: (call) =>
-        ok(call.args[0] === "list" ? EMPTY_LIST : upgradeJson({ name: "rg", action: "installed", to_version: "14.1.1" })),
+  it("takes over from a holder that died, without ever trusting a pid", async () => {
+    // A killed holder writes no release. Identity is a random token, so the
+    // number the operating system hands the *next* process cannot make a dead
+    // holder look alive: what says it is alive is the heartbeat, nothing else.
+    const m = machine();
+    const dead = m.child("dead", 0);
+    await until(() => m.turns().some((t) => t.what === "in"));
+    const before = m.db().prepare("SELECT token FROM locks").get() as { token: string };
+    dead.kill("SIGKILL"); // a pid this test started, and only that one
+    await new Promise((resolve) => dead.once("close", resolve));
+
+    const mine = new SyncLock(m.db(), { heartbeatMs: 50, staleMs: 400, pollMs: 20 });
+    const started = Date.now();
+    await mine.run(async () => {
+      // Only once the dead holder's heartbeat aged out — never on the strength
+      // of "its process is gone", which no other machine can even ask.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+      const now = m.db().prepare("SELECT token FROM locks").get() as { token: string };
+      expect(now.token).not.toBe(before.token);
     });
-    writeFileSync(join(r.root, "sync.lock"), "2147483646 2020-01-01T00:00:00.000Z\n");
-    const report = await r.tools.sync(on("rg"));
-    expect(report.failed).toBe(false);
-    expect(config(r.root)).toContain("[tools.rg]");
-    expect(existsSync(join(r.root, "sync.lock"))).toBe(false);
+    expect(m.db().prepare("SELECT count(*) AS n FROM locks").get()).toEqual({ n: 0 });
+  });
+
+  it("keeps the lock through work that outlives the stale window", async () => {
+    // The hole this closes: a legitimate 30-minute install was declared stale
+    // at 20 minutes and stolen. Staleness is heartbeat age, not runtime, so a
+    // holder that keeps beating keeps its lock however long the work takes.
+    const m = machine();
+    const timing = { heartbeatMs: 20, staleMs: 300, pollMs: 10 };
+    const order: string[] = [];
+    const long = new SyncLock(m.db(), timing).run(async () => {
+      order.push("long in");
+      await new Promise((resolve) => setTimeout(resolve, 900)); // three stale windows
+      order.push("long out");
+    });
+    await until(() => order.length === 1);
+    await new SyncLock(m.db(), timing).run(async () => order.push("waiter in"));
+    await long;
+    expect(order).toEqual(["long in", "long out", "waiter in"]);
+  });
+
+  it("lets exactly one of two waiters in at a time, and never deletes the other's row", async () => {
+    // Both holes at once: two waiters that each unlink what the other created,
+    // and an old holder whose cleanup takes its successor's lock with it.
+    const m = machine();
+    const timing = { heartbeatMs: 20, staleMs: 1_000, pollMs: 5 };
+    const hold = async (who: string): Promise<void> => {
+      await new SyncLock(m.db(), timing).run(async () => {
+        m.mark("in", who);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        m.mark("out", who);
+      });
+    };
+    const first = hold("first");
+    await until(() => m.turns().length === 1);
+    await Promise.all([first, hold("second"), hold("third")]);
+    const turns = m.turns();
+    expect(turns).toHaveLength(6);
+    expect(neverOverlapped(turns)).toBe(true);
+    expect(m.db().prepare("SELECT count(*) AS n FROM locks").get()).toEqual({ n: 0 });
+  });
+
+  it("releases only its own row, so a finished holder cannot free its successor", () => {
+    // The release is scoped to the token that wrote the row: a holder that was
+    // taken over deletes nothing on its way out.
+    const m = machine();
+    const db = m.db();
+    const successor = "the-successor";
+    db.prepare("INSERT INTO locks (name, token, heartbeat_at) VALUES (?, ?, ?)").run("tools-sync", successor, Date.now());
+    // What a finished, superseded holder does on its way out.
+    db.prepare("DELETE FROM locks WHERE name = ? AND token = ?").run("tools-sync", "the-holder-that-was-taken-over");
+    expect(db.prepare("SELECT token FROM locks").get()).toEqual({ token: successor });
   });
 });
 
