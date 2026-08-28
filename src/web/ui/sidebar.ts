@@ -369,16 +369,6 @@ const branchAt = (list: SessionInfo[], at: string): string =>
 
 const CHIP = "flex-none truncate rounded bg-neutral-200/70 px-1 font-mono text-[10px] leading-[15px] text-neutral-500";
 
-/** Which checkout this session works in, when its project has more than one.
- *  A single-worktree project would only be telling you its own branch. */
-function branchChip(s: SessionInfo, show: boolean): HTMLElement[] {
-  if (!show || !s.branch) return [];
-  const chip = h("span", CHIP, s.branch);
-  chip.style.maxWidth = "40%";
-  chip.title = s.cwd;
-  return [chip];
-}
-
 /** Short enough for a chip; `telegram` is the only name that isn't. */
 const CHANNEL_LABEL: Record<string, string | undefined> = { telegram: "tg" };
 
@@ -393,7 +383,7 @@ function channelChip(s: SessionInfo): HTMLElement[] {
   return [chip];
 }
 
-function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
+function sessionRow(s: SessionInfo): HTMLElement {
   const active = s.id === deps.currentId();
   const li = h(
     "li",
@@ -425,7 +415,6 @@ function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
       "div",
       "ml-auto flex flex-none items-center gap-1",
       ...channelChip(s),
-      ...branchChip(s, branches),
       done,
       more,
     ),
@@ -508,7 +497,7 @@ function projectNode(key: string, list: SessionInfo[]): HTMLElement {
   el.open = !collapsed.has(key);
   el.ontoggle = () => setCollapsed(key, !el.open);
   const rows = h("ul", "pb-1");
-  rows.append(...list.map((s) => sessionRow(s, cwds.length > 1)));
+  rows.append(...list.map(sessionRow));
   el.append(rows);
   return el;
 }
