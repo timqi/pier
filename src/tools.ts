@@ -17,7 +17,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import type { ManagedToolInfo } from "./core/types.js";
+import type { CatalogEntry } from "./core/types.js";
 import { logger } from "./log.js";
 import { pierPath, resolveAgentDir } from "./paths.js";
 
@@ -34,11 +34,21 @@ const STATUS_CAP_MS = 3000;
 
 /** One binary Pier will install and keep current on request. */
 export interface ManagedTool {
+  /** What it is to the person switching it on: an extension the agent gains,
+   *  or a command the agent can run. `rtk` is an extension that happens to
+   *  ship as a binary — it is listed with the extensions and installed like a
+   *  tool, which is the whole reason the catalog has one shape. */
+  kind: "extension" | "tool";
   name: string;
   /** A ubix spec — `github:owner/repo`, `pypi:name`, … */
   spec: string;
   /** One line, shown beside the switch that turns it on. */
   summary: string;
+  /** The executable inside the release archive, when it is not named after the
+   *  project: ubi looks for `<project>*`, and ripgrep ships `rg`. Verified the
+   *  hard way — without it the install fails with "could not find any files
+   *  matching [ripgrep*]". */
+  exe?: string;
   /** Run after every install and every upgrade, from the tool's own binary:
    *  a tool that has to register something with Pi does it here, and doing it
    *  on every sync is also how that registration stays current. */
@@ -46,23 +56,95 @@ export interface ManagedTool {
   /** Run *before* the binary is removed — undoing what `provision` did takes
    *  the tool that did it. */
   deprovision?: readonly string[];
+  /** True only for a row built from an operator's own spec. */
+  custom?: boolean;
 }
 
-/** The catalog. Data, not code: rg / fd / wt are rows nobody has written yet,
- *  and adding one must not need a new branch anywhere in this file. */
+/** The catalog. Data, not code: a new tool is a row, not a branch anywhere in
+ *  this file — only `rtk` has provisioning, and only because it registers
+ *  something with Pi. */
 export const MANAGED: readonly ManagedTool[] = [
   {
+    kind: "extension",
     name: "rtk",
     spec: "github:rtk-ai/rtk",
     summary:
-      "Compresses long bash output before it reaches the model. Installs its " +
-      "own Pi extension into Pier's agent dir, refreshed on every update.",
+      "Compresses long bash output before it reaches the model. Ships as a " +
+      "command, and installs its own Pi extension into Pier's agent dir — " +
+      "refreshed on every update.",
     // Write-if-changed inside rtk, so re-running it after an upgrade is the
     // extension-update path and costs nothing when nothing moved.
     provision: ["init", "-g", "--agent", "pi"],
     deprovision: ["init", "--uninstall", "--agent", "pi", "--global"],
   },
+  {
+    kind: "tool",
+    name: "rg",
+    spec: "github:BurntSushi/ripgrep",
+    exe: "rg",
+    summary: "ripgrep: searches a tree by content, fast enough to be the default.",
+  },
+  {
+    kind: "tool",
+    name: "fd",
+    spec: "github:sharkdp/fd",
+    summary: "Finds files by name, respecting .gitignore — what `find` should feel like.",
+  },
+  {
+    kind: "tool",
+    name: "wt",
+    spec: "github:max-sixty/worktrunk",
+    exe: "wt",
+    summary: "worktrunk: git worktrees as one command — branch, switch, merge, clean up.",
+  },
 ];
+
+/** A tool the operator added by writing a ubix spec. Same shape as a MANAGED
+ *  row minus everything only Pier can know. */
+export interface CustomTool {
+  name: string;
+  spec: string;
+}
+
+/** The sources ubix installs from (`ubix sources`). A spec must name one:
+ *  guessing a default would install something the operator did not write. */
+const UBIX_SOURCES = ["github", "gitlab", "url", "pypi", "npm", "cargo", "go", "pixi", "template", "http"];
+/** A binary's name on disk, so what goes on the PATH is predictable. */
+const TOOL_NAME = /^[a-z0-9][a-z0-9._-]{0,31}$/i;
+/** Every one is a binary on every PATH; a list this long is already a smell. */
+const MAX_CUSTOM = 16;
+
+/** What a custom entry must be, said once so both the route and the stored
+ *  row are checked by the same rule. */
+export const CUSTOM_TOOL_RULES =
+  `each custom tool needs a name (letters, digits, . _ - , ≤32 characters, not a built-in or "ubix")` +
+  ` and a ubix spec naming a source (${UBIX_SOURCES.join(", ")}) — e.g. github:owner/repo; at most ${String(MAX_CUSTOM)}`;
+
+/**
+ * Boundary check, rejecting rather than repairing: a spec quietly "fixed"
+ * would install something nobody wrote, onto a PATH every session inherits.
+ * A name Pier already manages is refused too — two rows installing into the
+ * same filename is a switch whose meaning depends on which ran last.
+ */
+export function normalizeCustomTools(raw: unknown): CustomTool[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_CUSTOM) return null;
+  const tools: CustomTool[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) return null;
+    const { name, spec } = item as Record<string, unknown>;
+    if (typeof name !== "string" || typeof spec !== "string") return null;
+    const cleanName = name.trim();
+    const cleanSpec = spec.trim();
+    if (!TOOL_NAME.test(cleanName)) return null;
+    if (cleanName === "ubix" || MANAGED.some((tool) => tool.name === cleanName)) return null;
+    if (tools.some((tool) => tool.name === cleanName)) return null;
+    if (cleanSpec.length > 200 || /\s/.test(cleanSpec)) return null;
+    const source = cleanSpec.slice(0, cleanSpec.indexOf(":"));
+    if (!UBIX_SOURCES.includes(source) || cleanSpec.length <= source.length + 1) return null;
+    tools.push({ name: cleanName, spec: cleanSpec });
+  }
+  return tools;
+}
 
 /** `~/.pier/tools/…` — install target, generated ubix config, ubix state. */
 export const toolsDir = (...parts: string[]): string => pierPath("tools", ...parts);
@@ -90,13 +172,14 @@ export const TOOLS_TASK_CREATOR = "tools";
 /** The task, as data. A plain bash task on a plain cron: its run history is
  *  the whole tools status surface — output, failures and the last time it ran
  *  are runs a person can already read (§5b), not a second thing to build. */
-export const toolsTaskDraft = (node: string, cli: string, cwd: string, timezone: string) => ({
+export const toolsTaskDraft = (script: string, cwd: string, timezone: string) => ({
   name: "tools: daily update",
   description: "Installs the CLI tools switched on in Settings → Agent and keeps them current.",
   trigger: { type: "cron" as const, expression: "17 4 * * *", timezone },
-  // The recorded node and CLI path, quoted: a version manager changing PATH
-  // months from now must not make the task unrunnable.
-  action: { type: "bash" as const, script: `"${node}" "${cli}" tools sync`, cwd },
+  // The command is main.ts's to build — it is the only thing that knows where
+  // this Pier's own CLI is — and it records absolute paths, so a version
+  // manager changing PATH months from now cannot make the task unrunnable.
+  action: { type: "bash" as const, script, cwd },
   timeoutSeconds: 1800,
 });
 
@@ -268,7 +351,10 @@ const tomlString = (value: string): string => `"${value.replace(/\\/g, "\\\\").r
  * operator's `~/.config/ubix/config.toml`: Pier rewrites this file on every
  * sync, and doing that to a file a human maintains would delete their tools.
  */
-export function ubixConfigToml(enabled: readonly string[], installDir: string): string {
+export function ubixConfigToml(
+  tools: readonly Pick<ManagedTool, "name" | "spec" | "exe">[],
+  installDir: string,
+): string {
   const lines = [
     "# Generated by Pier from the tools switched on in the Console.",
     "# Rewritten on every sync — your own ~/.config/ubix/config.toml is untouched.",
@@ -276,11 +362,18 @@ export function ubixConfigToml(enabled: readonly string[], installDir: string): 
     "[settings]",
     `install_dir = ${tomlString(installDir)}`,
   ];
-  for (const tool of MANAGED) {
-    if (!enabled.includes(tool.name)) continue;
+  for (const tool of tools) {
     lines.push("", `[tools.${tool.name}]`, `spec = ${tomlString(tool.spec)}`);
+    if (tool.exe) lines.push(`exe = ${tomlString(tool.exe)}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** The rows an enabled set names: Pier's catalog plus the operator's specs.
+ *  A name in neither is not an error — the setting is shape-only, so a row a
+ *  future release drops must not stop the sync of everything else. */
+function rows(custom: readonly CustomTool[]): ManagedTool[] {
+  return [...MANAGED, ...custom.map((tool): ManagedTool => ({ kind: "tool", summary: "", custom: true, ...tool }))];
 }
 
 /** Which release asset is this machine's. Pure, because the mapping is the
@@ -394,8 +487,9 @@ export class ManagedTools {
    * provision. Returns what happened per tool; whole-run failures throw,
    * because there is nothing per-tool to say about them.
    */
-  async sync(enabled: readonly string[]): Promise<ToolSyncReport> {
-    const wanted = MANAGED.filter((tool) => enabled.includes(tool.name));
+  async sync(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<ToolSyncReport> {
+    const all = rows(custom);
+    const wanted = all.filter((tool) => enabled.includes(tool.name));
     // Nothing on and nothing installed: no config to write, no ubix to fetch.
     // A first boot must not reach the network to find out it has no work.
     if (!wanted.length && !existsSync(this.ubixPath)) {
@@ -406,14 +500,16 @@ export class ManagedTools {
     const entries: ToolSyncEntry[] = [];
 
     // Removals first, and deprovision before the binary goes: rtk uninstalls
-    // its own Pi extension, which takes rtk.
+    // its own Pi extension, which takes rtk. Everything ubix declares is
+    // Pier's own config, so anything not wanted any more goes — including a
+    // custom spec the operator has since deleted from the catalog.
     for (const state of await this.#states(ubix, env, ["list", "--json"])) {
-      const tool = MANAGED.find((t) => t.name === state.name);
-      if (!tool || wanted.includes(tool)) continue;
-      entries.push(await this.#uninstall(ubix, env, tool));
+      if (wanted.some((tool) => tool.name === state.name)) continue;
+      const known = all.find((tool) => tool.name === state.name);
+      entries.push(await this.#uninstall(ubix, env, known ?? { kind: "tool", name: state.name, spec: "", summary: "" }));
     }
 
-    this.#writeConfig(enabled);
+    this.#writeConfig(wanted);
 
     const states = await this.#states(ubix, env, ["upgrade", "--all", "--json"]);
     for (const tool of wanted) {
@@ -437,16 +533,14 @@ export class ManagedTools {
    * answers a Console page, and a page that 500s says less than a row saying
    * why its version is unknown (§5b).
    */
-  async status(enabled: readonly string[]): Promise<ManagedToolInfo[]> {
-    const base = MANAGED.map((tool): ManagedToolInfo => ({
+  async status(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<CatalogEntry[]> {
+    const base = rows(custom).map((tool): CatalogEntry => ({
+      kind: tool.kind,
       name: tool.name,
-      spec: tool.spec,
       summary: tool.summary,
       enabled: enabled.includes(tool.name),
-      installed: false,
-      version: null,
-      path: null,
-      error: null,
+      binary: { spec: tool.spec, installed: false, version: null, path: null, error: null },
+      ...(tool.custom ? { custom: true } : {}),
     }));
     // No ubix yet is not a failure — it is the state of an instance that has
     // never switched a tool on.
@@ -463,26 +557,23 @@ export class ManagedTools {
       ]);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      return base.map((info) => ({ ...info, error }));
+      return base.map((entry) => withBinary(entry, { error }));
     }
-    if (!states) {
-      return base.map((info) => ({ ...info, error: "ubix is busy — an install or update is running" }));
-    }
-    return base.map((info) => {
-      const state = states.find((s) => s.name === info.name);
-      if (!state) return info;
+    if (!states) return base.map((entry) => withBinary(entry, { error: "ubix is busy — an install or update is running" }));
+    return base.map((entry) => {
+      const state = states.find((s) => s.name === entry.name);
+      if (!state) return entry;
       // State says installed, disk says otherwise: broken, and drawing that as
       // ready is how an operator finds out from a failed turn instead.
       const gone = state.installed === true && state.exists === false;
-      return {
-        ...info,
+      return withBinary(entry, {
         installed: state.installed === true && !gone,
         version: state.version,
         path: state.path,
         error: gone
           ? `installed but missing on disk: ${state.missingPaths.join(", ") || "tracked paths are gone"}`
           : state.error,
-      };
+      });
     });
   }
 
@@ -504,10 +595,10 @@ export class ManagedTools {
     return join(this.#root, "config");
   }
 
-  #writeConfig(enabled: readonly string[]): void {
+  #writeConfig(tools: readonly CustomTool[]): void {
     mkdirSync(this.#configDir, { recursive: true });
     mkdirSync(join(this.#root, "state"), { recursive: true });
-    writeFileSync(join(this.#configDir, "config.toml"), ubixConfigToml(enabled, this.bin));
+    writeFileSync(join(this.#configDir, "config.toml"), ubixConfigToml(tools, this.bin));
   }
 
   /**
@@ -582,6 +673,13 @@ export class ManagedTools {
     return new Uint8Array(await res.arrayBuffer());
   }
 }
+
+/** One catalog entry with its binary block updated — the block is optional on
+ *  the shape (a bundled extension has none) and always present on these. */
+const withBinary = (entry: CatalogEntry, patch: Partial<NonNullable<CatalogEntry["binary"]>>): CatalogEntry => ({
+  ...entry,
+  binary: { spec: "", installed: false, version: null, path: null, error: null, ...entry.binary, ...patch },
+});
 
 /** `<sha256>  <bare filename>` lines, as `sha256sum` writes them. */
 function expectedSha256(checksums: string, file: string): string {

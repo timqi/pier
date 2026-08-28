@@ -106,19 +106,18 @@ function fakeSession(id: string): AgentSession & {
 
 /** The bundled extensions this test pretends Pier ships with. */
 const CATALOG = [{
+  kind: "extension" as const,
   name: "web",
   summary: "the provider's own web tools",
-  tools: [{ name: "web_search", needs: "an authenticated model" }],
+  adds: [{ name: "web_search", needs: "an authenticated model" }],
 }];
-/** The managed CLI tools this test pretends Pier can install. */
+/** The managed CLI tools this test pretends Pier can install — one list with
+ *  the extensions, exactly as main.ts assembles it. */
 const TOOLS = [{
-  name: "rtk",
-  spec: "github:rtk-ai/rtk",
-  summary: "compresses bash output",
-  installed: false,
-  version: null,
-  path: null,
-  error: null,
+  kind: "tool" as const,
+  name: "rg",
+  summary: "searches a tree by content",
+  binary: { spec: "github:BurntSushi/ripgrep", installed: false, version: null, path: null, error: null },
 }];
 /** GET /api/settings on a fresh instance. */
 const SETTINGS_JSON = {
@@ -128,8 +127,8 @@ const SETTINGS_JSON = {
   terminalInitCommand: "",
   extensions: [],
   tools: [],
-  extensionCatalog: CATALOG.map((ext) => ({ ...ext, enabled: false })),
-  toolCatalog: TOOLS.map((tool) => ({ ...tool, enabled: false })),
+  customTools: [],
+  catalog: [...CATALOG, ...TOOLS].map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,
 };
 
@@ -287,18 +286,24 @@ function setup(
   const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
   // Stands in for main.ts's task lifecycle: web/ stores the set and says so,
   // the instance layer is what installs anything.
-  const onToolsChanged = vi.fn();
+  const onToolsChanged = vi.fn(() => Promise.resolve<string | null>(null));
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     // Composed like main.ts — a catalog of names, so this test never loads an
     // extension or the SDK behind one.
-    extensions: () =>
-      CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
-    // Data again, and never a subprocess: ubix is the instance layer's.
-    tools: () =>
+    // One list, assembled like main.ts does: data only, never a subprocess —
+    // loading an extension or spawning ubix is the instance layer's business.
+    catalog: () =>
       Promise.resolve({
-        catalog: TOOLS.map((tool) => ({ ...tool, enabled: settings.get().tools.includes(tool.name) })),
-        taskId: null,
+        entries: [
+          ...CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
+          ...TOOLS.map((tool) => ({
+            ...tool,
+            enabled: settings.get().tools.includes(tool.name),
+            custom: settings.get().customTools.some((c) => c.name === tool.name) || undefined,
+          })),
+        ],
+        toolsTaskId: null,
       }),
     onToolsChanged,
     reload,
@@ -900,7 +905,7 @@ describe("workbench server", () => {
     expect(settings.get().extensions).toEqual(["web"]);
     // The answer carries the switches back, already flipped.
     expect(await ok.json()).toMatchObject({
-      extensionCatalog: [{ name: "web", enabled: true }],
+      catalog: [{ name: "web", enabled: true }, { name: "rg" }],
     });
     expect((await put("web")).status).toBe(400);
     expect((await put([42])).status).toBe(400);
@@ -917,23 +922,63 @@ describe("workbench server", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ tools }),
       });
-    const ok = await put(["rtk"]);
+    const ok = await put(["rg"]);
     expect(ok.status).toBe(200);
-    expect(settings.get().tools).toEqual(["rtk"]);
+    expect(settings.get().tools).toEqual(["rg"]);
     // The answer carries the switch back already flipped, so the Console never
     // draws a state nobody stored.
-    expect(await ok.json()).toMatchObject({ toolCatalog: [{ name: "rtk", enabled: true }] });
-    expect(onToolsChanged).toHaveBeenCalledWith(["rtk"]);
+    expect(await ok.json()).toMatchObject({ catalog: [{ name: "web" }, { name: "rg", enabled: true }] });
+    expect(onToolsChanged).toHaveBeenCalledWith(["rg"]);
 
     expect((await put("rtk")).status).toBe(400);
     expect((await put([42])).status).toBe(400);
     // A refused write changes nothing and installs nothing.
-    expect(settings.get().tools).toEqual(["rtk"]);
+    expect(settings.get().tools).toEqual(["rg"]);
     expect(onToolsChanged).toHaveBeenCalledTimes(1);
 
     expect((await put([])).status).toBe(200);
     expect(settings.get().tools).toEqual([]);
     expect(onToolsChanged).toHaveBeenLastCalledWith([]);
+  });
+
+  // The bug this test exists for: the set was stored, nothing installed it,
+  // and the only trace was a line in the journal the person who flipped the
+  // switch never sees.
+  it("says on the switch when the set was stored and nothing will install it", async () => {
+    const { app, settings, onToolsChanged } = setup();
+    onToolsChanged.mockResolvedValueOnce("no CLI to run: /opt/pier/cli.js does not exist");
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tools: ["rg"] }),
+    });
+    // Stored — the switch shows what was written — and the reason rides back
+    // with it rather than only reaching the log.
+    expect(res.status).toBe(200);
+    expect(settings.get().tools).toEqual(["rg"]);
+    expect(await res.json()).toMatchObject({ toolsProblem: "no CLI to run: /opt/pier/cli.js does not exist" });
+  });
+
+  it("declares a custom tool and its switch in one write, or neither", async () => {
+    const { app, settings } = setup();
+    const put = (body: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const ok = await put({ customTools: [{ name: "eza", spec: "github:eza-community/eza" }], tools: ["eza"] });
+    expect(ok.status).toBe(200);
+    expect(settings.get().customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(settings.get().tools).toEqual(["eza"]);
+
+    // A bad spec beside a good switch: neither half is stored, so the Console
+    // never shows a tool that is on and undeclared.
+    const bad = await put({ customTools: [{ name: "nope", spec: "not-a-source:x" }], tools: ["eza", "nope"] });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: expect.stringContaining("ubix spec") });
+    expect(settings.get().customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(settings.get().tools).toEqual(["eza"]);
   });
 
   it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {

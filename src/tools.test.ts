@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type Exec,
   type ExecResult,
+  MANAGED,
   ManagedTools,
+  normalizeCustomTools,
   parseUbixJson,
   toolsTaskDraft,
   toolsTaskPlan,
@@ -138,14 +140,56 @@ describe("parseUbixJson", () => {
 });
 
 describe("the ubix config Pier owns", () => {
-  it("declares the enabled tools and where they install, and nothing else", () => {
-    const toml = ubixConfigToml(["rtk"], "/home/t/.pier/tools/bin");
+  it("declares the tools it was handed and where they install, and nothing else", () => {
+    const toml = ubixConfigToml([{ name: "rtk", spec: "github:rtk-ai/rtk" }], "/home/t/.pier/tools/bin");
     expect(toml).toContain(`install_dir = "/home/t/.pier/tools/bin"`);
     expect(toml).toContain("[tools.rtk]");
     expect(toml).toContain(`spec = "github:rtk-ai/rtk"`);
-    // A name nobody manages cannot smuggle a section in.
-    expect(ubixConfigToml(["nope"], "/bin")).not.toContain("[tools.");
     expect(ubixConfigToml([], "/bin")).not.toContain("[tools.");
+  });
+
+  it("names the executable when the archive does not name it after the project", () => {
+    // Verified against the real thing: without this, ripgrep's install fails
+    // with "could not find any files matching [ripgrep*]".
+    const rg = MANAGED.find((tool) => tool.name === "rg");
+    expect(rg?.exe).toBe("rg");
+    expect(ubixConfigToml([rg!], "/bin")).toContain(`exe = "rg"`);
+    expect(ubixConfigToml([{ name: "fd", spec: "github:sharkdp/fd" }], "/bin")).not.toContain("exe =");
+  });
+});
+
+describe("a tool the operator declares", () => {
+  it("takes a name and a spec that name a source ubix has", () => {
+    expect(normalizeCustomTools([{ name: " eza ", spec: " github:eza-community/eza " }]))
+      .toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(normalizeCustomTools([{ name: "ruff", spec: "pypi:ruff" }]))
+      .toEqual([{ name: "ruff", spec: "pypi:ruff" }]);
+    expect(normalizeCustomTools([])).toEqual([]);
+  });
+
+  it("refuses rather than half-storing anything that would install the wrong thing", () => {
+    for (const bad of [
+      "not a list",
+      [{ name: "eza" }],
+      [{ name: "eza", spec: 42 }],
+      // A source ubix does not have, or none at all: guessing one would
+      // install something nobody wrote.
+      [{ name: "eza", spec: "githbu:eza-community/eza" }],
+      [{ name: "eza", spec: "eza-community/eza" }],
+      [{ name: "eza", spec: "github:" }],
+      [{ name: "eza", spec: "github:a/b c" }],
+      // Names Pier already owns, and a name a filesystem would not like.
+      [{ name: "rtk", spec: "github:x/y" }],
+      [{ name: "ubix", spec: "github:x/y" }],
+      [{ name: "../rm", spec: "github:x/y" }],
+      [{ name: "", spec: "github:x/y" }],
+      [{ name: "a".repeat(33), spec: "github:x/y" }],
+      // Two rows installing into the same filename.
+      [{ name: "eza", spec: "github:x/y" }, { name: "eza", spec: "github:a/b" }],
+      Array.from({ length: 17 }, (_, i) => ({ name: `t${String(i)}`, spec: "github:x/y" })),
+    ]) {
+      expect(normalizeCustomTools(bad)).toBeNull();
+    }
   });
 });
 
@@ -174,8 +218,8 @@ describe("the daily update task", () => {
     expect(toolsTaskPlan(["rtk"], true, false)).toEqual({ do: "nothing" });
   });
 
-  it("runs the recorded node against the recorded CLI, quoted", () => {
-    const draft = toolsTaskDraft("/opt/node 24/bin/node", "/opt/pier/cli.js", "/home/t/.pier", "Europe/Berlin");
+  it("runs the command it was handed, in Pier's own home", () => {
+    const draft = toolsTaskDraft(`"/opt/node 24/bin/node" "/opt/pier/cli.js" tools sync`, "/home/t/.pier", "Europe/Berlin");
     expect(draft.action).toEqual({
       type: "bash",
       script: `"/opt/node 24/bin/node" "/opt/pier/cli.js" tools sync`,
@@ -259,13 +303,18 @@ describe("ManagedTools.sync", () => {
       answer: (call) => (call.args[0] === "list" ? ok(LIST_JSON) : ok(upgradeJson())),
     });
     const report = await r.tools.sync([]);
+    // Everything ubix still declares goes, whether or not it has a footprint
+    // of its own to undo — the config is Pier's, so nothing there is a
+    // stranger's.
     expect(r.lines()).toEqual([
       "ubix list --json",
       "rtk init --uninstall --agent pi --global",
       "ubix remove rtk --force",
+      "ubix remove fd --force",
+      "ubix remove wt --force",
       "ubix upgrade --all --json",
     ]);
-    expect(report.entries).toEqual([{ name: "rtk", action: "removed", version: null, error: null }]);
+    expect(report.entries[0]).toEqual({ name: "rtk", action: "removed", version: null, error: null });
     // The config that follows no longer declares it.
     expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).not.toContain("[tools.rtk]");
   });
@@ -318,9 +367,15 @@ describe("ManagedTools.status", () => {
   it("has no error and no versions before anything is installed", async () => {
     const root = mkdtempSync(join(tmpdir(), "pier-tools-status-"));
     const tools = new ManagedTools({ root, exec: () => Promise.reject(new Error("no ubix yet")) });
-    expect(await tools.status(["rtk"])).toEqual([
-      expect.objectContaining({ name: "rtk", enabled: true, installed: false, version: null, error: null }),
-    ]);
+    const entries = await tools.status(["rtk"]);
+    expect(entries.map((e) => e.name)).toEqual(MANAGED.map((t) => t.name));
+    expect(entries[0]).toEqual({
+      kind: "extension",
+      name: "rtk",
+      summary: expect.any(String),
+      enabled: true,
+      binary: { spec: "github:rtk-ai/rtk", installed: false, version: null, path: null, error: null },
+    });
   });
 
   it("shows a tool the state records and the disk lost as broken, not ready", async () => {
@@ -346,13 +401,13 @@ describe("ManagedTools.status", () => {
         })),
     });
     const [rtk] = await r.tools.status(["rtk"]);
-    expect(rtk).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
+    expect(rtk?.binary).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
   });
 
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {
     const r = rig({ answer: () => ({ code: 1, stdout: "", stderr: "state.toml is locked" }) });
     const [rtk] = await r.tools.status([]);
-    expect(rtk?.error).toMatch(/state\.toml is locked/);
+    expect(rtk?.binary?.error).toMatch(/state\.toml is locked/);
     expect(rtk?.enabled).toBe(false);
   });
 });
@@ -370,6 +425,9 @@ describe("a Console read while an install is running", () => {
     await vi.advanceTimersByTimeAsync(3000);
     const [rtk] = await answering;
     vi.useRealTimers();
-    expect(rtk).toMatchObject({ enabled: true, installed: false, error: "ubix is busy — an install or update is running" });
+    expect(rtk).toMatchObject({
+      enabled: true,
+      binary: { installed: false, error: "ubix is busy — an install or update is running" },
+    });
   });
 });

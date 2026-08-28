@@ -309,40 +309,41 @@ export interface ConfigResource {
 }
 
 /**
- * One extension Pier ships with, as a surface may show it. Not a
- * `ConfigResource`: it is not a file anyone can open, it is a switch — the
- * code lives inside the package and its state is an instance setting.
+ * One switch in the Console: something this instance can turn on. Not a
+ * `ConfigResource` — it is not a file anyone can open, and its state is an
+ * instance setting rather than something on disk.
+ *
+ * One shape for extensions and command-line tools because they share the whole
+ * vocabulary, and `rtk` is the proof: it is an extension *and* a binary, so
+ * two parallel catalogs would have had to draw it twice and agree with each
+ * other about it.
  */
-export interface BundledExtensionInfo {
+export interface CatalogEntry {
+  /** "extension": it gives every session new tools. "tool": a binary on the
+   *  PATH, which the agent uses like any other command. */
+  kind: "extension" | "tool";
   name: string;
   summary: string;
-  /** The tools it adds, and what each needs — which providers an extension
-   *  works with is the question asked in front of its switch, and it does not
-   *  always have one answer for the whole extension. */
-  tools: { name: string; needs: string }[];
   enabled: boolean;
-}
-
-/**
- * One CLI binary Pier manages (src/tools.ts), as a surface may show it: the
- * switch, and everything needed to understand what the switch did. The
- * declaration sits here rather than beside the installer for the same reason
- * `BundledExtensionInfo` does — the browser draws it, and nothing that draws
- * it may import a module that spawns processes.
- */
-export interface ManagedToolInfo {
-  name: string;
-  /** The ubix spec it is installed from — `github:owner/repo`. */
-  spec: string;
-  summary: string;
-  enabled: boolean;
-  /** Installed *and* present on disk. A tool the installer records and the
-   *  filesystem no longer has is broken, and says so in `error`. */
-  installed: boolean;
-  version: string | null;
-  path: string | null;
-  /** Why the state above is not what it should be, when it is not. */
-  error: string | null;
+  /** The tools an extension adds, and what each needs — which providers an
+   *  extension works with is the question asked in front of its switch, and it
+   *  does not always have one answer for the whole extension. */
+  adds?: { name: string; needs: string }[];
+  /** The binary behind it, where there is one: the spec it is installed from
+   *  and what is on disk right now. Its presence is also what says which set
+   *  the switch writes — an entry without one is loaded from inside Pier. */
+  binary?: {
+    spec: string;
+    /** Installed *and* present on disk. A binary the installer records and
+     *  the filesystem no longer has is broken, and says so in `error`. */
+    installed: boolean;
+    version: string | null;
+    path: string | null;
+    /** Why the state above is not what it should be, when it is not. */
+    error: string | null;
+  };
+  /** A spec the operator added themselves, and may remove again. */
+  custom?: boolean;
 }
 
 /**

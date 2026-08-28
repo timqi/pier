@@ -3,7 +3,7 @@
 // a session; server.ts stays the session/event surface.
 
 import type { Hono } from "hono";
-import type { BundledExtensionInfo, ManagedToolInfo } from "../core/types.js";
+import type { CatalogEntry } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
@@ -14,6 +14,7 @@ import {
   normalizeTools,
   type SettingsStore,
 } from "../settings.js";
+import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 
 /** How this instance replaces itself, or `null` where nothing supervises it.
@@ -53,16 +54,16 @@ export function registerInstanceRoutes(
      *  so instead of offering a button that cannot work. */
     updater?: UpdateApplier | null;
     secrets: SecretsControl;
-    /** The bundled-extension catalog, handed over as data by main.ts. Absent
-     *  in tests that do not care; the Console then shows no switches. */
-    extensions?: () => BundledExtensionInfo[];
-    /** The managed-CLI catalog with what is installed today, and the task that
-     *  keeps it that way — data again, because web/ must not run subprocesses
-     *  or know what a task is. Absent: the Console shows no tool switches. */
-    tools?: () => Promise<{ catalog: ManagedToolInfo[]; taskId: string | null }>;
-    /** Ran after the tool set was written, with the new set: main.ts installs
-     *  it, because tools.ts may not import tasks/. */
-    onToolsChanged?: (names: string[]) => void;
+    /** Everything with a switch — bundled extensions and managed binaries in
+     *  one list — plus the task whose runs install the binaries. Handed over
+     *  as data by main.ts: the catalog is code that imports the Pi SDK and
+     *  spawns ubix, and web/ may do neither. Absent in tests that do not care;
+     *  the Console then shows no switches. */
+    catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
+    /** Ran after a tool set was written, with the new one. Answers with the
+     *  reason nothing will happen, or null — the switch that was just flipped
+     *  is where that belongs, not only the journal (§5b). */
+    onToolsChanged?: (names: string[]) => Promise<string | null>;
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
@@ -76,8 +77,7 @@ export function registerInstanceRoutes(
     updates,
     updater = null,
     secrets,
-    extensions,
-    tools,
+    catalog,
     onUnlocked,
     onSettingsChanged,
     onToolsChanged,
@@ -125,14 +125,13 @@ export function registerInstanceRoutes(
   // switches cannot disagree with the setting they are drawn from. One shape
   // for both the read and the write, or the page reconciles two answers.
   const instanceSettings = async () => {
-    const managed = await tools?.();
+    const shown = await catalog?.();
     return {
       ...settings.get(),
-      extensionCatalog: extensions?.() ?? [],
-      toolCatalog: managed?.catalog ?? [],
+      catalog: shown?.entries ?? [],
       /** Where the runs are: the install and every daily update is one task's
        *  history, not a second status surface this route invented. */
-      toolsTaskId: managed?.taskId ?? null,
+      toolsTaskId: shown?.toolsTaskId ?? null,
     };
   };
 
@@ -209,64 +208,69 @@ export function registerInstanceRoutes(
         terminalInitCommand?: unknown;
         extensions?: unknown;
         tools?: unknown;
+        customTools?: unknown;
       }
       | null;
-    const given = body &&
-      [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.tools]
-        .some((v) => v !== undefined);
-    if (!given) {
+    const fields = body
+      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.tools, body.customTools]
+      : [];
+    if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions or tools required",
+        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions, tools or customTools required",
       }, 400);
     }
-    if (body.publicUrl !== undefined) {
-      if (typeof body.publicUrl !== "string") return c.json({ error: "publicUrl must be a string" }, 400);
+    // Everything is validated before anything is written: a request carrying a
+    // new custom tool *and* the switch that turns it on must not leave one of
+    // the two stored ("never half-handled").
+    const writes: (() => void)[] = [];
+    const refuse = (error: string) => c.json({ error }, 400);
+    if (body?.publicUrl !== undefined) {
+      if (typeof body.publicUrl !== "string") return refuse("publicUrl must be a string");
       const publicUrl = normalizePublicUrl(body.publicUrl);
-      if (publicUrl === null) {
-        return c.json({ error: "not a URL: expected http(s)://host, no query or fragment" }, 400);
-      }
-      settings.setPublicUrl(publicUrl);
+      if (publicUrl === null) return refuse("not a URL: expected http(s)://host, no query or fragment");
+      writes.push(() => settings.setPublicUrl(publicUrl));
     }
-    if (body.modelMenu !== undefined) {
+    if (body?.modelMenu !== undefined) {
       const menu = normalizeModelMenu(body.modelMenu);
-      if (menu === null) {
-        return c.json({ error: "modelMenu must be [{provider, id, note?}] (≤32 entries)" }, 400);
-      }
-      settings.setModelMenu(menu);
+      if (menu === null) return refuse("modelMenu must be [{provider, id, note?}] (≤32 entries)");
+      writes.push(() => settings.setModelMenu(menu));
     }
-    if (body.autoUpdate !== undefined) {
-      if (typeof body.autoUpdate !== "boolean") return c.json({ error: "autoUpdate must be a boolean" }, 400);
-      settings.setAutoUpdate(body.autoUpdate);
+    if (body?.autoUpdate !== undefined) {
+      const { autoUpdate } = body;
+      if (typeof autoUpdate !== "boolean") return refuse("autoUpdate must be a boolean");
+      writes.push(() => settings.setAutoUpdate(autoUpdate));
     }
-    if (body.terminalInitCommand !== undefined) {
+    if (body?.terminalInitCommand !== undefined) {
       const command = normalizeTerminalInitCommand(body.terminalInitCommand);
-      if (command === null) {
-        return c.json({ error: "terminalInitCommand must be one line of at most 500 characters" }, 400);
-      }
-      settings.setTerminalInitCommand(command);
+      if (command === null) return refuse("terminalInitCommand must be one line of at most 500 characters");
+      writes.push(() => settings.setTerminalInitCommand(command));
     }
-    if (body.extensions !== undefined) {
+    if (body?.extensions !== undefined) {
       const names = normalizeExtensions(body.extensions);
-      if (names === null) {
-        return c.json({ error: "extensions must be a list of names (≤32)" }, 400);
-      }
-      settings.setExtensions(names);
+      if (names === null) return refuse("extensions must be a list of names (≤32)");
+      writes.push(() => settings.setExtensions(names));
     }
-    if (body.tools !== undefined) {
-      const names = normalizeTools(body.tools);
-      if (names === null) {
-        return c.json({ error: "tools must be a list of names (≤32)" }, 400);
-      }
-      settings.setTools(names);
-      // Stored first, then acted on: the switch shows what was written even if
-      // the install that follows fails, and the failure has a task run to be
-      // read in.
-      onToolsChanged?.(names);
+    if (body?.customTools !== undefined) {
+      const custom = normalizeCustomTools(body.customTools);
+      if (custom === null) return refuse(CUSTOM_TOOL_RULES);
+      writes.push(() => settings.setCustomTools(custom));
     }
+    let tools: string[] | null = null;
+    if (body?.tools !== undefined) {
+      tools = normalizeTools(body.tools);
+      if (tools === null) return refuse("tools must be a list of names (≤32)");
+      const names = tools;
+      writes.push(() => settings.setTools(names));
+    }
+    for (const write of writes) write();
+    // Stored first, then acted on: the switch shows what was written even when
+    // the install cannot start — and then says why, here, rather than leaving
+    // "saved" as the last thing anyone was told.
+    const toolsProblem = tools ? { toolsProblem: (await onToolsChanged?.(tools)) ?? null } : {};
     // The URL and the extension set are both read when a session opens; the
     // model menu is read per picker call, so it needs no recycle.
-    if (body.publicUrl !== undefined || body.extensions !== undefined) onSettingsChanged?.();
-    return c.json(await instanceSettings());
+    if (body?.publicUrl !== undefined || body?.extensions !== undefined) onSettingsChanged?.();
+    return c.json({ ...(await instanceSettings()), ...toolsProblem });
   });
 
   // Layer-1 key status and control (Console → Settings → Security). The GET

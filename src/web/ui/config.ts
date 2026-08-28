@@ -5,11 +5,11 @@
 // the right. Scope comes from the session list (global + each project cwd);
 // bundled switches are instance-wide, so they appear under Global only.
 
-import type { BundledExtensionInfo, ConfigResource, ManagedToolInfo } from "../../core/types.js";
+import type { CatalogEntry, ConfigResource } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { setStatus, toggle } from "./form.js";
+import { badge, field, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 
 interface ConfigIndex {
@@ -22,13 +22,22 @@ type Selection =
   | { type: "file"; name: string }
   | { type: "resource"; kind: "extensions" | "skills"; name: string }
   | { type: "bundled"; name: string }
-  | { type: "tool"; name: string };
+  /** One pane for every command-line tool: a row and a switch each, because a
+   *  page per binary is four pages saying the same three facts. */
+  | { type: "tools" };
 
-/** The one settings answer both switch lists are drawn from. */
+/** The one settings answer every switch here is drawn from. */
 interface CatalogResponse {
-  extensionCatalog: BundledExtensionInfo[];
-  toolCatalog: ManagedToolInfo[];
+  catalog: CatalogEntry[];
   toolsTaskId: string | null;
+  /** Set when the tool set was stored and nothing will act on it. */
+  toolsProblem?: string | null;
+}
+
+/** What a save turned out to be, for the status line that redraws with it. */
+interface SaveOutcome {
+  state: "saved" | "failed";
+  text: string;
 }
 
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
@@ -42,15 +51,16 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   /** What the nav is currently drawn from, so a switch can redraw its badge
    *  without re-reading the scope's files. */
   let lastIndex: ConfigIndex | null = null;
-  /** The bundled extensions and their switch state; [] outside global scope. */
-  let bundled: BundledExtensionInfo[] = [];
+  /** Everything with a switch — bundled extensions and managed binaries in one
+   *  list, because rtk is both; [] outside global scope. */
+  let catalog: CatalogEntry[] = [];
   /** Why the list is missing, when it is — an empty section would read as
    *  "Pier ships none", which is a different fact. */
-  let bundledError = "";
-  /** The managed CLI tools and what is installed today; [] outside global. */
-  let managed: ManagedToolInfo[] = [];
+  let catalogError = "";
   /** The daily update task, where every install and failure is a run. */
   let toolsTaskId: string | null = null;
+  const extensionEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "extension");
+  const toolEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "tool");
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
@@ -85,30 +95,54 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   const q = (extra = ""): string => `?scope=${encodeURIComponent(scope)}${extra}`;
 
   /** Instance-wide, and the Console already serves them beside the setting. */
-  async function loadBundled(): Promise<void> {
+  async function loadCatalog(): Promise<void> {
     if (scope !== "global") {
-      bundled = [];
-      managed = [];
-      bundledError = "";
+      catalog = [];
+      catalogError = "";
       return;
     }
     const res = await fetch("/api/settings", { cache: "no-store" });
     if (!res.ok) {
-      bundled = [];
-      managed = [];
-      bundledError = await failure(res, "could not be loaded");
+      catalog = [];
+      catalogError = await failure(res, "could not be loaded");
       return;
     }
-    takeCatalogs((await res.json()) as CatalogResponse);
-    bundledError = "";
+    take((await res.json()) as CatalogResponse);
+    catalogError = "";
   }
 
-  /** One answer, both lists: a switch is never drawn from anything but the
+  /** One answer, every list: a switch is never drawn from anything but the
    *  state the server just confirmed. */
-  function takeCatalogs(body: CatalogResponse): void {
-    bundled = body.extensionCatalog;
-    managed = body.toolCatalog;
+  function take(body: CatalogResponse): void {
+    catalog = body.catalog;
     toolsTaskId = body.toolsTaskId;
+  }
+
+  /**
+   * The one write behind every switch here. Which set it lands in follows from
+   * the entry: something with a binary is in the tool set, something without is
+   * loaded from inside Pier — one rule, so no switch can write both.
+   */
+  async function save(body: Record<string, unknown>, saved: string): Promise<SaveOutcome> {
+    const res = await sendJson("/api/settings", body, "PUT");
+    // Redrawn from the state the server last confirmed, so a switch never
+    // shows something nobody stored — and the reason rides with the redraw.
+    if (!res.ok) return { state: "failed", text: await failure(res, "could not save") };
+    const answer = (await res.json()) as CatalogResponse;
+    take(answer);
+    renderNav(lastIndex); // the `on` badge in the nav is part of the answer
+    // Stored, and nothing will act on it: the switch is where that belongs.
+    if (answer.toolsProblem) return { state: "failed", text: `Saved, but nothing will install it: ${answer.toolsProblem}` };
+    return { state: "saved", text: saved };
+  }
+
+  /** The names one switch leaves behind in its own set. */
+  function switchBody(name: string, checked: boolean): Record<string, string[]> {
+    const binary = Boolean(catalog.find((e) => e.name === name)?.binary);
+    const names = catalog
+      .filter((e) => Boolean(e.binary) === binary && (e.name === name ? checked : e.enabled))
+      .map((e) => e.name);
+    return binary ? { tools: names } : { extensions: names };
   }
 
   async function load(): Promise<void> {
@@ -116,7 +150,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     paneRequest++;
     const [res] = await Promise.all([
       fetch(`/api/config${q()}`, { cache: "no-store" }),
-      loadBundled(),
+      loadCatalog(),
     ]);
     if (request !== loadRequest) return;
     if (!res.ok) {
@@ -255,7 +289,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name);
       else if (sel.type === "bundled") openBundled(sel.name);
-      else if (sel.type === "tool") openTool(sel.name);
+      else if (sel.type === "tools") openTools();
       else void openResource(sel.kind, sel.name);
     };
     const rows: HTMLElement[] = [];
@@ -266,26 +300,23 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     if (scope === "global") {
       rows.push(navSection("bundled with Pier"));
-      if (bundledError) {
-        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", bundledError));
-      } else if (!bundled.length) {
+      if (catalogError) {
+        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError));
+      } else if (!extensionEntries().length) {
         rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
       }
-      for (const ext of bundled) {
+      for (const ext of extensionEntries()) {
         const sel: Selection = { type: "bundled", name: ext.name };
         rows.push(
           navRow(ext.name, isActive(sel), false, () => open(sel), 0, ext.enabled ? onBadge() : undefined),
         );
       }
-      rows.push(navSection("command-line tools"));
-      if (!managed.length && !bundledError) {
-        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
-      }
-      for (const tool of managed) {
-        const sel: Selection = { type: "tool", name: tool.name };
-        rows.push(
-          navRow(tool.name, isActive(sel), false, () => open(sel), 0, tool.enabled ? onBadge() : undefined),
-        );
+      // One row, not one per binary: the tools differ by name and version and
+      // nothing else, so a page each would say the same three facts four times.
+      if (!catalogError) {
+        const sel: Selection = { type: "tools" };
+        const on = toolEntries().filter((t) => t.enabled).length;
+        rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), 0, on ? onBadge() : undefined));
       }
     }
     for (const kind of ["extensions", "skills"] as const) {
@@ -378,18 +409,45 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     editor.focus();
   }
 
+  /** Where every install and every failure already is: the update task's runs.
+   *  Null before anything is switched on, because the task does not exist. */
+  function taskLink(text: string): HTMLElement | null {
+    if (!toolsTaskId) return null;
+    const link = h("a", "text-indigo-600 hover:underline", text) as HTMLAnchorElement;
+    link.href = `#/tasks/${encodeURIComponent(toolsTaskId)}`;
+    return link;
+  }
+
+  /** What a binary is right now, in one line — the same line in both panes. */
+  function binaryLine(entry: CatalogEntry): string {
+    const binary = entry.binary;
+    if (!binary) return "";
+    if (binary.error) return `${binary.spec} — ${binary.error}`;
+    if (!binary.installed) return `${binary.spec} — not installed`;
+    return `${binary.spec} — ${binary.version ?? "unknown version"} at ${binary.path ?? "an unknown path"}`;
+  }
+
   /**
-   * The switch, and the two things it cannot be understood without: when it
-   * takes effect, and who wins against a copy of your own.
+   * The switch, and the things it cannot be understood without: when it takes
+   * effect, who wins against a copy of your own, and — for an extension that
+   * ships as a command — which binary it is and where the install ran.
    */
-  function openBundled(name: string, note?: { state: "saved" | "failed"; text: string }): void {
+  function openBundled(name: string, note?: SaveOutcome): void {
     paneRequest++;
-    const ext = bundled.find((e) => e.name === name);
+    const ext = catalog.find((e) => e.name === name && e.kind === "extension");
     if (!ext) return renderError(`unknown extension: ${name}`);
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
+    const runs = taskLink("every run of the update task");
     pane.replaceChildren(
-      paneBar(ext.name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "ships with Pier")),
+      paneBar(
+        ext.name,
+        h(
+          "span",
+          "ml-auto text-[11px] uppercase tracking-wide text-neutral-400",
+          ext.binary ? "installed by Pier" : "ships with Pier",
+        ),
+      ),
       h(
         "div",
         "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
@@ -400,109 +458,176 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         h(
           "dl",
           "flex max-w-2xl flex-col gap-1.5",
-          ...ext.tools.flatMap((tool) => [
+          ...(ext.adds ?? []).flatMap((tool) => [
             h("dt", "font-mono text-[12px] text-neutral-700", tool.name),
             h("dd", "text-[12px] leading-snug text-neutral-500", `needs ${tool.needs}`),
           ]),
+          ...(ext.binary
+            ? [
+              h("dt", "font-mono text-[12px] text-neutral-700", "binary"),
+              h(
+                "dd",
+                `font-mono text-[12px] leading-snug ${ext.binary.error ? "text-red-600" : "text-neutral-500"}`,
+                binaryLine(ext),
+              ),
+            ]
+            : []),
         ),
         toggle(
           "Enabled",
-          "Loaded from inside Pier — nothing is installed and no update touches your own extensions. "
-            + "A session mid-turn keeps the tools it started with; the next message picks this up.",
+          ext.binary
+            ? "Installed into Pier's own bin directory, first on the PATH every session, task and terminal "
+              + "inherits; it registers its own Pi extension. Switching it off uninstalls both."
+            : "Loaded from inside Pier — nothing is installed and no update touches your own extensions. "
+              + "A session mid-turn keeps the tools it started with; the next message picks this up.",
           ext.enabled,
-          (checked) => void saveBundled(ext.name, checked),
+          (checked) => void flip(ext.name, checked, (outcome) => openBundled(name, outcome)),
         ),
         h(
           "p",
           "max-w-2xl text-[12px] leading-snug text-neutral-400",
-          "An extension of your own that registers the same tool wins: this copy stands down and says so in the log.",
+          ...(ext.binary
+            ? runs ? ["A daily task installs and updates it — its history is ", runs, "."] : ["Switching it on creates the daily task that installs it."]
+            : ["An extension of your own that registers the same tool wins: this copy stands down and says so in the log."]),
         ),
         status,
       ),
     );
-  }
-
-  async function saveBundled(name: string, checked: boolean): Promise<void> {
-    const names = bundled.filter((e) => (e.name === name ? checked : e.enabled)).map((e) => e.name);
-    const res = await sendJson("/api/settings", { extensions: names }, "PUT");
-    if (!res.ok) {
-      // Redrawn from the state the server last confirmed, so the switch never
-      // shows something nobody stored — and the reason rides with the redraw.
-      return openBundled(name, { state: "failed", text: await failure(res, "could not save") });
-    }
-    takeCatalogs((await res.json()) as CatalogResponse);
-    renderNav(lastIndex); // the `on` badge in the nav is part of the answer
-    openBundled(name, { state: "saved", text: "Saved — sessions take it on their next message." });
   }
 
   /**
-   * The switch, what it installed, and where the install can be watched. No
-   * status of its own: the daily task's runs are the record, so the pane
-   * points at them instead of inventing a second one.
+   * Every command-line tool in one pane: a row, a line and a switch each, plus
+   * the operator's own specs. No page per binary — they differ by name and
+   * version, and a page each would repeat the same three facts.
    */
-  function openTool(name: string, note?: { state: "saved" | "failed"; text: string }): void {
+  function openTools(note?: SaveOutcome, draft = { name: "", spec: "" }): void {
     paneRequest++;
-    const tool = managed.find((t) => t.name === name);
-    if (!tool) return renderError(`unknown tool: ${name}`);
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
-    const facts: HTMLElement[] = [
-      h("dt", "font-mono text-[12px] text-neutral-700", "spec"),
-      h("dd", "font-mono text-[12px] leading-snug text-neutral-500", tool.spec),
-      h("dt", "font-mono text-[12px] text-neutral-700", "installed"),
-      h(
-        "dd",
-        "font-mono text-[12px] leading-snug text-neutral-500",
-        tool.installed ? `${tool.version ?? "unknown version"} — ${tool.path ?? "path unknown"}` : "not installed",
-      ),
-    ];
-    // What is wrong with it, where the version would be: a tool ubix records
-    // and the disk no longer has is broken, not ready.
-    const runs = toolsTaskId
-      ? h("a", "text-indigo-600 hover:underline", "every run of the update task")
-      : null;
-    if (runs) (runs as HTMLAnchorElement).href = `#/tasks/${encodeURIComponent(toolsTaskId ?? "")}`;
+    const tools = toolEntries();
+    const custom = (): { name: string; spec: string }[] =>
+      catalog.filter((e) => e.custom).map((e) => ({ name: e.name, spec: e.binary?.spec ?? "" }));
+    // Every binary that is on, not only the ones in this pane: rtk is switched
+    // by the same set from its own pane, and rewriting the set without it
+    // would uninstall it behind the operator's back.
+    const enabledBinaries = (): string[] => catalog.filter((e) => e.binary && e.enabled).map((e) => e.name);
+    const runs = taskLink("the update task");
+
+    const row = (tool: CatalogEntry): HTMLElement => {
+      const line = h(
+        "div",
+        "flex min-w-0 flex-1 flex-col gap-0.5",
+        h(
+          "span",
+          "flex items-center gap-2 text-[13px] text-neutral-700",
+          h("span", "font-mono", tool.name),
+          ...(tool.custom ? [badge("yours", "bg-neutral-50 text-neutral-500 ring-neutral-200")] : []),
+        ),
+        h("span", "text-[11.5px] leading-snug text-neutral-400", tool.summary || binaryLine(tool)),
+        ...(tool.summary
+          ? [h(
+            "span",
+            `font-mono text-[11px] leading-snug ${tool.binary?.error ? "text-red-600" : "text-neutral-400"}`,
+            binaryLine(tool),
+          )]
+          : []),
+      );
+      const box = toggle("", "", tool.enabled, (checked) => void flip(tool.name, checked, (outcome) => openTools(outcome)));
+      const remove = h("button", "btn text-[12px] text-neutral-500 hover:text-red-600", "Remove") as HTMLButtonElement;
+      remove.onclick = () => {
+        remove.disabled = true;
+        void save(
+          {
+            customTools: custom().filter((c) => c.name !== tool.name),
+            tools: enabledBinaries().filter((n) => n !== tool.name),
+          },
+          `Removed ${tool.name} — the next run uninstalls it.`,
+        ).then((outcome) => openTools(outcome));
+      };
+      return h(
+        "div",
+        "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0",
+        line,
+        ...(tool.custom ? [remove] : []),
+        box,
+      );
+    };
+
+    // Adding one is declaring it *and* switching it on: nobody writes a spec
+    // in order to leave it off, and the switch beside it undoes half of that.
+    const typed = { ...draft };
+    const add = h("button", "btn btn-primary text-[12.5px]", "Add") as HTMLButtonElement;
+    add.onclick = () => {
+      const entry = { name: typed.name.trim(), spec: typed.spec.trim() };
+      if (!entry.name || !entry.spec) {
+        return setStatus(status, "failed", "A custom tool needs a name and a ubix spec.");
+      }
+      add.disabled = true;
+      void save(
+        { customTools: [...custom(), entry], tools: [...enabledBinaries(), entry.name] },
+        `Added ${entry.name} — installing now.`,
+      ).then((outcome) =>
+        // A refused spec is redrawn with what was typed still in the fields:
+        // the fix is one character, and retyping it is not part of it.
+        openTools(outcome, outcome.state === "failed" ? typed : undefined)
+      );
+    };
+
     pane.replaceChildren(
-      paneBar(tool.name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "managed by Pier")),
+      paneBar(
+        "command-line tools",
+        h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "installed by Pier"),
+      ),
       h(
         "div",
         "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
-        h("p", "max-w-2xl text-[13px] leading-relaxed text-neutral-600", tool.summary),
-        h("dl", "flex max-w-2xl flex-col gap-1.5", ...facts),
-        ...(tool.error ? [h("p", "max-w-2xl text-[12px] leading-snug text-red-600", tool.error)] : []),
-        toggle(
-          "Enabled",
-          "Installed into Pier's own bin directory, first on the PATH every session, task and terminal inherits. "
-            + "Switching it off uninstalls it again.",
-          tool.enabled,
-          (checked) => void saveTools(tool.name, checked),
+        h(
+          "p",
+          "max-w-2xl text-[13px] leading-relaxed text-neutral-600",
+          "Installed into Pier's own bin directory and put first on the PATH every session, task and terminal "
+            + "inherits — so an agent gets this copy, at this version, whatever the machine already has.",
+        ),
+        catalogError
+          ? h("p", "max-w-2xl text-[12.5px] text-red-600", catalogError)
+          : h("div", "flex max-w-2xl flex-col", ...tools.map(row)),
+        h(
+          "div",
+          "flex max-w-2xl flex-col gap-2 border-t border-neutral-200 pt-4",
+          h("span", "text-[12.5px] font-medium text-neutral-600", "Add one of your own"),
+          h(
+            "div",
+            "flex items-end gap-2",
+            field("Name", textInput(typed.name, "eza", (v) => (typed.name = v), true)),
+            field("ubix spec", textInput(typed.spec, "github:eza-community/eza", (v) => (typed.spec = v), true)),
+            add,
+          ),
+          h(
+            "span",
+            "text-[11.5px] leading-snug text-neutral-400",
+            "A source and a locator: github:owner/repo, gitlab:group/repo, pypi:name, npm:name, cargo:name, "
+              + "go:module, pixi:name, or url:https://…",
+          ),
         ),
         h(
           "p",
           "max-w-2xl text-[12px] leading-snug text-neutral-400",
-          ...(runs
-            ? ["A daily task installs and updates it — its history is ", runs, "."]
-            : ["Switching one on creates the daily task that installs it and keeps it current."]),
+          ...(runs ? ["Installs and daily updates run as ", runs, " — output, failures and all."] : ["Switching one on creates the daily task that installs it and keeps it current."]),
         ),
         status,
       ),
     );
   }
 
-  async function saveTools(name: string, checked: boolean): Promise<void> {
-    const names = managed.filter((t) => (t.name === name ? checked : t.enabled)).map((t) => t.name);
-    const res = await sendJson("/api/settings", { tools: names }, "PUT");
-    if (!res.ok) {
-      // Same contract as the bundled switch: redraw from what the server last
-      // confirmed, with the reason it refused.
-      return openTool(name, { state: "failed", text: await failure(res, "could not save") });
-    }
-    takeCatalogs((await res.json()) as CatalogResponse);
-    renderNav(lastIndex);
-    openTool(name, {
-      state: "saved",
-      text: checked ? "Saved — installing now; watch the run." : "Saved — uninstalling in the next run.",
-    });
+  /** One switch, flipped: write the set it belongs to, then redraw the pane it
+   *  was flipped in with what came back. */
+  async function flip(name: string, checked: boolean, redraw: (outcome: SaveOutcome) => void): Promise<void> {
+    const entry = catalog.find((e) => e.name === name);
+    redraw(await save(
+      switchBody(name, checked),
+      entry?.binary
+        ? checked ? "Saved — installing now; watch the run." : "Saved — uninstalling in the next run."
+        : "Saved — sessions take it on their next message.",
+    ));
   }
 
   async function openResource(kind: "extensions" | "skills", name: string): Promise<void> {

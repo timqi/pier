@@ -19,6 +19,7 @@ const EMPTY = {
   terminalInitCommand: "",
   extensions: [],
   tools: [],
+  customTools: [],
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
@@ -133,6 +134,18 @@ describe("managed tools", () => {
     expect(store.get().extensions).toEqual([]);
     db.prepare("UPDATE settings SET value = 'not json' WHERE key = 'tools'").run();
     expect(store.get().tools).toEqual([]);
+    db.close();
+  });
+
+  it("keeps a declared spec when its switch goes off — they are two decisions", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    store.setCustomTools([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(store.setTools(["eza"]).customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(store.setTools([]).customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    // A hand-edited row must not take get() down with it.
+    db.prepare("UPDATE settings SET value = '[{\"name\":\"eza\"}]' WHERE key = 'customTools'").run();
+    expect(store.get().customTools).toEqual([]);
     db.close();
   });
 

@@ -37,9 +37,12 @@ describe("the bundled extensions", () => {
   it("hands surfaces names and summaries, and loads only what is switched on", () => {
     expect(bundledInfo([])).toEqual([
       {
+        // Half of one catalog: the tools Pier installs are the other half, and
+        // both halves are drawn by the same Console section.
+        kind: "extension",
         name: "web",
         summary: expect.stringContaining("hosted web tools"),
-        tools: [
+        adds: [
           { name: "web_search", needs: expect.stringContaining("Anthropic or OpenAI") },
           { name: "web_fetch", needs: expect.stringContaining("Anthropic") },
         ],

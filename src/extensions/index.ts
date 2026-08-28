@@ -11,7 +11,7 @@
 // stand down when a copy on disk already registers the same tools.
 
 import type { ExtensionFactory, InlineExtension } from "@earendil-works/pi-coding-agent";
-import type { BundledExtensionInfo } from "../core/types.js";
+import type { CatalogEntry } from "../core/types.js";
 import web from "./web/index.js";
 
 interface BundledExtension {
@@ -42,12 +42,15 @@ export const BUNDLED: readonly BundledExtension[] = [
   },
 ];
 
-/** The catalog a surface may show: no Pi types, nothing it cannot render. */
-export const bundledInfo = (enabled: readonly string[]): BundledExtensionInfo[] =>
+/** The catalog a surface may show: no Pi types, nothing it cannot render.
+ *  Half of one list — the tools Pier installs (src/tools.ts) are the other
+ *  half, and main.ts is where the two meet. */
+export const bundledInfo = (enabled: readonly string[]): CatalogEntry[] =>
   BUNDLED.map(({ name, summary, tools }) => ({
+    kind: "extension",
     name,
     summary,
-    tools,
+    adds: tools,
     enabled: enabled.includes(name),
   }));
 

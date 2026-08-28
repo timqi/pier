@@ -165,7 +165,8 @@ async function tools(action = ""): Promise<void> {
     import("./settings.js"),
   ]);
   try {
-    const report = await new ManagedTools().sync(new SettingsStore().get().tools);
+    const { tools: enabled, customTools } = new SettingsStore().get();
+    const report = await new ManagedTools().sync(enabled, customTools);
     say(report.summary);
     if (report.failed) process.exitCode = 1;
   } catch (err) {

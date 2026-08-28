@@ -18,11 +18,10 @@ import type {
   AgentFactory,
   AgentSession,
   BackgroundRun,
-  BundledExtensionInfo,
+  CatalogEntry,
   ChatTurn,
   ConfigStore,
   InboundMessage,
-  ManagedToolInfo,
   ProviderManager,
   SessionSummary,
   ThinkingLevel,
@@ -73,14 +72,14 @@ export interface WebDeps {
   config: ConfigStore;
   providers: ProviderManager;
   settings: SettingsStore;
-  /** The extensions Pier ships with, and which are on. Passed as data by
-   *  main.ts: the catalog is code that imports the Pi SDK, and web/ may not. */
-  extensions?: () => BundledExtensionInfo[];
-  /** The managed CLI tools and what is installed today; main.ts again, because
-   *  running ubix is the instance layer's business, not a route's. */
-  tools?: () => Promise<{ catalog: ManagedToolInfo[]; taskId: string | null }>;
-  /** Ran with the new tool set after it is stored — main.ts installs it. */
-  onToolsChanged?: (names: string[]) => void;
+  /** Everything with a switch — bundled extensions and managed binaries in one
+   *  list — and the task that installs the binaries. Passed as data by main.ts:
+   *  the catalog is code that imports the Pi SDK and spawns ubix, and web/ may
+   *  do neither. */
+  catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
+  /** Ran with the new tool set after it is stored; answers with the reason
+   *  nothing will happen, or null. */
+  onToolsChanged?: (names: string[]) => Promise<string | null>;
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
   updates: UpdateCheck;
@@ -116,8 +115,7 @@ export function createServer(
     config,
     providers,
     settings,
-    extensions,
-    tools,
+    catalog,
     onToolsChanged,
     secrets,
     onUnlocked,
@@ -617,8 +615,7 @@ export function createServer(
     updates,
     updater,
     secrets,
-    extensions,
-    tools,
+    catalog,
     onToolsChanged,
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),

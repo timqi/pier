@@ -11,6 +11,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { isThinkingLevel, type ThinkingLevel } from "./core/types.js";
 import { pierDb } from "./db.js";
 import { logger } from "./log.js";
+// The one place the custom-tool vocabulary lives (names, ubix sources, the
+// names Pier already owns). Imported rather than copied: a second validator
+// would be the third-copy bug one release later, and tools.ts is root-layer
+// like this file, so nothing crosses a seam.
+import { normalizeCustomTools, type CustomTool } from "./tools.js";
 
 const log = logger("settings");
 
@@ -45,6 +50,10 @@ export interface Settings {
    *  default: installing a binary and putting it ahead of the machine's own
    *  copy on every PATH is the operator's decision, not a default. */
   tools: string[];
+  /** Tools the operator declared themselves, by ubix spec. Beside the enabled
+   *  set rather than inside it: declaring one and switching it on are two
+   *  decisions, and a tool switched off must not lose its spec. */
+  customTools: CustomTool[];
 }
 
 /**
@@ -156,6 +165,7 @@ export class SettingsStore {
       terminalInitCommand: this.#value("terminalInitCommand") ?? "",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
+      customTools: this.#json("customTools", normalizeCustomTools, "a list of {name, spec}") ?? [],
     };
   }
 
@@ -212,6 +222,12 @@ export class SettingsStore {
   /** Same contract again: hand this `normalizeTools`'s output. */
   setTools(names: string[]): Settings {
     this.#set("tools", JSON.stringify(names));
+    return this.get();
+  }
+
+  /** Same contract again: hand this `normalizeCustomTools`'s output. */
+  setCustomTools(tools: CustomTool[]): Settings {
+    this.#set("customTools", JSON.stringify(tools));
     return this.get();
   }
 
