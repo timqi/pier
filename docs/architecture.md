@@ -89,7 +89,10 @@ src/
                vocabulary; one sync at a time per machine, under a lock the
                whole operation is inside — a row in pier.db, because both
                processes already open it and BEGIN IMMEDIATE is the mutual
-               exclusion a lock file would have to invent
+               exclusion a lock file would have to invent. A heartbeat cannot
+               prove a holder is dead, so the holder is fenced rather than
+               trusted: it re-checks the row before every step that changes
+               anything, and a sync that was taken over fails saying so
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns: what that task runs, keeping it the task Pier wrote, and
                coalescing a burst of switches into a single run

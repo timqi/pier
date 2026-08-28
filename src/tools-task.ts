@@ -63,8 +63,13 @@ export function toolsTask(tasks: TaskService) {
    * Created once and never retired: a task that comes and goes is a state class
    * of its own (two boots racing to create it, a retirement racing a switch),
    * and the run it would have been retired for already says "no tools switched
-   * on". Repaired rather than trusted, because the task routes can edit it and a
-   * switch must not silently run somebody's edited script.
+   * on".
+   *
+   * It repairs rather than trusts because of what came before the owner guard
+   * (tasks/definitions.ts): a definition edited by an older Pier, or by a
+   * release where the routes could still write it, is brought back to the one
+   * Pier owns here. Nothing can edit it any more — so this is a boot-time
+   * repair of state that already exists, not a defence.
    */
   const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> => {
     const command = toolsSyncScript();

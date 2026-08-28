@@ -53,8 +53,9 @@ export const newId = (): string => Array.from(randomBytes(16), idSymbol).join(""
  * that code, and edited by nobody.
  *
  * `creator` is `"http"` for the Console and `session:<id>` for the task tool.
- * Anything else is an instance-layer owner — today main.ts's tools update task,
- * whose script a switch in Settings runs on demand and cron runs nightly. Both
+ * Anything else is an instance-layer owner — today the tools update task
+ * (src/tools-task.ts), whose script a switch in Settings runs on demand and
+ * cron runs nightly. Both
  * public surfaces could rename it, point it at another script, pause it or
  * archive it, and the switch would go on claiming Pier keeps the tools current
  * while the run did something else entirely. The owner names itself in `by`;
