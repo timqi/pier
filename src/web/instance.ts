@@ -214,8 +214,7 @@ export function registerInstanceRoutes(
   //
   // A switch sends a *delta* (`tool`/`extension`), not the list it computed:
   // two quick clicks each carry a list built from what the page knew a moment
-  // ago, so the second silently drops the first. The whole-list forms stay for
-  // callers that really are replacing a set.
+  // ago, so the second silently drops the first.
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null) as
       | {
@@ -262,11 +261,15 @@ export function registerInstanceRoutes(
       if (command === null) return refuse("terminalInitCommand must be one line of at most 500 characters");
       writes.push(() => settings.setTerminalInitCommand(command));
     }
+    /** The blocks this request declares — adding a tool is declaring it *and*
+     *  switching it on, so its own name is switchable in the same write. */
+    let declared: readonly string[] = [];
     if (body?.customTools !== undefined) {
       const validated = validateCustomTools?.(body.customTools) ??
         { error: "this Pier cannot store custom tools" };
       if ("error" in validated) return refuse(validated.error);
       const { tools: custom } = validated;
+      declared = custom.map((tool) => tool.name);
       writes.push(() => settings.setCustomTools(custom));
     }
     /** A single switch, applied to the set as it is *now* rather than to the
@@ -277,9 +280,26 @@ export function registerInstanceRoutes(
       if (!name || name.length > 64 || typeof given?.on !== "boolean") return "expected {name, on}";
       return { name, on: given.on };
     };
+    /** A switch has to name something this instance has. A typo, or a name
+     *  from a release that dropped it, otherwise answered 200, stored a
+     *  setting no surface can draw and ran a sync that installs nothing — the
+     *  shape of failure §5b is about. Taking a name *out* of the set it is
+     *  stored in is always allowed: that is the repair, not the mistake. */
+    const known = body?.extension !== undefined || body?.tool !== undefined ? await catalog?.() : undefined;
+    const unknown = (
+      one: { name: string; on: boolean },
+      source: CatalogEntry["source"],
+      stored: readonly string[],
+    ): boolean =>
+      !known?.entries.some((entry) => entry.source === source && entry.name === one.name) &&
+      !(source === "binary" && declared.includes(one.name)) &&
+      !(!one.on && stored.includes(one.name));
     if (body?.extension !== undefined) {
       const one = delta(body.extension);
       if (typeof one === "string") return refuse(`extension: ${one}`);
+      if (unknown(one, "bundled", settings.get().extensions)) {
+        return refuse(`extension: this Pier has no extension called ${one.name}`);
+      }
       writes.push(() => settings.setExtensions(withName(settings.get().extensions, one)));
     }
     // Whether the enabled set moved, for the install below. The delta itself
@@ -288,6 +308,9 @@ export function registerInstanceRoutes(
     if (body?.tool !== undefined) {
       const one = delta(body.tool);
       if (typeof one === "string") return refuse(`tool: ${one}`);
+      if (unknown(one, "binary", settings.get().tools)) {
+        return refuse(`tool: this Pier manages no tool called ${one.name}`);
+      }
       toolsChanged = true;
       writes.push(() => settings.setTools(withName(settings.get().tools, one)));
     }

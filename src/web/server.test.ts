@@ -122,6 +122,12 @@ const TOOLS = [{
   name: "rg",
   summary: "searches a tree by content",
   binary: { spec: "github:BurntSushi/ripgrep", installed: false, version: null, path: null, error: null },
+}, {
+  source: "binary" as const,
+  kind: "tool" as const,
+  name: "fd",
+  summary: "finds files by name",
+  binary: { spec: "github:sharkdp/fd", installed: false, version: null, path: null, error: null },
 }];
 /** GET /api/settings on a fresh instance. */
 const SETTINGS_JSON = {
@@ -915,7 +921,7 @@ describe("workbench server", () => {
     expect(settings.get().extensions).toEqual(["web"]);
     // The answer carries the switches back, already flipped.
     expect(await ok.json()).toMatchObject({
-      catalog: [{ name: "web", enabled: true }, { name: "rg" }],
+      catalog: [{ name: "web", enabled: true }, { name: "rg" }, { name: "fd" }],
     });
     expect((await put("web")).status).toBe(400);
     expect((await put({ name: 42, on: true })).status).toBe(400);
@@ -937,7 +943,9 @@ describe("workbench server", () => {
     expect(settings.get().tools).toEqual(["rg"]);
     // The answer carries the switch back already flipped, so the Console never
     // draws a state nobody stored.
-    expect(await ok.json()).toMatchObject({ catalog: [{ name: "web" }, { name: "rg", enabled: true }] });
+    expect(await ok.json()).toMatchObject({
+      catalog: [{ name: "web" }, { name: "rg", enabled: true }, { name: "fd" }],
+    });
     expect(onToolsChanged).toHaveBeenCalledTimes(1);
 
     expect((await put("rg")).status).toBe(400);
@@ -1018,6 +1026,39 @@ describe("workbench server", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ toolsSync: { state: "waiting" } });
+  });
+
+  // The bug this test exists for: any name at all was accepted. `{tool:{name:
+  // "web"}}` or a typo answered 200, stored a setting no surface can show, and
+  // ran a sync with nothing to install.
+  it("refuses a switch for a name this instance has no switch for, and names it", async () => {
+    const { app, settings, onToolsChanged } = setup();
+    const put = (body: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    for (const [body, named] of [
+      [{ tool: { name: "rgg", on: true } }, "rgg"],
+      // A bundled extension is not a binary, and neither is switched through
+      // the other's set.
+      [{ tool: { name: "web", on: true } }, "web"],
+      [{ extension: { name: "rg", on: true } }, "rg"],
+    ] as const) {
+      const res = await put(body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: expect.stringContaining(named) });
+    }
+    expect(settings.get().tools).toEqual([]);
+    expect(settings.get().extensions).toEqual([]);
+    expect(onToolsChanged).not.toHaveBeenCalled();
+
+    // A name the catalog no longer has can still be taken *out* of the set it
+    // is stored in: that is the repair, not the mistake.
+    settings.setTools(["gone"]);
+    expect((await put({ tool: { name: "gone", on: false } })).status).toBe(200);
+    expect(settings.get().tools).toEqual([]);
   });
 
   it("declares a custom tool and its switch in one write, or neither", async () => {
