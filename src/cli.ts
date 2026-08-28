@@ -24,6 +24,7 @@ Usage
   pier service status         what systemd thinks of it
   pier update                 install the latest release and restart the service
   pier update --check         only say whether one exists
+  pier tools sync             install/update the managed CLI tools (rtk, …)
   pier restart                finish running turns first, then restart the service
   pier reload                 re-read channel config and recycle idle sessions
   pier backup                 snapshot pier.db before a manual update
@@ -97,6 +98,8 @@ if (values.help || command === "help") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly(["check"], "pier update");
   await update(values.check === true);
+} else if (command === "tools") {
+  await tools(subcommand);
 } else if (command === "restart" || command === "reload") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], `pier ${command}`);
@@ -143,6 +146,32 @@ async function update(checkOnly: boolean): Promise<void> {
   say(`pier backup`);
   say(`npm install -g @timqi/pier@${latest}`);
   say(`then restart Pier.`);
+}
+
+/**
+ * What the daily task runs, and what an operator can type. The setting is the
+ * instruction; this converges on it and prints what happened, one line per
+ * tool. Non-zero when anything failed — the task run is then a failed run with
+ * this text in it, which is the whole tools status surface.
+ */
+async function tools(action = ""): Promise<void> {
+  if (action !== "sync") {
+    process.stderr.write(`pier tools: unknown action "${action}"\n\n${HELP}`);
+    process.exit(2);
+  }
+  allowOnly([], "pier tools sync");
+  const [{ ManagedTools }, { SettingsStore }] = await Promise.all([
+    import("./tools.js"),
+    import("./settings.js"),
+  ]);
+  try {
+    const report = await new ManagedTools().sync(new SettingsStore().get().tools);
+    say(report.summary);
+    if (report.failed) process.exitCode = 1;
+  } catch (err) {
+    process.stderr.write(`pier: tools sync failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
+  }
 }
 
 /** Both are signals to the running unit: SIGUSR2 drains then exits (systemd

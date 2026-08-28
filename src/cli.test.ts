@@ -56,6 +56,17 @@ describe("pier CLI", () => {
     expect(result.stdout).toContain("no database yet");
   });
 
+  it("syncs the managed tools without reaching the network when none are on", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pier-cli-tools-"));
+    const env = { ...process.env, HOME: home, PIER_HOME: join(home, ".pier") };
+    const result = await run(["tools", "sync"], { env });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("no tools switched on");
+    // An action nobody implements must not read as one that did nothing.
+    expect((await run(["tools"], { env })).code).toBe(2);
+    expect((await run(["tools", "list"], { env })).stderr).toMatch(/unknown action "list"/);
+  });
+
   it("returns failure when systemd cannot load the installed unit", async () => {
     const home = mkdtempSync(join(tmpdir(), "pier-cli-failure-"));
     const bin = join(home, "bin");

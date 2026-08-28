@@ -41,6 +41,10 @@ export interface Settings {
    *  default: an extension gives every session new tools, which is the
    *  operator's call, and a name nobody ships any more is simply not found. */
   extensions: string[];
+  /** Names of the managed CLI tools switched on (src/tools.ts). Empty by
+   *  default: installing a binary and putting it ahead of the machine's own
+   *  copy on every PATH is the operator's decision, not a default. */
+  tools: string[];
 }
 
 /**
@@ -115,6 +119,17 @@ export function normalizeTerminalInitCommand(raw: unknown): string | null {
  * setting it cannot currently explain.
  */
 export function normalizeExtensions(raw: unknown): string[] | null {
+  return normalizeNames(raw);
+}
+
+/** Same shape, same contract, same cap — the managed-tool set (src/tools.ts).
+ *  Shape only again: tools.ts owns the catalog, and a name it does not know is
+ *  ignored there rather than rejected here, so a downgrade cannot lose one. */
+export function normalizeTools(raw: unknown): string[] | null {
+  return normalizeNames(raw);
+}
+
+function normalizeNames(raw: unknown): string[] | null {
   if (!Array.isArray(raw) || raw.length > 32) return null;
   const names = new Set<string>();
   for (const item of raw) {
@@ -140,6 +155,7 @@ export class SettingsStore {
       autoUpdate: this.#value("autoUpdate") === "1",
       terminalInitCommand: this.#value("terminalInitCommand") ?? "",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
+      tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
     };
   }
 
@@ -190,6 +206,12 @@ export class SettingsStore {
   /** Same contract again: hand this `normalizeExtensions`'s output. */
   setExtensions(names: string[]): Settings {
     this.#set("extensions", JSON.stringify(names));
+    return this.get();
+  }
+
+  /** Same contract again: hand this `normalizeTools`'s output. */
+  setTools(names: string[]): Settings {
+    this.#set("tools", JSON.stringify(names));
     return this.get();
   }
 

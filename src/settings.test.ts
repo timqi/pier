@@ -8,6 +8,7 @@ import {
   normalizeModelMenu,
   normalizePublicUrl,
   normalizeTerminalInitCommand,
+  normalizeTools,
   SettingsStore,
 } from "./settings.js";
 
@@ -17,6 +18,7 @@ const EMPTY = {
   autoUpdate: false,
   terminalInitCommand: "",
   extensions: [],
+  tools: [],
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
@@ -118,6 +120,26 @@ describe("bundled extensions", () => {
     expect(normalizeExtensions([])).toEqual([]);
     for (const bad of ["web", [42], [""], [" "], ["x".repeat(65)], Array(33).fill("a")]) {
       expect(normalizeExtensions(bad)).toBeNull();
+    }
+  });
+});
+
+describe("managed tools", () => {
+  it("round-trips the enabled set and ignores a corrupt row rather than crashing", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    expect(store.setTools(["rtk"]).tools).toEqual(["rtk"]);
+    // Neither list is the other: switching a tool on leaves extensions alone.
+    expect(store.get().extensions).toEqual([]);
+    db.prepare("UPDATE settings SET value = 'not json' WHERE key = 'tools'").run();
+    expect(store.get().tools).toEqual([]);
+    db.close();
+  });
+
+  it("takes a name it does not know, and refuses anything that is not one", () => {
+    expect(normalizeTools([" rtk ", "rtk", "future-tool"])).toEqual(["rtk", "future-tool"]);
+    for (const bad of ["rtk", [42], [""], ["x".repeat(65)], Array(33).fill("a")]) {
+      expect(normalizeTools(bad)).toBeNull();
     }
   });
 });
