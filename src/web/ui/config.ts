@@ -46,6 +46,74 @@ interface SaveOutcome {
   text: string;
 }
 
+/**
+ * The one write behind every switch and every custom-tool edit here, and the
+ * one place a write that never landed becomes something to show.
+ *
+ * A dropped connection or an answer that is not JSON used to reject into the
+ * click handler: the switch stayed visually flipped, Add and Remove stayed
+ * disabled, and the screen said nothing at all (§5b). Either one is a failed
+ * outcome now, and `answer` is absent — so the caller redraws from the state
+ * the server last confirmed instead of from what the click assumed.
+ */
+export async function writeSettings(
+  body: Record<string, unknown>,
+  saved: string,
+): Promise<{ outcome: SaveOutcome; answer?: CatalogResponse }> {
+  let res: Response;
+  try {
+    res = await sendJson("/api/settings", body, "PUT");
+  } catch (err) {
+    return { outcome: { state: "failed", text: `Could not save: ${String(err)}` } };
+  }
+  if (!res.ok) return { outcome: { state: "failed", text: await failure(res, "could not save") } };
+  let answer: CatalogResponse;
+  try {
+    answer = (await res.json()) as CatalogResponse;
+  } catch (err) {
+    // Stored, and unreadable: saying "saved" here would leave the page drawing
+    // a state it never got back.
+    return { outcome: { state: "failed", text: `Saved, but the answer could not be read: ${String(err)}` } };
+  }
+  // Stored — and then what actually became of it. "Saved" while a sync it has
+  // to queue behind is still running is how three switches turned into one
+  // installed tool with nothing anywhere saying so.
+  if (answer.toolsSync?.state === "refused") {
+    return { outcome: { state: "failed", text: `Saved, but nothing will install it: ${answer.toolsSync.reason}` }, answer };
+  }
+  if (answer.toolsSync?.state === "waiting") {
+    return {
+      outcome: { state: "saved", text: "Saved — a sync is already running; this change goes in the run right after it." },
+      answer,
+    };
+  }
+  return { outcome: { state: "saved", text: saved }, answer };
+}
+
+/**
+ * Removing a tool the operator declared, in the only order that cannot orphan
+ * a binary: switch it off first, so the next sync uninstalls it, and drop the
+ * declaration only once ubix reports the binary gone. The other order deleted
+ * the row while the tool was still on the PATH — with nothing left declaring
+ * it, nothing could remove it and no row could say so.
+ */
+export function removalStep(
+  entry: CatalogEntry,
+  customTools: readonly { name: string; toml: string }[],
+): { body: Record<string, unknown>; saved: string } {
+  const gone = entry.source === "binary" && !entry.binary.installed && entry.binary.error === null;
+  if (entry.enabled || !gone) {
+    return {
+      body: { tool: { name: entry.name, on: false } },
+      saved: `Switched ${entry.name} off — the next run uninstalls it. Its block stays until ubix reports the binary gone.`,
+    };
+  }
+  return {
+    body: { customTools: customTools.filter((tool) => tool.name !== entry.name) },
+    saved: `Removed ${entry.name}.`,
+  };
+}
+
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
   let scope = "global";
   let selection: Selection | null = null;
@@ -129,25 +197,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     toolsTaskId = body.toolsTaskId;
   }
 
-  /** The one write behind every switch and every custom-tool edit here. */
+  /** Write, then redraw from the state the server confirmed — so a switch
+   *  never shows something nobody stored, and the reason rides with the
+   *  redraw. A write that never landed answers with no state at all, and the
+   *  lists stay as they were. */
   async function save(body: Record<string, unknown>, saved: string): Promise<SaveOutcome> {
-    const res = await sendJson("/api/settings", body, "PUT");
-    // Redrawn from the state the server last confirmed, so a switch never
-    // shows something nobody stored — and the reason rides with the redraw.
-    if (!res.ok) return { state: "failed", text: await failure(res, "could not save") };
-    const answer = (await res.json()) as CatalogResponse;
-    take(answer);
-    renderNav(lastIndex); // the `on` badge in the nav is part of the answer
-    // Stored — and then what actually became of it. "Saved" while a sync it
-    // has to queue behind is still running is how three switches turned into
-    // one installed tool with nothing anywhere saying so.
-    if (answer.toolsSync?.state === "refused") {
-      return { state: "failed", text: `Saved, but nothing will install it: ${answer.toolsSync.reason}` };
+    const { outcome, answer } = await writeSettings(body, saved);
+    if (answer) {
+      take(answer);
+      renderNav(lastIndex); // the `on` badge in the nav is part of the answer
     }
-    if (answer.toolsSync?.state === "waiting") {
-      return { state: "saved", text: "Saved — a sync is already running; this change goes in the run right after it." };
-    }
-    return { state: "saved", text: saved };
+    return outcome;
   }
 
   /** One switch as a delta, never as the list this page computed: two quick
@@ -558,13 +618,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       const remove = h("button", "btn text-[12px] text-neutral-500 hover:text-red-600", "Remove") as HTMLButtonElement;
       remove.onclick = () => {
         remove.disabled = true;
-        void save(
-          {
-            customTools: customTools.filter((c) => c.name !== tool.name),
-            tool: { name: tool.name, on: false },
-          },
-          `Removed ${tool.name} — the next run uninstalls it.`,
-        ).then((outcome) => openTools(outcome));
+        const step = removalStep(tool, customTools);
+        void save(step.body, step.saved).then((outcome) => openTools(outcome));
       };
       return h(
         "div",
@@ -618,12 +673,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
         h(
           "p",
-          "max-w-2xl text-[13px] leading-relaxed text-neutral-600",
-          "Installed into Pier's own bin directory and put first on the PATH every session, task and terminal "
-            + "inherits — so an agent gets this copy, at this version, whatever the machine already has.",
-        ),
-        h(
-          "p",
           "max-w-2xl text-[12.5px] leading-relaxed text-neutral-500",
           "Pier writes no downloader: ",
           ubixLink(),
@@ -642,17 +691,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
           h("span", "text-[12.5px] font-medium text-neutral-600", "Add one of your own"),
           field("Name", nameField),
           field("The block Pier writes under the header", bodyField, {
-            hint: "Any keys ubix takes — spec, matching, exe, exes, rename, tag, version, the url: templating "
-              + "keys. Pier writes the header and leaves the body alone; a line that opens a section of its own "
-              + "is refused, because it could rewrite the rest of the file.",
+            hint: "A line that opens a section of its own is refused, because it could rewrite the rest of the file.",
           }),
           h("div", "flex items-center gap-3", header, add),
-          h(
-            "span",
-            "text-[11.5px] leading-snug text-neutral-400",
-            "github: and url: install on their own. npm: and pypi: need ubix's own runtime (fnm / uv) and land "
-              + "in that runtime's prefix, not Pier's bin — the row says so when they do.",
-          ),
         ),
         h(
           "p",
