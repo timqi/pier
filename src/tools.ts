@@ -7,9 +7,11 @@
 // a generated config file plus `ubix upgrade --all`. The tool-specific part is
 // data (MANAGED below) — the next tool is a table row, not a code path.
 //
-// An instance-layer leaf: node stdlib, paths.ts and log.ts only. It knows
-// nothing about tasks, sessions or the web — main.ts owns the task that calls
-// it, because a leaf that scheduled itself would be two modules.
+// Instance-layer, and nothing above it: node stdlib, paths.ts, log.ts, db.ts
+// (the sync lock is a row, not a file) and `core/types.ts` type-only, for the
+// one shape the Console draws a switch from. It knows nothing about tasks,
+// sessions or the web — tools-task.ts owns the task that calls it, because a
+// module that scheduled itself would be two modules.
 
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -240,27 +242,32 @@ export interface EnabledTools {
  *  a waiter gives a live holder before giving up with a reason. */
 const LOCK_TIMING = { heartbeatMs: 5_000, staleMs: 30_000, waitMs: 20 * 60_000, pollMs: 200 };
 
-/** What a fence found: the row is somebody else's now, so this sync stops
- *  where it stands. Its own class so a caller can tell "taken over" from "the
- *  install failed". */
-export class LockLost extends Error {}
-
 /**
  * One tools sync at a time on this machine, whichever process asked.
  *
- * The contract, which the rationale in docs/architecture.md expands:
+ * The contract:
  * - *Ownership* is one row and a random token. Every write to that row —
  *   release, takeover, refresh — matches on the token, so no party can undo
  *   another's.
  * - *Staleness* is heartbeat age. A holder that stops beating can be taken
  *   over; how long its work has been running never enters into it.
- * - *A heartbeat cannot prove a holder is dead*, so nothing here pretends it
- *   can: a holder that was taken over (paused long enough to look dead, then
- *   resumed) is stopped by the fence it must pass before every step that
- *   changes anything, not by the lock. Losing the lock is a failure the caller
- *   reports, never a warning under work that carries on.
+ * - *A heartbeat cannot prove a holder is dead*, so a holder does not assume
+ *   it is still the holder: it passes a fence before every step that changes
+ *   anything, and a sync that was taken over fails saying so rather than
+ *   writing beside its successor.
  * - No transaction is held for the length of a sync: acquire, refresh, fence
  *   and release are each their own.
+ *
+ * What the fence does *not* guarantee, deliberately. It bounds the overlap to
+ * one already-started step — a holder stopped between its fence and that
+ * step's own writes, or an `execFile` child that outlives its stopped parent,
+ * still finishes that step. Closing it would take a kernel lock every child
+ * inherits, which is a native dependency (AGENTS.md 8) or `flock(1)`, which
+ * macOS does not ship. It is not paid for, because the floor underneath is
+ * already a kernel lock: ubix takes an exclusive advisory flock on its own
+ * state file and Pier passes `--wait`, so two overlapping syncs cannot corrupt
+ * what ubix records — the worst case is a redundant install, or a config.toml
+ * written from a stale settings snapshot, which the next sync converges.
  */
 export class SyncLock {
   readonly #db: DatabaseSync;
@@ -321,7 +328,7 @@ export class SyncLock {
   #fence(token: string): void {
     const row = this.#db.prepare("SELECT token FROM tools_sync_lock").get() as { token: string } | undefined;
     if (row?.token !== token) {
-      throw new LockLost(
+      throw new Error(
         "this sync lost its lock — another tools sync took it over while this one was stopped, so it went no further",
       );
     }
@@ -739,9 +746,9 @@ export class ManagedTools {
    * could also be changing — the config file, ubix's own state, a tool's
    * footprint. Holding the lock is not proof of holding it *still*: a process
    * paused long enough to look dead is taken over and then resumes, and the
-   * fence is what stops it. It throws `LockLost`, which fails the sync with
-   * that sentence rather than letting it write on top of the sync that
-   * replaced it.
+   * fence is what stops it — by failing the sync with that sentence rather
+   * than letting it write on top of the sync that replaced it. What that
+   * leaves open, and why it is left open, is on `SyncLock`.
    */
   async sync(read: () => EnabledTools): Promise<ToolSyncReport> {
     this.#lock ??= new SyncLock(this.#db());

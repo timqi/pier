@@ -92,7 +92,10 @@ src/
                exclusion a lock file would have to invent. A heartbeat cannot
                prove a holder is dead, so the holder is fenced rather than
                trusted: it re-checks the row before every step that changes
-               anything, and a sync that was taken over fails saying so
+               anything, and a sync that was taken over fails saying so — which
+               bounds an overlap to one already-started step rather than
+               excluding it, over a floor of ubix's own flock (the contract in
+               tools.ts says what that leaves open, and why it is left)
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns: what that task runs, keeping it the task Pier wrote, and
                coalescing a burst of switches into a single run

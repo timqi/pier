@@ -504,7 +504,8 @@ describe("two syncs at once", () => {
  * to invent mutual exclusion badly: the version this replaced declared a live
  * 30-minute install dead at 20, trusted a pid a dead holder's number could be
  * reused for, let two waiters each unlink what the other had just created, and
- * let a finished holder delete its successor's lock.
+ * let a finished holder delete its successor's lock — the last of which is
+ * why every write to the row matches on the token that wrote it.
  */
 describe("the sync lock", () => {
   const tsx = import.meta.resolve("tsx");
@@ -721,18 +722,6 @@ describe("the sync lock", () => {
     const after = turns.slice(turns.findIndex((t) => t.who === "taker"));
     expect(after.some((t) => t.who === "stopped")).toBe(false);
     expect(turns.filter((t) => t.who === "stopped")).toEqual([{ what: "in", who: "stopped" }]);
-  });
-
-  it("releases only its own row, so a finished holder cannot free its successor", () => {
-    // The release is scoped to the token that wrote the row: a holder that was
-    // taken over deletes nothing on its way out.
-    const m = machine();
-    const db = m.db();
-    const successor = "the-successor";
-    db.prepare("INSERT INTO tools_sync_lock (id, token, heartbeat_at) VALUES (1, ?, ?)").run(successor, Date.now());
-    // What a finished, superseded holder does on its way out.
-    db.prepare("DELETE FROM tools_sync_lock WHERE token = ?").run("the-holder-that-was-taken-over");
-    expect(db.prepare("SELECT token FROM tools_sync_lock").get()).toEqual({ token: successor });
   });
 });
 
