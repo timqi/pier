@@ -171,16 +171,18 @@ export class TaskService {
     return this.definitions.create(raw, creator);
   }
 
-  update(id: string, raw: unknown): Promise<TaskDefinition> {
-    return this.definitions.update(id, raw);
+  /** `by` is how the code that owns a definition says so; the HTTP routes and
+   *  the task tool have none, which is what closes both (definitions.ts). */
+  update(id: string, raw: unknown, by?: string): Promise<TaskDefinition> {
+    return this.definitions.update(id, raw, by);
   }
 
-  setEnabled(id: string, enabled: boolean): TaskDefinition {
-    return this.definitions.setEnabled(id, enabled);
+  setEnabled(id: string, enabled: boolean, by?: string): TaskDefinition {
+    return this.definitions.setEnabled(id, enabled, by);
   }
 
-  archive(id: string): TaskDefinition {
-    return this.definitions.archive(id);
+  archive(id: string, by?: string): TaskDefinition {
+    return this.definitions.archive(id, by);
   }
 
   sessionExists(sessionId: string): Promise<boolean> {

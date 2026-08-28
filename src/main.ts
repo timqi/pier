@@ -237,7 +237,7 @@ const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> 
   // reporting the other's run as an overlap.
   for (const extra of owned.slice(1)) {
     log.warn(`archiving a second tools update task (${extra.id})`);
-    tasks.archive(extra.id);
+    tasks.archive(extra.id, TOOLS_TASK_CREATOR);
   }
   const task = owned[0];
   // Every field Pier owns, not just the command: a paused task, a renamed one
@@ -247,7 +247,9 @@ const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> 
     JSON.stringify([task.name, task.description, task.enabled, task.trigger, task.action, task.callback, task.timeoutSeconds]);
   if (task && current !== JSON.stringify(draftShape)) {
     log.warn("the tools update task was edited — restoring the definition Pier owns");
-    await tasks.update(task.id, { ...draft, enabled: true, callback: { type: "none" } });
+    // Named as the owner: this is the one path allowed to write it back
+    // (tasks/definitions.ts).
+    await tasks.update(task.id, { ...draft, enabled: true, callback: { type: "none" } }, TOOLS_TASK_CREATOR);
   }
   const id = task ? task.id : (await tasks.create(draft, TOOLS_TASK_CREATOR)).id;
   toolsTaskId = id;

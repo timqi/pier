@@ -1336,3 +1336,52 @@ describe("task HTTP routes", () => {
     expect(factory.fork).toHaveBeenCalledWith(session.id, expect.objectContaining({ cwd }));
   });
 });
+
+describe("a definition Pier's own code created", () => {
+  // The bug this test exists for: the tools update task was reconciled at boot
+  // and before every switch-triggered run, and an HTTP or task-tool edit in
+  // between still changed what the CRON run executed — while the switch went
+  // on saying Pier keeps the tools current.
+  it("is reconciled by its owner and edited, paused or archived by neither surface", async () => {
+    const { cwd, service } = setup();
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    // Created the way main.ts creates the tools update task.
+    const owned = await service.create(bashDraft(cwd, "echo tools sync"), "tools");
+    const mine = await service.create(bashDraft(cwd, "echo hi"));
+    const json = (body: unknown) => ({
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const patched = await app.request(`/api/tasks/${owned.id}`, json(bashDraft(cwd, "echo something else")));
+    expect(patched.status).toBe(400);
+    expect(await patched.json()).toMatchObject({ error: expect.stringContaining("reconciled by Pier") });
+    for (const route of ["pause", "resume", "archive"]) {
+      expect((await app.request(`/api/tasks/${owned.id}/${route}`, { method: "POST" })).status).toBe(400);
+    }
+    // The other way in: the task tool, which has no owner to name either.
+    await expect(service.tool({
+      operation: "update",
+      task_id: owned.id,
+      task: bashDraft(cwd, "echo something else"),
+    }, "s1")).rejects.toThrow(/reconciled by Pier/);
+
+    // Nothing moved: same script, still enabled, still not archived.
+    expect(service.get(owned.id)).toMatchObject({
+      enabled: true,
+      archived: false,
+      action: { script: "echo tools sync" },
+    });
+    // Running it is not editing it — that is what a flipped switch does.
+    expect((await service.waitForRun(service.run(owned.id).id)).state).toBe("succeeded");
+    // A task a person wrote is nobody's but theirs.
+    expect((await app.request(`/api/tasks/${mine.id}/pause`, { method: "POST" })).status).toBe(200);
+
+    // And the owner reconciles it, which is the whole point of the exception.
+    const repaired = await service.update(owned.id, bashDraft(cwd, "echo repaired"), "tools");
+    expect(repaired.action).toMatchObject({ script: "echo repaired" });
+    expect(service.archive(owned.id, "tools").archived).toBe(true);
+  });
+});

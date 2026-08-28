@@ -48,6 +48,22 @@ export const idSymbol = (byte: number): string => ID_ALPHABET.charAt(byte & 31);
  *  strict INSERT and a retry loop on every one of the four mint sites. */
 export const newId = (): string => Array.from(randomBytes(16), idSymbol).join("");
 
+/**
+ * Seam decision (tasks/): a definition Pier's own code created is reconciled by
+ * that code, and edited by nobody.
+ *
+ * `creator` is `"http"` for the Console and `session:<id>` for the task tool.
+ * Anything else is an instance-layer owner — today main.ts's tools update task,
+ * whose script a switch in Settings runs on demand and cron runs nightly. Both
+ * public surfaces could rename it, point it at another script, pause it or
+ * archive it, and the switch would go on claiming Pier keeps the tools current
+ * while the run did something else entirely. The owner names itself in `by`;
+ * neither the routes nor the tool has a `by` to pass, so this one function
+ * closes both.
+ */
+const ownerOf = (task: TaskDefinition): string | null =>
+  task.creator === "http" || task.creator.startsWith("session:") ? null : task.creator;
+
 export const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -164,8 +180,9 @@ export class TaskDefinitions {
     this.changed();
     return task;
   }
-  async update(id: string, raw: unknown): Promise<TaskDefinition> {
+  async update(id: string, raw: unknown, by?: string): Promise<TaskDefinition> {
     const old = this.get(id);
+    this.assertOwner(old, by, "edited");
     if (old.archived) throw new Error("archived tasks cannot be edited");
     const draft = await this.parseDraft(raw);
     const now = Date.now();
@@ -188,8 +205,9 @@ export class TaskDefinitions {
     this.changed();
     return task;
   }
-  setEnabled(id: string, enabled: boolean): TaskDefinition {
+  setEnabled(id: string, enabled: boolean, by?: string): TaskDefinition {
     const task = this.get(id);
+    this.assertOwner(task, by, enabled ? "resumed" : "paused");
     if (task.archived && enabled) throw new Error("archived tasks cannot be resumed");
     task.enabled = enabled;
     task.nextRunAt = enabled ? nextRunAt(task.trigger, Date.now()) : null;
@@ -198,8 +216,9 @@ export class TaskDefinitions {
     this.changed();
     return task;
   }
-  archive(id: string): TaskDefinition {
+  archive(id: string, by?: string): TaskDefinition {
     const task = this.get(id);
+    this.assertOwner(task, by, "archived");
     task.archived = true;
     task.enabled = false;
     task.nextRunAt = null;
@@ -228,6 +247,14 @@ export class TaskDefinitions {
   async sessionExists(sessionId: string): Promise<boolean> {
     return this.router.stateOf(sessionId) !== undefined ||
       (await this.factory.find(sessionId)) !== undefined;
+  }
+
+  /** The guard `ownerOf` exists for, on the three ways a definition changes. */
+  private assertOwner(task: TaskDefinition, by: string | undefined, what: string): void {
+    const owner = ownerOf(task);
+    if (owner && by !== owner) {
+      throw new Error(`"${task.name}" is Pier's own ${owner} task: it is reconciled by Pier, not ${what}`);
+    }
   }
 
   private async parseDraft(raw: unknown): Promise<TaskDraft> {
