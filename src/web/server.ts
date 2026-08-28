@@ -22,6 +22,7 @@ import type {
   ChatTurn,
   ConfigStore,
   InboundMessage,
+  ManagedToolInfo,
   ProviderManager,
   SessionSummary,
   ThinkingLevel,
@@ -75,6 +76,11 @@ export interface WebDeps {
   /** The extensions Pier ships with, and which are on. Passed as data by
    *  main.ts: the catalog is code that imports the Pi SDK, and web/ may not. */
   extensions?: () => BundledExtensionInfo[];
+  /** The managed CLI tools and what is installed today; main.ts again, because
+   *  running ubix is the instance layer's business, not a route's. */
+  tools?: () => Promise<{ catalog: ManagedToolInfo[]; taskId: string | null }>;
+  /** Ran with the new tool set after it is stored — main.ts installs it. */
+  onToolsChanged?: (names: string[]) => void;
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
   updates: UpdateCheck;
@@ -111,6 +117,8 @@ export function createServer(
     providers,
     settings,
     extensions,
+    tools,
+    onToolsChanged,
     secrets,
     onUnlocked,
     reload,
@@ -610,6 +618,8 @@ export function createServer(
     updater,
     secrets,
     extensions,
+    tools,
+    onToolsChanged,
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),
   });

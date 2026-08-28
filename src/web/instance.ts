@@ -3,7 +3,7 @@
 // a session; server.ts stays the session/event surface.
 
 import type { Hono } from "hono";
-import type { BundledExtensionInfo } from "../core/types.js";
+import type { BundledExtensionInfo, ManagedToolInfo } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
@@ -11,6 +11,7 @@ import {
   normalizeModelMenu,
   normalizePublicUrl,
   normalizeTerminalInitCommand,
+  normalizeTools,
   type SettingsStore,
 } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
@@ -55,6 +56,13 @@ export function registerInstanceRoutes(
     /** The bundled-extension catalog, handed over as data by main.ts. Absent
      *  in tests that do not care; the Console then shows no switches. */
     extensions?: () => BundledExtensionInfo[];
+    /** The managed-CLI catalog with what is installed today, and the task that
+     *  keeps it that way — data again, because web/ must not run subprocesses
+     *  or know what a task is. Absent: the Console shows no tool switches. */
+    tools?: () => Promise<{ catalog: ManagedToolInfo[]; taskId: string | null }>;
+    /** Ran after the tool set was written, with the new set: main.ts installs
+     *  it, because tools.ts may not import tasks/. */
+    onToolsChanged?: (names: string[]) => void;
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
@@ -63,8 +71,17 @@ export function registerInstanceRoutes(
     onSettingsChanged?: () => void;
   },
 ): void {
-  const { settings, updates, updater = null, secrets, extensions, onUnlocked, onSettingsChanged } =
-    deps;
+  const {
+    settings,
+    updates,
+    updater = null,
+    secrets,
+    extensions,
+    tools,
+    onUnlocked,
+    onSettingsChanged,
+    onToolsChanged,
+  } = deps;
   const updateLog = logger("update");
   // How long POST /api/update may hold its response open. A busy Pier drains
   // first, which can take minutes, and a response held that long dies at every
@@ -107,9 +124,19 @@ export function registerInstanceRoutes(
   // The catalog rides along: one round trip for the whole page, and the
   // switches cannot disagree with the setting they are drawn from. One shape
   // for both the read and the write, or the page reconciles two answers.
-  const instanceSettings = () => ({ ...settings.get(), extensionCatalog: extensions?.() ?? [] });
+  const instanceSettings = async () => {
+    const managed = await tools?.();
+    return {
+      ...settings.get(),
+      extensionCatalog: extensions?.() ?? [],
+      toolCatalog: managed?.catalog ?? [],
+      /** Where the runs are: the install and every daily update is one task's
+       *  history, not a second status surface this route invented. */
+      toolsTaskId: managed?.taskId ?? null,
+    };
+  };
 
-  app.get("/api/settings", (c) => c.json(instanceSettings()));
+  app.get("/api/settings", async (c) => c.json(await instanceSettings()));
 
   // What the version badge reads: the two versions, whether this instance can
   // do anything about the gap, and whether it is allowed to do it unattended.
@@ -181,14 +208,15 @@ export function registerInstanceRoutes(
         autoUpdate?: unknown;
         terminalInitCommand?: unknown;
         extensions?: unknown;
+        tools?: unknown;
       }
       | null;
     const given = body &&
-      [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions]
+      [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.tools]
         .some((v) => v !== undefined);
     if (!given) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand or extensions required",
+        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions or tools required",
       }, 400);
     }
     if (body.publicUrl !== undefined) {
@@ -224,10 +252,21 @@ export function registerInstanceRoutes(
       }
       settings.setExtensions(names);
     }
+    if (body.tools !== undefined) {
+      const names = normalizeTools(body.tools);
+      if (names === null) {
+        return c.json({ error: "tools must be a list of names (≤32)" }, 400);
+      }
+      settings.setTools(names);
+      // Stored first, then acted on: the switch shows what was written even if
+      // the install that follows fails, and the failure has a task run to be
+      // read in.
+      onToolsChanged?.(names);
+    }
     // The URL and the extension set are both read when a session opens; the
     // model menu is read per picker call, so it needs no recycle.
     if (body.publicUrl !== undefined || body.extensions !== undefined) onSettingsChanged?.();
-    return c.json(instanceSettings());
+    return c.json(await instanceSettings());
   });
 
   // Layer-1 key status and control (Console → Settings → Security). The GET

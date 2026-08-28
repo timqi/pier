@@ -110,6 +110,16 @@ const CATALOG = [{
   summary: "the provider's own web tools",
   tools: [{ name: "web_search", needs: "an authenticated model" }],
 }];
+/** The managed CLI tools this test pretends Pier can install. */
+const TOOLS = [{
+  name: "rtk",
+  spec: "github:rtk-ai/rtk",
+  summary: "compresses bash output",
+  installed: false,
+  version: null,
+  path: null,
+  error: null,
+}];
 /** GET /api/settings on a fresh instance. */
 const SETTINGS_JSON = {
   publicUrl: "",
@@ -117,7 +127,10 @@ const SETTINGS_JSON = {
   autoUpdate: false,
   terminalInitCommand: "",
   extensions: [],
+  tools: [],
   extensionCatalog: CATALOG.map((ext) => ({ ...ext, enabled: false })),
+  toolCatalog: TOOLS.map((tool) => ({ ...tool, enabled: false })),
+  toolsTaskId: null,
 };
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
@@ -272,12 +285,22 @@ function setup(
   const imOwners = new Map<string, string>();
   // Wired like main.ts: the adapters are its business, the eviction core's.
   const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
+  // Stands in for main.ts's task lifecycle: web/ stores the set and says so,
+  // the instance layer is what installs anything.
+  const onToolsChanged = vi.fn();
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     // Composed like main.ts — a catalog of names, so this test never loads an
     // extension or the SDK behind one.
     extensions: () =>
       CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
+    // Data again, and never a subprocess: ubix is the instance layer's.
+    tools: () =>
+      Promise.resolve({
+        catalog: TOOLS.map((tool) => ({ ...tool, enabled: settings.get().tools.includes(tool.name) })),
+        taskId: null,
+      }),
+    onToolsChanged,
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     channelOf: (id) => imOwners.get(id),
@@ -297,6 +320,7 @@ function setup(
     tasks,
     secrets,
     onUnlocked,
+    onToolsChanged,
     reload,
   };
 }
@@ -883,6 +907,33 @@ describe("workbench server", () => {
     expect(settings.get().extensions).toEqual(["web"]);
     expect((await put([])).status).toBe(200);
     expect(settings.get().extensions).toEqual([]);
+  });
+
+  it("switches a managed tool on, hands the set to the instance layer, and refuses a bad one", async () => {
+    const { app, settings, onToolsChanged } = setup();
+    const put = (tools: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tools }),
+      });
+    const ok = await put(["rtk"]);
+    expect(ok.status).toBe(200);
+    expect(settings.get().tools).toEqual(["rtk"]);
+    // The answer carries the switch back already flipped, so the Console never
+    // draws a state nobody stored.
+    expect(await ok.json()).toMatchObject({ toolCatalog: [{ name: "rtk", enabled: true }] });
+    expect(onToolsChanged).toHaveBeenCalledWith(["rtk"]);
+
+    expect((await put("rtk")).status).toBe(400);
+    expect((await put([42])).status).toBe(400);
+    // A refused write changes nothing and installs nothing.
+    expect(settings.get().tools).toEqual(["rtk"]);
+    expect(onToolsChanged).toHaveBeenCalledTimes(1);
+
+    expect((await put([])).status).toBe(200);
+    expect(settings.get().tools).toEqual([]);
+    expect(onToolsChanged).toHaveBeenLastCalledWith([]);
   });
 
   it("reads and writes the public URL, normalizing it and refusing a non-URL", async () => {

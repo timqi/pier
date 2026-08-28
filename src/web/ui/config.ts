@@ -5,7 +5,7 @@
 // the right. Scope comes from the session list (global + each project cwd);
 // bundled switches are instance-wide, so they appear under Global only.
 
-import type { BundledExtensionInfo, ConfigResource } from "../../core/types.js";
+import type { BundledExtensionInfo, ConfigResource, ManagedToolInfo } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
@@ -21,7 +21,15 @@ interface ConfigIndex {
 type Selection =
   | { type: "file"; name: string }
   | { type: "resource"; kind: "extensions" | "skills"; name: string }
-  | { type: "bundled"; name: string };
+  | { type: "bundled"; name: string }
+  | { type: "tool"; name: string };
+
+/** The one settings answer both switch lists are drawn from. */
+interface CatalogResponse {
+  extensionCatalog: BundledExtensionInfo[];
+  toolCatalog: ManagedToolInfo[];
+  toolsTaskId: string | null;
+}
 
 export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
   let scope = "global";
@@ -39,6 +47,10 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   /** Why the list is missing, when it is — an empty section would read as
    *  "Pier ships none", which is a different fact. */
   let bundledError = "";
+  /** The managed CLI tools and what is installed today; [] outside global. */
+  let managed: ManagedToolInfo[] = [];
+  /** The daily update task, where every install and failure is a run. */
+  let toolsTaskId: string | null = null;
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
@@ -76,17 +88,27 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   async function loadBundled(): Promise<void> {
     if (scope !== "global") {
       bundled = [];
+      managed = [];
       bundledError = "";
       return;
     }
     const res = await fetch("/api/settings", { cache: "no-store" });
     if (!res.ok) {
       bundled = [];
+      managed = [];
       bundledError = await failure(res, "could not be loaded");
       return;
     }
-    bundled = ((await res.json()) as { extensionCatalog: BundledExtensionInfo[] }).extensionCatalog;
+    takeCatalogs((await res.json()) as CatalogResponse);
     bundledError = "";
+  }
+
+  /** One answer, both lists: a switch is never drawn from anything but the
+   *  state the server just confirmed. */
+  function takeCatalogs(body: CatalogResponse): void {
+    bundled = body.extensionCatalog;
+    managed = body.toolCatalog;
+    toolsTaskId = body.toolsTaskId;
   }
 
   async function load(): Promise<void> {
@@ -233,6 +255,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name);
       else if (sel.type === "bundled") openBundled(sel.name);
+      else if (sel.type === "tool") openTool(sel.name);
       else void openResource(sel.kind, sel.name);
     };
     const rows: HTMLElement[] = [];
@@ -252,6 +275,16 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         const sel: Selection = { type: "bundled", name: ext.name };
         rows.push(
           navRow(ext.name, isActive(sel), false, () => open(sel), 0, ext.enabled ? onBadge() : undefined),
+        );
+      }
+      rows.push(navSection("command-line tools"));
+      if (!managed.length && !bundledError) {
+        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
+      }
+      for (const tool of managed) {
+        const sel: Selection = { type: "tool", name: tool.name };
+        rows.push(
+          navRow(tool.name, isActive(sel), false, () => open(sel), 0, tool.enabled ? onBadge() : undefined),
         );
       }
     }
@@ -397,9 +430,79 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       // shows something nobody stored — and the reason rides with the redraw.
       return openBundled(name, { state: "failed", text: await failure(res, "could not save") });
     }
-    bundled = ((await res.json()) as { extensionCatalog: BundledExtensionInfo[] }).extensionCatalog;
+    takeCatalogs((await res.json()) as CatalogResponse);
     renderNav(lastIndex); // the `on` badge in the nav is part of the answer
     openBundled(name, { state: "saved", text: "Saved — sessions take it on their next message." });
+  }
+
+  /**
+   * The switch, what it installed, and where the install can be watched. No
+   * status of its own: the daily task's runs are the record, so the pane
+   * points at them instead of inventing a second one.
+   */
+  function openTool(name: string, note?: { state: "saved" | "failed"; text: string }): void {
+    paneRequest++;
+    const tool = managed.find((t) => t.name === name);
+    if (!tool) return renderError(`unknown tool: ${name}`);
+    const status = h("span", "text-[11.5px] text-neutral-400", "");
+    if (note) setStatus(status, note.state, note.text);
+    const facts: HTMLElement[] = [
+      h("dt", "font-mono text-[12px] text-neutral-700", "spec"),
+      h("dd", "font-mono text-[12px] leading-snug text-neutral-500", tool.spec),
+      h("dt", "font-mono text-[12px] text-neutral-700", "installed"),
+      h(
+        "dd",
+        "font-mono text-[12px] leading-snug text-neutral-500",
+        tool.installed ? `${tool.version ?? "unknown version"} — ${tool.path ?? "path unknown"}` : "not installed",
+      ),
+    ];
+    // What is wrong with it, where the version would be: a tool ubix records
+    // and the disk no longer has is broken, not ready.
+    const runs = toolsTaskId
+      ? h("a", "text-indigo-600 hover:underline", "every run of the update task")
+      : null;
+    if (runs) (runs as HTMLAnchorElement).href = `#/tasks/${encodeURIComponent(toolsTaskId ?? "")}`;
+    pane.replaceChildren(
+      paneBar(tool.name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "managed by Pier")),
+      h(
+        "div",
+        "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
+        h("p", "max-w-2xl text-[13px] leading-relaxed text-neutral-600", tool.summary),
+        h("dl", "flex max-w-2xl flex-col gap-1.5", ...facts),
+        ...(tool.error ? [h("p", "max-w-2xl text-[12px] leading-snug text-red-600", tool.error)] : []),
+        toggle(
+          "Enabled",
+          "Installed into Pier's own bin directory, first on the PATH every session, task and terminal inherits. "
+            + "Switching it off uninstalls it again.",
+          tool.enabled,
+          (checked) => void saveTools(tool.name, checked),
+        ),
+        h(
+          "p",
+          "max-w-2xl text-[12px] leading-snug text-neutral-400",
+          ...(runs
+            ? ["A daily task installs and updates it — its history is ", runs, "."]
+            : ["Switching one on creates the daily task that installs it and keeps it current."]),
+        ),
+        status,
+      ),
+    );
+  }
+
+  async function saveTools(name: string, checked: boolean): Promise<void> {
+    const names = managed.filter((t) => (t.name === name ? checked : t.enabled)).map((t) => t.name);
+    const res = await sendJson("/api/settings", { tools: names }, "PUT");
+    if (!res.ok) {
+      // Same contract as the bundled switch: redraw from what the server last
+      // confirmed, with the reason it refused.
+      return openTool(name, { state: "failed", text: await failure(res, "could not save") });
+    }
+    takeCatalogs((await res.json()) as CatalogResponse);
+    renderNav(lastIndex);
+    openTool(name, {
+      state: "saved",
+      text: checked ? "Saved — installing now; watch the run." : "Saved — uninstalling in the next run.",
+    });
   }
 
   async function openResource(kind: "extensions" | "skills", name: string): Promise<void> {
