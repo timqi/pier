@@ -40,15 +40,15 @@ export interface ManagedTool {
    *  tool, which is the whole reason the catalog has one shape. */
   kind: "extension" | "tool";
   name: string;
-  /** A ubix spec — `github:owner/repo`, `pypi:name`, … */
-  spec: string;
   /** One line, shown beside the switch that turns it on. */
   summary: string;
-  /** The executable inside the release archive, when it is not named after the
-   *  project: ubi looks for `<project>*`, and ripgrep ships `rg`. Verified the
-   *  hard way — without it the install fails with "could not find any files
-   *  matching [ripgrep*]". */
-  exe?: string;
+  /** The body of this tool's `[tools.<name>]` block — `spec = "…"` and
+   *  whatever else ubix's ToolConfig takes. Pier owns the header and writes
+   *  the body underneath it verbatim: which keys exist is ubix's vocabulary to
+   *  know, not Pier's, and a wrong type is rejected by ubix with an error that
+   *  already reaches the run output. Pier guards the *structure* only
+   *  (`normalizeCustomTools`). */
+  toml: string;
   /** Run after every install and every upgrade, from the tool's own binary:
    *  a tool that has to register something with Pi does it here, and doing it
    *  on every sync is also how that registration stays current. */
@@ -56,7 +56,7 @@ export interface ManagedTool {
   /** Run *before* the binary is removed — undoing what `provision` did takes
    *  the tool that did it. */
   deprovision?: readonly string[];
-  /** True only for a row built from an operator's own spec. */
+  /** True only for a row built from an operator's own block. */
   custom?: boolean;
 }
 
@@ -67,7 +67,7 @@ export const MANAGED: readonly ManagedTool[] = [
   {
     kind: "extension",
     name: "rtk",
-    spec: "github:rtk-ai/rtk",
+    toml: `spec = "github:rtk-ai/rtk"`,
     summary:
       "Compresses long bash output before it reaches the model. Ships as a " +
       "command, and installs its own Pi extension into Pier's agent dir — " +
@@ -80,68 +80,111 @@ export const MANAGED: readonly ManagedTool[] = [
   {
     kind: "tool",
     name: "rg",
-    spec: "github:BurntSushi/ripgrep",
-    exe: "rg",
+    // `exe`, because ubi looks for files named after the *project* and
+    // ripgrep ships `rg`: without it the install fails with "could not find
+    // any files matching [ripgrep*]". Found by installing it for real.
+    toml: `spec = "github:BurntSushi/ripgrep"\nexe = "rg"`,
     summary: "ripgrep: searches a tree by content, fast enough to be the default.",
   },
   {
     kind: "tool",
     name: "fd",
-    spec: "github:sharkdp/fd",
+    toml: `spec = "github:sharkdp/fd"`,
     summary: "Finds files by name, respecting .gitignore — what `find` should feel like.",
   },
   {
     kind: "tool",
     name: "wt",
-    spec: "github:max-sixty/worktrunk",
-    exe: "wt",
+    toml: `spec = "github:max-sixty/worktrunk"\nexe = "wt"`,
     summary: "worktrunk: git worktrees as one command — branch, switch, merge, clean up.",
+  },
+  {
+    kind: "tool",
+    name: "jq",
+    // No `exe` and no `rename`: jq publishes bare per-platform binaries
+    // (`jq-linux-amd64`, not an archive), and ubi installs one of those under
+    // the tool's own name — observed landing as `bin/jq`, with `jq --version`
+    // answering jq-1.8.2. Archive-versus-binary is exactly what bit rg and wt,
+    // so what was seen is written down rather than assumed.
+    toml: `spec = "github:jqlang/jq"`,
+    summary: "Slices, filters and reshapes JSON on the command line.",
   },
 ];
 
-/** A tool the operator added by writing a ubix spec. Same shape as a MANAGED
- *  row minus everything only Pier can know. */
+/** A tool the operator added by writing a block of their own. */
 export interface CustomTool {
   name: string;
-  spec: string;
+  toml: string;
 }
 
-/** The sources ubix installs from (`ubix sources`). A spec must name one:
- *  guessing a default would install something the operator did not write. */
-const UBIX_SOURCES = ["github", "gitlab", "url", "pypi", "npm", "cargo", "go", "pixi", "template", "http"];
 /** A binary's name on disk, so what goes on the PATH is predictable. */
 const TOOL_NAME = /^[a-z0-9][a-z0-9._-]{0,31}$/i;
 /** Every one is a binary on every PATH; a list this long is already a smell. */
 const MAX_CUSTOM = 16;
+/** A tool's block is a handful of keys. Past this it is a config file, and a
+ *  textarea in a settings pane is the wrong place to keep one. Generous on
+ *  purpose: a templated `url:` tool carries two ~200-character URLs. */
+const MAX_BODY = 2000;
+
+/** The `spec = "…"` a block must carry, for the boundary check and for the
+ *  one line the Console shows about a tool it has not installed yet. */
+export function specOf(toml: string): string | null {
+  for (const line of toml.split("\n")) {
+    const match = /^\s*spec\s*=\s*["']([^"']+)["']\s*(?:#.*)?$/.exec(line);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return null;
+}
 
 /** What a custom entry must be, said once so both the route and the stored
  *  row are checked by the same rule. */
 export const CUSTOM_TOOL_RULES =
   `each custom tool needs a name (letters, digits, . _ - , ≤32 characters, not a built-in or "ubix")` +
-  ` and a ubix spec naming a source (${UBIX_SOURCES.join(", ")}) — e.g. github:owner/repo; at most ${String(MAX_CUSTOM)}`;
+  ` and a block body with a spec line — spec = "github:owner/repo", plus any ubix keys it needs.` +
+  ` Pier writes the [tools.<name>] header itself: a line opening a section of its own is refused, so are` +
+  ` control characters and a body over ${String(MAX_BODY)} characters; at most ${String(MAX_CUSTOM)} tools`;
 
 /**
- * Boundary check, rejecting rather than repairing: a spec quietly "fixed"
- * would install something nobody wrote, onto a PATH every session inherits.
- * A name Pier already manages is refused too — two rows installing into the
- * same filename is a switch whose meaning depends on which ran last.
+ * Boundary check, rejecting rather than repairing.
+ *
+ * The body is the operator's — which keys ubix's ToolConfig takes is ubix's
+ * vocabulary, and a wrong type is ubix's error to report, in the run output
+ * where it already lands. What Pier guards is the *structure* of the file it
+ * generates: nothing may open a section, because a body that could write
+ * `[settings]` could point `install_dir` anywhere, and one that could write
+ * `[tools.rg]` could redefine a tool the operator never touched. A name Pier
+ * already manages is refused for the same reason — two rows installing into
+ * one filename is a switch whose meaning depends on which ran last.
+ *
+ * `{name, spec}` from an older Pier is read as the body it stood for: those
+ * rows were written by this code, and orphaning them would silently drop a
+ * tool the operator is still using.
  */
 export function normalizeCustomTools(raw: unknown): CustomTool[] | null {
   if (!Array.isArray(raw) || raw.length > MAX_CUSTOM) return null;
   const tools: CustomTool[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null) return null;
-    const { name, spec } = item as Record<string, unknown>;
-    if (typeof name !== "string" || typeof spec !== "string") return null;
+    const given = record(item);
+    if (!given) return null;
+    const { name, toml, spec } = given;
+    if (typeof name !== "string") return null;
     const cleanName = name.trim();
-    const cleanSpec = spec.trim();
     if (!TOOL_NAME.test(cleanName)) return null;
     if (cleanName === "ubix" || MANAGED.some((tool) => tool.name === cleanName)) return null;
     if (tools.some((tool) => tool.name === cleanName)) return null;
-    if (cleanSpec.length > 200 || /\s/.test(cleanSpec)) return null;
-    const source = cleanSpec.slice(0, cleanSpec.indexOf(":"));
-    if (!UBIX_SOURCES.includes(source) || cleanSpec.length <= source.length + 1) return null;
-    tools.push({ name: cleanName, spec: cleanSpec });
+    // The migration: a stored `{name, spec}` is the block it always meant.
+    const body = typeof toml === "string"
+      ? toml.trim()
+      : typeof spec === "string" && spec.trim()
+      ? `spec = ${tomlString(spec.trim())}`
+      : null;
+    if (body === null || !body || body.length > MAX_BODY) return null;
+    // A section header would take the rest of the file with it.
+    if (body.split("\n").some((line) => line.trimStart().startsWith("["))) return null;
+    // Tabs and newlines are the only control characters a TOML body needs.
+    if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(body)) return null;
+    if (!specOf(body)) return null;
+    tools.push({ name: cleanName, toml: body });
   }
   return tools;
 }
@@ -417,7 +460,9 @@ export interface ToolSyncReport {
   summary: string;
 }
 
-/** TOML is only ever written here, and only for the four values below. */
+/** Pier only ever writes two TOML strings itself — the install dir and the
+ *  spec a legacy `{name, spec}` row is migrated into. A tool's own body is the
+ *  operator's text and is written verbatim. */
 const tomlString = (value: string): string => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 /**
@@ -426,7 +471,7 @@ const tomlString = (value: string): string => `"${value.replace(/\\/g, "\\\\").r
  * sync, and doing that to a file a human maintains would delete their tools.
  */
 export function ubixConfigToml(
-  tools: readonly Pick<ManagedTool, "name" | "spec" | "exe">[],
+  tools: readonly Pick<ManagedTool, "name" | "toml">[],
   installDir: string,
 ): string {
   const lines = [
@@ -436,14 +481,14 @@ export function ubixConfigToml(
     "[settings]",
     `install_dir = ${tomlString(installDir)}`,
   ];
-  for (const tool of tools) {
-    lines.push("", `[tools.${tool.name}]`, `spec = ${tomlString(tool.spec)}`);
-    if (tool.exe) lines.push(`exe = ${tomlString(tool.exe)}`);
-  }
+  // Pier owns the headers; the body under each one is written exactly as it
+  // was given. A `{version}` placeholder or a 200-character URL is the
+  // operator's business and must survive the round trip untouched.
+  for (const tool of tools) lines.push("", `[tools.${tool.name}]`, tool.toml.trim());
   return `${lines.join("\n")}\n`;
 }
 
-/** The rows an enabled set names: Pier's catalog plus the operator's specs.
+/** The rows an enabled set names: Pier's catalog plus the operator's blocks.
  *  A name in neither is not an error — the setting is shape-only, so a row a
  *  future release drops must not stop the sync of everything else. */
 function rows(custom: readonly CustomTool[]): ManagedTool[] {
@@ -580,7 +625,7 @@ export class ManagedTools {
     for (const state of await this.#states(ubix, env, ["list", "--json"])) {
       if (wanted.some((tool) => tool.name === state.name)) continue;
       const known = all.find((tool) => tool.name === state.name);
-      entries.push(await this.#uninstall(ubix, env, known ?? { kind: "tool", name: state.name, spec: "", summary: "" }));
+      entries.push(await this.#uninstall(ubix, env, known ?? { kind: "tool", name: state.name, toml: "", summary: "" }));
     }
 
     this.#writeConfig(wanted);
@@ -613,7 +658,7 @@ export class ManagedTools {
       name: tool.name,
       summary: tool.summary,
       enabled: enabled.includes(tool.name),
-      binary: { spec: tool.spec, installed: false, version: null, path: null, error: null },
+      binary: { spec: specOf(tool.toml) ?? "", installed: false, version: null, path: null, error: null },
       ...(tool.custom ? { custom: true } : {}),
     }));
     // No ubix yet is not a failure — it is the state of an instance that has
@@ -640,13 +685,22 @@ export class ManagedTools {
       // State says installed, disk says otherwise: broken, and drawing that as
       // ready is how an operator finds out from a failed turn instead.
       const gone = state.installed === true && state.exists === false;
+      // Installed, and not where Pier's PATH points: `npm:` lands in fnm's
+      // node prefix and `pixi:` in its own, under the package's binary name.
+      // The install worked and the promise did not, which is a sentence the
+      // row has to say rather than a path an operator has to notice.
+      const elsewhere = state.path !== null && !state.path.startsWith(`${this.bin}/`);
       return withBinary(entry, {
         installed: state.installed === true && !gone,
         version: state.version,
         path: state.path,
         error: gone
           ? `installed but missing on disk: ${state.missingPaths.join(", ") || "tracked paths are gone"}`
-          : state.error,
+          : state.error ??
+            (elsewhere
+              ? `installed outside Pier's bin (${state.path ?? ""}) — this source installs into its own runtime's` +
+                ` prefix, so Pier does not put it on the PATH sessions inherit`
+              : null),
       });
     });
   }

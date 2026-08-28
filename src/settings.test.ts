@@ -140,9 +140,13 @@ describe("managed tools", () => {
   it("keeps a declared spec when its switch goes off — they are two decisions", () => {
     const db = openDb(":memory:");
     const store = new SettingsStore(db);
-    store.setCustomTools([{ name: "eza", spec: "github:eza-community/eza" }]);
-    expect(store.setTools(["eza"]).customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
-    expect(store.setTools([]).customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    const eza = { name: "eza", toml: `spec = "github:eza-community/eza"` };
+    store.setCustomTools([eza]);
+    expect(store.setTools(["eza"]).customTools).toEqual([eza]);
+    expect(store.setTools([]).customTools).toEqual([eza]);
+    // A row an older Pier wrote is read as the block it stood for, not dropped.
+    db.prepare(`UPDATE settings SET value = '[{"name":"fd2","spec":"github:sharkdp/fd"}]' WHERE key = 'customTools'`).run();
+    expect(store.get().customTools).toEqual([{ name: "fd2", toml: `spec = "github:sharkdp/fd"` }]);
     // A hand-edited row must not take get() down with it.
     db.prepare("UPDATE settings SET value = '[{\"name\":\"eza\"}]' WHERE key = 'customTools'").run();
     expect(store.get().customTools).toEqual([]);

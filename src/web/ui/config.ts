@@ -9,7 +9,7 @@ import type { CatalogEntry, ConfigResource, ToolsSyncNote } from "../../core/typ
 import { failure, sendJson } from "./api.js";
 import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, field, setStatus, textInput, toggle } from "./form.js";
+import { badge, CONTROL, field, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 
 interface ConfigIndex {
@@ -29,6 +29,9 @@ type Selection =
 /** The one settings answer every switch here is drawn from. */
 interface CatalogResponse {
   catalog: CatalogEntry[];
+  /** The blocks the operator wrote, as stored — the catalog carries only the
+   *  spec line out of each, and re-sending the list takes the whole body. */
+  customTools: { name: string; toml: string }[];
   toolsTaskId: string | null;
   /** What became of the install the switch asked for; absent when it asked for
    *  none. */
@@ -60,6 +63,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   let catalogError = "";
   /** The daily update task, where every install and failure is a run. */
   let toolsTaskId: string | null = null;
+  /** The custom blocks, as stored: what a save has to send back unchanged. */
+  let customTools: { name: string; toml: string }[] = [];
   const extensionEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "extension");
   const toolEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "tool");
 
@@ -116,6 +121,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
    *  state the server just confirmed. */
   function take(body: CatalogResponse): void {
     catalog = body.catalog;
+    customTools = body.customTools;
     toolsTaskId = body.toolsTaskId;
   }
 
@@ -508,13 +514,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
    * the operator's own specs. No page per binary — they differ by name and
    * version, and a page each would repeat the same three facts.
    */
-  function openTools(note?: SaveOutcome, draft = { name: "", spec: "" }): void {
+  function openTools(note?: SaveOutcome, draft = { name: "", toml: "" }): void {
     paneRequest++;
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
     const tools = toolEntries();
-    const custom = (): { name: string; spec: string }[] =>
-      catalog.filter((e) => e.custom).map((e) => ({ name: e.name, spec: e.binary?.spec ?? "" }));
     // Every binary that is on, not only the ones in this pane: rtk is switched
     // by the same set from its own pane, and rewriting the set without it
     // would uninstall it behind the operator's back.
@@ -546,7 +550,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         remove.disabled = true;
         void save(
           {
-            customTools: custom().filter((c) => c.name !== tool.name),
+            customTools: customTools.filter((c) => c.name !== tool.name),
             tools: enabledBinaries().filter((n) => n !== tool.name),
           },
           `Removed ${tool.name} — the next run uninstalls it.`,
@@ -561,22 +565,35 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       );
     };
 
-    // Adding one is declaring it *and* switching it on: nobody writes a spec
+    // Adding one is declaring it *and* switching it on: nobody writes a block
     // in order to leave it off, and the switch beside it undoes half of that.
     const typed = { ...draft };
+    // The header is Pier's and the body is theirs — shown, so it is obvious
+    // what is being written into rather than something to guess at.
+    const header = h("span", "font-mono text-[12px] text-neutral-500", "[tools.<name>]");
+    const nameField = textInput(typed.name, "claude", (v) => {
+      typed.name = v;
+      header.textContent = `[tools.${v.trim() || "<name>"}]`;
+    }, true);
+    const bodyField = document.createElement("textarea");
+    bodyField.className = `${CONTROL} h-24 resize-y font-mono leading-snug`;
+    bodyField.spellcheck = false;
+    bodyField.value = typed.toml;
+    bodyField.placeholder = `spec = "github:owner/repo"\nexe = "tool"`;
+    bodyField.oninput = () => (typed.toml = bodyField.value);
     const add = h("button", "btn btn-primary text-[12.5px]", "Add") as HTMLButtonElement;
     add.onclick = () => {
-      const entry = { name: typed.name.trim(), spec: typed.spec.trim() };
-      if (!entry.name || !entry.spec) {
-        return setStatus(status, "failed", "A custom tool needs a name and a ubix spec.");
+      const entry = { name: typed.name.trim(), toml: typed.toml.trim() };
+      if (!entry.name || !entry.toml) {
+        return setStatus(status, "failed", "A custom tool needs a name and a block with a spec line.");
       }
       add.disabled = true;
       void save(
-        { customTools: [...custom(), entry], tools: [...enabledBinaries(), entry.name] },
+        { customTools: [...customTools, entry], tools: [...enabledBinaries(), entry.name] },
         `Added ${entry.name} — installing now.`,
       ).then((outcome) =>
-        // A refused spec is redrawn with what was typed still in the fields:
-        // the fix is one character, and retyping it is not part of it.
+        // A refused block is redrawn with what was typed still in the fields:
+        // the fix is one line, and retyping the rest is not part of it.
         openTools(outcome, outcome.state === "failed" ? typed : undefined)
       );
     };
@@ -602,18 +619,18 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
           "div",
           "flex max-w-2xl flex-col gap-2 border-t border-neutral-200 pt-4",
           h("span", "text-[12.5px] font-medium text-neutral-600", "Add one of your own"),
-          h(
-            "div",
-            "flex items-end gap-2",
-            field("Name", textInput(typed.name, "eza", (v) => (typed.name = v), true)),
-            field("ubix spec", textInput(typed.spec, "github:eza-community/eza", (v) => (typed.spec = v), true)),
-            add,
-          ),
+          field("Name", nameField),
+          field("The block Pier writes under the header", bodyField, {
+            hint: "Any keys ubix takes — spec, matching, exe, exes, rename, tag, version, the url: templating "
+              + "keys. Pier writes the header and leaves the body alone; a line that opens a section of its own "
+              + "is refused, because it could rewrite the rest of the file.",
+          }),
+          h("div", "flex items-center gap-3", header, add),
           h(
             "span",
             "text-[11.5px] leading-snug text-neutral-400",
-            "A source and a locator: github:owner/repo, gitlab:group/repo, pypi:name, npm:name, cargo:name, "
-              + "go:module, pixi:name, or url:https://…",
+            "github: and url: install on their own. npm: and pypi: need ubix's own runtime (fnm / uv) and land "
+              + "in that runtime's prefix, not Pier's bin — the row says so when they do.",
           ),
         ),
         h(

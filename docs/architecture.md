@@ -82,7 +82,8 @@ src/
   tools.ts     the CLI binaries Pier manages (install, update, PATH) — ubix
                does the downloading, main.ts owns the task that calls it;
                `rtk` is an extension that ships as one, so the Console's
-               catalog is one list with a kind, not two
+               catalog is one list with a kind, not two; a custom tool is the
+               body of its ubix block, guarded structurally, not by vocabulary
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core

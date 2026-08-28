@@ -10,6 +10,7 @@ import {
   ManagedTools,
   normalizeCustomTools,
   parseUbixJson,
+  specOf,
   toolsTaskDraft,
   toolsTaskPlan,
   type SyncRunner,
@@ -90,6 +91,15 @@ const upgraded = {
 
 const ok = (stdout: string): ExecResult => ({ code: 0, stdout, stderr: "" });
 
+/** The operator's real claude block: a templated `url:` source, placeholders,
+ *  two ~200-character URLs, and two keys Pier has no business knowing. */
+const CLAUDE_BODY = [
+  `spec = "url:https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/{version}/{os}-{arch}/claude"`,
+  `exe = "claude"`,
+  `url_musl = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/{version}/{os}-{arch}-musl/claude"`,
+  `version_source = "github:anthropics/claude-code"`,
+].join("\n");
+
 describe("parseUbixJson", () => {
   it("reads a list document, pins and all", () => {
     const [rtk, fd, wt] = parseUbixJson(LIST_JSON);
@@ -143,7 +153,7 @@ describe("parseUbixJson", () => {
 
 describe("the ubix config Pier owns", () => {
   it("declares the tools it was handed and where they install, and nothing else", () => {
-    const toml = ubixConfigToml([{ name: "rtk", spec: "github:rtk-ai/rtk" }], "/home/t/.pier/tools/bin");
+    const toml = ubixConfigToml([{ name: "rtk", toml: `spec = "github:rtk-ai/rtk"` }], "/home/t/.pier/tools/bin");
     expect(toml).toContain(`install_dir = "/home/t/.pier/tools/bin"`);
     expect(toml).toContain("[tools.rtk]");
     expect(toml).toContain(`spec = "github:rtk-ai/rtk"`);
@@ -154,44 +164,83 @@ describe("the ubix config Pier owns", () => {
     // Verified against the real thing: without this, ripgrep's install fails
     // with "could not find any files matching [ripgrep*]".
     const rg = MANAGED.find((tool) => tool.name === "rg");
-    expect(rg?.exe).toBe("rg");
+    expect(rg?.toml).toContain(`exe = "rg"`);
     expect(ubixConfigToml([rg!], "/bin")).toContain(`exe = "rg"`);
-    expect(ubixConfigToml([{ name: "fd", spec: "github:sharkdp/fd" }], "/bin")).not.toContain("exe =");
+    // jq needs none: it publishes bare per-platform binaries and ubi installs
+    // one under the tool's own name (observed: bin/jq, jq-1.8.2).
+    expect(MANAGED.find((tool) => tool.name === "jq")?.toml).not.toContain("exe");
+  });
+
+  it("writes an operator's own block verbatim under the header Pier owns", () => {
+    // The case the free-form body exists for: a templated `url:` tool with
+    // placeholders and two long URLs, and keys (url_musl, version_source)
+    // Pier has no business knowing about.
+    const [claude] = normalizeCustomTools([{ name: "claude", toml: CLAUDE_BODY }]) ?? [];
+    expect(claude?.toml).toBe(CLAUDE_BODY);
+    const config = ubixConfigToml([claude!], "/home/t/.pier/tools/bin");
+    expect(config).toContain(`[tools.claude]\n${CLAUDE_BODY}\n`);
+    // Not touched, not re-wrapped, not escaped a second time.
+    for (const line of CLAUDE_BODY.split("\n")) expect(config).toContain(line);
+    // The line the real install turned out to need — an inline table, which
+    // the structural guard allows because it opens no section. No whitelist of
+    // Pier's would have had `arch_replace` in it; that is the point.
+    const withArch = `${CLAUDE_BODY}\narch_replace = { amd64 = "x64", arm64 = "arm64" }`;
+    expect(normalizeCustomTools([{ name: "claude", toml: withArch }])?.[0]?.toml).toBe(withArch);
   });
 });
 
 describe("a tool the operator declares", () => {
-  it("takes a name and a spec that name a source ubix has", () => {
-    expect(normalizeCustomTools([{ name: " eza ", spec: " github:eza-community/eza " }]))
-      .toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
-    expect(normalizeCustomTools([{ name: "ruff", spec: "pypi:ruff" }]))
-      .toEqual([{ name: "ruff", spec: "pypi:ruff" }]);
+  it("takes a name and a block, and keeps the block exactly as written", () => {
+    expect(normalizeCustomTools([{ name: " eza ", toml: ` spec = "github:eza-community/eza" ` }]))
+      .toEqual([{ name: "eza", toml: `spec = "github:eza-community/eza"` }]);
+    const multi = `spec = "github:astral-sh/uv"\nexes = ["uv", "uvx"]\ntag = "0.9.7"`;
+    expect(normalizeCustomTools([{ name: "uv", toml: multi }])?.[0]?.toml).toBe(multi);
     expect(normalizeCustomTools([])).toEqual([]);
   });
 
-  it("refuses rather than half-storing anything that would install the wrong thing", () => {
+  it("reads a row an older Pier stored as {name, spec} as the block it meant", () => {
+    // Orphaning those would silently drop a tool the operator is still using.
+    expect(normalizeCustomTools([{ name: "eza", spec: "github:eza-community/eza" }]))
+      .toEqual([{ name: "eza", toml: `spec = "github:eza-community/eza"` }]);
+  });
+
+  it("refuses rather than half-storing anything that would rewrite the file", () => {
     for (const bad of [
       "not a list",
       [{ name: "eza" }],
-      [{ name: "eza", spec: 42 }],
-      // A source ubix does not have, or none at all: guessing one would
-      // install something nobody wrote.
-      [{ name: "eza", spec: "githbu:eza-community/eza" }],
-      [{ name: "eza", spec: "eza-community/eza" }],
-      [{ name: "eza", spec: "github:" }],
-      [{ name: "eza", spec: "github:a/b c" }],
+      [{ name: "eza", toml: 42 }],
+      // No spec: a block ubix cannot install anything from.
+      [{ name: "eza", toml: `exe = "eza"` }],
+      [{ name: "eza", toml: `spec = ""` }],
+      [{ name: "eza", toml: "   " }],
+      // A section of its own — install_dir anywhere, or another tool redefined.
+      [{ name: "eza", toml: `spec = "github:x/y"\n[settings]\ninstall_dir = "/usr/bin"` }],
+      [{ name: "eza", toml: `spec = "github:x/y"\n  [tools.rg]\nspec = "github:evil/rg"` }],
+      [{ name: "eza", toml: `[settings]` }],
+      // Control characters, and a body that is really a config file.
+      [{ name: "eza", toml: `spec = "github:x/y"\u0000` }],
+      [{ name: "eza", toml: `spec = "github:x/y"\r\nexe = "eza"` }],
+      [{ name: "eza", toml: `spec = "github:x/y"\n${"# padding\n".repeat(300)}` }],
       // Names Pier already owns, and a name a filesystem would not like.
-      [{ name: "rtk", spec: "github:x/y" }],
-      [{ name: "ubix", spec: "github:x/y" }],
-      [{ name: "../rm", spec: "github:x/y" }],
-      [{ name: "", spec: "github:x/y" }],
-      [{ name: "a".repeat(33), spec: "github:x/y" }],
+      [{ name: "rtk", toml: `spec = "github:x/y"` }],
+      [{ name: "jq", toml: `spec = "github:x/y"` }],
+      [{ name: "ubix", toml: `spec = "github:x/y"` }],
+      [{ name: "../rm", toml: `spec = "github:x/y"` }],
+      [{ name: "", toml: `spec = "github:x/y"` }],
+      [{ name: "a".repeat(33), toml: `spec = "github:x/y"` }],
       // Two rows installing into the same filename.
-      [{ name: "eza", spec: "github:x/y" }, { name: "eza", spec: "github:a/b" }],
-      Array.from({ length: 17 }, (_, i) => ({ name: `t${String(i)}`, spec: "github:x/y" })),
+      [{ name: "eza", toml: `spec = "github:x/y"` }, { name: "eza", toml: `spec = "github:a/b"` }],
+      Array.from({ length: 17 }, (_, i) => ({ name: `t${String(i)}`, toml: `spec = "github:x/y"` })),
     ]) {
       expect(normalizeCustomTools(bad)).toBeNull();
     }
+  });
+
+  it("finds the spec line the Console shows, and only a real one", () => {
+    expect(specOf(CLAUDE_BODY)).toContain("url:https://storage.googleapis.com/");
+    expect(specOf(`exe = "x"\nspec = 'github:a/b'`)).toBe("github:a/b");
+    expect(specOf(`# spec = "github:a/b"`)).toBeNull();
+    expect(specOf(`exe = "x"`)).toBeNull();
   });
 });
 
@@ -404,6 +453,37 @@ describe("ManagedTools.status", () => {
     });
     const [rtk] = await r.tools.status(["rtk"]);
     expect(rtk?.binary).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
+  });
+
+  it("says when a tool installed somewhere Pier's PATH does not point", async () => {
+    // What `npm:` really does: the binary lands in fnm's node prefix under the
+    // package's own name. The install worked; Pier's "first on the PATH"
+    // promise did not, and the row is where that has to be said.
+    const r = rig({
+      answer: () =>
+        ok(JSON.stringify({
+          schema_version: 1,
+          tools: [{
+            name: "cc",
+            spec: "npm:@anthropic-ai/claude-code",
+            source: "npm",
+            locator: null,
+            installed: true,
+            installed_version: "latest",
+            install_paths: ["/home/t/.local/share/fnm/aliases/default/bin/claude"],
+            exists: true,
+            missing_paths: [],
+            tag: null,
+            version: null,
+            installed_at: null,
+            updated_at: null,
+          }],
+        })),
+    });
+    const custom = [{ name: "cc", toml: `spec = "npm:@anthropic-ai/claude-code"` }];
+    const cc = (await r.tools.status(["cc"], custom)).find((e) => e.name === "cc");
+    expect(cc?.binary).toMatchObject({ installed: true, path: "/home/t/.local/share/fnm/aliases/default/bin/claude" });
+    expect(cc?.binary?.error).toContain("installed outside Pier's bin");
   });
 
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {

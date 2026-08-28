@@ -989,17 +989,22 @@ describe("workbench server", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-    const ok = await put({ customTools: [{ name: "eza", spec: "github:eza-community/eza" }], tools: ["eza"] });
+    const eza = { name: "eza", toml: `spec = "github:eza-community/eza"` };
+    const ok = await put({ customTools: [eza], tools: ["eza"] });
     expect(ok.status).toBe(200);
-    expect(settings.get().customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(settings.get().customTools).toEqual([eza]);
     expect(settings.get().tools).toEqual(["eza"]);
 
-    // A bad spec beside a good switch: neither half is stored, so the Console
-    // never shows a tool that is on and undeclared.
-    const bad = await put({ customTools: [{ name: "nope", spec: "not-a-source:x" }], tools: ["eza", "nope"] });
+    // A block that opens a section beside a good switch: neither half is
+    // stored, so the Console never shows a tool that is on and undeclared —
+    // and install_dir is never something a text field can move.
+    const bad = await put({
+      customTools: [eza, { name: "nope", toml: `spec = "github:x/y"\n[settings]\ninstall_dir = "/usr/bin"` }],
+      tools: ["eza", "nope"],
+    });
     expect(bad.status).toBe(400);
-    expect(await bad.json()).toMatchObject({ error: expect.stringContaining("ubix spec") });
-    expect(settings.get().customTools).toEqual([{ name: "eza", spec: "github:eza-community/eza" }]);
+    expect(await bad.json()).toMatchObject({ error: expect.stringContaining("spec line") });
+    expect(settings.get().customTools).toEqual([eza]);
     expect(settings.get().tools).toEqual(["eza"]);
   });
 
