@@ -701,9 +701,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     // appendSessionInfo, so the refused open writes nothing to disk.
     this.credentials?.assertUnlocked();
     if (opts.name) sessionManager.appendSessionInfo(opts.name);
-    const tools = opts.capabilities === "read"
-      ? ["read", "grep", "find", "ls", ...active.map((tool) => tool.name)]
-      : undefined;
     // This runtime serves exactly this one session, so shadowing its
     // streamSimple is the per-session seam for the Anthropic cache TTL:
     // interactive sessions keep "long" (1h — turns arrive minutes apart),
@@ -719,7 +716,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       cwd,
       sessionManager,
       customTools,
-      tools,
       modelRuntime: runtime,
       resourceLoader: await this.resourceLoader(cwd),
     });

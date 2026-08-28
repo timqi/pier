@@ -712,7 +712,7 @@ describe("task service", () => {
       action: {
         type: "agent",
         session: { mode: "fresh", cwd },
-        launch: { capabilities: "read", thinking: "low" },
+        launch: { thinking: "low" },
         prompt: "Review independently",
       },
     });
@@ -722,7 +722,6 @@ describe("task service", () => {
     }).id);
     expect(factory.create).toHaveBeenCalledWith(expect.objectContaining({
       cwd,
-      capabilities: "read",
       thinking: "low",
     }));
     expect(freshRun).toMatchObject({
@@ -1115,40 +1114,6 @@ describe("task service", () => {
     // …and the slot is free again: a second run on the same task succeeds.
     const second = await service.waitForRun(service.run(task.id).id);
     expect(second.state).toBe("succeeded");
-  });
-
-  it("refuses nested delegation from a read-only subagent", async () => {
-    const { cwd, service, factory } = setup();
-    vi.mocked(factory.create).mockResolvedValueOnce(hangingSession("read-only-child"));
-    // Read-only is a Console/HTTP definition field, not a tool parameter: the
-    // reachable path is a stored task the model runs by id.
-    const task = await service.create({
-      name: "reviewer",
-      trigger: { type: "manual" },
-      action: {
-        type: "agent",
-        session: { mode: "fresh", cwd },
-        prompt: "Review",
-        launch: { capabilities: "read" },
-      },
-    });
-    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
-    await vi.waitFor(() => expect(service.getRun(queued.runId).targetSessionId).toBe("read-only-child"));
-
-    await expect(service.tool({
-      operation: "run",
-      task: bashDraft(cwd, "echo nested"),
-    }, "read-only-child")).rejects.toThrow("read-only subagents cannot delegate");
-
-    // The tool refuses the field outright instead of honouring it silently.
-    await expect(service.tool({
-      operation: "run",
-      task: {
-        name: "tool read-only",
-        action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Review", launch: { capabilities: "read" } },
-      },
-    }, "s1")).rejects.toThrow("configured in Console or HTTP");
-    service.cancel(queued.runId);
   });
 
   it("joins an all-group in core and delivers one aggregated callback", async () => {

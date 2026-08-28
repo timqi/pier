@@ -162,7 +162,6 @@ export class AgentTaskRunner {
       model: action.launch?.model ??
         (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
       thinking: action.launch?.thinking,
-      capabilities: action.launch?.capabilities,
     };
     const session = run.sessionMode === "fork"
       ? await this.factory.fork(run.sourceSessionId!, opts)

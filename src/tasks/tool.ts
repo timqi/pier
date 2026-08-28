@@ -127,9 +127,6 @@ const DraftSchema = Type.Object({
         Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
       ]),
       prompt: Type.String(),
-      // No `capabilities` here on purpose: a child gets the same tools as any
-      // Pier session, so the model never spends a decision on it. Read-only
-      // children stay configurable through the Console and HTTP.
       launch: Type.Optional(Type.Object({
         model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
         thinking: Type.Optional(Type.String()),
@@ -205,9 +202,6 @@ export async function handleTaskTool(
     return definitions.update(requiredString(input.task_id, "task_id"), input.task);
   }
   if (input.operation === "run") {
-    if (active && active.context.definition.action.type === "agent" && active.context.definition.action.launch?.capabilities === "read") {
-      throw new Error("read-only subagents cannot delegate nested work");
-    }
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
@@ -310,12 +304,6 @@ async function resolveDraft(
 ): Promise<TaskDefinition> {
   if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
     throw new Error("inline subagent tasks must use a manual trigger");
-  }
-  // The draft parser accepts `capabilities` for Console/HTTP definitions; from
-  // the tool it is rejected rather than silently honoured, so a model working
-  // from stale memory learns the field is gone.
-  if (record(record(draft.action)?.launch)?.capabilities !== undefined) {
-    throw new Error("launch.capabilities is configured in Console or HTTP, not by the task tool");
   }
   if (active) {
     const action = record(draft.action);

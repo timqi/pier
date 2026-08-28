@@ -38,7 +38,7 @@ schedule policy, where `manual` means on-demand — by a human or by you.
 - The child inherits your current model unless `launch.model` is set.
   Unknown models fail with the available list in the error. `launch` applies to
   `fresh` and `fork` only — a `reuse` session owns its own model and tools.
-- The child has the same tools you do; there is no capability knob to pick.
+- The child has the same tools you do.
 - Runs time out after 900s by default; set `timeoutSeconds` in the draft for
   longer jobs.
 

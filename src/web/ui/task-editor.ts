@@ -91,7 +91,6 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
     let agentSession: HTMLSelectElement | undefined;
     let agentCwd: HTMLInputElement | undefined;
     let agentPrompt: HTMLTextAreaElement | undefined;
-    let agentCapabilities: HTMLSelectElement | undefined;
     let agentThinking: HTMLSelectElement | undefined;
     let agentModelProvider: HTMLInputElement | undefined;
     let agentModelId: HTMLInputElement | undefined;
@@ -112,13 +111,12 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
       const savedCwd = saved?.session.mode === "fresh" || saved?.session.mode === "fork" ? saved.session.cwd ?? "" : "";
       agentCwd = input(savedCwd || sessions[0]?.cwd || "");
       agentPrompt = textarea(saved?.prompt ?? "", 6);
-      agentCapabilities = select([["Normal project tools", "write"], ["Read only", "read"]], saved?.launch?.capabilities ?? "write");
       agentThinking = select([["Project default", ""], ["Off", "off"], ["Low", "low"], ["Medium", "medium"], ["High", "high"], ["Extra high", "xhigh"]], saved?.launch?.thinking ?? "");
       agentModelProvider = input(saved?.launch?.model?.provider ?? "");
       agentModelId = input(saved?.launch?.model?.id ?? "");
       const sessionField = field("Session", agentSession);
       const cwdField = field("Child directory", agentCwd);
-      const launchFields = [field("Capabilities", agentCapabilities), field("Thinking", agentThinking), field("Model provider (optional)", agentModelProvider), field("Model id (optional)", agentModelId)];
+      const launchFields = [field("Thinking", agentThinking), field("Model provider (optional)", agentModelProvider), field("Model id (optional)", agentModelId)];
       const syncMode = (): void => {
         const reuse = agentMode?.value === "reuse";
         sessionField.classList.toggle("hidden", !reuse);
@@ -144,7 +142,6 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
           : { type: "watch" as const, script: watchScript!.value, cwd: watchCwd!.value, intervalSeconds: Number(watchInterval!.value), mode: watchMode!.value as "once" | "repeat" };
       const agentLaunch = actionType.value === "agent" && agentMode!.value !== "reuse"
         ? {
-            capabilities: agentCapabilities!.value as "read" | "write",
             ...(agentThinking!.value ? { thinking: agentThinking!.value as "off" | "low" | "medium" | "high" | "xhigh" } : {}),
             ...(agentModelProvider!.value.trim() && agentModelId!.value.trim()
               ? { model: { provider: agentModelProvider!.value.trim(), id: agentModelId!.value.trim() } }

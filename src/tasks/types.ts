@@ -13,7 +13,6 @@ export type AgentSessionPolicy =
 export interface AgentLaunchPolicy {
   model?: ModelRef;
   thinking?: ThinkingLevel;
-  capabilities?: "read" | "write";
 }
 
 export type AgentTaskAction = {

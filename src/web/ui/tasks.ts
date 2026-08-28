@@ -264,7 +264,6 @@ export function createTasksView(
       if (task.action.session.mode === "fork") values.push(["Directory", task.action.session.cwd ?? "Caller project"]);
       if (task.action.launch?.model) values.push(["Model", `${task.action.launch.model.provider}/${task.action.launch.model.id}`]);
       if (task.action.launch?.thinking) values.push(["Thinking", task.action.launch.thinking]);
-      if (task.action.launch?.capabilities) values.push(["Capabilities", task.action.launch.capabilities]);
       values.push(["Prompt", task.action.prompt]);
     }
     if (task.action.type === "bash") values.push(["Directory", task.action.cwd], ["Script", task.action.script]);

@@ -370,7 +370,6 @@ export interface AgentLaunchOptions {
   name?: string;
   model?: ModelRef;
   thinking?: ThinkingLevel;
-  capabilities?: "read" | "write";
 }
 
 export interface SessionSummary {

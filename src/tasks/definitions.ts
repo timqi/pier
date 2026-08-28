@@ -113,12 +113,6 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     }
     launch.thinking = value.thinking as ThinkingLevel;
   }
-  if (value.capabilities !== undefined) {
-    if (value.capabilities !== "read" && value.capabilities !== "write") {
-      throw new Error("agent capabilities must be read or write");
-    }
-    launch.capabilities = value.capabilities;
-  }
   return Object.keys(launch).length ? launch : undefined;
 }
 
