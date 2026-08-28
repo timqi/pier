@@ -82,10 +82,15 @@ src/
                deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
   tools.ts     the CLI binaries Pier manages (install, update, PATH) — ubix
-               does the downloading, main.ts owns the task that calls it;
-               `rtk` is an extension that ships as one, so the Console's
+               does the downloading, tools-task.ts owns the task that calls
+               it; `rtk` is an extension that ships as one, so the Console's
                catalog is one list with a kind, not two; a custom tool is the
-               body of its ubix block, guarded structurally, not by vocabulary
+               body of its ubix block, guarded structurally, not by
+               vocabulary; one sync at a time per machine, under a lock the
+               whole operation is inside
+  tools-task.ts a tools switch becomes exactly one run of the one task Pier
+               owns: what that task runs, keeping it the task Pier wrote, and
+               coalescing a burst of switches into a single run
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
@@ -99,8 +104,12 @@ The browser may import owner-defined HTTP DTOs from `tasks/types.ts`,
 `channels/types.ts` and `web/types.ts` type-only: these imports are erased at build, keep wire
 shapes single-sourced, and do not let web implement either area.
 `tools.ts` is instance-layer too, but not a leaf anything may import: only
-`main.ts`, `cli.ts` and `settings.ts` reach it, because managing binaries is an
-instance operation and no area needs one. (`settings.ts` takes one function —
+`main.ts`, `cli.ts`, `tools-task.ts` and `settings.ts` reach it, because
+managing binaries is an instance operation and no area needs one.
+`tools-task.ts` is reachable from `main.ts` alone, and is the one root module
+that imports `tasks/` (the service type-only, `isTerminal` for a run state):
+the task belongs to the instance, and a leaf that scheduled itself would be two
+modules. (`settings.ts` takes one function —
 what a custom tool may be; the vocabulary it validates against, ubix's sources
 and the names Pier already owns, lives with the installer, and a second copy of
 it in the settings file would be the third-copy bug one release later.) It
