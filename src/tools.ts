@@ -13,7 +13,17 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { delimiter, join } from "node:path";
 import type { CatalogBinary, CatalogEntry } from "./core/types.js";
 import { logger } from "./log.js";
@@ -226,6 +236,22 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
   env.PATH = current ? `${bin}${delimiter}${current}` : bin;
 }
 
+/** What one sync converges on, read inside the lock (`sync`). A getter rather
+ *  than a value, and structural rather than the settings type, because
+ *  settings.ts imports this file and not the other way round. */
+export interface EnabledTools {
+  tools: readonly string[];
+  customTools: readonly CustomTool[];
+}
+
+/** How long a sync waits for another process's sync, how long a holder may
+ *  hold before it is assumed dead, and how often the waiter looks. The first
+ *  two are of the order of the subprocess timeout: a real sync downloading
+ *  several binaries is the slowest thing in this file. */
+const LOCK_WAIT_MS = 5 * 60_000;
+const LOCK_STALE_MS = 20 * 60_000;
+const LOCK_POLL_MS = 200;
+
 /** Marks the daily update task as Pier's own, so main.ts finds the one it
  *  owns rather than one a person wrote. */
 export const TOOLS_TASK_CREATOR = "tools";
@@ -246,12 +272,6 @@ export type SyncAttempt =
   | { ran: "started"; settled: Promise<void> }
   | { ran: "overlapped"; settled: Promise<void> };
 
-/** The one call the coalescer needs from whatever actually runs the task.
- *  Structural, so this file still knows nothing about tasks/. */
-export interface SyncRunner {
-  run(): SyncAttempt;
-}
-
 /**
  * Converge, don't race.
  *
@@ -269,7 +289,9 @@ export interface SyncRunner {
  * follow-up starts strictly after the request that asked for it.
  */
 export function coalescedSync(
-  runner: SyncRunner,
+  /** Start one run now, and say what to wait for. Structural, so this file
+   *  still knows nothing about tasks/. */
+  run: () => SyncAttempt,
   onFailure: (err: unknown) => void,
 ): () => SyncRequest {
   let chain: Promise<void> | null = null;
@@ -280,7 +302,7 @@ export function coalescedSync(
       // Cleared before the run, not after: a request arriving while this one is
       // in flight must set it again and earn its own follow-up.
       pending = false;
-      const { ran, settled } = runner.run();
+      const { ran, settled } = run();
       await settled;
       // Refused as an overlap: nothing of ours has run yet, so go again once
       // whatever was in flight is done.
@@ -349,15 +371,10 @@ export interface UbixToolState {
   exists: boolean | null;
   /** The tracked paths that are missing right now. */
   missingPaths: string[];
-  /** The pin, when the tool is pinned (`tag` or `version`). */
-  pin: string | null;
   /** `upgrade` only: installed / upgraded / skipped / pinned-skip / failed /
    *  orphan / pruned / would-*, verbatim. */
   action: string | null;
-  from: string | null;
   to: string | null;
-  /** Human prose for a skip, when ubix gave one. */
-  reason: string | null;
   /** The full failure chain when `action` is `failed`. */
   error: string | null;
 }
@@ -433,6 +450,7 @@ export function parseUbixJson(stdout: string): UbixToolState[] {
     const name = str("name");
     if (!name) throw new Error(`ubix --json entry has no name: ${JSON.stringify(value).slice(0, 120)}`);
     const to = str("to_version");
+    const action = str("action");
     return {
       name,
       version: str("installed_version") ?? to,
@@ -440,12 +458,11 @@ export function parseUbixJson(stdout: string): UbixToolState[] {
       installed: flag("installed"),
       exists: flag("exists"),
       missingPaths: list("missing_paths"),
-      pin: str("tag") ?? str("version"),
-      action: str("action"),
-      from: str("from_version"),
+      action,
       to,
-      reason: str("reason"),
-      error: str("error"),
+      // A failure with no words is still a failure: without this it reads as a
+      // tool that is fine, which is the one thing this parser may never say.
+      error: str("error") ?? (action === "failed" ? "ubix reported it failed and said no more" : null),
     };
   });
 }
@@ -621,12 +638,26 @@ export class ManagedTools {
   }
 
   /**
-   * Converge on `enabled`: uninstall what left the set (letting each tool undo
-   * its own footprint first), rewrite the config, upgrade everything, then
-   * provision. Returns what happened per tool; whole-run failures throw,
+   * Converge on what is switched on: uninstall what left the set (letting each
+   * tool undo its own footprint first), rewrite the config, upgrade everything,
+   * then provision. Returns what happened per tool; whole-run failures throw,
    * because there is nothing per-tool to say about them.
+   *
+   * The set is *read here*, inside the lock, rather than handed in: ubix reads
+   * the config file before it takes its own state lock, so a hand-typed `pier
+   * tools sync` overlapping the managed run could write its config after the
+   * other had written one and before ubix read either — the older snapshot
+   * winning, both exiting 0, and nothing anywhere saying the machine is not
+   * what the switches say.
    */
-  async sync(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<ToolSyncReport> {
+  async sync(read: () => EnabledTools): Promise<ToolSyncReport> {
+    return this.#locked(async () => {
+      const { tools, customTools } = read();
+      return this.#converge(tools, customTools);
+    });
+  }
+
+  async #converge(enabled: readonly string[], custom: readonly CustomTool[]): Promise<ToolSyncReport> {
     const all = rows(custom);
     const wanted = all.filter((tool) => enabled.includes(tool.name));
     // Nothing on and nothing installed: no config to write, no ubix to fetch.
@@ -763,7 +794,73 @@ export class ManagedTools {
   #writeConfig(tools: readonly CustomTool[]): void {
     mkdirSync(this.#configDir, { recursive: true });
     mkdirSync(join(this.#root, "state"), { recursive: true });
-    writeFileSync(join(this.#configDir, "config.toml"), ubixConfigToml(tools, this.bin));
+    // Temp plus rename: ubix reads this file, and half a config is a config
+    // that declares half the tools.
+    const path = join(this.#configDir, "config.toml");
+    writeFileSync(`${path}.writing`, ubixConfigToml(tools, this.bin));
+    renameSync(`${path}.writing`, path);
+  }
+
+  /**
+   * One sync at a time on this machine, whichever process asked.
+   *
+   * Everything is inside it — the settings read, the config write, ubix's own
+   * run and the provisioning — because the file ubix reads is written by us and
+   * it reads it before taking any lock of its own. Crash-safe without a daemon:
+   * the file carries its holder's pid, and a holder that is gone, or one that
+   * has held it longer than a subprocess may run, is taken over rather than
+   * waited on forever.
+   */
+  async #locked<T>(work: () => Promise<T>): Promise<T> {
+    mkdirSync(this.#root, { recursive: true });
+    const path = join(this.#root, "sync.lock");
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+      try {
+        // Exclusive create: the one operation two processes cannot both win.
+        writeFileSync(path, `${String(process.pid)} ${new Date().toISOString()}\n`, { flag: "wx" });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        if (this.#takeOver(path)) continue;
+        if (Date.now() > deadline) {
+          throw new Error(
+            `another tools sync has held ${path} for ${String(LOCK_WAIT_MS / 60_000)} minutes — nothing was changed`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+        continue;
+      }
+      try {
+        return await work();
+      } finally {
+        rmSync(path, { force: true });
+      }
+    }
+  }
+
+  /** Whether the lock's holder is gone — and if so, the lock is removed. A
+   *  crash leaves the file behind, and a sync that can never run again is a
+   *  worse failure than the double run this prevents. A file with no readable
+   *  pid is a holder mid-write, not a dead one: it is waited out, never taken
+   *  before the stale age. */
+  #takeOver(path: string): boolean {
+    let pid: number;
+    let age: number;
+    try {
+      pid = Number.parseInt(readFileSync(path, "utf8"), 10);
+      age = Date.now() - statSync(path).mtimeMs;
+    } catch {
+      return false; // it went away on its own; the next attempt takes it
+    }
+    const alive = !Number.isInteger(pid) || pid <= 0 || processAlive(pid);
+    if (alive && age < LOCK_STALE_MS) return false;
+    log.warn(`taking over ${path} from pid ${String(pid)} (${alive ? "held too long" : "gone"})`);
+    try {
+      rmSync(path);
+    } catch {
+      return false; // somebody else got there first; wait for them instead
+    }
+    return true;
   }
 
   /**
@@ -771,15 +868,18 @@ export class ManagedTools {
    *
    * A non-zero exit is *not* a reason to skip the parse: under `--json` a tool
    * that failed lands in the document as `action: "failed"` with its error and
-   * the run still exits non-zero, so the report is the truth and the exit code
-   * is only the alarm. No document at all is the other case — an ubix release
-   * that predates `--json` — and that is said in one sentence rather than by
-   * scraping the human output it printed instead.
+   * the run still exits non-zero, so the report says which tool it was. But the
+   * two have to agree: an exit code with no failed entry anywhere is a failure
+   * this file cannot attribute, and passing it on as a clean report is the one
+   * thing it may never do. No document at all is the third case — an ubix
+   * release that predates `--json` — and that is said in one sentence rather
+   * than by scraping the human output it printed instead.
    */
   async #states(ubix: string, env: NodeJS.ProcessEnv, args: readonly string[]): Promise<UbixToolState[]> {
     const result = await this.#exec(ubix, args, env);
+    let states: UbixToolState[];
     try {
-      return parseUbixJson(result.stdout);
+      states = parseUbixJson(result.stdout);
     } catch (err) {
       const failure = failedRun(`ubix ${args.join(" ")}`, result);
       // Only the flag being unknown means "too old". Everything else — a
@@ -789,6 +889,13 @@ export class ManagedTools {
       if (result.code !== 0 && refusesJson(result.stderr)) throw new UbixTooOld(failure);
       throw new Error(result.code === 0 ? String(err) : `${failure} (${String(err)})`);
     }
+    // Something failed and the report names nothing that did: the two disagree,
+    // and believing the document is how a failed run is read as a machine that
+    // is fine.
+    if (result.code !== 0 && !states.some((state) => state.action === "failed")) {
+      throw new Error(`${failedRun(`ubix ${args.join(" ")}`, result)} — and its report names no failure`);
+    }
+    return states;
   }
 
   /** The declared tools, and the one place a too-old ubix is repaired rather
@@ -842,6 +949,17 @@ export class ManagedTools {
  *  extensions/ and never passes through here. */
 const withBinary = (entry: CatalogEntry, patch: Partial<CatalogBinary>): CatalogEntry =>
   entry.source === "binary" ? { ...entry, binary: { ...entry.binary, ...patch } } : entry;
+
+/** Whether a pid is still running. Signal 0 is the ask-only signal; EPERM is
+ *  somebody else's process, which is alive. */
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
 
 /** What a failed child said, in one line — the same shape wherever one fails,
  *  and never empty: an exit code with no words is not a report. */

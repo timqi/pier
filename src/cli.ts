@@ -165,8 +165,10 @@ async function tools(action = ""): Promise<void> {
     import("./settings.js"),
   ]);
   try {
-    const { tools: enabled, customTools } = new SettingsStore().get();
-    const report = await new ManagedTools().sync(enabled, customTools);
+    // Read inside the sync's lock, not here: a sync that queued behind another
+    // one must converge on the set as it is when its turn comes.
+    const settings = new SettingsStore();
+    const report = await new ManagedTools().sync(() => settings.get());
     say(report.summary);
     if (report.failed) process.exitCode = 1;
   } catch (err) {

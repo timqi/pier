@@ -12,7 +12,6 @@ import {
   parseUbixJson,
   specOf,
   type SyncAttempt,
-  type SyncRunner,
   ubixAsset,
   ubixConfigToml,
 } from "./tools.js";
@@ -100,7 +99,7 @@ const CLAUDE_BODY = [
 ].join("\n");
 
 describe("parseUbixJson", () => {
-  it("reads a list document, pins and all", () => {
+  it("reads a list document", () => {
     const [rtk, fd, wt] = parseUbixJson(LIST_JSON);
     expect(rtk).toEqual({
       name: "rtk",
@@ -109,11 +108,8 @@ describe("parseUbixJson", () => {
       installed: true,
       exists: true,
       missingPaths: [],
-      pin: null,
       action: null,
-      from: null,
       to: null,
-      reason: null,
       error: null,
     });
     // Recorded as installed, gone from disk: both facts survive, so the
@@ -123,7 +119,6 @@ describe("parseUbixJson", () => {
       exists: false,
       missingPaths: ["/abs/bin/fd"],
       version: null,
-      pin: "v10.2.0",
     });
     expect(wt).toMatchObject({ installed: false, exists: false, path: null });
   });
@@ -137,10 +132,17 @@ describe("parseUbixJson", () => {
       reason: null,
       error: "download failed: 404",
     }));
-    expect(states[0]).toMatchObject({ action: "upgraded", from: "v0.20.0", to: "v0.23.5", version: "v0.23.5" });
+    expect(states[0]).toMatchObject({ action: "upgraded", to: "v0.23.5", version: "v0.23.5" });
     expect(states[1]).toMatchObject({ action: "failed", error: "download failed: 404" });
     // The fields the other command sends are absent, not invented.
     expect(states[0]?.installed).toBeNull();
+  });
+
+  it("never reads a failure as a tool that is fine, however little ubix said", () => {
+    // `action: "failed"` with no error at all: the one thing this parser may
+    // not answer is null.
+    const [fd] = parseUbixJson(upgradeJson({ name: "fd", action: "failed", error: null }));
+    expect(fd?.error).toBe("ubix reported it failed and said no more");
   });
 
   it("refuses a document it does not understand instead of reporting no tools", () => {
@@ -304,6 +306,9 @@ function rig(
   };
 }
 
+/** The switched-on set a sync reads when its turn comes. */
+const on = (...tools: string[]) => () => ({ tools, customTools: [] });
+
 describe("ManagedTools.sync", () => {
   it("does nothing at all when nothing is on and nothing is installed", async () => {
     const root = mkdtempSync(join(tmpdir(), "pier-tools-empty-"));
@@ -312,7 +317,7 @@ describe("ManagedTools.sync", () => {
       exec: () => Promise.reject(new Error("nothing may be spawned")),
       fetch: () => Promise.reject(new Error("nothing may be fetched")),
     });
-    expect(await tools.sync([])).toEqual({ entries: [], failed: false, summary: "no tools switched on" });
+    expect(await tools.sync(on())).toEqual({ entries: [], failed: false, summary: "no tools switched on" });
   });
 
   it("writes the config, upgrades, then provisions from the tool's own binary", async () => {
@@ -321,7 +326,7 @@ describe("ManagedTools.sync", () => {
       answer: (call) =>
         call.args[0] === "list" ? ok(JSON.stringify({ schema_version: 1, tools: [] })) : ok(upgradeJson(upgraded)),
     });
-    const report = await r.tools.sync(["rtk"]);
+    const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(false);
     expect(report.entries).toEqual([{ name: "rtk", action: "upgraded", version: "v0.23.5", error: null }]);
     expect(report.summary).toBe("rtk: upgraded v0.23.5");
@@ -346,7 +351,7 @@ describe("ManagedTools.sync", () => {
       installed: ["rtk"],
       answer: (call) => (call.args[0] === "list" ? ok(LIST_JSON) : ok(upgradeJson())),
     });
-    await r.tools.sync([]);
+    await r.tools.sync(on());
     // The listing survives for one reason: rtk has to uninstall its own Pi
     // extension *before* its binary goes, and ubix cannot know that. Removing
     // the rest is ubix's own `--prune`, which knows per source how.
@@ -378,7 +383,7 @@ describe("ManagedTools.sync", () => {
           stderr: "1 tool(s) failed",
         },
     });
-    const report = await r.tools.sync(["rtk"]);
+    const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(true);
     expect(report.summary).toBe("rtk: FAILED — no asset for linux-amd64");
     // A failed install is not provisioned on top of.
@@ -394,7 +399,7 @@ describe("ManagedTools.sync", () => {
         return { code: 3, stdout: "", stderr: "unknown agent: pi" };
       },
     });
-    const report = await r.tools.sync(["rtk"]);
+    const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(true);
     expect(report.summary).toContain("rtk init -g --agent pi exited 3: unknown agent: pi");
   });
@@ -410,7 +415,7 @@ describe("ManagedTools.sync", () => {
         return { code: 2, stdout: "", stderr: "rtk: cannot write the agent dir" };
       },
     });
-    const report = await r.tools.sync([]);
+    const report = await r.tools.sync(on());
     expect(report.failed).toBe(true);
     expect(report.summary).toContain("rtk: FAILED");
     // Still declared, so `--prune` leaves the binary alone.
@@ -429,8 +434,68 @@ describe("ManagedTools.sync", () => {
         return Promise.reject(new Error("the network is not open in tests"));
       },
     });
-    await expect(r.tools.sync(["rtk"])).rejects.toThrow(/network/);
+    await expect(r.tools.sync(on("rtk"))).rejects.toThrow(/network/);
     expect(fetched).toBe(1);
+  });
+});
+
+describe("two syncs at once", () => {
+  const EMPTY_LIST = JSON.stringify({ schema_version: 1, tools: [] });
+  const config = (root: string): string => readFileSync(join(root, "config", "config.toml"), "utf8");
+
+  it("serializes them across processes, so nobody rewrites the config ubix is reading", async () => {
+    // The real race: ubix reads the config file *before* it takes its own
+    // state lock, so a hand-typed `pier tools sync` overlapping the managed
+    // run could replace the config under it and win with the older set, both
+    // exiting 0.
+    const root = mkdtempSync(join(tmpdir(), "pier-tools-lock-"));
+    mkdirSync(join(root, "bin"), { recursive: true });
+    writeFileSync(join(root, "bin", "ubix"), "#!/bin/sh\n");
+    /** What the config said each time an upgrade was launched. */
+    const seen: string[] = [];
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const exec: Exec = (_file, args) => {
+      if (args[0] === "list") return Promise.resolve(ok(EMPTY_LIST));
+      seen.push(config(root));
+      // The first run stays in flight until the test lets it go.
+      return seen.length === 1 ? held.then(() => ok(upgradeJson())) : Promise.resolve(ok(upgradeJson()));
+    };
+    const options = { root, exec, fetch: () => Promise.reject(new Error("the network is not open in tests")) };
+    // Two instances, as two processes would be: they share only the directory.
+    const first = new ManagedTools(options).sync(on("rg"));
+    while (!seen.length) await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = new ManagedTools(options).sync(on("fd"));
+
+    // Long enough that an unserialized second sync would have written its
+    // config and launched its own ubix by now.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(seen).toHaveLength(1);
+    // What the first run's ubix reads while it runs is still the first run's.
+    expect(config(root)).toContain("[tools.rg]");
+    expect(config(root)).not.toContain("[tools.fd]");
+
+    release();
+    await first;
+    await second;
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toContain("[tools.fd]");
+    expect(seen[1]).not.toContain("[tools.rg]");
+    expect(existsSync(join(root, "sync.lock"))).toBe(false);
+  });
+
+  it("takes over a lock whose holder is gone instead of waiting out a dead process", async () => {
+    // A crash leaves the file behind, and a sync that can never run again is a
+    // worse failure than the double run the lock prevents.
+    const r = rig({
+      answer: (call) =>
+        ok(call.args[0] === "list" ? EMPTY_LIST : upgradeJson({ name: "rg", action: "installed", to_version: "14.1.1" })),
+    });
+    writeFileSync(join(r.root, "sync.lock"), "2147483646 2020-01-01T00:00:00.000Z\n");
+    const report = await r.tools.sync(on("rg"));
+    expect(report.failed).toBe(false);
+    expect(config(r.root)).toContain("[tools.rg]");
+    expect(existsSync(join(r.root, "sync.lock"))).toBe(false);
   });
 });
 
@@ -525,22 +590,20 @@ describe("three switches flipped while a sync is running", () => {
     const skipped: string[] = [];
     let enabled = ["rtk"];
     let settle: (() => void) | null = null;
-    const runner: SyncRunner = {
-      run: () => {
-        if (settle) {
-          // The overlap guard: the run is recorded as skipped and the caller
-          // is handed the run that is actually in flight.
-          skipped.push("overlap");
-          return { ran: "overlapped", settled: inFlight };
-        }
-        started.push([...enabled]);
-        inFlight = new Promise<void>((resolve) => (settle = resolve));
-        return { ran: "started", settled: inFlight };
-      },
+    const run = (): SyncAttempt => {
+      if (settle) {
+        // The overlap guard: the run is recorded as skipped and the caller
+        // is handed the run that is actually in flight.
+        skipped.push("overlap");
+        return { ran: "overlapped", settled: inFlight };
+      }
+      started.push([...enabled]);
+      inFlight = new Promise<void>((resolve) => (settle = resolve));
+      return { ran: "started", settled: inFlight };
     };
     let inFlight = Promise.resolve();
     return {
-      runner,
+      run,
       started,
       skipped,
       flip: (name: string) => enabled.push(name),
@@ -557,7 +620,7 @@ describe("three switches flipped while a sync is running", () => {
   it("coalesces them into exactly one follow-up run, with the final set", async () => {
     const rig = fakeTasks();
     const failures: unknown[] = [];
-    const sync = coalescedSync(rig.runner, (err) => failures.push(err));
+    const sync = coalescedSync(rig.run, (err) => failures.push(err));
 
     // rtk goes on and its sync starts running.
     expect(sync()).toBe("started");
@@ -587,12 +650,10 @@ describe("three switches flipped while a sync is running", () => {
     const busy = new Promise<void>((resolve) => (release = resolve));
     const started: number[] = [];
     let refuse = true;
-    const sync = coalescedSync({
-      run: (): SyncAttempt => {
-        if (refuse) return { ran: "overlapped", settled: busy };
-        started.push(Date.now());
-        return { ran: "started", settled: Promise.resolve() };
-      },
+    const sync = coalescedSync((): SyncAttempt => {
+      if (refuse) return { ran: "overlapped", settled: busy };
+      started.push(Date.now());
+      return { ran: "started", settled: Promise.resolve() };
     }, (err) => expect.unreachable(String(err)));
 
     expect(sync()).toBe("started");
@@ -607,11 +668,9 @@ describe("three switches flipped while a sync is running", () => {
   it("reports a failure instead of swallowing it, and takes requests again", async () => {
     const failures: unknown[] = [];
     let fail = true;
-    const sync = coalescedSync({
-      run: (): SyncAttempt => {
-        if (fail) throw new Error("no tools update task to run");
-        return { ran: "started", settled: Promise.resolve() };
-      },
+    const sync = coalescedSync((): SyncAttempt => {
+      if (fail) throw new Error("no tools update task to run");
+      return { ran: "started", settled: Promise.resolve() };
     }, (err) => failures.push(err));
     sync();
     await new Promise((resolve) => setTimeout(resolve, 0));

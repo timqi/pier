@@ -257,22 +257,20 @@ const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> 
 /** The half of `coalescedSync` (tools.ts, which has the rule and why) that
  *  knows what a task is: start a run, and hand back what to wait for — our own
  *  run, or the one already in flight that made ours a `skipped` row. */
-const requestSync = coalescedSync({
-  run: (): SyncAttempt => {
-    if (!toolsTaskId) throw new Error("no tools update task to run");
-    const settled = (id: string): Promise<void> => tasks.waitForRun(id).then(() => undefined);
-    // Bounded, because the only way round this loop is a run that finished
-    // between being in flight and being asked about: real, rare, and not
-    // something to spin on. Three refusals in a row with nothing running is a
-    // bug, and it is reported as one rather than retried forever.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const mine = tasks.run(toolsTaskId, null, "manual");
-      if (!isTerminal(mine.state)) return { ran: "started", settled: settled(mine.id) };
-      const active = tasks.activeRun(toolsTaskId);
-      if (active) return { ran: "overlapped", settled: settled(active.id) };
-    }
-    throw new Error("the tools sync was refused as an overlap three times with nothing running");
-  },
+const requestSync = coalescedSync((): SyncAttempt => {
+  if (!toolsTaskId) throw new Error("no tools update task to run");
+  const settled = (id: string): Promise<void> => tasks.waitForRun(id).then(() => undefined);
+  // Bounded, because the only way round this loop is a run that finished
+  // between being in flight and being asked about: real, rare, and not
+  // something to spin on. Three refusals in a row with nothing running is a
+  // bug, and it is reported as one rather than retried forever.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const mine = tasks.run(toolsTaskId, null, "manual");
+    if (!isTerminal(mine.state)) return { ran: "started", settled: settled(mine.id) };
+    const active = tasks.activeRun(toolsTaskId);
+    if (active) return { ran: "overlapped", settled: settled(active.id) };
+  }
+  throw new Error("the tools sync was refused as an overlap three times with nothing running");
 }, (err: unknown) => log.error("the tools sync could not be run", err));
 
 /** A switch was flipped: make sure the task is the one Pier means, then ask
