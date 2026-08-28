@@ -236,35 +236,31 @@ export interface EnabledTools {
   customTools: readonly CustomTool[];
 }
 
-/** What the lock below is called in the `locks` table. */
-const SYNC_LOCK = "tools-sync";
-
-/**
- * How the lock decides things. `stale` is measured on the *heartbeat*, never on
- * how long the holder has been working: a 30-minute install that is still
- * beating keeps its lock, and a process that died stops beating within
- * seconds. `wait` is what a waiter gives a live holder before giving up with a
- * reason — the daily task's own 30-minute timeout is the outer bound, and a
- * hand-typed sync that waits forever is worse than one that says why it
- * stopped.
- */
+/** `stale` is heartbeat age, never how long the work has taken; `wait` is what
+ *  a waiter gives a live holder before giving up with a reason. */
 const LOCK_TIMING = { heartbeatMs: 5_000, staleMs: 30_000, waitMs: 20 * 60_000, pollMs: 200 };
 
+/** What a fence found: the row is somebody else's now, so this sync stops
+ *  where it stands. Its own class so a caller can tell "taken over" from "the
+ *  install failed". */
+export class LockLost extends Error {}
+
 /**
- * One sync at a time on this machine, whichever process asked.
+ * One tools sync at a time on this machine, whichever process asked.
  *
- * The whole operation is inside it — the settings read, the config write,
- * ubix's own run and the provisioning — because the file ubix reads is written
- * by us and it reads it before taking any lock of its own.
- *
- * It lives in pier.db rather than in a lock file: both processes already open
- * that database (the CLI reads the settings through it), `BEGIN IMMEDIATE` is
- * real cross-process mutual exclusion, and a file protocol has to invent one
- * badly. Identity is a random token, not a pid — a recycled pid cannot
- * impersonate a dead holder, and every delete is scoped to the token that
- * wrote the row, so neither a release nor a takeover can remove a successor's
- * lock. No transaction is ever held for the length of a sync: acquire, refresh
- * and release are each their own.
+ * The contract, which the rationale in docs/architecture.md expands:
+ * - *Ownership* is one row and a random token. Every write to that row —
+ *   release, takeover, refresh — matches on the token, so no party can undo
+ *   another's.
+ * - *Staleness* is heartbeat age. A holder that stops beating can be taken
+ *   over; how long its work has been running never enters into it.
+ * - *A heartbeat cannot prove a holder is dead*, so nothing here pretends it
+ *   can: a holder that was taken over (paused long enough to look dead, then
+ *   resumed) is stopped by the fence it must pass before every step that
+ *   changes anything, not by the lock. Losing the lock is a failure the caller
+ *   reports, never a warning under work that carries on.
+ * - No transaction is held for the length of a sync: acquire, refresh, fence
+ *   and release are each their own.
  */
 export class SyncLock {
   readonly #db: DatabaseSync;
@@ -275,8 +271,10 @@ export class SyncLock {
     this.#timing = { ...LOCK_TIMING, ...timing };
   }
 
-  /** Run `work` with the lock held, waiting for whoever has it. */
-  async run<T>(work: () => Promise<T>): Promise<T> {
+  /** Run `work` with the lock held, waiting for whoever has it. `work` is
+   *  handed the fence and must call it before every step that changes
+   *  anything outside this process. */
+  async run<T>(work: (fence: () => void) => Promise<T>): Promise<T> {
     const token = randomUUID();
     const deadline = Date.now() + this.#timing.waitMs;
     while (!this.#acquire(token)) {
@@ -292,10 +290,10 @@ export class SyncLock {
     const beat = setInterval(() => this.#refresh(token), this.#timing.heartbeatMs);
     beat.unref();
     try {
-      return await work();
+      return await work(() => this.#fence(token));
     } finally {
       clearInterval(beat);
-      this.#db.prepare("DELETE FROM locks WHERE name = ? AND token = ?").run(SYNC_LOCK, token);
+      this.#db.prepare("DELETE FROM tools_sync_lock WHERE token = ?").run(token);
     }
   }
 
@@ -305,10 +303,10 @@ export class SyncLock {
     const now = Date.now();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      const stale = this.#db.prepare("DELETE FROM locks WHERE name = ? AND heartbeat_at <= ?")
-        .run(SYNC_LOCK, now - this.#timing.staleMs);
-      const taken = this.#db.prepare("INSERT OR IGNORE INTO locks (name, token, heartbeat_at) VALUES (?, ?, ?)")
-        .run(SYNC_LOCK, token, now);
+      const stale = this.#db.prepare("DELETE FROM tools_sync_lock WHERE heartbeat_at <= ?")
+        .run(now - this.#timing.staleMs);
+      const taken = this.#db.prepare("INSERT OR IGNORE INTO tools_sync_lock (id, token, heartbeat_at) VALUES (1, ?, ?)")
+        .run(token, now);
       this.#db.exec("COMMIT");
       if (stale.changes && taken.changes) log.warn("took over a tools sync lock whose holder stopped beating");
       return taken.changes === 1;
@@ -318,13 +316,22 @@ export class SyncLock {
     }
   }
 
-  /** Still alive. A refresh that updates nothing means the row is not ours any
-   *  more — said out loud, because a second sync is running over this one and
-   *  the report this one writes is no longer the whole truth (§5b). */
+  /** Still ours? The authority is the row, asked now — not the heartbeat's own
+   *  bookkeeping, which a stopped process does not get to run either. */
+  #fence(token: string): void {
+    const row = this.#db.prepare("SELECT token FROM tools_sync_lock").get() as { token: string } | undefined;
+    if (row?.token !== token) {
+      throw new LockLost(
+        "this sync lost its lock — another tools sync took it over while this one was stopped, so it went no further",
+      );
+    }
+  }
+
+  /** Say we are alive. A refresh that changes nothing is the first sign of a
+   *  takeover; the fence is what acts on it, at the next step. */
   #refresh(token: string): void {
-    const beat = this.#db.prepare("UPDATE locks SET heartbeat_at = ? WHERE name = ? AND token = ?")
-      .run(Date.now(), SYNC_LOCK, token);
-    if (!beat.changes) log.error("this tools sync lost its lock — another sync took it over while this one was running");
+    const beat = this.#db.prepare("UPDATE tools_sync_lock SET heartbeat_at = ? WHERE token = ?").run(Date.now(), token);
+    if (!beat.changes) log.warn("this tools sync no longer holds the lock — it stops at its next step");
   }
 }
 
@@ -727,16 +734,28 @@ export class ManagedTools {
    * other had written one and before ubix read either — the older snapshot
    * winning, both exiting 0, and nothing anywhere saying the machine is not
    * what the switches say.
+   *
+   * `fence` is called before every step that changes anything a second sync
+   * could also be changing — the config file, ubix's own state, a tool's
+   * footprint. Holding the lock is not proof of holding it *still*: a process
+   * paused long enough to look dead is taken over and then resumes, and the
+   * fence is what stops it. It throws `LockLost`, which fails the sync with
+   * that sentence rather than letting it write on top of the sync that
+   * replaced it.
    */
   async sync(read: () => EnabledTools): Promise<ToolSyncReport> {
     this.#lock ??= new SyncLock(this.#db());
-    return this.#lock.run(async () => {
+    return this.#lock.run(async (fence) => {
       const { tools, customTools } = read();
-      return this.#converge(tools, customTools);
+      return this.#converge(tools, customTools, fence);
     });
   }
 
-  async #converge(enabled: readonly string[], custom: readonly CustomTool[]): Promise<ToolSyncReport> {
+  async #converge(
+    enabled: readonly string[],
+    custom: readonly CustomTool[],
+    fence: () => void,
+  ): Promise<ToolSyncReport> {
     const all = rows(custom);
     const wanted = all.filter((tool) => enabled.includes(tool.name));
     // Nothing on and nothing installed: no config to write, no ubix to fetch.
@@ -744,6 +763,7 @@ export class ManagedTools {
     if (!wanted.length && !existsSync(this.ubixPath)) {
       return { entries: [], failed: false, summary: "no tools switched on" };
     }
+    fence();
     const ubix = await this.bootstrapUbix();
     const env = this.#env();
     const entries: ToolSyncEntry[] = [];
@@ -756,6 +776,7 @@ export class ManagedTools {
     for (const state of await this.#listing(ubix, env)) {
       const leaving = all.find((tool) => tool.name === state.name);
       if (!leaving?.deprovision || wanted.some((tool) => tool.name === state.name)) continue;
+      fence(); // a tool's own uninstall is a change to the machine
       const error = await this.#provision(env, leaving, leaving.deprovision);
       if (error) {
         // Removing it now would orphan what the deprovision failed to remove,
@@ -766,6 +787,7 @@ export class ManagedTools {
       }
     }
 
+    fence();
     this.#writeConfig([...wanted, ...kept]);
 
     // `--prune` is the removal: anything in ubix's state that this config no
@@ -773,6 +795,7 @@ export class ManagedTools {
     // `--wait` on the state lock: a hand-typed `pier tools sync` overlapping
     // the managed run should converge behind it, not fail on the lock. Bounded
     // by the subprocess timeout, like everything else here.
+    fence();
     const states = await this.#states(ubix, env, ["upgrade", "--all", "--prune", "--wait", "--json"]);
     for (const state of states) {
       // One line per tool: a kept one has already said why it stayed.
@@ -791,7 +814,10 @@ export class ManagedTools {
         // A tool ubix never mentioned is not a tool that is fine.
         error: state?.error ?? (state ? null : "ubix reported nothing about it"),
       };
-      if (!entry.error && tool.provision) entry.error = await this.#provision(env, tool, tool.provision);
+      if (!entry.error && tool.provision) {
+        fence();
+        entry.error = await this.#provision(env, tool, tool.provision);
+      }
       entries.push(entry);
     }
     const failed = entries.some((entry) => entry.error !== null);

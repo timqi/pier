@@ -493,7 +493,7 @@ describe("two syncs at once", () => {
     expect(seen[1]).toContain("[tools.fd]");
     expect(seen[1]).not.toContain("[tools.rg]");
     // Nothing left holding it.
-    expect(openDb(dbPath).prepare("SELECT count(*) AS n FROM locks").get()).toEqual({ n: 0 });
+    expect(openDb(dbPath).prepare("SELECT count(*) AS n FROM tools_sync_lock").get()).toEqual({ n: 0 });
   });
 });
 
@@ -557,6 +557,34 @@ describe("the sync lock", () => {
           env: { ...process.env, PIER_LOG: "silent", LOCK_DB: dbPath, LOCK_LOG: log, WHO: who, HOLD_MS: String(holdMs) },
           stdio: ["ignore", "ignore", "pipe"],
         }),
+      /** A holder that works in fenced steps, the way a sync does: it asks the
+       *  lock whether it is still the holder before each one. */
+      stepper: (who: string) =>
+        spawn(process.execPath, [
+          "--import",
+          tsx,
+          "--input-type=module",
+          "-e",
+          `
+          import { appendFileSync } from "node:fs";
+          import { SyncLock } from ${JSON.stringify(toolsUrl)};
+          import { openDb } from ${JSON.stringify(dbUrl)};
+          const mark = (what) => appendFileSync(process.env.LOCK_LOG, what + " " + process.env.WHO + " " + Date.now() + "\\n");
+          await new SyncLock(openDb(process.env.LOCK_DB), { heartbeatMs: 50, staleMs: 3_000, pollMs: 20 })
+            .run(async (fence) => {
+              mark("in");
+              for (const step of ["one", "two", "three"]) {
+                await new Promise((resolve) => setTimeout(resolve, 80));
+                fence();
+                mark(step);
+              }
+              mark("out");
+            });
+          `,
+        ], {
+          env: { ...process.env, PIER_LOG: "silent", LOCK_DB: dbPath, LOCK_LOG: log, WHO: who },
+          stdio: ["ignore", "ignore", "pipe"],
+        }),
     };
   }
 
@@ -602,7 +630,7 @@ describe("the sync lock", () => {
     const m = machine();
     const dead = m.child("dead", 0);
     await until(() => m.turns().some((t) => t.what === "in"));
-    const before = m.db().prepare("SELECT token FROM locks").get() as { token: string };
+    const before = m.db().prepare("SELECT token FROM tools_sync_lock").get() as { token: string };
     dead.kill("SIGKILL"); // a pid this test started, and only that one
     await new Promise((resolve) => dead.once("close", resolve));
 
@@ -612,10 +640,10 @@ describe("the sync lock", () => {
       // Only once the dead holder's heartbeat aged out — never on the strength
       // of "its process is gone", which no other machine can even ask.
       expect(Date.now() - started).toBeGreaterThanOrEqual(350);
-      const now = m.db().prepare("SELECT token FROM locks").get() as { token: string };
+      const now = m.db().prepare("SELECT token FROM tools_sync_lock").get() as { token: string };
       expect(now.token).not.toBe(before.token);
     });
-    expect(m.db().prepare("SELECT count(*) AS n FROM locks").get()).toEqual({ n: 0 });
+    expect(m.db().prepare("SELECT count(*) AS n FROM tools_sync_lock").get()).toEqual({ n: 0 });
   });
 
   it("keeps the lock through work that outlives the stale window", async () => {
@@ -654,7 +682,45 @@ describe("the sync lock", () => {
     const turns = m.turns();
     expect(turns).toHaveLength(6);
     expect(neverOverlapped(turns)).toBe(true);
-    expect(m.db().prepare("SELECT count(*) AS n FROM locks").get()).toEqual({ n: 0 });
+    expect(m.db().prepare("SELECT count(*) AS n FROM tools_sync_lock").get()).toEqual({ n: 0 });
+  });
+
+  it("stops a holder that was taken over while it could not notice", async () => {
+    // The hole a heartbeat cannot close: SIGSTOP long enough to look dead,
+    // taken over, SIGCONT — and the old holder carried on writing next to the
+    // new one. A heartbeat cannot prove a holder is dead, so the holder does
+    // not get to assume it is still the holder: it asks the row before every
+    // step. What it can still have done is bounded by one step — the one whose
+    // fence had already passed when the takeover happened.
+    const m = machine();
+    const child = m.stepper("stopped");
+    let stderr = "";
+    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+    await until(() => m.turns().some((t) => t.what === "in"));
+    child.kill("SIGSTOP"); // a pid this test started — paused, so it beats no more
+
+    let held = false;
+    const taker = new SyncLock(m.db(), { heartbeatMs: 20, staleMs: 200, pollMs: 10 }).run(async () => {
+      held = true;
+      m.mark("in", "taker");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      m.mark("out", "taker");
+    });
+    await until(() => held);
+    child.kill("SIGCONT");
+    const code = await new Promise((resolve) => child.once("close", resolve));
+    await taker;
+
+    // It failed, and it said why — an outcome, not a line in a log under work
+    // that carried on.
+    expect(code).not.toBe(0);
+    expect(stderr).toContain("lost its lock");
+    // And it did nothing after the takeover: no step of its own follows the
+    // taker's own "in".
+    const turns = m.turns();
+    const after = turns.slice(turns.findIndex((t) => t.who === "taker"));
+    expect(after.some((t) => t.who === "stopped")).toBe(false);
+    expect(turns.filter((t) => t.who === "stopped")).toEqual([{ what: "in", who: "stopped" }]);
   });
 
   it("releases only its own row, so a finished holder cannot free its successor", () => {
@@ -663,10 +729,10 @@ describe("the sync lock", () => {
     const m = machine();
     const db = m.db();
     const successor = "the-successor";
-    db.prepare("INSERT INTO locks (name, token, heartbeat_at) VALUES (?, ?, ?)").run("tools-sync", successor, Date.now());
+    db.prepare("INSERT INTO tools_sync_lock (id, token, heartbeat_at) VALUES (1, ?, ?)").run(successor, Date.now());
     // What a finished, superseded holder does on its way out.
-    db.prepare("DELETE FROM locks WHERE name = ? AND token = ?").run("tools-sync", "the-holder-that-was-taken-over");
-    expect(db.prepare("SELECT token FROM locks").get()).toEqual({ token: successor });
+    db.prepare("DELETE FROM tools_sync_lock WHERE token = ?").run("the-holder-that-was-taken-over");
+    expect(db.prepare("SELECT token FROM tools_sync_lock").get()).toEqual({ token: successor });
   });
 });
 

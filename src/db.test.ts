@@ -29,7 +29,6 @@ describe("openDb", () => {
       "channels",
       "conversations",
       "credentials",
-      "locks",
       "push_identity",
       "push_subscriptions",
       "receipts",
@@ -41,6 +40,7 @@ describe("openDb", () => {
       "task_messages",
       "task_runs",
       "tasks",
+      "tools_sync_lock",
     ]);
     expect(
       (db.prepare("PRAGMA table_info(session_state)").all() as unknown as { name: string }[])

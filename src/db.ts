@@ -247,12 +247,14 @@ const MIGRATIONS: readonly string[] = [
   `,
   // 12 — one row is how two processes take turns (src/tools.ts).
   `
-  -- A named lock held across processes: the token says who holds it, the
+  -- The tools sync, held across processes: the token says who holds it, the
   -- heartbeat says they are still alive. Both processes already open this
   -- database, and BEGIN IMMEDIATE is real mutual exclusion — a lock file with
-  -- a pid in it is neither, which is what this replaces.
-  CREATE TABLE locks (
-    name TEXT PRIMARY KEY,
+  -- a pid in it is neither, which is what this replaces. One row, because
+  -- there is one thing to serialize; the second lock can bring its own table
+  -- and its own reason for existing.
+  CREATE TABLE tools_sync_lock (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
     token TEXT NOT NULL,
     heartbeat_at INTEGER NOT NULL
   );
