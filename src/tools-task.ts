@@ -15,8 +15,13 @@ import { logger } from "./log.js";
 import { PIER_HOME } from "./paths.js";
 import type { TaskService } from "./tasks/service.js";
 import { isTerminal } from "./tasks/types.js";
-import { coalescedSync, type SyncAttempt, TOOLS_TASK_CREATOR } from "./tools.js";
+import { coalescedSync, type SyncAttempt } from "./tools.js";
 import type { ToolsSyncNote } from "./web/types.js";
+
+/** Marks the daily update task as Pier's own — this file finds the one it owns
+ *  rather than one a person wrote, and names itself with it when it writes the
+ *  definition back (the owner guard in tasks/definitions.ts). */
+const TOOLS_TASK_CREATOR = "tools";
 
 // The area these lines have always logged under: the move must not rename
 // anything an operator greps the journal for.
@@ -48,19 +53,7 @@ const toolsSyncScript = (): { script: string } | { problem: string } => {
   }
 };
 
-/** What main.ts holds: the task to reconcile at boot, the id the Console links
- *  to, and what a flipped switch does. */
-export interface ToolsTask {
-  /** Reconcile now. At boot, before any route exists: two first flips could
-   *  otherwise both find no task and create one each. */
-  reconcile(): Promise<{ id: string } | { problem: string }>;
-  /** The task whose runs are the status surface, or null until there is one. */
-  id(): string | null;
-  /** A switch was flipped. */
-  changed(): Promise<ToolsSyncNote>;
-}
-
-export function toolsTask(tasks: TaskService): ToolsTask {
+export function toolsTask(tasks: TaskService) {
   /** Which task is Pier's, and the id every managed run goes through. */
   let toolsTaskId: string | null = null;
 
@@ -150,5 +143,12 @@ export function toolsTask(tasks: TaskService): ToolsTask {
     }
   };
 
-  return { reconcile: ensureToolsTask, id: () => toolsTaskId, changed: toolsChanged };
+  return {
+    /** Reconcile now. At boot, before any route exists: two first flips could
+     *  otherwise both find no task and create one each. */
+    reconcile: ensureToolsTask,
+    /** The task whose runs are the status surface, null until there is one. */
+    id: () => toolsTaskId,
+    changed: toolsChanged,
+  };
 }
