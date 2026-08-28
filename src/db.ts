@@ -233,6 +233,18 @@ const MIGRATIONS: readonly string[] = [
   -- NULL for every row that predates this: never pinned within a lease.
   ALTER TABLE session_state ADD COLUMN pinned_at INTEGER;
   `,
+  // 11 — Projects holds what a hand put there, for as long as the hand says.
+  `
+  -- The lease is gone, so both of its columns are. It expired nothing: a row
+  -- it dropped kept its transcript, its place and its ownership, and one more
+  -- turn brought it back — so what it actually did was hide rows nobody asked
+  -- it to hide, and kept existed only to opt out of that. On the instance this
+  -- was decided on, the lease had never dropped a row: 20 pinned sessions,
+  -- none past seven days, one kept. Removing a row from Projects is the ✓ on
+  -- the row, and it stays the only way out.
+  ALTER TABLE session_state DROP COLUMN kept;
+  ALTER TABLE session_state DROP COLUMN pinned_at;
+  `,
 ];
 
 let shared: DatabaseSync | undefined;

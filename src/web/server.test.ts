@@ -26,7 +26,6 @@ import { SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
-import { PROJECT_LEASE_MS } from "../limits.js";
 import { SessionStateStore } from "./session-state.js";
 import { createServer, tabPrefix, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
@@ -244,8 +243,8 @@ function setup(
     create: vi.fn(async () => session),
     fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
-    // `modified` is what the Projects lease is dated from: a listed session
-    // whose transcript was written just now is a warm one.
+    // `modified` is the listing's own date for a session: the transcript's
+    // mtime, which is the only record of a turn that survives a restart.
     list: vi.fn(async () => [{ id: "s1", cwd, createdAt: 1, modified: Date.now() }]),
     // Derived from the same list, like the real seam: a fake that answers the
     // two independently can agree with nothing.
@@ -314,7 +313,7 @@ describe("workbench server", () => {
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", listed: false, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", listed: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -340,7 +339,7 @@ describe("workbench server", () => {
     const res = await app.request("/api/projects");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", listed: true, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", listed: true, unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -436,14 +435,14 @@ describe("workbench server", () => {
     // Not on disk yet — the nascent entry fills the gap.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", listed: true, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", listed: true, unread: false, activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
     listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: Date.now() });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", listed: true, unread: false, kept: false, lastActive: expect.any(Number), activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", listed: true, unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -517,98 +516,39 @@ describe("workbench server", () => {
     });
   });
 
-  // Projects is a working set: a session leaves it by going quiet, so the
-  // action that clears a finished one is doing nothing at all.
-  it("drops a session that went quiet past its lease, and never a kept one", async () => {
+  // Membership is what a hand said, and nothing dates it: a session quiet for a
+  // month is on the rail until the ✓ takes it off. A lease used to hide those
+  // rows and `kept` used to opt out of it — two states answering one question,
+  // for an expiry that never destroyed anything.
+  it("keeps a session in the rail however quiet it goes, until a hand unpins it", async () => {
     const { app, state, factory } = setup();
-    const cold = Date.now() - PROJECT_LEASE_MS - 1;
-    // The transcript's own mtime is the lease: nobody has written to either of
-    // these in over a week.
+    const month = Date.now() - 30 * 86_400_000;
     vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: cold },
-      { id: "s2", cwd: "/tmp", createdAt: 2, modified: cold },
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: month },
+      { id: "s2", cwd: "/tmp", createdAt: 2, modified: month },
     ]);
-    // Pinned back when they were last written, too: the lease starts at
-    // whichever came later, so a hand that touched these yesterday would keep
-    // them here on its own.
-    state.pin("s1", "/tmp", true, cold);
-    state.pin("s2", "/tmp", true, cold);
-    expect(await rail(app)).toEqual([]);
+    state.pin("s1", "/tmp", true);
+    state.pin("s2", "/tmp", true);
+    expect((await rail(app)).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
 
-    // Kept is the exemption, and the same row is back — with its place in the
-    // list intact, because leaving the rail never gave up membership.
-    expect((await app.request("/api/sessions/s2/keep", {
+    expect((await app.request("/api/sessions/s1/pin", {
       method: "POST",
-      body: JSON.stringify({ kept: true }),
+      body: JSON.stringify({ pinned: false }),
     })).status).toBe(200);
     expect((await rail(app)).map((r) => r.id)).toEqual(["s2"]);
 
-    // And one more turn renews the other one's lease, by writing its file.
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: Date.now() },
-      { id: "s2", cwd: "/tmp", createdAt: 2, modified: cold },
-    ]);
-    expect((await rail(app)).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
-  });
-
-  // Pinning is an act with a date. Without one the rail answered a click with
-  // nothing: the row flashed in optimistically and the re-read that followed
-  // dropped it, because the transcript it was counted from is a month old.
-  it("puts a cold session back in the rail when a hand pins it", async () => {
-    const { app, state, factory } = setup();
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: Date.now() - PROJECT_LEASE_MS - 1 },
-    ]);
-    expect(await rail(app)).toEqual([]);
-
-    const res = await app.request("/api/sessions/s1/pin", {
+    // And back, on the same act: pinning a month-old session is the only thing
+    // that decides, so the re-read cannot disagree with the click.
+    expect((await app.request("/api/sessions/s1/pin", {
       method: "POST",
       body: JSON.stringify({ pinned: true }),
-    });
-    expect(res.status).toBe(200);
-    const rows = (await (await app.request("/api/projects")).json()) as
-      { id: string; lastActive: number }[];
-    expect(rows.map((r) => r.id)).toEqual(["s1"]);
-    // And the row says the same thing the server counted, so the tooltip
-    // cannot promise it leaves today while the server holds it for a week.
-    expect(rows[0]!.lastActive).toBeGreaterThan(Date.now() - 5_000);
-    expect(state.flags().get("s1")?.pinnedAt).toEqual(expect.any(Number));
-  });
-
-  // Un-keeping is the other end of the same act: the exemption goes, a lease
-  // starts. Without it the row the hand just touched vanishes on the next read.
-  it("keeps a cold session on screen after its exemption is taken off", async () => {
-    const { app, state, factory } = setup();
-    const cold = Date.now() - PROJECT_LEASE_MS - 1;
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: cold },
-    ]);
-    state.pin("s1", "/tmp", true, cold);
-    state.keep("s1", true, cold);
-    expect((await rail(app)).map((r) => r.id)).toEqual(["s1"]);
-
-    expect((await app.request("/api/sessions/s1/keep", {
-      method: "POST",
-      body: JSON.stringify({ kept: false }),
     })).status).toBe(200);
-    expect((await rail(app)).map((r) => r.id)).toEqual(["s1"]);
-  });
-
-  it("refuses to keep a session Projects does not hold", async () => {
-    const { app } = setup();
-    const res = await app.request("/api/sessions/s1/keep", {
-      method: "POST",
-      body: JSON.stringify({ kept: true }),
-    });
-    expect(res.status).toBe(404);
-    expect((await app.request("/api/sessions/s1/keep", { method: "POST", body: "{}" })).status)
-      .toBe(400);
+    expect((await rail(app)).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
   });
 
   // A row that predates all of this holds a pin and a directory and nothing
   // else. Everything the rail draws comes off the listing, so there is no
-  // backfill to run and no stale summary to repair — including the lease,
-  // which is dated by the transcript and not by when the row was written.
+  // backfill to run and no stale summary to repair.
   it("renders a pin that carries no summary at all", async () => {
     const month = Date.now() - 30 * 86_400_000;
     const { app, factory } = setup(

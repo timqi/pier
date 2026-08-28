@@ -55,7 +55,7 @@ src/
   web/         server.ts (sessions + events), instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
                auth.ts, files.ts, session-state.ts (what the workbench
-               decided about a session: pinned, kept, unread, order),
+               decided about a session: pinned, unread, order),
                repos.ts (which repository a project directory belongs to),
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,

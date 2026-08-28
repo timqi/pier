@@ -31,7 +31,7 @@ import { SESSION_TITLE_MAX } from "../limits.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { RepoIndex } from "./repos.js";
-import { isListed, type SessionFlags, type SessionStateStore } from "./session-state.js";
+import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import type { SettingsStore } from "../settings.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
@@ -136,8 +136,6 @@ export function createServer(
     }
     if (!runningNow.delete(e.sessionId)) return;
     state.setUnread(e.sessionId, true);
-    // The Projects lease renews itself: the turn just wrote the transcript, and
-    // its mtime is what the lease is counted from.
     hub.emitWorkspace({ type: "sessions-changed" });
   });
 
@@ -188,35 +186,25 @@ export function createServer(
     });
 
   /** Every session a surface may show: what Pi has written, plus the ones
-   *  created here that it has not persisted yet. A nascent session's own
-   *  creation time stands in for a transcript mtime it does not have — it was
-   *  made seconds ago, which is the warmest a lease gets. */
+   *  created here that it has not persisted yet. */
   const allSessions = async (): Promise<SessionSummary[]> => {
     const sessions = await listSessions();
     for (const s of sessions) nascent.delete(s.id);
     // A session created but never prompted would otherwise be listed forever.
     for (const [id, n] of nascent) if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
     return [
-      ...[...nascent].map(([id, n]) => ({ id, ...n, modified: n.createdAt })),
+      ...[...nascent].map(([id, n]) => ({ id, ...n })),
       ...sessions,
     ];
   };
 
   // One session as every list renders it: the summary, what the workbench
   // decided about it, and what is true of it right now.
-  const present = (
-    { modified, ...s }: SessionSummary,
-    own: SessionFlags | undefined,
-    now: number = Date.now(),
-  ) => {
-    // The one thing the lease is counted from, computed once and spent twice:
-    // the later of the transcript being written and a hand pinning the session.
-    // Two computations would let the rail list a row for a week while its
-    // tooltip says it leaves today.
-    const lastActive = Math.max(modified ?? s.createdAt, own?.pinnedAt ?? 0);
+  // The listing's `modified` is dropped rather than forwarded: it dates a
+  // transcript, and no surface renders it.
+  const present = ({ modified: _drop, ...s }: SessionSummary, own: SessionFlags | undefined) => {
     return {
       ...s,
-      lastActive,
       ...(own?.sort === undefined ? {} : { sort: own.sort }),
       ...(own?.projectSort === undefined ? {} : { projectSort: own.projectSort }),
       // Which repository the directory belongs to, on every list and not only
@@ -226,9 +214,8 @@ export function createServer(
       // arrives as a `sessions-changed`.
       ...repos.get(s.cwd),
       state: router.stateOf(s.id) ?? "idle",
-      listed: isListed(own, lastActive, now),
+      listed: own?.pinned ?? false,
       unread: own?.unread ?? false,
-      kept: own?.kept ?? false,
       channel: channelOf?.(s.id) ?? "web",
       activeRuns: activeRuns(s.id),
     };
@@ -239,10 +226,9 @@ export function createServer(
   // the summaries out of SQLite, which is what had to be kept in step.
   app.get("/api/projects", async (c) => {
     const flags = state.flags();
-    const now = Date.now();
     return c.json(
       (await allSessions())
-        .map((s) => present(s, flags.get(s.id), now))
+        .map((s) => present(s, flags.get(s.id)))
         .filter((row) => row.listed),
     );
   });
@@ -271,8 +257,7 @@ export function createServer(
 
   app.get("/api/sessions", async (c) => {
     const flags = state.flags();
-    const now = Date.now();
-    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), now)));
+    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id))));
   });
 
   app.post("/api/sessions", async (c) => {
@@ -313,19 +298,6 @@ export function createServer(
     state.pin(id, cwd, body.pinned);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ pinned: body.pinned });
-  });
-
-  // Kept = exempt from the lease. Separate from pin because they answer
-  // different questions: pin is whether Projects holds the session at all,
-  // keep is whether going quiet is allowed to end that.
-  app.post("/api/sessions/:id/keep", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.kept !== "boolean") return c.json({ error: "kept required" }, 400);
-    if (!state.keep(c.req.param("id"), body.kept)) {
-      return c.json({ error: "session is not in Projects" }, 404);
-    }
-    hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ kept: body.kept });
   });
 
   // The two responses big enough to matter: a transcript, and one turn's tool

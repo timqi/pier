@@ -11,10 +11,6 @@ import { setUnreadBadge } from "./notifications.js";
 import { setAttention } from "./shell.js";
 import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
-// A value import, unlike the type-only line above: src/limits.ts is a leaf of
-// numbers with no runtime behind it, and a hand-copied 7 in this file is
-// exactly the drift it exists to stop.
-import { PROJECT_LEASE_MS } from "../../limits.js";
 
 /** GET /api/projects or /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -23,15 +19,10 @@ export interface SessionInfo {
   createdAt: number;
   title?: string;
   state: SessionState;
-  /** In Projects *now*. Not the database's `pinned`, which is ownership and
-   *  outlives an expired lease: this is what the rail draws. */
+  /** In Projects: what the rail draws, which is what `pinned` says. */
   listed: boolean;
   /** Turn finished, no client has viewed it yet (server-side, all clients agree). */
   unread: boolean;
-  /** Exempt from the Projects lease: it stays in the rail however quiet it goes. */
-  kept: boolean;
-  /** When its last turn finished — what the lease is counted from. */
-  lastActive?: number;
   /** The IM channel that owns it, or `"web"` for everything else. */
   channel: string;
   /** Background runs this session launched that are still in flight. */
@@ -76,9 +67,9 @@ const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 
 // --- projects (the listed sessions, grouped by repository) --------------------------
-// Projects lists what it owns and is still showing — sessions created in Pier
-// (pinned on creation) or pinned from the All-sessions dialog, minus the ones
-// whose lease ran out — so Pi history never floods the sidebar.
+// Projects lists what it owns — sessions created in Pier (pinned on creation)
+// or pinned from the All-sessions dialog — so Pi history never floods the
+// sidebar. Membership ends when a hand ends it, and nowhere else.
 
 const COLLAPSED_KEY = "pier.collapsedProjects";
 const collapsed = new Set<string>(loadCollapsed());
@@ -293,27 +284,6 @@ function sortable(row: HTMLElement, list: string, key: string, drop: (target: st
 const HOVER_BTN =
   "hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block";
 
-/** Whole days before the lease runs out. Counted from the same constant the
- *  server enforces (src/limits.ts), not a copy of the number it holds: a
- *  surface promising seven days while the server drops the row at eight is
- *  worse than one that says nothing. Two of them say it — the row's tooltip and
- *  the Keep row in the session menu — so they say it from here. */
-export const leaseDaysLeft = (s: SessionInfo): number =>
-  Math.max(0, Math.ceil((PROJECT_LEASE_MS - (Date.now() - (s.lastActive ?? s.createdAt))) / DAY_MS));
-
-/** Why this row is in the rail, and for how long. A session leaving on its own
- *  is the point of the lease, so the row says so before it happens rather than
- *  looking like something went missing. */
-function leaseNote(s: SessionInfo): string {
-  if (s.kept) return "Kept in Projects";
-  const days = Math.floor((Date.now() - (s.lastActive ?? s.createdAt)) / DAY_MS);
-  return `Quiet ${days === 0 ? "today" : `${days}d`} — leaves Projects in ${
-    leaseDaysLeft(s)
-  }d unless kept`;
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * Waiting for *you*, which is narrower than `unread`.
  *
@@ -388,14 +358,6 @@ export async function renameSession(s: SessionInfo): Promise<void> {
   );
 }
 
-/** Kept = never ages out of the rail. */
-export function setKept(s: SessionInfo, kept: boolean): Promise<void> {
-  // Not rolled back with the flag: the lease was renewed by asking, and the
-  // next Projects read carries the server's own stamp either way.
-  s.lastActive = Date.now();
-  return optimistic((v) => (s.kept = v), kept, !kept, `/api/sessions/${s.id}/keep`, { kept });
-}
-
 /** Unpin keeps the session — it just moves back into the All-sessions list. */
 export const setPinned = (s: SessionInfo, pinned: boolean): Promise<void> =>
   optimistic((v) => (s.listed = v), pinned, !pinned, `/api/sessions/${s.id}/pin`, { pinned });
@@ -456,17 +418,6 @@ function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
     ev.stopPropagation();
     void setPinned(s, false);
   };
-  // Kept has to be visible where the exemption applies, or the rail cannot say
-  // why one row outlived the rest. Same idiom as a project's count: resident,
-  // and out of the way of the controls on hover.
-  // An emoji pushpin would draw its own colour and its own angle; the outline
-  // takes the row's grey and points its tip down, which is a pin that is in.
-  const badge = h("span", "flex-none text-neutral-400 group-hover:hidden");
-  badge.innerHTML =
-    `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5">` +
-    `<path d="M8 11.33v3.34"/>` +
-    `<path d="M3.33 11.33h9.34v-1.17a1.33 1.33 0 0 0-.74-1.19l-1.19-.6A1.33 1.33 0 0 1 10 7.17V4h.67a1.33 1.33 0 0 0 0-2.67H5.33A1.33 1.33 0 0 0 5.33 4H6v3.17a1.33 1.33 0 0 1-.74 1.19l-1.19.6a1.33 1.33 0 0 0-.74 1.19Z"/></svg>`;
-  badge.title = "Kept in Projects";
   li.append(
     stateDot(s),
     h("span", "truncate", s.title ?? "untitled"),
@@ -475,13 +426,12 @@ function sessionRow(s: SessionInfo, branches: boolean): HTMLElement {
       "ml-auto flex flex-none items-center gap-1",
       ...channelChip(s),
       ...branchChip(s, branches),
-      ...(s.kept ? [badge] : []),
       done,
       more,
     ),
   );
   li.onclick = () => deps.select(s.id);
-  li.title = `${leaseNote(s)}\nDrag to reorder`;
+  li.title = "Drag to reorder";
   const key = groupKey(s);
   sortable(li, key, s.id, (id, after) => dropSession(key, id, s.id, after));
   return li;

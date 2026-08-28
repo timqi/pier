@@ -1,6 +1,5 @@
 // What the workbench decided about a session, and nothing a transcript already
-// knows. Ownership of a row in Projects (`pinned`) and when that was decided
-// (`pinned_at`), exemption from its lease (`kept`), a finished turn nobody has
+// knows. Ownership of a row in Projects (`pinned`), a finished turn nobody has
 // looked at (`unread`), and the two places a hand put it in (`sort`,
 // `project_sort`).
 //
@@ -24,29 +23,10 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
-import { PROJECT_LEASE_MS } from "../limits.js";
-
-/** In Projects right now: owned by it, and either kept or still on lease.
- *
- *  `pinned` is ownership and outlives the lease — a cold session keeps its
- *  place and its order, and one more turn brings it back — while removing it is
- *  what gives ownership up. The activity it is counted from is the later of two
- *  things: the transcript's own mtime, which the listing carries (the only
- *  record of a turn that survives a restart, and true even for turns another
- *  Pier ran), and the moment a hand pinned it, which nothing else records. */
-export const isListed = (
-  own: { pinned: boolean; kept: boolean } | undefined,
-  activeAt: number,
-  now: number = Date.now(),
-): boolean => !!own?.pinned && (own.kept || activeAt >= now - PROJECT_LEASE_MS);
 
 export interface SessionFlags {
   pinned: boolean;
-  kept: boolean;
   unread: boolean;
-  /** When a hand last took this session into Projects. Absent for a row pinned
-   *  before that was recorded, which counts as long ago. */
-  pinnedAt?: number;
   sort?: number;
   projectSort?: number;
 }
@@ -72,24 +52,10 @@ export class SessionStateStore {
     ).run(sessionId, unread ? 1 : 0);
   }
 
-  /** Exempt from expiry, or back on a lease. Returns false when the session is
-   *  not in Projects at all: nothing to keep, and a silent ok would draw a
-   *  filled pin for a row the next read drops. */
-  keep(sessionId: string, kept: boolean, at: number = Date.now()): boolean {
-    // Restarts the lease, like pinning does: taking the exemption off a session
-    // that has been quiet for a month would otherwise vanish it from the rail
-    // on the very next read, which reads as "the toggle deleted my row".
-    return this.#db.prepare(
-      "UPDATE session_state SET kept = ?, pinned_at = ? WHERE session_id = ? AND pinned = 1",
-    ).run(kept ? 1 : 0, at, sessionId).changes > 0;
-  }
-
-  /** Projects takes the session, or gives it up. Taking it starts the lease
-   *  over: pinning a month-old session from All sessions is a statement that it
-   *  is warm again, and a rail that drops it on the next read has answered a
-   *  click with nothing (§5b). Giving it up leaves the stamp alone — it says
-   *  nothing about a row Projects no longer holds. */
-  pin(sessionId: string, cwd: string, pinned: boolean, at: number = Date.now()): void {
+  /** Projects takes the session, or gives it up. Membership lasts until a hand
+   *  ends it: nothing expires, so what is pinned is what the rail draws until
+   *  the ✓ on the row says otherwise. */
+  pin(sessionId: string, cwd: string, pinned: boolean): void {
     // A new session joins a project that already has a place in the list.
     // Unranked it would sort on top — lifting the whole project with it, which
     // is the jump manual order exists to stop.
@@ -97,16 +63,13 @@ export class SessionStateStore {
       "SELECT project_sort AS rank FROM session_state WHERE cwd = ? AND project_sort IS NOT NULL LIMIT 1",
     ).get(cwd) as { rank: number } | undefined;
     this.#db.prepare(
-      `INSERT INTO session_state(session_id, pinned, cwd, project_sort, pinned_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO session_state(session_id, pinned, cwd, project_sort)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(session_id) DO UPDATE SET
          pinned = excluded.pinned,
          cwd = excluded.cwd,
-         project_sort = COALESCE(session_state.project_sort, excluded.project_sort),
-         kept = CASE WHEN excluded.pinned = 1 THEN session_state.kept ELSE 0 END,
-         pinned_at = CASE
-           WHEN excluded.pinned = 1 THEN excluded.pinned_at ELSE session_state.pinned_at END`,
-    ).run(sessionId, pinned ? 1 : 0, cwd, sibling?.rank ?? null, pinned ? at : null);
+         project_sort = COALESCE(session_state.project_sort, excluded.project_sort)`,
+    ).run(sessionId, pinned ? 1 : 0, cwd, sibling?.rank ?? null);
   }
 
   /** One drag = one write of the whole list it reordered: index is the place.
@@ -142,27 +105,21 @@ export class SessionStateStore {
   }
 
   /** What this store knows about the sessions it knows anything about, for a
-   *  caller holding the listing. Ownership, not membership: `isListed` decides
-   *  that, and it needs the transcript's mtime, which only the listing has. */
+   *  caller holding the listing. */
   flags(): Map<string, SessionFlags> {
     const rows = this.#db.prepare(
-      `SELECT session_id AS id, pinned, kept, unread, pinned_at AS pinnedAt,
-              sort, project_sort AS projectSort
+      `SELECT session_id AS id, pinned, unread, sort, project_sort AS projectSort
        FROM session_state WHERE pinned = 1 OR unread = 1`,
     ).all() as unknown as {
       id: string;
       pinned: number;
-      kept: number;
       unread: number;
-      pinnedAt: number | null;
       sort: number | null;
       projectSort: number | null;
     }[];
     return new Map(rows.map((r) => [r.id, {
       pinned: r.pinned === 1,
-      kept: r.kept === 1,
       unread: r.unread === 1,
-      ...(r.pinnedAt === null ? {} : { pinnedAt: r.pinnedAt }),
       ...(r.sort === null ? {} : { sort: r.sort }),
       ...(r.projectSort === null ? {} : { projectSort: r.projectSort }),
     }]));

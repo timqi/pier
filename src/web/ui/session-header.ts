@@ -11,7 +11,7 @@ import { $, basename, copyBtn, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel } from "./shortcut.js";
-import { leaseDaysLeft, renameSession, setKept, setPinned, type SessionInfo } from "./sidebar.js";
+import { renameSession, setPinned, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
@@ -280,10 +280,9 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
         void renameSession(s);
       },
     },
-    // Three rows, three answers to "how long does this stay in Projects": now
-    // (Done), a while (the default, which says how long), forever (Keep). The
-    // word for leaving is the one the rail's own ✓ button uses — one action,
-    // one name, whichever surface you reach it from.
+    // One answer to "is this in Projects", and the word for leaving is the one
+    // the rail's own ✓ button uses — one action, one name, whichever surface
+    // you reach it from.
     {
       label: s.listed ? "Done — remove from Projects" : "Pin to Projects",
       hint: current ? chordLabel(PIN_KEY) : "",
@@ -294,19 +293,6 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
         void setPinned(s, !s.listed);
       },
     },
-    // Only where it can mean anything: a session Projects does not hold has no
-    // lease to be exempt from.
-    ...(s.listed
-      ? [{
-        label: "Keep — never let it age out",
-        hint: s.kept ? "" : `leaves in ${leaseDaysLeft(s)}d`,
-        checked: s.kept,
-        onSelect: () => {
-          closeMenu();
-          void setKept(s, !s.kept);
-        },
-      }]
-      : []),
     {
       label: "Model",
       hint: current ? (currentModel?.id ?? "…") : "",
