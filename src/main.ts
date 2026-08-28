@@ -23,29 +23,28 @@ import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
 import { bundledInfo } from "./extensions/index.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
-import type { AgentSession, ConversationKey, ToolsSyncNote } from "./core/types.js";
+import type { AgentSession, ConversationKey } from "./core/types.js";
 import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
-import type { TaskDefinition } from "./tasks/types.js";
 import { isTerminal } from "./tasks/types.js";
 import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
 import {
   coalescedSync,
+  CUSTOM_TOOL_RULES,
   ManagedTools,
+  normalizeCustomTools,
   prependPath,
-  type SyncRequest,
   TOOLS_TASK_CREATOR,
-  toolsTaskDraft,
-  toolsTaskPlan,
 } from "./tools.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
 import { startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
+import type { ToolsSyncNote } from "./web/types.js";
 import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
@@ -173,12 +172,16 @@ tasks.start();
 // The managed CLI tools (src/tools.ts) and the one visible thing that keeps
 // them current: an ordinary bash task on an ordinary cron, created here
 // because tools.ts may not import tasks/. Its run history *is* the tools
-// status surface — the install, the daily update, and every failure are runs
-// with output, so there is no second place to look and nothing to disagree
-// with (§5b).
+// status surface — the install, the daily update and every failure are runs
+// with output, so there is no second place to look (§5b).
 const managedTools = new ManagedTools();
-const toolsTask = (): TaskDefinition | undefined =>
-  tasks.list().find((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
+/** Which task is Pier's, and the id every managed run goes through. */
+let toolsTaskId: string | null = null;
+
+/** POSIX single quotes: `$`, a backtick and a backslash mean things inside
+ *  double quotes, and this string is run by bash months from now. */
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
 /**
  * How this Pier runs `pier tools sync`. Installed, that is the built CLI beside
  * main.js. From a source checkout there is no `cli.js` and node cannot strip
@@ -188,87 +191,96 @@ const toolsTask = (): TaskDefinition | undefined =>
  */
 const toolsSyncScript = (): { script: string } | { problem: string } => {
   const built = fileURLToPath(new URL("./cli.js", import.meta.url));
-  const quoted = (...parts: string[]): string => parts.map((p) => `"${p}"`).join(" ");
-  if (existsSync(built)) return { script: `${quoted(process.execPath, built)} tools sync` };
+  if (existsSync(built)) return { script: `${shellQuote(process.execPath)} ${shellQuote(built)} tools sync` };
   const source = fileURLToPath(new URL("./cli.ts", import.meta.url));
   if (!existsSync(source)) return { problem: `no CLI to run: neither ${built} nor ${source} exists` };
   try {
-    return { script: `${quoted(process.execPath)} --import ${quoted(import.meta.resolve("tsx"))} ${quoted(source)} tools sync` };
+    return {
+      script: `${shellQuote(process.execPath)} --import ${shellQuote(import.meta.resolve("tsx"))}` +
+        ` ${shellQuote(source)} tools sync`,
+    };
   } catch {
     return { problem: `running from source (${source}) and tsx is not installed — run npm install, or npm run build` };
   }
 };
-/** Whatever went wrong reaching the person who caused it, wherever they were:
- *  a boot has only the journal, a flipped switch has its own status line. */
-const toolsFailure = (err: unknown): string => {
-  log.error("the tools update task could not be reconciled", err);
-  return err instanceof Error ? err.message : String(err);
-};
+
 /**
- * One converging sync, however many switches ask for it. The task layer
- * refuses an overlapping run by design and that refusal must not be dropped
- * (tools.ts `coalescedSync` has the rule and why); this is the half of it that
- * knows what a task is: start a run, and hand back what to wait for — our own
- * run, or the one already in flight that made ours a `skipped` row.
+ * The one task Pier owns, brought in line with what it should be.
+ *
+ * Created once and never retired: a task that comes and goes is a state class
+ * of its own (two boots racing to create it, a retirement racing a switch),
+ * and the run it would have been retired for already says "no tools switched
+ * on". Repaired rather than trusted, because the task routes can edit it and a
+ * switch must not silently run somebody's edited script.
  */
+const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> => {
+  const command = toolsSyncScript();
+  if ("problem" in command) return { problem: command.problem };
+  const draft = {
+    name: "tools: daily update",
+    description: "Installs the CLI tools switched on in Settings → Agent and keeps them current.",
+    trigger: {
+      type: "cron" as const,
+      expression: "17 4 * * *",
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    },
+    // PIER_HOME as cwd: the command belongs to the instance, not to a project.
+    action: { type: "bash" as const, script: command.script, cwd: PIER_HOME },
+    timeoutSeconds: 1800,
+  };
+  const owned = tasks.list().filter((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
+  // One per creator. Two would fight over ubix's state lock every night, each
+  // reporting the other's run as an overlap.
+  for (const extra of owned.slice(1)) {
+    log.warn(`archiving a second tools update task (${extra.id})`);
+    tasks.archive(extra.id);
+  }
+  const task = owned[0];
+  const canonical = JSON.stringify([draft.name, draft.trigger, draft.action, draft.timeoutSeconds]);
+  if (task && JSON.stringify([task.name, task.trigger, task.action, task.timeoutSeconds]) !== canonical) {
+    log.warn(`the tools update task was edited — restoring the command Pier owns`);
+    await tasks.update(task.id, draft);
+  }
+  const id = task ? task.id : (await tasks.create(draft, TOOLS_TASK_CREATOR)).id;
+  toolsTaskId = id;
+  return { id };
+};
+
+/** The half of `coalescedSync` (tools.ts, which has the rule and why) that
+ *  knows what a task is: start a run, and hand back what to wait for — our own
+ *  run, or the one already in flight that made ours a `skipped` row. */
 const requestSync = coalescedSync({
   run: () => {
-    const task = toolsTask();
-    // Never a spin: the caller only asks once a task exists, so this is a bug
-    // rather than a state to retry through.
-    if (!task) throw new Error("no tools update task to run");
-    const mine = tasks.run(task.id, null, "manual");
+    if (!toolsTaskId) throw new Error("no tools update task to run");
+    const mine = tasks.run(toolsTaskId, null, "manual");
     if (!isTerminal(mine.state)) {
       return { started: true, settled: tasks.waitForRun(mine.id).then(() => undefined) };
     }
-    const active = tasks.listRuns(task.id, 5).find((run) => !isTerminal(run.state));
+    const active = tasks.listRuns(toolsTaskId, 5).find((run) => !isTerminal(run.state));
     return { started: false, settled: active ? tasks.waitForRun(active.id).then(() => undefined) : null };
   },
 }, (err: unknown) => log.error("the tools sync could not be run", err));
-/** The plan (tools.ts) turned into task calls — the only half of it that needs
- *  the task API, which is why it is here and not there. Answers with what the
- *  switch that asked should say: started, waiting behind a running sync, or
- *  refused with a reason. */
-const applyTools = async (names: readonly string[], flipped: boolean): Promise<ToolsSyncNote | null> => {
-  const existing = toolsTask();
-  const plan = toolsTaskPlan(names, existing !== undefined, flipped);
-  if (plan.do === "nothing") return null;
-  if (plan.do === "retire") {
-    if (!existing) return null;
-    // The last tool switched off still has to be uninstalled, and a tool
-    // uninstalls itself (rtk removes its own Pi extension) — so the task runs
-    // one final time and is archived only once a run has succeeded. A failed
-    // removal keeps the task, and its cron keeps retrying. Through the same
-    // coalescer: switching the last three off is the same race as switching
-    // them on.
-    const request = requestSync();
-    void request.settled.then(() => {
-      if (tasks.listRuns(existing.id, 1)[0]?.state === "succeeded") tasks.archive(existing.id);
-    });
-    return { state: request.state };
+
+/** A switch was flipped: make sure the task is the one Pier means, then ask
+ *  for a sync. Answers with what that switch should say about it. */
+const toolsChanged = async (): Promise<ToolsSyncNote> => {
+  try {
+    const task = await ensureToolsTask();
+    if ("problem" in task) {
+      log.error(`tools cannot be managed: ${task.problem}`);
+      return { state: "refused", reason: task.problem };
+    }
+    return { state: requestSync().state };
+  } catch (err) {
+    log.error("the tools update task could not be reconciled", err);
+    return { state: "refused", reason: err instanceof Error ? err.message : String(err) };
   }
-  if (plan.do === "run") return existing ? { state: requestSync().state } : null;
-  const command = toolsSyncScript();
-  if ("problem" in command) {
-    log.error(`tools cannot be managed: ${command.problem}`);
-    return { state: "refused", reason: command.problem };
-  }
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  // PIER_HOME as cwd: the command belongs to the instance, not to a project.
-  await tasks.create(toolsTaskDraft(command.script, PIER_HOME, timezone), TOOLS_TASK_CREATOR);
-  return plan.run ? { state: requestSync().state } : null;
 };
-// At boot: create the task an enabled set needs, or finish an uninstall a
-// crash cut off. Never a run of its own — restarting Pier is not a reason to
-// reinstall anything.
-void applyTools(settings.get().tools, false).catch(toolsFailure);
-// Every surface's tool switch goes through here, so the coalescer is what
-// decides whether a request runs now or rides the next run.
-const toolsChanged = (names: string[]): Promise<ToolsSyncNote | null> =>
-  applyTools(names, true).catch((err: unknown): ToolsSyncNote => ({
-    state: "refused",
-    reason: toolsFailure(err),
-  }));
+
+// Before any route exists: two first flips could otherwise both find no task
+// and create one each. A failure here is logged, and the next flip retries.
+const toolsTask = await ensureToolsTask();
+if ("problem" in toolsTask) log.error(`tools cannot be managed: ${toolsTask.problem}`);
 
 channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
@@ -450,10 +462,16 @@ app.route("/", createServer({
     const { extensions, tools, customTools } = settings.get();
     return {
       entries: [...bundledInfo(extensions), ...await managedTools.status(tools, customTools)],
-      toolsTaskId: toolsTask()?.id ?? null,
+      toolsTaskId,
     };
   },
-  onToolsChanged: toolsChanged,
+  onToolsChanged: () => toolsChanged(),
+  // The rule lives with the installer; the names the bundled catalog already
+  // owns live with the extensions. Only here are both in scope.
+  validateCustomTools: (raw: unknown) => {
+    const validated = normalizeCustomTools(raw, bundledInfo([]).map((entry) => entry.name));
+    return validated ? { tools: validated } : { error: CUSTOM_TOOL_RULES };
+  },
   secrets,
   updates,
   updater,

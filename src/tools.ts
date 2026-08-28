@@ -17,7 +17,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import type { CatalogEntry } from "./core/types.js";
+import type { CatalogBinary, CatalogEntry } from "./core/types.js";
 import { logger } from "./log.js";
 import { pierPath, resolveAgentDir } from "./paths.js";
 
@@ -117,8 +117,9 @@ export interface CustomTool {
   toml: string;
 }
 
-/** A binary's name on disk, so what goes on the PATH is predictable. */
-const TOOL_NAME = /^[a-z0-9][a-z0-9._-]{0,31}$/i;
+/** A binary's name on disk, so what goes on the PATH is predictable. No dot:
+ *  `[tools.a.b]` is a different table than the one Pier means to write. */
+const TOOL_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
 /** Every one is a binary on every PATH; a list this long is already a smell. */
 const MAX_CUSTOM = 16;
 /** A tool's block is a handful of keys. Past this it is a config file, and a
@@ -129,9 +130,19 @@ const MAX_BODY = 2000;
 /** The `spec = "…"` a block must carry, for the boundary check and for the
  *  one line the Console shows about a tool it has not installed yet. */
 export function specOf(toml: string): string | null {
+  // Multiline strings are skipped, not scanned: a `spec = "…"` inside one is
+  // text, not a key, and reading it as the spec would let a block with no real
+  // spec past the boundary check below.
+  let inside = false;
   for (const line of toml.split("\n")) {
-    const match = /^\s*spec\s*=\s*["']([^"']+)["']\s*(?:#.*)?$/.exec(line);
-    if (match?.[1]?.trim()) return match[1].trim();
+    const fences = (line.match(/"""|'''/g) ?? []).length;
+    if (inside || fences % 2 === 1) {
+      inside = inside ? fences % 2 === 0 : true;
+      continue;
+    }
+    const match = /^\s*spec\s*=\s*"([^"]+)"\s*(?:#.*)?$|^\s*spec\s*=\s*'([^']+)'\s*(?:#.*)?$/.exec(line);
+    const value = (match?.[1] ?? match?.[2])?.trim();
+    if (value) return value;
   }
   return null;
 }
@@ -160,7 +171,18 @@ export const CUSTOM_TOOL_RULES =
  * rows were written by this code, and orphaning them would silently drop a
  * tool the operator is still using.
  */
-export function normalizeCustomTools(raw: unknown): CustomTool[] | null {
+export function normalizeCustomTools(
+  raw: unknown,
+  /** Names this instance already answers to that this file cannot see — the
+   *  bundled extensions live behind the Pi SDK, so main.ts hands them in. */
+  reserved: readonly string[] = [],
+): CustomTool[] | null {
+  // Case-insensitively: two names differing only in case are one filename on a
+  // case-insensitive filesystem, and one switch whose meaning depends on which
+  // ran last.
+  const taken = new Set(
+    [...MANAGED.map((tool) => tool.name), ...reserved, "ubix"].map((name) => name.toLowerCase()),
+  );
   if (!Array.isArray(raw) || raw.length > MAX_CUSTOM) return null;
   const tools: CustomTool[] = [];
   for (const item of raw) {
@@ -170,8 +192,8 @@ export function normalizeCustomTools(raw: unknown): CustomTool[] | null {
     if (typeof name !== "string") return null;
     const cleanName = name.trim();
     if (!TOOL_NAME.test(cleanName)) return null;
-    if (cleanName === "ubix" || MANAGED.some((tool) => tool.name === cleanName)) return null;
-    if (tools.some((tool) => tool.name === cleanName)) return null;
+    if (taken.has(cleanName.toLowerCase())) return null;
+    if (tools.some((tool) => tool.name.toLowerCase() === cleanName.toLowerCase())) return null;
     // The migration: a stored `{name, spec}` is the block it always meant.
     const body = typeof toml === "string"
       ? toml.trim()
@@ -182,7 +204,9 @@ export function normalizeCustomTools(raw: unknown): CustomTool[] | null {
     // A section header would take the rest of the file with it.
     if (body.split("\n").some((line) => line.trimStart().startsWith("["))) return null;
     // Tabs and newlines are the only control characters a TOML body needs.
-    if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(body)) return null;
+    // Character by character rather than by regex class, so the rule reads as
+    // what it is and no linter has to guess whether the escapes were meant.
+    if ([...body].some((ch) => (ch < " " && ch !== "\n" && ch !== "\t") || ch === "\u007f")) return null;
     if (!specOf(body)) return null;
     tools.push({ name: cleanName, toml: body });
   }
@@ -211,41 +235,6 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
 /** Marks the daily update task as Pier's own, so main.ts finds the one it
  *  owns rather than one a person wrote. */
 export const TOOLS_TASK_CREATOR = "tools";
-
-/** The task, as data. A plain bash task on a plain cron: its run history is
- *  the whole tools status surface — output, failures and the last time it ran
- *  are runs a person can already read (§5b), not a second thing to build. */
-export const toolsTaskDraft = (script: string, cwd: string, timezone: string) => ({
-  name: "tools: daily update",
-  description: "Installs the CLI tools switched on in Settings → Agent and keeps them current.",
-  trigger: { type: "cron" as const, expression: "17 4 * * *", timezone },
-  // The command is main.ts's to build — it is the only thing that knows where
-  // this Pier's own CLI is — and it records absolute paths, so a version
-  // manager changing PATH months from now cannot make the task unrunnable.
-  action: { type: "bash" as const, script, cwd },
-  timeoutSeconds: 1800,
-});
-
-/** What the enabled set owes the task. `flipped` is a human having just
- *  changed the set — the install then shows up as a run they can watch, where
- *  a restart is no reason to reinstall anything. */
-export type ToolsTaskPlan =
-  | { do: "nothing" }
-  | { do: "create"; run: boolean }
-  | { do: "run" }
-  /** Nothing is switched on any more: one last converging run — which is what
-   *  uninstalls the tools, deprovision included — and then the task goes. */
-  | { do: "retire" };
-
-export function toolsTaskPlan(
-  enabled: readonly string[],
-  hasTask: boolean,
-  flipped: boolean,
-): ToolsTaskPlan {
-  if (!enabled.length) return hasTask ? { do: "retire" } : { do: "nothing" };
-  if (!hasTask) return { do: "create", run: flipped };
-  return flipped ? { do: "run" } : { do: "nothing" };
-}
 
 /** What one sync request became, for the surface that asked for it. */
 export interface SyncRequest {
@@ -329,11 +318,19 @@ export interface ExecResult {
   stdout: string;
   stderr: string;
 }
-export type Exec = (file: string, args: readonly string[], env: NodeJS.ProcessEnv) => Promise<ExecResult>;
+export type Exec = (
+  file: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  /** Aborting kills the child. Without it a read that gave up waiting would
+   *  leave ubix running to the timeout below, holding the state lock it was
+   *  queued behind. */
+  signal?: AbortSignal,
+) => Promise<ExecResult>;
 
-const spawnExec: Exec = (file, args, env) =>
+const spawnExec: Exec = (file, args, env, signal) =>
   new Promise((resolve) => {
-    execFile(file, [...args], { env, maxBuffer: 8 * 1024 * 1024, timeout: 15 * 60_000 }, (err, stdout, stderr) => {
+    execFile(file, [...args], { env, signal, maxBuffer: 8 * 1024 * 1024, timeout: 15 * 60_000 }, (err, stdout, stderr) => {
       const failure = err as (NodeJS.ErrnoException & { code?: number | string }) | null;
       const code = typeof failure?.code === "number" ? failure.code : failure ? null : 0;
       resolve({
@@ -488,6 +485,11 @@ export function ubixConfigToml(
   return `${lines.join("\n")}\n`;
 }
 
+/** The ubix in `bin/` is older than the `--json` Pier reads. Pier put it
+ *  there, so this is Pier's to fix (`sync` re-bootstraps), not an errand for
+ *  the operator. */
+class UbixTooOld extends Error {}
+
 /** The rows an enabled set names: Pier's catalog plus the operator's blocks.
  *  A name in neither is not an error — the setting is shape-only, so a row a
  *  future release drops must not stop the sync of everything else. */
@@ -560,8 +562,8 @@ export class ManagedTools {
    * that quietly did nothing would show up later as "the tool never installed"
    * with no reason anywhere.
    */
-  async bootstrapUbix(): Promise<string> {
-    if (existsSync(this.ubixPath)) return this.ubixPath;
+  async bootstrapUbix(replace = false): Promise<string> {
+    if (existsSync(this.ubixPath) && !replace) return this.ubixPath;
     const { tag, assets } = parseRelease(JSON.parse(await this.#getText(UBIX_LATEST)));
     const wanted = ubixAsset(tag, process.platform, process.arch);
     const asset = assets.find((a) => a.name === wanted);
@@ -588,7 +590,7 @@ export class ManagedTools {
       // The system tar, not a dependency: unpacking one .tar.gz does not earn
       // an npm package (AGENTS.md 8).
       const untar = await this.#exec("tar", ["-xzf", tarball, "-C", staging], process.env);
-      if (untar.code !== 0) throw new Error(`tar failed on ${wanted}: ${untar.stderr.trim().slice(0, 300)}`);
+      if (untar.code !== 0) throw new Error(failedRun(`tar on ${wanted}`, untar));
       const extracted = join(staging, "ubix");
       if (!existsSync(extracted)) throw new Error(`${wanted} contains no "ubix" executable`);
       chmodSync(extracted, 0o755);
@@ -618,19 +620,35 @@ export class ManagedTools {
     const env = this.#env();
     const entries: ToolSyncEntry[] = [];
 
-    // Removals first, and deprovision before the binary goes: rtk uninstalls
-    // its own Pi extension, which takes rtk. Everything ubix declares is
-    // Pier's own config, so anything not wanted any more goes — including a
-    // custom spec the operator has since deleted from the catalog.
-    for (const state of await this.#states(ubix, env, ["list", "--json"])) {
-      if (wanted.some((tool) => tool.name === state.name)) continue;
-      const known = all.find((tool) => tool.name === state.name);
-      entries.push(await this.#uninstall(ubix, env, known ?? { kind: "tool", name: state.name, toml: "", summary: "" }));
+    // ubix prunes what its config no longer declares (`--prune` below), but it
+    // cannot know that rtk has to uninstall its own Pi extension *before* its
+    // binary goes — so the listing survives for exactly that: find the tools
+    // leaving the set that have something of their own to undo, and let them.
+    const kept: ManagedTool[] = [];
+    for (const state of await this.#listing(ubix, env)) {
+      const leaving = all.find((tool) => tool.name === state.name);
+      if (!leaving?.deprovision || wanted.some((tool) => tool.name === state.name)) continue;
+      const error = await this.#provision(env, leaving, leaving.deprovision);
+      if (error) {
+        // Removing it now would orphan what the deprovision failed to remove,
+        // with nothing left able to remove it. It stays declared, stays
+        // installed, and the next run tries again.
+        kept.push(leaving);
+        entries.push({ name: leaving.name, action: "kept", version: null, error });
+      }
     }
 
-    this.#writeConfig(wanted);
+    this.#writeConfig([...wanted, ...kept]);
 
-    const states = await this.#states(ubix, env, ["upgrade", "--all", "--json"]);
+    // `--prune` is the removal: anything in ubix's state that this config no
+    // longer declares is uninstalled by ubix, which knows per source how.
+    const states = await this.#states(ubix, env, ["upgrade", "--all", "--prune", "--json"]);
+    for (const state of states) {
+      if (wanted.some((tool) => tool.name === state.name)) continue;
+      // A tool that left the set: ubix says what it did with it, and a failure
+      // to remove is as much a failure as one to install.
+      entries.push({ name: state.name, action: state.action ?? "removed", version: null, error: state.error });
+    }
     for (const tool of wanted) {
       const state = states.find((s) => s.name === tool.name);
       const entry: ToolSyncEntry = {
@@ -654,6 +672,7 @@ export class ManagedTools {
    */
   async status(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<CatalogEntry[]> {
     const base = rows(custom).map((tool): CatalogEntry => ({
+      source: "binary",
       kind: tool.kind,
       name: tool.name,
       summary: tool.summary,
@@ -665,18 +684,25 @@ export class ManagedTools {
     // never switched a tool on.
     if (!existsSync(this.ubixPath)) return base;
     let states: UbixToolState[] | null;
+    // ubix guards its state with an exclusive lock, so this read can queue
+    // behind a running install for as long as a download takes — and this call
+    // is on a Console page's path (principle 7). Past the cap the row says what
+    // it is waiting for instead of the page waiting for it, and the child is
+    // killed rather than left holding a lock nobody is reading any more.
+    const cap = new AbortController();
+    const capped = setTimeout(() => cap.abort(), STATUS_CAP_MS);
+    capped.unref();
     try {
-      // ubix guards its state with an exclusive lock, so this read can queue
-      // behind a running install for as long as a download takes — and this
-      // call is on a Console page's path (principle 7). Past the cap the row
-      // says what it is waiting for instead of the page waiting for it.
       states = await Promise.race([
-        this.#states(this.ubixPath, this.#env(), ["list", "--json"]),
+        this.#states(this.ubixPath, this.#env(), ["list", "--json"], cap.signal),
         new Promise<null>((resolve) => setTimeout(resolve, STATUS_CAP_MS, null).unref()),
       ]);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       return base.map((entry) => withBinary(entry, { error }));
+    } finally {
+      clearTimeout(capped);
+      cap.abort();
     }
     if (!states) return base.map((entry) => withBinary(entry, { error: "ubix is busy — an install or update is running" }));
     return base.map((entry) => {
@@ -739,33 +765,37 @@ export class ManagedTools {
    * that predates `--json` — and that is said in one sentence rather than by
    * scraping the human output it printed instead.
    */
-  async #states(ubix: string, env: NodeJS.ProcessEnv, args: readonly string[]): Promise<UbixToolState[]> {
-    const result = await this.#exec(ubix, args, env);
+  async #states(
+    ubix: string,
+    env: NodeJS.ProcessEnv,
+    args: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<UbixToolState[]> {
+    const result = await this.#exec(ubix, args, env, signal);
     try {
       return parseUbixJson(result.stdout);
     } catch (err) {
       if (result.code !== 0) {
-        throw new Error(
-          `ubix ${args.join(" ")} exited ${String(result.code)} with no JSON document — this ubix is too old for` +
-            ` Pier's managed tools (they need --json and UBIX_CONFIG_DIR); install a newer ubix release.` +
-            ` ubix said: ${result.stderr.trim().slice(0, 300) || String(err)}`,
+        throw new UbixTooOld(
+          `${failedRun(`ubix ${args.join(" ")}`, result)} — and no JSON document, so this ubix predates the` +
+            ` --json output the managed tools read (Pier replaces it on the next sync). Parse: ${String(err)}`,
         );
       }
       throw err;
     }
   }
 
-  async #uninstall(ubix: string, env: NodeJS.ProcessEnv, tool: ManagedTool): Promise<ToolSyncEntry> {
-    const error = tool.deprovision ? await this.#provision(env, tool, tool.deprovision) : null;
-    const removed = await this.#exec(ubix, ["remove", tool.name, "--force"], env);
-    return {
-      name: tool.name,
-      action: "removed",
-      version: null,
-      error: removed.code === 0
-        ? error
-        : `ubix remove exited ${String(removed.code)}: ${removed.stderr.trim().slice(0, 300)}`,
-    };
+  /** The declared tools, and the one place a too-old ubix is repaired rather
+   *  than reported: Pier put that binary in `bin/`, so replacing it is Pier's
+   *  job, not an errand for whoever flipped a switch. */
+  async #listing(ubix: string, env: NodeJS.ProcessEnv): Promise<UbixToolState[]> {
+    try {
+      return await this.#states(ubix, env, ["list", "--json"]);
+    } catch (err) {
+      if (!(err instanceof UbixTooOld)) throw err;
+      log.warn(`the ubix in ${this.bin} is too old for --json — replacing it`);
+      return this.#states(await this.bootstrapUbix(true), env, ["list", "--json"]);
+    }
   }
 
   /** Run a tool's own binary against its own footprint. Returns the failure
@@ -783,8 +813,7 @@ export class ManagedTools {
     }
     mkdirSync(join(agentDir, "extensions"), { recursive: true });
     const result = await this.#exec(exe, args, { ...env, PI_CODING_AGENT_DIR: agentDir });
-    if (result.code === 0) return null;
-    return `${tool.name} ${args.join(" ")} exited ${String(result.code)}: ${result.stderr.trim().slice(0, 300)}`;
+    return result.code === 0 ? null : failedRun(`${tool.name} ${args.join(" ")}`, result);
   }
 
   async #getText(url: string): Promise<string> {
@@ -802,12 +831,16 @@ export class ManagedTools {
   }
 }
 
-/** One catalog entry with its binary block updated — the block is optional on
- *  the shape (a bundled extension has none) and always present on these. */
-const withBinary = (entry: CatalogEntry, patch: Partial<NonNullable<CatalogEntry["binary"]>>): CatalogEntry => ({
-  ...entry,
-  binary: { spec: "", installed: false, version: null, path: null, error: null, ...entry.binary, ...patch },
-});
+/** One catalog entry with its binary block updated. Everything this file makes
+ *  is a `source: "binary"` entry; the bundled half of the catalog comes from
+ *  extensions/ and never passes through here. */
+const withBinary = (entry: CatalogEntry, patch: Partial<CatalogBinary>): CatalogEntry =>
+  entry.source === "binary" ? { ...entry, binary: { ...entry.binary, ...patch } } : entry;
+
+/** What a failed child said, in one line — the same shape wherever one fails,
+ *  and never empty: an exit code with no words is not a report. */
+const failedRun = (what: string, result: ExecResult): string =>
+  `${what} exited ${String(result.code)}: ${result.stderr.trim().slice(0, 300) || "(no output)"}`;
 
 /** `<sha256>  <bare filename>` lines, as `sha256sum` writes them. */
 function expectedSha256(checksums: string, file: string): string {

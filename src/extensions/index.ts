@@ -43,10 +43,10 @@ export const BUNDLED: readonly BundledExtension[] = [
 ];
 
 /** The catalog a surface may show: no Pi types, nothing it cannot render.
- *  Half of one list — the tools Pier installs (src/tools.ts) are the other
- *  half, and main.ts is where the two meet. */
+ *  Half of one list; src/tools.ts has the other. */
 export const bundledInfo = (enabled: readonly string[]): CatalogEntry[] =>
   BUNDLED.map(({ name, summary, tools }) => ({
+    source: "bundled",
     kind: "extension",
     name,
     summary,

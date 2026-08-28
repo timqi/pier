@@ -25,7 +25,6 @@ import type {
   ProviderManager,
   SessionSummary,
   ThinkingLevel,
-  ToolsSyncNote,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import { SESSION_TITLE_MAX } from "../limits.js";
@@ -34,8 +33,10 @@ import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { RepoIndex } from "./repos.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import type { SettingsStore } from "../settings.js";
+import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
+import type { ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
@@ -73,14 +74,10 @@ export interface WebDeps {
   config: ConfigStore;
   providers: ProviderManager;
   settings: SettingsStore;
-  /** Everything with a switch — bundled extensions and managed binaries in one
-   *  list — and the task that installs the binaries. Passed as data by main.ts:
-   *  the catalog is code that imports the Pi SDK and spawns ubix, and web/ may
-   *  do neither. */
+  /** Passed straight to the instance routes, which document them. */
   catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-  /** Ran with the new tool set after it is stored; answers with what became of
-   *  the install it asked for, or null when nothing needed doing. */
   onToolsChanged?: (names: string[]) => Promise<ToolsSyncNote | null>;
+  validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
   updates: UpdateCheck;
@@ -118,6 +115,7 @@ export function createServer(
     settings,
     catalog,
     onToolsChanged,
+    validateCustomTools,
     secrets,
     onUnlocked,
     reload,
@@ -618,6 +616,7 @@ export function createServer(
     secrets,
     catalog,
     onToolsChanged,
+    validateCustomTools,
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),
   });

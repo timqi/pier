@@ -18,8 +18,8 @@ import type {
   SessionEventPayload,
   SessionState,
   ThinkingLevel,
-  ToolsSyncNote,
 } from "../core/types.js";
+import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
@@ -30,6 +30,7 @@ import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
 import { createServer, tabPrefix, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
+import type { ToolsSyncNote } from "./types.js";
 
 /** Scripted in-memory AgentSession for seam tests. */
 function fakeSession(id: string): AgentSession & {
@@ -107,6 +108,7 @@ function fakeSession(id: string): AgentSession & {
 
 /** The bundled extensions this test pretends Pier ships with. */
 const CATALOG = [{
+  source: "bundled" as const,
   kind: "extension" as const,
   name: "web",
   summary: "the provider's own web tools",
@@ -115,6 +117,7 @@ const CATALOG = [{
 /** The managed CLI tools this test pretends Pier can install — one list with
  *  the extensions, exactly as main.ts assembles it. */
 const TOOLS = [{
+  source: "binary" as const,
   kind: "tool" as const,
   name: "rg",
   summary: "searches a tree by content",
@@ -308,6 +311,12 @@ function setup(
         toolsTaskId: null,
       }),
     onToolsChanged,
+    // main.ts owns the rule (tools.ts) and the bundled names; the route only
+    // gets an answer.
+    validateCustomTools: (raw: unknown) => {
+      const tools = normalizeCustomTools(raw, CATALOG.map((ext) => ext.name));
+      return tools ? { tools } : { error: CUSTOM_TOOL_RULES };
+    },
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     channelOf: (id) => imOwners.get(id),
@@ -964,6 +973,38 @@ describe("workbench server", () => {
     expect(await res.json()).toMatchObject({
       toolsSync: { state: "refused", reason: "no CLI to run: /opt/pier/cli.js does not exist" },
     });
+  });
+
+  // The bug this test exists for: two quick clicks each sent the whole list as
+  // the page knew it a moment earlier, so the second silently dropped the
+  // first — the sync race, one layer up.
+  it("applies a switch as a delta, so two overlapping flips both survive", async () => {
+    const { app, settings } = setup();
+    const flip = (body: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    // Both are computed from the same starting state — an empty set — exactly
+    // as two clicks on a page that has not been redrawn yet would be.
+    const [first, second] = await Promise.all([
+      flip({ tool: { name: "rg", on: true } }),
+      flip({ tool: { name: "fd", on: true } }),
+    ]);
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(settings.get().tools.sort()).toEqual(["fd", "rg"]);
+
+    // Off is the same delta, and switching one off leaves the other alone.
+    expect((await flip({ tool: { name: "rg", on: false } })).status).toBe(200);
+    expect(settings.get().tools).toEqual(["fd"]);
+    // Extensions take the same shape, and never land in the tool set.
+    expect((await flip({ extension: { name: "web", on: true } })).status).toBe(200);
+    expect(settings.get().extensions).toEqual(["web"]);
+    expect(settings.get().tools).toEqual(["fd"]);
+    // Mis-shaped deltas are refused, not guessed at.
+    expect((await flip({ tool: { name: "rg" } })).status).toBe(400);
+    expect((await flip({ tool: { on: true } })).status).toBe(400);
   });
 
   // The switch cannot say "saved" and leave it there while its work sits

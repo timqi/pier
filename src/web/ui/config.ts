@@ -5,7 +5,9 @@
 // the right. Scope comes from the session list (global + each project cwd);
 // bundled switches are instance-wide, so they appear under Global only.
 
-import type { CatalogEntry, ConfigResource, ToolsSyncNote } from "../../core/types.js";
+import type { CatalogEntry, ConfigResource } from "../../core/types.js";
+// Type-only, erased at build: web's own wire vocabulary (architecture.md).
+import type { ToolsSyncNote } from "../types.js";
 import { failure, sendJson } from "./api.js";
 import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
@@ -66,6 +68,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   /** The custom blocks, as stored: what a save has to send back unchanged. */
   let customTools: { name: string; toml: string }[] = [];
   const extensionEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "extension");
+  /** A row the operator wrote, and may remove again. */
+  const isCustom = (entry: CatalogEntry): boolean => entry.source === "binary" && entry.custom === true;
   const toolEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "tool");
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
@@ -125,11 +129,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     toolsTaskId = body.toolsTaskId;
   }
 
-  /**
-   * The one write behind every switch here. Which set it lands in follows from
-   * the entry: something with a binary is in the tool set, something without is
-   * loaded from inside Pier — one rule, so no switch can write both.
-   */
+  /** The one write behind every switch and every custom-tool edit here. */
   async function save(body: Record<string, unknown>, saved: string): Promise<SaveOutcome> {
     const res = await sendJson("/api/settings", body, "PUT");
     // Redrawn from the state the server last confirmed, so a switch never
@@ -150,13 +150,13 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return { state: "saved", text: saved };
   }
 
-  /** The names one switch leaves behind in its own set. */
-  function switchBody(name: string, checked: boolean): Record<string, string[]> {
-    const binary = Boolean(catalog.find((e) => e.name === name)?.binary);
-    const names = catalog
-      .filter((e) => Boolean(e.binary) === binary && (e.name === name ? checked : e.enabled))
-      .map((e) => e.name);
-    return binary ? { tools: names } : { extensions: names };
+  /** One switch as a delta, never as the list this page computed: two quick
+   *  clicks would each send a list built a moment ago, and the second would
+   *  drop the first. Which set it lands in follows from `source` — installed
+   *  by Pier, or loaded from inside it. */
+  function switchBody(name: string, checked: boolean): Record<string, unknown> {
+    const one = { name, on: checked };
+    return catalog.find((e) => e.name === name)?.source === "binary" ? { tool: one } : { extension: one };
   }
 
   async function load(): Promise<void> {
@@ -423,8 +423,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     editor.focus();
   }
 
-  /** Where every install and every failure already is: the update task's runs.
-   *  Null before anything is switched on, because the task does not exist. */
+  /** Where every install and every failure already is: the update task's
+   *  runs. Null until this Pier has managed to create that task. */
   function taskLink(text: string): HTMLElement | null {
     if (!toolsTaskId) return null;
     const link = h("a", "text-indigo-600 hover:underline", text) as HTMLAnchorElement;
@@ -445,11 +445,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   /** What a binary is right now, in one line — the same line in both panes. */
   function binaryLine(entry: CatalogEntry): string {
-    const binary = entry.binary;
-    if (!binary) return "";
-    if (binary.error) return `${binary.spec} — ${binary.error}`;
-    if (!binary.installed) return `${binary.spec} — not installed`;
-    return `${binary.spec} — ${binary.version ?? "unknown version"} at ${binary.path ?? "an unknown path"}`;
+    if (entry.source !== "binary") return "";
+    const { spec, error, installed, version, path } = entry.binary;
+    if (error) return `${spec} — ${error}`;
+    if (!installed) return `${spec} — not installed`;
+    return `${spec} — ${version ?? "unknown version"} at ${path ?? "an unknown path"}`;
   }
 
   /**
@@ -470,7 +470,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         h(
           "span",
           "ml-auto text-[11px] uppercase tracking-wide text-neutral-400",
-          ext.binary ? "installed by Pier" : "ships with Pier",
+          ext.source === "binary" ? "installed by Pier" : "ships with Pier",
         ),
       ),
       h(
@@ -483,11 +483,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         h(
           "dl",
           "flex max-w-2xl flex-col gap-1.5",
-          ...(ext.adds ?? []).flatMap((tool) => [
+          ...(ext.source === "bundled" ? ext.adds : []).flatMap((tool) => [
             h("dt", "font-mono text-[12px] text-neutral-700", tool.name),
             h("dd", "text-[12px] leading-snug text-neutral-500", `needs ${tool.needs}`),
           ]),
-          ...(ext.binary
+          ...(ext.source === "binary"
             ? [
               h("dt", "font-mono text-[12px] text-neutral-700", "binary"),
               h(
@@ -500,7 +500,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         ),
         toggle(
           "Enabled",
-          ext.binary
+          ext.source === "binary"
             ? "Installed into Pier's own bin directory, first on the PATH every session, task and terminal "
               + "inherits; it registers its own Pi extension. Switching it off uninstalls both."
             : "Loaded from inside Pier — nothing is installed and no update touches your own extensions. "
@@ -511,8 +511,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         h(
           "p",
           "max-w-2xl text-[12px] leading-snug text-neutral-400",
-          ...(ext.binary
-            ? runs ? ["A daily task installs and updates it — its history is ", runs, "."] : ["Switching it on creates the daily task that installs it."]
+          ...(ext.source === "binary"
+            ? runs ? ["A daily task installs and updates it — its history is ", runs, "."] : ["Its installs run as the daily update task."]
             : ["An extension of your own that registers the same tool wins: this copy stands down and says so in the log."]),
         ),
         status,
@@ -520,11 +520,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     );
   }
 
-  /**
-   * Every command-line tool in one pane: a row, a line and a switch each, plus
-   * the operator's own specs. No page per binary — they differ by name and
-   * version, and a page each would repeat the same three facts.
-   */
+  /** Every command-line tool in one pane: a row, a line and a switch each,
+   *  plus the operator's own blocks. */
   function openTools(note?: SaveOutcome, draft = { name: "", toml: "" }): void {
     paneRequest++;
     const status = h("span", "text-[11.5px] text-neutral-400", "");
@@ -533,7 +530,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     // Every binary that is on, not only the ones in this pane: rtk is switched
     // by the same set from its own pane, and rewriting the set without it
     // would uninstall it behind the operator's back.
-    const enabledBinaries = (): string[] => catalog.filter((e) => e.binary && e.enabled).map((e) => e.name);
+
     const runs = taskLink("the update task");
 
     const row = (tool: CatalogEntry): HTMLElement => {
@@ -544,13 +541,15 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
           "span",
           "flex items-center gap-2 text-[13px] text-neutral-700",
           h("span", "font-mono", tool.name),
-          ...(tool.custom ? [badge("yours", "bg-neutral-50 text-neutral-500 ring-neutral-200")] : []),
+          ...(isCustom(tool) ? [badge("yours", "bg-neutral-50 text-neutral-500 ring-neutral-200")] : []),
         ),
         h("span", "text-[11.5px] leading-snug text-neutral-400", tool.summary || binaryLine(tool)),
         ...(tool.summary
           ? [h(
             "span",
-            `font-mono text-[11px] leading-snug ${tool.binary?.error ? "text-red-600" : "text-neutral-400"}`,
+            `font-mono text-[11px] leading-snug ${
+              tool.source === "binary" && tool.binary.error ? "text-red-600" : "text-neutral-400"
+            }`,
             binaryLine(tool),
           )]
           : []),
@@ -562,7 +561,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         void save(
           {
             customTools: customTools.filter((c) => c.name !== tool.name),
-            tools: enabledBinaries().filter((n) => n !== tool.name),
+            tool: { name: tool.name, on: false },
           },
           `Removed ${tool.name} — the next run uninstalls it.`,
         ).then((outcome) => openTools(outcome));
@@ -571,7 +570,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         "div",
         "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0",
         line,
-        ...(tool.custom ? [remove] : []),
+        ...(isCustom(tool) ? [remove] : []),
         box,
       );
     };
@@ -600,7 +599,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       }
       add.disabled = true;
       void save(
-        { customTools: [...customTools, entry], tools: [...enabledBinaries(), entry.name] },
+        { customTools: [...customTools, entry], tool: { name: entry.name, on: true } },
         `Added ${entry.name} — installing now.`,
       ).then((outcome) =>
         // A refused block is redrawn with what was typed still in the fields:
@@ -671,7 +670,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     const entry = catalog.find((e) => e.name === name);
     redraw(await save(
       switchBody(name, checked),
-      entry?.binary
+      entry?.source === "binary"
         ? checked ? "Saved — installing now; watch the run." : "Saved — uninstalling in the next run."
         : "Saved — sessions take it on their next message.",
     ));

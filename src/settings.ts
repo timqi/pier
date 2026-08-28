@@ -231,6 +231,24 @@ export class SettingsStore {
     return this.get();
   }
 
+  /**
+   * Several setters as one write. A request that declares a tool *and* the
+   * switch that turns it on must not be able to store one without the other:
+   * half of that pair is a switch nobody can explain — on and undeclared, or
+   * declared and invisible.
+   */
+  transact<T>(work: () => T): T {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = work();
+      this.#db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      this.#db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   #set(key: string, value: string): void {
     this.#db.prepare(`
       INSERT INTO settings(key, value) VALUES (?, ?)

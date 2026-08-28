@@ -52,7 +52,9 @@ src/
                slack.ts + -api + -render + -panel + -tool + -outbound + -directory
                lark.ts + -api + -render + -panel + -outbound
   boards/      boards.ts (scan + manifest + static serving), pier.css
-  web/         server.ts (sessions + events), instance.ts (settings, update,
+  web/         types.ts (the wire shapes its answers carry, and the one file
+               here the browser may import), server.ts (sessions + events),
+               instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
                auth.ts, files.ts, session-state.ts (what the workbench
                decided about a session: pinned, unread, order),
@@ -93,8 +95,8 @@ never imports platform SDKs or Pi, and runtime dependencies never go sideways.
 allowed to import the SDK. Only `agent/pi.ts` registers one (as an inline
 factory) and only `main.ts` reads the catalog, as `CatalogEntry` data for the
 Console; nothing else imports the area.
-The browser may import owner-defined HTTP DTOs from `tasks/types.ts` and
-`channels/types.ts` type-only: these imports are erased at build, keep wire
+The browser may import owner-defined HTTP DTOs from `tasks/types.ts`,
+`channels/types.ts` and `web/types.ts` type-only: these imports are erased at build, keep wire
 shapes single-sourced, and do not let web implement either area.
 `tools.ts` is instance-layer too, but not a leaf anything may import: only
 `main.ts`, `cli.ts` and `settings.ts` reach it, because managing binaries is an

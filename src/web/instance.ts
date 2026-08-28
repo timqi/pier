@@ -3,7 +3,7 @@
 // a session; server.ts stays the session/event surface.
 
 import type { Hono } from "hono";
-import type { CatalogEntry, ToolsSyncNote } from "../core/types.js";
+import type { CatalogEntry } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
@@ -14,7 +14,10 @@ import {
   normalizeTools,
   type SettingsStore,
 } from "../settings.js";
-import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
+// Type-only, and only for the shape the injected validator answers with:
+// erased at build, so web/ still runs nothing from tools.ts (architecture.md).
+import type { CustomTool } from "../tools.js";
+import type { ToolsSyncNote } from "./types.js";
 import type { UpdateCheck } from "../update.js";
 
 /** How this instance replaces itself, or `null` where nothing supervises it.
@@ -38,6 +41,10 @@ export interface SecretsControl {
   unlock(): Promise<void>;
   rotateKek(mode?: SecretsMode): Promise<void>;
 }
+
+/** One name added to or removed from a stored set, order preserved. */
+const withName = (current: readonly string[], { name, on }: { name: string; on: boolean }): string[] =>
+  on ? [...new Set([...current, name])] : current.filter((each) => each !== name);
 
 /** Client reports per minute, for the whole server: a browser bug can fire in
  *  a loop, and the journal is shared with everything else Pier says. */
@@ -66,6 +73,10 @@ export function registerInstanceRoutes(
      *  where that belongs, not only the journal (§5b). `null`: nothing needed
      *  doing, so the switch says only that it saved. */
     onToolsChanged?: (names: string[]) => Promise<ToolsSyncNote | null>;
+    /** What a custom tool may be. Injected because the rule lives with the
+     *  installer (src/tools.ts) and web/ may not import it; main.ts also folds
+     *  in the names the bundled catalog already owns. */
+    validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
@@ -83,6 +94,7 @@ export function registerInstanceRoutes(
     onUnlocked,
     onSettingsChanged,
     onToolsChanged,
+    validateCustomTools,
   } = deps;
   const updateLog = logger("update");
   // How long POST /api/update may hold its response open. A busy Pier drains
@@ -201,6 +213,11 @@ export function registerInstanceRoutes(
 
   // Partial on purpose: each surface sends only the setting it edits, and a
   // malformed field is rejected before anything is written.
+  //
+  // A switch sends a *delta* (`tool`/`extension`), not the list it computed:
+  // two quick clicks each carry a list built from what the page knew a moment
+  // ago, so the second silently drops the first. The whole-list forms stay for
+  // callers that really are replacing a set.
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null) as
       | {
@@ -211,19 +228,21 @@ export function registerInstanceRoutes(
         extensions?: unknown;
         tools?: unknown;
         customTools?: unknown;
+        extension?: unknown;
+        tool?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.tools, body.customTools]
+      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.tools, body.customTools, body.extension, body.tool]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions, tools or customTools required",
+        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions, tools, customTools, extension or tool required",
       }, 400);
     }
-    // Everything is validated before anything is written: a request carrying a
-    // new custom tool *and* the switch that turns it on must not leave one of
-    // the two stored ("never half-handled").
+    // Everything is validated before anything is written, and everything is
+    // written in one transaction: a request carrying a new custom tool *and*
+    // the switch that turns it on must not leave one of the two stored.
     const writes: (() => void)[] = [];
     const refuse = (error: string) => c.json({ error }, 400);
     if (body?.publicUrl !== undefined) {
@@ -253,25 +272,50 @@ export function registerInstanceRoutes(
       writes.push(() => settings.setExtensions(names));
     }
     if (body?.customTools !== undefined) {
-      const custom = normalizeCustomTools(body.customTools);
-      if (custom === null) return refuse(CUSTOM_TOOL_RULES);
+      const validated = validateCustomTools?.(body.customTools) ??
+        { error: "this Pier cannot store custom tools" };
+      if ("error" in validated) return refuse(validated.error);
+      const { tools: custom } = validated;
       writes.push(() => settings.setCustomTools(custom));
     }
+    /** A single switch, applied to the set as it is *now* rather than to the
+     *  list the browser had. Returns the name, or the refusal. */
+    const delta = (raw: unknown): { name: string; on: boolean } | string => {
+      const given = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
+      const name = typeof given?.name === "string" ? given.name.trim() : "";
+      if (!name || name.length > 64 || typeof given?.on !== "boolean") return "expected {name, on}";
+      return { name, on: given.on };
+    };
+    if (body?.extension !== undefined) {
+      const one = delta(body.extension);
+      if (typeof one === "string") return refuse(`extension: ${one}`);
+      writes.push(() => settings.setExtensions(withName(settings.get().extensions, one)));
+    }
+    // What the tool switches changed to, for the install below: the delta is
+    // resolved inside the transaction, so it is the set that was stored.
     let tools: string[] | null = null;
     if (body?.tools !== undefined) {
-      tools = normalizeTools(body.tools);
-      if (tools === null) return refuse("tools must be a list of names (≤32)");
-      const names = tools;
-      writes.push(() => settings.setTools(names));
+      const names = normalizeTools(body.tools);
+      if (names === null) return refuse("tools must be a list of names (≤32)");
+      writes.push(() => settings.setTools((tools = names)));
     }
-    for (const write of writes) write();
+    if (body?.tool !== undefined) {
+      const one = delta(body.tool);
+      if (typeof one === "string") return refuse(`tool: ${one}`);
+      writes.push(() => settings.setTools((tools = withName(settings.get().tools, one))));
+    }
+    settings.transact(() => {
+      for (const write of writes) write();
+    });
     // Stored first, then acted on: the switch shows what was written even when
     // the install cannot start — and then says why, here, rather than leaving
     // "saved" as the last thing anyone was told.
     const note = tools ? await onToolsChanged?.(tools) : null;
     // The URL and the extension set are both read when a session opens; the
     // model menu is read per picker call, so it needs no recycle.
-    if (body?.publicUrl !== undefined || body?.extensions !== undefined) onSettingsChanged?.();
+    if (body?.publicUrl !== undefined || body?.extensions !== undefined || body?.extension !== undefined) {
+      onSettingsChanged?.();
+    }
     return c.json({ ...(await instanceSettings()), ...(note ? { toolsSync: note } : {}) });
   });
 

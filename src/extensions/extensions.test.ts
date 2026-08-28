@@ -37,8 +37,9 @@ describe("the bundled extensions", () => {
   it("hands surfaces names and summaries, and loads only what is switched on", () => {
     expect(bundledInfo([])).toEqual([
       {
-        // Half of one catalog: the tools Pier installs are the other half, and
-        // both halves are drawn by the same Console section.
+        // Half of one catalog: the tools Pier installs are the other half,
+        // and `source` is what tells a surface which half it is holding.
+        source: "bundled",
         kind: "extension",
         name: "web",
         summary: expect.stringContaining("hosted web tools"),

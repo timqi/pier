@@ -11,8 +11,6 @@ import {
   normalizeCustomTools,
   parseUbixJson,
   specOf,
-  toolsTaskDraft,
-  toolsTaskPlan,
   type SyncRunner,
   ubixAsset,
   ubixConfigToml,
@@ -257,29 +255,6 @@ describe("the release asset for this machine", () => {
   });
 });
 
-describe("the daily update task", () => {
-  it("exists exactly while something is switched on", () => {
-    expect(toolsTaskPlan([], false, false)).toEqual({ do: "nothing" });
-    expect(toolsTaskPlan([], true, true)).toEqual({ do: "retire" });
-    // A boot creates the task an enabled set needs, but does not reinstall.
-    expect(toolsTaskPlan(["rtk"], false, false)).toEqual({ do: "create", run: false });
-    expect(toolsTaskPlan(["rtk"], false, true)).toEqual({ do: "create", run: true });
-    // A flipped switch converges now; a restart does not.
-    expect(toolsTaskPlan(["rtk"], true, true)).toEqual({ do: "run" });
-    expect(toolsTaskPlan(["rtk"], true, false)).toEqual({ do: "nothing" });
-  });
-
-  it("runs the command it was handed, in Pier's own home", () => {
-    const draft = toolsTaskDraft(`"/opt/node 24/bin/node" "/opt/pier/cli.js" tools sync`, "/home/t/.pier", "Europe/Berlin");
-    expect(draft.action).toEqual({
-      type: "bash",
-      script: `"/opt/node 24/bin/node" "/opt/pier/cli.js" tools sync`,
-      cwd: "/home/t/.pier",
-    });
-    expect(draft.trigger.expression.split(/\s+/)).toHaveLength(5);
-  });
-});
-
 // --- the operation surface, with both seams replaced -------------------------
 
 interface Call {
@@ -290,7 +265,9 @@ interface Call {
 
 /** A rig with a bin/ that already holds ubix (and optionally the tools), so
  *  nothing here ever fetches or spawns anything. */
-function rig(options: { answer?: (call: Call) => ExecResult | undefined; installed?: string[] } = {}) {
+function rig(
+  options: { answer?: (call: Call) => ExecResult | undefined; installed?: string[]; fetch?: typeof fetch } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "pier-tools-"));
   mkdirSync(join(root, "bin"), { recursive: true });
   for (const name of ["ubix", ...(options.installed ?? [])]) {
@@ -305,7 +282,11 @@ function rig(options: { answer?: (call: Call) => ExecResult | undefined; install
   return {
     root,
     calls,
-    tools: new ManagedTools({ root, exec, fetch: () => Promise.reject(new Error("the network is not open in tests")) }),
+    tools: new ManagedTools({
+      root,
+      exec,
+      fetch: options.fetch ?? (() => Promise.reject(new Error("the network is not open in tests"))),
+    }),
     /** Every command line, in order — the assertions below are about order. */
     lines: () => calls.map((c) => `${c.file.split("/").pop() ?? ""} ${c.args.join(" ")}`),
   };
@@ -334,7 +315,7 @@ describe("ManagedTools.sync", () => {
     expect(report.summary).toBe("rtk: upgraded v0.23.5");
     expect(r.lines()).toEqual([
       "ubix list --json",
-      "ubix upgrade --all --json",
+      "ubix upgrade --all --prune --json",
       "rtk init -g --agent pi",
     ]);
     // Pier's own config, never the operator's ~/.config/ubix.
@@ -353,19 +334,17 @@ describe("ManagedTools.sync", () => {
       installed: ["rtk"],
       answer: (call) => (call.args[0] === "list" ? ok(LIST_JSON) : ok(upgradeJson())),
     });
-    const report = await r.tools.sync([]);
-    // Everything ubix still declares goes, whether or not it has a footprint
-    // of its own to undo — the config is Pier's, so nothing there is a
-    // stranger's.
+    await r.tools.sync([]);
+    // The listing survives for one reason: rtk has to uninstall its own Pi
+    // extension *before* its binary goes, and ubix cannot know that. Removing
+    // the rest is ubix's own `--prune`, which knows per source how.
     expect(r.lines()).toEqual([
       "ubix list --json",
       "rtk init --uninstall --agent pi --global",
-      "ubix remove rtk --force",
-      "ubix remove fd --force",
-      "ubix remove wt --force",
-      "ubix upgrade --all --json",
+      "ubix upgrade --all --prune --json",
     ]);
-    expect(report.entries[0]).toEqual({ name: "rtk", action: "removed", version: null, error: null });
+    // Nothing is declared any more, so prune takes all three.
+    expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).not.toContain("[tools.");
     // The config that follows no longer declares it.
     expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).not.toContain("[tools.rtk]");
   });
@@ -408,9 +387,38 @@ describe("ManagedTools.sync", () => {
     expect(report.summary).toContain("rtk init -g --agent pi exited 3: unknown agent: pi");
   });
 
-  it("says an ubix too old for --json is too old, instead of scraping its output", async () => {
-    const r = rig({ answer: () => ({ code: 1, stdout: "", stderr: "error: unexpected argument '--json'" }) });
-    await expect(r.tools.sync(["rtk"])).rejects.toThrow(/too old for Pier's managed tools/);
+  it("keeps a tool ubix knows about when its own uninstall failed", async () => {
+    // Removing it now would orphan rtk's Pi extension with nothing left able
+    // to remove it — so it stays declared and the next run tries again.
+    const r = rig({
+      installed: ["rtk"],
+      answer: (call) => {
+        if (call.args[0] === "list") return ok(LIST_JSON);
+        if (call.args[0] === "upgrade") return ok(upgradeJson());
+        return { code: 2, stdout: "", stderr: "rtk: cannot write the agent dir" };
+      },
+    });
+    const report = await r.tools.sync([]);
+    expect(report.failed).toBe(true);
+    expect(report.summary).toContain("rtk: FAILED");
+    // Still declared, so `--prune` leaves the binary alone.
+    expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).toContain("[tools.rtk]");
+  });
+
+  it("replaces an ubix too old for --json rather than sending the operator to do it", async () => {
+    // Pier put that binary in bin/; a version of it Pier cannot read is Pier's
+    // to fix. (The replacement itself needs the network, which tests refuse —
+    // what is asserted is that it was attempted, not that it landed.)
+    let fetched = 0;
+    const r = rig({
+      answer: () => ({ code: 1, stdout: "", stderr: "error: unexpected argument '--json'" }),
+      fetch: () => {
+        fetched++;
+        return Promise.reject(new Error("the network is not open in tests"));
+      },
+    });
+    await expect(r.tools.sync(["rtk"])).rejects.toThrow(/network/);
+    expect(fetched).toBe(1);
   });
 });
 
@@ -421,6 +429,7 @@ describe("ManagedTools.status", () => {
     const entries = await tools.status(["rtk"]);
     expect(entries.map((e) => e.name)).toEqual(MANAGED.map((t) => t.name));
     expect(entries[0]).toEqual({
+      source: "binary",
       kind: "extension",
       name: "rtk",
       summary: expect.any(String),
@@ -452,7 +461,7 @@ describe("ManagedTools.status", () => {
         })),
     });
     const [rtk] = await r.tools.status(["rtk"]);
-    expect(rtk?.binary).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
+    expect(rtk?.source === "binary" && rtk.binary).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
   });
 
   it("says when a tool installed somewhere Pier's PATH does not point", async () => {
@@ -482,14 +491,15 @@ describe("ManagedTools.status", () => {
     });
     const custom = [{ name: "cc", toml: `spec = "npm:@anthropic-ai/claude-code"` }];
     const cc = (await r.tools.status(["cc"], custom)).find((e) => e.name === "cc");
-    expect(cc?.binary).toMatchObject({ installed: true, path: "/home/t/.local/share/fnm/aliases/default/bin/claude" });
-    expect(cc?.binary?.error).toContain("installed outside Pier's bin");
+    const binary = cc?.source === "binary" ? cc.binary : null;
+    expect(binary).toMatchObject({ installed: true, path: "/home/t/.local/share/fnm/aliases/default/bin/claude" });
+    expect(binary?.error).toContain("installed outside Pier's bin");
   });
 
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {
     const r = rig({ answer: () => ({ code: 1, stdout: "", stderr: "state.toml is locked" }) });
     const [rtk] = await r.tools.status([]);
-    expect(rtk?.binary?.error).toMatch(/state\.toml is locked/);
+    expect(rtk?.source === "binary" && rtk.binary.error).toMatch(/state\.toml is locked/);
     expect(rtk?.enabled).toBe(false);
   });
 });

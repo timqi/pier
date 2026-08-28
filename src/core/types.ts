@@ -308,54 +308,56 @@ export interface ConfigResource {
   link: boolean;
 }
 
+/** What a switch that installs something knows about the thing on disk. */
+export interface CatalogBinary {
+  /** The `spec = "…"` line of its ubix block. */
+  spec: string;
+  /** Installed *and* present on disk. A binary the installer records and the
+   *  filesystem no longer has is broken, and says so in `error`. */
+  installed: boolean;
+  version: string | null;
+  path: string | null;
+  /** Why the state above is not what it should be, when it is not. */
+  error: string | null;
+}
+
 /**
  * One switch in the Console: something this instance can turn on. Not a
  * `ConfigResource` — it is not a file anyone can open, and its state is an
  * instance setting rather than something on disk.
  *
  * One shape for extensions and command-line tools because they share the whole
- * vocabulary, and `rtk` is the proof: it is an extension *and* a binary, so
- * two parallel catalogs would have had to draw it twice and agree with each
- * other about it.
+ * vocabulary, and `rtk` is the proof: it is an extension *and* a binary. The
+ * union is on `source`, which is the question every consumer actually asks —
+ * which set the switch writes, and whether there is a version to show — so an
+ * extension with a version or a tool without one cannot be spelled at all.
  */
-export interface CatalogEntry {
-  /** "extension": it gives every session new tools. "tool": a binary on the
-   *  PATH, which the agent uses like any other command. */
-  kind: "extension" | "tool";
-  name: string;
-  summary: string;
-  enabled: boolean;
-  /** The tools an extension adds, and what each needs — which providers an
-   *  extension works with is the question asked in front of its switch, and it
-   *  does not always have one answer for the whole extension. */
-  adds?: { name: string; needs: string }[];
-  /** The binary behind it, where there is one: the spec it is installed from
-   *  and what is on disk right now. Its presence is also what says which set
-   *  the switch writes — an entry without one is loaded from inside Pier. */
-  binary?: {
-    spec: string;
-    /** Installed *and* present on disk. A binary the installer records and
-     *  the filesystem no longer has is broken, and says so in `error`. */
-    installed: boolean;
-    version: string | null;
-    path: string | null;
-    /** Why the state above is not what it should be, when it is not. */
-    error: string | null;
+export type CatalogEntry =
+  | {
+    /** Loaded from inside Pier: nothing is installed, nothing to update. */
+    source: "bundled";
+    kind: "extension";
+    name: string;
+    summary: string;
+    enabled: boolean;
+    /** The tools it adds, and what each needs — which providers an extension
+     *  works with is the question asked in front of its switch, and it does
+     *  not always have one answer for the whole extension. */
+    adds: { name: string; needs: string }[];
+  }
+  | {
+    /** Installed by ubix into Pier's own bin (src/tools.ts). */
+    source: "binary";
+    /** `extension` when the command *is* an extension (rtk registers its own
+     *  Pi extension); `tool` when it is just a command. */
+    kind: "extension" | "tool";
+    name: string;
+    summary: string;
+    enabled: boolean;
+    binary: CatalogBinary;
+    /** A block the operator wrote themselves, and may remove again. */
+    custom?: boolean;
   };
-  /** A spec the operator added themselves, and may remove again. */
-  custom?: boolean;
-}
-
-/**
- * What became of the install a switch asked for, told to the surface that
- * flipped it. `waiting` is its own state on purpose: a sync was already
- * running, so this one goes next — which is neither a failure nor the "saved"
- * that used to be the last thing anyone was told while nothing happened.
- */
-export type ToolsSyncNote =
-  | { state: "started" }
-  | { state: "waiting" }
-  | { state: "refused"; reason: string };
 
 /**
  * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
