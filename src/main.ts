@@ -28,8 +28,16 @@ import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
+import type { TaskDefinition } from "./tasks/types.js";
 import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
+import {
+  ManagedTools,
+  prependPath,
+  TOOLS_TASK_CREATOR,
+  toolsTaskDraft,
+  toolsTaskPlan,
+} from "./tools.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
@@ -56,6 +64,11 @@ const log = logger("pier");
 // again from this instance's own PIER_HOME.
 process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
 process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
+
+// Ahead of everything Pier spawns — sessions, tasks, the Web Terminal all
+// inherit this process's env. A tool switched on in the Console is Pier's
+// copy at Pier's version, so it goes first, not last.
+prependPath(process.env);
 
 // First, and explicitly: every store below shares this one connection, and a
 // schema that cannot be migrated must stop the process here — before a port is
@@ -153,6 +166,56 @@ tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
 });
 tasks.start();
+
+// The managed CLI tools (src/tools.ts) and the one visible thing that keeps
+// them current: an ordinary bash task on an ordinary cron, created here
+// because tools.ts may not import tasks/. Its run history *is* the tools
+// status surface — the install, the daily update, and every failure are runs
+// with output, so there is no second place to look and nothing to disagree
+// with (§5b).
+const managedTools = new ManagedTools();
+const toolsEntry = fileURLToPath(new URL("./cli.js", import.meta.url));
+const toolsTask = (): TaskDefinition | undefined =>
+  tasks.list().find((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
+/** The plan (tools.ts) turned into task calls — the only half of it that needs
+ *  the task API, which is why it is here and not there. */
+const applyTools = async (names: readonly string[], flipped: boolean): Promise<void> => {
+  const existing = toolsTask();
+  const plan = toolsTaskPlan(names, existing !== undefined, flipped);
+  if (plan.do === "nothing") return;
+  if (plan.do === "retire") {
+    if (!existing) return;
+    // The last tool switched off still has to be uninstalled, and a tool
+    // uninstalls itself (rtk removes its own Pi extension) — so the task runs
+    // one final time and is archived only once that run has succeeded. A
+    // failed removal keeps the task, and its cron keeps retrying.
+    const run = tasks.run(existing.id, null, "manual");
+    void tasks.waitForRun(run.id).then((settled) => {
+      if (settled.state === "succeeded") tasks.archive(existing.id);
+    });
+    return;
+  }
+  if (plan.do === "run") {
+    if (existing) tasks.run(existing.id, null, "manual");
+    return;
+  }
+  if (!existsSync(toolsEntry)) {
+    log.error(`tools cannot be managed: ${toolsEntry} does not exist (a run from source has no built CLI)`);
+    return;
+  }
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  // PIER_HOME as cwd: the command belongs to the instance, not to a project.
+  const task = await tasks.create(
+    toolsTaskDraft(process.execPath, toolsEntry, PIER_HOME, timezone),
+    TOOLS_TASK_CREATOR,
+  );
+  if (plan.run) tasks.run(task.id, null, "manual");
+};
+// At boot: create the task an enabled set needs, or finish an uninstall a
+// crash cut off. Never a run of its own — restarting Pier is not a reason to
+// reinstall anything.
+void applyTools(settings.get().tools, false)
+  .catch((err: unknown) => log.error("the tools update task could not be reconciled", err));
 
 channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
@@ -328,6 +391,15 @@ app.route("/", createServer({
   // The catalog is code, so the composition root is where it is read: web/
   // gets names and summaries, not a module that imports the Pi SDK.
   extensions: () => bundledInfo(settings.get().extensions),
+  // Same shape as the extension catalog, and the same reason: web/ gets data,
+  // not a module that spawns ubix. The task id is where the runs are.
+  tools: async () => ({
+    catalog: await managedTools.status(settings.get().tools),
+    taskId: toolsTask()?.id ?? null,
+  }),
+  onToolsChanged: (names) =>
+    void applyTools(names, names.length > 0)
+      .catch((err: unknown) => log.error("the tools update task could not be reconciled", err)),
   secrets,
   updates,
   updater,
