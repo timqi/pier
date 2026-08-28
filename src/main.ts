@@ -174,17 +174,36 @@ tasks.start();
 // with output, so there is no second place to look and nothing to disagree
 // with (§5b).
 const managedTools = new ManagedTools();
-const toolsEntry = fileURLToPath(new URL("./cli.js", import.meta.url));
 const toolsTask = (): TaskDefinition | undefined =>
   tasks.list().find((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
+/**
+ * How this Pier runs `pier tools sync`. Installed, that is the built CLI beside
+ * main.js. From a source checkout there is no `cli.js` and node cannot strip
+ * types through imports that still say `.js`, so it is the same command under
+ * tsx — which is what a source checkout has. Neither available is a refusal
+ * with a reason, never a task whose script cannot run.
+ */
+const toolsSyncScript = (): { script: string } | { problem: string } => {
+  const built = fileURLToPath(new URL("./cli.js", import.meta.url));
+  const quoted = (...parts: string[]): string => parts.map((p) => `"${p}"`).join(" ");
+  if (existsSync(built)) return { script: `${quoted(process.execPath, built)} tools sync` };
+  const source = fileURLToPath(new URL("./cli.ts", import.meta.url));
+  if (!existsSync(source)) return { problem: `no CLI to run: neither ${built} nor ${source} exists` };
+  try {
+    return { script: `${quoted(process.execPath)} --import ${quoted(import.meta.resolve("tsx"))} ${quoted(source)} tools sync` };
+  } catch {
+    return { problem: `running from source (${source}) and tsx is not installed — run npm install, or npm run build` };
+  }
+};
 /** The plan (tools.ts) turned into task calls — the only half of it that needs
- *  the task API, which is why it is here and not there. */
-const applyTools = async (names: readonly string[], flipped: boolean): Promise<void> => {
+ *  the task API, which is why it is here and not there. Answers with the reason
+ *  nothing was scheduled, so the surface that asked can say it. */
+const applyTools = async (names: readonly string[], flipped: boolean): Promise<string | null> => {
   const existing = toolsTask();
   const plan = toolsTaskPlan(names, existing !== undefined, flipped);
-  if (plan.do === "nothing") return;
+  if (plan.do === "nothing") return null;
   if (plan.do === "retire") {
-    if (!existing) return;
+    if (!existing) return null;
     // The last tool switched off still has to be uninstalled, and a tool
     // uninstalls itself (rtk removes its own Pi extension) — so the task runs
     // one final time and is archived only once that run has succeeded. A
@@ -193,29 +212,36 @@ const applyTools = async (names: readonly string[], flipped: boolean): Promise<v
     void tasks.waitForRun(run.id).then((settled) => {
       if (settled.state === "succeeded") tasks.archive(existing.id);
     });
-    return;
+    return null;
   }
   if (plan.do === "run") {
     if (existing) tasks.run(existing.id, null, "manual");
-    return;
+    return null;
   }
-  if (!existsSync(toolsEntry)) {
-    log.error(`tools cannot be managed: ${toolsEntry} does not exist (a run from source has no built CLI)`);
-    return;
+  const command = toolsSyncScript();
+  if ("problem" in command) {
+    log.error(`tools cannot be managed: ${command.problem}`);
+    return command.problem;
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   // PIER_HOME as cwd: the command belongs to the instance, not to a project.
   const task = await tasks.create(
-    toolsTaskDraft(process.execPath, toolsEntry, PIER_HOME, timezone),
+    toolsTaskDraft(command.script, PIER_HOME, timezone),
     TOOLS_TASK_CREATOR,
   );
   if (plan.run) tasks.run(task.id, null, "manual");
+  return null;
+};
+/** Whatever went wrong reaching the person who caused it, wherever they were:
+ *  a boot has only the journal, a flipped switch has its own status line. */
+const toolsFailure = (err: unknown): string => {
+  log.error("the tools update task could not be reconciled", err);
+  return err instanceof Error ? err.message : String(err);
 };
 // At boot: create the task an enabled set needs, or finish an uninstall a
 // crash cut off. Never a run of its own — restarting Pier is not a reason to
 // reinstall anything.
-void applyTools(settings.get().tools, false)
-  .catch((err: unknown) => log.error("the tools update task could not be reconciled", err));
+void applyTools(settings.get().tools, false).catch(toolsFailure);
 
 channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
@@ -390,16 +416,17 @@ app.route("/", createServer({
   settings,
   // The catalog is code, so the composition root is where it is read: web/
   // gets names and summaries, not a module that imports the Pi SDK.
-  extensions: () => bundledInfo(settings.get().extensions),
-  // Same shape as the extension catalog, and the same reason: web/ gets data,
-  // not a module that spawns ubix. The task id is where the runs are.
-  tools: async () => ({
-    catalog: await managedTools.status(settings.get().tools),
-    taskId: toolsTask()?.id ?? null,
-  }),
-  onToolsChanged: (names) =>
-    void applyTools(names, names.length > 0)
-      .catch((err: unknown) => log.error("the tools update task could not be reconciled", err)),
+  // One list, assembled where both halves are visible: the extensions Pier
+  // loads from inside itself and the binaries it installs are the same kind of
+  // switch to the person flipping it, and rtk is both.
+  catalog: async () => {
+    const { extensions, tools, customTools } = settings.get();
+    return {
+      entries: [...bundledInfo(extensions), ...await managedTools.status(tools, customTools)],
+      toolsTaskId: toolsTask()?.id ?? null,
+    };
+  },
+  onToolsChanged: (names) => applyTools(names, names.length > 0).catch(toolsFailure),
   secrets,
   updates,
   updater,
