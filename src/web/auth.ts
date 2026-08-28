@@ -145,13 +145,15 @@ const hash = (password: string, salt: string): string =>
  * What a logged-out visitor must still reach: the login form, published
  * boards, and the stylesheet those boards link — a published board rendering
  * unstyled for the person it was published to is the same bug as not serving
- * it. `/boards/*` stays behind the boundary; `/p/*` is the published mirror,
- * the single exempt prefix `docs/architecture.md` reserved for this.
+ * it. Both live under `/p/*` (the stylesheet at `/p/_assets/pier.css`), the
+ * single exempt prefix `docs/architecture.md` reserved for this, so the rule
+ * is one prefix here and one prefix in anything fronting Pier; `/boards/*`
+ * stays behind the boundary.
  */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
   if (method !== "GET" && method !== "HEAD") return false;
-  return path.startsWith("/p/") || path === "/boards/_assets/pier.css";
+  return path.startsWith("/p/");
 }
 
 const sign = (secret: string, expiresAt: number): string =>

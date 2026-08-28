@@ -226,7 +226,8 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   middleware ahead of all routes, a scrypt hash generated on first boot and
   printed once, and a cookie signed with that hash. Single-account on purpose —
   Pier has one workspace, so a boundary is what an exposed instance needs, not
-  identities. `/p/*` and the stylesheet boards link are the only exemptions, so
+  identities. `/p/*` — published boards and the stylesheet they link — is the
+  only exemption, so
   a board's `public` flag is a real boundary and not just a data state.
 - Remote access and deployment: the loopback bind is the posture, reached over
   an SSH tunnel, a private network or a reverse proxy. `pier service install`

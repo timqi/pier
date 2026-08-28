@@ -56,7 +56,8 @@ new day — so the last one still applies; a gap alone shows as time only, like
 export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }): string {
   const reach = instance.publicUrl
     ? `Address: ${instance.publicUrl} — a board's link is that plus ` +
-      "`/boards/<slug>/`, or `/p/<slug>/` once published."
+      "`/boards/<slug>/`, or `/p/<slug>-<token>/` once published, where `token` " +
+      "is the random field the manifest carries beside `public`."
     : "No public address is configured (the user sets one in Console → Settings), " +
       "so give paths and never guess a host.";
   return `${REPLY_SURFACE_PROMPT}

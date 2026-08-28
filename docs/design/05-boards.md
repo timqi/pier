@@ -5,8 +5,8 @@ agent writes to present something — a report, a dashboard, a digest, a handove
 note — at a stable URL, readable on a phone, with no runtime.
 
 Authentication has since shipped (`src/web/auth.ts`): every surface is behind
-the instance password, `/p/*` and the board stylesheet are the only
-exemptions, so `public` is a real security boundary — the design below
+the instance password and `/p/*` (published boards plus the stylesheet they
+link) is the only exemption, so `public` is a real security boundary — the design below
 predates that and holds unchanged.
 
 ## Product decisions
@@ -86,7 +86,7 @@ Slug: `[a-z0-9][a-z0-9-]{0,63}`. Anything else, and any directory with a missing
 or unparsable `board.json`, is logged once and skipped — never half-listed.
 Timestamps come from the filesystem (`site/` mtime), not the manifest.
 
-## Shipped stylesheet (`/boards/_assets/pier.css`)
+## Shipped stylesheet (`/p/_assets/pier.css`)
 
 Served from Pier's package dir, not from `$PIER_HOME`, so an agent cannot edit it
 and every board upgrades at once. One **classless** stylesheet: readable measure,
@@ -114,12 +114,19 @@ stylesheet being good enough, not from policing.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/boards` | scan + list `{slug, title, description, sessions, public, updatedAt}` |
-| `PATCH /api/boards/:slug` | body `{public}` → write `board.json`; every other field is agent-owned |
+| `GET /api/boards` | scan + list `{slug, title, description, sessions, public, token, updatedAt}` |
+| `PATCH /api/boards/:slug` | body `{public}` → write `board.json`, minting `token` on the first publish; every other field is agent-owned |
 | `DELETE /api/boards/:slug` | rename to `<slug>.deleted-<ts>` in place |
-| `GET /boards/_assets/pier.css` | the shipped stylesheet |
+| `GET /p/_assets/pier.css` | the shipped stylesheet |
 | `GET /boards/:slug/*` | static from `<board>/site/`, public or not — the operator surface |
-| `GET /p/:slug/*` | static from `<board>/site/`, **only** if `public: true`; otherwise 404 (never 403 — do not leak existence) |
+| `GET /p/:slug-:token/*` | static from `<board>/site/`, **only** if `public: true` and the token matches; otherwise 404 (never 403 — do not leak existence) |
+
+A published board's address carries 32 random bits after its slug: the slug is a
+readable word an agent chose, so `/p/` would otherwise be walkable with a
+dictionary. `token` is minted the first time a manifest is seen public — by the
+Console's toggle, or by `readManifest` when an agent set `public: true` itself —
+which is why no board can be public and enumerable at once. It is not a second
+boundary: the flag still decides, the token only hides the door.
 
 Both static handlers: realpath containment against `<board>/site` (reuse the
 `src/web/server.ts` attachment pattern), extension whitelist extended with
@@ -138,8 +145,8 @@ it. `src/boards/` depends on `node:fs` and core types only;
 ## Console surface (`src/web/ui/boards.ts`)
 
 One table, nothing else: public boards in a section at the top with their
-copyable `/p/<slug>/` URL, then the private ones — title · slug · linked sessions
-(links into chat) · updated, with a public toggle, open ↗ and delete. The toggle
+copyable `/p/<slug>-<token>/` URL, then the private ones — title · slug · linked sessions
+(links into chat) · updated, with a public toggle, copy link, open ↗ and delete. The toggle
 carries a one-line "anyone with the link can read this" warning.
 
 No detail drawer, no title/description editing, no file list, no board picker in
@@ -186,7 +193,8 @@ cost more than the feature.)
 - Filesystem units in a tmp `PIER_HOME`: slug validation, malformed manifest is
   skipped + logged (and treated as private), manifest write round-trips, delete
   renames and disappears from the scan.
-- Route tests: `/p/:slug` 404 while private and 200 after `public: true`; `..`,
+- Route tests: `/p/:slug` 404 while private and 200 at `<slug>-<token>` after
+  `public: true`, 404 on a missing or wrong token; `..`,
   absolute-path and symlink escapes rejected on both static prefixes;
   `board.json`, `README.md` and sources are 404 under both prefixes even though
   they sit in the board dir.
@@ -196,7 +204,7 @@ cost more than the feature.)
 - An agent creates a board with plain file writes, links its session, and the
   Console lists it within one refetch.
 - A board created without an explicit public request is unreachable at
-  `/p/<slug>/`; setting `public: true` (agent or Console) makes it reachable and
+  `/p/<slug>-<token>/`; setting `public: true` (agent or Console) makes it reachable and
   lands it in the Console's public section.
 - A second, unrelated session edits the same board's content and description.
 - Deleting the linked session changes nothing about the board.

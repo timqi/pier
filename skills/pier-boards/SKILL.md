@@ -27,23 +27,33 @@ session may read or rewrite any board, and closing this one changes nothing.
 }
 ```
 
-Those four fields are the whole manifest.
+Those four fields are the whole manifest (publishing adds a fifth — below).
 
-- `slug`: `[a-z0-9][a-z0-9-]{0,63}`, and it is the URL — short and stable.
+- `slug`: `[a-z0-9][a-z0-9-]{0,63}`, and it is the URL — short and stable. Do
+  not add random characters of your own; publishing adds them (see below).
 - `description` is the Console list entry: write it for someone who has
   forgotten this conversation.
 - `sessions`: append your own id, never replace — other ids are provenance too.
 
 ## Publish, then hand over the link
 
-`"public": true` serves the board at `/p/<slug>/` **with no password**. Set it
-only if the user asked for a public or shareable board *in this request*;
-otherwise leave it `false` and say the board is private. Never publish personal
-data or anything the user has not seen.
+`"public": true` serves the board **with no password**. Set it only if the user
+asked for a public or shareable board *in this request*; otherwise leave it
+`false` and say the board is private. Never publish personal data or anything
+the user has not seen.
 
-Asked to make an existing board public? Flip `"public"` to `true` in
-`board.json` and reply with the `/p/<slug>/` link — that is the whole answer.
-No verification step, no narrating the edit, no restating what the page holds.
+The published address is `/p/<slug>-<token>/`, not `/p/<slug>/`, so a public
+board's URL cannot be guessed from its name. `token` is a fifth manifest field
+you write next to `"public": true` — eight hex characters from
+`openssl rand -hex 4`, never invented in your head, never reused between
+boards. Leave it out and Pier mints one on the first request, but then the link
+is only visible in the Console, so write it yourself and you can hand it over
+in the same message.
+
+Asked to make an existing board public? Set `"public": true` and a fresh
+`token` in `board.json`, then reply with the `/p/<slug>-<token>/` link — that is
+the whole answer. Already has a token? Keep it: the link may be out there. No
+verification step, no narrating the edit, no restating what the page holds.
 
 The message announcing the board carries **one bare URL** — paste the address
 itself, never `[title](url)`: link labels get mangled or truncated on some chat
@@ -54,10 +64,10 @@ surfaces, and the title is already on the page. No filesystem paths either —
 | The user asked for | Send |
 | --- | --- |
 | a board, nothing about sharing | `https://pier.example.com/boards/weekly-digest/` — behind the Pier password; Console → Boards makes it public |
-| a **public** board | `https://pier.example.com/p/weekly-digest/` — no password |
+| a **public** board | `https://pier.example.com/p/weekly-digest-3f9ac128/` — no password; the suffix is the manifest's `token`, copied verbatim |
 
 Never both: the pair invites pasting the password-free URL of a board that was
-never meant to leave the workspace, and `/p/<slug>/` 404s unless the manifest
+never meant to leave the workspace, and `/p/<slug>-<token>/` 404s unless the manifest
 says `"public": true`. No address configured? Give the path, say Console →
 Settings turns it into a link, and never guess a host.
 
@@ -74,7 +84,7 @@ build, no npm, no framework:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weekly digest — infra</title>
-<link rel="stylesheet" href="/boards/_assets/pier.css">
+<link rel="stylesheet" href="/p/_assets/pier.css">
 </head>
 <body>
 <div class="hero">

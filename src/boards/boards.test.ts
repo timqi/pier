@@ -8,6 +8,12 @@ import { listBoards, registerBoardRoutes } from "./boards.js";
 let dir: string;
 let app: Hono;
 
+/** A published board is addressed by `<slug>-<token>`; fixtures pin the token
+ *  so a test can build the URL without publishing through the API first. */
+const TOKEN = "0123abcd";
+const published = { public: true, token: TOKEN };
+const key = (slug: string): string => `${slug}-${TOKEN}`;
+
 /** Hermetic: every test gets its own boards dir, never $HOME. */
 function makeBoard(
   slug: string,
@@ -99,8 +105,13 @@ describe("serving", () => {
       headers: { "content-type": "application/json" },
     });
     expect(patch.status).toBe(200);
+    const { token } = (await patch.json()) as { token: string };
+    expect(token).toMatch(/^[a-f0-9]{8}$/);
+    // The slug alone stays a non-answer: publishing hides the door, it does
+    // not put the board back on a guessable name.
+    expect((await app.request("/p/digest/")).status).toBe(404);
 
-    const res = await app.request("/p/digest/");
+    const res = await app.request(`/p/digest-${token}/`);
     expect(res.status).toBe(200);
     const csp = res.headers.get("content-security-policy");
     expect(csp).toContain("sandbox allow-scripts;");
@@ -113,25 +124,30 @@ describe("serving", () => {
   });
 
   it("keeps everything outside site/ off the wire", async () => {
-    const board = makeBoard("digest", { public: true });
+    const board = makeBoard("digest", published);
     writeFileSync(join(board, "README.md"), "secrets");
     mkdirSync(join(board, "src"));
     writeFileSync(join(board, "src", "index.html"), "<p>source</p>");
 
     // Encoded, because a literal `../` is collapsed by URL parsing long before
     // it reaches us — the escape attempt that actually arrives is this one.
-    for (const prefix of ["/boards", "/p"]) {
-      expect((await app.request(`${prefix}/digest/..%2Fboard.json`)).status).toBe(404);
-      expect((await app.request(`${prefix}/digest/..%2FREADME.md`)).status).toBe(404);
-      expect((await app.request(`${prefix}/digest/..%2Fsrc%2Findex.html`)).status).toBe(404);
-      expect((await app.request(`${prefix}/digest/%2e%2e%2fboard.json`)).status).toBe(404);
+    for (const at of ["/boards/digest", `/p/${key("digest")}`]) {
+      expect((await app.request(`${at}/..%2Fboard.json`)).status).toBe(404);
+      expect((await app.request(`${at}/..%2FREADME.md`)).status).toBe(404);
+      expect((await app.request(`${at}/..%2Fsrc%2Findex.html`)).status).toBe(404);
+      expect((await app.request(`${at}/%2e%2e%2fboard.json`)).status).toBe(404);
     }
   });
 
   it("refuses a slug that is a path or carries a NUL byte", async () => {
-    makeBoard("digest", { public: true });
+    makeBoard("digest", published);
     writeFileSync(join(dir, "board.json"), '{"public":true}'); // a decoy above the boards
-    for (const path of ["/p/..%2F..%2Fetc/index.html", "/boards/..%2F/index.html", "/p/a%00b/index.html"]) {
+    for (const path of [
+      "/p/..%2F..%2Fetc/index.html",
+      `/p/..%2F..%2Fetc-${TOKEN}/index.html`,
+      "/boards/..%2F/index.html",
+      `/p/a%00b-${TOKEN}/index.html`,
+    ]) {
       expect((await app.request(path)).status).toBe(404);
     }
     // The decoy above the boards dir must not be readable *or* writable.
@@ -145,29 +161,44 @@ describe("serving", () => {
   });
 
   it("refuses symlinks that leave the site dir", async () => {
-    const board = makeBoard("digest", { public: true });
+    const board = makeBoard("digest", published);
     writeFileSync(join(dir, "outside.html"), "<p>nope</p>");
     symlinkSync(join(dir, "outside.html"), join(board, "site", "link.html"));
-    expect((await app.request("/p/digest/link.html")).status).toBe(404);
+    expect((await app.request(`/p/${key("digest")}/link.html`)).status).toBe(404);
   });
 
   it("serves only whitelisted extensions and never shares private assets", async () => {
-    const board = makeBoard("digest", { public: true });
+    const board = makeBoard("digest", published);
     writeFileSync(join(board, "site", "style.css"), "body{}");
     writeFileSync(join(board, "site", "notes.exe"), "x");
     const privateAsset = await app.request("/boards/digest/style.css");
-    const publicAsset = await app.request("/p/digest/style.css");
+    const publicAsset = await app.request(`/p/${key("digest")}/style.css`);
     expect(privateAsset.status).toBe(200);
     expect(privateAsset.headers.get("cache-control")).toBe("private, max-age=300");
     expect(privateAsset.headers.get("access-control-allow-origin")).toBeNull();
     expect(publicAsset.status).toBe(200);
     expect(publicAsset.headers.get("cache-control")).toBe("no-store");
     expect(publicAsset.headers.get("access-control-allow-origin")).toBe("*");
-    expect((await app.request("/p/digest/notes.exe")).status).toBe(404);
+    expect((await app.request(`/p/${key("digest")}/notes.exe`)).status).toBe(404);
+  });
+
+  it("404s a wrong, missing or truncated token on a published board", async () => {
+    makeBoard("digest", published);
+    for (const at of [
+      "/p/digest/",
+      "/p/digest-/",
+      "/p/digest-0123abc/",
+      "/p/digest-0123abce/",
+      `/p/digest-${TOKEN.toUpperCase()}/`,
+      `/p/${TOKEN}/`,
+    ]) {
+      expect((await app.request(at)).status).toBe(404);
+    }
+    expect((await app.request(`/p/${key("digest")}/`)).status).toBe(200);
   });
 
   it("serves the shipped stylesheet", async () => {
-    const res = await app.request("/boards/_assets/pier.css");
+    const res = await app.request("/p/_assets/pier.css");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/css");
     expect(await res.text()).toContain(".kpi");
@@ -201,8 +232,34 @@ describe("manifest writes", () => {
     });
     const boards = await listBoards(dir);
     expect(boards[0]).toMatchObject({ public: true, description: "keep me", sessions: ["s1"] });
+    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).toMatchObject({
+      note: "agent data",
+    });
     const raw = await app.request("/api/boards");
     expect(await raw.json()).toHaveLength(1);
+  });
+
+  it("mints a token for a board an agent published itself, once and for good", async () => {
+    // No PATCH: the manifest arrives public with no token, the way an agent
+    // writing board.json leaves it.
+    makeBoard("digest", { public: true });
+    const [board] = await listBoards(dir);
+    expect(board?.token).toMatch(/^[a-f0-9]{8}$/);
+    // Persisted, or the next request would hand out a different URL.
+    const stored = JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8")) as {
+      token: string;
+    };
+    expect(stored.token).toBe(board?.token);
+    expect((await listBoards(dir))[0]?.token).toBe(board?.token);
+    expect((await app.request(`/p/digest-${board?.token}/`)).status).toBe(200);
+  });
+
+  it("keeps a private board's manifest untouched", async () => {
+    makeBoard("digest");
+    expect((await listBoards(dir))[0]?.token).toBe("");
+    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).not.toHaveProperty(
+      "token",
+    );
   });
 
   it("deletes by renaming, so the bytes survive and the scan forgets it", async () => {

@@ -4,7 +4,7 @@
 // this view reads /api/boards and writes only `public`.
 
 import { sendJson } from "./api.js";
-import { consoleView, h, relTime, type ConsoleView } from "./dom.js";
+import { consoleView, copyBtn, h, relTime, type ConsoleView } from "./dom.js";
 import { btn, toggle } from "./form.js";
 
 interface Board {
@@ -13,8 +13,16 @@ interface Board {
   description: string;
   sessions: string[];
   public: boolean;
+  /** Empty until the board is published: the URL's unguessable half. */
+  token: string;
   updatedAt: string;
 }
+
+/** Where this board is readable: published boards on the password-free URL its
+ *  readers use, the rest on the operator's. One answer, so the row's title, its
+ *  copy button and the address it prints can never disagree. */
+const boardPath = (board: Board): string =>
+  board.public && board.token ? `/p/${board.slug}-${board.token}/` : `/boards/${board.slug}/`;
 
 export function createBoardsView(root: HTMLElement, openSession: (id: string) => void): ConsoleView {
   let boards: Board[] = [];
@@ -32,12 +40,17 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
   const pane = h("div", "px-4 py-5");
   root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, pane));
 
-  async function patch(slug: string, isPublic: boolean): Promise<void> {
-    const res = await sendJson(`/api/boards/${slug}`, { public: isPublic }, "PATCH");
-    if (res.ok) return;
+  async function patch(board: Board, isPublic: boolean): Promise<void> {
+    const res = await sendJson(`/api/boards/${board.slug}`, { public: isPublic }, "PATCH");
+    if (res.ok) {
+      // The URL's token is minted by the write, so an optimistic row cannot
+      // draw the link — this answer is the first place it exists.
+      board.token = ((await res.json().catch(() => ({}))) as { token?: string }).token ?? "";
+      return render();
+    }
     // The toggle already flipped optimistically; reloading puts it back, and
     // the line says why it moved on its own.
-    problem = `Could not change ${slug}: ${res.status}`;
+    problem = `Could not change ${board.slug}: ${res.status}`;
     await load();
   }
 
@@ -51,7 +64,9 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     const el = h("div", "group flex flex-col gap-1 border-b border-neutral-200/70 px-1 py-2.5 last:border-b-0");
     const link = document.createElement("a");
     link.className = "truncate font-medium text-neutral-800 hover:text-indigo-700";
-    link.href = `/boards/${board.slug}/`;
+    // A public board opens on the URL its readers use: the password-free one,
+    // so what the operator checks is the page anyone else gets.
+    link.href = boardPath(board);
     link.target = "_blank";
     link.rel = "noreferrer";
     link.textContent = board.title;
@@ -62,7 +77,7 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     // restyled to sit inline in the row.
     const label = toggle("", "", board.public, (v) => {
       board.public = v;
-      void patch(board.slug, v);
+      void patch(board, v);
     });
     label.className = "ml-auto flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500";
     label.append(h("span", "", "Public"));
@@ -74,7 +89,15 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     );
     del.title = "Renames the folder on disk; nothing is erased";
     del.onclick = () => void remove(board.slug);
-    top.append(label, del);
+    // Absolute, because a copied link is going somewhere else: a chat, a mail,
+    // another machine. `board` is read at click time, so a toggle flipped a
+    // second ago copies the URL the row now shows.
+    const copyLink = copyBtn(
+      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-indigo-600 group-hover:opacity-100",
+      () => `${location.origin}${boardPath(board)}`,
+    );
+    copyLink.title = "Copy the board's link";
+    top.append(label, copyLink, del);
     el.append(top);
 
     const meta = h("div", "flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-neutral-500");
@@ -86,9 +109,9 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
       chip.onclick = () => openSession(id);
       meta.append(chip);
     }
-    if (board.public) {
-      const url = h("span", "flex-none font-mono text-neutral-400", `/p/${board.slug}/`);
-      url.title = "Public URL — anyone who can reach Pier can read this";
+    if (board.public && board.token) {
+      const url = h("span", "flex-none font-mono text-neutral-400", boardPath(board));
+      url.title = "Public URL — anyone holding this link can read the board, no password";
       meta.append(url);
     }
     el.append(meta);
@@ -97,7 +120,7 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
 
   // Public first, because that is the list worth double-checking.
   const SECTIONS = [
-    { title: "Public", hint: "Readable at /p/<slug>/ by anyone who can reach Pier.", wanted: true },
+    { title: "Public", hint: "Readable at /p/<slug>-<token>/ by anyone holding the link.", wanted: true },
     { title: "Private", hint: "Reachable from the Console only.", wanted: false },
   ];
 

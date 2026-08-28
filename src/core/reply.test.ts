@@ -163,7 +163,7 @@ describe("the instance facts in the surface prompt", () => {
     expect(prompt).toContain("https://test-pier.example.com");
     // Both routes, named once each — the host is not repeated per route.
     expect(prompt).toContain("/boards/<slug>/");
-    expect(prompt).toContain("/p/<slug>/");
+    expect(prompt).toContain("/p/<slug>-<token>/");
     // The contract itself is still there — the facts are an appendix to it.
     expect(prompt).toContain("Pier chat surface");
   });

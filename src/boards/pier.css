@@ -1,5 +1,5 @@
 /* pier.css — the one stylesheet every Board can link, served at
-   /boards/_assets/pier.css. Classless on purpose: plain semantic HTML must
+   /p/_assets/pier.css. Classless on purpose: plain semantic HTML must
    look finished, so a board needs no build step and no framework. A handful of
    named helpers cover the shapes a report actually asks for. */
 

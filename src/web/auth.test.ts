@@ -38,8 +38,8 @@ function app(s: AuthStore): Hono {
   a.post("/api/sessions", (c) => c.json({ ok: true }));
   a.get("/p/report/", (c) => c.text("published"));
   a.all("/p/report/", (c) => c.text("published write"));
-  a.get("/boards/_assets/pier.css", (c) => c.text("css"));
-  a.all("/boards/_assets/pier.css", (c) => c.text("css write"));
+  a.get("/p/_assets/pier.css", (c) => c.text("css"));
+  a.all("/p/_assets/pier.css", (c) => c.text("css write"));
   a.get("/boards/report/", (c) => c.text("private"));
   return a;
 }
@@ -110,7 +110,7 @@ describe("requireAuth", () => {
 
   it("serves only read methods for published boards and their stylesheet", async () => {
     const a = app(store().store);
-    for (const path of ["/p/report/", "/boards/_assets/pier.css"]) {
+    for (const path of ["/p/report/", "/p/_assets/pier.css"]) {
       expect((await a.request(path)).status).toBe(200);
       expect((await a.request(path, { method: "HEAD" })).status).toBe(200);
       for (const method of ["POST", "PATCH", "DELETE"]) {

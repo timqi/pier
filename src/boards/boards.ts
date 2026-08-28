@@ -5,8 +5,11 @@
 // Only <board>/site is reachable over HTTP: sources, README and the manifest
 // itself stay off the wire, so a public board leaks nothing about how it was
 // made. `/boards/*` is authenticated; `/p/*` additionally requires the
-// manifest's `public` flag and runs as sandboxed active content.
+// manifest's `public` flag and runs as sandboxed active content — and is the
+// only password-free prefix, stylesheet included, so one firewall rule covers
+// everything a logged-out reader may fetch.
 
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context, Hono } from "hono";
@@ -19,11 +22,20 @@ export const defaultBoardsDir = (): string => pierPath("boards");
  *  pattern excludes from every scan — one rename is the whole delete path. */
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
+/** A published board is addressed by `<slug>-<token>`: the slug alone is a
+ *  guessable word, so without the 32 bits after it `/p/` could be walked with
+ *  a dictionary. Minted the first time a manifest is seen public, by whichever
+ *  path published it — the Console's toggle or an agent editing board.json —
+ *  so a board cannot be public and enumerable at the same time. */
+const TOKEN = /^[a-f0-9]{8}$/;
+const mintToken = (): string => randomBytes(4).toString("hex");
+
 export interface BoardManifest {
   title: string;
   description: string;
   sessions: string[];
   public: boolean;
+  token: string;
 }
 
 export interface BoardSummary extends BoardManifest {
@@ -70,7 +82,10 @@ const warned = new Set<string>();
  *  here and nowhere else: an unvalidated `../../etc` would read outside the
  *  boards dir, and a NUL byte would throw instead of 404. Unknown fields get
  *  defaults, a broken file is skipped whole, and extra keys are the agent's
- *  business — they survive a write. */
+ *  business — they survive a write. The one manifest this writes back is a
+ *  public board that arrived without a token: minting is the same decision as
+ *  reading `public`, and doing it anywhere else leaves the agent's own publish
+ *  path — editing `board.json` — with no URL. */
 async function readManifest(
   dir: string,
   slug: string,
@@ -90,14 +105,30 @@ async function readManifest(
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
-  return {
+  const manifest = {
     ...m,
     title: typeof m.title === "string" && m.title ? m.title : slug,
     description: typeof m.description === "string" ? m.description : "",
     sessions: Array.isArray(m.sessions) ? m.sessions.filter((s): s is string => typeof s === "string") : [],
     public: m.public === true,
+    token: typeof m.token === "string" && TOKEN.test(m.token) ? m.token : "",
   };
+  if (manifest.public && !manifest.token) {
+    manifest.token = mintToken();
+    try {
+      await writeManifest(dir, slug, manifest);
+    } catch (err) {
+      // A token that cannot be stored would differ on the next request, so the
+      // board stays unreachable on /p/ rather than handing out a dead link.
+      logger("boards").warn(`cannot mint a public token for ${slug}`, err);
+      manifest.token = "";
+    }
+  }
+  return manifest;
 }
+
+const writeManifest = (dir: string, slug: string, manifest: BoardManifest & Record<string, unknown>) =>
+  writeFile(join(dir, slug, "board.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 /** Freshness is the site's mtime, not a manifest field — the filesystem
  *  already knows, and an agent rewriting a page cannot forget to say so. */
@@ -121,8 +152,8 @@ export async function listBoards(dir: string): Promise<BoardSummary[]> {
   for (const slug of entries.sort()) {
     const manifest = await readManifest(dir, slug);
     if (!manifest) continue;
-    const { title, description, sessions, public: isPublic } = manifest;
-    boards.push({ slug, title, description, sessions, public: isPublic, updatedAt: await updatedAt(dir, slug) });
+    const { title, description, sessions, public: isPublic, token } = manifest;
+    boards.push({ slug, title, description, sessions, public: isPublic, token, updatedAt: await updatedAt(dir, slug) });
   }
   return boards;
 }
@@ -156,10 +187,29 @@ async function resolveFile(dir: string, slug: string, rest: string): Promise<str
   return info.isFile() ? file : null;
 }
 
-async function serveFile(c: Context, dir: string, slug: string, rest: string, publicOnly: boolean) {
+/** `/p/` addresses a board as `<slug>-<token>`; a slug may itself contain
+ *  hyphens, so the last one is the cut. */
+function publicKey(key: string): { slug: string; token: string } {
+  const cut = key.lastIndexOf("-");
+  return cut < 1 ? { slug: "", token: "" } : { slug: key.slice(0, cut), token: key.slice(cut + 1) };
+}
+
+/** Digested first: the token is a secret, and a URL's half may be any length
+ *  or encoding, which a raw comparison would either leak or throw on. */
+const sameToken = (want: string, got: string): boolean => {
+  if (!want) return false;
+  const digest = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(digest(want), digest(got));
+};
+
+async function serveFile(c: Context, dir: string, key: string, rest: string, publicOnly: boolean) {
+  const { slug, token } = publicOnly ? publicKey(key) : { slug: key, token: "" };
   const manifest = await readManifest(dir, slug);
-  // 404, never 403: a private board's existence is not public information.
-  if (!manifest || (publicOnly && !manifest.public)) return c.notFound();
+  // 404, never 403: a private board's existence is not public information, and
+  // a wrong token is the same non-answer as a wrong name.
+  if (!manifest || (publicOnly && (!manifest.public || !sameToken(manifest.token, token)))) {
+    return c.notFound();
+  }
   const file = await resolveFile(dir, slug, rest);
   if (!file) return c.notFound();
   const type = TYPES[extname(file).toLowerCase()];
@@ -192,8 +242,11 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
     const manifest = await readManifest(dir, slug);
     if (!manifest) return c.json({ error: "no such board" }, 404);
     manifest.public = body.public;
-    await writeFile(join(dir, slug, "board.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    return c.json({ public: manifest.public });
+    // Publishing an unpublished board is the case readManifest cannot mint for:
+    // it read the manifest while it was still private.
+    if (manifest.public && !manifest.token) manifest.token = mintToken();
+    await writeManifest(dir, slug, manifest);
+    return c.json({ public: manifest.public, token: manifest.token });
   });
 
   app.delete("/api/boards/:slug", async (c) => {
@@ -204,7 +257,7 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
   });
 
   // Declared before the wildcards below: `_assets` is not a slug.
-  app.get("/boards/_assets/pier.css", async (c) => {
+  app.get("/p/_assets/pier.css", async (c) => {
     const file = new URL("./pier.css", import.meta.url);
     return c.body(await readFile(file), 200, {
       "content-type": "text/css; charset=utf-8",
@@ -215,11 +268,11 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
   // Trailing slash matters: without it a board's relative asset paths resolve
   // against /boards instead of the board.
   for (const prefix of ["/boards", "/p"]) {
-    app.get(`${prefix}/:slug`, (c) => c.redirect(`${prefix}/${c.req.param("slug")}/`));
-    app.get(`${prefix}/:slug/*`, (c) => {
-      const slug = c.req.param("slug");
-      const rest = c.req.path.slice(`${prefix}/${slug}/`.length);
-      return serveFile(c, dir, slug, rest, prefix === "/p");
+    app.get(`${prefix}/:key`, (c) => c.redirect(`${prefix}/${c.req.param("key")}/`));
+    app.get(`${prefix}/:key/*`, (c) => {
+      const key = c.req.param("key");
+      const rest = c.req.path.slice(`${prefix}/${key}/`.length);
+      return serveFile(c, dir, key, rest, prefix === "/p");
     });
   }
 }
