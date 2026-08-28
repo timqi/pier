@@ -204,6 +204,80 @@ export function toolsTaskPlan(
   return flipped ? { do: "run" } : { do: "nothing" };
 }
 
+/** What one sync request became, for the surface that asked for it. */
+export interface SyncRequest {
+  /** `waiting`: a sync was already running, and this request rides the run
+   *  that follows it — not a failure, and not "nothing happened" either. */
+  state: "started" | "waiting";
+  /** Settles when the run that covers this request has finished. */
+  settled: Promise<void>;
+}
+
+/** The one call the coalescer needs from whatever actually runs the task.
+ *  Structural, so this file still knows nothing about tasks/. */
+export interface SyncRunner {
+  /** Start one run now. `started: false` is the task layer refusing an
+   *  overlapping run — by design, no double fire — and `settled` is then what
+   *  to wait for before trying again (`null`: nothing is in flight after all). */
+  run(): { started: boolean; settled: Promise<void> | null };
+}
+
+/**
+ * Converge, don't race.
+ *
+ * Every switch is its own request and every request wants the *current* set
+ * installed, but the task layer refuses an overlapping run (`skipped`). Three
+ * switches flipped in one second therefore produced one run that had read the
+ * set as it stood halfway through and two runs that did nothing at all — the
+ * Console showed four tools on and the machine had two, with nothing anywhere
+ * saying so.
+ *
+ * So a request that lands on a running sync is *remembered*, not queued: one
+ * bit, so a click storm cannot grow a backlog, and the moment the run settles
+ * exactly one more run goes — reading the set as it is by then. That run can
+ * be overlapped in turn and the bit set again; it terminates because every
+ * follow-up starts strictly after the request that asked for it.
+ */
+export function coalescedSync(
+  runner: SyncRunner,
+  onFailure: (err: unknown) => void,
+): () => SyncRequest {
+  let chain: Promise<void> | null = null;
+  let pending = false;
+
+  const drive = async (): Promise<void> => {
+    do {
+      // Cleared before the run, not after: a request arriving while this one is
+      // in flight must set it again and earn its own follow-up.
+      pending = false;
+      const { started, settled } = runner.run();
+      if (settled) await settled;
+      // Refused as an overlap: nothing of ours has run yet, so go again once
+      // whatever was in flight is done.
+      if (!started) pending = true;
+    } while (pending);
+  };
+
+  return () => {
+    if (chain) {
+      pending = true;
+      return { state: "waiting", settled: chain };
+    }
+    let finish!: () => void;
+    // Assigned before `drive` is called: a drive that never awaits would
+    // otherwise finish before this variable existed, and every later request
+    // would wait forever on a chain nobody is driving.
+    chain = new Promise<void>((resolve) => (finish = resolve));
+    const settled = chain;
+    void drive().catch(onFailure).finally(() => {
+      chain = null;
+      pending = false;
+      finish();
+    });
+    return { state: "started", settled };
+  };
+}
+
 /** One subprocess, never rejecting: a tool that failed is a report, not a
  *  throw, and `code: null` is "it could not even start". Injected everywhere
  *  below so tests never spawn ubix. */

@@ -18,6 +18,7 @@ import type {
   SessionEventPayload,
   SessionState,
   ThinkingLevel,
+  ToolsSyncNote,
 } from "../core/types.js";
 import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
@@ -286,7 +287,8 @@ function setup(
   const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
   // Stands in for main.ts's task lifecycle: web/ stores the set and says so,
   // the instance layer is what installs anything.
-  const onToolsChanged = vi.fn(() => Promise.resolve<string | null>(null));
+  const onToolsChanged = vi.fn((_names: string[]) =>
+    Promise.resolve<ToolsSyncNote | null>({ state: "started" }));
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     // Composed like main.ts — a catalog of names, so this test never loads an
@@ -946,7 +948,10 @@ describe("workbench server", () => {
   // switch never sees.
   it("says on the switch when the set was stored and nothing will install it", async () => {
     const { app, settings, onToolsChanged } = setup();
-    onToolsChanged.mockResolvedValueOnce("no CLI to run: /opt/pier/cli.js does not exist");
+    onToolsChanged.mockResolvedValueOnce({
+      state: "refused",
+      reason: "no CLI to run: /opt/pier/cli.js does not exist",
+    });
     const res = await app.request("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -956,7 +961,24 @@ describe("workbench server", () => {
     // with it rather than only reaching the log.
     expect(res.status).toBe(200);
     expect(settings.get().tools).toEqual(["rg"]);
-    expect(await res.json()).toMatchObject({ toolsProblem: "no CLI to run: /opt/pier/cli.js does not exist" });
+    expect(await res.json()).toMatchObject({
+      toolsSync: { state: "refused", reason: "no CLI to run: /opt/pier/cli.js does not exist" },
+    });
+  });
+
+  // The switch cannot say "saved" and leave it there while its work sits
+  // behind a sync already running — that is what left four switches on and two
+  // tools installed.
+  it("passes back that a change is waiting behind a running sync", async () => {
+    const { app, onToolsChanged } = setup();
+    onToolsChanged.mockResolvedValueOnce({ state: "waiting" });
+    const res = await app.request("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tools: ["rg"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ toolsSync: { state: "waiting" } });
   });
 
   it("declares a custom tool and its switch in one write, or neither", async () => {

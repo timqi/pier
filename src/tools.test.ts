@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  coalescedSync,
   type Exec,
   type ExecResult,
   MANAGED,
@@ -11,6 +12,7 @@ import {
   parseUbixJson,
   toolsTaskDraft,
   toolsTaskPlan,
+  type SyncRunner,
   ubixAsset,
   ubixConfigToml,
 } from "./tools.js";
@@ -429,5 +431,110 @@ describe("a Console read while an install is running", () => {
       enabled: true,
       binary: { installed: false, error: "ubix is busy — an install or update is running" },
     });
+  });
+});
+
+describe("three switches flipped while a sync is running", () => {
+  /** A stand-in for tasks/: one run at a time, an overlapping request is
+   *  refused exactly as `tasks/runs.ts` refuses it, and a run reads the
+   *  enabled set at the moment it starts. */
+  function fakeTasks() {
+    const started: string[][] = [];
+    const skipped: string[] = [];
+    let enabled = ["rtk"];
+    let settle: (() => void) | null = null;
+    const runner: SyncRunner = {
+      run: () => {
+        if (settle) {
+          // The overlap guard: the run is recorded as skipped and the caller
+          // is handed the run that is actually in flight.
+          skipped.push("overlap");
+          return { started: false, settled: inFlight };
+        }
+        started.push([...enabled]);
+        inFlight = new Promise<void>((resolve) => (settle = resolve));
+        return { started: true, settled: inFlight };
+      },
+    };
+    let inFlight = Promise.resolve();
+    return {
+      runner,
+      started,
+      skipped,
+      flip: (name: string) => enabled.push(name),
+      finish: () => {
+        const resolve = settle;
+        settle = null;
+        resolve?.();
+        // Let the coalescer's follow-up start before the test looks.
+        return Promise.resolve().then(() => Promise.resolve()).then(() => undefined);
+      },
+    };
+  }
+
+  it("coalesces them into exactly one follow-up run, with the final set", async () => {
+    const rig = fakeTasks();
+    const failures: unknown[] = [];
+    const sync = coalescedSync(rig.runner, (err) => failures.push(err));
+
+    // rtk goes on and its sync starts running.
+    expect(sync().state).toBe("started");
+    expect(rig.started).toEqual([["rtk"]]);
+
+    // Three more switches, each its own request, all while that run is busy.
+    for (const name of ["rg", "fd", "wt"]) {
+      rig.flip(name);
+      expect(sync().state).toBe("waiting");
+    }
+    // Nothing has been started behind its back, and nothing is queued per click.
+    expect(rig.started).toHaveLength(1);
+
+    await rig.finish();
+    // Exactly one follow-up — not three — and it read the set as it is now.
+    expect(rig.started).toEqual([["rtk"], ["rtk", "rg", "fd", "wt"]]);
+    await rig.finish();
+    expect(rig.started).toHaveLength(2);
+    expect(failures).toEqual([]);
+  });
+
+  it("keeps trying when the task layer refuses its run as an overlap", async () => {
+    // The other half of the race: the run in flight is somebody else's (the
+    // cron, or the boot), so ours is refused outright. Dropping it is what
+    // left the config missing two tools.
+    let release = (): void => {};
+    const busy = new Promise<void>((resolve) => (release = resolve));
+    const started: number[] = [];
+    let refuse = true;
+    const sync = coalescedSync({
+      run: () => {
+        if (refuse) return { started: false, settled: busy };
+        started.push(Date.now());
+        return { started: true, settled: Promise.resolve() };
+      },
+    }, (err) => expect.unreachable(String(err)));
+
+    expect(sync().state).toBe("started");
+    expect(started).toEqual([]);
+    refuse = false;
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The refused request was not dropped: it ran once the other run settled.
+    expect(started).toHaveLength(1);
+  });
+
+  it("reports a failure instead of swallowing it, and takes requests again", async () => {
+    const failures: unknown[] = [];
+    let fail = true;
+    const sync = coalescedSync({
+      run: () => {
+        if (fail) throw new Error("no tools update task to run");
+        return { started: true, settled: Promise.resolve() };
+      },
+    }, (err) => failures.push(err));
+    sync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(String(failures[0])).toContain("no tools update task");
+    fail = false;
+    expect(sync().state).toBe("started");
   });
 });

@@ -25,6 +25,7 @@ import type {
   ProviderManager,
   SessionSummary,
   ThinkingLevel,
+  ToolsSyncNote,
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import { SESSION_TITLE_MAX } from "../limits.js";
@@ -77,9 +78,9 @@ export interface WebDeps {
    *  the catalog is code that imports the Pi SDK and spawns ubix, and web/ may
    *  do neither. */
   catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-  /** Ran with the new tool set after it is stored; answers with the reason
-   *  nothing will happen, or null. */
-  onToolsChanged?: (names: string[]) => Promise<string | null>;
+  /** Ran with the new tool set after it is stored; answers with what became of
+   *  the install it asked for, or null when nothing needed doing. */
+  onToolsChanged?: (names: string[]) => Promise<ToolsSyncNote | null>;
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */
   updates: UpdateCheck;

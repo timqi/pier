@@ -3,7 +3,7 @@
 // a session; server.ts stays the session/event surface.
 
 import type { Hono } from "hono";
-import type { CatalogEntry } from "../core/types.js";
+import type { CatalogEntry, ToolsSyncNote } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
@@ -60,10 +60,12 @@ export function registerInstanceRoutes(
      *  spawns ubix, and web/ may do neither. Absent in tests that do not care;
      *  the Console then shows no switches. */
     catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-    /** Ran after a tool set was written, with the new one. Answers with the
-     *  reason nothing will happen, or null — the switch that was just flipped
-     *  is where that belongs, not only the journal (§5b). */
-    onToolsChanged?: (names: string[]) => Promise<string | null>;
+    /** Ran after a tool set was written, with the new one. Answers with what
+     *  became of the install — started, waiting behind a sync already running,
+     *  or refused with a reason — because the switch that was just flipped is
+     *  where that belongs, not only the journal (§5b). `null`: nothing needed
+     *  doing, so the switch says only that it saved. */
+    onToolsChanged?: (names: string[]) => Promise<ToolsSyncNote | null>;
     /** Ran after a successful unlock; main.ts starts the channels it held
      *  back. A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
@@ -266,11 +268,11 @@ export function registerInstanceRoutes(
     // Stored first, then acted on: the switch shows what was written even when
     // the install cannot start — and then says why, here, rather than leaving
     // "saved" as the last thing anyone was told.
-    const toolsProblem = tools ? { toolsProblem: (await onToolsChanged?.(tools)) ?? null } : {};
+    const note = tools ? await onToolsChanged?.(tools) : null;
     // The URL and the extension set are both read when a session opens; the
     // model menu is read per picker call, so it needs no recycle.
     if (body?.publicUrl !== undefined || body?.extensions !== undefined) onSettingsChanged?.();
-    return c.json({ ...(await instanceSettings()), ...toolsProblem });
+    return c.json({ ...(await instanceSettings()), ...(note ? { toolsSync: note } : {}) });
   });
 
   // Layer-1 key status and control (Console → Settings → Security). The GET

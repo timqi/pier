@@ -5,7 +5,7 @@
 // the right. Scope comes from the session list (global + each project cwd);
 // bundled switches are instance-wide, so they appear under Global only.
 
-import type { CatalogEntry, ConfigResource } from "../../core/types.js";
+import type { CatalogEntry, ConfigResource, ToolsSyncNote } from "../../core/types.js";
 import { failure, sendJson } from "./api.js";
 import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
@@ -30,8 +30,9 @@ type Selection =
 interface CatalogResponse {
   catalog: CatalogEntry[];
   toolsTaskId: string | null;
-  /** Set when the tool set was stored and nothing will act on it. */
-  toolsProblem?: string | null;
+  /** What became of the install the switch asked for; absent when it asked for
+   *  none. */
+  toolsSync?: ToolsSyncNote;
 }
 
 /** What a save turned out to be, for the status line that redraws with it. */
@@ -131,8 +132,15 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     const answer = (await res.json()) as CatalogResponse;
     take(answer);
     renderNav(lastIndex); // the `on` badge in the nav is part of the answer
-    // Stored, and nothing will act on it: the switch is where that belongs.
-    if (answer.toolsProblem) return { state: "failed", text: `Saved, but nothing will install it: ${answer.toolsProblem}` };
+    // Stored — and then what actually became of it. "Saved" while a sync it
+    // has to queue behind is still running is how three switches turned into
+    // one installed tool with nothing anywhere saying so.
+    if (answer.toolsSync?.state === "refused") {
+      return { state: "failed", text: `Saved, but nothing will install it: ${answer.toolsSync.reason}` };
+    }
+    if (answer.toolsSync?.state === "waiting") {
+      return { state: "saved", text: "Saved — a sync is already running; this change goes in the run right after it." };
+    }
     return { state: "saved", text: saved };
   }
 

@@ -347,6 +347,17 @@ export interface CatalogEntry {
 }
 
 /**
+ * What became of the install a switch asked for, told to the surface that
+ * flipped it. `waiting` is its own state on purpose: a sync was already
+ * running, so this one goes next — which is neither a failure nor the "saved"
+ * that used to be the last thing anyone was told while nothing happened.
+ */
+export type ToolsSyncNote =
+  | { state: "started" }
+  | { state: "waiting" }
+  | { state: "refused"; reason: string };
+
+/**
  * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
  * browsing. Changes apply to sessions created afterwards — Pi reads these
  * files at session start, never mid-run.
