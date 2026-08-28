@@ -30,7 +30,7 @@ import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
-import { CUSTOM_TOOL_RULES, ManagedTools, normalizeCustomTools, prependPath } from "./tools.js";
+import { CUSTOM_TOOL_RULES, MANAGED, ManagedTools, normalizeCustomTools, prependPath } from "./tools.js";
 import { toolsTask } from "./tools-task.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
@@ -355,6 +355,11 @@ app.route("/", createServer({
       toolsTaskId: toolsUpdate.id(),
     };
   },
+  // Names only, and the same two lists the catalog above is built from: the
+  // route validates a switch against what this Pier *can* switch, which is
+  // code, never against a catalog whose custom half the request may be
+  // rewriting.
+  names: { extensions: bundledInfo([]).map((entry) => entry.name), tools: MANAGED.map((tool) => tool.name) },
   onToolsChanged: toolsUpdate.changed,
   // The rule lives with the installer; the names the bundled catalog already
   // owns live with the extensions. Only here are both in scope.

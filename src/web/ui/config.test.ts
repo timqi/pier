@@ -88,19 +88,14 @@ describe("removing a tool the operator declared", () => {
   it("switches it off first and keeps the block ubix still needs", () => {
     const step = removalStep(declaredTool(), declared);
     expect(step.body).toEqual({ tool: { name: "eza", on: false } });
-    expect(step.saved).toContain("Its block stays until ubix reports the binary gone");
+    expect(step.saved).toContain("Remove it again once its binary is gone");
   });
 
-  it("keeps the block while the binary is still installed, or unknown", () => {
-    expect(removalStep(declaredTool({ enabled: false }), declared).body).toEqual({ tool: { name: "eza", on: false } });
-    // Switched off, and ubix could not be read: "gone" is not something to
-    // assume from a failed read.
-    expect(removalStep(declaredTool({ enabled: false, installed: false, error: "state.toml is locked" }), declared).body)
-      .toEqual({ tool: { name: "eza", on: false } });
-  });
-
-  it("drops the declaration only once ubix reports the binary gone", () => {
-    const step = removalStep(declaredTool({ enabled: false, installed: false }), declared);
+  it("asks to drop the block only after the switch is off", () => {
+    // Whether the block may go *now* is the server's rule (web/instance.ts
+    // refuses while the binary is installed, broken or unreadable); the pane
+    // asks and shows what it is told, rather than keeping a second copy of it.
+    const step = removalStep(declaredTool({ enabled: false, installed: true }), declared);
     expect(step.body).toEqual({ customTools: [] });
     expect(step.saved).toBe("Removed eza.");
   });

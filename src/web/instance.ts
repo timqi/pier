@@ -3,7 +3,7 @@
 // a session; server.ts stays the session/event surface.
 
 import type { Hono } from "hono";
-import type { CatalogEntry } from "../core/types.js";
+import type { CatalogBinary, CatalogEntry } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
@@ -40,6 +40,15 @@ export interface SecretsControl {
   rotateKek(mode?: SecretsMode): Promise<void>;
 }
 
+/** A rule that failed inside the transaction — its own class so the route can
+ *  tell it from a real fault. 400 when the request named something this Pier
+ *  does not have, 409 when it collided with the state as it stands. */
+class Refusal extends Error {
+  constructor(message: string, readonly status: 400 | 409) {
+    super(message);
+  }
+}
+
 /** One name added to or removed from a stored set, order preserved. */
 const withName = (current: readonly string[], { name, on }: { name: string; on: boolean }): string[] =>
   on ? [...new Set([...current, name])] : current.filter((each) => each !== name);
@@ -65,6 +74,12 @@ export function registerInstanceRoutes(
      *  spawns ubix, and web/ may do neither. Absent in tests that do not care;
      *  the Console then shows no switches. */
     catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
+    /** Every name this Pier can ever switch: the bundled extensions and the
+     *  tools it manages. Code, not state — which is why a switch is validated
+     *  against these and not against the catalog, whose custom half the same
+     *  request may be rewriting. Absent means no switches, and every `on` is
+     *  refused. */
+    names?: { extensions: readonly string[]; tools: readonly string[] };
     /** Ran after the tool set was written. Answers with what became of the
      *  install — started, waiting behind a sync already running, or refused
      *  with a reason — because the switch that was just flipped is where that
@@ -89,6 +104,7 @@ export function registerInstanceRoutes(
     updater = null,
     secrets,
     catalog,
+    names = { extensions: [], tools: [] },
     onUnlocked,
     onSettingsChanged,
     onToolsChanged,
@@ -261,15 +277,16 @@ export function registerInstanceRoutes(
       if (command === null) return refuse("terminalInitCommand must be one line of at most 500 characters");
       writes.push(() => settings.setTerminalInitCommand(command));
     }
-    /** The blocks this request declares — adding a tool is declaring it *and*
-     *  switching it on, so its own name is switchable in the same write. */
-    let declared: readonly string[] = [];
+    /** The blocks this request declares, or null when it does not touch them.
+     *  Adding a tool is declaring it *and* switching it on, so a name declared
+     *  here is switchable in the same write. */
+    let declared: CustomTool[] | null = null;
     if (body?.customTools !== undefined) {
       const validated = validateCustomTools?.(body.customTools) ??
         { error: "this Pier cannot store custom tools" };
       if ("error" in validated) return refuse(validated.error);
-      const { tools: custom } = validated;
-      declared = custom.map((tool) => tool.name);
+      declared = validated.tools;
+      const custom = validated.tools;
       writes.push(() => settings.setCustomTools(custom));
     }
     /** A single switch, applied to the set as it is *now* rather than to the
@@ -280,53 +297,84 @@ export function registerInstanceRoutes(
       if (!name || name.length > 64 || typeof given?.on !== "boolean") return "expected {name, on}";
       return { name, on: given.on };
     };
-    /** A switch has to name something this instance will have *after this
-     *  request*. A typo, or a name from a release that dropped it, otherwise
-     *  answered 200, stored a setting no surface can draw and ran a sync that
-     *  installs nothing — the shape of failure §5b is about. The catalog is
-     *  what is declared *now*, so a request that also replaces `customTools`
-     *  is checked against the blocks it declares rather than the ones it is
-     *  deleting: `{customTools: [], tool: {name: <a custom tool>, on: true}}`
-     *  would otherwise switch on a tool the same write removed. Taking a name
-     *  *out* of the set it is stored in is always allowed: that is the repair,
-     *  not the mistake. */
-    const known = body?.extension !== undefined || body?.tool !== undefined ? await catalog?.() : undefined;
-    const replacingBlocks = body?.customTools !== undefined;
-    const unknown = (
-      one: { name: string; on: boolean },
-      source: CatalogEntry["source"],
-      stored: readonly string[],
-    ): boolean =>
-      !known?.entries.some((entry) =>
-        entry.source === source && entry.name === one.name &&
-        // A custom row survives this request only if this request declares it.
-        !(replacingBlocks && entry.source === "binary" && entry.custom === true)
-      ) &&
-      !(source === "binary" && declared.includes(one.name)) &&
-      !(!one.on && stored.includes(one.name));
+    let extensionOne: { name: string; on: boolean } | null = null;
     if (body?.extension !== undefined) {
       const one = delta(body.extension);
       if (typeof one === "string") return refuse(`extension: ${one}`);
-      if (unknown(one, "bundled", settings.get().extensions)) {
-        return refuse(`extension: this Pier has no extension called ${one.name}`);
-      }
+      extensionOne = one;
       writes.push(() => settings.setExtensions(withName(settings.get().extensions, one)));
     }
     // Whether the enabled set moved, for the install below. The delta itself
     // is resolved inside the transaction, against the set as it was stored.
     let toolsChanged = false;
+    let toolOne: { name: string; on: boolean } | null = null;
     if (body?.tool !== undefined) {
       const one = delta(body.tool);
       if (typeof one === "string") return refuse(`tool: ${one}`);
-      if (unknown(one, "binary", settings.get().tools)) {
-        return refuse(`tool: this Pier manages no tool called ${one.name}`);
-      }
+      toolOne = one;
       toolsChanged = true;
       writes.push(() => settings.setTools(withName(settings.get().tools, one)));
     }
-    settings.transact(() => {
-      for (const write of writes) write();
-    });
+
+    // What ubix says about the blocks this request would undeclare. Asked out
+    // here because answering it spawns a subprocess, and a transaction may not
+    // wait on one; the *sets* below are read inside the transaction, where
+    // nothing can move them.
+    const dropping = declared !== null &&
+      settings.get().customTools.some((tool) => !declared?.some((kept) => kept.name === tool.name));
+    const shown = dropping ? await catalog?.() : undefined;
+    const binaryOf = (name: string): CatalogBinary | null => {
+      const entry = shown?.entries.find((row) => row.source === "binary" && row.name === name);
+      return entry?.source === "binary" ? entry.binary : null;
+    };
+
+    /**
+     * The rules that are about *sets*, applied inside the transaction against
+     * the settings as they are at that instant. Outside it they are a
+     * time-of-check: a request dropping a declaration and another switching
+     * that tool on both passed, and left an enabled tool nothing declares.
+     *
+     * What may be switched on comes from `names`, which is code and cannot
+     * change while this runs, plus what this request declares. What may be
+     * undeclared is the second rule: a block is the only thing that can
+     * uninstall its binary, so it may not go while the tool is on, installed,
+     * broken, or while ubix's answer about it could not be read. Switching a
+     * name *off* is never refused — that is the repair, and it is the first
+     * half of removing one.
+     */
+    const check = (): void => {
+      const current = settings.get();
+      const after = (declared ?? current.customTools).map((tool) => tool.name);
+      const toolsAfter = toolOne ? withName(current.tools, toolOne) : current.tools;
+      if (extensionOne?.on && !names.extensions.includes(extensionOne.name)) {
+        throw new Refusal(`extension: this Pier has no extension called ${extensionOne.name}`, 400);
+      }
+      if (toolOne?.on && !names.tools.includes(toolOne.name) && !after.includes(toolOne.name)) {
+        throw new Refusal(`tool: this Pier manages no tool called ${toolOne.name}`, 400);
+      }
+      for (const gone of current.customTools.filter((tool) => !after.includes(tool.name))) {
+        if (toolsAfter.includes(gone.name)) {
+          throw new Refusal(`${gone.name} is still switched on — switch it off first, so the next sync uninstalls it`, 409);
+        }
+        const binary = binaryOf(gone.name);
+        if (!binary) throw new Refusal(`${gone.name}: Pier cannot read what is installed, so its block stays for now`, 409);
+        if (binary.installed) {
+          throw new Refusal(`${gone.name} is still installed — its block stays until ubix reports the binary gone`, 409);
+        }
+        if (binary.error) throw new Refusal(`${gone.name}: ${binary.error} — its block stays until that is resolved`, 409);
+      }
+    };
+
+    try {
+      settings.transact(() => {
+        check();
+        for (const write of writes) write();
+      });
+    } catch (err) {
+      // Nothing was written: the transaction rolled back with it.
+      if (err instanceof Refusal) return c.json({ error: err.message }, err.status);
+      throw err;
+    }
     // Stored first, then acted on: the switch shows what was written even when
     // the install cannot start — and then says why, here, rather than leaving
     // "saved" as the last thing anyone was told.

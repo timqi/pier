@@ -93,19 +93,23 @@ export async function writeSettings(
 /**
  * Removing a tool the operator declared, in the only order that cannot orphan
  * a binary: switch it off first, so the next sync uninstalls it, and drop the
- * declaration only once ubix reports the binary gone. The other order deleted
- * the row while the tool was still on the PATH — with nothing left declaring
- * it, nothing could remove it and no row could say so.
+ * declaration second. The other order deleted the row while the tool was still
+ * on the PATH — with nothing left declaring it, nothing could remove it and no
+ * row could say so.
+ *
+ * *When* the block may go is not decided here. That rule is the server's
+ * (web/instance.ts refuses while the tool is on, installed, broken or
+ * unreadable), and a copy of it in the browser would be a second answer to
+ * one question — the pane shows the server's sentence instead.
  */
 export function removalStep(
   entry: CatalogEntry,
   customTools: readonly { name: string; toml: string }[],
 ): { body: Record<string, unknown>; saved: string } {
-  const gone = entry.source === "binary" && !entry.binary.installed && entry.binary.error === null;
-  if (entry.enabled || !gone) {
+  if (entry.enabled) {
     return {
       body: { tool: { name: entry.name, on: false } },
-      saved: `Switched ${entry.name} off — the next run uninstalls it. Its block stays until ubix reports the binary gone.`,
+      saved: `Switched ${entry.name} off — the next run uninstalls it. Remove it again once its binary is gone.`,
     };
   }
   return {

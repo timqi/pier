@@ -297,14 +297,24 @@ function setup(
   // Stands in for main.ts's task lifecycle: web/ stores the set and says so,
   // the instance layer is what installs anything.
   const onToolsChanged = vi.fn(() => Promise.resolve<ToolsSyncNote | null>({ state: "started" }));
+  /** What ubix would say about a declared block, for the tests that need it to
+   *  say something other than "not installed". */
+  const catalogState = new Map<string, { installed: boolean; error: string | null }>();
+  /** Set by a test to hold the *next* catalog read open. */
+  let parked: Promise<void> | null = null;
+  const parkNextCatalogRead = (): { release: () => void } => {
+    let release = (): void => {};
+    parked = new Promise<void>((resolve) => (release = resolve));
+    return { release };
+  };
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     // Composed like main.ts — a catalog of names, so this test never loads an
     // extension or the SDK behind one.
     // One list, assembled like main.ts does: data only, never a subprocess —
     // loading an extension or spawning ubix is the instance layer's business.
-    catalog: () =>
-      Promise.resolve({
+    catalog: async () => {
+      const answer = {
         entries: [
           ...CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
           ...TOOLS.map((tool) => ({ ...tool, enabled: settings.get().tools.includes(tool.name) })),
@@ -317,12 +327,30 @@ function setup(
             name: tool.name,
             summary: "",
             enabled: settings.get().tools.includes(tool.name),
-            binary: { spec: tool.toml, installed: false, version: null, path: null, error: null },
+            binary: {
+              spec: tool.toml,
+              installed: catalogState.get(tool.name)?.installed ?? false,
+              version: null,
+              path: null,
+              error: catalogState.get(tool.name)?.error ?? null,
+            },
             custom: true,
           })),
         ],
         toolsTaskId: null,
-      }),
+      };
+      // The snapshot is taken here, as the real one is: a test that parks a
+      // request inside this read is holding a request between what it saw and
+      // what it writes — the only window a check made before the transaction
+      // has to be wrong in.
+      const park = parked;
+      parked = null;
+      if (park) await park;
+      return answer;
+    },
+    // Composed like main.ts: names are code, and a switch is validated against
+    // them rather than against a catalog the same request may be rewriting.
+    names: { extensions: CATALOG.map((ext) => ext.name), tools: TOOLS.map((tool) => tool.name) },
     onToolsChanged,
     // main.ts owns the rule (tools.ts) and the bundled names; the route only
     // gets an answer.
@@ -350,6 +378,8 @@ function setup(
     secrets,
     onUnlocked,
     onToolsChanged,
+    catalogState,
+    parkNextCatalogRead,
     reload,
   };
 }
@@ -1098,11 +1128,89 @@ describe("workbench server", () => {
     expect((await put({ customTools: [uv], tool: { name: "uv", on: true } })).status).toBe(200);
     expect(settings.get().customTools).toEqual([uv]);
     expect(settings.get().tools).toEqual(["uv"]);
-    // And a built-in row is not a custom one: replacing the blocks leaves it
-    // switchable. (`uv` stays in the set, undeclared — dropping a block is not
-    // switching a tool off, which is why the Console switches off first.)
+    // Dropping uv's block while uv is on is refused whatever else the request
+    // carries — the block is the only thing that can uninstall the binary.
+    const early = await put({ customTools: [], tool: { name: "rg", on: true } });
+    expect(early.status).toBe(409);
+    expect(await early.json()).toMatchObject({ error: expect.stringContaining("still switched on") });
+    expect(settings.get().customTools).toEqual([uv]);
+    expect(settings.get().tools).toEqual(["uv"]);
+
+    // Off first, and then both halves go through: a built-in row is not a
+    // custom one, so replacing the blocks leaves it switchable.
+    expect((await put({ tool: { name: "uv", on: false } })).status).toBe(200);
     expect((await put({ customTools: [], tool: { name: "rg", on: true } })).status).toBe(200);
-    expect(settings.get().tools).toEqual(["uv", "rg"]);
+    expect(settings.get().customTools).toEqual([]);
+    expect(settings.get().tools).toEqual(["rg"]);
+  });
+
+  // The bug this test exists for: the rule that a declaration outlives its
+  // binary lived only in the Console's helper, so `PUT {customTools: []}`
+  // answered 200 and left the tool enabled with nothing left to uninstall it.
+  it("refuses to drop a block while the binary it declares is still there", async () => {
+    const { app, settings, catalogState } = setup();
+    const put = (body: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const eza = { name: "eza", toml: `spec = "github:eza-community/eza"` };
+    expect((await put({ customTools: [eza], tool: { name: "eza", on: true } })).status).toBe(200);
+
+    const on = await put({ customTools: [] });
+    expect(on.status).toBe(409);
+    expect(await on.json()).toMatchObject({ error: expect.stringContaining("still switched on") });
+
+    // Switched off, but the binary is still installed: the block is what the
+    // next sync uninstalls it with.
+    expect((await put({ tool: { name: "eza", on: false } })).status).toBe(200);
+    catalogState.set("eza", { installed: true, error: null });
+    const installed = await put({ customTools: [] });
+    expect(installed.status).toBe(409);
+    expect(await installed.json()).toMatchObject({ error: expect.stringContaining("still installed") });
+
+    // Broken, or unreadable: neither is "gone".
+    catalogState.set("eza", { installed: false, error: "state.toml is locked" });
+    expect((await put({ customTools: [] })).status).toBe(409);
+    expect(settings.get().customTools).toEqual([eza]);
+
+    // Gone, as ubix reports it: now the block may go.
+    catalogState.set("eza", { installed: false, error: null });
+    expect((await put({ customTools: [] })).status).toBe(200);
+    expect(settings.get().customTools).toEqual([]);
+  });
+
+  // The bug this test exists for: validation ran before the transaction, so a
+  // request dropping a declaration and one switching that tool on both passed
+  // their checks and left an enabled tool nothing declares.
+  it("settles two racing writes inside the transaction, not before it", async () => {
+    const { app, settings, parkNextCatalogRead } = setup();
+    const put = (body: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const eza = { name: "eza", toml: `spec = "github:eza-community/eza"` };
+    expect((await put({ customTools: [eza] })).status).toBe(200);
+
+    // A request that reads the world, is held there, and writes afterwards:
+    // the drop below saw eza switched off and not installed, which is exactly
+    // what a check made before the write would still be believing.
+    const held = parkNextCatalogRead();
+    const dropping = put({ customTools: [] });
+    await new Promise((resolve) => setImmediate(resolve));
+    // Meanwhile the tool is switched on — legitimately: it is still declared.
+    expect((await put({ tool: { name: "eza", on: true } })).status).toBe(200);
+    held.release();
+
+    // The held request is judged on the state as it is when it writes, not on
+    // what it read: the block stays, because something is using it now.
+    const dropped = await dropping;
+    expect(dropped.status).toBe(409);
+    expect(await dropped.json()).toMatchObject({ error: expect.stringContaining("still switched on") });
+    expect(settings.get()).toMatchObject({ tools: ["eza"], customTools: [eza] });
   });
 
   it("declares a custom tool and its switch in one write, or neither", async () => {

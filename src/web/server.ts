@@ -76,6 +76,7 @@ export interface WebDeps {
   settings: SettingsStore;
   /** Passed straight to the instance routes, which document them. */
   catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
+  names?: { extensions: readonly string[]; tools: readonly string[] };
   onToolsChanged?: () => Promise<ToolsSyncNote | null>;
   validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
   /** Whether a newer Pier exists; answered from cache, refreshed in the
@@ -114,6 +115,7 @@ export function createServer(
     providers,
     settings,
     catalog,
+    names,
     onToolsChanged,
     validateCustomTools,
     secrets,
@@ -615,6 +617,7 @@ export function createServer(
     updater,
     secrets,
     catalog,
+    names,
     onToolsChanged,
     validateCustomTools,
     onUnlocked,
