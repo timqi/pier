@@ -87,7 +87,9 @@ src/
                catalog is one list with a kind, not two; a custom tool is the
                body of its ubix block, guarded structurally, not by
                vocabulary; one sync at a time per machine, under a lock the
-               whole operation is inside
+               whole operation is inside — a row in pier.db, because both
+               processes already open it and BEGIN IMMEDIATE is the mutual
+               exclusion a lock file would have to invent
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns: what that task runs, keeping it the task Pier wrote, and
                coalescing a burst of switches into a single run
@@ -113,10 +115,10 @@ modules. (`settings.ts` takes one function —
 what a custom tool may be; the vocabulary it validates against, ubix's sources
 and the names Pier already owns, lives with the installer, and a second copy of
 it in the settings file would be the third-copy bug one release later.) It
-imports node stdlib, `paths.ts`, `log.ts` and — type-only, like `settings.ts` —
-`core/types.ts`, whose `CatalogEntry` is the Console's view of one switch,
-bundled extension and managed binary alike, and must stay importable by a
-browser.
+imports node stdlib, `paths.ts`, `log.ts`, `db.ts` (the sync lock is a row, not
+a file) and — type-only, like `settings.ts` — `core/types.ts`, whose
+`CatalogEntry` is the Console's view of one switch, bundled extension and
+managed binary alike, and must stay importable by a browser.
 `paths.ts`, `db.ts`, `log.ts`, `secrets.ts` and `settings.ts` are the
 root-leaf exceptions: every area may import them, and they import
 nothing outside the root layer (`settings.ts` also names types from
