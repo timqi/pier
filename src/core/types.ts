@@ -324,6 +324,28 @@ export interface BundledExtensionInfo {
 }
 
 /**
+ * One CLI binary Pier manages (src/tools.ts), as a surface may show it: the
+ * switch, and everything needed to understand what the switch did. The
+ * declaration sits here rather than beside the installer for the same reason
+ * `BundledExtensionInfo` does — the browser draws it, and nothing that draws
+ * it may import a module that spawns processes.
+ */
+export interface ManagedToolInfo {
+  name: string;
+  /** The ubix spec it is installed from — `github:owner/repo`. */
+  spec: string;
+  summary: string;
+  enabled: boolean;
+  /** Installed *and* present on disk. A tool the installer records and the
+   *  filesystem no longer has is broken, and says so in `error`. */
+  installed: boolean;
+  version: string | null;
+  path: string | null;
+  /** Why the state above is not what it should be, when it is not. */
+  error: string | null;
+}
+
+/**
  * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
  * browsing. Changes apply to sessions created afterwards — Pi reads these
  * files at session start, never mid-run.
