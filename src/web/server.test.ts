@@ -290,8 +290,7 @@ function setup(
   const reload = vi.fn(() => router.evictIdle(0, Date.now(), { includeWatched: true }));
   // Stands in for main.ts's task lifecycle: web/ stores the set and says so,
   // the instance layer is what installs anything.
-  const onToolsChanged = vi.fn((_names: string[]) =>
-    Promise.resolve<ToolsSyncNote | null>({ state: "started" }));
+  const onToolsChanged = vi.fn(() => Promise.resolve<ToolsSyncNote | null>({ state: "started" }));
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
     // Composed like main.ts — a catalog of names, so this test never loads an
@@ -903,15 +902,15 @@ describe("workbench server", () => {
     expect(settings.get().autoUpdate).toBe(false);
   });
 
-  it("switches a bundled extension on, refuses a mis-shaped list, and recycles", async () => {
+  it("switches a bundled extension on, refuses a mis-shaped delta, and recycles", async () => {
     const { app, settings } = setup();
-    const put = (extensions: unknown) =>
+    const put = (extension: unknown) =>
       app.request("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ extensions }),
+        body: JSON.stringify({ extension }),
       });
-    const ok = await put(["web"]);
+    const ok = await put({ name: "web", on: true });
     expect(ok.status).toBe(200);
     expect(settings.get().extensions).toEqual(["web"]);
     // The answer carries the switches back, already flipped.
@@ -919,37 +918,36 @@ describe("workbench server", () => {
       catalog: [{ name: "web", enabled: true }, { name: "rg" }],
     });
     expect((await put("web")).status).toBe(400);
-    expect((await put([42])).status).toBe(400);
+    expect((await put({ name: 42, on: true })).status).toBe(400);
     expect(settings.get().extensions).toEqual(["web"]);
-    expect((await put([])).status).toBe(200);
+    expect((await put({ name: "web", on: false })).status).toBe(200);
     expect(settings.get().extensions).toEqual([]);
   });
 
-  it("switches a managed tool on, hands the set to the instance layer, and refuses a bad one", async () => {
+  it("switches a managed tool on, tells the instance layer, and refuses a bad delta", async () => {
     const { app, settings, onToolsChanged } = setup();
-    const put = (tools: unknown) =>
+    const put = (tool: unknown) =>
       app.request("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tools }),
+        body: JSON.stringify({ tool }),
       });
-    const ok = await put(["rg"]);
+    const ok = await put({ name: "rg", on: true });
     expect(ok.status).toBe(200);
     expect(settings.get().tools).toEqual(["rg"]);
     // The answer carries the switch back already flipped, so the Console never
     // draws a state nobody stored.
     expect(await ok.json()).toMatchObject({ catalog: [{ name: "web" }, { name: "rg", enabled: true }] });
-    expect(onToolsChanged).toHaveBeenCalledWith(["rg"]);
+    expect(onToolsChanged).toHaveBeenCalledTimes(1);
 
-    expect((await put("rtk")).status).toBe(400);
-    expect((await put([42])).status).toBe(400);
+    expect((await put("rg")).status).toBe(400);
+    expect((await put({ name: "rg", on: "yes" })).status).toBe(400);
     // A refused write changes nothing and installs nothing.
     expect(settings.get().tools).toEqual(["rg"]);
     expect(onToolsChanged).toHaveBeenCalledTimes(1);
 
-    expect((await put([])).status).toBe(200);
+    expect((await put({ name: "rg", on: false })).status).toBe(200);
     expect(settings.get().tools).toEqual([]);
-    expect(onToolsChanged).toHaveBeenLastCalledWith([]);
   });
 
   // The bug this test exists for: the set was stored, nothing installed it,
@@ -964,7 +962,7 @@ describe("workbench server", () => {
     const res = await app.request("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tools: ["rg"] }),
+      body: JSON.stringify({ tool: { name: "rg", on: true } }),
     });
     // Stored — the switch shows what was written — and the reason rides back
     // with it rather than only reaching the log.
@@ -1016,7 +1014,7 @@ describe("workbench server", () => {
     const res = await app.request("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tools: ["rg"] }),
+      body: JSON.stringify({ tool: { name: "rg", on: true } }),
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ toolsSync: { state: "waiting" } });
@@ -1031,7 +1029,7 @@ describe("workbench server", () => {
         body: JSON.stringify(body),
       });
     const eza = { name: "eza", toml: `spec = "github:eza-community/eza"` };
-    const ok = await put({ customTools: [eza], tools: ["eza"] });
+    const ok = await put({ customTools: [eza], tool: { name: "eza", on: true } });
     expect(ok.status).toBe(200);
     expect(settings.get().customTools).toEqual([eza]);
     expect(settings.get().tools).toEqual(["eza"]);
@@ -1041,7 +1039,7 @@ describe("workbench server", () => {
     // and install_dir is never something a text field can move.
     const bad = await put({
       customTools: [eza, { name: "nope", toml: `spec = "github:x/y"\n[settings]\ninstall_dir = "/usr/bin"` }],
-      tools: ["eza", "nope"],
+      tool: { name: "nope", on: true },
     });
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ error: expect.stringContaining("spec line") });
@@ -1888,7 +1886,7 @@ describe("configuration reaching live sessions", () => {
     attached(router, session);
     await recycled(
       "bundled extension",
-      await app.request("/api/settings", { ...json({ extensions: ["web"] }), method: "PUT" }),
+      await app.request("/api/settings", { ...json({ extension: { name: "web", on: true } }), method: "PUT" }),
     );
   });
 

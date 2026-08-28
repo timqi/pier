@@ -7,11 +7,9 @@ import type { CatalogEntry } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
-  normalizeExtensions,
   normalizeModelMenu,
   normalizePublicUrl,
   normalizeTerminalInitCommand,
-  normalizeTools,
   type SettingsStore,
 } from "../settings.js";
 // Type-only, and only for the shape the injected validator answers with:
@@ -67,12 +65,12 @@ export function registerInstanceRoutes(
      *  spawns ubix, and web/ may do neither. Absent in tests that do not care;
      *  the Console then shows no switches. */
     catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-    /** Ran after a tool set was written, with the new one. Answers with what
-     *  became of the install — started, waiting behind a sync already running,
-     *  or refused with a reason — because the switch that was just flipped is
-     *  where that belongs, not only the journal (§5b). `null`: nothing needed
-     *  doing, so the switch says only that it saved. */
-    onToolsChanged?: (names: string[]) => Promise<ToolsSyncNote | null>;
+    /** Ran after the tool set was written. Answers with what became of the
+     *  install — started, waiting behind a sync already running, or refused
+     *  with a reason — because the switch that was just flipped is where that
+     *  belongs, not only the journal (§5b). It reads the stored set itself:
+     *  passing it in would be a second copy of what was just written. */
+    onToolsChanged?: () => Promise<ToolsSyncNote | null>;
     /** What a custom tool may be. Injected because the rule lives with the
      *  installer (src/tools.ts) and web/ may not import it; main.ts also folds
      *  in the names the bundled catalog already owns. */
@@ -225,19 +223,17 @@ export function registerInstanceRoutes(
         modelMenu?: unknown;
         autoUpdate?: unknown;
         terminalInitCommand?: unknown;
-        extensions?: unknown;
-        tools?: unknown;
         customTools?: unknown;
         extension?: unknown;
         tool?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.extensions, body.tools, body.customTools, body.extension, body.tool]
+      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.customTools, body.extension, body.tool]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, extensions, tools, customTools, extension or tool required",
+        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, customTools, extension or tool required",
       }, 400);
     }
     // Everything is validated before anything is written, and everything is
@@ -266,11 +262,6 @@ export function registerInstanceRoutes(
       if (command === null) return refuse("terminalInitCommand must be one line of at most 500 characters");
       writes.push(() => settings.setTerminalInitCommand(command));
     }
-    if (body?.extensions !== undefined) {
-      const names = normalizeExtensions(body.extensions);
-      if (names === null) return refuse("extensions must be a list of names (≤32)");
-      writes.push(() => settings.setExtensions(names));
-    }
     if (body?.customTools !== undefined) {
       const validated = validateCustomTools?.(body.customTools) ??
         { error: "this Pier cannot store custom tools" };
@@ -291,18 +282,14 @@ export function registerInstanceRoutes(
       if (typeof one === "string") return refuse(`extension: ${one}`);
       writes.push(() => settings.setExtensions(withName(settings.get().extensions, one)));
     }
-    // What the tool switches changed to, for the install below: the delta is
-    // resolved inside the transaction, so it is the set that was stored.
-    let tools: string[] | null = null;
-    if (body?.tools !== undefined) {
-      const names = normalizeTools(body.tools);
-      if (names === null) return refuse("tools must be a list of names (≤32)");
-      writes.push(() => settings.setTools((tools = names)));
-    }
+    // Whether the enabled set moved, for the install below. The delta itself
+    // is resolved inside the transaction, against the set as it was stored.
+    let toolsChanged = false;
     if (body?.tool !== undefined) {
       const one = delta(body.tool);
       if (typeof one === "string") return refuse(`tool: ${one}`);
-      writes.push(() => settings.setTools((tools = withName(settings.get().tools, one))));
+      toolsChanged = true;
+      writes.push(() => settings.setTools(withName(settings.get().tools, one)));
     }
     settings.transact(() => {
       for (const write of writes) write();
@@ -310,12 +297,10 @@ export function registerInstanceRoutes(
     // Stored first, then acted on: the switch shows what was written even when
     // the install cannot start — and then says why, here, rather than leaving
     // "saved" as the last thing anyone was told.
-    const note = tools ? await onToolsChanged?.(tools) : null;
+    const note = toolsChanged ? await onToolsChanged?.() : null;
     // The URL and the extension set are both read when a session opens; the
     // model menu is read per picker call, so it needs no recycle.
-    if (body?.publicUrl !== undefined || body?.extensions !== undefined || body?.extension !== undefined) {
-      onSettingsChanged?.();
-    }
+    if (body?.publicUrl !== undefined || body?.extension !== undefined) onSettingsChanged?.();
     return c.json({ ...(await instanceSettings()), ...(note ? { toolsSync: note } : {}) });
   });
 

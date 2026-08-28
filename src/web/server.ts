@@ -76,7 +76,7 @@ export interface WebDeps {
   settings: SettingsStore;
   /** Passed straight to the instance routes, which document them. */
   catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-  onToolsChanged?: (names: string[]) => Promise<ToolsSyncNote | null>;
+  onToolsChanged?: () => Promise<ToolsSyncNote | null>;
   validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
   /** Whether a newer Pier exists; answered from cache, refreshed in the
    *  background. */

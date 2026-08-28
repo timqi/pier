@@ -150,6 +150,15 @@ export class TaskService {
     return this.store.countActiveRuns();
   }
 
+  /** The run this task has in flight, if any. The store already answers this
+   *  for the overlap guard (runs.ts); a caller that has just been refused as
+   *  an overlap needs the same answer to know what to wait for, and scanning
+   *  run history for it finds nothing once the skipped rows outnumber the
+   *  window. */
+  activeRun(taskId: string): TaskRun | undefined {
+    return this.store.findActiveRun(taskId);
+  }
+
   list(): TaskDefinition[] {
     return this.definitions.list();
   }

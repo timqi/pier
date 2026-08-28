@@ -11,6 +11,7 @@ import {
   normalizeCustomTools,
   parseUbixJson,
   specOf,
+  type SyncAttempt,
   type SyncRunner,
   ubixAsset,
   ubixConfigToml,
@@ -143,9 +144,20 @@ describe("parseUbixJson", () => {
   });
 
   it("refuses a document it does not understand instead of reporting no tools", () => {
+    const doc = (tools: unknown[], schema: unknown = 1) => JSON.stringify({ schema_version: schema, tools });
     expect(() => parseUbixJson("ubix 1.0\nusage: ...")).toThrow(/did not answer with JSON/);
     expect(() => parseUbixJson(JSON.stringify({ schema_version: 1 }))).toThrow(/no tools array/);
-    expect(() => parseUbixJson(JSON.stringify({ tools: [{ action: "installed" }] }))).toThrow(/no name/);
+    expect(() => parseUbixJson(doc([{ action: "installed" }]))).toThrow(/no name/);
+    // A schema Pier was not written against: refused, because the alternative
+    // is reading fields that may have moved and drawing installed tools as
+    // absent with nothing saying so.
+    expect(() => parseUbixJson(doc([], 2))).toThrow(/schema 2, and Pier reads 1/);
+    expect(() => parseUbixJson(doc([]))).not.toThrow();
+    // A field that is there and is the wrong type is the same failure, not a
+    // null to carry on with.
+    expect(() => parseUbixJson(doc([{ name: "rg", installed: "yes" }]))).toThrow(/rg\.installed is not a boolean/);
+    expect(() => parseUbixJson(doc([{ name: "rg", installed_version: 42 }]))).toThrow(/installed_version is not a string/);
+    expect(() => parseUbixJson(doc([{ name: "rg", install_paths: ["/a", 7] }]))).toThrow(/install_paths is not a list/);
   });
 });
 
@@ -315,7 +327,7 @@ describe("ManagedTools.sync", () => {
     expect(report.summary).toBe("rtk: upgraded v0.23.5");
     expect(r.lines()).toEqual([
       "ubix list --json",
-      "ubix upgrade --all --prune --json",
+      "ubix upgrade --all --prune --wait --json",
       "rtk init -g --agent pi",
     ]);
     // Pier's own config, never the operator's ~/.config/ubix.
@@ -341,7 +353,7 @@ describe("ManagedTools.sync", () => {
     expect(r.lines()).toEqual([
       "ubix list --json",
       "rtk init --uninstall --agent pi --global",
-      "ubix upgrade --all --prune --json",
+      "ubix upgrade --all --prune --wait --json",
     ]);
     // Nothing is declared any more, so prune takes all three.
     expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).not.toContain("[tools.");
@@ -411,7 +423,7 @@ describe("ManagedTools.sync", () => {
     // what is asserted is that it was attempted, not that it landed.)
     let fetched = 0;
     const r = rig({
-      answer: () => ({ code: 1, stdout: "", stderr: "error: unexpected argument '--json'" }),
+      answer: () => ({ code: 1, stdout: "", stderr: "error: unexpected argument '--json' found" }),
       fetch: () => {
         fetched++;
         return Promise.reject(new Error("the network is not open in tests"));
@@ -504,26 +516,6 @@ describe("ManagedTools.status", () => {
   });
 });
 
-describe("a Console read while an install is running", () => {
-  it("answers that ubix is busy rather than waiting out its state lock", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pier-tools-busy-"));
-    mkdirSync(join(root, "bin"), { recursive: true });
-    writeFileSync(join(root, "bin", "ubix"), "#!/bin/sh\n");
-    // ubix's state lock is exclusive: a `list` behind a running `upgrade`
-    // returns when the download does, which is not a page's timescale.
-    const tools = new ManagedTools({ root, exec: () => new Promise<ExecResult>(() => {}) });
-    vi.useFakeTimers();
-    const answering = tools.status(["rtk"]);
-    await vi.advanceTimersByTimeAsync(3000);
-    const [rtk] = await answering;
-    vi.useRealTimers();
-    expect(rtk).toMatchObject({
-      enabled: true,
-      binary: { installed: false, error: "ubix is busy — an install or update is running" },
-    });
-  });
-});
-
 describe("three switches flipped while a sync is running", () => {
   /** A stand-in for tasks/: one run at a time, an overlapping request is
    *  refused exactly as `tasks/runs.ts` refuses it, and a run reads the
@@ -539,11 +531,11 @@ describe("three switches flipped while a sync is running", () => {
           // The overlap guard: the run is recorded as skipped and the caller
           // is handed the run that is actually in flight.
           skipped.push("overlap");
-          return { started: false, settled: inFlight };
+          return { ran: "overlapped", settled: inFlight };
         }
         started.push([...enabled]);
         inFlight = new Promise<void>((resolve) => (settle = resolve));
-        return { started: true, settled: inFlight };
+        return { ran: "started", settled: inFlight };
       },
     };
     let inFlight = Promise.resolve();
@@ -568,13 +560,13 @@ describe("three switches flipped while a sync is running", () => {
     const sync = coalescedSync(rig.runner, (err) => failures.push(err));
 
     // rtk goes on and its sync starts running.
-    expect(sync().state).toBe("started");
+    expect(sync()).toBe("started");
     expect(rig.started).toEqual([["rtk"]]);
 
     // Three more switches, each its own request, all while that run is busy.
     for (const name of ["rg", "fd", "wt"]) {
       rig.flip(name);
-      expect(sync().state).toBe("waiting");
+      expect(sync()).toBe("waiting");
     }
     // Nothing has been started behind its back, and nothing is queued per click.
     expect(rig.started).toHaveLength(1);
@@ -596,14 +588,14 @@ describe("three switches flipped while a sync is running", () => {
     const started: number[] = [];
     let refuse = true;
     const sync = coalescedSync({
-      run: () => {
-        if (refuse) return { started: false, settled: busy };
+      run: (): SyncAttempt => {
+        if (refuse) return { ran: "overlapped", settled: busy };
         started.push(Date.now());
-        return { started: true, settled: Promise.resolve() };
+        return { ran: "started", settled: Promise.resolve() };
       },
     }, (err) => expect.unreachable(String(err)));
 
-    expect(sync().state).toBe("started");
+    expect(sync()).toBe("started");
     expect(started).toEqual([]);
     refuse = false;
     release();
@@ -616,15 +608,15 @@ describe("three switches flipped while a sync is running", () => {
     const failures: unknown[] = [];
     let fail = true;
     const sync = coalescedSync({
-      run: () => {
+      run: (): SyncAttempt => {
         if (fail) throw new Error("no tools update task to run");
-        return { started: true, settled: Promise.resolve() };
+        return { ran: "started", settled: Promise.resolve() };
       },
     }, (err) => failures.push(err));
     sync();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(String(failures[0])).toContain("no tools update task");
     fail = false;
-    expect(sync().state).toBe("started");
+    expect(sync()).toBe("started");
   });
 });

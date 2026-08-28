@@ -37,6 +37,7 @@ import {
   ManagedTools,
   normalizeCustomTools,
   prependPath,
+  type SyncAttempt,
   TOOLS_TASK_CREATOR,
 } from "./tools.js";
 import { Secrets } from "./secrets.js";
@@ -228,6 +229,9 @@ const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> 
     action: { type: "bash" as const, script: command.script, cwd: PIER_HOME },
     timeoutSeconds: 1800,
   };
+  const draftShape = [draft.name, draft.description, true, draft.trigger, draft.action, { type: "none" }, draft.timeoutSeconds];
+  // Archived is not "owned but edited": nothing can un-archive a task, so the
+  // replacement is a new one and the old one keeps its history.
   const owned = tasks.list().filter((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
   // One per creator. Two would fight over ubix's state lock every night, each
   // reporting the other's run as an overlap.
@@ -236,10 +240,14 @@ const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> 
     tasks.archive(extra.id);
   }
   const task = owned[0];
-  const canonical = JSON.stringify([draft.name, draft.trigger, draft.action, draft.timeoutSeconds]);
-  if (task && JSON.stringify([task.name, task.trigger, task.action, task.timeoutSeconds]) !== canonical) {
-    log.warn(`the tools update task was edited — restoring the command Pier owns`);
-    await tasks.update(task.id, draft);
+  // Every field Pier owns, not just the command: a paused task, a renamed one
+  // or one pointed at a callback still claims to be keeping the tools current
+  // while the daily run never happens.
+  const current = task &&
+    JSON.stringify([task.name, task.description, task.enabled, task.trigger, task.action, task.callback, task.timeoutSeconds]);
+  if (task && current !== JSON.stringify(draftShape)) {
+    log.warn("the tools update task was edited — restoring the definition Pier owns");
+    await tasks.update(task.id, { ...draft, enabled: true, callback: { type: "none" } });
   }
   const id = task ? task.id : (await tasks.create(draft, TOOLS_TASK_CREATOR)).id;
   toolsTaskId = id;
@@ -250,14 +258,20 @@ const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> 
  *  knows what a task is: start a run, and hand back what to wait for — our own
  *  run, or the one already in flight that made ours a `skipped` row. */
 const requestSync = coalescedSync({
-  run: () => {
+  run: (): SyncAttempt => {
     if (!toolsTaskId) throw new Error("no tools update task to run");
-    const mine = tasks.run(toolsTaskId, null, "manual");
-    if (!isTerminal(mine.state)) {
-      return { started: true, settled: tasks.waitForRun(mine.id).then(() => undefined) };
+    const settled = (id: string): Promise<void> => tasks.waitForRun(id).then(() => undefined);
+    // Bounded, because the only way round this loop is a run that finished
+    // between being in flight and being asked about: real, rare, and not
+    // something to spin on. Three refusals in a row with nothing running is a
+    // bug, and it is reported as one rather than retried forever.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const mine = tasks.run(toolsTaskId, null, "manual");
+      if (!isTerminal(mine.state)) return { ran: "started", settled: settled(mine.id) };
+      const active = tasks.activeRun(toolsTaskId);
+      if (active) return { ran: "overlapped", settled: settled(active.id) };
     }
-    const active = tasks.listRuns(toolsTaskId, 5).find((run) => !isTerminal(run.state));
-    return { started: false, settled: active ? tasks.waitForRun(active.id).then(() => undefined) : null };
+    throw new Error("the tools sync was refused as an overlap three times with nothing running");
   },
 }, (err: unknown) => log.error("the tools sync could not be run", err));
 
@@ -270,7 +284,7 @@ const toolsChanged = async (): Promise<ToolsSyncNote> => {
       log.error(`tools cannot be managed: ${task.problem}`);
       return { state: "refused", reason: task.problem };
     }
-    return { state: requestSync().state };
+    return { state: requestSync() };
   } catch (err) {
     log.error("the tools update task could not be reconciled", err);
     return { state: "refused", reason: err instanceof Error ? err.message : String(err) };
@@ -465,7 +479,7 @@ app.route("/", createServer({
       toolsTaskId,
     };
   },
-  onToolsChanged: () => toolsChanged(),
+  onToolsChanged: toolsChanged,
   // The rule lives with the installer; the names the bundled catalog already
   // owns live with the extensions. Only here are both in scope.
   validateCustomTools: (raw: unknown) => {

@@ -8,10 +8,8 @@
 // data (MANAGED below) — the next tool is a table row, not a code path.
 //
 // An instance-layer leaf: node stdlib, paths.ts and log.ts only. It knows
-// nothing about tasks, sessions or the web — the daily update task is *shape
-// and rule* here (`toolsTaskDraft`, `toolsTaskPlan`, both pure data), and
-// main.ts is what calls tasks/ with them, because a leaf that scheduled itself
-// would be two modules.
+// nothing about tasks, sessions or the web — main.ts owns the task that calls
+// it, because a leaf that scheduled itself would be two modules.
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -27,10 +25,6 @@ const log = logger("tools");
  *  download URL: the asset name carries the release tag, so the tag has to be
  *  asked for before anything can be fetched. */
 const UBIX_LATEST = "https://api.github.com/repos/timqi/ubix/releases/latest";
-
-/** How long a Console read of the installed state may take before it answers
- *  "busy" instead (see `status`). */
-const STATUS_CAP_MS = 3000;
 
 /** One binary Pier will install and keep current on request. */
 export interface ManagedTool {
@@ -150,7 +144,7 @@ export function specOf(toml: string): string | null {
 /** What a custom entry must be, said once so both the route and the stored
  *  row are checked by the same rule. */
 export const CUSTOM_TOOL_RULES =
-  `each custom tool needs a name (letters, digits, . _ - , ≤32 characters, not a built-in or "ubix")` +
+  `each custom tool needs a name (letters, digits, _ and -, ≤32 characters, not a built-in or "ubix")` +
   ` and a block body with a spec line — spec = "github:owner/repo", plus any ubix keys it needs.` +
   ` Pier writes the [tools.<name>] header itself: a line opening a section of its own is refused, so are` +
   ` control characters and a body over ${String(MAX_BODY)} characters; at most ${String(MAX_CUSTOM)} tools`;
@@ -236,22 +230,26 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
  *  owns rather than one a person wrote. */
 export const TOOLS_TASK_CREATOR = "tools";
 
-/** What one sync request became, for the surface that asked for it. */
-export interface SyncRequest {
-  /** `waiting`: a sync was already running, and this request rides the run
-   *  that follows it — not a failure, and not "nothing happened" either. */
-  state: "started" | "waiting";
-  /** Settles when the run that covers this request has finished. */
-  settled: Promise<void>;
-}
+/** What one sync request became, for the surface that asked for it.
+ *  `waiting`: a sync was already running, and this request rides the run that
+ *  follows it — not a failure, and not "nothing happened" either. */
+export type SyncRequest = "started" | "waiting";
+
+/**
+ * One attempt to run the task, as whatever owns the task reports it. There is
+ * always something to wait for: "refused, and nothing is in flight" is not a
+ * state a caller can act on — it would loop with nothing to loop on — so the
+ * type cannot spell it, and the one place that could produce it (a run that
+ * finished between the refusal and the lookup) resolves it before answering.
+ */
+export type SyncAttempt =
+  | { ran: "started"; settled: Promise<void> }
+  | { ran: "overlapped"; settled: Promise<void> };
 
 /** The one call the coalescer needs from whatever actually runs the task.
  *  Structural, so this file still knows nothing about tasks/. */
 export interface SyncRunner {
-  /** Start one run now. `started: false` is the task layer refusing an
-   *  overlapping run — by design, no double fire — and `settled` is then what
-   *  to wait for before trying again (`null`: nothing is in flight after all). */
-  run(): { started: boolean; settled: Promise<void> | null };
+  run(): SyncAttempt;
 }
 
 /**
@@ -282,31 +280,30 @@ export function coalescedSync(
       // Cleared before the run, not after: a request arriving while this one is
       // in flight must set it again and earn its own follow-up.
       pending = false;
-      const { started, settled } = runner.run();
-      if (settled) await settled;
+      const { ran, settled } = runner.run();
+      await settled;
       // Refused as an overlap: nothing of ours has run yet, so go again once
       // whatever was in flight is done.
-      if (!started) pending = true;
+      if (ran === "overlapped") pending = true;
     } while (pending);
   };
 
   return () => {
     if (chain) {
       pending = true;
-      return { state: "waiting", settled: chain };
+      return "waiting";
     }
     let finish!: () => void;
     // Assigned before `drive` is called: a drive that never awaits would
     // otherwise finish before this variable existed, and every later request
     // would wait forever on a chain nobody is driving.
     chain = new Promise<void>((resolve) => (finish = resolve));
-    const settled = chain;
     void drive().catch(onFailure).finally(() => {
       chain = null;
       pending = false;
       finish();
     });
-    return { state: "started", settled };
+    return "started";
   };
 }
 
@@ -318,19 +315,11 @@ export interface ExecResult {
   stdout: string;
   stderr: string;
 }
-export type Exec = (
-  file: string,
-  args: readonly string[],
-  env: NodeJS.ProcessEnv,
-  /** Aborting kills the child. Without it a read that gave up waiting would
-   *  leave ubix running to the timeout below, holding the state lock it was
-   *  queued behind. */
-  signal?: AbortSignal,
-) => Promise<ExecResult>;
+export type Exec = (file: string, args: readonly string[], env: NodeJS.ProcessEnv) => Promise<ExecResult>;
 
-const spawnExec: Exec = (file, args, env, signal) =>
+const spawnExec: Exec = (file, args, env) =>
   new Promise((resolve) => {
-    execFile(file, [...args], { env, signal, maxBuffer: 8 * 1024 * 1024, timeout: 15 * 60_000 }, (err, stdout, stderr) => {
+    execFile(file, [...args], { env, maxBuffer: 8 * 1024 * 1024, timeout: 15 * 60_000 }, (err, stdout, stderr) => {
       const failure = err as (NodeJS.ErrnoException & { code?: number | string }) | null;
       const code = typeof failure?.code === "number" ? failure.code : failure ? null : 0;
       resolve({
@@ -377,14 +366,9 @@ const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-const text = (value: unknown): string | null =>
-  typeof value === "string" && value.trim() ? value.trim() : null;
-const bool = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
-const paths = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((p): p is string => typeof p === "string") : [];
 
-/** The `--json` document shape Pier was written against (ubix bumps this on
- *  any breaking change to the fields read below). */
+/** The `--json` document shape Pier was written against. ubix bumps this on
+ *  any breaking change to the fields read below. */
 const UBIX_SCHEMA = 1;
 
 /**
@@ -394,13 +378,14 @@ const UBIX_SCHEMA = 1;
  *
  * Both documents are `{schema_version, tools: [...]}`; the entries differ, so
  * one shape carries both and the fields the other command does not send stay
- * null. A document with no `tools` array, or an entry with no name, is a
- * schema this function no longer understands: it throws rather than reporting
- * "no tools", which would show an installed tool as missing.
+ * null.
  *
- * A newer `schema_version` is logged, not refused: breaking Pier on somebody
- * else's release day is worse than reading a document whose extra fields it
- * ignores — and a field that actually moved fails loudly right here anyway.
+ * Everything that is not exactly what it should be throws, including a schema
+ * version this does not know. The alternative was tried and is worse: a field
+ * that fails to parse would become `null`, an installed tool would be drawn as
+ * absent, and the switches and the machine would disagree with nothing saying
+ * so (§5b). A caller that cannot read ubix reports that it cannot; it never
+ * reports "no tools".
  */
 export function parseUbixJson(stdout: string): UbixToolState[] {
   let doc: unknown;
@@ -414,28 +399,53 @@ export function parseUbixJson(stdout: string): UbixToolState[] {
     throw new Error(`ubix --json has no tools array: ${stdout.trim().slice(0, 200)}`);
   }
   if (top.schema_version !== UBIX_SCHEMA) {
-    log.warn(`ubix --json is schema ${String(top.schema_version)}; Pier reads ${String(UBIX_SCHEMA)}`);
+    throw new Error(
+      `ubix --json is schema ${JSON.stringify(top.schema_version)}, and Pier reads ${String(UBIX_SCHEMA)}` +
+        ` — refusing to guess what its fields mean now`,
+    );
   }
   return top.tools.map((value): UbixToolState => {
     const entry = record(value);
-    const name = entry ? text(entry.name) : null;
-    if (!entry || !name) {
-      throw new Error(`ubix --json entry has no name: ${JSON.stringify(value).slice(0, 120)}`);
-    }
-    const to = text(entry.to_version);
+    if (!entry) throw new Error(`ubix --json entry is not an object: ${JSON.stringify(value).slice(0, 120)}`);
+    const where = typeof entry.name === "string" ? entry.name : JSON.stringify(value).slice(0, 80);
+    /** A string, an explicit null, or absent. Anything else is a field that
+     *  moved, and guessing `null` for it is how "installed" becomes "gone". */
+    const str = (key: string): string | null => {
+      const raw = entry[key];
+      if (raw === undefined || raw === null) return null;
+      if (typeof raw !== "string") throw new Error(`ubix --json: ${where}.${key} is not a string`);
+      return raw.trim() || null;
+    };
+    const flag = (key: string): boolean | null => {
+      const raw = entry[key];
+      if (raw === undefined || raw === null) return null;
+      if (typeof raw !== "boolean") throw new Error(`ubix --json: ${where}.${key} is not a boolean`);
+      return raw;
+    };
+    const list = (key: string): string[] => {
+      const raw = entry[key];
+      if (raw === undefined || raw === null) return [];
+      if (!Array.isArray(raw) || raw.some((item) => typeof item !== "string")) {
+        throw new Error(`ubix --json: ${where}.${key} is not a list of paths`);
+      }
+      return raw as string[];
+    };
+    const name = str("name");
+    if (!name) throw new Error(`ubix --json entry has no name: ${JSON.stringify(value).slice(0, 120)}`);
+    const to = str("to_version");
     return {
       name,
-      version: text(entry.installed_version) ?? to,
-      path: paths(entry.install_paths)[0] ?? null,
-      installed: bool(entry.installed),
-      exists: bool(entry.exists),
-      missingPaths: paths(entry.missing_paths),
-      pin: text(entry.tag) ?? text(entry.version),
-      action: text(entry.action),
-      from: text(entry.from_version),
+      version: str("installed_version") ?? to,
+      path: list("install_paths")[0] ?? null,
+      installed: flag("installed"),
+      exists: flag("exists"),
+      missingPaths: list("missing_paths"),
+      pin: str("tag") ?? str("version"),
+      action: str("action"),
+      from: str("from_version"),
       to,
-      reason: text(entry.reason),
-      error: text(entry.error),
+      reason: str("reason"),
+      error: str("error"),
     };
   });
 }
@@ -485,6 +495,13 @@ export function ubixConfigToml(
   return `${lines.join("\n")}\n`;
 }
 
+/** ubix's own words for "I do not have that flag" — clap's message for an
+ *  unknown argument, and ubix's own refusal on a command that takes no JSON.
+ *  Nothing else counts as too old. */
+const refusesJson = (stderr: string): boolean =>
+  /unexpected argument\s+'?--json|unrecognized (?:option|argument)\s+'?--json|`--json` is not supported/i
+    .test(stderr);
+
 /** The ubix in `bin/` is older than the `--json` Pier reads. Pier put it
  *  there, so this is Pier's to fix (`sync` re-bootstraps), not an errand for
  *  the operator. */
@@ -517,6 +534,7 @@ interface ReleaseAsset {
  *  parser: a shape that is not understood is an error, not an empty list. */
 function parseRelease(doc: unknown): { tag: string; assets: ReleaseAsset[] } {
   const value = record(doc);
+  const text = (raw: unknown): string | null => (typeof raw === "string" && raw.trim() ? raw.trim() : null);
   const tag = text(value?.tag_name);
   const rawAssets = value?.assets;
   if (!tag || !Array.isArray(rawAssets)) throw new Error("the ubix release feed has no tag or assets");
@@ -642,9 +660,14 @@ export class ManagedTools {
 
     // `--prune` is the removal: anything in ubix's state that this config no
     // longer declares is uninstalled by ubix, which knows per source how.
-    const states = await this.#states(ubix, env, ["upgrade", "--all", "--prune", "--json"]);
+    // `--wait` on the state lock: a hand-typed `pier tools sync` overlapping
+    // the managed run should converge behind it, not fail on the lock. Bounded
+    // by the subprocess timeout, like everything else here.
+    const states = await this.#states(ubix, env, ["upgrade", "--all", "--prune", "--wait", "--json"]);
     for (const state of states) {
+      // One line per tool: a kept one has already said why it stayed.
       if (wanted.some((tool) => tool.name === state.name)) continue;
+      if (entries.some((entry) => entry.name === state.name)) continue;
       // A tool that left the set: ubix says what it did with it, and a failure
       // to remove is as much a failure as one to install.
       entries.push({ name: state.name, action: state.action ?? "removed", version: null, error: state.error });
@@ -683,28 +706,16 @@ export class ManagedTools {
     // No ubix yet is not a failure — it is the state of an instance that has
     // never switched a tool on.
     if (!existsSync(this.ubixPath)) return base;
-    let states: UbixToolState[] | null;
-    // ubix guards its state with an exclusive lock, so this read can queue
-    // behind a running install for as long as a download takes — and this call
-    // is on a Console page's path (principle 7). Past the cap the row says what
-    // it is waiting for instead of the page waiting for it, and the child is
-    // killed rather than left holding a lock nobody is reading any more.
-    const cap = new AbortController();
-    const capped = setTimeout(() => cap.abort(), STATUS_CAP_MS);
-    capped.unref();
+    let states: UbixToolState[];
     try {
-      states = await Promise.race([
-        this.#states(this.ubixPath, this.#env(), ["list", "--json"], cap.signal),
-        new Promise<null>((resolve) => setTimeout(resolve, STATUS_CAP_MS, null).unref()),
-      ]);
+      states = await this.#states(this.ubixPath, this.#env(), ["list", "--json"]);
     } catch (err) {
+      // The page says why it cannot answer rather than answering wrongly: a
+      // row drawn as "not installed" because a read failed is the lie §5b is
+      // about.
       const error = err instanceof Error ? err.message : String(err);
       return base.map((entry) => withBinary(entry, { error }));
-    } finally {
-      clearTimeout(capped);
-      cap.abort();
     }
-    if (!states) return base.map((entry) => withBinary(entry, { error: "ubix is busy — an install or update is running" }));
     return base.map((entry) => {
       const state = states.find((s) => s.name === entry.name);
       if (!state) return entry;
@@ -765,23 +776,18 @@ export class ManagedTools {
    * that predates `--json` — and that is said in one sentence rather than by
    * scraping the human output it printed instead.
    */
-  async #states(
-    ubix: string,
-    env: NodeJS.ProcessEnv,
-    args: readonly string[],
-    signal?: AbortSignal,
-  ): Promise<UbixToolState[]> {
-    const result = await this.#exec(ubix, args, env, signal);
+  async #states(ubix: string, env: NodeJS.ProcessEnv, args: readonly string[]): Promise<UbixToolState[]> {
+    const result = await this.#exec(ubix, args, env);
     try {
       return parseUbixJson(result.stdout);
     } catch (err) {
-      if (result.code !== 0) {
-        throw new UbixTooOld(
-          `${failedRun(`ubix ${args.join(" ")}`, result)} — and no JSON document, so this ubix predates the` +
-            ` --json output the managed tools read (Pier replaces it on the next sync). Parse: ${String(err)}`,
-        );
-      }
-      throw err;
+      const failure = failedRun(`ubix ${args.join(" ")}`, result);
+      // Only the flag being unknown means "too old". Everything else — a
+      // malformed body in someone's block, a locked state file, a full disk —
+      // is that failure, reported as itself: re-bootstrapping ubix over a
+      // config error would fix nothing and say something false.
+      if (result.code !== 0 && refusesJson(result.stderr)) throw new UbixTooOld(failure);
+      throw new Error(result.code === 0 ? String(err) : `${failure} (${String(err)})`);
     }
   }
 
