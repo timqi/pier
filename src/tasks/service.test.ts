@@ -1384,4 +1384,21 @@ describe("a definition Pier's own code created", () => {
     expect(repaired.action).toMatchObject({ script: "echo repaired" });
     expect(service.archive(owned.id, "tools").archived).toBe(true);
   });
+
+  // The bug this test exists for: the guard is reachable from *inside* the
+  // task layer too. A one-shot watch retires itself after a successful run,
+  // and with no owner named that mutation was refused — so an owned task
+  // failed immediately after succeeding.
+  it("still retires itself when it is a one-shot watch, however it was created", async () => {
+    const { cwd, service } = setup();
+    const once = await service.create({
+      ...bashDraft(cwd, "echo fixed"),
+      name: "owned one-shot",
+      trigger: { type: "watch", cwd, script: "exit 0", intervalSeconds: 60, mode: "once" },
+    }, "tools");
+    const run = await service.waitForRun(service.run(once.id).id);
+    expect(run.state).toBe("succeeded");
+    expect(run.error).toBeNull();
+    expect(service.get(once.id).enabled).toBe(false);
+  });
 });

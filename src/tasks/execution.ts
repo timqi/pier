@@ -64,7 +64,11 @@ export class TaskExecution {
       if (run.matched !== false) run.result = await this.executeAction(run, controller.signal);
       run.state = "succeeded";
       if (definition.trigger.type === "watch" && !run.resumedFromRunId && definition.trigger.mode === "once" && run.matched) {
-        this.definitions.setEnabled(definition.id, false);
+        // As the definition's own creator: a one-shot watch retiring itself is
+        // the task layer keeping its own promise, not a surface editing
+        // somebody's task, and the owner guard (definitions.ts) would
+        // otherwise fail the run that had just succeeded.
+        this.definitions.setEnabled(definition.id, false, definition.creator);
       }
     } catch (error) {
       // A killed child reports `exited null`, not `cancelled`: report why we
