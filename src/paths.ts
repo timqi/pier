@@ -9,8 +9,15 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** Empty is unset, not a value: `PIER_HOME=` in a shell would otherwise
+ *  resolve every path below relative to the working directory, and the
+ *  database, the boards and the master key would land wherever the process
+ *  happened to start. Pure, because that rule is worth a test. */
+export const resolveHome = (value: string | undefined, home: string = homedir()): string =>
+  value || join(home, ".pier");
+
 /** `$PIER_HOME`, or `~/.pier`. Fixed for the life of the process. */
-export const PIER_HOME = process.env.PIER_HOME ?? join(homedir(), ".pier");
+export const PIER_HOME = resolveHome(process.env.PIER_HOME);
 
 /** A path inside it — `pierPath("boards")`. */
 export const pierPath = (...parts: string[]): string => join(PIER_HOME, ...parts);

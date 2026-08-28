@@ -5,9 +5,20 @@
 // edited its SYSTEM.md inside the production directory.
 
 import { describe, expect, it } from "vitest";
-import { resolveAgentDir } from "./paths.js";
+import { resolveAgentDir, resolveHome } from "./paths.js";
 
 const derived = "/home/t/.pier_test/pi";
+
+describe("resolveHome", () => {
+  it("takes the value a human set", () => {
+    expect(resolveHome("/srv/pier", "/home/t")).toBe("/srv/pier");
+  });
+
+  it("treats unset and empty alike — an empty PIER_HOME would make every path relative", () => {
+    expect(resolveHome(undefined, "/home/t")).toBe("/home/t/.pier");
+    expect(resolveHome("", "/home/t")).toBe("/home/t/.pier");
+  });
+});
 
 describe("resolveAgentDir", () => {
   it("derives from this instance's PIER_HOME when nothing says otherwise", () => {
