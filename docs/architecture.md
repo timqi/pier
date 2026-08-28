@@ -79,6 +79,8 @@ src/
   drain.ts     the graceful restart: finish running turns, ledger what the
                deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
+  tools.ts     the CLI binaries Pier manages (install, update, PATH) — ubix
+               does the downloading, main.ts owns the task that calls it
 ```
 
 Dependency direction: `channels | web | tasks | boards → core → agent`. Core
@@ -91,6 +93,11 @@ for the Console; nothing else imports the area.
 The browser may import owner-defined HTTP DTOs from `tasks/types.ts` and
 `channels/types.ts` type-only: these imports are erased at build, keep wire
 shapes single-sourced, and do not let web implement either area.
+`tools.ts` is instance-layer too, but not a leaf anything may import: only
+`main.ts` and `cli.ts` reach it, because managing binaries is an instance
+operation and no area needs one. It imports node stdlib, `paths.ts`, `log.ts`
+and — type-only, like `settings.ts` — `core/types.ts`, whose `ManagedToolInfo`
+is the Console's view of a switch and must stay importable by a browser.
 `paths.ts`, `db.ts`, `log.ts`, `secrets.ts` and `settings.ts` are the
 root-leaf exceptions: every area may import them, and they import
 nothing outside the root layer (`settings.ts` also names types from
