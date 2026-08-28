@@ -432,6 +432,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return link;
   }
 
+  /** Who actually does the installing. Named and linked because the block
+   *  below is written in someone else's config language: a body that ubix
+   *  rejects is only debuggable against ubix's own documentation. */
+  const ubixLink = (): HTMLElement => {
+    const link = h("a", "text-indigo-600 hover:underline", "ubix") as HTMLAnchorElement;
+    link.href = "https://github.com/timqi/ubix";
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    return link;
+  };
+
   /** What a binary is right now, in one line — the same line in both panes. */
   function binaryLine(entry: CatalogEntry): string {
     const binary = entry.binary;
@@ -611,6 +622,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
           "max-w-2xl text-[13px] leading-relaxed text-neutral-600",
           "Installed into Pier's own bin directory and put first on the PATH every session, task and terminal "
             + "inherits — so an agent gets this copy, at this version, whatever the machine already has.",
+        ),
+        h(
+          "p",
+          "max-w-2xl text-[12.5px] leading-relaxed text-neutral-500",
+          "Pier writes no downloader: ",
+          ubixLink(),
+          " does the work — a declarative installer that resolves a spec like ",
+          h("span", "font-mono text-[11.5px]", "github:owner/repo"),
+          " to the right release asset for this machine, verifies it, and upgrades in place. Pier bootstraps it, "
+            + "generates its config from the switches below, and keeps its files under Pier's own directory — "
+            + "your own ubix setup is untouched.",
         ),
         catalogError
           ? h("p", "max-w-2xl text-[12.5px] text-red-600", catalogError)
