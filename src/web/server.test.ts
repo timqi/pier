@@ -307,10 +307,18 @@ function setup(
       Promise.resolve({
         entries: [
           ...CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
-          ...TOOLS.map((tool) => ({
-            ...tool,
+          ...TOOLS.map((tool) => ({ ...tool, enabled: settings.get().tools.includes(tool.name) })),
+          // The blocks the operator declared are rows too, exactly as
+          // ManagedTools.status lists them — a fake that leaves them out cannot
+          // show what a request replacing them does.
+          ...settings.get().customTools.map((tool) => ({
+            source: "binary" as const,
+            kind: "tool" as const,
+            name: tool.name,
+            summary: "",
             enabled: settings.get().tools.includes(tool.name),
-            custom: settings.get().customTools.some((c) => c.name === tool.name) || undefined,
+            binary: { spec: tool.toml, installed: false, version: null, path: null, error: null },
+            custom: true,
           })),
         ],
         toolsTaskId: null,
@@ -1059,6 +1067,42 @@ describe("workbench server", () => {
     settings.setTools(["gone"]);
     expect((await put({ tool: { name: "gone", on: false } })).status).toBe(200);
     expect(settings.get().tools).toEqual([]);
+  });
+
+  // The bug this test exists for: the catalog is what is declared *now*, so a
+  // request that deletes a block and switches its tool on in the same write
+  // was checked against the row it was about to remove — and stored an enabled
+  // tool nothing declares.
+  it("checks a switch against the blocks the same request declares, not the ones it deletes", async () => {
+    const { app, settings } = setup();
+    const put = (body: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const eza = { name: "eza", toml: `spec = "github:eza-community/eza"` };
+    expect((await put({ customTools: [eza], tool: { name: "eza", on: true } })).status).toBe(200);
+    expect((await put({ tool: { name: "eza", on: false } })).status).toBe(200);
+
+    const gone = await put({ customTools: [], tool: { name: "eza", on: true } });
+    expect(gone.status).toBe(400);
+    expect(await gone.json()).toMatchObject({ error: expect.stringContaining("eza") });
+    // Neither half was stored: the block is still declared and nothing is on.
+    expect(settings.get().customTools).toEqual([eza]);
+    expect(settings.get().tools).toEqual([]);
+
+    // Replacing the blocks with a *different* one, and switching that one on,
+    // is the Add flow and still works.
+    const uv = { name: "uv", toml: `spec = "github:astral-sh/uv"` };
+    expect((await put({ customTools: [uv], tool: { name: "uv", on: true } })).status).toBe(200);
+    expect(settings.get().customTools).toEqual([uv]);
+    expect(settings.get().tools).toEqual(["uv"]);
+    // And a built-in row is not a custom one: replacing the blocks leaves it
+    // switchable. (`uv` stays in the set, undeclared — dropping a block is not
+    // switching a tool off, which is why the Console switches off first.)
+    expect((await put({ customTools: [], tool: { name: "rg", on: true } })).status).toBe(200);
+    expect(settings.get().tools).toEqual(["uv", "rg"]);
   });
 
   it("declares a custom tool and its switch in one write, or neither", async () => {

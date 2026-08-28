@@ -280,18 +280,28 @@ export function registerInstanceRoutes(
       if (!name || name.length > 64 || typeof given?.on !== "boolean") return "expected {name, on}";
       return { name, on: given.on };
     };
-    /** A switch has to name something this instance has. A typo, or a name
-     *  from a release that dropped it, otherwise answered 200, stored a
-     *  setting no surface can draw and ran a sync that installs nothing — the
-     *  shape of failure §5b is about. Taking a name *out* of the set it is
-     *  stored in is always allowed: that is the repair, not the mistake. */
+    /** A switch has to name something this instance will have *after this
+     *  request*. A typo, or a name from a release that dropped it, otherwise
+     *  answered 200, stored a setting no surface can draw and ran a sync that
+     *  installs nothing — the shape of failure §5b is about. The catalog is
+     *  what is declared *now*, so a request that also replaces `customTools`
+     *  is checked against the blocks it declares rather than the ones it is
+     *  deleting: `{customTools: [], tool: {name: <a custom tool>, on: true}}`
+     *  would otherwise switch on a tool the same write removed. Taking a name
+     *  *out* of the set it is stored in is always allowed: that is the repair,
+     *  not the mistake. */
     const known = body?.extension !== undefined || body?.tool !== undefined ? await catalog?.() : undefined;
+    const replacingBlocks = body?.customTools !== undefined;
     const unknown = (
       one: { name: string; on: boolean },
       source: CatalogEntry["source"],
       stored: readonly string[],
     ): boolean =>
-      !known?.entries.some((entry) => entry.source === source && entry.name === one.name) &&
+      !known?.entries.some((entry) =>
+        entry.source === source && entry.name === one.name &&
+        // A custom row survives this request only if this request declares it.
+        !(replacingBlocks && entry.source === "binary" && entry.custom === true)
+      ) &&
       !(source === "binary" && declared.includes(one.name)) &&
       !(!one.on && stored.includes(one.name));
     if (body?.extension !== undefined) {
