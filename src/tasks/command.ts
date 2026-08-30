@@ -1,5 +1,12 @@
+// A bash task's script, run in its cwd with its input on stdin. The output is
+// capped as it arrives rather than after: a run that printed a gigabyte is a
+// run whose result still has to fit in a row, a transcript and a callback.
+
 import { spawn } from "node:child_process";
+import { logger } from "../log.js";
 import type { CommandResult } from "./types.js";
+
+const log = logger("tasks");
 
 const OUTPUT_LIMIT = 1024 * 1024;
 
@@ -71,6 +78,15 @@ export function runBash(
         stdoutTruncated: stdout.truncated,
         stderrTruncated: stderr.truncated,
       });
+    });
+    // A script that never reads stdin is ordinary (`exit 0`, a one-line curl),
+    // and writing the input to a pipe nobody is holding raises EPIPE *here*.
+    // Unhandled, that is an `error` event on a stream, which is an uncaught
+    // exception, which is main.ts exiting the process: one task script could
+    // take every session and every other run down with it. The input not being
+    // wanted is not a failure of the run — anything else still gets said.
+    child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code !== "EPIPE") log.warn(`run input could not be written: ${err.message}`);
     });
     child.stdin.end(encodedInput);
   });
