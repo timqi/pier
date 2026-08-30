@@ -168,18 +168,28 @@ function renderSessionMeta(): void {
 /** Read-only details panel: what this session is and how full its context is.
  *  Opened from the ⋯ menu, from either title bar, or from a project row. */
 export function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
-  // Third field: a note beside the label, not part of the value — every row is
+  // Third field: a note trailing the value, but not *in* it — every row is
   // copyable, and "12m ago" pasted anywhere is worthless.
   const rows: [string, string, string?][] = [
     ["Title", s.title ?? "untitled"],
     ["Directory", s.cwd],
     ["Session", s.id],
   ];
-  if (s.id === deps.currentId()) {
+  const current = s.id === deps.currentId();
+  if (current) {
     rows.push(["Model", currentModel?.id ?? "—"]);
+    // Same three readings the title row's chips carry, and in their order — the
+    // panel is where they are read in full rather than glanced at.
+    rows.push(["Reasoning", currentThinking ?? "—"]);
     rows.push(["Context", currentContext ? contextLabel(currentContext) : "—"]);
-    if (lastReplyAt === null) rows.push(["Last reply", "—"]);
-    else rows.push(["Last reply", stampTime(lastReplyAt), agoLabel(lastReplyAt)]);
+  }
+  // Last, and beside the reply: only the two together say how long this session
+  // has been running. Free either way — the listed summary already carries it.
+  rows.push(["Created", stampTime(s.createdAt), agoLabel(s.createdAt)]);
+  // The reply is live state, so only the selected session has one to report.
+  if (current) {
+    const at = lastReplyAt;
+    rows.push(at === null ? ["Last reply", "—"] : ["Last reply", stampTime(at), agoLabel(at)]);
   }
   const panel = h("div", "flex max-w-80 flex-col gap-1.5 px-3 py-2");
   for (const [label, value, note] of rows) {
@@ -187,16 +197,15 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
       "div",
       "flex items-center gap-1.5",
       h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
-    );
-    if (note) head.append(h("span", "text-[10.5px] text-neutral-400", note));
-    // Every field is copyable — cheaper than deciding which ones deserve it.
-    head.append(
+      // Every field is copyable — cheaper than deciding which ones deserve it.
       copyBtn(
         "cursor-pointer text-[10.5px] uppercase tracking-wide text-neutral-400 opacity-0 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100",
         () => value,
       ),
     );
-    panel.append(h("div", "group flex flex-col", head, h("span", "break-all font-mono text-[12px] text-neutral-700", value)));
+    const shown = h("span", "break-all font-mono text-[12px] text-neutral-700", value);
+    if (note) shown.append(h("span", "ml-1.5 font-sans text-[11px] text-neutral-400", note));
+    panel.append(h("div", "group flex flex-col", head, shown));
   }
   openPanel(anchor, panel);
 }
