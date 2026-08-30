@@ -3,7 +3,7 @@
 // rendered into #turns between chat rows. chat.ts owns the rows themselves and
 // calls seal/finish/reset here so a group closes when the transcript moves on.
 
-import { failure, promptRun, type Sent } from "./api.js";
+import { type Sent, failure, getJson, promptRun } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
@@ -485,16 +485,15 @@ async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise
   // did nothing.
   say("loading…");
   if (!sessionId) return say("no session");
-  let steps: ActivityStep[];
-  try {
-    const res = await fetch(`/api/sessions/${sessionId}/turns/${turnIndex}/steps`);
-    if (!res.ok) return say(await failure(res, "could not load these steps"));
-    steps = ((await res.json()) as { steps: ActivityStep[] }).steps;
-  } catch (err) {
-    // Silence here reads as "this tool did nothing", which is a lie about the
-    // one thing the user opened the group to see.
-    return say(`could not load these steps: ${String(err)}`);
-  }
+  // Silence here reads as "this tool did nothing", which is a lie about the
+  // one thing the user opened the group to see — so a refusal and a fetch that
+  // never answered both end up in the pane.
+  const got = await getJson<{ steps: ActivityStep[] }>(
+    `/api/sessions/${sessionId}/turns/${turnIndex}/steps`,
+    "could not load these steps",
+  );
+  if (!got.ok) return say(got.error);
+  const steps = got.value.steps;
   const tools = steps.filter((s) => s.kind === "tool");
   for (const [i, row] of rows.entries()) {
     if (!fillable.has(row)) continue;

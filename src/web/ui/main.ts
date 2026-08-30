@@ -11,7 +11,7 @@ import "./style.css";
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
-import { coalesce, sendJson } from "./api.js";
+import { coalesce, getJson, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -147,12 +147,14 @@ function commitSessions(rows: SessionInfo[], complete: boolean): void {
 }
 
 const refreshProjects = coalesce(async () => {
-  commitSessions((await (await fetch("/api/projects")).json()) as SessionInfo[], false);
+  const got = await getJson<SessionInfo[]>("/api/projects", "Could not load projects");
+  if (got.ok) commitSessions(got.value, false);
 });
 
 /** Full Pi transcript scan, only for surfaces that explicitly need history. */
 const refreshSessions = coalesce(async () => {
-  commitSessions((await (await fetch("/api/sessions")).json()) as SessionInfo[], true);
+  const got = await getJson<SessionInfo[]>("/api/sessions", "Could not load sessions");
+  if (got.ok) commitSessions(got.value, true);
 });
 
 /** Seen = read: the selected session's chat is on screen in a *focused*
@@ -361,14 +363,14 @@ async function loadSession(id: string, missing = false): Promise<void> {
     appendTurn("error", `session not found: ${id}`);
     return;
   }
-  const res = await fetch(`/api/sessions/${id}/history`);
-  const snap = res.ok ? ((await res.json()) as SessionSnapshot) : null;
+  const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id) return; // stale: the user switched again mid-fetch
-  if (!snap) {
+  if (!got.ok) {
     chatLoading(false);
-    appendTurn("error", `failed to load session: ${res.status}`);
+    appendTurn("error", got.error);
     return;
   }
+  const snap = got.value;
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:

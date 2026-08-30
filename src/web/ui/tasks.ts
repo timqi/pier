@@ -3,7 +3,7 @@
 // create/edit dialog in task-editor.ts; this file owns navigation and state.
 
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
-import { coalesce, sendJson } from "./api.js";
+import { coalesce, getJson, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { button, tabButton } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
@@ -197,13 +197,14 @@ export function createTasksView(
   }
 
   async function renderDetail(id: string): Promise<void> {
-    const [taskRes, runsRes] = await Promise.all([
-      fetch(`/api/tasks/${id}`),
-      fetch(`/api/tasks/${id}/runs`),
+    const [gotTask, gotRuns] = await Promise.all([
+      getJson<TaskDefinition>(`/api/tasks/${id}`, "Failed to load task"),
+      getJson<TaskRun[]>(`/api/tasks/${id}/runs`, "Failed to load the task's runs"),
     ]);
-    if (!taskRes.ok || !runsRes.ok) return renderError("Failed to load task");
-    const task = (await taskRes.json()) as TaskDefinition;
-    const runs = (await runsRes.json()) as TaskRun[];
+    if (!gotTask.ok) return renderError(gotTask.error);
+    if (!gotRuns.ok) return renderError(gotRuns.error);
+    const task = gotTask.value;
+    const runs = gotRuns.value;
     // "Tasks › <name>" breadcrumb: names the task being viewed and doubles
     // as the way back to the list (replaces the old Back button).
     const listLink = button("Tasks");

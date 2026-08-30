@@ -3,7 +3,7 @@
 // steer/stop/continue controls. tasks.ts owns the surrounding detail page.
 
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
-import { promptRun, type Sent } from "./api.js";
+import { type Sent, getJson, promptRun } from "./api.js";
 import { fmtDuration, h } from "./dom.js";
 import { button } from "./form.js";
 
@@ -40,13 +40,13 @@ export function renderRuns(pane: HTMLElement, runs: TaskRun[], deps: TaskRunsDep
 }
 
 async function openRun(pane: HTMLElement, id: string, list: HTMLElement, deps: TaskRunsDeps): Promise<void> {
-  const [res, messagesRes] = await Promise.all([
-    fetch(`/api/task-runs/${id}`),
-    fetch(`/api/task-runs/${id}/messages`),
+  const [got, gotMessages] = await Promise.all([
+    getJson<TaskRun>(`/api/task-runs/${id}`, "Could not load the run"),
+    getJson<TaskMessage[]>(`/api/task-runs/${id}/messages`, "Could not load the run's messages"),
   ]);
-  if (!res.ok) return;
-  const run = (await res.json()) as TaskRun;
-  const messages = messagesRes.ok ? await messagesRes.json() as TaskMessage[] : [];
+  if (!got.ok) return;
+  const run = got.value;
+  const messages = gotMessages.ok ? gotMessages.value : [];
   const back = button("Back to runs");
   back.onclick = () => pane.replaceChildren(list);
   const actions = h("div", "flex items-center gap-2 border-b border-neutral-200 px-4 py-2");

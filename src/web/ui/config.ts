@@ -8,7 +8,7 @@
 import type { CatalogEntry, ConfigResource } from "../../core/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
-import { failure, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, CONTROL, field, setStatus, textInput, toggle } from "./form.js";
@@ -183,13 +183,15 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       catalogError = "";
       return;
     }
-    const res = await fetch("/api/settings", { cache: "no-store" });
-    if (!res.ok) {
+    const got = await getJson<CatalogResponse>("/api/settings", "could not be loaded", {
+      cache: "no-store",
+    });
+    if (!got.ok) {
       catalog = [];
-      catalogError = await failure(res, "could not be loaded");
+      catalogError = got.error;
       return;
     }
-    take((await res.json()) as CatalogResponse);
+    take(got.value);
     catalogError = "";
   }
 
@@ -226,18 +228,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   async function load(): Promise<void> {
     const request = ++loadRequest;
     paneRequest++;
-    const [res] = await Promise.all([
-      fetch(`/api/config${q()}`, { cache: "no-store" }),
+    const [got] = await Promise.all([
+      getJson<ConfigIndex>(`/api/config${q()}`, "failed to load config", { cache: "no-store" }),
       loadCatalog(),
     ]);
     if (request !== loadRequest) return;
-    if (!res.ok) {
+    if (!got.ok) {
       renderNav(null);
-      renderError(`failed to load config: ${res.status}`);
+      renderError(got.error);
       return;
     }
-    const index = (await res.json()) as ConfigIndex;
-    if (request !== loadRequest) return;
+    const index = got.value;
     if (scope === "global" && index.dir) {
       globalDir = index.dir;
       renderScopeOptions();
@@ -429,15 +430,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   async function openFile(name: string): Promise<void> {
     const request = ++paneRequest;
-    const res = await fetch(`/api/config/files/${encodeURIComponent(name)}${q()}`, {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      if (request === paneRequest) renderError(`failed to load ${name}: ${res.status}`);
+    const got = await getJson<{ content: string }>(
+      `/api/config/files/${encodeURIComponent(name)}${q()}`,
+      `failed to load ${name}`,
+      { cache: "no-store" },
+    );
+    if (!got.ok) {
+      if (request === paneRequest) renderError(got.error);
       return;
     }
-    const { content } = (await res.json()) as { content: string };
     if (request !== paneRequest) return;
+    const { content } = got.value;
     let expected = content;
 
     const status = h("span", "text-[11.5px] text-neutral-400", "");
@@ -723,16 +726,17 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   async function openResource(kind: "extensions" | "skills", name: string): Promise<void> {
     const request = ++paneRequest;
-    const res = await fetch(
+    const got = await getJson<{ content: string }>(
       `/api/config/resource${q(`&kind=${kind}&name=${encodeURIComponent(name)}`)}`,
+      `failed to load ${name}`,
       { cache: "no-store" },
     );
-    if (!res.ok) {
-      if (request === paneRequest) renderError(`failed to load ${name}: ${res.status}`);
+    if (!got.ok) {
+      if (request === paneRequest) renderError(got.error);
       return;
     }
-    const { content } = (await res.json()) as { content: string };
     if (request !== paneRequest) return;
+    const { content } = got.value;
     const lines = content.split("\n");
     if (lines.at(-1) === "") lines.pop(); // the trailing newline is not a line
     // The Files view's renderer, not a second one: same gutter, same

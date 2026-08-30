@@ -9,7 +9,7 @@
 // down from home is the slow way to reach a directory the person can already
 // name.
 
-import { sendJson } from "./api.js";
+import { getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn } from "./form.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -23,8 +23,8 @@ interface Listing {
 /** Absolute paths only; anything else means "start from the user's home". */
 const listing = async (path?: string): Promise<Listing | null> => {
   const q = path?.startsWith("/") ? `?path=${encodeURIComponent(path)}` : "";
-  const res = await fetch(`/api/fs/dirs${q}`);
-  return res.ok ? ((await res.json()) as Listing) : null;
+  const got = await getJson<Listing>(`/api/fs/dirs${q}`, "Could not list directories");
+  return got.ok ? got.value : null;
 };
 
 const row = (label: string, cls: string, onSelect: () => void): HTMLElement => {

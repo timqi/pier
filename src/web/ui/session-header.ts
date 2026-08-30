@@ -5,7 +5,7 @@
 // session is selected and feeds state in through init.
 
 import { compact } from "../../core/reply.js";
-import { failure, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
 import { $, basename, copyBtn, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -182,15 +182,17 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
 
 async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
   try {
-    const [modelsRes, thinkingRes] = await Promise.all([
-      fetch(`/api/sessions/${id}/models`),
-      fetch(`/api/sessions/${id}/thinking`),
+    const [gotModels, gotThinking] = await Promise.all([
+      getJson<ModelRef[]>(`/api/sessions/${id}/models`, "Could not load models"),
+      getJson<{ level: ThinkingLevel; levels: ThinkingLevel[] }>(
+        `/api/sessions/${id}/thinking`,
+        "Could not read the reasoning level",
+      ),
     ]);
-    if (!modelsRes.ok || !thinkingRes.ok) {
-      throw new Error(`HTTP ${!modelsRes.ok ? modelsRes.status : thinkingRes.status}`);
-    }
-    const models = (await modelsRes.json()) as ModelRef[];
-    const thinking = (await thinkingRes.json()) as { level: ThinkingLevel; levels: ThinkingLevel[] };
+    if (!gotModels.ok) throw new Error(gotModels.error);
+    if (!gotThinking.ok) throw new Error(gotThinking.error);
+    const models = gotModels.value;
+    const thinking = gotThinking.value;
     openPanel(
       anchor,
       modelPicker({

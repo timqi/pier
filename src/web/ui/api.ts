@@ -47,6 +47,38 @@ export async function failure(res: Response, fallback: string): Promise<string> 
   return body.error ?? `${fallback} (${res.status})`;
 }
 
+/** What a read got: the value, or the sentence to show for not having it. */
+export type Fetched<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * GET something this instance answers as JSON.
+ *
+ * The write side was consolidated long ago and the read side was not, so a
+ * dozen views had their own `fetch` → `res.ok` → `json()` — agreeing on the
+ * happy path and differing on the two that matter: a refusal whose body
+ * carries the server's own sentence (thrown away by most of them, leaving
+ * `(500)`), and a request that never answered, which rejected into a `void`
+ * call and showed nothing at all (§5b).
+ */
+export async function getJson<T>(
+  url: string,
+  fallback: string,
+  init?: RequestInit,
+): Promise<Fetched<T>> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    return { ok: false, error: `${fallback}: ${String(err)}` };
+  }
+  if (!res.ok) return { ok: false, error: await failure(res, fallback) };
+  try {
+    return { ok: true, value: (await res.json()) as T };
+  } catch (err) {
+    return { ok: false, error: `${fallback}: ${String(err)}` };
+  }
+}
+
 /**
  * Ask for one line of text and post it to a run-control endpoint.
  *

@@ -5,7 +5,7 @@
 
 import type { ModelRef } from "../../core/types.js";
 import type { ChannelConfig, ChannelPlatform, ChatConfig, ChatKind } from "../../channels/types.js";
-import { sendJson } from "./api.js";
+import { getJson, sendJson } from "./api.js";
 import {
   larkThreadHelp,
   larkTokenHelp,
@@ -149,17 +149,17 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   async function load(): Promise<void> {
     // Catalogue once per view visit; it does not change while the page is open.
     if (!models.length) {
-      const list = await fetch("/api/models");
-      if (list.ok) models = (await list.json()) as ModelRef[];
+      const list = await getJson<ModelRef[]>("/api/models", "Could not load the model catalog");
+      if (list.ok) models = list.value;
     }
-    const res = await fetch(`/api/channels/${platform}`);
-    if (!res.ok) {
+    const got = await getJson<ChannelConfig>(`/api/channels/${platform}`, "Failed to load");
+    if (!got.ok) {
       config = null;
       renderTabs();
-      pane.replaceChildren(empty(`Failed to load: ${res.status}`));
+      pane.replaceChildren(empty(got.error));
       return;
     }
-    config = (await res.json()) as ChannelConfig;
+    config = got.value;
     showStatus("clean");
     render();
   }

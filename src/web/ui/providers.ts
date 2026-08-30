@@ -11,7 +11,7 @@ import type {
   ProviderInfo,
   ProviderSetup,
 } from "../../core/types.js";
-import { failure, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { badge, button, CONTROL, empty, field, input, select, setStatus, textarea } from "./form.js";
 import { openAuthFlow, type AuthFlow } from "./auth-flow.js";
@@ -46,17 +46,17 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
   const load = async (): Promise<void> => {
     content.replaceChildren(h("p", "px-4 py-3 text-[13px] text-neutral-400", "Loading…"));
     try {
-      const [res, models] = await Promise.all([
-        fetch("/api/providers", { cache: "no-store" }),
-        fetch("/api/models", { cache: "no-store" }),
+      const [got, models] = await Promise.all([
+        getJson<ProviderInfo[]>("/api/providers", "Could not load providers", { cache: "no-store" }),
+        getJson<ModelRef[]>("/api/models", "the model catalog could not be read", { cache: "no-store" }),
       ]);
-      catalog = models.ok ? ((await models.json()) as ModelRef[]) : [];
-      catalogError = models.ok ? "" : await failure(models, "the model catalog could not be read");
-      if (!res.ok) {
-        content.replaceChildren(empty(await failure(res, "Could not load providers")));
+      catalog = models.ok ? models.value : [];
+      catalogError = models.ok ? "" : models.error;
+      if (!got.ok) {
+        content.replaceChildren(empty(got.error));
         return;
       }
-      const providers = (await res.json()) as ProviderInfo[];
+      const providers = got.value;
       add.onclick = () => openSetup(providers, undefined, load);
       render(providers);
     } catch (err) {

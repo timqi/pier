@@ -6,7 +6,7 @@
 
 import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
-import { failure, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { button, card, empty, field, input, select, setStatus } from "./form.js";
 
@@ -136,15 +136,13 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   function load(): void {
     if (dirty) return; // an unsaved edit survives tab hops; reload happens on save
     void (async () => {
-      const [settingsRes, modelsRes] = await Promise.all([
-        fetch("/api/settings"),
-        fetch("/api/models"),
+      const [settings, models] = await Promise.all([
+        getJson<{ modelMenu: MenuEntry[] }>("/api/settings", "Could not load the menu"),
+        getJson<ModelRef[]>("/api/models", "Could not load the model catalog"),
       ]);
-      if (!settingsRes.ok) {
-        return setStatus(status, "failed", await failure(settingsRes, "Could not load the menu"));
-      }
-      entries = ((await settingsRes.json()) as { modelMenu: MenuEntry[] }).modelMenu;
-      catalog = modelsRes.ok ? ((await modelsRes.json()) as ModelRef[]) : [];
+      if (!settings.ok) return setStatus(status, "failed", settings.error);
+      entries = settings.value.modelMenu;
+      catalog = models.ok ? models.value : [];
       status.textContent = "";
       render();
     })();

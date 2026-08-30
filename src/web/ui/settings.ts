@@ -5,7 +5,7 @@
 // Security). Storage is not the split — a db row and a Pi file are both
 // "settings" to the person opening this page.
 
-import { failure, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
@@ -223,9 +223,9 @@ export function createSettingsView(
   function loadInstance(): void {
     pwStatus.textContent = "";
     void (async () => {
-      const res = await fetch("/api/settings");
-      if (!res.ok) return setStatus(urlStatus, "failed", await failure(res, "Could not load settings"));
-      urlInput.value = ((await res.json()) as { publicUrl: string }).publicUrl;
+      const got = await getJson<{ publicUrl: string }>("/api/settings", "Could not load settings");
+      if (!got.ok) return setStatus(urlStatus, "failed", got.error);
+      urlInput.value = got.value.publicUrl;
       urlStatus.textContent = "";
     })();
   }
@@ -235,12 +235,12 @@ export function createSettingsView(
   const securityColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
 
   async function loadSecurity(): Promise<void> {
-    const res = await fetch("/api/secrets");
-    if (!res.ok) {
-      securityColumn.replaceChildren(empty(await failure(res, "Could not load key status")));
+    const got = await getJson<SecretsStatus>("/api/secrets", "Could not load key status");
+    if (!got.ok) {
+      securityColumn.replaceChildren(empty(got.error));
       return;
     }
-    renderSecurity((await res.json()) as SecretsStatus);
+    renderSecurity(got.value);
   }
 
   function renderSecurity(status: SecretsStatus, note?: string): void {

@@ -6,6 +6,7 @@
 // numbers, images, PDFs). A viewer, not an editor: /api/explorer/* is scoped
 // server-side to known project cwds, and nothing here writes.
 
+import { getJson } from "./api.js";
 import { codePane, plainRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
@@ -123,18 +124,12 @@ export function createExplorerView(
   const api = (ep: string, params: Record<string, string>): string =>
     `/api/explorer/${ep}?${new URLSearchParams({ root: cwd, ...params })}`;
 
-  /** JSON or a clean error — a proxy's HTML 502 page must read as "HTTP 502",
-   *  not as JSON.parse's SyntaxError quoting "<html…". */
-  async function getJson<T>(url: string): Promise<T> {
-    const res = await fetch(url);
-    let body: (T & { error?: string }) | null = null;
-    try {
-      body = (await res.json()) as T & { error?: string };
-    } catch {
-      /* not JSON — fall through to the status */
-    }
-    if (!res.ok || body === null) throw new Error(body?.error ?? `HTTP ${res.status}`);
-    return body;
+  /** The shared read, thrown rather than returned: every caller here is inside
+   *  a `try` already, because a listing that fails still has a tree to draw. */
+  async function ask<T>(url: string, what: string): Promise<T> {
+    const got = await getJson<T>(url, what);
+    if (!got.ok) throw new Error(got.error);
+    return got.value;
   }
 
   const note = (text: string, tone = "text-neutral-400"): HTMLElement =>
@@ -175,7 +170,7 @@ export function createExplorerView(
 
   async function entriesInto(box: HTMLElement, path: string): Promise<void> {
     try {
-      const { entries } = await getJson<{ entries: Entry[] }>(api("ls", { path }));
+      const { entries } = await ask<{ entries: Entry[] }>(api("ls", { path }), "could not list this folder");
       box.replaceChildren(...rowsFor(path, entries));
       if (!box.childElementCount) box.append(note(onlyChanged ? "No changes." : "Empty."));
     } catch (err) {
@@ -465,7 +460,10 @@ export function createExplorerView(
     const canDownload = changes.get(path)?.status !== "D";
     viewer.replaceChildren(viewerTitle(path, canDownload), note("…"));
     try {
-      const { diff } = await getJson<{ diff: string }>(api("diff", { base, head, file: path, context: "99999" }));
+      const { diff } = await ask<{ diff: string }>(
+        api("diff", { base, head, file: path, context: "99999" }),
+        "could not read this diff",
+      );
       if (!current(seq)) return;
       if (!diff || /^Binary files /m.test(diff)) return viewPlain(path, seq); // mode-only change, or an image
       const rows = parseDiff(diff);
@@ -583,7 +581,10 @@ export function createExplorerView(
   async function loadChanges(): Promise<void> {
     changes = new Map();
     if (!git.branch) return;
-    const { files } = await getJson<{ files: { status: string; path: string; add: number; del: number }[] }>(api("diff", { base, head }));
+    const { files } = await ask<{ files: { status: string; path: string; add: number; del: number }[] }>(
+      api("diff", { base, head }),
+      "could not read what changed",
+    );
     for (const f of files) changes.set(f.path, { status: f.status, add: f.add, del: f.del });
     // Unfold the tree down to every change — the badge trail, pre-walked.
     if (changes.size <= MAX_AUTO_EXPAND) {
@@ -645,7 +646,7 @@ export function createExplorerView(
   async function refreshGit(): Promise<void> {
     if (!cwd) return;
     try {
-      git = await getJson<GitInfo>(api("git", {}));
+      git = await ask<GitInfo>(api("git", {}), "could not read this repository");
       renderHeader(); // the branch may have moved too
     } catch (err) {
       viewer.replaceChildren(note(String(err), "text-red-600"));
@@ -671,7 +672,7 @@ export function createExplorerView(
       return;
     }
     try {
-      git = await getJson<GitInfo>(api("git", {}));
+      git = await ask<GitInfo>(api("git", {}), "could not read this repository");
     } catch (err) {
       git = { branch: null, refs: [], commits: [], worktrees: [] };
       viewer.replaceChildren(note(String(err), "text-red-600"));

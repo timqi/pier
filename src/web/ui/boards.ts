@@ -3,7 +3,7 @@
 // description, session links, content — belongs to the agent that wrote it, so
 // this view reads /api/boards and writes only `public`.
 
-import { sendJson } from "./api.js";
+import { getJson, sendJson } from "./api.js";
 import { consoleView, copyBtn, h, relTime, type ConsoleView } from "./dom.js";
 import { btn, toggle } from "./form.js";
 
@@ -153,12 +153,12 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
   }
 
   async function load(): Promise<void> {
-    const res = await fetch("/api/boards");
-    if (!res.ok) {
-      problem = `Could not load boards: ${res.status}`;
+    const got = await getJson<Board[]>("/api/boards", "Could not load boards");
+    if (!got.ok) {
+      problem = got.error;
       return render();
     }
-    boards = (await res.json()) as Board[];
+    boards = got.value;
     render();
     // Cleared only after a good render, so the reason survives the reload it
     // triggered and disappears on the next clean one.

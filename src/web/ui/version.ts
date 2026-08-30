@@ -12,7 +12,7 @@
 // switch that lets Pier take it unattended. The element stays an <a href>, so
 // middle-click and "open in new tab" still go straight to the source.
 
-import { failure, sendJson } from "./api.js";
+import { failure, getJson, sendJson } from "./api.js";
 import { $, h } from "./dom.js";
 import { button, toggle } from "./form.js";
 import { openPanel } from "./menu.js";
@@ -163,9 +163,9 @@ function panel(): HTMLElement {
 }
 
 async function load(current: string): Promise<void> {
-  const res = await fetch("/api/update");
-  if (!res.ok) return; // an unreachable check is not news: the label stays put
-  status = (await res.json()) as UpdateStatus;
+  const got = await getJson<UpdateStatus>("/api/update", "Update check failed");
+  if (!got.ok) return; // an unreachable check is not news: the label stays put
+  status = got.value;
   renderLabel(status.current || current);
 }
 
