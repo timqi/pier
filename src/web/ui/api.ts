@@ -80,6 +80,23 @@ export async function getJson<T>(
 }
 
 /**
+ * The same read for a caller that is already inside a `try` — a view whose
+ * failure path is one `catch` around several steps, not a branch per step.
+ * Exists so "throw the sentence" is written once: it had four copies within a
+ * day of `getJson` landing, and a copy that throws the `Response` instead of
+ * the sentence is how `[object Object]` reaches a pane.
+ */
+export async function mustGetJson<T>(
+  url: string,
+  fallback: string,
+  init?: RequestInit,
+): Promise<T> {
+  const got = await getJson<T>(url, fallback, init);
+  if (!got.ok) throw new Error(got.error);
+  return got.value;
+}
+
+/**
  * Ask for one line of text and post it to a run-control endpoint.
  *
  * Both surfaces that steer a subagent — the chat's background-run row and the

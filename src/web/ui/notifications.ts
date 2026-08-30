@@ -10,7 +10,7 @@
 // which of them is true, and offers a test notification for the only question
 // that matters ("did it actually arrive?").
 
-import { failure, getJson, sendJson } from "./api.js";
+import { failure, mustGetJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { button, card, setStatus, toggle } from "./form.js";
 
@@ -97,9 +97,10 @@ const sameKey = (a: ArrayBuffer | null, b: Uint8Array): boolean => {
 };
 
 async function subscribe(reg: ServiceWorkerRegistration): Promise<PushSubscription> {
-  const got = await getJson<{ publicKey: string }>("/api/push", "Could not read this instance's push key");
-  if (!got.ok) throw new Error(got.error);
-  const { publicKey } = got.value;
+  const { publicKey } = await mustGetJson<{ publicKey: string }>(
+    "/api/push",
+    "Could not read this instance's push key",
+  );
   const key = urlBase64ToBytes(publicKey);
   const existing = await reg.pushManager.getSubscription();
   if (existing) {

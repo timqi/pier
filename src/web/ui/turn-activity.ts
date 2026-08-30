@@ -3,7 +3,7 @@
 // rendered into #turns between chat rows. chat.ts owns the rows themselves and
 // calls seal/finish/reset here so a group closes when the transcript moves on.
 
-import { type Sent, failure, getJson, promptRun } from "./api.js";
+import { failure, getJson, promptRun, type Sent } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";

@@ -6,7 +6,7 @@
 // is instant and loses nothing; the server replays recent output when a page
 // attaches fresh.
 
-import { failure, getJson, sendJson } from "./api.js";
+import { failure, mustGetJson, sendJson } from "./api.js";
 import { openPathMenu } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { setStatus as setFieldStatus, type SaveState } from "./form.js";
@@ -221,12 +221,11 @@ export function createTerminalView(
     let stored = "";
     void (async () => {
       try {
-        const got = await getJson<{ terminalInitCommand?: string }>(
+        const settings = await mustGetJson<{ terminalInitCommand?: string }>(
           "/api/settings",
           "Could not load the startup command",
         );
-        if (!got.ok) throw new Error(got.error);
-        stored = got.value.terminalInitCommand ?? "";
+        stored = settings.terminalInitCommand ?? "";
         cmd.value = stored;
         cmd.disabled = false;
         report("idle", "Runs when a shell starts — Restart applies it here.");

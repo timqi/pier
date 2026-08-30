@@ -11,7 +11,7 @@ import "./style.css";
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
-import { coalesce, getJson, sendJson } from "./api.js";
+import { coalesce, getJson, mustGetJson, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -146,15 +146,16 @@ function commitSessions(rows: SessionInfo[], complete: boolean): void {
   maybeAckRead();
 }
 
+// Thrown, not swallowed: these run as `void refresh…()` from event handlers,
+// and report.ts is listening for exactly that rejection — a rail that quietly
+// stopped updating is the shape of bug 5b is about.
 const refreshProjects = coalesce(async () => {
-  const got = await getJson<SessionInfo[]>("/api/projects", "Could not load projects");
-  if (got.ok) commitSessions(got.value, false);
+  commitSessions(await mustGetJson<SessionInfo[]>("/api/projects", "Could not load projects"), false);
 });
 
 /** Full Pi transcript scan, only for surfaces that explicitly need history. */
 const refreshSessions = coalesce(async () => {
-  const got = await getJson<SessionInfo[]>("/api/sessions", "Could not load sessions");
-  if (got.ok) commitSessions(got.value, true);
+  commitSessions(await mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"), true);
 });
 
 /** Seen = read: the selected session's chat is on screen in a *focused*

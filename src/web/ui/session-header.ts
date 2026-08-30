@@ -5,7 +5,7 @@
 // session is selected and feeds state in through init.
 
 import { compact } from "../../core/reply.js";
-import { failure, getJson, sendJson } from "./api.js";
+import { failure, mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
 import { $, basename, copyBtn, h } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -182,17 +182,13 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
 
 async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
   try {
-    const [gotModels, gotThinking] = await Promise.all([
-      getJson<ModelRef[]>(`/api/sessions/${id}/models`, "Could not load models"),
-      getJson<{ level: ThinkingLevel; levels: ThinkingLevel[] }>(
+    const [models, thinking] = await Promise.all([
+      mustGetJson<ModelRef[]>(`/api/sessions/${id}/models`, "Could not load models"),
+      mustGetJson<{ level: ThinkingLevel; levels: ThinkingLevel[] }>(
         `/api/sessions/${id}/thinking`,
         "Could not read the reasoning level",
       ),
     ]);
-    if (!gotModels.ok) throw new Error(gotModels.error);
-    if (!gotThinking.ok) throw new Error(gotThinking.error);
-    const models = gotModels.value;
-    const thinking = gotThinking.value;
     openPanel(
       anchor,
       modelPicker({

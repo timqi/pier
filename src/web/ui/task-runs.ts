@@ -3,7 +3,7 @@
 // steer/stop/continue controls. tasks.ts owns the surrounding detail page.
 
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
-import { type Sent, getJson, promptRun } from "./api.js";
+import { getJson, promptRun, type Sent } from "./api.js";
 import { fmtDuration, h } from "./dom.js";
 import { button } from "./form.js";
 
@@ -44,7 +44,11 @@ async function openRun(pane: HTMLElement, id: string, list: HTMLElement, deps: T
     getJson<TaskRun>(`/api/task-runs/${id}`, "Could not load the run"),
     getJson<TaskMessage[]>(`/api/task-runs/${id}/messages`, "Could not load the run's messages"),
   ]);
-  if (!got.ok) return;
+  // A row that opens into nothing is the 5b shape: say which half failed and
+  // leave the list reachable.
+  if (!got.ok) {
+    return void pane.replaceChildren(h("p", "p-4 text-[13px] text-red-600", got.error));
+  }
   const run = got.value;
   const messages = gotMessages.ok ? gotMessages.value : [];
   const back = button("Back to runs");

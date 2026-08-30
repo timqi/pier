@@ -4,6 +4,7 @@
 
 import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
+import { mustGetJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn, CONTROL, field } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
@@ -42,9 +43,11 @@ type Entry = ModelRef & { thinking?: ThinkingLevel; note?: string };
 let pinnedMenu: Entry[] | null = null;
 
 async function loadPinned(): Promise<Entry[]> {
-  const res = await fetch("/api/settings");
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return ((await res.json()) as { modelMenu: Entry[] }).modelMenu;
+  const { modelMenu } = await mustGetJson<{ modelMenu: Entry[] }>(
+    "/api/settings",
+    "Could not read the pinned model menu",
+  );
+  return modelMenu;
 }
 
 function loadFavorites(): Favorite[] {
