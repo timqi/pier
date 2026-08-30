@@ -12,8 +12,10 @@ import { h } from "./dom.js";
 
 let live: HTMLElement | null = null;
 
+// max-w-full + break-words: the labels are written by the agent, and a long one
+// is a pill wider than the pane rather than a pill on two lines.
 const BTN =
-  "cursor-pointer rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[12.5px] text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100";
+  "max-w-full cursor-pointer break-words rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-left text-[12.5px] text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100";
 
 /** Forget the live group — the transcript it belonged to is gone. */
 export function resetSuggestions(): void {

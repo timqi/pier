@@ -19,6 +19,12 @@ export function relTime(ts: number): string {
   return `${Math.round(mins / 1440)}d`;
 }
 
+/** The age as it reads *beside* a wall clock, where "now" would be a fragment. */
+export const agoLabel = (ts: number): string => {
+  const age = relTime(ts);
+  return age === "now" ? "just now" : `${age} ago`;
+};
+
 export function h(tag: string, cls: string, ...children: (Node | string)[]): HTMLElement {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -28,6 +34,17 @@ export function h(tag: string, cls: string, ...children: (Node | string)[]): HTM
 
 /** Last path segment — how every surface names a cwd or a file. */
 export const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
+
+/** Local wall clock, sortable and unambiguous: `2026-08-30 19:41:07`. The one
+ *  full timestamp — the transcript's last reply and the session info panel are
+ *  the same fact on two surfaces, so they may not spell it two ways. Written
+ *  out rather than left to a locale, which decides day/month order itself. */
+export function stampTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${day} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
 /** "42s" under a minute, "3m 12s" over — run durations everywhere. */
 export function fmtDuration(ms: number): string {

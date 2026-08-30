@@ -127,7 +127,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
   row.replaceChildren(
     head,
-    h("div", "mt-1 text-[11px] opacity-70", `${run.sessionMode ?? "task"} · depth ${run.depth} · ${seconds}s · ${run.runId}`),
+    h("div", "mt-1 break-words text-[11px] opacity-70", `${run.sessionMode ?? "task"} · depth ${run.depth} · ${seconds}s · ${run.runId}`),
   );
   turns.scroll();
 }
@@ -266,7 +266,7 @@ function statusIconEl(status: ActivityStatus): HTMLElement {
 function ensureActivity(ts: number): Activity {
   if (activity) return activity;
   const statusIcon = statusIconEl("running");
-  const headline = h("span", "truncate", "working…");
+  const headline = h("span", "min-w-0 truncate", "working…");
   const { el } = detailsRow("", [statusIcon, headline]);
   el.dataset.kind = "activity";
   styleGroup(el, "running");
@@ -360,14 +360,16 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   a.thinking = null;
   const argsText = JSON.stringify(args, null, 2) ?? "";
   const statusEl = h("span", "ml-auto flex-none text-neutral-400", "running…");
-  const preview = h("span", "truncate text-neutral-500", argsPreview(argsText));
+  // min-w-0, or a flex item's min-content floor keeps an unbreakable argument
+  // (a path, a URL) at full width and truncate never gets to run.
+  const preview = h("span", "min-w-0 truncate text-neutral-500", argsPreview(argsText));
   const { el } = detailsRow("rounded-md px-1 py-0.5 font-mono text-[12.5px] hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
     h("span", "flex-none font-semibold", name),
     preview,
     statusEl,
   ]);
-  const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100", argsText);
-  const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100");
+  const argsPre = h("pre", "max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100", argsText);
+  const outputPre = h("pre", "hidden max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded bg-black/[0.04] p-1.5 text-[12px] dark:bg-neutral-100");
   el.append(h("div", "mt-1 flex flex-col gap-1 pl-4", argsPre, outputPre));
   // A replayed row arrives without args or output — they are fetched when the
   // group is opened, and this is where that fill writes.
@@ -403,9 +405,9 @@ export function activityThinking(ts: number, text: string): void {
   const a = ensureActivity(ts);
   if (!a.thinking) {
     const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
-      h("span", "truncate", "thinking…"),
+      h("span", "min-w-0 truncate", "thinking…"),
     ]);
-    const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap pl-4 not-italic text-neutral-500", "");
+    const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
     el.append(pre);
     a.rowsEl.append(el);
     a.thinking = { pre, summary };

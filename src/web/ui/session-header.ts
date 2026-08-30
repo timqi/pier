@@ -7,12 +7,12 @@
 import { compact } from "../../core/reply.js";
 import { failure, mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
-import { $, basename, copyBtn, h } from "./dom.js";
+import { $, agoLabel, basename, copyBtn, h, stampTime } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel } from "./shortcut.js";
 import { renameSession, setPinned, type SessionInfo } from "./sidebar.js";
-import type { ContextUsage, ModelRef, ThinkingLevel } from "../../core/types.js";
+import type { ContextUsage, ModelRef, ThinkingLevel, TurnMeta } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
 export interface HeaderDeps {
@@ -68,12 +68,17 @@ const sessionMeta = $("#session-meta");
 let currentModel: ModelRef | null = null;
 let currentContext: ContextUsage | null = null;
 let currentThinking: ThinkingLevel | null = null;
+/** When the last assistant turn completed, ms epoch. The transcript stamps that
+ *  turn itself (chat.ts); this is the same fact where "how stale is this
+ *  session" is asked — without scrolling to the bottom to find out. */
+let lastReplyAt: number | null = null;
 
 /** Cleared before a snapshot (re)load — the chips must not show the old session. */
 export function resetHeaderState(): void {
   currentModel = null;
   currentContext = null;
   currentThinking = null;
+  lastReplyAt = null;
   renderSessionMeta();
 }
 
@@ -82,23 +87,31 @@ export function setHeaderState(
   model: ModelRef | null,
   context: ContextUsage | null,
   thinking: ThinkingLevel,
+  lastReply: number | null,
 ): void {
   currentModel = model;
   currentContext = context;
   currentThinking = thinking;
+  lastReplyAt = lastReply;
   renderHeader();
 }
 
-/** turn-end meta carries the context size at completion — keep the chip live. */
-export function noteContextTokens(tokens: number): void {
-  if (!currentContext) return;
-  currentContext = { ...currentContext, tokens };
+/** turn-end meta: the context size at completion keeps the chip live, and the
+ *  completion time is the reading the info panel reports. */
+export function noteTurnMeta(meta: TurnMeta): void {
+  lastReplyAt = meta.completedAt;
+  if (currentContext) currentContext = { ...currentContext, tokens: meta.tokens };
   renderSessionMeta();
 }
 
 export function renderHeader(): void {
   const s = deps.currentSession();
   chatTitle.textContent = s ? (s.title ?? "Untitled session") : "no session";
+  // The title is what the panel is *about*, so it is also the way in — a click,
+  // not a hover: the same gesture works on the mobile bar's title (shell.ts).
+  chatTitle.classList.toggle("cursor-pointer", !!s);
+  chatTitle.title = s ? "Session info" : "";
+  chatTitle.onclick = s ? () => sessionInfo(chatTitle, s) : null;
   chatMenu.classList.toggle("hidden", !s);
   // Everything per-session (info, pin, model) lives in the ⋯ menu.
   if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
@@ -152,9 +165,12 @@ function renderSessionMeta(): void {
   sessionMeta.classList.toggle("flex", items.length > 0);
 }
 
-/** Read-only details panel: what this session is and how full its context is. */
-function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
-  const rows: [string, string][] = [
+/** Read-only details panel: what this session is and how full its context is.
+ *  Opened from the ⋯ menu, from either title bar, or from a project row. */
+export function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
+  // Third field: a note beside the label, not part of the value — every row is
+  // copyable, and "12m ago" pasted anywhere is worthless.
+  const rows: [string, string, string?][] = [
     ["Title", s.title ?? "untitled"],
     ["Directory", s.cwd],
     ["Session", s.id],
@@ -162,14 +178,19 @@ function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
   if (s.id === deps.currentId()) {
     rows.push(["Model", currentModel?.id ?? "—"]);
     rows.push(["Context", currentContext ? contextLabel(currentContext) : "—"]);
+    if (lastReplyAt === null) rows.push(["Last reply", "—"]);
+    else rows.push(["Last reply", stampTime(lastReplyAt), agoLabel(lastReplyAt)]);
   }
   const panel = h("div", "flex max-w-80 flex-col gap-1.5 px-3 py-2");
-  for (const [label, value] of rows) {
-    // Every field is copyable — cheaper than deciding which ones deserve it.
+  for (const [label, value, note] of rows) {
     const head = h(
       "div",
       "flex items-center gap-1.5",
       h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
+    );
+    if (note) head.append(h("span", "text-[10.5px] text-neutral-400", note));
+    // Every field is copyable — cheaper than deciding which ones deserve it.
+    head.append(
       copyBtn(
         "cursor-pointer text-[10.5px] uppercase tracking-wide text-neutral-400 opacity-0 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100",
         () => value,

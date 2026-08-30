@@ -42,9 +42,10 @@ import { initPush } from "./notifications.js";
 import { initReport } from "./report.js";
 import {
   initHeader,
-  noteContextTokens,
+  noteTurnMeta,
   renderHeader,
   resetHeaderState,
+  sessionInfo,
   sessionMenu,
   setHeaderState,
 } from "./session-header.js";
@@ -246,8 +247,8 @@ function handleEvent(e: SessionEvent): void {
     case "turn-end":
       turnOpen = false;
       completeTurn(e.text, e.meta);
-      // meta.tokens is the context size at completion — keep the meta line live.
-      if (e.meta) noteContextTokens(e.meta.tokens);
+      // meta carries the context size and the completion time — keep both live.
+      if (e.meta) noteTurnMeta(e.meta);
       break;
     case "queue-state":
       renderQueue(e.steering, e.followUp);
@@ -379,7 +380,10 @@ async function loadSession(id: string, missing = false): Promise<void> {
   turnOpen = snap.state === "streaming";
   setState(snap.state);
   renderQueue(snap.queue.steering, snap.queue.followUp);
-  setHeaderState(snap.model, snap.context, snap.thinkingLevel);
+  // meta is assistant-only (core/types.ts), so the last one that carries it is
+  // the last reply — no role test, and none of Array#findLast (web target).
+  const lastReply = snap.turns.reduce<number | null>((at, t) => t.meta?.completedAt ?? at, null);
+  setHeaderState(snap.model, snap.context, snap.thinkingLevel, lastReply);
   connect(id, snap.lastSeq);
 }
 
@@ -420,6 +424,10 @@ initShell({
   sessionMenu: (anchor) => {
     const s = currentSession();
     if (s) sessionMenu(anchor, s);
+  },
+  sessionInfo: (anchor) => {
+    const s = currentSession();
+    if (s) sessionInfo(anchor, s);
   },
 });
 initSidebar({

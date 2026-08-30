@@ -5,13 +5,13 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { formatTurnMeta, isSilentReply, silentReason, splitReply } from "../../core/reply.js";
+import { isSilentReply, silentReason, splitReply } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
-import { $, copyBtn, externalLinks, h } from "./dom.js";
+import { $, agoLabel, copyBtn, externalLinks, h, stampTime } from "./dom.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
   decisionReplyBtn,
@@ -215,10 +215,6 @@ export function appendTurn(
     const strip = imageRow(row);
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
-  // Same hover chip an agent turn gets, and for the same question: a message
-  // sitting above an answer says nothing about when either happened. Pushed
-  // clear of the pencil on a user row, which owns the top-right corner.
-  if (at !== undefined) row.append(hoverChip(clockTime(at), kind === "user" ? "right-10" : "right-3"));
   if (kind === "user") {
     const edit = h("button", "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex");
     edit.title = "Edit — resends from here; this message and later turns leave the context";
@@ -228,6 +224,10 @@ export function appendTurn(
     edit.onclick = () => startEdit(row, node);
     row.append(edit);
   }
+  // After the group was detached above, or the divider would sit between the
+  // steps and the message they produced — and takeActivityGroup only adopts a
+  // group that is still the pane's last row.
+  timeDivider(at);
   turnsPane.append(row);
   trimRows();
   scrollBottom();
@@ -257,7 +257,6 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: 
   sealActivity();
   const row = h("div", "group relative mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
   row.dataset.kind = "system";
-  if (at !== undefined) row.append(hoverChip(clockTime(at)));
   const head = h("div", "mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold uppercase text-cyan-800", h("span", "flex-none", kind));
   // What produced it, not just which run did: the task's own name, the model
   // and the effort, all riding in the origin (core/types.ts) so the card never
@@ -290,6 +289,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: 
   const collapsed = ["max-h-[min(18rem,40dvh)]", "overflow-hidden"];
   const content = h("div", `whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
   row.append(head, content);
+  timeDivider(at);
   turnsPane.append(row);
   // Hidden chat panes cannot be measured, so an approximate text gate catches
   // inputs likely to exceed the cap; visible panes use their rendered height.
@@ -389,26 +389,81 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   }
 }
 
-/** 24-hour, local timezone — every clock in the transcript. */
+/** 24-hour, local timezone — the divider's clock. The stamp under the last
+ *  reply is deliberately the fuller `stampTime`: one is a bearing, the other a
+ *  reading you copy. */
 const clockTime = (ms: number): string =>
   new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
-/** The chip a row shows on hover, notched into its top edge. One builder: the
- *  agent's meta hint and the plain time on the other rows are the same object
- *  to a reader, so they may not drift apart. */
-const hoverChip = (text: string, right = "right-3"): HTMLElement =>
-  h(
-    "span",
-    `absolute -top-2.5 ${right} z-10 hidden rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[11.5px] text-neutral-500 shadow-sm group-hover:inline`,
-    text,
-  );
+// --- when things happened ---------------------------------------------------------
+// A clock on every row was chrome nobody read, and on hover it did not exist at
+// all on a phone. Two placements instead, and the same rule identity.ts already
+// applies to IM headers: a time is written only where it *changed* something.
 
-/** Row-hover meta chip on agent turns: completion time · duration · tokens. */
-function setMetaHint(node: HTMLElement, meta?: TurnMeta): void {
+/** A new day, or this much silence, is what makes the clock worth a line. */
+const STAMP_GAP_MS = 10 * 60_000;
+
+/** When the last stamped row happened — the divider is a diff against it. */
+let lastStampAt: number | null = null;
+
+const sameDay = (a: number, b: number): boolean =>
+  new Date(a).toDateString() === new Date(b).toDateString();
+
+/** Today needs no date; anything older is being read out of context without one. */
+function stampLabel(at: number): string {
+  if (sameDay(at, Date.now())) return clockTime(at);
+  const day = new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${day} · ${clockTime(at)}`;
+}
+
+/** Place a row in time, if the gap since the previous one says anything. The
+ *  first row of a transcript always gets one: "when did this start" is the
+ *  question a pane you just opened is asking.
+ *
+ *  An untimed row (an error, a block still streaming) is skipped rather than
+ *  stamped `Date.now()` — a replayed transcript would then date every one of
+ *  them to the moment it was reloaded. */
+function timeDivider(at: number | undefined): void {
+  if (at === undefined) return;
+  const prev = lastStampAt;
+  lastStampAt = at;
+  if (prev !== null && at - prev < STAMP_GAP_MS && sameDay(prev, at)) return;
+  const line = h("div", "px-5 pb-0.5 pt-3 text-center text-[11px] text-neutral-400", stampLabel(at));
+  line.dataset.kind = "time"; // every row in the pane names its kind
+  turnsPane.append(line);
+}
+
+/** The newest assistant turn, and only it, carries its own clock: the answer
+ *  you are looking at is the one whose time you wanted, and the turns above it
+ *  are already placed by the dividers. Full date and seconds, not the divider's
+ *  bare clock: this is the reading Session info reports as "Last reply", and
+ *  one fact on two surfaces gets one wording (dom.ts). */
+let replyStamp: HTMLElement | null = null;
+let replyStampAt = 0;
+
+/** The age half goes stale where it sits, and a reply still claiming "just now"
+ *  an hour later is worse than no age at all — so it is repainted, by a ticker
+ *  that exists only while a stamp does. */
+let stampTimer: ReturnType<typeof setInterval> | undefined;
+
+function paintReplyStamp(): void {
+  if (!replyStamp?.isConnected) {
+    clearInterval(stampTimer);
+    stampTimer = undefined;
+    replyStamp = null;
+    return;
+  }
+  replyStamp.textContent = `${stampTime(replyStampAt)} · ${agoLabel(replyStampAt)}`;
+}
+
+function setReplyStamp(node: HTMLElement, meta?: TurnMeta): void {
   if (!meta) return;
-  (node.parentElement ?? node).append(
-    hoverChip(`${clockTime(meta.completedAt)} · ${formatTurnMeta(meta)}`),
-  );
+  replyStamp?.remove();
+  replyStampAt = meta.completedAt;
+  replyStamp = h("div", "mt-1 font-mono text-[11px] text-neutral-400");
+  (node.parentElement ?? node).append(replyStamp);
+  paintReplyStamp();
+  stampTimer ??= setInterval(paintReplyStamp, 60_000);
 }
 
 /** Wrap each fenced block so a copy button can sit in its corner without
@@ -469,10 +524,11 @@ function renderAssistant(
   // the reason the agent gave, because this is the view the operator debugs in.
   if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
-  setMetaHint(node, meta);
   if (offer) {
     renderSuggestions(node.parentElement ?? node, suggestions, (label) => deps.send("auto", label));
   }
+  // Last, so the clock reads under the whole turn — buttons included.
+  setReplyStamp(node, meta);
   return node;
 }
 
@@ -484,8 +540,16 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
   );
 }
 
+/** `completedAt - durationMs` is when the exchange began, which is where the
+ *  row belongs in time: stamping it with the completion instead put a divider
+ *  between a question and the long answer to it. */
 const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>
-  renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
+  renderAssistant(
+    appendTurn("assistant", "", false, meta && meta.completedAt - meta.durationMs),
+    raw,
+    meta,
+    offer,
+  );
 
 // --- streaming text ---------------------------------------------------------------
 
@@ -531,12 +595,12 @@ export function appendDelta(text: string): void {
 }
 
 /** Finalize the in-flight streamed text block (full markdown render). */
-export function finalizeStreaming(offer = false): void {
+export function finalizeStreaming(offer = false, meta?: TurnMeta): void {
   if (!streamingEl) return;
   const node = streamingEl;
   streamingEl = null;
   stopStreamPaint();
-  renderAssistant(node, node.dataset.raw ?? "", undefined, offer);
+  renderAssistant(node, node.dataset.raw ?? "", meta, offer);
 }
 
 /** turn-end presentation. `text` is the authoritative full turn text — a
@@ -545,11 +609,12 @@ export function completeTurn(text: string | undefined, meta?: TurnMeta): void {
   finishActivity("done");
   if (streamingEl) {
     if (text) streamingEl.dataset.raw = text;
-    setMetaHint(streamingEl, meta);
-  } else if (text) {
-    appendAssistant(text, meta, true);
+    // meta goes through the finalize, not around it: the clock has to land
+    // after the next-step buttons the same render appends.
+    finalizeStreaming(true, meta);
+    return;
   }
-  finalizeStreaming(true);
+  if (text) appendAssistant(text, meta, true);
 }
 
 /** idle without a turn-end: the run was aborted. */
@@ -564,6 +629,8 @@ export function resetChat(): void {
   trimmedUserTurns = 0;
   trimmedRows = 0;
   trimNotice = null;
+  lastStampAt = null;
+  replyStamp = null;
   streamingEl = null;
   stopStreamPaint();
   resetActivity();

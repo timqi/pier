@@ -389,6 +389,20 @@ html {
   .md hr {
     margin-block: 0.9em;
   }
+  /* The one markdown block that cannot be made to fit: prose sizes columns from
+     their content, so three columns of paths are wider than a phone and the
+     *pane* scrolls sideways — the whole transcript moving because of one table.
+     display:block gives the table its own scroll box (max-content, then clamped,
+     so a narrow table still shrink-wraps); contain keeps that scroll off the
+     back-swipe. */
+  .md table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
   /* Code should read as a patch of canvas, not a slab: prose's near-black pre
      background is swapped for a faint tint that keeps the page's light weight,
      and inline code loses prose's literal backtick pseudo-elements. */

@@ -12,6 +12,8 @@ import { shortcut } from "./shortcut.js";
 export interface ShellDeps {
   /** The current session's ⋯ menu, mirrored from the chat header. */
   sessionMenu: (anchor: HTMLElement) => void;
+  /** Its info panel — the bar title opens it, as the chat header's title does. */
+  sessionInfo: (anchor: HTMLElement) => void;
 }
 
 const sidebar = $("#sidebar");
@@ -28,6 +30,7 @@ export function closeDrawer(): void {
 /** The bar names wherever we are — a session's title or the Console view. */
 export function setBarTitle(text: string, hasSession: boolean): void {
   title.textContent = text;
+  title.classList.toggle("cursor-pointer", hasSession);
   menuBtn.classList.toggle("hidden", !hasSession);
 }
 
@@ -189,6 +192,11 @@ export function initShell(deps: ShellDeps): void {
   $("#drawer-toggle").onclick = toggleDrawer;
   scrim.onclick = closeDrawer;
   menuBtn.onclick = () => deps.sessionMenu(menuBtn);
+  // The handler outlives the title text, and a Console view's name opens
+  // nothing — so it asks the flag setBarTitle already writes.
+  title.onclick = () => {
+    if (!menuBtn.classList.contains("hidden")) deps.sessionInfo(title);
+  };
   const rail = $("#rail-toggle");
   rail.onclick = () => setRail(document.body.dataset.rail !== "closed");
   // ⌘ only: Ctrl+B is the backward motion a composer needs to keep.
