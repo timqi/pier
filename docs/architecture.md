@@ -43,7 +43,9 @@ src/
   channels/    types.ts (config contract), config.ts (store + permission gate),
                gatekeeper.ts (verdict + drop log), chains.ts (ordering),
                attach.ts (outbound file links → uploads),
-               chunk.ts, commands.ts (slash-command parse), control.ts,
+               chunk.ts, dedup.ts (the bounded seen-set both push transports
+               need), lines.ts (what the shared control moments say),
+               commands.ts (slash-command parse), control.ts,
                conversations.ts (durable chat → session map),
                receipts.ts (durable pending-reaction set),
                panel.ts (shared in-chat settings panel),
@@ -56,7 +58,10 @@ src/
                here the browser may import), server.ts (sessions + events),
                instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
-               auth.ts, files.ts, session-state.ts (what the workbench
+               auth.ts, files.ts (scoped config editing, cwd browsing,
+               attachments), explorer.ts (read-only listing/bytes/git diff for
+               the Files view), terminal.ts (one pty per project cwd, the one
+               WebSocket surface), session-state.ts (what the workbench
                decided about a session: pinned, unread, order),
                repos.ts (which repository a project directory belongs to),
                push.ts (who is notified of a finished turn) + webpush.ts
@@ -82,20 +87,19 @@ src/
                deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
   tools.ts     the CLI binaries Pier manages (install, update, PATH) — ubix
-               does the downloading, tools-task.ts owns the task that calls
-               it; `rtk` is an extension that ships as one, so the Console's
-               catalog is one list with a kind, not two; a custom tool is the
-               body of its ubix block, guarded structurally, not by
-               vocabulary; one sync at a time per machine, under a lock the
-               whole operation is inside — a row in pier.db, because both
-               processes already open it and BEGIN IMMEDIATE is the mutual
-               exclusion a lock file would have to invent. A heartbeat cannot
-               prove a holder is dead, so the holder is fenced rather than
-               trusted: it re-checks the row before every step that changes
-               anything, and a sync that was taken over fails saying so — which
-               bounds an overlap to one already-started step rather than
-               excluding it, over a floor of ubix's own flock (the contract in
-               tools.ts says what that leaves open, and why it is left)
+               does the downloading; `rtk` is an extension that ships as one,
+               so the Console's catalog is one list with a kind, not two, and a
+               custom tool is the body of its ubix block, guarded structurally
+               rather than by vocabulary. `~/.pier/tools/bin` goes first on the
+               PATH everything Pier spawns inherits. One sync at a time per
+               machine: the whole operation runs inside a lock that is a row in
+               pier.db (both processes already open it, and BEGIN IMMEDIATE is
+               the mutual exclusion a lock file would have to invent), and
+               because a heartbeat cannot prove a holder is dead, the holder
+               re-checks that row before every step that changes anything —
+               bounding an overlap to one already-started step, over a floor of
+               ubix's own flock. The contract in tools.ts says what that leaves
+               open and why
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns: what that task runs, keeping it the task Pier wrote, and
                coalescing a burst of switches into a single run
@@ -111,36 +115,29 @@ Console; nothing else imports the area.
 The browser may import owner-defined HTTP DTOs from `tasks/types.ts`,
 `channels/types.ts` and `web/types.ts` type-only: these imports are erased at build, keep wire
 shapes single-sourced, and do not let web implement either area.
-`tools.ts` is instance-layer too, but not a leaf anything may import: only
-`main.ts`, `cli.ts`, `tools-task.ts` and `settings.ts` reach it, because
-managing binaries is an instance operation and no area needs one.
-`tools-task.ts` is reachable from `main.ts` alone, and is the one root module
-that imports `tasks/` (the service type-only, `isTerminal` for a run state):
-the task belongs to the instance, and a leaf that scheduled itself would be two
-modules. (`settings.ts` takes one function —
-what a custom tool may be; the vocabulary it validates against, ubix's sources
-and the names Pier already owns, lives with the installer, and a second copy of
-it in the settings file would be the third-copy bug one release later.) It
-imports node stdlib, `paths.ts`, `log.ts`, `db.ts` (the sync lock is a row, not
-a file) and — type-only, like `settings.ts` — `core/types.ts`, whose
-`CatalogEntry` is the Console's view of one switch, bundled extension and
-managed binary alike, and must stay importable by a browser.
 `paths.ts`, `db.ts`, `log.ts`, `secrets.ts` and `settings.ts` are the
-root-leaf exceptions: every area may import them, and they import
-nothing outside the root layer (`settings.ts` also names types from
-`core/types.ts`, type-only), because `$PIER_HOME` is process configuration (it had otherwise grown a
-copy per module that needed a file), a schema version is one number per
-database and cannot be owned by five modules, and a log line is not a seam
-crossing. Logging goes to stdout/stderr only —
-journald owns time, history and rotation (docs/deploy.md); `PIER_LOG=debug`
-adds per-message tracing, `PIER_LOG=silent` is what test runs use.
+root-leaf exceptions: every area may import them, and they import nothing
+outside the root layer (`settings.ts` also names types from `core/types.ts`,
+type-only), because `$PIER_HOME` is process configuration, a schema version is
+one number per database, and a log line is not a seam crossing. Logging goes to
+stdout/stderr only — journald owns time, history and rotation
+(docs/deploy.md); `PIER_LOG=debug` adds per-message tracing, `PIER_LOG=silent`
+is what test runs use.
+`tools.ts` and `tools-task.ts` are instance-layer but not leaves: only
+`main.ts`, `cli.ts`, `tools-task.ts` and `settings.ts` reach `tools.ts`
+(managing binaries is an instance operation, and `settings.ts` takes one
+function from it — what a custom tool may be — because the vocabulary it
+validates against lives with the installer), and `tools-task.ts` is reachable
+from `main.ts` alone. It is the one root module that imports `tasks/` (the
+service type-only, `isTerminal` for a run state): the task belongs to the
+instance, and a leaf that scheduled itself would be two modules.
 `boards/` is the thinnest surface of all: a filesystem scan plus a static file
 handler, importing neither core nor Pi.
 
 The IM channel layer has its own living spec: `docs/design/04-im-channels.md`
 covers what is shared versus platform-specific, the checklists a new adapter
-follows, and the traps Telegram and Slack already paid for. Read it before
-writing the Lark adapter.
+follows, and the traps Telegram, Slack and Lark already paid for. Read it
+before writing the next adapter.
 
 ### Markdown is repaired once, at the seam
 

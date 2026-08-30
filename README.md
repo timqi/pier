@@ -2,7 +2,7 @@
 
 A self-hosted workspace for coding agents. Pier puts a web workbench and your
 IM channels in front of [Pi](https://github.com/earendil-works/pi) sessions:
-you talk to the same agent from a browser, from Slack or from Telegram, steer a
+you talk to the same agent from a browser, from Slack, Telegram or Lark, steer a
 running turn, schedule tasks, watch what every session is doing, and publish a
 static page when something is worth showing.
 
@@ -89,6 +89,11 @@ Console → Settings is the normal setup path:
   `web_search` on an authenticated Anthropic or OpenAI model, `web_fetch` on an
   Anthropic one (OpenAI hosts no fetch tool), and no other key or service. The
   page says which tools a switch adds and what each needs before you flip it.
+  Below it, the same tab switches on the command-line tools Pier manages —
+  `rtk`, `rg`, `fd`, `wt`, `jq`, or a tool of your own written as a
+  [ubix](https://github.com/timqi/ubix) block. A switch installs the binary
+  into `~/.pier/tools/bin`, which is first on the PATH every session, task and
+  terminal inherits, and a task you can read keeps them current.
 
 On first credential access, Pier imports an existing `auth.json` into its sealed
 store and renames the source to `auth.json.imported`. Literal provider keys left
@@ -111,6 +116,7 @@ pier restart             # drain running work, then restart
 pier reload              # re-read channel config and recycle idle sessions
 pier backup              # snapshot the database before a manual update
 pier update              # latest release, then hard-stop/restart the service
+pier tools sync          # install/update the managed CLI tools by hand
 ```
 
 `pier restart` refuses new work, waits up to five minutes for active turns and

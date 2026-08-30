@@ -3,14 +3,16 @@
 Browser surface for chat + live observability: a consumer of core over
 REST + SSE, no agent logic. Kept current as the workbench evolves.
 
-## Backend (`src/web/server.ts`, Hono, ≤ 500 lines)
+## Backend (`src/web/server.ts`, Hono)
 
-Budget revised from 300: attachments, queue control, thinking-level and config
-routes each added a thin table row over core, no logic — the file is a route
-table and growing it past 500 means logic is leaking in.
+`server.ts` is the session half only — sessions, turns, queue, SSE and the
+static frontend. Every other surface owns its own routes and is mounted beside
+it; the file is a route table, and logic appearing in a row is the thing to
+catch, not the line count.
 
 | Route | Behavior |
 | ----- | -------- |
+| `POST /api/projects/order` | body `{sessions?, projects?}` (lists of ids) → the sidebar's two manual orders, the only ones the UI owns |
 | `GET /api/sessions` | `AgentFactory.list()` + live state from router + `listed`/`unread` from the pin store (`listed` = pinned: membership ends when a hand ends it, nothing expires) |
 | `GET /api/projects` | the same rows, filtered to `listed` — the rail reads no second store |
 | `POST /api/sessions` | body `{cwd?}` → create session (auto-pinned), returns `{id}` |
@@ -18,7 +20,8 @@ table and growing it past 500 means logic is leaking in.
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn and re-dispatch the new text; 409 while streaming |
-| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown |
+| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown. Compressed, like the steps route below — a long transcript is the one large answer here |
+| `GET /api/sessions/:id/turns/:index/steps` | one finished turn's thinking/tool steps, fetched when its Activity group is opened rather than shipped with the snapshot |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `GET /api/models` | the same list without a session, for pickers |
 | `POST /api/sessions/:id/model` | body `{provider, id}` → switch model, returns `{model}` |
@@ -28,11 +31,25 @@ table and growing it past 500 means logic is leaking in.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
+| `POST /api/sessions/:id/compact` | compact the transcript now (the ⋯ menu). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5b), automatic ones included |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
-| `GET /api/activity` | Active or last-24h sessions, task runs, and Subagent control/supervisor message edges for Console Activity |
+| `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
+
+The other route owners, each a file with one reason to exist — the routes
+themselves live there and are not mirrored here:
+`auth.ts` (the password boundary ahead of everything, `/login`, `/logout`,
+`/api/password`), `files.ts` (`/api/config*` scoped Pi config editing,
+`/api/fs/dirs` for the cwd pickers, `/api/sessions/:id/files`), `explorer.ts`
+(`/api/explorer/{ls,file,git,diff}` for the Files view, read-only),
+`terminal.ts` (`/api/terminal`, the one WebSocket upgrade), `instance.ts`
+(`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
+`providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
+that sends one real request), `push.ts` (below), `tasks/routes.ts` and
+`channels/routes.ts` (their own areas), `boards/boards.ts` (`/boards/*`,
+`/p/*`).
 
 ## Notifications (`src/web/push.ts` + `src/web/webpush.ts`)
 

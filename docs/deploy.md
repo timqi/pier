@@ -177,9 +177,9 @@ journalctl --user -u pier --since -1h | grep 'tasks:'   # one area
 ```
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
-`channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `drain`, `secrets`,
-`settings`, `credentials`, `update`, `web.providers`, `pier` — so an area is a
-grep
+`lark`, `channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `drain`,
+`secrets`, `settings`, `credentials`, `update`, `tools`, `terminal`, `push`,
+`web`, `web.providers`, `pier` — so an area is a grep
 and a level is a `-p`. The level reaches journald as a syslog priority prefix, which Pier
 emits only when systemd says the output is a journal (`$JOURNAL_STREAM`); run
 in a terminal, the same lines carry a timestamp and a level word instead.
@@ -237,6 +237,7 @@ with the stored hash.
 ```sh
 pier restart          # finish active work, then restart the service
 pier reload           # apply channel config and recycle idle sessions in place
+pier tools sync       # install/update the managed CLI tools
 ```
 
 Both commands signal the installed systemd service; they are not foreground
@@ -245,6 +246,14 @@ up to five minutes for active work, then exits for `Restart=always` to start the
 next process. At the deadline it records every aborted IM turn first, and the
 next process posts that note after its adapter starts. Cleanup after the deadline
 has one shared 10-second bound regardless of how many sessions are stuck.
+
+`pier tools sync` converges the command-line tools switched on in Console →
+Settings — they install into `~/.pier/tools/bin`, which the service puts first
+on the PATH every session, task and terminal inherits. Normally a switch runs
+it for you as a task; typing it is for a machine that was offline when one was
+flipped. One sync runs at a time per machine: an overlapping one waits for the
+lock (and converges on the switches as they stand when its turn comes) instead
+of racing the other's installs.
 
 `pier reload` does not stop active work. It reloads Slack and Telegram adapters
 and immediately evicts idle sessions nobody is watching, so their next message
