@@ -1,3 +1,8 @@
+// One queued run carried to a result: dispatched by action kind (a bash
+// script, an agent session, another task), abortable while it goes, settled
+// exactly once. What the two action kinds actually do lives in command.ts and
+// agent.ts; this file owns only the lifecycle they share.
+
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
 import { TaskCallbacks } from "./callbacks.js";

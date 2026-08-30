@@ -1,3 +1,8 @@
+// The fan-out join: members start detached, and the group is what turns their
+// separate endings into one answer — when the join condition is met, which
+// members are cancelled, and the single aggregated callback that goes back.
+// Delivering it is the outbox's job; deciding it is this file's.
+
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runRef, runResultText } from "./callbacks.js";

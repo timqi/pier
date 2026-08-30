@@ -1,3 +1,8 @@
+// The vocabulary every file in this area shares: what a task, a run, a group
+// and a control message *are*, plus the delivery constants the outbox and the
+// messenger must agree on. Owner-defined and browser-importable type-only
+// (architecture.md), so nothing here may reach for a runtime or a node builtin.
+
 import type { ModelRef, ThinkingLevel } from "../core/types.js";
 
 export type TaskTrigger =

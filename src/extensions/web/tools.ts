@@ -1,3 +1,9 @@
+// The two tools as the model sees them: web_search and web_fetch — their
+// parameters, which backend answers a call, and what comes back when one
+// cannot. Every parameter is context the model pays for on every turn, so the
+// surface is deliberately small; the wire formats behind it are anthropic.ts
+// and openai.ts, and the answer's shape is content.ts.
+
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { callNativeTool } from "./anthropic.js";

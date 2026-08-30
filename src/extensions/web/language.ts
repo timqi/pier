@@ -1,3 +1,9 @@
+// The language-preservation policy in words: what the model is told to search
+// in, and how to tell afterwards whether it did. This is the reason the
+// extension exists at all — a hosted search that quietly translates a Chinese
+// query answers a question nobody asked — so the policy is one file, and the
+// audit that checks it reads from the same one.
+
 export type LanguageMode = "auto" | "preserve" | "expand";
 
 export function searchPrompt(query: string, mode: LanguageMode): string {

@@ -1,3 +1,9 @@
+// A run that *is* a Pi session: which session it opens (reuse, fresh, fork),
+// what the child is told before the prompt, and how many may run at once. The
+// concurrency caps are here rather than in execution.ts because they bound
+// agents specifically — a bash run costs a process, an agent run costs a
+// model's context and someone's rate limit.
+
 import type { AgentFactory, AgentSession } from "../core/types.js";
 import { quietLabel, splitReply } from "../core/reply.js";
 import { Router } from "../core/router.js";

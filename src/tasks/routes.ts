@@ -1,3 +1,8 @@
+// The area's HTTP surface: tasks, runs, group and message routes for the
+// Console, plus the Activity snapshot it draws its graph from. A route reads
+// its body, names the caller and hands the decision to TaskService — policy
+// that lives here would be policy the task tool does not get.
+
 import type { Hono } from "hono";
 import type { AgentFactory } from "../core/types.js";
 import type { Router } from "../core/router.js";

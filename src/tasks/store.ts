@@ -1,3 +1,8 @@
+// Every query this area makes against pier.db, and nothing else: definitions,
+// runs, groups and messages are rows here, read and written through one
+// connection db.ts opened. A store owns its queries, never its own tables or
+// its own handle — the schema is db.ts's migration list.
+
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
 import type { TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";

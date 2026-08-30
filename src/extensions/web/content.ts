@@ -1,3 +1,9 @@
+// What a provider's answer becomes on the way to the model: sources, results,
+// the queries actually searched, usage, and the text of a fetched document.
+// One shape for both backends, so a tool renders its answer once instead of
+// per wire format — anthropic.ts and openai.ts parse into these, and nothing
+// past this file knows which one replied.
+
 import { isObject } from "./json.js";
 import { languageLabel } from "./language.js";
 import type { Backend } from "./provider.js";

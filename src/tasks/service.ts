@@ -1,3 +1,10 @@
+// The one object the rest of Pier talks to about tasks, and the clock behind
+// it: the tick that finds what is due, the boot recovery that writes off runs
+// a restart interrupted, and the pause a drain needs. Every decision it looks
+// like it makes belongs to a file beside it (definitions, runs, execution,
+// groups, messages, callbacks) — what is genuinely here is scheduling and the
+// facade, so the HTTP routes and the task tool cannot drift apart.
+
 import type { AgentFactory, BackgroundRun } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";

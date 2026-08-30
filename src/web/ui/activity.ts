@@ -1,3 +1,9 @@
+// Console → Activity: what is happening right now, and what happened in the
+// last day — the session table and the directed graph of task runs, drawn from
+// one /api/activity snapshot. Its one reason to exist is the picture: which
+// run invoked which, which callback went where, and which agent is waiting on
+// an answer, none of which any single session's timeline can show.
+
 import { readableTitle } from "../../core/identity.js";
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";

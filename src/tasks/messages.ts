@@ -1,3 +1,10 @@
+// What a parent and a child say to each other while a run is going: steer,
+// follow-up and resume in one direction, progress and decision questions in
+// the other. Every message is a durable row before it is a delivery, because
+// the two ends are different sessions and either may be mid-turn, gone, or
+// finished — an undelivered message is retried, expired and *said*, never
+// dropped (§5b).
+
 import type { SystemInputOrigin } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";

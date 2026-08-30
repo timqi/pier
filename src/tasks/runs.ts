@@ -1,3 +1,9 @@
+// A definition plus an input becomes a queued run: where it came from, how
+// deep in a subagent chain it sits, whether it overlaps a run already going,
+// and which session hears about it. The limits that keep a chain from
+// exploding (depth, children per root) are decided here, once, because every
+// caller — scheduler, tool, HTTP — enqueues through this one door.
+
 import { logger } from "../log.js";
 import { TaskCallbacks } from "./callbacks.js";
 import { newId } from "./definitions.js";
