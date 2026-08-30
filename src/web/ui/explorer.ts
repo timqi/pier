@@ -118,7 +118,9 @@ export function createExplorerView(
   // pointer-events: only the marks catch clicks — the strip sits over the
   // viewer's scrollbar, which must stay draggable through it.
   const minimap = h("div", "pointer-events-none absolute inset-y-0 right-0 z-20 hidden w-2");
-  const right = h("section", "relative min-w-0 flex-1", viewer, minimap);
+  // min-h-0: stacked below md the pane is a column item, whose auto minimum
+  // is its content — without this it grows past the view and nothing scrolls.
+  const right = h("section", "relative min-h-0 min-w-0 flex-1", viewer, minimap);
   root.append(header, h("div", "flex min-h-0 flex-1 max-md:flex-col", left, right));
 
   const api = (ep: string, params: Record<string, string>): string =>
