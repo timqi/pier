@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
@@ -581,21 +582,27 @@ describe("workbench server", () => {
   });
 
   // The rail groups a repository's worktrees together, so the route has to
-  // carry the identity git reports for the directory. Against this checkout,
-  // because a fake would only prove the spread operator works.
+  // carry the identity git reports for the directory. Against a real repository,
+  // because a fake would only prove the spread operator works — its own, and not
+  // this checkout, which CI clones at a tag and hands over with a detached head.
   it("says which repository a project directory belongs to", async () => {
     const { app, state, factory } = setup();
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "pier-project-")));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", cwd, "-c", "user.email=t@t", "-c", "user.name=t", ...args]);
+    git("init", "-q", "-b", "main");
+    git("commit", "-q", "--allow-empty", "-m", "first");
     vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: process.cwd(), createdAt: 1, modified: Date.now() },
+      { id: "s1", cwd, createdAt: 1, modified: Date.now() },
     ]);
-    state.pin("s1", process.cwd(), true);
+    state.pin("s1", cwd, true);
     await vi.waitFor(async () => {
       const rows = (await (await app.request("/api/projects")).json()) as
         { repo?: string; branch?: string }[];
-      // A worktree of this repository reports the *main* .git dir, which is the
-      // grouping key; what it maps to is repos.test.ts's business.
-      expect(rows[0]?.repo).toMatch(/\/\.git$/);
-      expect(rows[0]?.branch).toEqual(expect.any(String));
+      // A worktree reports the *main* .git dir, which is the grouping key; what
+      // it maps to is repos.test.ts's business.
+      expect(rows[0]?.repo).toBe(join(cwd, ".git"));
+      expect(rows[0]?.branch).toBe("main");
     });
   });
 

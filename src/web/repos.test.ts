@@ -22,7 +22,9 @@ const settled = async <T>(read: () => T): Promise<T> => {
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "pier-repos-"));
-  git(root, "init", "-q", "main");
+  // `-b`, because the default branch name is the machine's to configure and CI
+  // is not this machine: an unnamed `init` gave `master` there and `main` here.
+  git(root, "init", "-q", "-b", "main", "main");
   git(join(root, "main"), "commit", "-q", "--allow-empty", "-m", "first");
 });
 
