@@ -22,10 +22,14 @@ beforeEach(() => {
 
 describe("Pier system prompt", () => {
   it("puts Pier's baseline before the user-owned SYSTEM.md", () => {
-    const prompt = pierSystemPrompt("# Working style\nUser rules");
+    const prompt = pierSystemPrompt("# Tools\nUser rules");
     expect(prompt).toMatch(/^You are a general-purpose agent with a live workspace/);
     expect(prompt).toContain("read and change files and run shell commands");
+    // The baseline carries the rules that hold on any machine; the user's file
+    // follows it with the local ones, so its layer is the one that wins.
+    expect(prompt).toContain("Never claim a test passed without running it");
     expect(prompt.indexOf("# Communication")).toBeLessThan(prompt.indexOf("# Working style"));
+    expect(prompt.indexOf("# Working style")).toBeLessThan(prompt.indexOf("# Tools"));
     expect(pierSystemPrompt()).not.toContain("undefined");
   });
 });
