@@ -5,7 +5,7 @@
 
 import { sendJson } from "./api.js";
 import { pathTrigger, type PathOption } from "./dir-picker.js";
-import { $, basename, detailsRow, h, relTime } from "./dom.js";
+import { $, basename, detailsRow, h, relTime, untitled } from "./dom.js";
 import { closeMenu, openMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { setAttention } from "./shell.js";
@@ -410,6 +410,8 @@ function sessionRow(s: SessionInfo): HTMLElement {
   };
   li.append(
     stateDot(s),
+    // Not the header's `untitled(cwd)`: this row already sits under its
+    // project, and the long form would truncate to "New session i…".
     h("span", "truncate", s.title ?? "untitled"),
     h(
       "div",
@@ -647,7 +649,7 @@ function renderArchive(): void {
   const matched = deps.sessions().filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`));
   const byAge = (a: SessionInfo, b: SessionInfo): number => b.createdAt - a.createdAt;
   const target = (s: SessionInfo): Target => ({
-    label: s.title ?? "untitled",
+    label: s.title ?? untitled(s.cwd),
     detail: [basename(s.cwd), chatOf(s)].filter(Boolean).join(" · "),
     open: open(() => deps.select(s.id)),
     session: s,

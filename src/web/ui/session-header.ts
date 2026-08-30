@@ -7,7 +7,7 @@
 import { compact } from "../../core/reply.js";
 import { failure, mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
-import { $, agoLabel, basename, copyBtn, h, stampTime } from "./dom.js";
+import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel } from "./shortcut.js";
@@ -104,9 +104,20 @@ export function noteTurnMeta(meta: TurnMeta): void {
   renderSessionMeta();
 }
 
+/** The pane is the new session's before that session has an id, and it may not
+ *  go on naming the one it replaced. Cleared by the first render that has a
+ *  session — which is that session arriving. */
+let pending: string | null = null;
+
+export function setHeaderPending(cwd: string | null): void {
+  pending = cwd === null ? null : untitled(cwd);
+  renderHeader();
+}
+
 export function renderHeader(): void {
   const s = deps.currentSession();
-  chatTitle.textContent = s ? (s.title ?? "Untitled session") : "no session";
+  if (s) pending = null;
+  chatTitle.textContent = s ? (s.title ?? untitled(s.cwd)) : (pending ?? "no session");
   // The title is what the panel is *about*, so it is also the way in — a click,
   // not a hover: the same gesture works on the mobile bar's title (shell.ts).
   chatTitle.classList.toggle("cursor-pointer", !!s);

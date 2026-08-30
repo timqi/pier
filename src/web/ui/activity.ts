@@ -8,7 +8,7 @@ import { readableTitle } from "../../core/identity.js";
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
 import { coalesce } from "./api.js";
-import { consoleView, fmtDuration, h, type ConsoleView } from "./dom.js";
+import { consoleView, fmtDuration, h, untitled, type ConsoleView } from "./dom.js";
 import { tabButton as control } from "./form.js";
 
 interface ActivitySession {
@@ -168,7 +168,7 @@ export function createActivityView(
       tr.onclick = () => openSession(session.id);
       tr.append(
         h("td", "px-4 py-2.5",
-          h("div", "truncate font-medium", session.title ?? "Untitled session"),
+          h("div", "truncate font-medium", session.title ?? untitled(session.cwd)),
           h("div", "truncate font-mono text-[11px] text-neutral-400", session.id)),
         h("td", "truncate px-2 py-2.5 font-mono text-[11.5px]", session.cwd || "-"),
         h("td", "px-2 py-2.5",

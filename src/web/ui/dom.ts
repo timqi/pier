@@ -35,6 +35,13 @@ export function h(tag: string, cls: string, ...children: (Node | string)[]): HTM
 /** Last path segment — how every surface names a cwd or a file. */
 export const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 
+/** A session with no title has had no first message yet — the prompt is what
+ *  names it — so what identifies it is where it opens. Shared so the header
+ *  and Activity spell it the same way, and so the header can say it while a
+ *  session is still being created: the label then stands unchanged until the
+ *  first prompt replaces it. */
+export const untitled = (cwd: string): string => `New session in ${basename(cwd)}`;
+
 /** Local wall clock, sortable and unambiguous: `2026-08-30 19:41:07`. The one
  *  full timestamp — the transcript's last reply and the session info panel are
  *  the same fact on two surfaces, so they may not spell it two ways. Written

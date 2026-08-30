@@ -47,6 +47,7 @@ import {
   resetHeaderState,
   sessionInfo,
   sessionMenu,
+  setHeaderPending,
   setHeaderState,
 } from "./session-header.js";
 import { closeDrawer, initShell } from "./shell.js";
@@ -115,14 +116,38 @@ let turnOpen = false;
 // --- sessions --------------------------------------------------------------------
 
 async function createSession(cwd: string): Promise<void> {
+  // Opening a session in Pi costs a round trip long enough to look ignored —
+  // the dialog closes and the *previous* session stays on screen. So the pane
+  // becomes the new session's before the POST is sent: skeleton, the title an
+  // untitled session will keep anyway, and no current id — a prompt typed
+  // during the wait must not be sent to the session being left.
+  showChat();
+  closeDrawer();
+  currentId = null;
+  source?.close();
+  resetChat();
+  resetHeaderState();
+  setHeaderPending(cwd);
+  chatLoading(true);
   const res = await sendJson("/api/sessions", { cwd });
   if (!res.ok) {
+    chatLoading(false);
+    setHeaderPending(null);
     appendTurn("error", `session create failed: ${res.status}`);
     return;
   }
   const { id } = (await res.json()) as { id: string };
-  await refreshProjects();
-  await select(id);
+  // The row is known here and the POST already broadcast `sessions-changed`,
+  // so it is rendered now and the workspace stream's own refresh reconciles it
+  // — selecting must not wait for a full listing (principle 7). Repo and branch
+  // come from a session in the same directory, so the row lands in its project
+  // rather than jumping there a moment later.
+  const { repo, branch } = sessions.find((s) => s.cwd === cwd) ?? {};
+  sessions.unshift({
+    id, cwd, createdAt: Date.now(), state: "idle", listed: true, unread: false, channel: "web",
+    activeRuns: 0, repo, branch,
+  });
+  await select(id); // renders the rail and the header with the row above
   focusInput();
 }
 
