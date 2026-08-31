@@ -1,12 +1,22 @@
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { backupDb, openDb } from "./db.js";
 
-const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-db-")), "pier.db");
+const dbDirs = new Set<string>();
+const dbPath = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "pier-db-"));
+  dbDirs.add(dir);
+  return join(dir, "pier.db");
+};
+
+afterEach(() => {
+  for (const dir of dbDirs) rmSync(dir, { recursive: true, force: true });
+  dbDirs.clear();
+});
 
 /** Where db.ts puts every copy, and one copy's name in it. */
 const backupsDir = (path: string): string => join(dirname(path), "backups");
