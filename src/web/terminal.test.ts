@@ -71,7 +71,7 @@ afterEach(() => {
 });
 
 describe("terminal WebSocket", () => {
-  it("detaches an early disconnect and revokes a live client on password change", async () => {
+  it("detaches an early disconnect and closes a client whose session is revoked", async () => {
     const db = openDb(join(mkdtempSync(join(tmpdir(), "pier-term-auth-")), "pier.db"));
     let printed = "";
     const auth = new AuthStore(db, (message) => {
@@ -105,10 +105,10 @@ describe("terminal WebSocket", () => {
     });
     expect(malformed).toContain("400 Bad Request");
     const url = `ws://127.0.0.1:${port}/api/terminal?cwd=${encodeURIComponent(cwd)}`;
-    const connect = async (autoPong = true): Promise<WebSocket> => {
+    const connect = async (autoPong = true, as = cookie): Promise<WebSocket> => {
       const ws = new WebSocket(url, {
         autoPong,
-        headers: { cookie, origin: `http://127.0.0.1:${port}` },
+        headers: { cookie: as, origin: `http://127.0.0.1:${port}` },
       });
       await new Promise<void>((resolve, reject) => {
         ws.once("open", resolve);
@@ -142,14 +142,25 @@ describe("terminal WebSocket", () => {
         return terminal.size === 0;
       });
 
-      const revoked = await connect();
+      // Two browsers, one shell each. Signing the second one out closes its
+      // socket and leaves the first one working: revocation is per session.
+      const mine = await connect();
+      const theirs = await connect(true, `pier_session=${auth.open("10.0.0.5", "test")}`);
       await until(() => terminal.size === 1);
-      await new Promise<void>((resolve) => revoked.once("ping", () => resolve()));
+      await new Promise<void>((resolve) => theirs.once("ping", () => resolve()));
+      const theirClose = new Promise<{ code: number; reason: string }>((resolve) =>
+        theirs.once("close", (code, reason) => resolve({ code, reason: reason.toString() })),
+      );
+      auth.revoke(auth.list().find((d) => d.ip === "10.0.0.5")?.id ?? "");
+      await expect(theirClose).resolves.toEqual({ code: 1008, reason: "signed out" });
+      expect(mine.readyState).toBe(WebSocket.OPEN);
+
+      // A password change revokes every session, so it closes the rest.
       const closed = new Promise<{ code: number; reason: string }>((resolve) =>
-        revoked.once("close", (code, reason) => resolve({ code, reason: reason.toString() })),
+        mine.once("close", (code, reason) => resolve({ code, reason: reason.toString() })),
       );
       auth.setPassword("replacement-password");
-      await expect(closed).resolves.toEqual({ code: 1008, reason: "password changed" });
+      await expect(closed).resolves.toEqual({ code: 1008, reason: "signed out" });
     } finally {
       terminal.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

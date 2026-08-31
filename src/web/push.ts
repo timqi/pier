@@ -14,6 +14,7 @@ import type { EventHub } from "../core/hub.js";
 import { readableTitle } from "../core/identity.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
+import { sessionIdOf } from "./auth.js";
 import {
   generateVapidKeys,
   type PushTarget,
@@ -50,6 +51,12 @@ export interface PushSubscriptionRow extends PushTarget {
   createdAt: number;
 }
 
+/** SQLite's "that parent row does not exist" — the session ended. Anything
+ *  else that goes wrong here is a broken database, not a signed-out browser. */
+const FOREIGN_KEY_VIOLATION = 787;
+const sessionGone = (err: unknown): boolean =>
+  (err as { errcode?: number }).errcode === FOREIGN_KEY_VIOLATION;
+
 /** Subscriptions and the instance's VAPID identity. Both are per-instance
  *  facts nobody edits by hand, so they live beside every other one. */
 export class PushStore {
@@ -85,16 +92,18 @@ export class PushStore {
   }
 
   /** Upsert: a browser re-posts the same subscription on every load, which is
-   *  what repairs a row this instance lost. */
-  save(target: PushTarget, label: string): void {
+   *  what repairs a row this instance lost — and what re-attaches one to the
+   *  session that is signed in now. */
+  save(target: PushTarget, label: string, sessionId: string): void {
     this.#db
       .prepare(
-        `INSERT INTO push_subscriptions(endpoint, p256dh, auth, label, created_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO push_subscriptions(endpoint, p256dh, auth, label, created_at, session_id)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(endpoint) DO UPDATE SET
-           p256dh = excluded.p256dh, auth = excluded.auth, label = excluded.label`,
+           p256dh = excluded.p256dh, auth = excluded.auth, label = excluded.label,
+           session_id = excluded.session_id`,
       )
-      .run(target.endpoint, target.p256dh, target.auth, label, Date.now());
+      .run(target.endpoint, target.p256dh, target.auth, label, Date.now(), sessionId);
     this.#db
       .prepare(
         `DELETE FROM push_subscriptions WHERE endpoint NOT IN
@@ -107,7 +116,6 @@ export class PushStore {
     return this.#db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?")
       .run(endpoint).changes > 0;
   }
-
 }
 
 /** What a service worker is handed. Kept small on purpose: a push service need
@@ -284,7 +292,21 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     const target = parseTarget(body);
     if (!target) return c.json({ error: "not a push subscription" }, 400);
     const label = String((body as { label?: unknown }).label ?? "a browser").slice(0, 80);
-    store.save(target, label);
+    // The session that is asking owns the subscription, and the foreign key is
+    // what makes signing this browser out take the subscription with it. It can
+    // refuse: the boundary let this request in and the browser was signed out
+    // while its body was still arriving. Say so rather than 500 — the browser
+    // is about to be sent to the login form by its next request anyway.
+    try {
+      store.save(target, label, sessionIdOf(c));
+    } catch (err) {
+      // Only that. A full or read-only database answering 401 would send a
+      // signed-in browser to the login form, where the password it types will
+      // not help either.
+      if (!sessionGone(err)) throw err;
+      log.warn(`subscription refused for a session that ended: ${String(err)}`);
+      return c.json({ error: "session ended" }, 401);
+    }
     log.info(`subscribed ${label}`);
     return c.json({ ok: true }, 201);
   });

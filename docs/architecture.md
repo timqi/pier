@@ -255,7 +255,10 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 
 - One shared password guards every HTTP surface (`web/auth.ts`): a single
   middleware ahead of all routes, a scrypt hash generated on first boot and
-  printed once, and a cookie signed with that hash. Single-account on purpose —
+  printed once, and a cookie naming a row in `web_sessions` — one per signed-in
+  browser, holding only the SHA-256 of the cookie's token, so a copy of
+  `pier.db` cannot be turned into a session and any single browser can be
+  signed out. Single-account on purpose —
   Pier has one workspace, so a boundary is what an exposed instance needs, not
   identities. `/p/*` — published boards and the stylesheet they link — is the
   only exemption, so

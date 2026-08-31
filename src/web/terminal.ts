@@ -13,7 +13,7 @@ import { isAbsolute } from "node:path";
 import { spawn, type IPty } from "node-pty";
 import { WebSocketServer } from "ws";
 import { logger } from "../log.js";
-import { upgradeAuthorized, type AuthStore } from "./auth.js";
+import { ALL, upgradeAuthorized, type AuthStore } from "./auth.js";
 
 const log = logger("terminal");
 
@@ -307,9 +307,17 @@ export function attachTerminal(
   });
   server.once("close", () => hub.close());
   wss.on("error", (err) => log.error("terminal WebSocket server failed", err));
-  auth.onRotation(() => {
-    log.info("password changed; closing terminal clients");
-    for (const client of wss.clients) client.close(1008, "password changed");
+  // A shell outlives the request that opened it, so revocation has to reach it
+  // here: the session that opened this socket was signed out (or every session
+  // was, by a password change), and the terminal goes with it.
+  const sessionOf = new WeakMap<TermSocket, string>();
+  const revoked = new WeakSet<TermSocket>();
+  auth.onRevoke((id) => {
+    for (const client of wss.clients) {
+      if (id !== ALL && sessionOf.get(client) !== id) continue;
+      revoked.add(client);
+      client.close(1008, "signed out");
+    }
   });
   server.on("upgrade", (req, socket, head) => {
     let url: URL;
@@ -325,14 +333,15 @@ export function attachTerminal(
       socket.destroy();
       return;
     }
-    if (!upgradeAuthorized(auth, req)) {
+    const sessionId = upgradeAuthorized(auth, req);
+    if (!sessionId) {
       log.warn("refused terminal upgrade (unauthorized)");
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
     }
-    const authKey = auth.cookieKey;
     wss.handleUpgrade(req, socket, head, (ws) => {
+      sessionOf.set(ws, sessionId);
       alive.add(ws);
       ws.on("pong", () => alive.add(ws));
       // Frames can land while attach() is resolving realpath; hold a bounded
@@ -348,9 +357,10 @@ export function attachTerminal(
       });
       ws.on("message", (data, binary) => {
         if (closed) return;
-        if (auth.cookieKey !== authKey) {
+        // A frame can already be in flight when the close above goes out.
+        if (revoked.has(ws)) {
           closed = true;
-          ws.close(1008, "password changed");
+          ws.close(1008, "signed out");
           return;
         }
         if (binary) {

@@ -6,7 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { AuthStore, requireAuth, registerAuthRoutes, upgradeAuthorized } from "./auth.js";
+import { ALL, AuthStore, requireAuth, registerAuthRoutes, upgradeAuthorized } from "./auth.js";
 
 /** A store on a throwaway file, plus the password it printed on first boot. */
 function store(path = join(mkdtempSync(join(tmpdir(), "pier-auth-")), "pier.db")): {
@@ -168,20 +168,23 @@ describe("WebSocket auth", () => {
     const { store: s, password } = store();
     const a = app(s);
     const cookie = cookieOf(await login(a, password));
-    expect(upgradeAuthorized(s, upgrade(cookie, "https://pier.example"))).toBe(true);
-    expect(upgradeAuthorized(s, upgrade(cookie))).toBe(true); // non-browser client
-    expect(upgradeAuthorized(s, upgrade("pier_session=bad", "https://pier.example"))).toBe(false);
-    expect(upgradeAuthorized(s, upgrade(cookie, "https://other.example"))).toBe(false);
+    // The session id comes back, so the socket knows what revoking it means.
+    const id = s.list()[0]?.id;
+    expect(upgradeAuthorized(s, upgrade(cookie, "https://pier.example"))).toBe(id);
+    expect(upgradeAuthorized(s, upgrade(cookie))).toBe(id); // non-browser client
+    expect(upgradeAuthorized(s, upgrade("pier_session=bad", "https://pier.example")))
+      .toBeUndefined();
+    expect(upgradeAuthorized(s, upgrade(cookie, "https://other.example"))).toBeUndefined();
     // A loopback TLS proxy's external host is trusted and URL-normalized.
     expect(upgradeAuthorized(
       s,
       upgrade(cookie, "https://pier.example", "127.0.0.1:3141", "::1", "PIER.EXAMPLE:443"),
-    )).toBe(true);
+    )).toBe(id);
     // A remote caller cannot make its own forwarded host authoritative.
     expect(upgradeAuthorized(
       s,
       upgrade(cookie, "https://pier.example", "127.0.0.1:3141", "10.0.0.2", "pier.example"),
-    )).toBe(false);
+    )).toBeUndefined();
   });
 });
 
@@ -193,8 +196,10 @@ describe("login", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
     const cookie = cookieOf(res);
-    expect(cookie).toMatch(/^pier_session=\d+\./);
+    expect(cookie).toMatch(/^pier_session=[\w-]+\.[\w-]{43}$/);
     expect(res.headers.get("set-cookie")).toContain("HttpOnly");
+    // A week, not a quarter: the window a stolen cookie is good for.
+    expect(res.headers.get("set-cookie")).toContain("Max-Age=604800");
     const api = await a.request("/api/sessions", { headers: { cookie } });
     expect(api.status).toBe(200);
     expect(api.headers.get("cache-control")).toBe("private, no-store");
@@ -268,17 +273,20 @@ describe("changing the password", () => {
     const { store: s, password } = store();
     const a = app(s);
     const before = cookieOf(await login(a, password));
-    let rotations = 0;
-    s.onRotation(() => rotations++);
+    const other = cookieOf(await login(a, password));
+    const revoked: string[] = [];
+    s.onRevoke((id) => revoked.push(id));
 
     const res = await change(a, { current: password, next: "correct-horse" }, before);
     expect(res.status).toBe(200);
     expect(s.verify("correct-horse")).toBe(true);
     expect(s.verify(password)).toBe(false);
-    expect(rotations).toBe(1);
+    expect(revoked).toEqual([ALL]);
+    expect(s.list()).toEqual([]);
+    expect((await a.request("/api/sessions", { headers: { cookie: other } })).status).toBe(401);
 
-    // No cookie is re-issued — the caller's is cleared, and every cookie
-    // signed under the old hash stops verifying. Everyone signs in again.
+    // No cookie is re-issued — the caller's is cleared, and every session row
+    // is gone. Everyone signs in again.
     expect(cookieOf(res)).toBe("pier_session=");
     expect((await a.request("/api/sessions", { headers: { cookie: before } })).status).toBe(401);
     expect((await login(a, "correct-horse")).status).toBe(302);
@@ -308,7 +316,7 @@ describe("changing the password", () => {
 });
 
 describe("logout", () => {
-  it("clears the cookie for a signed-in browser", async () => {
+  it("clears the cookie and revokes the session behind it", async () => {
     const { store: s, password } = store();
     const a = app(s);
     const cookie = cookieOf(await login(a, password));
@@ -316,6 +324,10 @@ describe("logout", () => {
     expect(res.status).toBe(200);
     expect(cookieOf(res)).toBe("pier_session=");
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+    // A copy of the cookie taken before signing out is dead too — the row is
+    // what authenticates, not the value.
+    expect((await a.request("/api/sessions", { headers: { cookie } })).status).toBe(401);
+    expect(s.list()).toEqual([]);
   });
 
   it("is behind the boundary like every other write", async () => {
@@ -325,33 +337,198 @@ describe("logout", () => {
 });
 
 describe("the cookie", () => {
-  it("dies with the password it was signed under", async () => {
+  it("survives a restart, and dies when its row is gone", async () => {
+    const { store: s, password, path, db } = store();
+    const cookie = cookieOf(await login(app(s), password));
+    db.close();
+
+    // The session is in the database, so the process may go and come back.
+    const restarted = store(path);
+    expect((await app(restarted.store).request("/api/sessions", { headers: { cookie } })).status)
+      .toBe(200);
+    restarted.store.revoke(cookie.split("=")[1]?.split(".")[0] ?? "");
+    expect((await app(restarted.store).request("/api/sessions", { headers: { cookie } })).status)
+      .toBe(401);
+    restarted.db.close();
+  });
+
+  it("does not survive the documented password recovery", async () => {
     const { store: s, password, path, db } = store();
     const cookie = cookieOf(await login(app(s), password));
 
-    // Rotation, the way an operator does it: drop the row, restart, new password.
+    // "DELETE FROM auth, then restart" is how a lost password is replaced — so
+    // it is also how a browser signed in under the old one is put out.
     db.exec("DELETE FROM auth");
     db.close();
-    const rotated = store(path);
-    expect(rotated.password).not.toBe(password);
-    expect((await app(rotated.store).request("/api/sessions", { headers: { cookie } })).status).toBe(401);
-    rotated.db.close();
+    const recovered = store(path);
+    expect(recovered.password).not.toBe(password);
+    expect(recovered.store.list()).toEqual([]);
+    expect((await app(recovered.store).request("/api/sessions", { headers: { cookie } })).status)
+      .toBe(401);
+    recovered.db.close();
+  });
+
+  it("is swept at boot when it expired while Pier was down", async () => {
+    const { store: s, password, path, db } = store();
+    await login(app(s), password);
+    db.prepare("UPDATE web_sessions SET seen_at = ?").run(Date.now() - 8 * 24 * 60 * 60_000);
+    db.close();
+
+    // Nothing else would look: the browser never comes back, and until
+    // somebody signs in there is no other reason to read this table.
+    const restarted = store(path);
+    expect(restarted.store.list()).toEqual([]);
+    expect(restarted.db.prepare("SELECT count(*) AS n FROM web_sessions").get()).toEqual({ n: 0 });
+    restarted.db.close();
+  });
+
+  it("is marked Secure only when the request really arrived over TLS", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const proxied = (remoteAddress: string) =>
+      a.request("http://127.0.0.1:3141/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-proto": "https",
+          "x-forwarded-for": crypto.randomUUID(),
+        },
+        body: new URLSearchParams({ password, next: "/" }),
+      }, { incoming: { socket: { remoteAddress, remotePort: 443, remoteFamily: "IPv4" } } });
+
+    // A local TLS proxy is believed; a stranger writing the same header is not,
+    // or anyone could decide this flag for a cookie they are about to receive.
+    expect((await proxied("127.0.0.1")).headers.get("set-cookie")).toContain("Secure");
+    expect((await proxied("10.0.0.4")).headers.get("set-cookie")).not.toContain("Secure");
+    // Pier's own TLS needs no header at all.
+    const direct = await a.request("https://pier.example/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ password, next: "/" }),
+    });
+    expect(direct.headers.get("set-cookie")).toContain("Secure");
   });
 
   it("is refused when tampered with or expired", async () => {
-    const { store: s, password } = store();
+    const { store: s, password, db } = store();
     const a = app(s);
     const cookie = cookieOf(await login(a, password));
-    const value = cookie.split("=")[1] ?? "";
-    const [expiresAt, sig = ""] = value.split(".");
+    const [id = "", token = ""] = (cookie.split("=")[1] ?? "").split(".");
     for (const forged of [
-      `pier_session=${Number(expiresAt) + 60_000}.${sig}`,
-      `pier_session=${Date.now() - 1}.${sig}`,
-      `pier_session=${expiresAt}.${sig.slice(0, -1)}`,
+      `pier_session=${id}.${token.slice(0, -1)}`,
+      `pier_session=${id}.`,
+      `pier_session=${token}.${token}`,
       "pier_session=nonsense",
       "pier_session=",
     ]) {
       expect((await a.request("/api/sessions", { headers: { cookie: forged } })).status).toBe(401);
     }
+    // Still live — none of the above touched the row.
+    expect((await a.request("/api/sessions", { headers: { cookie } })).status).toBe(200);
+
+    // A row unused for longer than the TTL is refused without anything having
+    // to delete it: last use is the deadline.
+    db.prepare("UPDATE web_sessions SET seen_at = ?").run(Date.now() - 8 * 24 * 60 * 60_000);
+    expect((await a.request("/api/sessions", { headers: { cookie } })).status).toBe(401);
+    db.close();
+  });
+
+  it("stores no usable credential: a copy of the database cannot sign anything", async () => {
+    const { store: s, password, db } = store();
+    const cookie = cookieOf(await login(app(s), password));
+    const token = (cookie.split("=")[1] ?? "").split(".")[1] ?? "";
+    const row = db.prepare("SELECT token_hash AS h FROM web_sessions").get() as { h: string };
+    expect(token).toHaveLength(43); // 32 random bytes, base64url
+    expect(row.h).toHaveLength(64);
+    expect(row.h).not.toContain(token);
+    db.close();
+  });
+
+  it("slides its deadline forward on use, on both sides", async () => {
+    const { store: s, password, db } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    const deadline = () =>
+      (db.prepare("SELECT seen_at AS e FROM web_sessions").get() as { e: number }).e;
+    const first = deadline();
+
+    // Inside the touch window nothing is written and no cookie is re-sent: one
+    // write per browser per five minutes, not one per request.
+    const quiet = await a.request("/api/sessions", { headers: { cookie } });
+    expect(quiet.headers.get("set-cookie")).toBeNull();
+    expect(deadline()).toBe(first);
+
+    // Six minutes later the row and the browser both get the new deadline.
+    db.prepare("UPDATE web_sessions SET seen_at = ?").run(Date.now() - 6 * 60_000);
+    const used = await a.request("/api/sessions", { headers: { cookie } });
+    expect(used.status).toBe(200);
+    expect(cookieOf(used)).toBe(cookie);
+    expect(used.headers.get("set-cookie")).toContain("Max-Age=604800");
+    expect(deadline()).toBeGreaterThan(first);
+    db.close();
+  });
+});
+
+describe("signed-in devices", () => {
+  const devices = async (a: Hono, cookie: string) => {
+    const res = await a.request("/api/devices", { headers: { cookie } });
+    return (await res.json()) as { id: string; ip: string; agent: string; current: boolean }[];
+  };
+
+  it("lists every browser, says which one is asking, and signs one out", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const mine = cookieOf(await login(a, password, "10.0.0.20"));
+    const other = cookieOf(await login(a, password, "10.0.0.21"));
+
+    const listed = await devices(a, mine);
+    expect(listed).toHaveLength(2);
+    expect(listed.filter((d) => d.current)).toHaveLength(1);
+    expect(listed.map((d) => d.ip).sort()).toEqual(["10.0.0.20", "10.0.0.21"]);
+
+    const victim = listed.find((d) => !d.current)?.id ?? "";
+    const res = await a.request(`/api/devices/${victim}/signout`, {
+      method: "POST",
+      headers: { cookie: mine },
+    });
+    expect(res.status).toBe(200);
+    // The other browser is out; this one is untouched.
+    expect((await a.request("/api/sessions", { headers: { cookie: other } })).status).toBe(401);
+    expect((await a.request("/api/sessions", { headers: { cookie: mine } })).status).toBe(200);
+    expect(await devices(a, mine)).toHaveLength(1);
+  });
+
+  it("replaces this browser's row when it signs in again", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const first = cookieOf(await login(a, password));
+    const again = await a.request("/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-forwarded-for": "10.0.0.22",
+        cookie: first,
+      },
+      body: new URLSearchParams({ password, next: "/" }),
+    });
+    // One row, not two — and the cookie that was displaced is dead, rather than
+    // good for another week as a device nobody recognizes.
+    expect(s.list()).toHaveLength(1);
+    expect((await a.request("/api/sessions", { headers: { cookie: first } })).status).toBe(401);
+    expect((await a.request("/api/sessions", { headers: { cookie: cookieOf(again) } })).status)
+      .toBe(200);
+  });
+
+  it("refuses the wildcard, and the whole surface without a cookie", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    const wildcard = await a.request(`/api/devices/${encodeURIComponent(ALL)}/signout`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(wildcard.status).toBe(400);
+    expect(s.list()).toHaveLength(1);
+    expect((await a.request("/api/devices")).status).toBe(401);
   });
 });

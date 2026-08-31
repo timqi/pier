@@ -259,7 +259,62 @@ const MIGRATIONS: readonly string[] = [
     heartbeat_at INTEGER NOT NULL
   );
   `,
+  // 13 — a signed-in browser can be signed out on its own (web/auth.ts).
+  `
+  -- One row per signed-in browser. The cookie carries "<id>.<token>" and only
+  -- the token's SHA-256 is stored, so a copy of this database cannot be turned
+  -- into a session — and deleting a row is what revocation is. seen_at is the
+  -- whole lifetime: the session ends one TTL after it, so there is no second
+  -- column that can disagree about when.
+  CREATE TABLE web_sessions (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    seen_at INTEGER NOT NULL,
+    ip TEXT NOT NULL,
+    agent TEXT NOT NULL
+  );
+  `,
+  // 14 — signing a browser out also stops notifying it (web/push.ts).
+  `
+  -- A subscription belongs to the web session that made it, and dies with it:
+  -- the cascade is the rule, so no code has to remember to run it — revoking a
+  -- session, changing the password and recovering it all reach here for free.
+  -- Rebuilt rather than altered because a foreign key cannot be added to an
+  -- existing table; nothing is carried over, since migration 13 invalidated
+  -- every cookie and each of these rows belongs to a browser that is now
+  -- signed out. A browser re-subscribes on its next load.
+  DROP TABLE push_subscriptions;
+  CREATE TABLE push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    session_id TEXT NOT NULL REFERENCES web_sessions(id) ON DELETE CASCADE
+  );
+  `,
 ];
+
+/**
+ * Several writes as one, or none. `BEGIN IMMEDIATE` because every writer here
+ * competes with another Pier process on the same file: taking the write lock
+ * up front turns a race into a wait, where deferred would turn it into
+ * SQLITE_BUSY halfway through. The rollback is the reason this is shared —
+ * three modules had written the same seven lines, and a `catch` that forgets
+ * to roll back leaves the connection in a transaction forever.
+ */
+export function transact<T>(db: DatabaseSync, work: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = work();
+    db.exec("COMMIT");
+    return result;
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
 
 let shared: DatabaseSync | undefined;
 
@@ -302,6 +357,12 @@ export function openDb(path: string, migrations: readonly string[] = MIGRATIONS)
   // file, and SQLite refuses to change it inside one.
   db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   db.exec("PRAGMA journal_mode = WAL");
+  // Off by default in SQLite, and a declared relationship nothing enforces is
+  // a comment. Set before migrate(): it is a per-connection switch and a no-op
+  // inside a transaction. Nothing older declares a key, so this changes the
+  // behaviour of exactly one table — push_subscriptions, whose rows must not
+  // outlive the session that made them.
+  db.exec("PRAGMA foreign_keys = ON");
   migrate(db, path, migrations);
   if (path !== ":memory:") restrict(path);
   return db;

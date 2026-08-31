@@ -8,7 +8,7 @@
 import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
-import { consoleView, h, type ConsoleView } from "./dom.js";
+import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, button, card, empty, field, input, pill, setStatus } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
@@ -33,6 +33,28 @@ interface SecretsStatus {
   state: "locked" | "unlocked";
   mode: "vt" | "file" | null;
   reason?: string;
+}
+
+/** What /api/devices answers: one signed-in browser, never its token. */
+interface Device {
+  id: string;
+  createdAt: number;
+  seenAt: number;
+  ip: string;
+  agent: string;
+  current: boolean;
+}
+
+/** The user agent as a person recognizes their own browser. A guess by
+ *  design — the exact string is on the row's tooltip. */
+function deviceName(agent: string): string {
+  // Edge before Chrome: its user agent says both, Chrome first.
+  const browser = /\bEdg\//.test(agent)
+    ? "Edge"
+    : /\b(Firefox|Chrome|Safari)\/[\d.]+/.exec(agent)?.[1];
+  const platform = /\(([^;)]+)/.exec(agent)?.[1]?.trim();
+  const name = [browser, platform].filter(Boolean).join(" · ");
+  return name || agent || "unknown client";
 }
 
 export function createSettingsView(
@@ -167,18 +189,85 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", reload, reloadStatus),
   );
 
-  // --- Instance: sign out ------------------------------------------------------------
+  // --- Instance: signed-in devices -----------------------------------------------------
+
+  const devicesBody = h("div", "flex flex-col gap-2");
+  const devicesStatus = h("span", "text-[11.5px]", "");
+  /** One sign-out call, and the sentence when it did not happen — a refusal
+   *  and a dead network both have to reach the page (§5b), and the two buttons
+   *  below would otherwise each have their own idea of that. */
+  async function endSession(url: string, failed: string): Promise<boolean> {
+    setStatus(devicesStatus, "saving", "signing out…");
+    try {
+      const res = await sendJson(url, {});
+      if (res.ok) return true;
+      setStatus(devicesStatus, "failed", await failure(res, failed));
+    } catch (err) {
+      setStatus(devicesStatus, "failed", `${failed}: ${String(err)}`);
+    }
+    return false;
+  }
 
   const signOut = button("Sign out");
   signOut.onclick = () => {
-    void sendJson("/logout", {}).finally(() => {
-      location.href = "/login";
+    signOut.disabled = true;
+    // Only leave once the session is actually gone: a failed call that still
+    // redirected would show the login page to a browser that is still signed in.
+    void endSession("/logout", "Could not sign out").then((ok) => {
+      if (ok) location.href = "/login";
+      else signOut.disabled = false;
     });
   };
-  const signOutCard = card(
-    "Sign out",
-    "Ends this browser's session. Others keep theirs — change the password to sign out everywhere.",
-    h("div", "flex items-center gap-3", signOut),
+
+  function renderDevices(devices: Device[]): void {
+    devicesBody.replaceChildren(...devices.map((d) => {
+      const end = button(d.current ? "This browser" : "Sign out");
+      end.disabled = d.current; // ending this one is the button below, which also leaves
+      end.onclick = () => {
+        end.disabled = true;
+        const url = `/api/devices/${encodeURIComponent(d.id)}/signout`;
+        void endSession(url, "Could not sign it out").then((ok) => {
+          if (!ok) return void (end.disabled = false);
+          setStatus(devicesStatus, "saved", "Signed out.");
+          void loadDevices();
+        });
+      };
+      const line = h("div", "flex min-w-0 flex-col", h(
+        "span",
+        "truncate text-[12.5px] text-neutral-700",
+        deviceName(d.agent),
+      ));
+      // The raw agent string stays reachable: the pretty name is a guess, and
+      // "is that mine?" is answered by the thing the browser actually sent.
+      line.title = d.agent;
+      line.append(h(
+        "span",
+        "truncate text-[11.5px] text-neutral-400",
+        `${d.ip} · seen ${agoLabel(d.seenAt)} · signed in ${agoLabel(d.createdAt)}`,
+      ));
+      return h(
+        "div",
+        "flex items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2",
+        line,
+        end,
+      );
+    }));
+  }
+
+  async function loadDevices(): Promise<void> {
+    const got = await getJson<Device[]>("/api/devices", "Could not load signed-in devices");
+    if (!got.ok) {
+      devicesBody.replaceChildren(empty(got.error));
+      return;
+    }
+    renderDevices(got.value);
+  }
+
+  const devicesCard = card(
+    "Signed-in devices",
+    "One row per browser holding a session. Signing one out invalidates its cookie immediately; sessions expire on their own 7 days after last use.",
+    devicesBody,
+    h("div", "flex items-center gap-3", signOut, devicesStatus),
   );
 
   const instanceColumn = h(
@@ -191,7 +280,7 @@ export function createSettingsView(
     createNotificationsCard(),
     reloadCard,
     pwCard,
-    signOutCard,
+    devicesCard,
   );
 
   // --- topic hosts -----------------------------------------------------------------
@@ -222,6 +311,8 @@ export function createSettingsView(
 
   function loadInstance(): void {
     pwStatus.textContent = "";
+    devicesStatus.textContent = "";
+    void loadDevices();
     void (async () => {
       const got = await getJson<{ publicUrl: string }>("/api/settings", "Could not load settings");
       if (!got.ok) return setStatus(urlStatus, "failed", got.error);

@@ -9,7 +9,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import { isThinkingLevel, type ThinkingLevel } from "./core/types.js";
-import { pierDb } from "./db.js";
+import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
 // The one place the custom-tool vocabulary lives (names, ubix sources, the
 // names Pier already owns). Imported rather than copied: a second validator
@@ -238,15 +238,7 @@ export class SettingsStore {
    * declared and invisible.
    */
   transact<T>(work: () => T): T {
-    this.#db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = work();
-      this.#db.exec("COMMIT");
-      return result;
-    } catch (err) {
-      this.#db.exec("ROLLBACK");
-      throw err;
-    }
+    return transact(this.#db, work);
   }
 
   #set(key: string, value: string): void {

@@ -229,8 +229,16 @@ sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'
 pier restart
 ```
 
-Changing the password invalidates every session cookie: the cookies are signed
-with the stored hash.
+Changing the password signs out every browser: the session rows behind the
+cookies are deleted. So does the recovery above — a new password does not leave
+the old one's browsers signed in. To end one browser without changing the
+password, use Settings → Instance → Signed-in devices. A session that is not
+used expires 7 days after its last request. However a session ends — signed
+out, expired, password changed, password recovered — its push subscription is
+deleted with it, so that browser stops being notified as well.
+
+The upgrade that introduced these rows signs everyone out once: a cookie issued
+before it names no row. Have the password to hand.
 
 ## Restarting and reloading
 
@@ -400,7 +408,8 @@ elsewhere, pick a tunnel rather than a wider bind:
   there, preserve the external `Host` (or pass `X-Forwarded-Host`), and pass
   `X-Forwarded-For`; Pier uses the external host for write-origin checks and
   counts login failures per forwarded client. Its session cookie is marked
-  `Secure` when the proxy reports `X-Forwarded-Proto: https`. The proxy must
+  `Secure` when a loopback proxy reports `X-Forwarded-Proto: https` (the header
+  is ignored from anywhere else, where it is a header the client wrote). The proxy must
   pass WebSocket upgrades for `/api/terminal` (Caddy does automatically;
   nginx needs its usual HTTP/1.1 `Upgrade`/`Connection` forwarding).
 

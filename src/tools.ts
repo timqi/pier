@@ -19,7 +19,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writ
 import { delimiter, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { CatalogBinary, CatalogEntry } from "./core/types.js";
-import { pierDb } from "./db.js";
+import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
 import { pierPath, resolveAgentDir } from "./paths.js";
 
@@ -308,19 +308,14 @@ export class SyncLock {
    *  in one immediate transaction, so two waiters cannot both win. */
   #acquire(token: string): boolean {
     const now = Date.now();
-    this.#db.exec("BEGIN IMMEDIATE");
-    try {
-      const stale = this.#db.prepare("DELETE FROM tools_sync_lock WHERE heartbeat_at <= ?")
-        .run(now - this.#timing.staleMs);
-      const taken = this.#db.prepare("INSERT OR IGNORE INTO tools_sync_lock (id, token, heartbeat_at) VALUES (1, ?, ?)")
-        .run(token, now);
-      this.#db.exec("COMMIT");
-      if (stale.changes && taken.changes) log.warn("took over a tools sync lock whose holder stopped beating");
-      return taken.changes === 1;
-    } catch (err) {
-      this.#db.exec("ROLLBACK");
-      throw err;
-    }
+    const { stale, taken } = transact(this.#db, () => ({
+      stale: this.#db.prepare("DELETE FROM tools_sync_lock WHERE heartbeat_at <= ?")
+        .run(now - this.#timing.staleMs),
+      taken: this.#db.prepare("INSERT OR IGNORE INTO tools_sync_lock (id, token, heartbeat_at) VALUES (1, ?, ?)")
+        .run(token, now),
+    }));
+    if (stale.changes && taken.changes) log.warn("took over a tools sync lock whose holder stopped beating");
+    return taken.changes === 1;
   }
 
   /** Still ours? The authority is the row, asked now — not the heartbeat's own
