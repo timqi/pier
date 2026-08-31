@@ -21,6 +21,9 @@ const fakeVt = (): VtClient & { creates: number; reads: number } => {
       vt.reads++;
       return Buffer.from(record.slice("vt://0".length), "base64url").toString();
     },
+    async doctor() {
+      return "vt doctor — fake";
+    },
   };
   return vt;
 };

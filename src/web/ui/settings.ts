@@ -117,7 +117,7 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", urlSave, urlStatus),
   );
 
-  // --- Instance: password ----------------------------------------------------------
+  // --- Security: password ----------------------------------------------------------
 
   const current = input("", "password");
   const next = input("", "password");
@@ -189,7 +189,7 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", reload, reloadStatus),
   );
 
-  // --- Instance: signed-in devices -----------------------------------------------------
+  // --- Security: signed-in devices -----------------------------------------------------
 
   const devicesBody = h("div", "flex flex-col gap-2");
   const devicesStatus = h("span", "text-[11.5px]", "");
@@ -279,8 +279,6 @@ export function createSettingsView(
     // of the same vocabulary.
     createNotificationsCard(),
     reloadCard,
-    pwCard,
-    devicesCard,
   );
 
   // --- topic hosts -----------------------------------------------------------------
@@ -310,9 +308,6 @@ export function createSettingsView(
   const filesChild = createConfigView(filesHost, getCwds);
 
   function loadInstance(): void {
-    pwStatus.textContent = "";
-    devicesStatus.textContent = "";
-    void loadDevices();
     void (async () => {
       const got = await getJson<{ publicUrl: string }>("/api/settings", "Could not load settings");
       if (!got.ok) return setStatus(urlStatus, "failed", got.error);
@@ -322,13 +317,20 @@ export function createSettingsView(
   }
 
   // --- Security: master key --------------------------------------------------------
+  // One tab for who gets in and what the credentials are sealed with. Only the
+  // key card re-renders (per status); password and devices are built once, so
+  // the column is written out around whatever the key card currently is.
 
   const securityColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
+  const showKeyCard = (el: HTMLElement): void => securityColumn.replaceChildren(el, pwCard, devicesCard);
 
   async function loadSecurity(): Promise<void> {
+    pwStatus.textContent = "";
+    devicesStatus.textContent = "";
+    void loadDevices();
     const got = await getJson<SecretsStatus>("/api/secrets", "Could not load key status");
     if (!got.ok) {
-      securityColumn.replaceChildren(empty(got.error));
+      showKeyCard(empty(got.error));
       return;
     }
     renderSecurity(got.value);
@@ -417,7 +419,28 @@ export function createSettingsView(
       body.push(h("div", "flex items-center gap-3", keep, switchBtn, keyStatus));
     }
 
-    securityColumn.replaceChildren(card(
+    // vt's own diagnosis, under the buttons that need it: which config file and
+    // env vt reads, how it routes an approval, whether an agent answers. Only
+    // where it can be the answer — a locked instance, or vt mode that could
+    // lock on the next start. Pier does not edit vt's config; vt owns that.
+    if (locked || status.mode === "vt") {
+      const report = h("pre", "hidden overflow-x-auto rounded-lg bg-neutral-50 p-3 text-[11.5px] leading-snug text-neutral-700");
+      const doctor = button("vt doctor");
+      doctor.onclick = () => {
+        doctor.disabled = true;
+        report.classList.remove("hidden");
+        report.textContent = "running vt doctor…";
+        void (async () => {
+          const got = await getJson<{ report: string }>("/api/secrets/doctor", "Could not run vt doctor");
+          // The failure is the diagnosis too — an absent binary reads as one.
+          report.textContent = got.ok ? got.value.report : got.error;
+          doctor.disabled = false;
+        })();
+      };
+      body.push(h("div", "flex items-center gap-3", doctor), report);
+    }
+
+    showKeyCard(card(
       "Master key",
       "Seals every credential Pier stores (channel tokens, API keys). Rotating rewraps the key file; no stored data is rewritten.",
       ...body,

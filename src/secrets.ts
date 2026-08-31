@@ -32,6 +32,9 @@ export interface VtClient {
   read(record: string): Promise<string>;
   /** `vt create` — plaintext on stdin, the `vt://` record back. */
   create(plaintext: string): Promise<string>;
+  /** `vt doctor` — read-only: which config vt uses, how it routes, whether an
+   *  agent answers. Values are reported as lengths, never plaintext. */
+  doctor(): Promise<string>;
 }
 
 export type SecretsMode = "vt" | "file";
@@ -141,6 +144,16 @@ export class Secrets {
     log.info(`KEK rotated (${mode} mode, dek ${file.dekId} unchanged)`);
   }
 
+  /**
+   * What vt says about itself. A refused or impossible unlock is almost never
+   * Pier's fault — missing binary, no agent listening, config pointing
+   * elsewhere — and `lockedReason` only carries the last error. Read-only, so
+   * it is safe to run while locked; vt's own report is the repair instruction.
+   */
+  doctor(): Promise<string> {
+    return this.vt.doctor();
+  }
+
   /** First boot: random KEK and DEK, file mode. */
   #create(): KeyFile {
     const kek = randomBytes(KEY_BYTES);
@@ -196,19 +209,23 @@ export const vtCli: VtClient = {
     if (!record) throw new Error("vt create printed no vt:// record");
     return record;
   },
+  // Bounded: doctor probes an agent socket and a worker over the network, and
+  // a hung probe would leave the Console waiting on a diagnosis forever.
+  doctor: () => run("vt", ["doctor"], undefined, 15_000),
 };
 
-function run(cmd: string, args: string[], stdin?: string): Promise<string> {
+function run(cmd: string, args: string[], stdin?: string, timeoutMs?: number): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], timeout: timeoutMs });
     let out = "";
     let err = "";
     child.stdout.on("data", (d: Buffer) => (out += d.toString()));
     child.stderr.on("data", (d: Buffer) => (err += d.toString()));
     child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) resolvePromise(out.trim());
-      else reject(new Error(`${cmd} ${args[0]} exited ${code}: ${err.trim() || out.trim()}`));
+    child.on("close", (code, signal) => {
+      if (code === 0) return resolvePromise(out.trim());
+      const how = signal ? `timed out after ${timeoutMs}ms (${signal})` : `exited ${code}`;
+      reject(new Error(`${cmd} ${args[0]} ${how}: ${err.trim() || out.trim()}`));
     });
     child.stdin.on("error", reject); // EPIPE if vt exits before reading
     if (stdin !== undefined) child.stdin.write(stdin);

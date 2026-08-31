@@ -38,6 +38,8 @@ export interface SecretsControl {
   readonly lockedReason: string;
   unlock(): Promise<void>;
   rotateKek(mode?: SecretsMode): Promise<void>;
+  /** vt's own read-only report — config sources and reachability, no values. */
+  doctor(): Promise<string>;
 }
 
 /** A rule that failed inside the transaction — its own class so the route can
@@ -404,6 +406,17 @@ export function registerInstanceRoutes(
     }
     onUnlocked?.();
     return c.json(secretsStatus());
+  });
+
+  // Why vt cannot hand the key over is vt's answer, not Pier's: config
+  // sources, routing, whether an agent is listening. Read-only and safe while
+  // locked — without it "locked" is one error string and no way to repair it.
+  app.get("/api/secrets/doctor", async (c) => {
+    try {
+      return c.json({ report: await secrets.doctor() });
+    } catch (err) {
+      return c.json({ error: String(err) }, 500);
+    }
   });
 
   app.post("/api/secrets/rotate", async (c) => {

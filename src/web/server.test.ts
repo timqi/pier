@@ -215,7 +215,7 @@ function fakeProviders(): ProviderManager & { calls: string[] } {
 }
 
 /** Scripted SecretsControl — in memory, never touches disk or vt. */
-function fakeSecrets(opts: { unlockError?: string } = {}): SecretsControl & { calls: string[] } {
+function fakeSecrets(opts: { unlockError?: string; doctorError?: string } = {}): SecretsControl & { calls: string[] } {
   const calls: string[] = [];
   let mode: "vt" | "file" | undefined;
   let lockedReason = "unlock() has not run";
@@ -243,6 +243,11 @@ function fakeSecrets(opts: { unlockError?: string } = {}): SecretsControl & { ca
       calls.push(`rotate:${next ?? "keep"}`);
       if (!mode) throw new Error(`secrets locked: ${lockedReason}`);
       if (next) mode = next;
+    },
+    doctor: async () => {
+      calls.push("doctor");
+      if (opts.doctorError) throw new Error(opts.doctorError);
+      return "vt doctor — vt v1\n\nAgent:\n  no agent listening";
     },
   };
 }
@@ -1612,6 +1617,20 @@ describe("workbench server", () => {
       mode: null,
       reason: "vt read denied",
     });
+  });
+
+  it("reports vt's own diagnosis while locked, failures included", async () => {
+    const { app, secrets } = setup();
+    const res = await app.request("/api/secrets/doctor");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { report: string }).report).toContain("no agent listening");
+    expect(secrets.calls).toEqual(["doctor"]);
+
+    // An absent binary is a diagnosis too, and must reach the page (§5b).
+    const broken = setup("/tmp", fakeSecrets({ doctorError: "spawn vt ENOENT" }));
+    const failed = await broken.app.request("/api/secrets/doctor");
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({ error: "Error: spawn vt ENOENT" });
   });
 
   it("rotates the KEK, switching mode on request and rejecting bad modes", async () => {
