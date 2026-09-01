@@ -238,7 +238,7 @@ function handleEvent(e: SessionEvent): void {
       break;
     case "system-input":
       finalizeStreaming();
-      appendSystemInput(e.text, e.origin, e.ts);
+      appendSystemInput(e.text, e.origin);
       break;
     case "task-status":
       renderBackgroundRun(e.run);

@@ -177,8 +177,14 @@ export function appendTurn(
   // a group sitting between two agent rows used to break.
   const steps = kind === "assistant" ? takeActivityGroup() : null;
   const s = ROW_STYLE[kind]!;
-  // Consecutive rows from the same sender read as one block (Slack grouping).
-  const grouped = (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
+  // Only a user row can carry a clock (see stampDue), and only when the gap
+  // rule says the time changed something. An untimed row — an error, a block
+  // still streaming — is skipped rather than stamped `Date.now()`.
+  const stamp = kind === "user" && at !== undefined && stampDue(at) ? at : undefined;
+  // Consecutive rows from the same sender read as one block (Slack grouping) —
+  // except across a stamp, which is a break in the conversation.
+  const grouped = stamp === undefined &&
+    (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
   const row = h("div", `group relative border-l-2 px-5 ${grouped ? "pt-1 pb-2.5" : "mt-1.5 py-2.5"} ${s.row}`);
   row.dataset.kind = kind;
   // A user message may end in inbound-file markers (core/inbound-file.ts):
@@ -193,9 +199,11 @@ export function appendTurn(
   const named = speaker?.id || speaker?.when ? speaker : null;
   // A Console turn is headed `operator<web>` so a shared session can tell it
   // from the IM speakers — but here the operator is the reader, and their own
-  // name over every message they typed is noise. The time still earned its
-  // line: identity.ts only wrote a header because the day or the gap changed.
-  const caption = named && (named.id === "web" ? (named.when ? { when: named.when } : null) : named);
+  // name over every message they typed is noise. The header's clock goes with
+  // it: `stamp` is the row's own, on the same "only where it changed
+  // something" rule identity.ts wrote the header by, and two clocks on one
+  // line spelt two ways is worse than either.
+  const caption = named?.id && named.id !== "web" ? named : null;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
   // Editing resends the raw text, markers and header included — stripping them
   // from the bubble must not detach the files, or drop who was speaking.
@@ -208,7 +216,7 @@ export function appendTurn(
     row.classList.add("flow-root");
     row.append(steps);
   }
-  if (caption) row.append(speakerLine(caption));
+  if (caption || stamp !== undefined) row.append(speakerLine(caption, stamp));
   row.append(node);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
@@ -224,31 +232,27 @@ export function appendTurn(
     edit.onclick = () => startEdit(row, node);
     row.append(edit);
   }
-  // After the group was detached above, or the divider would sit between the
-  // steps and the message they produced — and takeActivityGroup only adopts a
-  // group that is still the pane's last row.
-  timeDivider(at);
   turnsPane.append(row);
   trimRows();
   scrollBottom();
   return node;
 }
 
-/** The speaker caption above an IM user message: who, when, and the mention id
- *  on hover — the one thing the header carries that a name cannot replace. */
-function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
+/** The caption above a user message: who (IM only — the mention id on hover is
+ *  the one thing the header carries that a name cannot replace) and when. */
+function speakerLine(speaker: Omit<Speaker, "text"> | null, at?: number): HTMLElement {
   const line = h("div", "mb-1 flex items-baseline gap-2 text-[11.5px] leading-tight");
-  const who = speaker.name ?? speaker.id;
+  const who = speaker?.name ?? speaker?.id;
   if (who) {
     const label = h("span", "font-semibold text-indigo-700", who);
-    if (speaker.id) label.title = speaker.id;
+    if (speaker?.id) label.title = speaker.id;
     line.append(label);
   }
-  if (speaker.when) line.append(h("span", "text-neutral-400", speaker.when));
+  if (at !== undefined) line.append(stampEl(at, "font-mono text-[11px] text-indigo-600"));
   return line;
 }
 
-export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: number): void {
+export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kind = origin.kind === "task-callback"
     ? "Task callback"
     : origin.kind === "task-message"
@@ -289,7 +293,6 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin, at?: 
   const collapsed = ["max-h-[min(18rem,40dvh)]", "overflow-hidden"];
   const content = h("div", `whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
   row.append(head, content);
-  timeDivider(at);
   turnsPane.append(row);
   // Hidden chat panes cannot be measured, so an approximate text gate catches
   // inputs likely to exceed the cap; visible panes use their rendered height.
@@ -389,81 +392,75 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   }
 }
 
-/** 24-hour, local timezone — the divider's clock. The stamp under the last
- *  reply is deliberately the fuller `stampTime`: one is a bearing, the other a
- *  reading you copy. */
-const clockTime = (ms: number): string =>
-  new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-
 // --- when things happened ---------------------------------------------------------
 // A clock on every row was chrome nobody read, and on hover it did not exist at
 // all on a phone. Two placements instead, and the same rule identity.ts already
 // applies to IM headers: a time is written only where it *changed* something.
+// A rule across the pane was the third placement and said it loudest, so the
+// question "when did this part of the conversation happen" is answered where it
+// is asked — on the message that reopened it.
 
 /** A new day, or this much silence, is what makes the clock worth a line. */
 const STAMP_GAP_MS = 10 * 60_000;
 
-/** When the last stamped row happened — the divider is a diff against it. */
+/** When the last stamped row happened — a stamp is a diff against it. */
 let lastStampAt: number | null = null;
 
 const sameDay = (a: number, b: number): boolean =>
   new Date(a).toDateString() === new Date(b).toDateString();
 
-/** Today needs no date; anything older is being read out of context without one. */
-function stampLabel(at: number): string {
-  if (sameDay(at, Date.now())) return clockTime(at);
-  const day = new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
-  return `${day} · ${clockTime(at)}`;
-}
-
-/** Place a row in time, if the gap since the previous one says anything. The
- *  first row of a transcript always gets one: "when did this start" is the
- *  question a pane you just opened is asking.
- *
- *  An untimed row (an error, a block still streaming) is skipped rather than
- *  stamped `Date.now()` — a replayed transcript would then date every one of
- *  them to the moment it was reloaded. */
-function timeDivider(at: number | undefined): void {
-  if (at === undefined) return;
+/** Does this row owe a clock? Only user rows ask: an agent turn happens
+ *  *because* of the message above it, so its own time restates one already on
+ *  screen, and the last reply carries the reading worth copying anyway. The
+ *  first row of a transcript always gets one — "when did this start" is the
+ *  question a pane you just opened is asking. */
+function stampDue(at: number): boolean {
   const prev = lastStampAt;
   lastStampAt = at;
-  if (prev !== null && at - prev < STAMP_GAP_MS && sameDay(prev, at)) return;
-  const line = h("div", "px-5 pb-0.5 pt-3 text-center text-[11px] text-neutral-400", stampLabel(at));
-  line.dataset.kind = "time"; // every row in the pane names its kind
-  turnsPane.append(line);
+  return prev === null || at - prev >= STAMP_GAP_MS || !sameDay(prev, at);
+}
+
+/** Wall clock and age, in the one full spelling Session info uses for "Last
+ *  reply" (dom.ts): one fact on two surfaces gets one wording. The moment rides
+ *  on the element, so the ticker repaints every stamp in the pane without a
+ *  registry to keep in step with the trim. */
+function stampEl(at: number, cls: string): HTMLElement {
+  const el = h("div", cls);
+  el.dataset.at = String(at);
+  paintStamp(el);
+  stampTimer ??= setInterval(paintStamps, 60_000);
+  return el;
+}
+
+function paintStamp(el: HTMLElement): void {
+  const at = Number(el.dataset.at);
+  el.textContent = `${stampTime(at)} · ${agoLabel(at)}`;
 }
 
 /** The newest assistant turn, and only it, carries its own clock: the answer
- *  you are looking at is the one whose time you wanted, and the turns above it
- *  are already placed by the dividers. Full date and seconds, not the divider's
- *  bare clock: this is the reading Session info reports as "Last reply", and
- *  one fact on two surfaces gets one wording (dom.ts). */
+ *  you are looking at is the one whose time you wanted. */
 let replyStamp: HTMLElement | null = null;
-let replyStampAt = 0;
 
 /** The age half goes stale where it sits, and a reply still claiming "just now"
  *  an hour later is worse than no age at all — so it is repainted, by a ticker
  *  that exists only while a stamp does. */
 let stampTimer: ReturnType<typeof setInterval> | undefined;
 
-function paintReplyStamp(): void {
-  if (!replyStamp?.isConnected) {
+function paintStamps(): void {
+  const stamps = turnsPane.querySelectorAll<HTMLElement>("[data-at]");
+  if (!stamps.length) {
     clearInterval(stampTimer);
     stampTimer = undefined;
-    replyStamp = null;
     return;
   }
-  replyStamp.textContent = `${stampTime(replyStampAt)} · ${agoLabel(replyStampAt)}`;
+  for (const el of stamps) paintStamp(el);
 }
 
 function setReplyStamp(node: HTMLElement, meta?: TurnMeta): void {
   if (!meta) return;
   replyStamp?.remove();
-  replyStampAt = meta.completedAt;
-  replyStamp = h("div", "mt-1 font-mono text-[11px] text-neutral-400");
+  replyStamp = stampEl(meta.completedAt, "mt-1 font-mono text-[11px] text-neutral-400");
   (node.parentElement ?? node).append(replyStamp);
-  paintReplyStamp();
-  stampTimer ??= setInterval(paintReplyStamp, 60_000);
 }
 
 /** Wrap each fenced block so a copy button can sit in its corner without
@@ -540,16 +537,8 @@ function renderSilence(node: HTMLElement, reason: string | undefined): void {
   );
 }
 
-/** `completedAt - durationMs` is when the exchange began, which is where the
- *  row belongs in time: stamping it with the completion instead put a divider
- *  between a question and the long answer to it. */
 const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLElement =>
-  renderAssistant(
-    appendTurn("assistant", "", false, meta && meta.completedAt - meta.durationMs),
-    raw,
-    meta,
-    offer,
-  );
+  renderAssistant(appendTurn("assistant", ""), raw, meta, offer);
 
 // --- streaming text ---------------------------------------------------------------
 
@@ -705,7 +694,7 @@ export function renderSnapshot(
         // that delivered it is the earliest place it can be shown. A batched one
         // carries every run id it delivers.
         placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
-        appendSystemInput(t.text, t.origin, t.at);
+        appendSystemInput(t.text, t.origin);
         continue;
       }
       // meta is assistant-only (core/types.ts), so plain turns need no hint.

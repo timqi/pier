@@ -235,10 +235,19 @@ export function restoreDraft(id: string): void {
   renderFileStrip();
 }
 
-/** Single-line by default; grows with content, icons stay on the bottom row. */
+/** Single-line by default; grows with content, icons stay on the bottom row.
+ *
+ *  Runs on every keystroke, and the transcript is `flex-1` above it: a height
+ *  it writes is a height the pane loses. Measuring needs the reset either way,
+ *  but a height that *changed* re-pins the tail in the same frame. Left to the
+ *  ResizeObserver, the pin landed a frame later and the last message visibly
+ *  bounced once per wrap, which with an IME is once per candidate. */
 function autosize(): void {
+  const was = input.style.height;
   input.style.height = "auto";
-  input.style.height = `${Math.min(input.scrollHeight, 192)}px`; // cap = max-h-48
+  const next = `${Math.min(input.scrollHeight, 192)}px`; // cap = max-h-48
+  input.style.height = next;
+  if (next !== was) scrollBottom();
 }
 
 // --- sending ---------------------------------------------------------------------------
