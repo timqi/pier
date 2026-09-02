@@ -3,8 +3,8 @@
 // drifted from the base ref — main by default — and a changed file opens as
 // the whole file, syntax-highlighted, with added/removed lines toned inline,
 // never a bare patch. Unchanged files preview as themselves (code with line
-// numbers, images, PDFs). A viewer, not an editor: /api/explorer/* is scoped
-// server-side to known project cwds, and nothing here writes.
+// numbers, images, PDFs). A viewer, not an editor: every read is scoped
+// server-side to the root it was asked under, and nothing here writes.
 
 import { mustGetJson } from "./api.js";
 import { codePane, plainRows, type CodeRow } from "./code.js";
@@ -93,6 +93,9 @@ export function createExplorerView(
   session: () => { id: string; cwd: string } | undefined,
   /** Through the router (hash), so Back walks directories too. */
   openDir: (dir: string) => void,
+  /** The other half of this directory: a shell in it. The two overlays ask
+   *  about one folder, so neither makes you name it twice. */
+  openTerminal: (dir: string) => void,
   /** The ✕: leave the view, back to wherever it was opened from. */
   close: () => void,
 ): ConsoleView {
@@ -123,8 +126,12 @@ export function createExplorerView(
   const right = h("section", "relative min-h-0 min-w-0 flex-1", viewer, minimap);
   root.append(header, h("div", "flex min-h-0 flex-1 max-md:flex-col", left, right));
 
-  const api = (ep: string, params: Record<string, string>): string =>
+  /** Two route families, one question: what git knows about this root
+   *  (web/explorer.ts) and what is on disk under it (web/fs.ts). */
+  const api = (ep: "git" | "diff", params: Record<string, string>): string =>
     `/api/explorer/${ep}?${new URLSearchParams({ root: cwd, ...params })}`;
+  const fsApi = (ep: "ls" | "file", params: Record<string, string>): string =>
+    `/api/fs/${ep}?${new URLSearchParams({ root: cwd, ...params })}`;
 
   const note = (text: string, tone = "text-neutral-400"): HTMLElement =>
     h("p", `px-4 py-3 text-[12.5px] ${tone}`, text);
@@ -165,7 +172,7 @@ export function createExplorerView(
   async function entriesInto(box: HTMLElement, path: string): Promise<void> {
     try {
       const { entries } = await mustGetJson<{ entries: Entry[] }>(
-        api("ls", { path }),
+        fsApi("ls", { path }),
         "could not list this folder",
       );
       box.replaceChildren(...rowsFor(path, entries));
@@ -248,7 +255,7 @@ export function createExplorerView(
     if (download) {
       const dl = document.createElement("a");
       dl.className = "flex-none text-neutral-400 hover:text-indigo-700 hover:underline";
-      dl.href = api("file", { path });
+      dl.href = fsApi("file", { path });
       dl.download = basename(path);
       dl.textContent = "Download";
       tail.append(dl);
@@ -311,7 +318,7 @@ export function createExplorerView(
   async function viewPlain(path: string, seq: number): Promise<void> {
     if (!current(seq)) return; // reached as a stale viewDiff's fallback
     clearDiffChrome();
-    const url = api("file", { path });
+    const url = fsApi("file", { path });
     const body = h("div", "min-w-0");
     viewer.classList.remove("flex", "flex-col");
     viewer.replaceChildren(viewerTitle(path, true), body);
@@ -624,15 +631,22 @@ export function createExplorerView(
         cwd || undefined,
         openDir, // hash first; show() reloads
       );
-    const closeBtn = h("button", "icon-btn ml-auto", "✕") as HTMLButtonElement;
+    const termBtn = chip("Terminal", "neutral");
+    termBtn.title = "Open a shell in this folder";
+    termBtn.onclick = () => openTerminal(cwd);
+    const closeBtn = h("button", "icon-btn", "✕") as HTMLButtonElement;
     closeBtn.type = "button";
     closeBtn.title = "Close Files";
     closeBtn.setAttribute("aria-label", "Close Files");
     closeBtn.onclick = close;
+    // No folder yet → no shell to offer: a chip that answers a click with
+    // nothing is worse than one that isn't there.
+    const tail = cwd ? [termBtn, closeBtn] : [closeBtn];
+    tail[0]!.classList.add("ml-auto");
     header.replaceChildren(
       cwdChip,
       h("span", "truncate font-mono text-[11.5px] text-neutral-400", git.branch ? `⎇ ${git.branch}` : "no git"),
-      closeBtn,
+      ...tail,
     );
   }
 

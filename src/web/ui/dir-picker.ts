@@ -17,15 +17,21 @@ import { closeMenu, openMenu, openPanel } from "./menu.js";
 interface Listing {
   path: string;
   parent: string | null;
-  entries: string[];
+  entries: { name: string; dir: boolean }[];
 }
 
 /** Absolute paths only; anything else means "start from the user's home". */
 const listing = async (path?: string): Promise<Listing | null> => {
   const q = path?.startsWith("/") ? `?path=${encodeURIComponent(path)}` : "";
-  const got = await getJson<Listing>(`/api/fs/dirs${q}`, "Could not list directories");
+  const got = await getJson<Listing>(`/api/fs/ls${q}`, "Could not list directories");
   return got.ok ? got.value : null;
 };
+
+/** What a project picker offers: folders, and not the dot ones — they are
+ *  noise here, and a hidden cwd can still be typed into the path line. The
+ *  listing itself is the Files view's too, so the filtering is this caller's. */
+const folders = (list: Listing): string[] =>
+  list.entries.filter((e) => e.dir && !e.name.startsWith(".")).map((e) => e.name);
 
 const row = (label: string, cls: string, onSelect: () => void): HTMLElement => {
   const el = btn(label, `flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-left ${cls}`);
@@ -52,7 +58,7 @@ function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLEl
       // the enclosing form — in the New session dialog that would submit it.
       if (ev.key !== "Enter") return;
       ev.preventDefault();
-      const res = await sendJson("/api/fs/dirs", { path: parent, name: input.value });
+      const res = await sendJson("/api/fs/mkdir", { path: parent, name: input.value });
       if (!res.ok) {
         error.textContent = ((await res.json()) as { error?: string }).error ?? "could not create";
         error.classList.remove("hidden");
@@ -124,10 +130,11 @@ export function openBrowser(
     );
     const body = h("div", "min-h-0 flex-1 overflow-y-auto py-0.5 text-[12.5px]");
     if (list.parent) body.append(row("../", "font-mono text-neutral-500 hover:bg-neutral-100", () => void open(list.parent!)));
-    for (const name of list.entries) {
+    const names = folders(list);
+    for (const name of names) {
       body.append(row(name, "truncate hover:bg-neutral-100", () => void open(`${list.path}/${name}`.replace("//", "/"))));
     }
-    if (!list.entries.length) body.append(h("p", "px-3 py-1.5 text-[12px] text-neutral-400", "No sub-folders."));
+    if (!names.length) body.append(h("p", "px-3 py-1.5 text-[12px] text-neutral-400", "No sub-folders."));
     // Creating navigates into the new folder, so "Use" is one click away.
     content.append(head, error, body, newFolderRow(list.path, (path) => void open(path)));
     openPanel(anchor, content);

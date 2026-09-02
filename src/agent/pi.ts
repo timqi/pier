@@ -806,7 +806,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
    *  session this factory opened. The miss is what earns a fresh scan, because
    *  callers read it as permission to start a replacement session
    *  (channels/conversations.ts), which costs a conversation its history, or as
-   *  a session that no longer exists (tasks/, web/files.ts). `reused` is how we
+   *  a session that no longer exists (tasks/, web/server.ts). `reused` is how we
    *  know a scan is owed: same entry back, same disk state. */
   private async locate(sessionId: string): Promise<SessionRecord | undefined> {
     const find = (infos: SessionInfos) => infos.find((s) => s.id === sessionId);

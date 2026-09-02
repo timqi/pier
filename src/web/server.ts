@@ -2,8 +2,8 @@
 // See docs/design/03-web-workbench.md for the route contract.
 
 import { hostname } from "node:os";
-import { readFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
@@ -12,8 +12,10 @@ import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
 import { Router } from "../core/router.js";
+import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
-import { guarded, registerFileRoutes } from "./files.js";
+import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes, scopedFile } from "./fs.js";
+import { guarded } from "./route.js";
 import type {
   AgentFactory,
   AgentSession,
@@ -28,7 +30,7 @@ import type {
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import { SESSION_TITLE_MAX } from "../limits.js";
-import { saveInbound } from "../core/inbox.js";
+import { INBOX_DIR, saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { RepoIndex } from "./repos.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
@@ -344,6 +346,27 @@ export function createServer(
     return c.json({ steps: turn.steps ?? [] });
   });
 
+  // Attachments, both directions: the agent links a file it produced, the chat
+  // renders a file the user sent. Read-only, and only from the session's own
+  // cwd or the inbox inbound files land in (core/inbox.ts) — a session route
+  // rather than an /api/fs one, because the session *is* the scope here.
+  guarded(app, "GET", "/api/sessions/:id/files", 400, async (c) => {
+    const raw = c.req.query("path");
+    if (!raw) return c.json({ error: "path required" }, 400);
+    const id = c.req.param("id");
+    const cwd = nascent.get(id)?.cwd ?? (await factory.find(id))?.cwd;
+    // Absolute only: a link into a session's files is written by the agent or
+    // by Pier, and neither of them writes a path relative to anything.
+    const file = cwd && isAbsolute(raw) ? await scopedFile([cwd, INBOX_DIR], raw) : null;
+    if (!file) return c.json({ error: "no such file" }, 404);
+    if ((await stat(file)).size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
+    const bytes = await readFile(file);
+    return c.body(bytes, 200, {
+      ...fileHeaders(file, bytes, c.req.query("download") === "1"),
+      "cache-control": "private, max-age=60",
+    });
+  });
+
   // Composer attachments: bytes land in the inbox, the message carries the
   // path as a `[name](file:///…)` line the client builds itself — upload
   // first, so the text it sends (and optimistically renders) is final.
@@ -624,12 +647,8 @@ export function createServer(
     onSettingsChanged: () => recycle("instance settings"),
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));
-  registerFileRoutes(app, {
-    factory,
-    config,
-    nascentCwd: (id) => nascent.get(id)?.cwd,
-    onConfigWritten: () => recycle("an agent file"),
-  });
+  registerConfigRoutes(app, { factory, config, onConfigWritten: () => recycle("an agent file") });
+  registerFsRoutes(app);
   registerExplorerRoutes(app);
 
   // serveStatic resolves `root` against the *working directory*, and an

@@ -13,7 +13,7 @@ import { basename, join } from "node:path";
 import { pierPath } from "../paths.js";
 import { fileMarker, lostMarker, MAX_INBOUND_BYTES, safeName } from "./inbound-file.js";
 
-/** Where every inbound file lives; web/files.ts allowlists this root. */
+/** Where every inbound file lives; the attachment route allowlists this root. */
 export const INBOX_DIR = pierPath("inbox");
 
 /**

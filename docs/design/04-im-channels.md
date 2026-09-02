@@ -466,7 +466,7 @@ explicitly rejected). Routes:
 | `POST /api/channels/:platform/bind-code` | issue a single-use code |
 | `DELETE /api/channels/:platform/users/:id` | unbind |
 | `GET /api/models` | backend model catalog, no session needed |
-| `GET|POST /api/fs/dirs` | directory browsing / mkdir for the cwd picker |
+| `GET /api/fs/ls`, `POST /api/fs/mkdir` | directory browsing / mkdir for the cwd picker |
 
 Two behaviours a second platform inherits for free: the save is **non-destructive**
 (it walks the stored chat list and overlays the client's edits, so a chat

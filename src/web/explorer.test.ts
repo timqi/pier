@@ -7,7 +7,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { registerExplorerRoutes } from "./explorer.js";
 
 // A real repo in a temp dir: the routes are a thin shell around git, so the
-// test exercises the actual seam (argument building, scoping) — not a mock git.
+// test exercises the actual seam (argument building, refs) — not a mock git.
+// Path containment is web/fs.test.ts's; here it is only checked to be applied.
 let root: string;
 let app: Hono;
 
@@ -26,7 +27,6 @@ beforeAll(() => {
   git("commit", "-am", "two");
   git("tag", "v1");
   writeFileSync(join(root, "a.ts"), "const x = 3;\n"); // uncommitted
-  writeFileSync(join(root, "bin.dat"), Buffer.from([0x50, 0x00, 0x01]));
 
   app = new Hono();
   registerExplorerRoutes(app);
@@ -36,36 +36,9 @@ const get = (ep: string, params: Record<string, string>) =>
   app.request(`/api/explorer/${ep}?${new URLSearchParams({ root, ...params })}`);
 
 describe("explorer routes", () => {
-  it("lists entries dirs-first and hides .git", async () => {
-    const res = await get("ls", {});
-    expect(res.status).toBe(200);
-    const { entries } = (await res.json()) as { entries: { name: string; dir: boolean }[] };
-    expect(entries.map((e) => e.name)).toEqual(["sub", "a.ts", "bin.dat"]);
-  });
-
-  it("takes any readable directory as root — worktrees are not session cwds", async () => {
-    const other = realpathSync(mkdtempSync(join(tmpdir(), "pier-explorer-other-")));
-    writeFileSync(join(other, "c.txt"), "c\n");
-    const res = await app.request(`/api/explorer/ls?root=${encodeURIComponent(other)}`);
-    expect(res.status).toBe(200);
-    const { entries } = (await res.json()) as { entries: { name: string; dir: boolean }[] };
-    expect(entries).toEqual([{ name: "c.txt", dir: false }]);
-  });
-
-  it("refuses relative roots, non-directories and paths escaping the root", async () => {
-    expect((await app.request("/api/explorer/ls?root=relative/dir")).status).toBe(404);
-    expect((await app.request(`/api/explorer/ls?root=${encodeURIComponent(join(root, "a.ts"))}`)).status).toBe(404);
-    expect((await get("ls", { path: "../" })).status).toBe(404);
-    expect((await get("file", { path: "../../etc/passwd" })).status).toBe(404);
-  });
-
-  it("serves text inline and unknown bytes as a download", async () => {
-    const text = await get("file", { path: "a.ts" });
-    expect(text.headers.get("content-type")).toContain("text/plain");
-    expect(await text.text()).toBe("const x = 3;\n");
-    const bin = await get("file", { path: "bin.dat" });
-    expect(bin.headers.get("content-type")).toBe("application/octet-stream");
-    expect(bin.headers.get("content-disposition")).toContain("attachment");
+  it("answers only for a root it can resolve", async () => {
+    expect((await app.request("/api/explorer/git?root=relative/dir")).status).toBe(404);
+    expect((await app.request(`/api/explorer/diff?root=${encodeURIComponent(join(root, "a.ts"))}&base=HEAD`)).status).toBe(404);
   });
 
   it("reports branch, refs and recent commits", async () => {

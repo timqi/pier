@@ -58,9 +58,11 @@ src/
                here the browser may import), server.ts (sessions + events),
                instance.ts (settings, update,
                secrets, client error reports), providers.ts + provider-flows.ts,
-               auth.ts, files.ts (scoped config editing, cwd browsing,
-               attachments), explorer.ts (read-only listing/bytes/git diff for
-               the Files view), terminal.ts (one pty per project cwd, the one
+               auth.ts, config.ts (scoped agent-file editing),
+               fs.ts (one confined resolver, and the listing/bytes/mkdir
+               routes on it), explorer.ts (what git knows about a project
+               directory: refs, worktrees, diffs),
+               terminal.ts (one pty per project cwd, the one
                WebSocket surface), session-state.ts (what the workbench
                decided about a session: pinned, unread, order),
                repos.ts (which repository a project directory belongs to),

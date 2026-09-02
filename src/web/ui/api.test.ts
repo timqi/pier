@@ -74,7 +74,7 @@ describe("mustGetJson", () => {
 
   it("throws the sentence, not the response", async () => {
     answering({ error: "not a directory" }, 400);
-    await expect(mustGetJson("/api/explorer/ls", "could not list this folder")).rejects.toThrow(
+    await expect(mustGetJson("/api/fs/ls", "could not list this folder")).rejects.toThrow(
       "not a directory",
     );
   });

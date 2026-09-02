@@ -120,6 +120,9 @@ export function createTerminalView(
   defaultCwd: () => string | undefined,
   /** Through the router (hash), so Back walks cwd switches too. */
   openDir: (dir: string) => void,
+  /** The other half of this directory: browsing it, in the Files view. The
+   *  two overlays ask about one folder, so neither makes you name it twice. */
+  openFiles: (dir: string) => void,
   /** The ✕: leave the view, back to wherever it was opened from. */
   close: () => void,
 ): ConsoleView {
@@ -346,6 +349,9 @@ export function createTerminalView(
         // Picking the folder already open must not reboot the shell in it.
         (path) => (path === cwd ? undefined : openDir(path)), // hash first; show() reboots
       );
+    const filesBtn = chip("Files");
+    filesBtn.title = "Browse this folder";
+    filesBtn.onclick = () => openFiles(cwd);
     const fitBtn = chip("Fit");
     fitBtn.title = "Resize the shell to this window";
     fitBtn.onclick = () => {
@@ -365,7 +371,17 @@ export function createTerminalView(
     closeBtn.title = "Close Terminal";
     closeBtn.setAttribute("aria-label", "Close Terminal");
     closeBtn.onclick = close;
-    header.replaceChildren(cwdChip, statusBox, fitBtn, restartBtn, settingsBtn, closeBtn);
+    // No folder yet → nothing to browse, so the chip stays away rather than
+    // answering a click with nothing.
+    header.replaceChildren(
+      cwdChip,
+      statusBox,
+      ...(cwd ? [filesBtn] : []),
+      fitBtn,
+      restartBtn,
+      settingsBtn,
+      closeBtn,
+    );
   }
 
   const sendResize = (): void => {

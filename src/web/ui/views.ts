@@ -231,6 +231,7 @@ export function initViews(d: ViewsDeps): void {
         () => deps.currentSession(),
         // Through the router, so Back walks directory switches too.
         (dir) => showConsole("files", dir),
+        (dir) => showConsole("terminal", dir),
         () => closeOverlay("files"),
       ),
     },
@@ -241,6 +242,7 @@ export function initViews(d: ViewsDeps): void {
         () => [...groupByCwd(deps.sessions()).keys()],
         () => deps.currentSession()?.cwd,
         (dir) => showConsole("terminal", dir),
+        (dir) => showConsole("files", dir),
         () => closeOverlay("terminal"),
       ),
     },

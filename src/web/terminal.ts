@@ -7,12 +7,11 @@
 // WebSocket surface: a keystroke is a round trip, which SSE cannot carry
 // upstream. Everything else stays on the event stream.
 
-import { realpath, stat } from "node:fs/promises";
 import type { Server } from "node:http";
-import { isAbsolute } from "node:path";
 import { spawn, type IPty } from "node-pty";
 import { WebSocketServer } from "ws";
 import { logger } from "../log.js";
+import { scoped } from "./fs.js";
 import { ALL, upgradeAuthorized, type AuthStore } from "./auth.js";
 
 const log = logger("terminal");
@@ -109,9 +108,7 @@ export class TerminalHub {
   async attach(cwd: string, sock: TermSocket): Promise<TermConn | null> {
     let key: string;
     try {
-      if (!isAbsolute(cwd)) throw new Error("cwd must be an absolute directory");
-      key = await realpath(cwd);
-      if (!(await stat(key)).isDirectory()) throw new Error("cwd must be an absolute directory");
+      key = await scoped(cwd); // absolute, real, and a directory — or it throws
     } catch (err) {
       control(sock, { t: "error", message: String(err) });
       sock.close(1008, "bad cwd");

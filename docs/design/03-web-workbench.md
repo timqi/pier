@@ -41,9 +41,10 @@ catch, not the line count.
 The other route owners, each a file with one reason to exist — the routes
 themselves live there and are not mirrored here:
 `auth.ts` (the password boundary ahead of everything, `/login`, `/logout`,
-`/api/password`), `files.ts` (`/api/config*` scoped Pi config editing,
-`/api/fs/dirs` for the cwd pickers, `/api/sessions/:id/files`), `explorer.ts`
-(`/api/explorer/{ls,file,git,diff}` for the Files view, read-only),
+`/api/password`), `config.ts` (`/api/config*`, scoped Pi config editing),
+`fs.ts` (`/api/fs/{ls,file,mkdir}` — and the containment check behind every
+path the Console reaches, including `/api/sessions/:id/files` and the pty's
+cwd), `explorer.ts` (`/api/explorer/{git,diff}` for the Files view, read-only),
 `terminal.ts` (`/api/terminal`, the one WebSocket upgrade), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe

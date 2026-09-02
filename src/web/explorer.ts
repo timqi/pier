@@ -1,32 +1,16 @@
-// Files view backend: read-only directory listing, file bytes and git
-// ref/diff queries for the Console's Files view. `root` is any directory the
-// process can read — sessions work in worktrees and siblings of their cwd, and
-// an owner who is already past the Console password can reach those paths
-// anyway. `path` is still confined to the `root` it was asked under, so a
-// listing can never widen itself, and nothing here writes.
+// What git knows about a project directory, for the Console's Files view: the
+// refs, commits and worktrees its pickers offer, and the diffs it tones into a
+// file. Every route here runs git and nothing else — reading the directory and
+// the files themselves is web/fs.ts, which also owns the scoping both share.
 
 import { execFile } from "node:child_process";
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, extname, isAbsolute, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { Hono } from "hono";
-import { guarded } from "./files.js";
+import { scoped } from "./fs.js";
+import { guarded } from "./route.js";
 
 const run = promisify(execFile);
 
-// Inline-renderable binary types; text is sniffed, everything else downloads.
-const BINARY_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".bmp": "image/bmp",
-  ".svg": "image/svg+xml",
-  ".pdf": "application/pdf",
-};
-const MAX_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
 /** A ref never starts with `-`: execFile blocks the shell, this blocks the
@@ -38,51 +22,11 @@ const git = async (root: string, ...args: string[]): Promise<string> =>
   (await run("git", ["-C", root, ...args], { maxBuffer: MAX_DIFF_BYTES })).stdout;
 
 export function registerExplorerRoutes(app: Hono): void {
-  /** The scope check every route shares: `root` must be an absolute directory,
-   *  and `path` must resolve inside it (realpath both ends — neither `..` nor a
-   *  symlink steps outside). Returns the real target. */
-  const resolveScoped = async (root: string | undefined, path = ""): Promise<string> => {
-    if (!root || !isAbsolute(root)) throw new Error("root must be an absolute directory");
-    const real = await realpath(root);
-    if (!(await stat(real)).isDirectory()) throw new Error("root must be an absolute directory");
-    const target = await realpath(resolve(real, path));
-    if (target !== real && !target.startsWith(real + sep)) throw new Error("path escapes root");
-    return target;
-  };
-
-  // Directory listing, names only. `.git` is plumbing, not content.
-  guarded(app, "GET", "/api/explorer/ls", 404, async (c) => {
-    c.header("cache-control", "no-store");
-    const dir = await resolveScoped(c.req.query("root"), c.req.query("path"));
-    const entries = (await readdir(dir, { withFileTypes: true }))
-      .filter((e) => e.name !== ".git" && (e.isDirectory() || e.isFile()))
-      .map((e) => ({ name: e.name, dir: e.isDirectory() }))
-      .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
-    return c.json({ entries });
-  });
-
-  // File bytes, read-only. Known binary types render inline; anything else is
-  // sniffed — a NUL in the head means bytes we can't vouch for, so it
-  // downloads instead of rendering (that is how a file starts executing).
-  guarded(app, "GET", "/api/explorer/file", 404, async (c) => {
-    const file = await resolveScoped(c.req.query("root"), c.req.query("path"));
-    if (!(await stat(file)).isFile()) throw new Error("not a file");
-    const bytes = await readFile(file);
-    if (bytes.byteLength > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
-    const binary = BINARY_TYPES[extname(file).toLowerCase()];
-    const text = !binary && !bytes.subarray(0, 8192).includes(0);
-    return c.body(bytes, 200, {
-      "content-type": binary ?? (text ? "text/plain; charset=utf-8" : "application/octet-stream"),
-      "content-disposition": `${binary || text ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(basename(file))}`,
-      "cache-control": "no-store",
-    });
-  });
-
   // Git refs for the diff pickers: current branch, branches+tags, recent
   // commits. Not a repo → { branch: null }, which the UI renders as "no git".
   guarded(app, "GET", "/api/explorer/git", 404, async (c) => {
     c.header("cache-control", "no-store");
-    const root = await resolveScoped(c.req.query("root"));
+    const root = await scoped(c.req.query("root"));
     let branch: string | null;
     try {
       branch = (await git(root, "rev-parse", "--abbrev-ref", "HEAD")).trim();
@@ -126,7 +70,7 @@ export function registerExplorerRoutes(app: Hono): void {
   // means the working tree.
   guarded(app, "GET", "/api/explorer/diff", 404, async (c) => {
     c.header("cache-control", "no-store");
-    const root = await resolveScoped(c.req.query("root"));
+    const root = await scoped(c.req.query("root"));
     const base = c.req.query("base") ?? "";
     const head = c.req.query("head") ?? "";
     if (!REF_RE.test(base) || (head !== "" && !REF_RE.test(head)))
