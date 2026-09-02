@@ -399,6 +399,12 @@ export interface AgentCustomTool {
    * reason — this answer can go stale while a long-lived session is open.
    */
   available?(): boolean;
+  /**
+   * The bundled skill that documents this tool. It stands down with the tool:
+   * a skill's description is resident in every prompt, and one pointing at a
+   * tool the session was not given is a route the agent cannot take.
+   */
+  skill?: string;
 }
 
 export interface AgentLaunchOptions {

@@ -358,13 +358,13 @@ describe("channel history", () => {
     };
     // A thrown error here is indistinguishable from a quiet channel.
     expect(out.count).toBe(1);
-    expect(out.incomplete).toMatch(/invite it/);
+    expect(out.incomplete).toMatch(/\/invite @Pier/);
   });
 
   it("turns a Slack error code into something the agent can act on", async () => {
     client.failFrom = 0;
     await expect(call({ operation: "read_channel", channel: "C100" }))
-      .rejects.toThrow(/invite it before it can read/);
+      .rejects.toThrow(/\/invite @Pier` there before it can read/);
   });
 });
 
@@ -431,6 +431,21 @@ describe("threads", () => {
     // Hoisted once instead of repeated on every line.
     expect(out.threadTs).toBe(T(100));
     expect(texts(out)).toEqual(["parent", "reply"]);
+  });
+
+  it("caps a long thread and says so, instead of reading as if it were whole", async () => {
+    client.threadReplies = Array.from(
+      { length: 20 },
+      (_, i) => ({ ts: T(100 + i), text: `r${i}`, thread_ts: T(100) }),
+    );
+    const out = await call({
+      operation: "read_thread",
+      channel: "C100",
+      thread_ts: T(100),
+      limit: 5,
+    }) as { count: number; truncated: boolean };
+    expect(out).toMatchObject({ count: 5, truncated: true });
+    expect(texts(out)).toEqual(["r0", "r1", "r2", "r3", "r4"]);
   });
 
   it("returns only the replies newer than the last one the agent saw", async () => {
@@ -509,6 +524,22 @@ describe("posting", () => {
       .rejects.toThrow(/11000 per message/);
   });
 
+  it("reports a mention that posted as plain text and notified nobody", async () => {
+    const out = await call({ operation: "post", channel: "C100", text: "@alice ready?" });
+    expect(out).toMatchObject({ hint: expect.stringMatching(/@alice.*<@U/) });
+    // Reported, not refused: the message is on Slack either way.
+    expect(client.posted).toHaveLength(1);
+
+    const group = await call({ operation: "post", channel: "C100", text: "@here deploy" });
+    expect(group).toMatchObject({ hint: expect.stringMatching(/<!here>/) });
+  });
+
+  it("stays quiet when the syntax is already Slack's, or is only code", async () => {
+    for (const text of ["<@U04B7Q2> ready?", "see <#C100>", "run `git log @{u}`", "mail a@b.com"]) {
+      expect(await call({ operation: "post", channel: "C100", text })).not.toHaveProperty("hint");
+    }
+  });
+
   it("requires the fields it cannot invent", async () => {
     await expect(call({ operation: "post", channel: "C100" })).rejects.toThrow(/text is required/);
     await expect(call({ operation: "read_thread", channel: "C100" }))
@@ -520,6 +551,7 @@ describe("editing", () => {
   beforeEach(() => configure());
 
   it("replaces the text of the named message, as markdown", async () => {
+    client.timeline = [{ ts: T(100), user: "U1", text: "before" }];
     expect(await call({ operation: "edit", channel: "#ops", ts: T(100), text: "## fixed" }))
       .toMatchObject({ channel: "C100", ts: T(100), edited: true });
     expect(client.updated[0]).toMatchObject({
@@ -528,8 +560,31 @@ describe("editing", () => {
       text: "## fixed",
       blocks: [{ type: "markdown", text: "## fixed" }],
     });
-    // The previous text is gone from Slack, so the log is the only record.
-    expect(logs.some((l) => l.includes(`edited ${T(100)}`))).toBe(true);
+    // The previous text is gone from Slack, so the log is the only record —
+    // and a record that says only "something changed" is not one.
+    expect(logs.some((l) => l.includes(`edited ${T(100)}`) && l.includes("was: before"))).toBe(true);
+  });
+
+  it("finds the old text of a reply in the thread it is standing in", async () => {
+    // `conversations.history` cannot see inside a thread: without the default
+    // from `here`, every correction to its own reply would log "not captured".
+    at = { channel: "C100", threadTs: T(100) };
+    client.threadReplies = [{ ts: T(110), user: "U1", text: "typo", thread_ts: T(100) }];
+    await call({ operation: "edit", ts: T(110), text: "fixed" });
+    expect(client.repliesCalls[0]).toMatchObject({ channel: "C100", ts: T(100) });
+    expect(logs.some((l) => l.includes("was: typo"))).toBe(true);
+  });
+
+  it("still edits when the old text cannot be read back, and says it was not kept", async () => {
+    client.failFrom = 0; // history refuses; the correction must not be lost with it
+    await call({ operation: "edit", channel: "C100", ts: T(100), text: "fixed" });
+    expect(client.updated).toHaveLength(1);
+    expect(logs.some((l) => l.includes("(not captured)"))).toBe(true);
+  });
+
+  it("reports an inert mention in a correction too", async () => {
+    expect(await call({ operation: "edit", channel: "C100", ts: T(100), text: "@alice ping" }))
+      .toMatchObject({ hint: expect.stringMatching(/@alice/) });
   });
 
   it("never guesses the target, even inside a thread", async () => {
@@ -644,5 +699,14 @@ describe("time parsing", () => {
     expect(toTs("1717200000.000100")).toBe("1717200000.000100");
     expect(toTs(undefined)).toBeUndefined();
     expect(() => toTs("last tuesday")).toThrow(/not a time/);
+  });
+
+  it("refuses milliseconds instead of reading a channel that looks empty", () => {
+    // Taken as seconds this is the year 56387: Slack finds nothing there and
+    // the read is indistinguishable from a quiet channel.
+    expect(() => toTs("1717200000000")).toThrow(/epoch seconds, not milliseconds/);
+    expect(() => toTs(1717200000000)).toThrow(/epoch seconds, not milliseconds/);
+    // The number path still takes a real time.
+    expect(toTs(1717200000)).toBe("1717200000");
   });
 });

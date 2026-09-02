@@ -24,20 +24,13 @@ this: there is no current conversation and `channel` is required.
 
 `{"operation":"channels"}` lists what Pier can reach (`id`, `name`, `kind`,
 `respondsToMessages`); pass either an id or a `#name` anywhere a channel is
-wanted. `not_in_channel` means someone must run `/invite @Pier`.
+wanted.
 
 ## Never ask for an id
 
-You already have them:
-
-- **The person talking to you** — a message may start with `[name<id> time]`,
-  added by Pier, not typed by them. It appears only on a change — new speaker,
-  a time gap, a new day — so the last one you saw still applies (a gap alone
-  shows as time only, like `[14:23]`).
-- **Anyone in a transcript** — every line carries `name[id]`.
-- **This channel and thread** — from `context`.
-
-Asking a human to paste their own user ID is never acceptable.
+You already have them: the sender header on the message you are answering,
+`name[id]` on every line of a transcript, and `context` for this channel and
+thread. Asking a human to paste their own user ID is never acceptable.
 
 ## Reading
 
@@ -107,8 +100,6 @@ The response carries `ts` and `threadTs` for replying under what you posted.
 `text` replaces the message outright; there is no partial edit. Read the
 message first if you are changing part of it.
 
-- Slack only lets Pier edit what **its own bot** posted — anyone else's message
-  answers `cant_update_message`, and the answer is to reply, not to retry.
 - `ts` is always explicit, as with `delete`, and means nothing outside the
   channel it was read in.
 - The old text is gone — Slack keeps no version a reader can open, and may not
@@ -122,9 +113,6 @@ message first if you are changing part of it.
 ```json
 {"operation":"delete","channel":"#ops","ts":"1717243800.000100"}
 ```
-
-Slack only lets Pier delete what **its own bot** posted — a person's message
-answers `cant_delete_message`, and the answer is to ask them, not to retry.
 
 - `ts` is always explicit. There is no "delete the last one" and no default
   from the thread you are in: the wrong `ts` cannot be undone.

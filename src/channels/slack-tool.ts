@@ -38,15 +38,26 @@ const tsToIso = (ts: string): string =>
 /** Minute precision in the transcript: the exact time is in the `ts` beside it. */
 const tsToMinute = (ts: string): string => `${tsToIso(ts).slice(0, 16)}Z`;
 
+/** Epoch seconds at the year 2100: past this, the caller meant milliseconds. */
+const MAX_SECONDS = 4_102_444_800;
+
 /** Accepts an ISO date, an epoch-seconds number, or a raw Slack ts. */
 export function toTs(value: string | number | undefined): string | undefined {
   if (value === undefined || value === "") return undefined;
-  if (typeof value === "number") return String(value);
-  const trimmed = value.trim();
-  if (/^\d+(\.\d+)?$/.test(trimmed)) return trimmed;
-  const parsed = Date.parse(trimmed);
-  if (Number.isNaN(parsed)) throw new Error(`not a time: ${value}`);
-  return String(parsed / 1000);
+  const raw = typeof value === "number" ? String(value) : value.trim();
+  // A ts is passed through untouched — it is an id, not a number to reformat.
+  const numeric = /^\d+(\.\d+)?$/.test(raw);
+  const seconds = numeric ? Number(raw) : Date.parse(raw) / 1000;
+  if (Number.isNaN(seconds)) throw new Error(`not a time: ${value}`);
+  // Milliseconds are the mistake worth naming: Slack takes the window without
+  // complaint, finds nothing that far in the future, and answers with an empty
+  // read that is indistinguishable from a channel where nobody spoke.
+  if (seconds > MAX_SECONDS) {
+    throw new Error(
+      `${value} is past the year 2100 — Slack times are epoch seconds, not milliseconds`,
+    );
+  }
+  return numeric ? raw : String(seconds);
 }
 
 /**
@@ -113,6 +124,8 @@ export function slackToolSpec(
       text: Type.Optional(Type.String()),
     }),
     available,
+    // Stands down with the tool: without Slack, its manual is a route to nowhere.
+    skill: "pier-slack",
     execute,
   };
 }
@@ -216,11 +229,13 @@ export async function handleSlackTool(
   // own bounds are inclusive-ish, so the boundary message is dropped here
   // rather than trusted to the API.
   const after = toTs(input.after as string | undefined);
+  // Both reads take it, so it is read once: a cap that worked on a channel and
+  // was ignored on a thread would be the more expensive kind of surprise.
+  const limit = Math.min(Number(input.limit) || MAX_MESSAGES, MAX_MESSAGES);
 
   if (input.operation === "read_channel") {
     const since = after ?? toTs(input.since as string | undefined);
     const until = toTs(input.until as string | undefined);
-    const limit = Math.min(Number(input.limit) || MAX_MESSAGES, MAX_MESSAGES);
     return readChannel(deps, client, channel, since, until, after, limit);
   }
 
@@ -229,7 +244,7 @@ export async function handleSlackTool(
       ? input.thread_ts.trim()
       : at?.threadTs;
     if (!threadTs) throw new Error("thread_ts is required outside a Slack thread");
-    return readThread(deps, client, channel, threadTs, after);
+    return readThread(deps, client, channel, threadTs, after, limit);
   }
 
   if (input.operation === "read_message") {
@@ -258,6 +273,7 @@ export async function handleSlackTool(
       at: sent.ts ? tsToIso(sent.ts) : null,
       // Returned so a follow-up can reply under what was just posted.
       threadTs: threadTs ?? sent.ts,
+      ...inertMention(text),
     };
   }
 
@@ -266,13 +282,22 @@ export async function handleSlackTool(
     // and Slack keeps no visible record of what it said before.
     const ts = required(input.ts, "ts");
     const text = messageText(input.text);
+    // Defaulted from `here` as `post` is: a correction is nearly always to a
+    // reply the agent made in this thread, and `conversations.history` cannot
+    // see inside a thread — without this the read below always comes up empty.
+    const asked = typeof input.thread_ts === "string" ? input.thread_ts.trim() : "";
+    const inThread = asked || (channel === at?.channel ? at?.threadTs : undefined);
+    // Read before the write, because after it the old wording exists nowhere:
+    // Slack keeps no version, so this log is the only record of what was
+    // replaced. Best-effort — a failed read must not block the correction.
+    const was = await previousText(client, channel, ts, inThread);
     try {
       await client.updateMessage({ channel, ts, text, blocks: [{ type: "markdown", text }] });
     } catch (err) {
       throw new Error(explain(err));
     }
-    deps.log(`slack tool edited ${ts} in ${channel}`);
-    return { channel, ts, edited: true };
+    deps.log(`slack tool edited ${ts} in ${channel}; was: ${was ?? "(not captured)"}`);
+    return { channel, ts, edited: true, ...inertMention(text) };
   }
 
   if (input.operation === "delete") {
@@ -291,6 +316,61 @@ export async function handleSlackTool(
   }
 
   throw new Error(`unknown slack operation: ${String(input.operation)}`);
+}
+
+/**
+ * The one message at `ts`. A `ts` is unique only within its conversation, and
+ * `conversations.history` never returns what was posted inside a thread — so a
+ * reply has to be asked for through its thread, and only the caller knows.
+ */
+async function oneMessage(
+  client: SlackClient,
+  channel: string,
+  ts: string,
+  threadTs: string | undefined,
+): Promise<SlackMessageEvent | undefined> {
+  const page = threadTs
+    ? await client.replies(channel, threadTs, { oldest: ts, limit: 20 })
+    : await client.history(channel, { oldest: ts, latest: ts, limit: 1 });
+  return page.messages.find((msg) => msg.ts === ts);
+}
+
+/** One line of what a message said, for the log an edit leaves behind. */
+async function previousText(
+  client: SlackClient,
+  channel: string,
+  ts: string,
+  threadTs: string | undefined,
+): Promise<string | undefined> {
+  try {
+    const text = (await oneMessage(client, channel, ts, threadTs))?.text;
+    return text === undefined ? undefined : text.slice(0, 200).replace(/\s+/g, " ");
+  } catch {
+    // Not swallowed: the caller logs that the old wording was not captured,
+    // which is the fact that matters. Refusing the edit over it would be worse.
+    return undefined;
+  }
+}
+
+/**
+ * A plain `@alice` is the one Slack mistake that looks like it worked: the
+ * message goes up, renders as text, and notifies nobody. Reported after the
+ * fact rather than refused — a name in prose is legitimate, an unping is not
+ * worth losing the message over.
+ */
+function inertMention(text: string): { hint?: string } {
+  const prose = text
+    .replace(/```[\s\S]*?```|`[^`]*`/g, "") // code says @ and # for other reasons
+    .replace(/<[^>]*>/g, ""); // already Slack syntax
+  const hit = /(?:^|\s)([@#][A-Za-z][\w.-]*)/.exec(prose)?.[1];
+  if (!hit) return {};
+  const as = hit.startsWith("@")
+    ? /^@(here|channel|everyone)$/.test(hit) ? `<!${hit.slice(1)}>` : "<@U…>"
+    : "<#C…>";
+  return {
+    hint: `${hit} is plain text and notified nobody — Slack needs ${as}. ` +
+      `Edit this ts if it was meant to reach someone.`,
+  };
 }
 
 /** Accept a `#name` or a bare name as well as an id — models prefer names. */
@@ -343,30 +423,31 @@ async function readThread(
   channel: string,
   threadTs: string,
   after: string | undefined,
+  limit: number,
 ): Promise<unknown> {
   const fetched = await fetchPages(
     deps,
     (cursor) => client.replies(channel, threadTs, { oldest: after, cursor }),
     `thread ${threadTs} in ${channel}`,
   );
-  const messages = newerThan(transcript(fetched.messages), after);
+  const all = newerThan(transcript(fetched.messages), after);
+  // Oldest first, as in a channel read: a thread cut at its newest end still
+  // reads as a thread, and the cut has to be said either way — a long thread
+  // that answers as if it were complete is the read nobody double-checks.
+  const messages = all.slice(0, limit);
   return {
     channel,
     // Hoisted: every line in a thread carries the same one.
     threadTs,
     count: messages.length,
+    ...(fetched.truncated || all.length > messages.length ? { truncated: true } : {}),
     ...(fetched.incomplete ? { incomplete: fetched.incomplete } : {}),
     format: LINE_FORMAT,
     messages: await lines(deps, client, messages),
   };
 }
 
-/**
- * One message, because that is sometimes the whole question. A `ts` is unique
- * only within its conversation, and `conversations.history` never returns what
- * was posted inside a thread — so a reply has to be asked for through its
- * thread, and saying which one is the caller's job.
- */
+/** One message, because that is sometimes the whole question. */
 async function readMessage(
   deps: SlackToolDeps,
   client: SlackClient,
@@ -374,10 +455,7 @@ async function readMessage(
   ts: string,
   threadTs: string | undefined,
 ): Promise<unknown> {
-  const page = threadTs
-    ? await client.replies(channel, threadTs, { oldest: ts, limit: 20 })
-    : await client.history(channel, { oldest: ts, latest: ts, limit: 1 });
-  const found = page.messages.find((msg) => msg.ts === ts);
+  const found = await oneMessage(client, channel, ts, threadTs);
   if (!found) {
     throw new Error(
       threadTs
@@ -435,7 +513,8 @@ function explain(err: unknown): string {
   const code = /slack [\w.]+: (\w+)/.exec(String(err))?.[1] ?? "";
   return {
     channel_not_found: "no such channel, or Pier's bot cannot see it — check the channels operation",
-    not_in_channel: "Pier's bot is not in that channel; someone has to invite it before it can read",
+    not_in_channel:
+      "Pier's bot is not in that channel; someone has to run `/invite @Pier` there before it can read",
     missing_scope: "Pier's Slack app lacks the scope for this call; the operator must reinstall it",
     ratelimited: "Slack rate-limited Pier; wait a minute, and narrow the range if this was a read",
     thread_not_found: "no thread with that ts in this channel",

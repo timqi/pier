@@ -4,7 +4,7 @@
 // Plus the one rule that decides which copy of a bundled extension runs.
 
 import { describe, expect, it, vi } from "vitest";
-import { PiSession, standDownShadowed } from "./pi.js";
+import { PiSession, standDownShadowed, standDownUndocumented } from "./pi.js";
 
 /** Only what PiSession touches on these paths. */
 function fakePi() {
@@ -97,6 +97,24 @@ describe("a bundled extension shadowed by a copy on disk", () => {
       ext("<inline:web>", "web_search"),
       ext("<inline:pier-bash-timeout>"),
     )).toEqual(["/x/quiet.ts", "<inline:web>", "<inline:pier-bash-timeout>"]);
+  });
+});
+
+describe("a bundled skill whose tool this session was not given", () => {
+  const tool = (name: string, skill?: string, available?: boolean) =>
+    ({ name, skill, available: available === undefined ? undefined : () => available }) as never;
+  const skills = [{ name: "pier-slack" }, { name: "pier-tasks" }];
+
+  it("stands down with it, so no prompt advertises a route that is switched off", () => {
+    expect(standDownUndocumented([tool("slack", "pier-slack", false)], skills))
+      .toEqual([{ name: "pier-tasks" }]);
+  });
+
+  it("stays when the tool is there, or claims no skill at all", () => {
+    expect(standDownUndocumented([tool("slack", "pier-slack", true)], skills)).toEqual(skills);
+    expect(standDownUndocumented([tool("slack", "pier-slack")], skills)).toEqual(skills);
+    // An unavailable tool documented by nothing takes nothing with it.
+    expect(standDownUndocumented([tool("task", undefined, false)], skills)).toEqual(skills);
   });
 });
 

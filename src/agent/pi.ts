@@ -146,6 +146,22 @@ export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsRes
   };
 };
 
+/**
+ * A bundled skill stands down with the tool it documents. A skill's
+ * description is resident in every prompt, so one pointing at a tool this
+ * session was not given is both a cost and a route the agent cannot take.
+ */
+export const standDownUndocumented = <S extends { name: string }>(
+  tools: AgentCustomTool[],
+  skills: S[],
+): S[] => {
+  const gone = new Set(
+    tools.filter((tool) => tool.skill && !(tool.available?.() ?? true)).map((tool) => tool.skill!),
+  );
+  if (!gone.size) return skills;
+  return skills.filter((skill) => !gone.has(skill.name));
+};
+
 /** Shared with the runtime wrapper in `open()`, which reads it per request —
  *  so tasks can downgrade a session's cache TTL after it is already open. */
 type CacheRetentionBox = { value: "short" | "long" };
@@ -651,6 +667,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       // Pi's generic default, preserving the user's later instruction layer.
       systemPromptOverride: pierSystemPrompt,
       additionalSkillPaths: this.skillPaths,
+      skillsOverride: (base) => ({
+        ...base,
+        skills: standDownUndocumented(this.extraTools, base.skills),
+      }),
       extensionFactories: [
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
         ...inlineExtensions(this.enabledExtensions()),
