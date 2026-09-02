@@ -95,6 +95,23 @@ describe("fs routes", () => {
     expect(svg.headers.get("content-disposition")).toContain("attachment");
   });
 
+  it("offers a validator and answers a matching one with 304 and no body", async () => {
+    const first = await file({ root, path: "a.ts" });
+    const tag = first.headers.get("etag");
+    expect(tag).toMatch(/^"[0-9a-f]+-[0-9a-f]+"$/);
+    expect(first.headers.get("last-modified")).toBe(statSync(join(root, "a.ts")).mtime.toUTCString());
+
+    const again = await app.request(`/api/fs/file?${new URLSearchParams({ root, path: "a.ts" })}`, {
+      headers: { "if-none-match": tag ?? "" },
+    });
+    expect(again.status).toBe(304);
+    expect(again.headers.get("cache-control")).toBe("private, no-cache");
+    expect(await again.text()).toBe("");
+    // The validator is the file's own state: a rewrite invalidates it.
+    writeFileSync(join(root, "a.ts"), "const x = 2;\nconst y = 3;\n");
+    expect((await file({ root, path: "a.ts" })).headers.get("etag")).not.toBe(tag);
+  });
+
   it("creates a folder by name, and refuses a path", async () => {
     const create = (body: unknown) =>
       app.request("/api/fs/mkdir", {

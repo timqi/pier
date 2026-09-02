@@ -9,11 +9,15 @@
 // symlink steps outside and a listing can never widen itself. Only mkdir
 // writes, and only a name.
 
-import { mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { mkdir, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, resolve, sep } from "node:path";
+import { Readable } from "node:stream";
 import type { Hono } from "hono";
+import { logger } from "../log.js";
 import { guarded } from "./route.js";
+
+const log = logger("web");
 
 /** What a browser is asked to hold at once — the same ceiling for a preview
  *  and for an attachment, because it is the reader's patience, not the route's. */
@@ -103,11 +107,39 @@ export function registerFsRoutes(app: Hono): void {
   // File bytes, read-only: the Files view's previews and whole-file reads.
   guarded(app, "GET", "/api/fs/file", 404, async (c) => {
     const file = await scoped(c.req.query("root"), c.req.query("path"));
-    const info = await stat(file);
-    if (!info.isFile()) throw new Error("not a file");
-    if (info.size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
-    const bytes = await readFile(file);
-    return c.body(bytes, 200, { ...fileHeaders(file, bytes), "cache-control": "no-store" });
+    const handle = await open(file);
+    let streaming = false;
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new Error("not a file");
+      if (info.size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
+      // Size and mtime, not a digest: the view re-reads a file every time it is
+      // clicked again, and a validator the stat above already knows costs
+      // nothing to offer. `no-cache` keeps the answer conditional, so an edited
+      // file is never shown from a browser cache.
+      const tag = `"${info.size.toString(16)}-${info.mtime.getTime().toString(16)}"`;
+      const validators = {
+        etag: tag,
+        "last-modified": info.mtime.toUTCString(),
+        "cache-control": "private, no-cache",
+      };
+      if (c.req.header("if-none-match") === tag) return c.body(null, 304, validators);
+      // Sniff and stream the same open file, so a replacement cannot bypass
+      // the size check or make the headers describe different bytes.
+      const head = Buffer.alloc(Math.min(8192, info.size));
+      await handle.read(head, 0, head.length, 0);
+      const bytes = handle.createReadStream({ start: 0 });
+      streaming = true;
+      // Past the headers a failure can only truncate the body, so this is the
+      // one place it can still be said at all (§5b).
+      bytes.on("error", (err) => log.warn(`serving ${file} stopped mid-stream`, err));
+      return c.body(Readable.toWeb(bytes) as ReadableStream, 200, {
+        ...fileHeaders(file, head),
+        ...validators,
+      });
+    } finally {
+      if (!streaming) await handle.close();
+    }
   });
 
   // Create a folder while picking one — a new project usually needs a new

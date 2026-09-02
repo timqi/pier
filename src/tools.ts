@@ -238,6 +238,11 @@ export interface EnabledTools {
   customTools: readonly CustomTool[];
 }
 
+/** How long `ubix list --json` stays usable for `status()`: long enough that
+ *  one Console page open spawns it once, short enough that an install done
+ *  outside Pier shows up while the operator is still looking at the page. */
+const LIST_TTL_MS = 3_000;
+
 /** `stale` is heartbeat age, never how long the work has taken; `wait` is what
  *  a waiter gives a live holder before giving up with a reason. */
 const LOCK_TIMING = { heartbeatMs: 5_000, staleMs: 30_000, waitMs: 20 * 60_000, pollMs: 200 };
@@ -749,7 +754,14 @@ export class ManagedTools {
     this.#lock ??= new SyncLock(this.#db());
     return this.#lock.run(async (fence) => {
       const { tools, customTools } = read();
-      return this.#converge(tools, customTools, fence);
+      // This run is the only thing here that changes what `list` answers, so
+      // the memo `status()` reads is dropped on both sides of it.
+      this.#listed = undefined;
+      try {
+        return await this.#converge(tools, customTools, fence);
+      } finally {
+        this.#listed = undefined;
+      }
     });
   }
 
@@ -846,7 +858,7 @@ export class ManagedTools {
     if (!existsSync(this.ubixPath)) return base;
     let states: UbixToolState[];
     try {
-      states = await this.#states(this.ubixPath, this.#env(), ["list", "--json"]);
+      states = await this.#listedTools();
     } catch (err) {
       // The page says why it cannot answer rather than answering wrongly: a
       // row drawn as "not installed" because a read failed is the lie §5b is
@@ -878,6 +890,24 @@ export class ManagedTools {
               : null),
       });
     });
+  }
+
+  /** What `ubix list --json` last said, retained for LIST_TTL_MS. It is a
+   *  subprocess, and the Console asks for the catalog on every settings read —
+   *  one page open is several, each of which spawned its own ubix. A failed
+   *  read is not retained: it is not an answer to hand the next caller for
+   *  three seconds. */
+  #listed?: { at: number; states: Promise<UbixToolState[]> };
+
+  #listedTools(): Promise<UbixToolState[]> {
+    const now = Date.now();
+    if (this.#listed && now - this.#listed.at < LIST_TTL_MS) return this.#listed.states;
+    const states = this.#states(this.ubixPath, this.#env(), ["list", "--json"]);
+    void states.catch(() => {
+      if (this.#listed?.states === states) this.#listed = undefined;
+    });
+    this.#listed = { at: now, states };
+    return states;
   }
 
   /** Pier's ubix config and state, never the operator's. `UBIX_CONFIG_DIR` /

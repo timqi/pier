@@ -1,12 +1,48 @@
 // The one thing the Pi seam must refuse: work handed to a session that is
 // already closed. Pi answers such a call by running a turn nobody records, so
 // every delivery path upstream would count a lost message as delivered.
-// Plus the one rule that decides which copy of a bundled extension runs.
+// Plus the one rule that decides which copy of a bundled extension runs, and
+// the runtime state that must remain private to one session.
 
 import { describe, expect, it, vi } from "vitest";
 import type { SessionEventPayload } from "../core/types.js";
 import type { PiEvent, PiMessage } from "./events.js";
-import { PiSession, standDownShadowed, standDownUndocumented } from "./pi.js";
+
+type Stream = (model: unknown, context: unknown, options?: unknown) => unknown;
+type Runtime = { providers: Set<string>; registerProvider(name: string): void; streamSimple: Stream };
+const runtimes: Runtime[] = [];
+const streamed: unknown[] = [];
+
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  SessionManager: {
+    create: (cwd: string) => ({ path: `${cwd}/new`, getSessionDir: () => cwd }),
+  },
+  ModelRuntime: {
+    create: async () => {
+      const runtime: Runtime = {
+        providers: new Set(),
+        registerProvider(name) { this.providers.add(name); },
+        streamSimple: (_model, _context, options) => {
+          streamed.push(options);
+          return {};
+        },
+      };
+      runtimes.push(runtime);
+      return runtime;
+    },
+  },
+  DefaultResourceLoader: class {
+    async reload(): Promise<void> {}
+  },
+  createAgentSession: async ({ cwd, modelRuntime }: { cwd: string; modelRuntime: Runtime }) => {
+    // Pi extensions register providers onto the runtime handed to this session.
+    modelRuntime.registerProvider(cwd);
+    return { session: { sessionId: cwd, isStreaming: false, messages: [], dispose() {} } };
+  },
+}));
+
+const { PiAgentFactory, PiSession, standDownShadowed, standDownUndocumented } = await import("./pi.js");
 
 /** Only what PiSession touches on these paths. */
 function fakePi() {
@@ -88,6 +124,26 @@ const ext = (path: string, ...tools: string[]) =>
 const shadow = (...extensions: unknown[]): string[] =>
   standDownShadowed({ extensions, errors: [], runtime: {} } as never)
     .extensions.map((e) => e.path);
+
+describe("session model runtimes", () => {
+  it("keeps extension providers and cache retention private to one session", async () => {
+    const factory = new PiAgentFactory();
+    const a = await factory.create({ cwd: "/tmp/a" });
+    const b = await factory.create({ cwd: "/tmp/b" });
+
+    expect(runtimes).toHaveLength(2);
+    expect([...runtimes[0]!.providers]).toEqual(["/tmp/a"]);
+    expect([...runtimes[1]!.providers]).toEqual(["/tmp/b"]);
+    a.setCacheRetention("short");
+    runtimes[0]!.streamSimple({}, {});
+    runtimes[1]!.streamSimple({}, {}, { cacheRetention: "none" });
+    expect(streamed).toEqual([
+      { cacheRetention: "short" },
+      { cacheRetention: "none" },
+    ]);
+    await Promise.all([a.dispose(), b.dispose()]);
+  });
+});
 
 describe("a bundled extension shadowed by a copy on disk", () => {
   it("stands down, so one name never means two tools", () => {

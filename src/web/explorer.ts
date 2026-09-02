@@ -34,11 +34,20 @@ export function registerExplorerRoutes(app: Hono): void {
       // not a repo, or no commits yet
       return c.json({ branch: null, refs: [], commits: [], worktrees: [] });
     }
+    // Three reads of the same repository, none of which is an argument to
+    // another: one wait, not three. The rev-parse above stays alone — it is
+    // the guard that decides whether these three are asked at all.
+    const [worktreeList, refList, commitLog] = await Promise.all([
+      git(root, "worktree", "list", "--porcelain"),
+      git(root, "for-each-ref", "--format=%(refname:short)\t%(subject)", "refs/heads", "refs/tags"),
+      // Unit/record separators, because a body is multi-line by nature.
+      git(root, "log", "-20", "--format=%h\u001f%at\u001f%an\u001f%ae\u001f%s\u001f%b\u001e"),
+    ]);
     // Every checkout of this repository, from git rather than from the
     // sessions that happen to live in one: a worktree created ten seconds ago
     // has no session in it yet, and that is exactly when its files are worth
     // opening. Detached heads have no `branch` line, so the path stands alone.
-    const worktrees = (await git(root, "worktree", "list", "--porcelain"))
+    const worktrees = worktreeList
       .split("\n\n")
       .map((block) => {
         const path = /^worktree (.+)$/m.exec(block)?.[1];
@@ -46,15 +55,14 @@ export function registerExplorerRoutes(app: Hono): void {
         return path ? { path, ...(on ? { branch: on } : {}) } : null;
       })
       .filter((w): w is { path: string; branch?: string } => w !== null);
-    const refs = (await git(root, "for-each-ref", "--format=%(refname:short)\t%(subject)", "refs/heads", "refs/tags"))
+    const refs = refList
       .split("\n")
       .filter(Boolean)
       .map((line) => {
         const tab = line.indexOf("\t");
         return { name: line.slice(0, tab), subject: line.slice(tab + 1) };
       });
-    // Unit/record separators, because a body is multi-line by nature.
-    const commits = (await git(root, "log", "-20", "--format=%h\u001f%at\u001f%an\u001f%ae\u001f%s\u001f%b\u001e"))
+    const commits = commitLog
       .split("\u001e")
       .map((r) => r.trimStart())
       .filter(Boolean)

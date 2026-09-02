@@ -148,14 +148,15 @@ export async function listBoards(dir: string): Promise<BoardSummary[]> {
   } catch {
     return []; // no boards yet
   }
-  const boards: BoardSummary[] = [];
-  for (const slug of entries.sort()) {
+  // One board's manifest says nothing about the next one's, so the scan waits
+  // once for all of them rather than once per board.
+  const boards = await Promise.all(entries.sort().map(async (slug): Promise<BoardSummary | null> => {
     const manifest = await readManifest(dir, slug);
-    if (!manifest) continue;
+    if (!manifest) return null;
     const { title, description, sessions, public: isPublic, token } = manifest;
-    boards.push({ slug, title, description, sessions, public: isPublic, token, updatedAt: await updatedAt(dir, slug) });
-  }
-  return boards;
+    return { slug, title, description, sessions, public: isPublic, token, updatedAt: await updatedAt(dir, slug) };
+  }));
+  return boards.filter((board): board is BoardSummary => board !== null);
 }
 
 /** Containment, not normalization: the resolved realpath must sit inside the

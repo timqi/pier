@@ -799,6 +799,21 @@ describe("ManagedTools.status", () => {
     expect(binary?.error).toContain("installed outside Pier's bin");
   });
 
+  it("spawns ubix once for a burst of readers, and again after a sync", async () => {
+    const r = rig({ answer: () => ok(LIST_JSON) });
+    // One Console page is several settings reads, and every one of them asked
+    // for the catalog: the same document, one subprocess.
+    const [first, second] = await Promise.all([r.tools.status(["rtk"]), r.tools.status(["rtk"])]);
+    expect(second).toEqual(first);
+    expect(await r.tools.status(["rtk"])).toEqual(first);
+    expect(r.lines()).toEqual(["ubix list --json"]);
+    // A sync is the one thing that changes what `list` answers, so nothing it
+    // did may be read back off the memo.
+    await r.tools.sync(on());
+    await r.tools.status(["rtk"]);
+    expect(r.lines().filter((line) => line === "ubix list --json")).toHaveLength(3);
+  });
+
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {
     const r = rig({ answer: () => ({ code: 1, stdout: "", stderr: "state.toml is locked" }) });
     const [rtk] = await r.tools.status([]);
