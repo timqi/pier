@@ -304,6 +304,17 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX task_runs_callback_state ON task_runs(callback_state);
   CREATE INDEX task_messages_state ON task_messages(state);
   `,
+  // 16 — the same tick stops parsing every task document to find none due.
+  `
+  -- When a task is next due is the one field the scheduler asks about once a
+  -- second, and it lived only inside the JSON: answering meant reading and
+  -- parsing every definition, due or not. A generated column keeps the JSON
+  -- as the only record while giving the query planner a value it can index; a
+  -- disabled or archived task has no next run, so NULLs stay out of the index.
+  ALTER TABLE tasks ADD COLUMN next_run_at INTEGER
+    GENERATED ALWAYS AS (json_extract(json, '$.nextRunAt')) VIRTUAL;
+  CREATE INDEX tasks_due ON tasks(next_run_at) WHERE next_run_at IS NOT NULL;
+  `,
 ];
 
 /**

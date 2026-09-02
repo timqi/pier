@@ -241,7 +241,9 @@ export class TaskDefinitions {
   }
   claimDue(now: number): TaskDefinition[] {
     const due: TaskDefinition[] = [];
-    for (const task of this.store.listTasks()) {
+    // The store narrows to the tasks with a next run at or before `now`; the
+    // JSON is still the record, so its own fields decide.
+    for (const task of this.store.listDueTasks(now)) {
       if (!task.enabled || task.archived || task.nextRunAt === null || task.nextRunAt > now) continue;
       task.nextRunAt = nextRunAt(task.trigger, now);
       this.store.saveTask(task);

@@ -91,8 +91,7 @@ export class TaskMessenger {
    * `inject` dedupes on the recipient transcript, so a retry cannot double
    * deliver. Controls aimed at a finished run are dead and expire here. */
   retryUndelivered(now = Date.now()): void {
-    for (const message of this.store.listUndeliveredMessages()) {
-      const run = this.store.getRun(message.runId);
+    for (const { message, run } of this.store.listUndeliveredMessages()) {
       if (!run) continue;
       // Expiring a dead control is not a retry, so it ignores the backoff.
       if ((message.kind === "steer" || message.kind === "follow_up") && isTerminal(run.state)) {

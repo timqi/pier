@@ -49,6 +49,16 @@ export class TaskStore {
     `).run(task.id, task.updatedAt, JSON.stringify(task));
   }
 
+  /** The tick's whole question, asked of the index rather than of every
+   *  document: a task with no next run (disabled, archived, manual) is not in
+   *  it, so an idle second reads no row. */
+  listDueTasks(now: number): TaskDefinition[] {
+    return this.#many(
+      "SELECT json FROM tasks WHERE next_run_at IS NOT NULL AND next_run_at <= ?",
+      now,
+    );
+  }
+
   listRuns(taskId: string, limit = 50, offset = 0): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs WHERE task_id = ?
@@ -185,11 +195,20 @@ export class TaskStore {
     );
   }
 
-  /** Messages whose injection never landed: the delivery sweep retries these. */
-  listUndeliveredMessages(): TaskMessage[] {
-    return this.#many(
-      "SELECT json FROM task_messages WHERE state IN ('pending', 'failed') ORDER BY created_at",
-    );
+  /** Messages whose injection never landed, each beside the run it belongs to:
+   *  the delivery sweep needs both, and fetching the run per message made one
+   *  sweep cost a query per undelivered message. A message whose run is gone
+   *  comes back with `run: undefined` — the sweep drops it. */
+  listUndeliveredMessages(): { message: TaskMessage; run: TaskRun | undefined }[] {
+    const rows = this.sql(`
+      SELECT m.json AS json, r.json AS run_json
+      FROM task_messages m LEFT JOIN task_runs r ON r.id = m.run_id
+      WHERE m.state IN ('pending', 'failed') ORDER BY m.created_at
+    `).all() as unknown as { json: string; run_json: string | null }[];
+    return rows.map((row) => ({
+      message: JSON.parse(row.json) as TaskMessage,
+      run: row.run_json === null ? undefined : JSON.parse(row.run_json) as TaskRun,
+    }));
   }
 
   /** Decisions are excluded: they have no timeout and stay answerable across

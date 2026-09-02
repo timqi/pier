@@ -37,7 +37,7 @@ const indexes = (db: DatabaseSync): string[] =>
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(15);
+    expect(version(db)).toBe(16);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -83,7 +83,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(15);
+    expect(version(second)).toBe(16);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -96,7 +96,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 15/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 16/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -278,12 +278,13 @@ describe("openDb", () => {
     const before = openDb(path);
     before.exec(
       "DROP INDEX task_runs_callback_state; DROP INDEX task_messages_state;" +
+        " DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
         " PRAGMA user_version = 14",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(15);
+    expect(version(db)).toBe(16);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -297,6 +298,47 @@ describe("openDb", () => {
           .all(),
       ),
     ).toContain("task_runs_callback_state");
+    db.close();
+  });
+
+  it("carries every task's next run into a column an older database never had", () => {
+    const path = dbPath();
+    const before = openDb(path);
+    before.exec(
+      "DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
+        " PRAGMA user_version = 15",
+    );
+    // Three rows the upgrade has to tell apart: one due, two that never are.
+    before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
+      .run("t1", 1, JSON.stringify({ id: "t1", nextRunAt: 5000 }));
+    before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
+      .run("t2", 1, JSON.stringify({ id: "t2", nextRunAt: null }));
+    before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
+      .run("t3", 1, JSON.stringify({ id: "t3" }));
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(16);
+    expect(
+      db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
+    ).toEqual([
+      { id: "t1", next_run_at: 5000 },
+      { id: "t2", next_run_at: null },
+      { id: "t3", next_run_at: null },
+    ]);
+    db.prepare("UPDATE tasks SET json = ? WHERE id = 't1'")
+      .run(JSON.stringify({ id: "t1", nextRunAt: 7000 }));
+    expect(db.prepare("SELECT next_run_at FROM tasks WHERE id = 't1'").get())
+      .toEqual({ next_run_at: 7000 });
+    // The tick's query, and the point of the column: the index answers it.
+    expect(
+      JSON.stringify(
+        db.prepare(
+          "EXPLAIN QUERY PLAN SELECT json FROM tasks" +
+            " WHERE next_run_at IS NOT NULL AND next_run_at <= 6000",
+        ).all(),
+      ),
+    ).toContain("tasks_due");
     db.close();
   });
 
