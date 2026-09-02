@@ -40,12 +40,36 @@ describe("EventHub", () => {
     expect(hub.replay("s", 3).map((e) => e.seq)).toEqual([4, 5]);
   });
 
-  it("ring buffer drops oldest beyond 1000", () => {
+  it("ring buffer drops oldest beyond 1000, oldest first, still filtered by seq", () => {
     const hub = new EventHub();
     for (let i = 0; i < 1005; i++) hub.emit("s", { type: "turn-start" });
     const events = hub.replay("s", 0);
     expect(events).toHaveLength(1000);
     expect(events[0]?.seq).toBe(6);
+    expect(events.at(-1)?.seq).toBe(1005);
+    expect(events.every((e, i) => i === 0 || e.seq === events[i - 1]!.seq + 1)).toBe(true);
+    // A wrapped ring still answers `seq > after`, and an id older than the
+    // ring gets what is left rather than nothing.
+    expect(hub.replay("s", 1003).map((e) => e.seq)).toEqual([1004, 1005]);
+    expect(hub.replay("s", 2)[0]?.seq).toBe(6);
+    expect(hub.replay("s", 1005)).toEqual([]);
+  });
+
+  it("text deltas fan out live but never enter the ring", () => {
+    // A long reply is thousands of deltas: buffering them would evict the
+    // turn-start/tool/turn-end events a reconnecting client replays for.
+    const hub = new EventHub();
+    const seen: string[] = [];
+    hub.subscribe("s", (e) => seen.push(e.type));
+    hub.emit("s", { type: "turn-start" });
+    for (let i = 0; i < 2000; i++) hub.emit("s", { type: "text-delta", text: "x" });
+    hub.emit("s", { type: "thinking-delta", text: "h" });
+    hub.emit("s", { type: "turn-end", text: "xxx" });
+    expect(seen).toHaveLength(2003); // every one of them was delivered live
+    // Thinking must survive a native EventSource reconnect: it does not reload
+    // the transcript snapshot, and turn-end only restores the final text.
+    expect(hub.replay("s", 0).map((e) => e.seq)).toEqual([1, 2002, 2003]);
+    expect(hub.lastSeq("s")).toBe(2003); // deltas still take their number
   });
 
   it("fans workspace events out to every client", () => {

@@ -199,7 +199,8 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   add options.
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
-  fan-out to subscribers. No persistence — pi's session files are the durable
+  fan-out to subscribers. Text deltas are fanned out but not buffered — they
+  would be the only thing in the ring, and `turn-end` carries the turn's full text. No persistence — pi's session files are the durable
   record. Pi's `queue_update` is translated to a `queue-state` event at the
   seam (`agent/events.ts`), so surfaces can show what is waiting.
 - **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory.

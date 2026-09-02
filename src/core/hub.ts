@@ -21,7 +21,7 @@ function fanOut<E>(subscribers: Iterable<(e: E) => void>, event: E): void {
 
 interface SessionBus {
   seq: number;
-  buffer: SessionEvent[]; // ring, oldest first; emptied once nobody watches
+  buffer: SessionEvent[]; // ring of replayable events, oldest first; emptied once nobody watches
   subscribers: Set<(e: SessionEvent) => void>;
 }
 
@@ -48,8 +48,17 @@ export class EventHub {
       sessionId,
       ...payload,
     };
-    b.buffer.push(event);
-    if (b.buffer.length > RING_SIZE) b.buffer.shift();
+    // Text deltas fan out live but never enter the ring: one long reply emits
+    // thousands of them, so a ring that held them would hold *only* them and
+    // would have evicted the turn-start, tool and turn-end events a
+    // reconnecting client replays for. The text is not lost — `turn-end`
+    // carries the full reply (web/ui/chat.ts treats it as authoritative).
+    // Thinking stays replayable because a native EventSource reconnect does
+    // not reload the transcript snapshot that would otherwise restore it.
+    if (payload.type !== "text-delta") {
+      b.buffer.push(event);
+      if (b.buffer.length > RING_SIZE) b.buffer.shift();
+    }
     fanOut(b.subscribers, event);
   }
 
@@ -59,7 +68,8 @@ export class EventHub {
     return () => b.subscribers.delete(fn);
   }
 
-  /** Events with seq > afterSeq still held in the ring buffer. */
+  /** Events with seq > afterSeq still held in the ring buffer — oldest first,
+   *  and without text deltas, which are live-only. */
   replay(sessionId: string, afterSeq: number): SessionEvent[] {
     return this.bus(sessionId).buffer.filter((e) => e.seq > afterSeq);
   }

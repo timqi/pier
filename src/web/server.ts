@@ -25,6 +25,7 @@ import type {
   ConfigStore,
   InboundMessage,
   ProviderManager,
+  SessionEvent,
   SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
@@ -106,8 +107,30 @@ export interface WebDeps {
 }
 
 const HEARTBEAT_MS = 15_000;
+/** A reader that stopped reading must not queue frames without bound. Past
+ *  this much frame text in flight the stream is dropped with a line in the
+ *  log; EventSource reconnects and replays from its Last-Event-ID. */
+const SSE_HIGH_WATER = 4 * 1024 * 1024;
 // Canonical base64 only: Buffer.from(.., "base64") happily "decodes" garbage.
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** The SSE frame for one event, built once and shared by every stream watching
+ *  that session — three open tabs used to stringify the same delta three
+ *  times. One slot is the whole cache: the hub fans an event out to its
+ *  subscribers in one synchronous loop, so the reuse is always of the event
+ *  just built, and the memo is keyed on identity so a miss only costs a
+ *  rebuild. The hub stays transport-blind; this is the transport's business.
+ *  Byte-identical to hono's `writeSSE`: JSON has no raw newline, so `data` is
+ *  one line. */
+let lastEvent: SessionEvent | null = null;
+let lastFrame = "";
+const sseFrame = (e: SessionEvent): string => {
+  if (e !== lastEvent) {
+    lastEvent = e;
+    lastFrame = `data: ${JSON.stringify(e)}\nid: ${e.seq}\n\n`;
+  }
+  return lastFrame;
+};
 
 export function createServer(
   {
@@ -597,12 +620,30 @@ export function createServer(
       Number(c.req.query("after") ?? "") ||
       0;
     return streamSSE(c, async (stream) => {
-      const send = (e: { seq: number }) =>
-        stream.writeSSE({ id: String(e.seq), data: JSON.stringify(e) });
-      for (const e of hub.replay(id, lastId)) await send(e);
-      // Same as above: the client may be gone by the time an event fires.
-      const unsubscribe = hub.subscribe(id, (e) => void send(e).catch(() => {}));
+      let queued = 0; // frame chars written but not yet drained by the reader
+      const send = (frame: string): void => {
+        if (stream.aborted || stream.closed) return;
+        if (queued > SSE_HIGH_WATER) {
+          log.warn(`dropping slow event client for ${id} — ${queued} chars queued`);
+          stream.abort(); // unsubscribes; the client reconnects and replays
+          return;
+        }
+        queued += frame.length;
+        void stream
+          .write(frame)
+          .catch((err: unknown) => log.warn(`event write for ${id} failed: ${String(err)}`))
+          .finally(() => (queued -= frame.length));
+      };
+      // Subscribe before the replay write can wait on its reader: an event that
+      // arrives while that write is backpressured must queue behind it, not fall
+      // between replay() and subscribe(). Both snapshots happen synchronously,
+      // so live writes cannot overtake the replay write.
+      const unsubscribe = hub.subscribe(id, (e) => send(sseFrame(e)));
       stream.onAbort(unsubscribe);
+      // One write for the whole replay: a reconnect after a busy turn used to
+      // cost an await per event before the client saw any of them.
+      const missed = hub.replay(id, lastId);
+      if (missed.length) await stream.write(missed.map(sseFrame).join(""));
       // Heartbeat keeps proxies from closing the stream; loop ends on abort.
       while (!stream.aborted) {
         await stream.sleep(HEARTBEAT_MS);

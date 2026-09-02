@@ -2022,23 +2022,57 @@ describe("workbench server", () => {
     expect(session.calls).toContain("abort");
   });
 
-  it("SSE replays buffered events after Last-Event-ID", async () => {
+  it("SSE replays buffered events after Last-Event-ID, in one write", async () => {
     const { app, hub } = setup();
     hub.emit("s1", { type: "turn-start" });
-    hub.emit("s1", { type: "text-delta", text: "a" });
-    hub.emit("s1", { type: "state", state: "idle" });
+    hub.emit("s1", { type: "text-delta", text: "a" }); // live-only, never replayed
+    hub.emit("s1", { type: "thinking-delta", text: "considering" });
+    hub.emit("s1", { type: "state", state: "streaming" });
+    hub.emit("s1", { type: "turn-end", text: "a" });
 
     const res = await app.request("/api/sessions/s1/events", {
       headers: { "Last-Event-ID": "1" },
     });
     expect(res.headers.get("content-type")).toContain("text/event-stream");
+    // The replay write is waiting on this unread body, but the live subscription
+    // must already exist or an event in this interval disappears.
+    expect(hub.hasSubscribers("s1")).toBe(true);
+    hub.emit("s1", { type: "state", state: "idle" });
     const reader = res.body!.getReader();
-    const { value } = await reader.read();
-    const chunk = new TextDecoder().decode(value);
+    const replay = new TextDecoder().decode((await reader.read()).value);
+    const live = new TextDecoder().decode((await reader.read()).value);
     await reader.cancel();
-    expect(chunk).toContain('"seq":2');
-    expect(chunk).toContain('"text-delta"');
-    expect(chunk).not.toContain('"seq":1,');
+    // One read carries the whole replay: the frames were joined into a single
+    // write instead of one await per event, and the later live frame follows it.
+    expect(replay).toContain('"seq":4');
+    expect(replay).toContain('"seq":5');
+    expect(replay).toContain("id: 5\n\n");
+    expect(replay).not.toContain('"seq":1,');
+    expect(replay).not.toContain('"seq":6');
+    expect(live).toContain('"seq":6');
+    // The client rebuilds the text from turn-end, so the delta is not missed.
+    expect(replay).not.toContain('"text-delta"');
+    expect(replay).toContain('"thinking-delta"');
+  });
+
+  it("drops a reader that stopped reading instead of queueing without bound", async () => {
+    // Nobody consumes the body: every write stays queued, and without a
+    // ceiling one stalled tab would hold a turn's worth of events in memory.
+    // The reason goes to the log, which the suite runs silent (vitest.config).
+    const { app, hub } = setup();
+    const res = await app.request("/api/sessions/s1/events");
+    expect(hub.hasSubscribers("s1")).toBe(true);
+    const big = "x".repeat(64 * 1024);
+    let emitted = 0;
+    while (hub.hasSubscribers("s1") && emitted < 500) {
+      hub.emit("s1", { type: "tool-end", toolCallId: "t", isError: false, output: big });
+      emitted++;
+      await Promise.resolve();
+    }
+    // Dropped once past the ceiling, well before 500 x 64KB could queue up.
+    expect(hub.hasSubscribers("s1")).toBe(false);
+    expect(emitted).toBeLessThan(200);
+    await res.body!.cancel().catch(() => {});
   });
 });
 

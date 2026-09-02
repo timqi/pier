@@ -35,7 +35,7 @@ catch, not the line count.
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
-| `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history), then live. Heartbeat comment every 15s. |
+| `GET /api/sessions/:id/events` | SSE. `id:` = event `seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `lastSeq` from history) in one write, then live. Text deltas are live-only — a reconnect mid-turn gets the text back from `turn-end`; thinking remains replayable because reconnect does not reload the transcript snapshot. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
 
 The other route owners, each a file with one reason to exist — the routes
