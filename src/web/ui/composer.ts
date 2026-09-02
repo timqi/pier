@@ -20,6 +20,8 @@ interface PendingFile {
 /** Everything the composer needs from the orchestrator (main.ts). */
 export interface ComposerDeps {
   sessionId: () => string | null;
+  /** A session is being opened and has no id yet: there is nowhere to send. */
+  starting: () => boolean;
   sessionState: () => SessionState;
   chatVisible: () => boolean;
   setState: (state: SessionState) => void;
@@ -31,7 +33,7 @@ let deps: ComposerDeps;
 
 const composer = $<HTMLFormElement>("#composer");
 const input = $<HTMLTextAreaElement>("#input");
-const sendBtn = $("#send");
+const sendBtn = $<HTMLButtonElement>("#send");
 const sendPlane = $("#send-plane");
 const sendQueue = $("#send-queue");
 const stopBtn = $("#stop");
@@ -104,12 +106,22 @@ export function clearOptimistic(): void {
  *  queues; the queue panel offers Send now / Abort & send). */
 export function updateComposer(): void {
   const streaming = deps.sessionState() === "streaming";
-  sendBtn.className = `flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg ${
-    streaming
-      ? "bg-amber-100 text-amber-700 hover:bg-amber-200 active:bg-amber-300"
-      : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50"
+  // No id, nothing to send to: send() would drop the prompt on the floor, so
+  // the button says so before it is pressed rather than after.
+  const ready = deps.sessionId() !== null;
+  const starting = deps.starting();
+  sendBtn.disabled = !ready;
+  sendBtn.className = `flex h-7 w-7 flex-none items-center justify-center rounded-lg ${
+    !ready
+      ? "cursor-default bg-neutral-100 text-neutral-400"
+      : streaming
+        ? "cursor-pointer bg-amber-100 text-amber-700 hover:bg-amber-200 active:bg-amber-300"
+        : "cursor-pointer bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50"
   }`;
-  sendBtn.title = streaming ? "Queue — delivered when the turn ends" : "Send";
+  sendBtn.title = !ready
+    ? (starting ? "Starting the session…" : "No session")
+    : streaming ? "Queue — delivered when the turn ends" : "Send";
+  input.placeholder = starting ? "Starting the session…" : "Message…";
   sendPlane.classList.toggle("hidden", streaming);
   sendQueue.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("hidden", !streaming);

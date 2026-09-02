@@ -146,6 +146,17 @@ function renderSessionMeta(): void {
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
   const items: HTMLElement[] = [];
+  // Opening a session in Pi is a round trip, and during it the meta row has no
+  // id and no chips to draw — which reads exactly like a session sitting idle.
+  // It says which one it is instead, and the chips replace it on arrival.
+  if (!id && pending) {
+    items.push(h(
+      "span",
+      "flex flex-none items-center gap-1.5 text-neutral-500",
+      h("span", "spinner"),
+      "starting…",
+    ));
+  }
   if (id) {
     const pickerButton = (text: string, cls: string): HTMLElement => {
       const button = h("button", `flex-none cursor-pointer font-mono ${cls}`, text);

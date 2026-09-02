@@ -112,6 +112,9 @@ let currentState: SessionState = "idle";
 let source: EventSource | null = null;
 let lastSeq = 0;
 let turnOpen = false;
+// A session posted to Pi whose id hasn't come back: the pane is already its
+// own (createSession), so the header and the composer say it isn't ready yet.
+let starting = false;
 
 // --- sessions --------------------------------------------------------------------
 
@@ -129,10 +132,14 @@ async function createSession(cwd: string): Promise<void> {
   resetHeaderState();
   setHeaderPending(cwd);
   chatLoading(true);
+  starting = true;
+  updateComposer();
   const res = await sendJson("/api/sessions", { cwd });
+  starting = false;
   if (!res.ok) {
     chatLoading(false);
     setHeaderPending(null);
+    updateComposer();
     appendTurn("error", `session create failed: ${res.status}`);
     return;
   }
@@ -440,6 +447,7 @@ initChat({
 });
 initComposer({
   sessionId: () => currentId,
+  starting: () => starting,
   sessionState: () => currentState,
   chatVisible: isChatVisible,
   setState,
