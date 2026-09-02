@@ -666,6 +666,11 @@ export function createServer(
   // at /login learns neither. Read once: neither can change under a process.
   const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
   let shell: string | null = null;
+  // The one file the precompressed siblings below cannot cover: this route
+  // answers from the patched string, not from disk, and it is re-fetched on
+  // every navigation because it may not be cached. Exact path, like the two
+  // API routes above — never the SSE streams.
+  app.use("/", compress());
   app.get("/", async (c, next) => {
     // A release replaces hashed assets. Revalidate the shell on every
     // navigation so a cached index cannot name bundles that no longer exist.
@@ -699,6 +704,16 @@ export function createServer(
     c.header("cache-control", "private, max-age=31536000, immutable");
     await next();
   });
-  app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || "." }));
+  // `precompressed` looks for a `.br`/`.gz` sibling of the file it is about to
+  // serve and hands that over when the request accepts the encoding; the build
+  // writes them (vite.config.ts). Without it the 325 kB bundle, the 87 kB
+  // stylesheet and the 636 kB terminal emulator all go out verbatim.
+  // serveStatic only sets Vary when it selects a sibling. Identity must carry
+  // it too, or a cache can reuse that response for a later Brotli request.
+  app.use("/*", async (c, next) => {
+    await next();
+    c.header("Vary", "Accept-Encoding");
+  });
+  app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || ".", precompressed: true }));
   return app;
 }

@@ -1,4 +1,7 @@
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { join, resolve } from "node:path";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
 
@@ -22,9 +25,48 @@ const chunkBudget = (): Plugin => ({
   },
 });
 
+// The bundle is immutable once built, so its compressed form is too: write
+// the `.br`/`.gz` siblings here and serveStatic hands them out per
+// Accept-Encoding (`precompressed`, src/web/server.ts). Streaming the same
+// 325 kB through an encoder on every request would spend CPU per client to
+// arrive at the identical bytes — and at a worse ratio, since a request-time
+// encoder cannot afford brotli's maximum quality. The icons and any font stay
+// out: they are compressed already and would only grow.
+const COMPRESSIBLE = /\.(?:js|css|html|svg|json|webmanifest)$/;
+// Under a packet the encodings buy nothing and only add files to stat; the
+// empty vite shim chunk is the case in point.
+const MIN_BYTES = 1024;
+
+const precompress = (): Plugin => {
+  let outDir = "";
+  return {
+    name: "pier:precompress",
+    apply: "build",
+    configResolved(config) {
+      // `outDir` stays as written in the config, i.e. relative to `root`.
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    // closeBundle, not generateBundle: publicDir (sw.js, the manifest, the
+    // icons) is copied after the chunks are written, and it is served from the
+    // same root by the same handler.
+    async closeBundle() {
+      for (const entry of await readdir(outDir, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile() || !COMPRESSIBLE.test(entry.name)) continue;
+        const file = join(entry.parentPath, entry.name);
+        const bytes = await readFile(file);
+        if (bytes.length < MIN_BYTES) continue;
+        await Promise.all([
+          writeFile(`${file}.br`, brotliCompressSync(bytes)),
+          writeFile(`${file}.gz`, gzipSync(bytes, { level: 9 })),
+        ]);
+      }
+    },
+  };
+};
+
 export default defineConfig({
   root: "src/web/ui",
-  plugins: [tailwindcss(), chunkBudget()],
+  plugins: [tailwindcss(), chunkBudget(), precompress()],
   define: { __PIER_VERSION__: JSON.stringify(version) },
   build: {
     outDir: "../public",
