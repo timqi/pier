@@ -4,11 +4,15 @@
 // Plus the one rule that decides which copy of a bundled extension runs.
 
 import { describe, expect, it, vi } from "vitest";
+import type { SessionEventPayload } from "../core/types.js";
+import type { PiEvent, PiMessage } from "./events.js";
 import { PiSession, standDownShadowed, standDownUndocumented } from "./pi.js";
 
 /** Only what PiSession touches on these paths. */
 function fakePi() {
   const calls: string[] = [];
+  /** Pi's own subscribers, so a test can be the Pi session emitting an event. */
+  const listeners = new Set<(event: PiEvent) => void>();
   /** What each prompt was queued as, kept apart from `calls` so the ordering
    *  assertions elsewhere stay about ordering. */
   const promptOptions: unknown[] = [];
@@ -17,6 +21,9 @@ function fakePi() {
   return {
     calls,
     promptOptions,
+    emit: (event: PiEvent) => {
+      for (const fn of listeners) fn(event);
+    },
     finishCompaction: (err?: Error) => {
       release?.(err);
       release = undefined;
@@ -24,7 +31,11 @@ function fakePi() {
     pi: {
       sessionId: "s1",
       isStreaming: false,
-      messages: [] as { role: string; content: unknown }[],
+      messages: [] as PiMessage[],
+      subscribe(fn: (event: PiEvent) => void) {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
       // Pi's manager, as far as a rename is concerned: one append, and the
       // latest name is what it reads back.
       sessionManager: {
@@ -231,6 +242,71 @@ describe("a session that is compacting", () => {
     const retry = s.compact();
     fake.finishCompaction();
     await retry;
+  });
+});
+
+describe("a turn the provider never answered", () => {
+  const outage = '503 {"error":{"message":"Upstream service overloaded"},"type":"error"}';
+  /** What Pi records for an attempt that never reached the model: an assistant
+   *  message with no content at all, and the reason on the side. */
+  const stopped = (): PiMessage => ({
+    role: "assistant",
+    content: [],
+    stopReason: "error",
+    errorMessage: outage,
+    timestamp: 1,
+  });
+
+  it("crosses the seam as a failure carrying the provider's words", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    const final = stopped();
+    fake.pi.messages.push(final);
+    fake.emit({ type: "agent_end", messages: [final] });
+    // An empty turn-end alone is what every surface reads as "said nothing";
+    // the error is on the turn *and* delivered, so neither can miss it.
+    expect(seen).toMatchObject([
+      { type: "turn-end", text: "", error: outage },
+      { type: "error", message: outage },
+      { type: "state", state: "idle" },
+    ]);
+  });
+
+  it("ends exactly once after Pi's retries are exhausted", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    const final = stopped();
+    fake.pi.messages.push(final);
+    // Pi retried this one four times in a row on a real outage. Each attempt
+    // ends an agent run of its own; only the last of them ended the turn.
+    fake.emit({ type: "agent_end", willRetry: true, messages: [final] });
+    expect(seen).toEqual([]);
+    fake.emit({ type: "agent_end", willRetry: false, messages: [final] });
+    expect(seen).toMatchObject([
+      { type: "turn-end", text: "", error: outage },
+      { type: "error", message: outage },
+      { type: "state", state: "idle" },
+    ]);
+  });
+
+  it("settles as aborted when retry backoff is cancelled", () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    const attempt = stopped();
+    fake.pi.messages.push(attempt);
+    fake.emit({ type: "agent_end", willRetry: true, messages: [attempt] });
+    fake.emit({ type: "auto_retry_end" });
+    fake.emit({ type: "agent_settled" });
+    expect(seen).toMatchObject([
+      { type: "turn-end", text: "" },
+      { type: "state", state: "idle" },
+    ]);
   });
 });
 

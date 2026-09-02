@@ -387,8 +387,18 @@ export class PiSession implements AgentSession {
   }
 
   subscribe(fn: (e: SessionEventPayload) => void): () => void {
+    let retryPending = false;
     return this.pi.subscribe((event) => {
-      for (const payload of toSessionEvents(event as PiEvent)) {
+      const piEvent = event as PiEvent;
+      if (piEvent.type === "agent_end") retryPending = piEvent.willRetry === true;
+      if (piEvent.type === "agent_settled" && retryPending) {
+        // Aborting Pi during retry backoff produces no final agent_end.
+        retryPending = false;
+        fn({ type: "turn-end", text: "", meta: this.lastTurnMeta() });
+        fn({ type: "state", state: "idle" });
+        return;
+      }
+      for (const payload of toSessionEvents(piEvent)) {
         fn(payload.type === "turn-end" ? { ...payload, meta: this.lastTurnMeta() } : payload);
       }
     });

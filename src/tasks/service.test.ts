@@ -35,6 +35,7 @@ function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
   prompts: string[];
   systemInputs: { text: string; origin: SystemInputOrigin; mode: "prompt" | "steer" | "followUp" }[];
   setState(state: SessionState): void;
+  emit(event: SessionEventPayload): void;
 } {
   let state: SessionState = "idle";
   const listeners = new Set<(event: SessionEventPayload) => void>();
@@ -60,6 +61,11 @@ function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
     setState(next) {
       state = next;
       listeners.forEach((fn) => fn({ type: "state", state: next }));
+    },
+    /** For the turns this fake does not run itself — the ones that end on
+     *  something other than an answer. */
+    emit(event) {
+      listeners.forEach((fn) => fn(event));
     },
     model,
     thinkingLevel: "off" as ThinkingLevel,
@@ -89,6 +95,21 @@ function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     dispose: async () => {},
   };
+}
+
+/** A session whose turn ends the way a provider outage ends one: no text, and
+ *  the reason on the turn (what agent/events.ts emits for an assistant message
+ *  that stopped with `stopReason: "error"`). */
+function outageSession(id: string, error: string): ReturnType<typeof fakeSession> {
+  const session = fakeSession(id);
+  session.systemInput = async (text, origin, mode) => {
+    session.systemInputs.push({ text, origin, mode });
+    session.setState("streaming");
+    await Promise.resolve();
+    session.emit({ type: "turn-end", text: "", error });
+    session.setState("idle");
+  };
+  return session;
 }
 
 /** A session whose turn never ends until it is aborted — for cancel paths. */
@@ -1051,6 +1072,28 @@ describe("task service", () => {
     const probeRun = await service.waitForRun(service.run(broken.id).id);
     expect(probeRun.state).toBe("failed");
     expect(probeRun.error).toContain("watch probe exited 2");
+  });
+
+  it("fails a run whose turn died on the provider, instead of reporting 'no reply'", async () => {
+    const outage = '503 {"error":{"message":"Upstream service overloaded"},"type":"error"}';
+    const { service, session } = setup(outageSession("s1", outage));
+    const task = await service.create({
+      name: "review",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "Review the PR" },
+    });
+    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
+    const run = await service.waitForRun(queued.runId);
+    // "succeeded" with "no reply" is the same answer as an agent that chose to
+    // stay silent — the caller cannot tell an outage from a decision (§5b).
+    expect(run.state).toBe("failed");
+    expect(run.error).toContain("Upstream service overloaded");
+    expect(run.result).toBeNull();
+
+    // And the agent that delegated it is told, in the words the provider used.
+    await vi.waitFor(() => expect(service.getRun(run.id).callbackState).toBe("delivered"));
+    expect(session.systemInputs.at(-1)?.text).toContain("state: failed");
+    expect(session.systemInputs.at(-1)?.text).toContain("Upstream service overloaded");
   });
 
   it("runs paused tasks on demand and lists a task's run history", async () => {

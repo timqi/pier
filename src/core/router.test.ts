@@ -169,12 +169,18 @@ describe("channel fan-out", () => {
   });
 
   it("tells the conversation when the session itself reports an error", async () => {
-    const { channel, notes } = fakeChannel("telegram");
+    const { channel, notes, sent } = fakeChannel("telegram");
     router.registerChannel(channel);
     await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "", error: "tool exploded" });
     fake.emit({ type: "error", message: "tool exploded" });
     await new Promise((r) => setTimeout(r, 0));
-    // Otherwise the eyes come off with no reply and nothing says why.
+    // The turn settles without leaking its error into the reply body; the
+    // paired error event is the conversation's one failure notification.
+    expect(sent).toEqual([[
+      KEY.conversationId,
+      { text: "", suggestions: [], meta: undefined },
+    ]]);
     expect(notes).toEqual([[KEY.conversationId, {
       text: "tool exploded",
       origin: { kind: "error" },

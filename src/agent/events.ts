@@ -55,6 +55,8 @@ export interface PiEvent {
   errorMessage?: string;
   steering?: readonly string[];
   followUp?: readonly string[];
+  // agent_end: Pi's own auto-retry will continue this turn.
+  willRetry?: boolean;
 }
 
 export function textOf(content: string | TextPart[] | undefined): string {
@@ -243,13 +245,23 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
     case "agent_start":
       return [{ type: "state", state: "streaming" }, { type: "turn-start" }];
     case "agent_end": {
+      // Pi retries a retryable provider error itself and emits one agent_end
+      // per attempt. Only the last one ends the turn: translating the others
+      // posts a reply and an error per attempt for a failure Pi is still
+      // recovering from, and an `idle` the session is not in.
+      if (e.willRetry) return [];
       const final = lastAssistant(e.messages);
+      // A turn can end without the model ever answering. Carried twice on
+      // purpose: on turn-end because it is *how this turn ended*, which is what
+      // a task run settles on (tasks/agent.ts), and as the error event that is
+      // already every chat surface's failure path (core/router.ts).
+      const failure = final?.stopReason === "error"
+        ? final.errorMessage || "unknown agent error"
+        : undefined;
       const out: SessionEventPayload[] = [
-        { type: "turn-end", text: textOf(final?.content) },
+        { type: "turn-end", text: textOf(final?.content), ...(failure ? { error: failure } : {}) },
       ];
-      if (final?.stopReason === "error") {
-        out.push({ type: "error", message: final.errorMessage ?? "unknown agent error" });
-      }
+      if (failure) out.push({ type: "error", message: failure });
       out.push({ type: "state", state: "idle" });
       return out;
     }

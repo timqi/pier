@@ -135,7 +135,10 @@ export type SessionEventPayload =
   | { type: "thinking-delta"; text: string }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-end"; toolCallId: string; isError: boolean; output: string }
-  | { type: "turn-end"; text: string; meta?: TurnMeta } // full assistant text of the turn
+  // Full assistant text of the turn, plus how the turn ended: `error` is set
+  // when the last assistant message stopped on a provider failure, so a turn
+  // with nothing to say is never mistaken for one that chose to say nothing.
+  | { type: "turn-end"; text: string; meta?: TurnMeta; error?: string }
   // The context was summarized away and replaced by that summary: the token
   // counts either side of it. Not a `system-input` — nothing entered the
   // model's context, the opposite happened — and the only trace compaction

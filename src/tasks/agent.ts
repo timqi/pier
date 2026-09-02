@@ -82,8 +82,17 @@ export class AgentTaskRunner {
         run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
         let text = "";
+        // Not only what the turn said but how it ended: a provider outage ends
+        // it with an empty reply, and a run that settles on that reports "no
+        // reply" — the one wording for a turn that *chose* to say nothing, so
+        // the outage arrives at the caller looking like an answer (§5b). Pi has
+        // already retried by the time this lands; the run only reports.
+        let failure: string | undefined;
         const unsubscribe = session.subscribe((event) => {
-          if (event.type === "turn-end") text = event.text;
+          if (event.type === "turn-end") {
+            text = event.text;
+            failure = event.error;
+          }
         });
         // The race below also settles this attempt if Pi ignores the abort:
         // a hung turn must not hold one of the 4 slots (and its waiters)
@@ -115,6 +124,10 @@ export class AgentTaskRunner {
           this.messages.deliverPendingControls(run);
           await Promise.race([turn, abortedTurn]);
           if (signal.aborted) throw new Error("cancelled");
+          // Before the fallback below: on a reused session that reads the
+          // *previous* turn's answer back out of history and reports it as
+          // this run's result.
+          if (failure) throw new Error(failure);
           if (!text) {
             const history = await session.history();
             text = [...history].reverse().find((turn) => turn.role === "assistant")?.text ?? "";

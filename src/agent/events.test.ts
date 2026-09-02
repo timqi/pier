@@ -28,7 +28,7 @@ describe("toSessionEvents", () => {
       ],
     },
     {
-      name: "agent_end with error stopReason adds error event",
+      name: "agent_end with error stopReason ends the turn *as* the failure",
       input: {
         type: "agent_end",
         messages: [
@@ -36,10 +36,37 @@ describe("toSessionEvents", () => {
         ],
       },
       expected: [
-        { type: "turn-end", text: "" },
+        // On the turn (what a task run settles on) and as the error event
+        // (what a chat surface reports) — never as a turn that said nothing.
+        { type: "turn-end", text: "", error: "boom" },
         { type: "error", message: "boom" },
         { type: "state", state: "idle" },
       ],
+    },
+    {
+      name: "agent_end with an empty provider error still names the failure",
+      input: {
+        type: "agent_end",
+        messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "" }],
+      },
+      expected: [
+        { type: "turn-end", text: "", error: "unknown agent error" },
+        { type: "error", message: "unknown agent error" },
+        { type: "state", state: "idle" },
+      ],
+    },
+    {
+      // Pi emits one agent_end per attempt. Reported, four 503s would be four
+      // "no reply" turns and four errors for one turn that has not ended.
+      name: "agent_end Pi is about to retry is not the end of anything",
+      input: {
+        type: "agent_end",
+        willRetry: true,
+        messages: [
+          { role: "assistant", content: [], stopReason: "error", errorMessage: "503 overloaded" },
+        ],
+      },
+      expected: [],
     },
     {
       name: "text_delta → text-delta",
