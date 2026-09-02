@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cjkFriendly, compact, formatTurnMeta, silentReason, splitReply, surfacePrompt } from "./reply.js";
+import { cjkFriendly, compact, formatTurnMeta, silentReason, splitReply, stableBlockEnd, streamBody, surfacePrompt } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -172,5 +172,96 @@ describe("the instance facts in the surface prompt", () => {
     const prompt = surfacePrompt({ boardsDir: "/home/q/.pier/boards", publicUrl: "" });
     expect(prompt).toContain("No public address is configured");
     expect(prompt).not.toContain("http");
+  });
+});
+
+describe("the stable block boundary a streaming render keeps", () => {
+  /** Replay `md` as a stream, collecting the prefixes that went stable. */
+  function stream(md: string, step = 7): { chunks: string[]; tail: string } {
+    let stable = 0;
+    const chunks: string[] = [];
+    for (let n = step; n <= md.length; n += step) {
+      const cut = stableBlockEnd(md.slice(0, n), stable);
+      if (cut > stable) {
+        chunks.push(md.slice(stable, cut));
+        stable = cut;
+      }
+    }
+    return { chunks, tail: md.slice(stable) };
+  }
+
+  it("does not cut on a blank line inside a code fence", () => {
+    const md = "```js\nconst a = 1;\n\nconst b = 2;\n```\n\nafter the block\nmore\n";
+    // The only boundary is the blank line after the closing fence.
+    expect(stableBlockEnd(md)).toBe(md.indexOf("after the block"));
+    for (const chunk of stream(md).chunks) {
+      expect((chunk.match(/```/g) ?? []).length % 2).toBe(0);
+    }
+  });
+
+  it("does not cut a four-backtick fence on the triple fence it quotes", () => {
+    const md = "````\n```\nx\n\ny\n```\n````\n\ntail\nmore\n";
+    expect(stableBlockEnd(md)).toBe(md.indexOf("tail"));
+  });
+
+  it("does not cut tilde fences or close a fence on a code line", () => {
+    for (const md of ["~~~js\na\n\nb\n~~~\n\ntail\n", "```js\na\n```not a close\n\nb\n```\n\ntail\n"]) {
+      expect(stream(md, 1).chunks[0]).toBe(md.slice(0, md.indexOf("tail")));
+    }
+  });
+
+  it("does not keep DOM from inside a silent block", () => {
+    const open = "before\n\n<silent>private\n\nreason\n";
+    expect(stableBlockEnd(open)).toBe(open.indexOf("<silent>"));
+    const md = `${open}</silent>\n\nafter\n`;
+    for (const chunk of stream(md, 1).chunks) {
+      expect((chunk.match(/<silent>/gi) ?? []).length).toBe((chunk.match(/<\/silent>/gi) ?? []).length);
+    }
+    const fenced = "```\n<silent> is code\n```\n\nafter\n";
+    expect(stableBlockEnd(fenced)).toBe(fenced.indexOf("after"));
+  });
+
+  it("claims nothing until a block is closed by a line that follows it", () => {
+    expect(stableBlockEnd("a paragraph that is still growing")).toBe(0);
+    expect(stableBlockEnd("a paragraph\n\n")).toBe(0); // the next block hasn't arrived
+    expect(stableBlockEnd("a paragraph\n\nthe next one\n")).toBe("a paragraph\n\n".length);
+  });
+
+  it("keeps a loose list, a split quote and an indented block whole", () => {
+    for (const md of ["- one\n\n- two\n\n- three\n", "> a\n\n> b\n", "    code\n\n    more\n", "- item\n\n  its second paragraph\n"]) {
+      expect(stableBlockEnd(md)).toBe(0);
+    }
+  });
+
+  it("cuts where a list really ends", () => {
+    const md = "- one\n- two\n\nA paragraph after the list.\n";
+    expect(stableBlockEnd(md)).toBe(md.indexOf("A paragraph"));
+  });
+
+  it("loses no text, and never moves a boundary back", () => {
+    const md = "# Title\n\nIntro para.\n\n```py\nx = 1\n\ny = 2\n```\n\n- a\n- b\n\nEnd.\n";
+    const { chunks, tail } = stream(md, 3);
+    expect(chunks.join("") + tail).toBe(md);
+    expect(chunks.every((c) => c.length > 0)).toBe(true);
+  });
+
+  it("renders as one piece: the chunks' markdown equals the whole text's", async () => {
+    // The contract is exactly this — a boundary may only be claimed where
+    // parsing the two sides separately renders what parsing them together
+    // does — so the test parses, with the renderer the web chat uses.
+    const { marked } = await import("marked");
+    const md = "# Title\n\nIntro **para** with `code`.\n\n```py\nx = 1\n\ny = 2\n```\n\n- a\n- b\n\n> quote\n\nEnd.\n";
+    const { chunks, tail } = stream(md, 5);
+    const piecewise = [...chunks, tail].map((p) => marked.parse(p, { async: false })).join("");
+    const whole = marked.parse(md, { async: false });
+    expect(piecewise.replace(/\s+/g, " ")).toBe(whole.replace(/\s+/g, " "));
+  });
+
+  it("leaves a next-step row that is not the turn's end as body text", () => {
+    // splitReply would strip it, and it would come back on the final paint —
+    // text that vanishes and returns mid-stream is worse than either.
+    expect(streamBody("---\n[a] | [b]")).toBe("---\n[a] | [b]");
+    expect(splitReply("---\n[a] | [b]").text).toBe("");
+    expect(streamBody("said it\n<silent>nothing to add</silent>")).toBe("said it");
   });
 });

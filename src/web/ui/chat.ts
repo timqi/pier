@@ -5,7 +5,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { isSilentReply, silentReason, splitReply } from "../../core/reply.js";
+import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
 import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
@@ -481,25 +481,22 @@ function addCodeCopy(root: HTMLElement): void {
   }
 }
 
-/** Swap a plain-text bubble to sanitized rendered markdown. `streaming` marks
- *  a mid-turn repaint of a block that is still growing. */
-function renderMarkdown(node: HTMLElement, raw: string, streaming = false): void {
-  // Attachment links are rewritten to the session's files route first: the
-  // sanitizer drops `file:` URLs (rightly), so they'd vanish otherwise.
+/** One markdown fragment, sanitized, in a detached box the caller moves into
+ *  place. Attachment links are rewritten to the session's files route first:
+ *  the sanitizer drops `file:` URLs (rightly), so they'd vanish otherwise. */
+function mdBox(raw: string): HTMLElement {
   const id = deps.sessionId();
-  const md = id ? rewriteFileLinks(raw, id) : raw;
-  node.innerHTML = DOMPurify.sanitize(marked.parse(md, { async: false }));
+  const box = h("div", "");
+  box.innerHTML = DOMPurify.sanitize(marked.parse(id ? rewriteFileLinks(raw, id) : raw, { async: false }));
+  externalLinks(box);
+  return box;
+}
+
+/** Swap a plain-text bubble to sanitized rendered markdown. */
+function renderMarkdown(node: HTMLElement, raw: string): void {
+  node.replaceChildren(...mdBox(raw).childNodes);
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
-  externalLinks(node);
-  // A streaming block is rewritten whole every ~80ms, so everything that is
-  // either expensive or stateful waits for the final paint. Highlighting is the
-  // expensive one: it re-tokenizes *every* fence in the block on every repaint,
-  // and each repaint throws the result away — a 40KB turn measured ~2.9s of
-  // hljs against ~0.2s of parsing, i.e. the streaming cost was almost entirely
-  // colour nobody had time to read. Copy buttons would be recreated mid-click
-  // and attachment cards would refetch their bytes, so they wait too.
-  if (streaming) return;
   highlightCode(node);
   addCodeCopy(node);
   renderAttachments(node);
@@ -545,15 +542,49 @@ const appendAssistant = (raw: string, meta?: TurnMeta, offer = false): HTMLEleme
 let streamingEl: HTMLElement | null = null;
 let streamTimer: ReturnType<typeof setTimeout> | null = null;
 let streamDirty = false;
+/** Raw chars of the in-flight block already rendered into DOM that is kept,
+ *  and how many child nodes that DOM is. */
+let streamStable = 0;
+let streamNodes = 0;
 
-/** Repaint budget for the in-flight block: parsing, sanitizing and
- *  highlighting the whole block on every delta janks a long turn, and text
- *  arrives far faster than it can be read. */
+/** Repaint budget for the in-flight block: parsing and sanitizing on every
+ *  delta janks a long turn, and text arrives far faster than it can be read. */
 const STREAM_PAINT_MS = 80;
 
-/** Render what has arrived so far as markdown, leading-edge then coalesced.
- *  The suggestions block is stripped here too, so a half-typed `[label]` row
- *  doesn't flash as body text before it becomes buttons. */
+/**
+ * Render what has arrived so far as markdown, re-parsing only the tail past
+ * the last closed block boundary — the blocks before it keep the DOM they were
+ * rendered into once. Re-rendering the *whole* block every tick made a turn
+ * cost O(N²): a long reply passes the paint budget somewhere in its middle and
+ * from there the text lags the stream by seconds, which is the one thing a
+ * stream must not do.
+ *
+ * Everything either expensive or stateful still waits for the final paint.
+ * Highlighting is the expensive one: it re-tokenizes every fence it is handed
+ * and each repaint throws the result away — a 40KB turn measured ~2.9s of hljs
+ * against ~0.2s of parsing, i.e. the streaming cost was almost entirely colour
+ * nobody had time to read. Copy buttons would be recreated mid-click and
+ * attachment cards would refetch their bytes, so they wait too.
+ *
+ * The suggestions block is stripped from the tail — the only place it can be —
+ * so a half-typed `[label]` row doesn't flash as body text before it becomes
+ * buttons.
+ */
+function paintStreamText(node: HTMLElement): void {
+  const raw = node.dataset.raw ?? "";
+  while (node.childNodes.length > streamNodes) node.lastChild!.remove();
+  const cut = stableBlockEnd(raw, streamStable);
+  if (cut > streamStable) {
+    node.append(...mdBox(streamBody(raw.slice(streamStable, cut))).childNodes);
+    streamStable = cut;
+    streamNodes = node.childNodes.length;
+  }
+  node.append(...mdBox(splitReply(raw.slice(streamStable)).text).childNodes);
+  node.classList.remove("whitespace-pre-wrap");
+  node.classList.add("md");
+}
+
+/** Leading-edge then coalesced, on the budget above. */
 function paintStreaming(): void {
   if (streamTimer) {
     streamDirty = true;
@@ -561,7 +592,7 @@ function paintStreaming(): void {
   }
   streamDirty = false;
   if (streamingEl) {
-    renderMarkdown(streamingEl, splitReply(streamingEl.dataset.raw ?? "").text, true);
+    paintStreamText(streamingEl);
     scrollBottom();
   }
   streamTimer = setTimeout(() => {
@@ -578,7 +609,11 @@ function stopStreamPaint(): void {
 
 /** Append a text-delta to the in-flight streamed block. */
 export function appendDelta(text: string): void {
-  if (!streamingEl) streamingEl = appendTurn("assistant", "");
+  if (!streamingEl) {
+    streamingEl = appendTurn("assistant", "");
+    streamStable = 0;
+    streamNodes = 0;
+  }
   streamingEl.dataset.raw = (streamingEl.dataset.raw ?? "") + text;
   paintStreaming();
 }

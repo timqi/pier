@@ -233,3 +233,65 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
   if (!suggestions.length) return { text: markdown, suggestions: [], meta, silence };
   return { text: markdown.slice(0, m.index).trimEnd(), suggestions, meta, silence };
 }
+
+/**
+ * The body of a block that is still being written, for a surface rendering it
+ * before the turn ends: everything `splitReply` repairs, minus the next-step
+ * block. That block is only a next-step block at the very *end* of a turn, so
+ * text a later paragraph has already closed behind keeps it as body — which is
+ * what the final render will do with it too.
+ */
+export const streamBody = (markdown: string): string => cjkFriendly(markdown.replace(SILENT, "").trim());
+
+/** Lines a blank line does not necessarily separate: a list item, a quote and
+ *  an indented continuation all survive one — a loose list is still one list.
+ *  Deliberately over-matching (`*` and `-` also catch emphasis and a rule):
+ *  claiming one boundary too few costs nothing but a repaint. */
+const CONTINUES = /^(?:\s|[-*+>]|\d+[.)])/;
+
+/**
+ * How much of `markdown` after `from` can no longer change as more text
+ * arrives: the offset just past the last blank line that closes a block, or
+ * `from` if there is none.
+ *
+ * Streaming markdown is the caller. Re-parsing the whole reply on every
+ * repaint costs O(N²) over a turn, so the web chat renders each closed prefix
+ * once and keeps its DOM. A boundary is therefore only claimed where parsing
+ * the two sides separately renders the same as parsing them together: never
+ * inside a backtick or tilde fence, inside a block stripped on completion, or
+ * between two lines a blank line leaves in the same list or quote. Fence runs
+ * keep their length as in `channels/chunk.ts`: a ```` fence is not closed by
+ * the ``` it quotes.
+ */
+export function stableBlockEnd(markdown: string, from = 0): number {
+  // The last line is still growing, so it decides nothing — not the fence
+  // state, and not whether the blank line above it ended a block.
+  const end = markdown.lastIndexOf("\n") + 1;
+  /** Marker run of the fence currently open; empty = closed. */
+  let open = "";
+  let silent = false;
+  let cut = from;
+  /** Start of the block after a blank line, waiting for its first line. */
+  let pending = -1;
+  let prev = "";
+  for (let at = from; at < end; ) {
+    const nl = markdown.indexOf("\n", at);
+    const line = markdown.slice(at, nl);
+    at = nl + 1;
+    const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!open && !silent && !line.trim()) {
+      if (pending < 0 && prev) pending = at;
+      continue;
+    }
+    if (!open && !silent && pending >= 0 && !(CONTINUES.test(prev) && CONTINUES.test(line))) cut = pending;
+    const run = fence?.[1] ?? "";
+    if (!open && run && !silent) open = run;
+    else if (open && run[0] === open[0] && run.length >= open.length && !fence?.[2]?.trim()) open = "";
+    if (!open && (!run || silent)) {
+      for (const tag of line.matchAll(/<(\/?)silent>/gi)) silent = !tag[1];
+    }
+    pending = -1;
+    prev = line;
+  }
+  return cut;
+}
