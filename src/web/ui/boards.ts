@@ -3,7 +3,7 @@
 // description, session links, content — belongs to the agent that wrote it, so
 // this view reads /api/boards and writes only `public`.
 
-import { getJson, sendJson } from "./api.js";
+import { failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, copyBtn, h, relTime, type ConsoleView } from "./dom.js";
 import { btn, toggle } from "./form.js";
 
@@ -50,13 +50,12 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     }
     // The toggle already flipped optimistically; reloading puts it back, and
     // the line says why it moved on its own.
-    problem = `Could not change ${board.slug}: ${res.status}`;
+    problem = await failure(res, `Could not change ${board.slug}`);
     await load();
   }
 
   async function remove(slug: string): Promise<void> {
-    const res = await fetch(`/api/boards/${slug}`, { method: "DELETE" });
-    if (!res.ok) problem = `Could not delete ${slug}: ${res.status}`;
+    problem = (await refused(`/api/boards/${slug}`, "DELETE", `Could not delete ${slug}`)) ?? "";
     await load();
   }
 

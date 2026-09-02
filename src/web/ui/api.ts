@@ -97,6 +97,26 @@ export async function mustGetJson<T>(
 }
 
 /**
+ * A bodiless POST or DELETE — stop a run, delete a board, retry a task — where
+ * the only answer worth having is the sentence for a refusal. Three views had
+ * the same try/fetch/failure/catch around it, and two of them had left the
+ * catch out, so a request that never answered surfaced as an "unhandled
+ * rejection" line in the chat pane instead of in the pane that was clicked.
+ */
+export async function refused(
+  url: string,
+  method: "POST" | "DELETE",
+  fallback: string,
+): Promise<string | undefined> {
+  try {
+    const res = await fetch(url, { method });
+    return res.ok ? undefined : await failure(res, fallback);
+  } catch (err) {
+    return `${fallback}: ${String(err)}`;
+  }
+}
+
+/**
  * Ask for one line of text and post it to a run-control endpoint.
  *
  * Both surfaces that steer a subagent — the chat's background-run row and the

@@ -7,7 +7,7 @@
 import { readableTitle } from "../../core/identity.js";
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
-import { coalesce } from "./api.js";
+import { coalesce, getJson } from "./api.js";
 import { consoleView, fmtDuration, h, untitled, type ConsoleView } from "./dom.js";
 import { tabButton as control } from "./form.js";
 
@@ -101,17 +101,17 @@ export function createActivityView(
 
   const load = coalesce(async () => {
     const wanted = scope;
-    const res = await fetch(`/api/activity?scope=${wanted}`);
-    if (!res.ok) {
+    const got = await getJson<ActivitySnapshot>(`/api/activity?scope=${wanted}`, "Failed to load activity");
+    if (!got.ok) {
       drawn = "";
-      root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", `Failed to load activity: ${res.status}`));
+      root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", got.error));
       return;
     }
-    const body = await res.text();
     if (wanted !== scope) return; // stale: the scope changed mid-fetch
+    const body = JSON.stringify(got.value);
     if (body === drawn) return;
     drawn = body;
-    const fresh = JSON.parse(body) as ActivitySnapshot;
+    const fresh = got.value;
     // Same speaker-header cleanup the sidebar does (dom.ts): a session titled
     // by an IM prompt must not show a raw platform id here either.
     snapshot = { ...fresh, sessions: fresh.sessions.map((s) => ({ ...s, title: readableTitle(s.title) })) };

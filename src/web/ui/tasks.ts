@@ -3,7 +3,7 @@
 // create/edit dialog in task-editor.ts; this file owns navigation and state.
 
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
-import { coalesce, getJson, sendJson } from "./api.js";
+import { coalesce, failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { button, tabButton } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
@@ -49,18 +49,21 @@ export function createTasksView(
   const load = coalesce(async () => {
     const wanted = filter;
     const state = wanted === "archived" ? "archived" : "active";
-    const res = await fetch(`/api/tasks?state=${state}${wanted === "subagent" ? "&kind=subagent" : ""}`);
-    if (!res.ok) {
+    const got = await getJson<TaskRow[]>(
+      `/api/tasks?state=${state}${wanted === "subagent" ? "&kind=subagent" : ""}`,
+      "Failed to load tasks",
+    );
+    if (!got.ok) {
       drawn = "";
-      return renderError(`Failed to load tasks: ${res.status}`);
+      return renderError(got.error);
     }
-    const body = await res.text();
     if (wanted !== filter) return; // stale: the filter changed mid-fetch
     // The detail page has endpoints of its own — a run's state changes without
     // this list changing — so only the list may be skipped.
+    const body = JSON.stringify(got.value);
     if (wanted + body === drawn && !selectedId) return;
     drawn = wanted + body;
-    rows = JSON.parse(body) as TaskRow[];
+    rows = got.value;
     // The editor offers active tasks as chain targets whatever the list is
     // filtered to, so a filter that cannot stand in for that list fetches it.
     // Reusing the wrong list left the target picker empty or stale.
@@ -79,8 +82,8 @@ export function createTasksView(
 
   /** Keep the last good list on a failed refetch: a stale picker beats none. */
   async function activeTasks(): Promise<TaskRow[]> {
-    const res = await fetch("/api/tasks?state=active");
-    return res.ok ? (await res.json()) as TaskRow[] : availableTasks;
+    const got = await getJson<TaskRow[]>("/api/tasks?state=active", "Failed to load tasks");
+    return got.ok ? got.value : availableTasks;
   }
 
   const editorDeps = {
@@ -287,14 +290,14 @@ export function createTasksView(
 
   async function runTask(id: string): Promise<void> {
     const res = await sendJson(`/api/tasks/${id}/run`, { sourceSessionId: getCurrentSessionId() });
-    if (!res.ok) return renderError(((await res.json()) as { error?: string }).error ?? "Failed to run task");
+    if (!res.ok) return renderError(await failure(res, "Failed to run task"));
     selectedId = id;
     await renderDetail(id);
   }
 
   async function mutate(url: string): Promise<void> {
-    const res = await fetch(url, { method: "POST" });
-    if (!res.ok) return renderError(((await res.json()) as { error?: string }).error ?? "Task update failed");
+    const error = await refused(url, "POST", "Task update failed");
+    if (error) return renderError(error);
     await load();
   }
 

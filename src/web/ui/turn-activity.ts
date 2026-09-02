@@ -3,7 +3,7 @@
 // rendered into #turns between chat rows. chat.ts owns the rows themselves and
 // calls seal/finish/reset here so a group closes when the transcript moves on.
 
-import { failure, getJson, promptRun, type Sent } from "./api.js";
+import { getJson, promptRun, refused, type Sent } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
@@ -59,12 +59,8 @@ async function say(outcome: Promise<Sent>): Promise<void> {
 
 /** The controls that take no typed message still have to report a refusal. */
 async function post(url: string, fallback: string): Promise<void> {
-  try {
-    const res = await fetch(url, { method: "POST" });
-    if (!res.ok) turns.append("error", await failure(res, fallback));
-  } catch (err) {
-    turns.append("error", `${fallback}: ${String(err)}`);
-  }
+  const error = await refused(url, "POST", fallback);
+  if (error) turns.append("error", error);
 }
 
 async function replyToDecision(messageId: string): Promise<void> {

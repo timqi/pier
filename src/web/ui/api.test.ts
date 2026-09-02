@@ -1,8 +1,8 @@
-// The shared read, whose whole reason to exist is the failures: fifteen views
-// answer with what these two functions decided.
+// The shared read and the bodiless write, whose whole reason to exist is the
+// failures: fifteen views answer with what these functions decided.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coalesce, getJson, mustGetJson } from "./api.js";
+import { coalesce, getJson, mustGetJson, refused } from "./api.js";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -89,5 +89,27 @@ describe("coalesce", () => {
     });
     await Promise.all([load(), load(), load(), load()]);
     expect(loads).toBe(2); // the one in flight, then one for everything asked during it
+  });
+});
+
+describe("refused", () => {
+  it("answers nothing when the write took", async () => {
+    answering({});
+    await expect(refused("/api/boards/x", "DELETE", "Could not delete x")).resolves.toBeUndefined();
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/boards/x", { method: "DELETE" });
+  });
+
+  it("answers the server's sentence for a refusal", async () => {
+    answering({ error: "run already finished" }, 409);
+    await expect(refused("/api/runs/r/cancel", "POST", "could not stop the run")).resolves.toBe(
+      "run already finished",
+    );
+  });
+
+  it("answers a sentence, not a rejection, when the request never answered", async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))) as unknown as typeof fetch;
+    await expect(refused("/api/tasks/t/retry", "POST", "Task update failed")).resolves.toBe(
+      "Task update failed: TypeError: Failed to fetch",
+    );
   });
 });

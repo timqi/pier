@@ -5,6 +5,7 @@
 // the rendered node is upgraded: images become thumbnails, everything else an
 // attachment card with preview + download.
 
+import { failure } from "./api.js";
 import { $, basename, h } from "./dom.js";
 
 // --- image lightbox + thumbnails ---------------------------------------------------
@@ -137,8 +138,13 @@ async function preview(url: string, name: string): Promise<void> {
   fileDownload.href = `${url}&download=1`;
   fileText.textContent = "loading…";
   fileDialog.showModal();
-  const res = await fetch(url);
-  const body = res.ok ? await res.text() : `failed to load: ${res.status}`;
+  let body: string;
+  try {
+    const res = await fetch(url);
+    body = res.ok ? await res.text() : await failure(res, "failed to load");
+  } catch (err) {
+    body = `failed to load: ${String(err)}`;
+  }
   fileText.textContent =
     body.length > MAX_PREVIEW_BYTES ? `${body.slice(0, MAX_PREVIEW_BYTES)}\n…` : body;
 }
