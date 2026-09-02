@@ -90,12 +90,17 @@ export class ChannelStore {
    * discovery is passive. A new chat copies the platform defaults and owns
    * them from then on — the mention and bind gates are what keep it harmless
    * until an operator configures it.
+   *
+   * Telegram gets a chat's name free with every update, so it discovers on
+   * every message: the "already known, unchanged" answer is read off the
+   * cached document and costs no clone. Only a real change pays for one.
    */
   discoverChat(platform: ChannelPlatform, chat: { id: string; name: string; kind: ChatKind }): void {
+    const cached = this.cached(platform).chats.find((c) => c.id === chat.id);
+    if (cached && cached.name === chat.name && cached.kind === chat.kind) return;
     const config = this.get(platform);
     const known = config.chats.find((c) => c.id === chat.id);
     if (known) {
-      if (known.name === chat.name && known.kind === chat.kind) return;
       known.name = chat.name || known.name;
       known.kind = chat.kind;
     } else {

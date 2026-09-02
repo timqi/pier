@@ -83,18 +83,32 @@ export async function sendAttachments(
     log(`attachment ${path} not sent: ${reason}`);
     lost.push(lostMarker(nameOf(path), reason));
   };
-  for (const path of paths.slice(0, MAX_ATTACHMENTS)) {
+  const taken = paths.slice(0, MAX_ATTACHMENTS);
+  // Five files that know nothing about each other cost one round trip, not
+  // five. Two phases so the platform still receives them in the order the
+  // turn linked them, and each failure is kept in its own slot — `lost` reads
+  // in link order whichever upload finished first.
+  const reasons: (string | undefined)[] = [];
+  const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+  const files = await Promise.all(taken.map(async (path, i): Promise<Attachment | undefined> => {
     try {
       const info = await stat(path);
       if (!info.isFile()) throw new Error("not a file");
       if (info.size > MAX_ATTACH_BYTES) throw new Error(`too large (>${MAX_ATTACH_BYTES} bytes)`);
       const name = nameOf(path);
       const ext = extname(name).slice(1).toLowerCase();
-      await upload({ name, bytes: await readFile(path), image: IMAGE_EXT.has(ext) });
+      return { name, bytes: await readFile(path), image: IMAGE_EXT.has(ext) };
     } catch (err) {
-      fail(path, err instanceof Error ? err.message : String(err));
+      reasons[i] = reasonOf(err);
+      return undefined;
     }
-  }
+  }));
+  await Promise.all(files.map((file, i) =>
+    file ? upload(file).catch((err: unknown) => void (reasons[i] = reasonOf(err))) : undefined));
+  taken.forEach((path, i) => {
+    const reason = reasons[i];
+    if (reason !== undefined) fail(path, reason);
+  });
   for (const path of paths.slice(MAX_ATTACHMENTS)) {
     fail(path, `more than ${MAX_ATTACHMENTS} files in one turn`);
   }

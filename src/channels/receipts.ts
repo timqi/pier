@@ -12,6 +12,15 @@ import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
 import type { ChannelPlatform } from "./types.js";
 
+/**
+ * How often the straggler sweep may really run. Adapters ask on the inbound
+ * path — per envelope, or per `getUpdates` round trip — and the books only
+ * change on the scale of `staleMs`, so a busy chat would otherwise run this
+ * query hundreds of times a minute. Throttled here rather than in each
+ * adapter, which is where the same timestamp had been copied twice already.
+ */
+const SWEEP_EVERY_MS = 60_000;
+
 export interface Receipt {
   /** The conversation whose turn-end clears this receipt. */
   conversationId: string;
@@ -102,6 +111,7 @@ export interface ReactionApi {
 export class Receipts {
   /** In-flight `setReaction` per marked message. Only this process's own. */
   private readonly applying = new Map<string, Promise<unknown>>();
+  private sweptAt = 0;
 
   constructor(
     private readonly api: ReactionApi,
@@ -146,15 +156,21 @@ export class Receipts {
    * ours yet — and past `staleMs` a receipt's turn is never going to settle.
    */
   sweep(all = false): Promise<void> {
+    const now = Date.now();
+    // `all` is the startup sweep: it takes everything, so it is never skipped.
+    if (!all && now - this.sweptAt < SWEEP_EVERY_MS) return Promise.resolve();
+    this.sweptAt = now;
     return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs));
   }
 
   private async clear(receipts: Receipt[]): Promise<void> {
-    for (const { chatId, messageId } of receipts) {
-      const key = `${chatId}:${messageId}`;
-      await this.applying.get(key);
-      this.applying.delete(key);
-      await this.api.setReaction(chatId, messageId, null).catch(() => {});
-    }
+    // Wait together, then launch clears in booking order: if one apply is slow,
+    // it must not let a later receipt clear first.
+    await Promise.all(receipts.map(({ chatId, messageId }) =>
+      this.applying.get(`${chatId}:${messageId}`)));
+    for (const { chatId, messageId } of receipts) this.applying.delete(`${chatId}:${messageId}`);
+    await Promise.all(receipts.map(({ chatId, messageId }) =>
+      this.api.setReaction(chatId, messageId, null)
+        .catch((err: unknown) => this.log(`reaction clear failed: ${String(err)}`))));
   }
 }

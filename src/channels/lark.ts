@@ -61,7 +61,6 @@ const DRAIN_TIMEOUT_MS = 5000;
 /** How long a delivered event id is remembered, against redelivery. */
 const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
-const SWEEP_EVERY_MS = 60_000;
 
 /**
  * A Lark conversation is always `<chatId>/<rootMessageId>` — the thread is
@@ -127,7 +126,6 @@ export class LarkChannel implements Channel {
   private readonly out: LarkOutbound;
   private socket?: LarkSocket;
   private running = false;
-  private sweptAt = 0;
 
   constructor(private readonly deps: LarkDeps) {
     const config = deps.store.get("lark");
@@ -193,10 +191,8 @@ export class LarkChannel implements Channel {
    */
   private onEvent(event: LarkMessageEvent, onMessage: (msg: InboundMessage) => void): void {
     if (!this.running) return;
-    if (Date.now() - this.sweptAt > SWEEP_EVERY_MS) {
-      this.sweptAt = Date.now();
-      void this.receipts.sweep();
-    }
+    // Asked on every event, throttled inside receipts.ts.
+    void this.receipts.sweep();
     // Our own echo or another app's message.
     if (event.senderType === "app") return;
     if (this.seen.duplicate(event.eventId)) return;

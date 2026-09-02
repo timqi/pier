@@ -172,6 +172,7 @@ export class TelegramChannel implements Channel {
         const startedAt = Date.now();
         const updates = await this.api.getUpdates(this.offset, POLL_SECONDS);
         if (!this.running) return;
+        // Asked on every round trip, throttled inside receipts.ts.
         void this.receipts.sweep();
         if (!updates.length && Date.now() - startedAt < 1000) {
           await new Promise((r) => setTimeout(r, 1000));

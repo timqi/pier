@@ -98,6 +98,35 @@ describe("sendAttachments", () => {
     expect(logged).toHaveLength(1);
   });
 
+  it("uploads together, and still names the losses in link order", async () => {
+    const paths = [
+      join(dir, "gone-a.txt"),
+      write("slow.txt"),
+      write("boom.txt"),
+      join(dir, "gone-b.txt"),
+    ];
+    let inFlight = 0;
+    let peak = 0;
+    const logged: string[] = [];
+    const lost = await sendAttachments(paths, async (file) => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, file.name === "slow.txt" ? 20 : 1));
+      inFlight--;
+      if (file.name === "boom.txt") throw new Error("upload refused");
+    }, (m) => logged.push(m));
+    // Both readable files were in the air at once — and the one that finished
+    // first does not get to report before a file linked ahead of it.
+    expect(peak).toBe(2);
+    const lines = lost.split("\n");
+    expect(lines.map((l) => l.split(" — ")[0])).toEqual([
+      "[attachment lost: gone-a.txt",
+      "[attachment lost: boom.txt",
+      "[attachment lost: gone-b.txt",
+    ]);
+    expect(lines[1]).toBe("[attachment lost: boom.txt — upload refused]");
+    expect(logged).toHaveLength(3);
+  });
+
   it("sends the first five and says the rest were dropped", async () => {
     const paths = Array.from({ length: 7 }, (_, i) => write(`f${String(i)}.txt`));
     const { sent, lost } = await collect(paths);

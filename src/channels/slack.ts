@@ -73,8 +73,6 @@ const DRAIN_TIMEOUT_MS = 5000;
  */
 const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
-/** How often the straggler sweep may run; see onEnvelope. */
-const SWEEP_EVERY_MS = 60_000;
 
 /**
  * Commands that may appear as a bare word, and exactly how many arguments each
@@ -180,7 +178,6 @@ export class SlackChannel implements Channel {
   private readonly out: SlackOutbound;
   private socket?: SlackSocket;
   private running = false;
-  private sweptAt = 0;
 
   constructor(private readonly deps: SlackDeps) {
     const config = deps.store.get("slack");
@@ -252,13 +249,8 @@ export class SlackChannel implements Channel {
    */
   private onEnvelope(env: SlackEnvelope, onMessage: (msg: InboundMessage) => void): void {
     if (!this.running) return;
-    // Envelopes arrive pushed, not in polled batches, so the sweep is timed
-    // rather than per-envelope: a busy channel would otherwise run this query
-    // hundreds of times a minute for something that changes every 30.
-    if (Date.now() - this.sweptAt > SWEEP_EVERY_MS) {
-      this.sweptAt = Date.now();
-      void this.receipts.sweep();
-    }
+    // Asked on every envelope, throttled inside receipts.ts.
+    void this.receipts.sweep();
     if (env.type === "events_api") {
       const payload = env.payload as SlackEventPayload | undefined;
       const event = payload?.event;
