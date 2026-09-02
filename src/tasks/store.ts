@@ -113,6 +113,21 @@ export class TaskStore {
     `, sessionId);
   }
 
+  /** How many background runs each session has in flight, for a list that
+   *  draws one dot per row: the state column narrows the scan to the handful
+   *  of live runs, and no row's JSON is parsed. */
+  countActiveBackgroundRunsBySession(): Map<string, number> {
+    const rows = this.db.prepare(`
+      SELECT json_extract(json, '$.invokedBySessionId') AS session_id, COUNT(*) AS n
+      FROM task_runs
+      WHERE state IN ('queued', 'running')
+        AND json_extract(json, '$.background') = 1
+        AND json_extract(json, '$.invokedBySessionId') IS NOT NULL
+      GROUP BY session_id
+    `).all() as unknown as { session_id: string; n: number }[];
+    return new Map(rows.map((row) => [row.session_id, row.n]));
+  }
+
   listRunsForSession(sessionId: string, limit = 50): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs

@@ -24,6 +24,7 @@ import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
+import type { TaskRun } from "../tasks/types.js";
 import { SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
@@ -366,6 +367,7 @@ function setup(
     },
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
+    activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -404,6 +406,40 @@ describe("workbench server", () => {
     expect(await res.json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", listed: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
+  });
+
+  // The dot is a number, so the list asks for the numbers once: a finished run
+  // and a foreground one are not in flight, and a session that launched
+  // nothing says so. The per-session route still reads whole run objects.
+  it("counts the background runs each listed session has in flight", async () => {
+    const { app, db, factory, tasks } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: Date.now() },
+      { id: "s2", cwd: "/tmp", createdAt: 2, modified: Date.now() },
+    ]);
+    const task = await tasks.create({
+      name: "delegate",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "work" },
+    });
+    const store = new TaskStore(db);
+    const run = (id: string, over: Partial<TaskRun>): TaskRun => ({
+      id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      rootRunId: id, depth: 0, resumedFromRunId: null, triggerSource: "agent",
+      invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
+      sessionMode: null, callbackSessionId: null, background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+      state: "queued", input: null, context: { definition: task }, probe: null,
+      matched: null, result: null, error: null, skipReason: null,
+      queuedAt: 1, startedAt: null, finishedAt: null,
+      ...over,
+    });
+    store.saveRun(run("in-flight", {}));
+    store.saveRun(run("finished", { state: "succeeded", finishedAt: 2 }));
+    store.saveRun(run("foreground", { background: false, state: "running" }));
+    const rows = (await (await app.request("/api/sessions")).json()) as
+      { id: string; activeRuns: number }[];
+    expect(rows.map((row) => [row.id, row.activeRuns])).toEqual([["s1", 1], ["s2", 0]]);
   });
 
   // The badge counts "web" rows only (ui/sidebar.ts): an IM turn is delivered

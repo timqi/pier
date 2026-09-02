@@ -374,6 +374,7 @@ app.route("/", createServer({
   onUnlocked: () => void startChannels(),
   reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
+  activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
   channelOf: (id) => conversations.channelOf(id),
 }));
 

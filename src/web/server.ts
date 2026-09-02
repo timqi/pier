@@ -95,6 +95,8 @@ export interface WebDeps {
   reload?: () => Promise<number>;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
+  /** The same runs, counted per session in one query — what a list needs. */
+  activeBackgroundRunCounts?: () => Map<string, number>;
   /** The IM channel that durably owns a session, absent for everything else.
    *  Injected because the mapping lives in channels/. Not push.ts's question:
    *  that one asks which conversation produced *this* turn and is answered
@@ -126,6 +128,7 @@ export function createServer(
     updates,
     updater,
     backgroundRuns,
+    activeBackgroundRunCounts,
     channelOf,
   }: WebDeps,
 ): Hono {
@@ -151,9 +154,10 @@ export function createServer(
   // Repository identity per project directory, refreshed off the request path.
   const repos = new RepoIndex(() => hub.emitWorkspace({ type: "sessions-changed" }));
 
-  /** Background runs this session launched that are still in flight. */
-  const activeRuns = (id: string): number =>
-    backgroundRuns?.(id).filter((r) => r.state === "queued" || r.state === "running").length ?? 0;
+  /** Background runs still in flight, per launching session. One query for a
+   *  whole list: asking row by row loaded every run object of every session to
+   *  draw one dot each. */
+  const activeRuns = (): Map<string, number> => activeBackgroundRunCounts?.() ?? new Map();
 
   /** The web channel's session for `id` — every session route resolves here. */
   const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id });
@@ -211,7 +215,11 @@ export function createServer(
   // decided about it, and what is true of it right now.
   // The listing's `modified` is dropped rather than forwarded: it dates a
   // transcript, and no surface renders it.
-  const present = ({ modified: _drop, ...s }: SessionSummary, own: SessionFlags | undefined) => {
+  const present = (
+    { modified: _drop, ...s }: SessionSummary,
+    own: SessionFlags | undefined,
+    active: Map<string, number>,
+  ) => {
     return {
       ...s,
       ...(own?.sort === undefined ? {} : { sort: own.sort }),
@@ -226,7 +234,7 @@ export function createServer(
       listed: own?.pinned ?? false,
       unread: own?.unread ?? false,
       channel: channelOf?.(s.id) ?? "web",
-      activeRuns: activeRuns(s.id),
+      activeRuns: active.get(s.id) ?? 0,
     };
   };
 
@@ -235,9 +243,10 @@ export function createServer(
   // the summaries out of SQLite, which is what had to be kept in step.
   app.get("/api/projects", async (c) => {
     const flags = state.flags();
+    const active = activeRuns();
     return c.json(
       (await allSessions())
-        .map((s) => present(s, flags.get(s.id)))
+        .map((s) => present(s, flags.get(s.id), active))
         .filter((row) => row.listed),
     );
   });
@@ -266,7 +275,8 @@ export function createServer(
 
   app.get("/api/sessions", async (c) => {
     const flags = state.flags();
-    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id))));
+    const active = activeRuns();
+    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active)));
   });
 
   app.post("/api/sessions", async (c) => {

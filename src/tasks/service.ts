@@ -233,6 +233,12 @@ export class TaskService {
       .map((run) => this.backgroundRun(run));
   }
 
+  /** The same runs `backgroundRuns` reports as in flight, counted per session
+   *  in one query — a list needs the number, not the runs. */
+  activeBackgroundRunCounts(): Map<string, number> {
+    return this.store.countActiveBackgroundRunsBySession();
+  }
+
   run(
     taskId: string,
     input: unknown = null,
