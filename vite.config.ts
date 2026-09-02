@@ -11,7 +11,10 @@ const { version } = createRequire(import.meta.url)("./package.json") as { versio
 // (~640 kB, fetched only when a terminal opens) would set the bar for our own
 // code too. Exempt it by name and hold everything else to a real budget.
 const LAZY_VENDOR = /ghostty-web/;
-const OWN_CHUNK_LIMIT_KB = 350;
+// The boot chunk is ~160 kB now that the Console views and the highlighter
+// load on first use; a limit that only the old single bundle could reach was
+// a gate nothing would trip for years.
+const OWN_CHUNK_LIMIT_KB = 200;
 
 const chunkBudget = (): Plugin => ({
   name: "pier:chunk-budget",

@@ -742,9 +742,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     // The Files view's renderer, not a second one: same gutter, same
     // highlighting, same wrapping — a skill or an extension is source code,
     // and it was reading as a wall of grey <pre>.
+    const lang = await langFor(name); // first file of the session waits for hljs
+    if (request !== paneRequest) return;
     pane.replaceChildren(
       paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only")),
-      h("div", "min-h-0 flex-1 overflow-auto", codePane(plainRows(lines), langFor(name))),
+      h("div", "min-h-0 flex-1 overflow-auto", codePane(plainRows(lines), lang)),
     );
   }
 

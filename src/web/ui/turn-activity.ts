@@ -5,7 +5,7 @@
 
 import { getJson, promptRun, refused, type Sent } from "./api.js";
 import type { ChatDeps } from "./chat.js";
-import { detailsRow, h } from "./dom.js";
+import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun } from "../../core/types.js";
 
@@ -147,7 +147,7 @@ interface Activity {
   headline: HTMLElement;
   rowsEl: HTMLElement;
   toolRows: Map<string, ToolRow>;
-  thinking: { pre: HTMLElement; summary: HTMLElement } | null;
+  thinking: Thinking | null;
   steps: number;
   failedSteps: number;
   startTs: number;
@@ -155,6 +155,58 @@ interface Activity {
 }
 
 let activity: Activity | null = null; // the live (running) group
+
+// --- the thinking row -----------------------------------------------------------------
+// Thinking arrives token by token, so it is painted on the stream's cadence
+// like the reply text is (ui/chat.ts): the per-delta path read the whole tail
+// back off the DOM, re-sliced it to 4000 chars and re-split it into lines,
+// once per token, for a row most turns never open.
+
+/** `text` is everything the row has been handed, painted or not. */
+interface Thinking {
+  pre: HTMLElement;
+  summary: HTMLElement;
+  text: string;
+}
+
+/** The row deltas are accumulating into. Outlives `activity.thinking`, which a
+ *  tool call clears: the tail still owed then belongs to *this* row's pre. */
+let think: Thinking | null = null;
+let thinkTimer: ReturnType<typeof setTimeout> | null = null;
+let thinkDirty = false;
+
+function drawThinking(): void {
+  if (!think) return;
+  think.text = think.text.slice(-4000);
+  think.pre.textContent = think.text;
+  const line = think.text.split("\n").filter(Boolean).pop() ?? "thinking…";
+  const label = think.summary.lastElementChild as HTMLElement;
+  label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
+}
+
+/** Leading-edge then coalesced, the same shape chat.ts paints text with. */
+function paintThinking(): void {
+  if (thinkTimer) {
+    thinkDirty = true;
+    return;
+  }
+  thinkDirty = false;
+  drawThinking();
+  thinkTimer = setTimeout(() => {
+    thinkTimer = null;
+    if (thinkDirty) paintThinking();
+  }, STREAM_PAINT_MS);
+}
+
+/** A row stops receiving text at the turn's end, at the next thinking row and
+ *  at a reset. What is on screen then has to be all of it, so every one of
+ *  those paints what the last tick still held. */
+function flushThinking(): void {
+  if (thinkTimer) clearTimeout(thinkTimer);
+  thinkTimer = null;
+  if (thinkDirty) drawThinking();
+  thinkDirty = false;
+}
 
 /** Every tool row of a group, in the order they ran — what a later detail fetch
  *  writes into. Keyed by the group element so it is collected with it: a
@@ -191,6 +243,8 @@ let lastGroup: HTMLElement | null = null;
 export function resetActivity(): void {
   activity = null;
   lastGroup = null;
+  think = null; // the pre it was painting goes with the pane
+  flushThinking();
   backgroundRows.clear();
 }
 
@@ -322,6 +376,7 @@ function activityHeadline(a: Activity, status: ActivityStatus, latest?: string):
 
 export function finishActivity(status: ActivityStatus): void {
   if (!activity) return;
+  flushThinking(); // the last tokens of the turn are part of the turn
   // Any still-running tool rows were cut short.
   for (const { statusEl } of activity.toolRows.values()) {
     if (statusEl.textContent === "running…") statusEl.textContent = "interrupted";
@@ -353,6 +408,7 @@ function argsPreview(argsText: string): string {
 export function activityToolStart(ts: number, id: string, name: string, args: unknown): void {
   const a = ensureActivity(ts);
   a.steps += 1;
+  flushThinking(); // the preceding thinking row stops receiving text here
   a.thinking = null;
   const argsText = JSON.stringify(args, null, 2) ?? "";
   const statusEl = h("span", "ml-auto flex-none text-neutral-400", "running…");
@@ -400,21 +456,20 @@ export function activityToolEnd(id: string, isError: boolean, output: string): v
 export function activityThinking(ts: number, text: string): void {
   const a = ensureActivity(ts);
   if (!a.thinking) {
+    flushThinking(); // whatever the previous row was still owed
     const { el, summary } = detailsRow("rounded-md px-1 py-0.5 text-[12.5px] italic text-neutral-500 hover:bg-black/[0.03] dark:hover:bg-neutral-100", [
       h("span", "min-w-0 truncate", "thinking…"),
     ]);
     const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
     el.append(pre);
     a.rowsEl.append(el);
-    a.thinking = { pre, summary };
+    a.thinking = { pre, summary, text: "" };
+    think = a.thinking;
     tailSteps(a);
     activityHeadline(a, "running", "thinking…");
   }
-  const t = a.thinking;
-  t.pre.textContent = ((t.pre.textContent ?? "") + text).slice(-4000);
-  const line = (t.pre.textContent ?? "").split("\n").filter(Boolean).pop() ?? "thinking…";
-  const label = t.summary.lastElementChild as HTMLElement;
-  label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
+  a.thinking.text += text;
+  paintThinking();
 }
 
 /**

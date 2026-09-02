@@ -3,6 +3,11 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
+/** Repaint budget for anything painted from a stream — the reply text
+ *  (ui/chat.ts) and the thinking row (ui/turn-activity.ts). Text arrives far
+ *  faster than it can be read, so both coalesce onto this one cadence. */
+export const STREAM_PAINT_MS = 80;
+
 export const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
   if (!el) throw new Error(`missing element: ${sel}`);

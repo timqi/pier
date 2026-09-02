@@ -5,18 +5,14 @@
 // and back/forward land where the user was. main.ts owns sessions and
 // selection and feeds them in through init.
 
-import { createActivityView, type ActivityView } from "./activity.js";
-import { createBoardsView } from "./boards.js";
-import { createExplorerView } from "./explorer.js";
+import type { ActivityView } from "./activity.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
-import { $, type ConsoleView } from "./dom.js";
+import { $, consoleView, h, type ConsoleView } from "./dom.js";
 import { renderHeader } from "./session-header.js";
-import { createSettingsView } from "./settings.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { groupByCwd, type SessionInfo } from "./sidebar.js";
-import { createTasksView, type TasksView } from "./tasks.js";
-import { createTerminalView } from "./terminal.js";
+import type { TasksView } from "./tasks.js";
 import { shortcut } from "./shortcut.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
@@ -38,16 +34,23 @@ const composerForm = $<HTMLFormElement>("#composer");
 
 // Console views hide chat elements but leave session SSE wiring untouched.
 const chatEls = [chatHeader, turnsPane, composerForm];
-let chatVisible = true;
 
-export const isChatVisible = (): boolean => chatVisible;
+export const isChatVisible = (): boolean => openName === null;
 
 export type ConsoleName = "tasks" | "activity" | "boards" | "settings" | "files" | "terminal";
 
-let tasksView: TasksView;
-let activityView: ActivityView;
-let consoleViews: { name: ConsoleName; view: ConsoleView }[] = [];
+let tasksView: TasksView | undefined;
+let activityView: ActivityView | undefined;
+/** Built so far — a view arrives with its own chunk the first time it opens. */
+const views = new Map<ConsoleName, ConsoleView>();
+/** In-flight builds, so leaving and reopening a loading view cannot construct
+ *  it twice and duplicate its document listeners. */
+const building = new Map<ConsoleName, Promise<ConsoleView>>();
 const consoleBtns = new Map<ConsoleName, HTMLElement>();
+/** Which view the route says is open, set before its chunk lands: the top bar
+ *  and the overlay toggles may not wait on a fetch to know where they are. */
+let openName: ConsoleName | null = null;
+let openRequest = 0;
 
 // Whichever of the Activity item's two views (Activity or Tasks) showed last;
 // the views themselves keep their tab/selection state.
@@ -67,15 +70,15 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   terminal: "Terminal",
 };
 
-// Workspace events fan into whichever of these views is open.
-export const refreshTasks = (taskId?: string): void => tasksView.refresh(taskId);
-export const refreshActivity = (): void => activityView.refresh();
+// Workspace events fan into whichever of these views is open — and into none
+// while a view has never been opened: its first show() loads what it missed.
+export const refreshTasks = (taskId?: string): void => tasksView?.refresh(taskId);
+export const refreshActivity = (): void => activityView?.refresh();
 
 /** Mobile top bar mirrors the route: a Console view's name, or the chat title
  *  plus its ⋯ menu (the chat header itself is hidden below md). */
 export function syncBar(): void {
-  const open = consoleViews.find((entry) => entry.view.visible);
-  if (open) setBarTitle(CONSOLE_LABELS[open.name], false);
+  if (openName) setBarTitle(CONSOLE_LABELS[openName], false);
   else setBarTitle(chatTitle.textContent ?? "", deps.currentSession() !== undefined);
 }
 
@@ -90,13 +93,10 @@ export function showConsole(name: ConsoleName, arg?: string): void {
   }
   setHash({ kind: "console", name, arg });
   closeDrawer();
-  chatVisible = false;
+  openName = name;
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
-  for (const entry of consoleViews) {
-    if (entry.name === name) entry.view.show(arg);
-    else entry.view.hide();
-  }
+  for (const [built, view] of views) if (built !== name) view.hide();
   // Tasks lives under the Activity menu item (tab strip inside the views).
   for (const [btnName, btn] of consoleBtns) {
     btn.classList.toggle(
@@ -105,6 +105,40 @@ export function showConsole(name: ConsoleName, arg?: string): void {
     );
   }
   syncBar();
+  void openView(name, arg, ++openRequest);
+}
+
+/** A view's module loads the first time it opens — the Console is five pages
+ *  the chat waited for at boot. Everything the route implies has already
+ *  happened above, so a slow chunk shows an empty pane rather than a stale
+ *  one; a chunk that will not load says so where the view would have been,
+ *  because a Console that opens onto nothing is a Console that looks broken. */
+async function openView(name: ConsoleName, arg: string | undefined, request: number): Promise<void> {
+  let view = views.get(name);
+  if (!view) {
+    let pending = building.get(name);
+    if (!pending) {
+      const root = $(`#${name}-view`);
+      pending = BUILD[name](root).catch((err: unknown) => {
+        // A stub view, not a loose message: the pane still has to hide when the
+        // chat comes back. It says reload because a chunk that failed to load
+        // will not load until the page does.
+        console.warn(`${name} view failed to load`, err);
+        return consoleView(root, () =>
+          root.replaceChildren(
+            h("p", "p-4 text-[13px] text-red-600", `Could not load ${CONSOLE_LABELS[name]} — reload the page.`),
+          ),
+        );
+      });
+      building.set(name, pending);
+    }
+    view = await pending;
+    views.set(name, view);
+    building.delete(name);
+  }
+  // The same view may have been left and reopened with a different argument.
+  if (openName !== name || request !== openRequest) return;
+  view.show(arg);
 }
 
 export const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
@@ -119,7 +153,7 @@ export const showTerminal = (dir?: string): void => showConsole("terminal", dir)
 /** The chord's version: one key both opens the overlay and, pressed again, is
  *  its ✕. A menu row keeps opening — it names a directory, so it always does. */
 const toggleOverlay = (name: ConsoleName, dir?: string): void => {
-  if (consoleViews.find((entry) => entry.name === name)?.view.visible) closeOverlay(name);
+  if (openName === name) closeOverlay(name);
   else showConsole(name, dir);
 };
 
@@ -141,10 +175,10 @@ function closeOverlay(name: ConsoleName): void {
 }
 
 export function showChat(): void {
-  if (!consoleViews.some(({ view }) => view.visible)) return;
-  for (const { view } of consoleViews) view.hide();
+  if (!openName) return;
+  openName = null;
+  for (const view of views.values()) view.hide();
   for (const btn of consoleBtns.values()) btn.classList.remove("bg-indigo-50");
-  chatVisible = true;
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
   syncBar();
@@ -168,8 +202,10 @@ const FOLDED: Record<string, string> = { config: "files", channels: "channels", 
 function parseHash(): Route | null {
   const [head = "", arg] = location.hash.replace(/^#\/?/, "").split("/");
   if (FOLDED[head]) return { kind: "console", name: "settings", arg: FOLDED[head] };
-  const name = consoleViews.find((v) => v.name === head)?.name;
-  if (name) return { kind: "console", name, arg: arg ? decodeURIComponent(arg) : undefined };
+  // The labels are the name list too — a route may not wait for a view to be
+  // built. hasOwn, not `in`: `#/toString` is a hash anyone can type.
+  if (Object.hasOwn(CONSOLE_LABELS, head))
+    return { kind: "console", name: head as ConsoleName, arg: arg ? decodeURIComponent(arg) : undefined };
   if (head === "session" && arg) return { kind: "session", id: decodeURIComponent(arg) };
   return null; // unknown or empty → the fallback in applyRoute()
 }
@@ -208,55 +244,52 @@ export function applyRoute(): void {
   if (route?.kind !== "console" && id) setHash({ kind: "session", id }, true);
 }
 
+/** One dynamic import per view, with the deps it is built from. `deps` is read
+ *  when a view opens, not when this table is written, so it is already set. */
+const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = {
+  tasks: async (root) =>
+    (tasksView = (await import("./tasks.js")).createTasksView(
+      root,
+      () => deps.sessions().map(({ id, cwd, title }) => ({ id, cwd, title })),
+      deps.loadSessions,
+      deps.select,
+      () => deps.currentId(),
+      (arg) => showConsole("activity", arg),
+    )),
+  activity: async (root) =>
+    (activityView = (await import("./activity.js")).createActivityView(root, deps.select, showTasks)),
+  boards: async (root) => (await import("./boards.js")).createBoardsView(root, deps.select),
+  files: async (root) =>
+    (await import("./explorer.js")).createExplorerView(
+      root,
+      // Whose folder+diff to restore: a bare open is "the files of this chat".
+      () => deps.currentSession(),
+      // Through the router, so Back walks directory switches too.
+      (dir) => showConsole("files", dir),
+      (dir) => showConsole("terminal", dir),
+      () => closeOverlay("files"),
+    ),
+  terminal: async (root) =>
+    (await import("./terminal.js")).createTerminalView(
+      root,
+      () => [...groupByCwd(deps.sessions()).keys()],
+      () => deps.currentSession()?.cwd,
+      (dir) => showConsole("terminal", dir),
+      (dir) => showConsole("files", dir),
+      () => closeOverlay("terminal"),
+    ),
+  settings: async (root) =>
+    (await import("./settings.js")).createSettingsView(
+      root,
+      () => [...groupByCwd(deps.sessions()).keys()],
+      // Through the router, not a local re-render: the hash is the one
+      // copy of "where am I", and Back should walk tabs too.
+      (t) => showConsole("settings", t),
+    ),
+};
+
 export function initViews(d: ViewsDeps): void {
   deps = d;
-  tasksView = createTasksView(
-    $("#tasks-view"),
-    () => deps.sessions().map(({ id, cwd, title }) => ({ id, cwd, title })),
-    d.loadSessions,
-    d.select,
-    () => deps.currentId(),
-    (arg) => showConsole("activity", arg),
-  );
-  activityView = createActivityView($("#activity-view"), d.select, showTasks);
-  consoleViews = [
-    { name: "tasks", view: tasksView },
-    { name: "activity", view: activityView },
-    { name: "boards", view: createBoardsView($("#boards-view"), d.select) },
-    {
-      name: "files",
-      view: createExplorerView(
-        $("#files-view"),
-        // Whose folder+diff to restore: a bare open is "the files of this chat".
-        () => deps.currentSession(),
-        // Through the router, so Back walks directory switches too.
-        (dir) => showConsole("files", dir),
-        (dir) => showConsole("terminal", dir),
-        () => closeOverlay("files"),
-      ),
-    },
-    {
-      name: "terminal",
-      view: createTerminalView(
-        $("#terminal-view"),
-        () => [...groupByCwd(deps.sessions()).keys()],
-        () => deps.currentSession()?.cwd,
-        (dir) => showConsole("terminal", dir),
-        (dir) => showConsole("files", dir),
-        () => closeOverlay("terminal"),
-      ),
-    },
-    {
-      name: "settings",
-      view: createSettingsView(
-        $("#settings-view"),
-        () => [...groupByCwd(deps.sessions()).keys()],
-        // Through the router, not a local re-render: the hash is the one
-        // copy of "where am I", and Back should walk tabs too.
-        (t) => showConsole("settings", t),
-      ),
-    },
-  ];
   // The sidebar icon and its chord both toggle. ⌘; and not ⌃`: the backtick
   // chord is what quake-mode terminals and editors grab globally, and a ⌘
   // chord is Pier's own everywhere — including inside Terminal, whose shell

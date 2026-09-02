@@ -255,9 +255,10 @@ function sortable(row: HTMLElement, list: string, key: string, drop: (target: st
   };
   // Re-render on end, not only on drop: a drag abandoned outside every row
   // leaves the last drop line drawn, and a stray line is an order nobody made.
+  // Forced, because that line is inline style no render model knows about.
   row.ondragend = () => {
     dragging = null;
-    renderSessions();
+    renderSessions(true);
   };
   const half = (ev: DragEvent): boolean => {
     const box = row.getBoundingClientRect();
@@ -504,7 +505,21 @@ function projectNode(key: string, list: SessionInfo[]): HTMLElement {
   return el;
 }
 
-export function renderSessions(): void {
+/** The render model as one string — every field of a row the rail or the
+ *  palette draws, plus which row is selected. Same short-circuit the Activity
+ *  view uses (ui/activity.ts): a rebuild replaces every node, so it drops the
+ *  drag handlers and the hover the pointer is on, and one landing between a
+ *  mousedown and its mouseup swallows the click that was already happening —
+ *  and ~12 call sites reach here on state events that changed none of this. */
+const renderKey = (): string => `${deps.currentId() ?? ""}\n${JSON.stringify(deps.sessions())}`;
+
+let drawn = "";
+
+/** `force` redraws whatever the key says — the drag handlers' only way back. */
+export function renderSessions(force = false): void {
+  const key = renderKey();
+  if (key === drawn && !force) return;
+  drawn = key;
   const sessions = deps.sessions();
   // The one place the dots are painted, so also the one place the two surfaces
   // that stand in for them off screen are counted: the badge on the sidebar

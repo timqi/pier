@@ -11,7 +11,7 @@ import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
-import { $, agoLabel, copyBtn, externalLinks, h, stampTime } from "./dom.js";
+import { $, agoLabel, copyBtn, externalLinks, h, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
   decisionReplyBtn,
@@ -497,7 +497,9 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   node.replaceChildren(...mdBox(raw).childNodes);
   node.classList.remove("whitespace-pre-wrap");
   node.classList.add("md");
-  highlightCode(node);
+  // Colour lands when its chunk does, which may be after the copy buttons —
+  // those hang off <pre>, the element highlightCode() never replaces.
+  void highlightCode(node);
   addCodeCopy(node);
   renderAttachments(node);
 }
@@ -546,10 +548,6 @@ let streamDirty = false;
  *  and how many child nodes that DOM is. */
 let streamStable = 0;
 let streamNodes = 0;
-
-/** Repaint budget for the in-flight block: parsing and sanitizing on every
- *  delta janks a long turn, and text arrives far faster than it can be read. */
-const STREAM_PAINT_MS = 80;
 
 /**
  * Render what has arrived so far as markdown, re-parsing only the tail past

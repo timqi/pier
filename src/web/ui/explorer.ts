@@ -349,7 +349,9 @@ export function createExplorerView(
     const lines = (await res.text()).split("\n");
     if (!current(seq)) return;
     if (lines.at(-1) === "") lines.pop(); // the trailing newline is not a line
-    body.replaceChildren(codePane(plainRows(lines), langFor(path)));
+    const lang = await langFor(path); // first file of the session waits for hljs
+    if (!current(seq)) return;
+    body.replaceChildren(codePane(plainRows(lines), lang));
   }
 
   /** `+`/`-`/context off the wire, two number columns on screen. The request
@@ -472,7 +474,9 @@ export function createExplorerView(
       if (!diff || /^Binary files /m.test(diff)) return viewPlain(path, seq); // mode-only change, or an image
       const rows = parseDiff(diff);
       markIntraline(rows);
-      const pane = codePane(rows, langFor(path));
+      const lang = await langFor(path); // first file of the session waits for hljs
+      if (!current(seq)) return;
+      const pane = codePane(rows, lang);
       const rowEls = [...pane.children] as HTMLElement[];
       const segs = segmentsOf(rows);
       diffNav.set(segs, rowEls);
