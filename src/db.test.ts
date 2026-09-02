@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { backupDb, openDb } from "./db.js";
+import { backupDb, openDb, statements } from "./db.js";
 
 const dbDirs = new Set<string>();
 const dbPath = (): string => {
@@ -30,10 +30,14 @@ const tables = (db: DatabaseSync): string[] =>
   (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as unknown as
     { name: string }[]).map((r) => r.name);
 
+const indexes = (db: DatabaseSync): string[] =>
+  (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as unknown as
+    { name: string }[]).map((r) => r.name);
+
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(14);
+    expect(version(db)).toBe(15);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -79,7 +83,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(14);
+    expect(version(second)).toBe(15);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -92,7 +96,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 14/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 15/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -267,6 +271,35 @@ describe("openDb", () => {
     after.close();
   });
 
+  it("indexes the two columns the scheduler sweeps, on a database that predates them", () => {
+    const path = dbPath();
+    // Wound back to 14: the migration has to arrive as an upgrade of a
+    // populated database, which is how every live instance meets it.
+    const before = openDb(path);
+    before.exec(
+      "DROP INDEX task_runs_callback_state; DROP INDEX task_messages_state;" +
+        " PRAGMA user_version = 14",
+    );
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(15);
+    expect(indexes(db)).toContain("task_runs_callback_state");
+    expect(indexes(db)).toContain("task_messages_state");
+    // And the planner uses them rather than scanning, which is the point.
+    db.prepare(
+      "INSERT INTO task_runs(id, task_id, queued_at, state, callback_state, json)" +
+        " VALUES ('r1', 't1', 1, 'done', 'pending', '{}')",
+    ).run();
+    expect(
+      JSON.stringify(
+        db.prepare("EXPLAIN QUERY PLAN SELECT json FROM task_runs WHERE callback_state = 'pending'")
+          .all(),
+      ),
+    ).toContain("task_runs_callback_state");
+    db.close();
+  });
+
   it("keeps the database, its sidecars and its directory to the owner", () => {
     const path = dbPath();
     // The auth hash lives in here, and it is written to the -wal file before
@@ -278,5 +311,35 @@ describe("openDb", () => {
     }
     expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
     db.close();
+  });
+});
+
+describe("statements", () => {
+  it("compiles one SQL string once and re-binds it per call", () => {
+    const db = openDb(":memory:");
+    const sql = statements(db);
+    const insert = "INSERT INTO settings(key, value) VALUES (?, ?)";
+    const select = "SELECT value FROM settings WHERE key = ?";
+
+    expect(sql(insert)).toBe(sql(insert));
+    expect(sql(select)).not.toBe(sql(insert));
+
+    // The whole reason it may be cached: one statement, many bindings.
+    sql(insert).run("a", "1");
+    sql(insert).run("b", "2");
+    expect(sql(select).get("a")).toEqual({ value: "1" });
+    expect(sql(select).get("b")).toEqual({ value: "2" });
+    expect(sql(select).get("a")).toEqual({ value: "1" });
+    expect(sql(select).get("missing")).toBeUndefined();
+    db.close();
+  });
+
+  it("caches per connection, so a statement is never used on another database", () => {
+    const one = openDb(":memory:");
+    const two = openDb(":memory:");
+    const sql = "SELECT COUNT(*) AS n FROM settings";
+    expect(statements(one)(sql)).not.toBe(statements(two)(sql));
+    one.close();
+    two.close();
   });
 });

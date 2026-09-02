@@ -20,11 +20,11 @@
 
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { pierDb, transact } from "../db.js";
+import { pierDb, statements, transact } from "../db.js";
 import { logger } from "../log.js";
 
 const log = logger("auth");
@@ -84,10 +84,14 @@ function generatePassword(): string {
  */
 export class AuthStore {
   readonly #db: DatabaseSync;
+  /** Compiled once each: `check()` runs two of these on every request that
+   *  carries a cookie, which is every request the workbench makes. */
+  readonly #sql: (sql: string) => StatementSync;
   readonly #revokeListeners = new Set<(id: string) => void>();
 
   constructor(db: DatabaseSync = pierDb(), print: (message: string) => void = (m) => log.info(m)) {
     this.#db = db;
+    this.#sql = statements(db);
 
     let row = this.#row();
     if (!row) {
@@ -100,8 +104,7 @@ export class AuthStore {
       // in one transaction: half of this leaves a new password and live old
       // cookies, which is the state recovery exists to end.
       transact(this.#db, () => {
-        this.#db
-          .prepare("INSERT INTO auth(id, salt, hash, created_at) VALUES (1, ?, ?, ?)")
+        this.#sql("INSERT INTO auth(id, salt, hash, created_at) VALUES (1, ?, ?, ?)")
           .run(salt, hash(password, salt), Date.now());
         this.#dropSessions();
       });
@@ -118,15 +121,14 @@ export class AuthStore {
   }
 
   #row(): { salt: string; hash: string; createdAt: number } | undefined {
-    return this.#db
-      .prepare("SELECT salt, hash, created_at AS createdAt FROM auth WHERE id = 1")
+    return this.#sql("SELECT salt, hash, created_at AS createdAt FROM auth WHERE id = 1")
       .get() as { salt: string; hash: string; createdAt: number } | undefined;
   }
 
   /** Every signed-in browser at once. Private: the callers that mean it also
    *  have to tell the listeners, and `revoke(ALL)` is that pair in public. */
   #dropSessions(): void {
-    this.#db.prepare("DELETE FROM web_sessions").run();
+    this.#sql("DELETE FROM web_sessions").run();
   }
 
   /** Sessions nobody may use any more, deleted rather than merely refused: a
@@ -135,8 +137,7 @@ export class AuthStore {
    *  boot and whenever somebody signs in — the two moments the process has a
    *  reason to look at this table at all. */
   sweep(): void {
-    const swept = this.#db
-      .prepare("DELETE FROM web_sessions WHERE seen_at <= ? RETURNING id")
+    const swept = this.#sql("DELETE FROM web_sessions WHERE seen_at <= ? RETURNING id")
       .all(Date.now() - TTL_MS) as unknown as { id: string }[];
     for (const row of swept) this.#revoked(row.id);
     if (swept.length) log.info(`swept ${String(swept.length)} expired session(s)`);
@@ -159,8 +160,7 @@ export class AuthStore {
     // Credential and sessions change together or not at all — a crash between
     // the two writes is exactly the state "everyone signs in again" denies.
     transact(this.#db, () => {
-      this.#db
-        .prepare("UPDATE auth SET salt = ?, hash = ?, created_at = ? WHERE id = 1")
+      this.#sql("UPDATE auth SET salt = ?, hash = ?, created_at = ? WHERE id = 1")
         .run(salt, hash(password, salt), Date.now());
       this.#dropSessions();
     });
@@ -175,12 +175,10 @@ export class AuthStore {
     // name, and the 256-bit token is the only part that has to resist guessing.
     const id = randomBytes(9).toString("base64url");
     const token = randomBytes(32).toString("base64url");
-    this.#db
-      .prepare(
-        "INSERT INTO web_sessions(id, token_hash, created_at, seen_at, ip, agent)" +
-          " VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(id, digest(token), now, now, ip, agent.slice(0, 200));
+    this.#sql(
+      "INSERT INTO web_sessions(id, token_hash, created_at, seen_at, ip, agent)" +
+        " VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(id, digest(token), now, now, ip, agent.slice(0, 200));
     return `${id}.${token}`;
   }
 
@@ -193,9 +191,9 @@ export class AuthStore {
   check(cookie: string | undefined): { id: string; renewed: boolean } | undefined {
     const [id, token] = (cookie ?? "").split(".");
     if (!id || !token) return undefined;
-    const row = this.#db
-      .prepare("SELECT token_hash AS tokenHash, seen_at AS seenAt FROM web_sessions WHERE id = ?")
-      .get(id) as { tokenHash: string; seenAt: number } | undefined;
+    const row = this.#sql(
+      "SELECT token_hash AS tokenHash, seen_at AS seenAt FROM web_sessions WHERE id = ?",
+    ).get(id) as { tokenHash: string; seenAt: number } | undefined;
     const now = Date.now();
     // One clock: last use is the deadline, so there is no second column that
     // can disagree with it about when this session ends. An expired row is
@@ -208,7 +206,7 @@ export class AuthStore {
     }
     if (!sameSecret(digest(token), row.tokenHash)) return undefined;
     if (now - row.seenAt < TOUCH_MS) return { id, renewed: false };
-    this.#db.prepare("UPDATE web_sessions SET seen_at = ? WHERE id = ?").run(now, id);
+    this.#sql("UPDATE web_sessions SET seen_at = ? WHERE id = ?").run(now, id);
     return { id, renewed: true };
   }
 
@@ -216,17 +214,17 @@ export class AuthStore {
    *  same id: a revoked cookie must also close what it opened. */
   revoke(id: string): void {
     if (id === ALL) this.#dropSessions();
-    else this.#db.prepare("DELETE FROM web_sessions WHERE id = ?").run(id);
+    else this.#sql("DELETE FROM web_sessions WHERE id = ?").run(id);
     this.#revoked(id);
   }
 
   /** Signed-in browsers, most recently seen first. Never the token — the list
    *  is shown to whoever is signed in, and it is not a set of credentials. */
   list(): Device[] {
-    return this.#db
-      .prepare("SELECT id, created_at AS createdAt, seen_at AS seenAt, ip, agent" +
-        " FROM web_sessions WHERE seen_at > ? ORDER BY seen_at DESC")
-      .all(Date.now() - TTL_MS) as unknown as Device[];
+    return this.#sql(
+      "SELECT id, created_at AS createdAt, seen_at AS seenAt, ip, agent" +
+        " FROM web_sessions WHERE seen_at > ? ORDER BY seen_at DESC",
+    ).all(Date.now() - TTL_MS) as unknown as Device[];
   }
 
   /** A long-lived authenticated surface closes itself when a cookie is

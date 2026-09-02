@@ -17,8 +17,8 @@
 
 import { createReadStream, promises as fs } from "node:fs";
 import { join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
-import { pierDb } from "../db.js";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { pierDb, statements, transact } from "../db.js";
 import { SESSION_TITLE_MAX } from "../limits.js";
 import { logger } from "../log.js";
 import { defaultAgentDir } from "./config.js";
@@ -131,6 +131,7 @@ function fold(acc: Parsed | undefined, line: string): Parsed | undefined | null 
 /** The listing Pier runs on: Pi's session directory, remembered in pier.db. */
 export class IndexedListing implements SessionListing {
   #db?: DatabaseSync;
+  #statements?: (sql: string) => StatementSync;
 
   constructor(
     private readonly dir: string = join(defaultAgentDir(), "sessions"),
@@ -146,10 +147,14 @@ export class IndexedListing implements SessionListing {
     return (this.#db ??= pierDb());
   }
 
+  /** The scan's three statements, compiled on the first scan and not again. */
+  #sql(): (sql: string) => StatementSync {
+    return (this.#statements ??= statements(this.#store()));
+  }
+
   async scan(): Promise<SessionRecord[]> {
-    const db = this.#store();
     const known = new Map(
-      (db.prepare("SELECT * FROM session_index").all() as unknown as IndexRow[]).map((
+      (this.#sql()("SELECT * FROM session_index").all() as unknown as IndexRow[]).map((
         row,
       ) => [row.path, row]),
     );
@@ -296,7 +301,8 @@ export class IndexedListing implements SessionListing {
   #save(rows: IndexRow[], gone: string[]): void {
     if (!rows.length && !gone.length) return;
     const db = this.#store();
-    const upsert = db.prepare(
+    const sql = this.#sql();
+    const upsert = sql(
       `INSERT INTO session_index(path, id, cwd, created_at, name, first_message, size, mtime, parsed_bytes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(path) DO UPDATE SET
@@ -305,9 +311,8 @@ export class IndexedListing implements SessionListing {
          size = excluded.size, mtime = excluded.mtime,
          parsed_bytes = excluded.parsed_bytes`,
     );
-    const drop = db.prepare("DELETE FROM session_index WHERE path = ?");
-    db.exec("BEGIN");
-    try {
+    const drop = sql("DELETE FROM session_index WHERE path = ?");
+    transact(db, () => {
       for (const r of rows) {
         upsert.run(
           r.path,
@@ -322,10 +327,6 @@ export class IndexedListing implements SessionListing {
         );
       }
       for (const path of gone) drop.run(path);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
+    });
   }
 }

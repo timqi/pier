@@ -3,8 +3,8 @@
 // connection db.ts opened. A store owns its queries, never its own tables or
 // its own handle — the schema is db.ts's migration list.
 
-import type { DatabaseSync } from "node:sqlite";
-import { pierDb } from "../db.js";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { pierDb, statements } from "../db.js";
 import type { TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -14,22 +14,23 @@ interface JsonRow {
 const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1), cap);
 
 export class TaskStore {
-  private readonly db: DatabaseSync;
+  /** Every query below is a fixed string, so each is compiled once. */
+  private readonly sql: (sql: string) => StatementSync;
 
   constructor(db: DatabaseSync = pierDb()) {
-    this.db = db;
+    this.sql = statements(db);
   }
 
   // Every table is one JSON column plus query columns; these two are the only
   // readers, and the one seam where a future schema change normalizes old rows
   // (pre-v1 databases are refused outright in db.ts).
   #one<T>(sql: string, ...params: (string | number)[]): T | undefined {
-    const row = this.db.prepare(sql).get(...params) as JsonRow | undefined;
+    const row = this.sql(sql).get(...params) as JsonRow | undefined;
     return row ? JSON.parse(row.json) as T : undefined;
   }
 
   #many<T>(sql: string, ...params: (string | number)[]): T[] {
-    return (this.db.prepare(sql).all(...params) as unknown as JsonRow[])
+    return (this.sql(sql).all(...params) as unknown as JsonRow[])
       .map((row) => JSON.parse(row.json) as T);
   }
 
@@ -42,7 +43,7 @@ export class TaskStore {
   }
 
   saveTask(task: TaskDefinition): void {
-    this.db.prepare(`
+    this.sql(`
       INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at, json=excluded.json
     `).run(task.id, task.updatedAt, JSON.stringify(task));
@@ -60,7 +61,7 @@ export class TaskStore {
   }
 
   saveRun(run: TaskRun): void {
-    this.db.prepare(`
+    this.sql(`
       INSERT INTO task_runs(id, task_id, queued_at, state, callback_state, json)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -91,7 +92,7 @@ export class TaskStore {
   }
 
   countActiveRuns(): number {
-    const row = this.db.prepare(
+    const row = this.sql(
       "SELECT COUNT(*) AS n FROM task_runs WHERE state IN ('queued', 'running')",
     ).get() as { n: number };
     return row.n;
@@ -117,7 +118,7 @@ export class TaskStore {
    *  draws one dot per row: the state column narrows the scan to the handful
    *  of live runs, and no row's JSON is parsed. */
   countActiveBackgroundRunsBySession(): Map<string, number> {
-    const rows = this.db.prepare(`
+    const rows = this.sql(`
       SELECT json_extract(json, '$.invokedBySessionId') AS session_id, COUNT(*) AS n
       FROM task_runs
       WHERE state IN ('queued', 'running')
@@ -137,7 +138,7 @@ export class TaskStore {
   }
 
   saveGroup(group: TaskGroup): void {
-    this.db.prepare(`
+    this.sql(`
       INSERT INTO task_groups(id, created_at, callback_state, finished_at, json)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -162,7 +163,7 @@ export class TaskStore {
   }
 
   saveMessage(message: TaskMessage): void {
-    this.db.prepare(`
+    this.sql(`
       INSERT INTO task_messages(id, run_id, state, created_at, json)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET state=excluded.state, json=excluded.json

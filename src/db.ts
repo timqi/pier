@@ -14,7 +14,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { logger } from "./log.js";
 import { PIER_DB } from "./paths.js";
 
@@ -294,6 +294,16 @@ const MIGRATIONS: readonly string[] = [
     session_id TEXT NOT NULL REFERENCES web_sessions(id) ON DELETE CASCADE
   );
   `,
+  // 15 — the scheduler's tick stops reading the rows it cannot deliver.
+  `
+  -- Once a second, tasks/ asks for the runs whose callback is still owed and
+  -- the messages whose injection has not landed. Both are a handful of rows
+  -- filtered on one low-cardinality column, and without an index both are a
+  -- full scan of a table that only grows — the sweep got slower with every
+  -- run that finished cleanly and can never match again.
+  CREATE INDEX task_runs_callback_state ON task_runs(callback_state);
+  CREATE INDEX task_messages_state ON task_messages(state);
+  `,
 ];
 
 /**
@@ -314,6 +324,24 @@ export function transact<T>(db: DatabaseSync, work: () => T): T {
     db.exec("ROLLBACK");
     throw err;
   }
+}
+
+/**
+ * Prepared statements, memoized by their SQL. `prepare()` compiles, and the
+ * callers here hand it the same handful of strings forever — twice per
+ * authenticated request, once a second per scheduler sweep. A `StatementSync`
+ * is reusable with different bound parameters, so one per SQL string per
+ * connection is the whole cache. Bound to the connection because a statement
+ * belongs to the database that compiled it; SQL built per call does not
+ * belong in here, since the cache would then grow without a bound.
+ */
+export function statements(db: DatabaseSync): (sql: string) => StatementSync {
+  const cache = new Map<string, StatementSync>();
+  return (sql) => {
+    let stmt = cache.get(sql);
+    if (!stmt) cache.set(sql, (stmt = db.prepare(sql)));
+    return stmt;
+  };
 }
 
 let shared: DatabaseSync | undefined;
@@ -357,6 +385,11 @@ export function openDb(path: string, migrations: readonly string[] = MIGRATIONS)
   // file, and SQLite refuses to change it inside one.
   db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   db.exec("PRAGMA journal_mode = WAL");
+  // WAL's default leaves every commit waiting on an fsync, and DatabaseSync is
+  // synchronous — that wait is the event loop's. NORMAL still survives a
+  // process crash; only a power loss can cost the last transactions, which for
+  // routing state and task bookkeeping is a fair trade for not blocking.
+  db.exec("PRAGMA synchronous = NORMAL");
   // Off by default in SQLite, and a declared relationship nothing enforces is
   // a comment. Set before migrate(): it is a per-connection switch and a no-op
   // inside a transaction. Nothing older declares a key, so this changes the
