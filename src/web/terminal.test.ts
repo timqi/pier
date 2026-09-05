@@ -313,7 +313,12 @@ describe("TerminalHub", () => {
     const conn = (await h.attach(cwd, a))!;
     conn.message(JSON.stringify({ t: "in", d: "echo only-mine\r" }));
     await until(() => a.output.includes("only-mine"));
-    expect(a.output.trimStart().startsWith("echo only-mine")).toBe(true);
+    // Read as lines, not as a prefix: the tty echoes the typed command as soon
+    // as it arrives, which can beat the shell's first prompt out of the pty, so
+    // whether the output opens with "$ " is a race. A startup command would
+    // have been echoed as a line of its own before ours — nothing was.
+    const before = a.output.slice(0, a.output.indexOf("echo only-mine"));
+    expect(before).not.toContain("\n");
   });
 
   it("applies the last resize", async () => {

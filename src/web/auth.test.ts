@@ -459,12 +459,16 @@ describe("the cookie", () => {
     expect(deadline()).toBe(first);
 
     // Six minutes later the row and the browser both get the new deadline.
-    db.prepare("UPDATE web_sessions SET seen_at = ?").run(Date.now() - 6 * 60_000);
+    // The stale value is what the write is measured against: `first` is this
+    // millisecond's clock, and a touch landing in the same millisecond would
+    // otherwise read as no touch at all.
+    const stale = Date.now() - 6 * 60_000;
+    db.prepare("UPDATE web_sessions SET seen_at = ?").run(stale);
     const used = await a.request("/api/sessions", { headers: { cookie } });
     expect(used.status).toBe(200);
     expect(cookieOf(used)).toBe(cookie);
     expect(used.headers.get("set-cookie")).toContain("Max-Age=604800");
-    expect(deadline()).toBeGreaterThan(first);
+    expect(deadline()).toBeGreaterThan(stale);
     db.close();
   });
 });
