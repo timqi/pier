@@ -395,6 +395,20 @@ describe("drain", () => {
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("a queue with no turn left to drain it", () => {
+  it("keeps task ownership during automatic promotion for callback and push routing", async () => {
+    const owner = { channelId: "task", conversationId: "s1" };
+    await router.ensure(owner);
+    expect(router.conversationOf("s1")).toEqual(owner);
+    fake.setQueue({ followUp: ["task follow-up"] });
+    fake.emit({ type: "queue-state", steering: [], followUp: ["task follow-up"] });
+    await settle();
+    expect(fake.prompts).toEqual(["task follow-up"]);
+    expect(router.conversationOf("s1")).toEqual(owner);
+    // A later explicit web control retains the existing alias-switch policy.
+    fake.setQueue({ followUp: ["operator promotion"] });
+    await router.deliverQueue("s1", "steer");
+    expect(router.conversationOf("s1")).toEqual({ channelId: "web", conversationId: "s1" });
+  });
   // `decide` reads the session state once. A steer chosen against a turn that
   // ends before the call lands stays in Pi's queue, and the next turn — which
   // may never come — is the first thing that would read it. On IM that is
@@ -666,10 +680,137 @@ describe("queue promotion recovery", () => {
     expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["still queued"] });
     expect(fake.calls.filter((c) => c === "clearQueue")).toHaveLength(1);
   });
+
+  it("does not resend uncertain live input on a NEW queue event after ACK", async () => {
+    let submissions = 0;
+    fake.session.prompt = async (text) => {
+      submissions++;
+      fake.setQueue({ followUp: [text] });
+      fake.emit({ type: "queue-state", steering: [], followUp: [text] });
+      throw new Error("acceptance unknown");
+    };
+    await router.deliverQueue("s1", "steer");
+    await settle();
+    router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
+    const queue = await fake.session.pendingQueue();
+    queue.followUp.push("a genuinely new arrival");
+    fake.setQueue(queue);
+    fake.emit({ type: "queue-state", ...queue });
+    await settle();
+    expect(submissions).toBe(1);
+    expect(await fake.session.pendingQueue()).toEqual(queue);
+    expect(router.queueUncertain("s1")).toBe(true);
+  });
+
+  it.each(["before", "after"])("resolves the live-queue hold with manual recall %s ACK, preserving copies until ACK", async (order) => {
+    fake.failPrompts(new Error("uncertain"));
+    await router.deliverQueue("s1", "steer");
+    await settle();
+    const batch = router.recoveryOf("s1")[0]!;
+    fake.failPrompts(undefined);
+    if (order === "after") router.acknowledgeRecovery("s1", batch.id);
+    expect(router.queueUncertain("s1")).toBe(true);
+    expect(await router.recallQueue("s1")).toEqual({ steering: [], followUp: [] });
+    expect(router.queueUncertain("s1")).toBe(false);
+    if (order === "before") {
+      expect(router.recoveryOf("s1")[0]).toEqual(batch);
+      router.acknowledgeRecovery("s1", batch.id);
+    }
+    expect(router.queueUncertain("s1")).toBe(false);
+    fake.setQueue({ followUp: ["fresh after resolution"] });
+    fake.emit({ type: "queue-state", steering: [], followUp: ["fresh after resolution"] });
+    await settle();
+    expect(fake.prompts.at(-1)).toBe("fresh after resolution");
+  });
+
+  it.each(["steer", "restart"] as const)("resolves the hold only after an explicit %s clear succeeds", async (mode) => {
+    fake.failPrompts(new Error("uncertain"));
+    await router.deliverQueue("s1", "steer");
+    await settle();
+    router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
+    const clear = fake.session.clearQueue;
+    fake.session.clearQueue = async () => { throw new Error("clear failed"); };
+    await expect(router.deliverQueue("s1", mode)).rejects.toThrow("clear failed");
+    await expect(router.recallQueue("s1")).rejects.toThrow("clear failed");
+    expect(router.queueUncertain("s1")).toBe(true);
+    fake.session.clearQueue = clear;
+    fake.failPrompts(undefined);
+    fake.setQueue({ followUp: ["explicitly delivered"] });
+    await router.deliverQueue("s1", mode);
+    await settle();
+    expect(router.queueUncertain("s1")).toBe(false);
+    expect(fake.prompts.at(-1)).toBe("explicitly delivered");
+  });
+
+  it("keeps an acknowledged hold through eviction and snapshot reads", async () => {
+    fake.failPrompts(new Error("uncertain"));
+    await router.deliverQueue("s1", "steer");
+    await settle();
+    router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
+    expect(await router.evictIdle(0, Date.now() + 1)).toBe(1);
+    await router.ensure(KEY);
+    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: [] });
+    expect(router.recoveryOf("s1")).toEqual([]);
+    expect(router.queueUncertain("s1")).toBe(true);
+    expect(hub.replay("s1", 0)).toEqual([]); // eviction dropped replay, not the hold
+    await router.recallQueue("s1");
+    expect(router.queueUncertain("s1")).toBe(false);
+  });
+
+  it.each(["during clear", "after clear"])("retains a later rejection %s and ignores unrelated success", async (when) => {
+    const late = deferred(), success = deferred();
+    fake.session.prompt = () => late.promise;
+    await router.deliverQueue("s1", "steer");
+    fake.setQueue({ followUp: ["another submission"] });
+    fake.session.prompt = () => success.promise;
+    await router.deliverQueue("s1", "steer");
+    const clear = fake.session.clearQueue;
+    const gate = deferred<Awaited<ReturnType<typeof clear>>>();
+    const taken = await clear();
+    fake.session.clearQueue = () => gate.promise;
+    const recall = router.recallQueue("s1");
+    await settle();
+    if (when === "during clear") { late.reject(new Error("late rejection")); await settle(); }
+    gate.resolve(taken);
+    await recall;
+    if (when === "after clear") { late.reject(new Error("late rejection")); await settle(); }
+    success.resolve();
+    await settle();
+    expect(router.queueUncertain("s1")).toBe(true);
+    expect(router.recoveryOf("s1")).toEqual([expect.objectContaining({ ...originals, status: "uncertain" })]);
+  });
 });
 
 describe("the speaker a session has been told about", () => {
   const ada = { id: "U1", name: "Ada" };
+
+  it.each(["before submission", "uncertain"])("restores attribution after promotion fails %s, without resetting again on ACK", async (failure) => {
+    Object.assign(fake.session, { state: "streaming" });
+    fake.session.followUp = async (text) => { fake.setQueue({ followUp: [text] }); };
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "queued", mode: "auto" });
+    expect((await fake.session.pendingQueue()).followUp[0]).toContain("Ada<U1>");
+    Object.assign(fake.session, { state: "idle" });
+    const clear = fake.session.clearQueue;
+    if (failure === "before submission") {
+      fake.session.clearQueue = async () => {
+        const queue = await clear();
+        router.beginDrain();
+        return queue;
+      };
+      await expect(router.deliverQueue("s1", "steer")).rejects.toThrow("restarting");
+      router.endDrain();
+    } else {
+      fake.failPrompts(new Error("uncertain submission"));
+      await router.deliverQueue("s1", "steer");
+      await settle();
+      fake.failPrompts(undefined);
+    }
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "next", mode: "auto" });
+    expect(fake.prompts.at(-1)).toContain("Ada<U1>");
+    router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "after acknowledgement", mode: "auto" });
+    expect(fake.prompts.at(-1)).toBe("after acknowledgement");
+  });
 
   it("is re-sent when the dispatch carrying it failed", async () => {
     fake.failPrompts(new Error("session gone"));

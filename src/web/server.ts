@@ -374,6 +374,7 @@ export function createServer(
         thinkingLevel: session.thinkingLevel,
         queue,
         queueRecovery: router.recoveryOf(id),
+        queueUncertain: router.queueUncertain(id),
         backgroundRuns: backgroundRuns?.(id) ?? [],
       });
     }

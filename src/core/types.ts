@@ -147,7 +147,7 @@ export type SessionEventPayload =
   | { type: "state"; state: SessionState }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
   | { type: "queue-state"; steering: string[]; followUp: string[] }
-  | { type: "queue-recovery"; batches: QueueRecovery[] }
+  | { type: "queue-recovery"; batches: QueueRecovery[]; uncertain: boolean }
   | { type: "error"; message: string };
 
 /** Originals removed for a promotion, retained in memory, not another queue.

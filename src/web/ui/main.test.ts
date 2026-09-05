@@ -70,7 +70,7 @@ function deferred<T = Response>() {
 }
 const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
   turns: [{ role: "user", text }], lastSeq, epoch, model: null, state: "idle",
-  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [] }, queueRecovery: [], backgroundRuns: [],
+  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [] }, queueRecovery: [], queueUncertain: false, backgroundRuns: [],
 });
 const latest = () => Stream.all.at(-1)!;
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -101,12 +101,14 @@ describe("session loads", () => {
   it("restores queue recovery from the snapshot and reconciles it from the same event stream", async () => {
     const batch = { id: "batch", steering: ["[Ada<U1>]\nfirst", "second"], followUp: [], status: "uncertain" };
     const response = await snapshot("loaded").json();
-    h.history.mockResolvedValueOnce(Response.json({ ...response, queueRecovery: [batch] }));
+    h.history.mockResolvedValueOnce(Response.json({ ...response, queueRecovery: [batch], queueUncertain: true }));
     h.sidebar.select("a");
     await settled();
-    expect(h.renderRecovery).toHaveBeenLastCalledWith([batch]);
-    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 1, ts: 1, type: "queue-recovery", batches: [] }) });
-    expect(h.renderRecovery).toHaveBeenLastCalledWith([]);
+    expect(h.renderRecovery).toHaveBeenLastCalledWith([batch], true);
+    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 1, ts: 1, type: "queue-recovery", batches: [], uncertain: true }) });
+    expect(h.renderRecovery).toHaveBeenLastCalledWith([], true);
+    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 2, ts: 1, type: "queue-recovery", batches: [], uncertain: false }) });
+    expect(h.renderRecovery).toHaveBeenLastCalledWith([], false);
   });
 
   it("reselecting during a load or on a healthy stream keeps the current generation", async () => {

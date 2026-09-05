@@ -212,6 +212,13 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   Unresolved recovery holds automatic promotion only: a queue event followed
   by rejection may describe the same input. Manual live-queue controls still
   work, and acknowledgement itself never launches a promotion.
+  Post-invocation rejection also sets one independent, memory-only uncertainty
+  hold per session. ACK removes the copy, not this hold. Only an explicit manual
+  deliver/recall whose queue clear succeeds removes it; events, settlement and
+  eviction cannot. The existing recovery event/snapshot carries the hold, and
+  its pause notice offers recall even for an empty live queue. A later rejection
+  can set the hold again. Neither a queue snapshot nor text matching proves
+  whether the original input was accepted.
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
   fan-out to subscribers. Text deltas are fanned out but not buffered — they

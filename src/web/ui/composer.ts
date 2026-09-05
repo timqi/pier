@@ -139,7 +139,7 @@ export function syncQueuePanel(): void {
   recoveryPanel.classList.toggle("hidden", !deps.chatVisible() || !recoveryPanel.childElementCount);
 }
 
-export function renderRecovery(batches: QueueRecovery[]): void {
+export function renderRecovery(batches: QueueRecovery[], uncertain = false): void {
   const sessionId = deps.sessionId();
   recoveryPanel.replaceChildren(...batches.map((batch) => {
     const group = h("details", "py-1");
@@ -161,13 +161,23 @@ export function renderRecovery(batches: QueueRecovery[]): void {
     ack.onclick = async () => {
       if (!sessionId || !confirm("Remove this recovery copy? This does not resend the messages.")) return;
       const res = await sendJson(`/api/sessions/${sessionId}/queue/recovery/${batch.id}/ack`, {});
+      const why = res.ok ? null : await failure(res, "Could not acknowledge queue recovery");
       if (deps.sessionId() !== sessionId) return;
-      if (!res.ok) appendTurn("error", await failure(res, "Could not acknowledge queue recovery"));
+      if (why !== null) appendTurn("error", why);
       else await deps.reload(sessionId);
     };
     group.append(ack);
     return group;
   }));
+  if (uncertain) {
+    const notice = h("div", "flex flex-wrap items-center gap-x-2 py-1 text-amber-700",
+      "Automatic queue paused: acceptance unknown (in memory)");
+    const recall = h("button", "cursor-pointer underline", "Recall queue");
+    recall.title = "Clear the live queue and return its messages to the composer";
+    recall.onclick = () => void recallQueue();
+    notice.append(recall);
+    recoveryPanel.prepend(notice);
+  }
   syncQueuePanel();
 }
 
@@ -379,7 +389,11 @@ async function recallQueue(): Promise<void> {
   const id = deps.sessionId();
   if (!id) return;
   const res = await fetch(`/api/sessions/${id}/queue/recall`, { method: "POST" });
-  if (!res.ok) return;
+  if (!res.ok) {
+    const why = await failure(res, "Could not recall queued messages");
+    if (deps.sessionId() === id) appendTurn("error", why);
+    return;
+  }
   const { messages } = (await res.json()) as { messages: string[] };
   // Append (not replace) so an existing draft isn't clobbered — avibe recall rule.
   if (messages.length) {

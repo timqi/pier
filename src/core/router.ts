@@ -305,6 +305,13 @@ export class Router {
   private readonly queueOperations = new Set<string>();
   private readonly promotionRequested = new Set<string>();
   private readonly recoveries = new Map<string, QueueRecovery[]>();
+  // Keep the latest failed batch ID so a clear cannot erase a newer rejection
+  // that arrived while it awaited the backend. ACK affects only the copy.
+  private readonly uncertaintyHeld = new Map<string, string>();
+
+  queueUncertain(sessionId: string): boolean {
+    return this.uncertaintyHeld.has(sessionId);
+  }
 
   recoveryOf(sessionId: string): QueueRecovery[] {
     return structuredClone(this.recoveries.get(sessionId) ?? []);
@@ -312,7 +319,9 @@ export class Router {
 
   private recoveryChanged(sessionId: string): void {
     if (!this.recoveries.get(sessionId)?.length) this.recoveries.delete(sessionId);
-    this.hub.emit(sessionId, { type: "queue-recovery", batches: this.recoveryOf(sessionId) });
+    this.hub.emit(sessionId, {
+      type: "queue-recovery", batches: this.recoveryOf(sessionId), uncertain: this.queueUncertain(sessionId),
+    });
   }
 
   acknowledgeRecovery(sessionId: string, batchId: string): void {
@@ -327,11 +336,15 @@ export class Router {
 
   /** Only queue mutation owns this lock. A model turn owns its batch, not the
    *  next queue: manual controls remain available while that turn runs. */
-  private async useQueue<T>(sessionId: string, action: (session: AgentSession) => Promise<T>): Promise<T> {
+  private async useQueue<T>(
+    sessionId: string,
+    action: (session: AgentSession) => Promise<T>,
+    key: ConversationKey = { channelId: "web", conversationId: sessionId },
+  ): Promise<T> {
     if (this.queueOperations.has(sessionId)) throw new QueueOperationError("busy", "Queue operation in progress");
     this.queueOperations.add(sessionId);
     try {
-      return await action(await this.ensure({ channelId: "web", conversationId: sessionId }));
+      return await action(await this.ensure(key));
     } finally {
       this.queueOperations.delete(sessionId);
       this.resumePromotion(sessionId);
@@ -340,7 +353,9 @@ export class Router {
 
   async recallQueue(sessionId: string): Promise<{ steering: string[]; followUp: string[] }> {
     return this.useQueue(sessionId, async (session) => {
+      const held = this.uncertaintyHeld.get(sessionId);
       const queue = await session.clearQueue();
+      if (this.uncertaintyHeld.get(sessionId) === held && this.uncertaintyHeld.delete(sessionId)) this.recoveryChanged(sessionId);
       if (queue.steering.length || queue.followUp.length) this.forgetSender(sessionId);
       return queue;
     });
@@ -356,8 +371,10 @@ export class Router {
       this.checkQueueDrain();
       return await this.useQueue(sessionId, async (session) => {
         this.checkQueueDrain();
-        if (mode === "auto" && session.state !== "idle") return "";
+        if (mode === "auto" && (session.state !== "idle" || this.queueUncertain(sessionId) || this.recoveries.get(sessionId)?.length)) return "";
+        const held = this.uncertaintyHeld.get(sessionId);
         const queue = await session.clearQueue();
+        if (mode !== "auto" && this.uncertaintyHeld.get(sessionId) === held && this.uncertaintyHeld.delete(sessionId)) this.recoveryChanged(sessionId);
         if (!queue.steering.length && !queue.followUp.length) throw new QueueOperationError("empty", "Queue is empty");
         const batch: QueueRecovery = { id: randomUUID(), ...queue, status: "submitting" };
         this.recoveries.set(sessionId, [...(this.recoveries.get(sessionId) ?? []), batch]);
@@ -366,11 +383,13 @@ export class Router {
         const text = [...batch.steering, ...batch.followUp].join("\n");
         let invoked = false;
         const failed = (err: unknown): void => {
+          this.forgetSender(sessionId);
           this.promotionRequested.delete(sessionId);
           batch.status = invoked ? "uncertain" : "not-submitted";
+          if (invoked) this.uncertaintyHeld.set(sessionId, batch.id);
           batch.error = String(err);
           this.recoveryChanged(sessionId);
-          this.reportTo(sessionId, `Queue promotion failed (${batch.status}); originals remain available in queue recovery: ${String(err)}`);
+          this.reportTo(sessionId, `Queue promotion failed (${batch.status}); automatic queue paused, originals remain available in queue recovery: ${String(err)}`);
         };
         try {
           this.checkQueueDrain();
@@ -390,7 +409,7 @@ export class Router {
           failed(err);
           throw err;
         }
-      });
+      }, mode === "auto" ? this.conversationOf(sessionId) : undefined);
     } catch (err) {
       if (!retained && !(err instanceof QueueOperationError && (err.reason === "busy" || err.reason === "empty"))) {
         this.reportTo(sessionId, `Could not promote queued messages: ${String(err)}`);
@@ -421,7 +440,7 @@ export class Router {
       if (!this.promotionRequested.has(sessionId) || this.queueOperations.has(sessionId)) return;
       // A queue event followed by rejection might describe the same input.
       // Retained failures require a human decision, not an automatic resend.
-      if (this.recoveries.get(sessionId)?.length) return;
+      if (this.queueUncertain(sessionId) || this.recoveries.get(sessionId)?.length) return;
       this.promotionRequested.delete(sessionId);
       const attached = this.bySession.get(sessionId);
       if (!attached || attached.session.state !== "idle") return;

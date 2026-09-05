@@ -836,6 +836,7 @@ describe("workbench server", () => {
       thinkingLevel: "medium",
       queue: { steering: ["s-msg"], followUp: ["f-msg"] },
       queueRecovery: [],
+      queueUncertain: false,
       backgroundRuns: [],
     });
     session.setState("idle");
@@ -2081,9 +2082,10 @@ describe("workbench server", () => {
     reject(new Error("failed after launch"));
     await new Promise((done) => setTimeout(done, 0));
     const snapshot = async () => (await (await app.request("/api/sessions/s1/history")).json()) as {
-      queueRecovery: QueueRecovery[]; lastSeq: number;
+      queueRecovery: QueueRecovery[]; queueUncertain: boolean; lastSeq: number;
     };
     const recovered = await snapshot();
+    expect(recovered.queueUncertain).toBe(true);
     expect(recovered.queueRecovery).toEqual([expect.objectContaining({ id: batch.id, ...originals, status: "uncertain" })]);
     expect((await snapshot()).queueRecovery).toEqual(recovered.queueRecovery); // lost response/copy is nondestructive
     expect(hub.replay("s1", 0)).toContainEqual(expect.objectContaining({ type: "queue-recovery", batches: recovered.queueRecovery }));
@@ -2091,9 +2093,18 @@ describe("workbench server", () => {
     expect((await post("recovery/absent/ack")).status).toBe(404);
     expect((await post(`recovery/${batch.id}/ack`)).status).toBe(200);
     expect((await snapshot()).queueRecovery).toEqual([]);
+    expect((await snapshot()).queueUncertain).toBe(true);
     expect(session.calls).toEqual(calls); // ACK cannot touch the agent queue
     expect((await post(`recovery/${batch.id}/ack`)).status).toBe(404);
     expect((await post("retry")).status).toBe(404);
+    session.clearQueue = async () => ({ steering: [], followUp: [] });
+    session.pendingQueue = async () => ({ steering: [], followUp: [] });
+    expect((await snapshot()).queueUncertain).toBe(true); // an empty snapshot is not a manual decision
+    expect((await post("recall")).status).toBe(200);
+    expect((await snapshot()).queueUncertain).toBe(false);
+    expect(hub.replay("s1", 0)).toContainEqual(expect.objectContaining({
+      type: "queue-recovery", batches: [], uncertain: false,
+    }));
   });
 
   it.each(["drain", "abort"])("retains recovery in the history snapshot after a post-clear %s failure", async (failure) => {

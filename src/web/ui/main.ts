@@ -102,6 +102,7 @@ interface SessionSnapshot {
   thinkingLevel: ThinkingLevel;
   queue: { steering: string[]; followUp: string[] };
   queueRecovery: QueueRecovery[];
+  queueUncertain: boolean;
   backgroundRuns: BackgroundRun[];
 }
 
@@ -299,7 +300,7 @@ function handleEvent(e: SessionEvent): void {
       renderQueue(e.steering, e.followUp);
       break;
     case "queue-recovery":
-      renderRecovery(e.batches);
+      renderRecovery(e.batches, e.uncertain);
       break;
     case "context-compacted":
       // The transcript keeps no trace of a compaction, so this line is the
@@ -446,7 +447,7 @@ async function loadSession(id: string, missing = false): Promise<void> {
   turnOpen = snap.state === "streaming";
   setState(snap.state);
   renderQueue(snap.queue.steering, snap.queue.followUp);
-  renderRecovery(snap.queueRecovery);
+  renderRecovery(snap.queueRecovery, snap.queueUncertain);
   // meta is assistant-only (core/types.ts), so the last one that carries it is
   // the last reply — no role test, and none of Array#findLast (web target).
   const lastReply = snap.turns.reduce<number | null>((at, t) => t.meta?.completedAt ?? at, null);
