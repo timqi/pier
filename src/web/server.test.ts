@@ -828,6 +828,7 @@ describe("workbench server", () => {
         { role: "assistant", text: "hello" },
       ],
       lastSeq: 1,
+      epoch: expect.any(String),
       model: { provider: "anthropic", id: "claude-opus-4-5" },
       state: "streaming",
       context: { tokens: 1200, contextWindow: 200_000 },
@@ -1745,11 +1746,124 @@ describe("workbench server", () => {
     expect((await app.request("/api/config/resource?kind=skills")).status).toBe(400);
   });
 
+  it.each([0, 1, 20])("resets a foreign epoch even with a current server seq of %i", async (count) => {
+    const previous = setup();
+    const old = await (await previous.app.request("/api/sessions/s1/history")).json() as { epoch: string };
+    const { app, hub } = setup();
+    for (let i = 0; i < count; i++) hub.emit("s1", { type: "turn-start" });
+    for (const seq of [0, 1]) {
+      const res = await app.request(`/api/sessions/s1/events?after=${old.epoch}:${seq}`);
+      expect(await res.text()).toContain("event: reset\n");
+      expect(hub.hasSubscribers("s1")).toBe(false);
+    }
+  });
+
+  it.each(["overflow", "drop"])("resets an uncovered cursor after %s", async (kind) => {
+    const { app, hub } = setup();
+    const { epoch } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string };
+    for (let i = 0; i < (kind === "overflow" ? 1001 : 1); i++) hub.emit("s1", { type: "turn-start" });
+    if (kind === "drop") hub.dropReplay("s1");
+    const res = await app.request(`/api/sessions/s1/events?after=${epoch}:0`);
+    expect(await res.text()).toContain("event: reset\n");
+    expect(hub.hasSubscribers("s1")).toBe(false);
+  });
+
+  it("resets missing, numeric, malformed and future cursors without falling back from a bad header", async () => {
+    const { app } = setup();
+    const { epoch } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string };
+    for (const cursor of ["", "0", `${epoch}:-1`, `${epoch}:1.5`, `${epoch}:1`, `${epoch}:9007199254740992`]) {
+      const res = await app.request(`/api/sessions/s1/events?after=${epoch}:0`, {
+        headers: { "Last-Event-ID": cursor },
+      });
+      expect(await res.text()).toContain("event: reset\n");
+    }
+    expect(await (await app.request("/api/sessions/s1/events")).text()).toContain("event: reset\n");
+  });
+
+  it("accepts a zero cursor with no events and preserves it across an empty reconnect", async () => {
+    const { app, hub } = setup();
+    const { epoch, lastSeq } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string; lastSeq: number };
+    expect(lastSeq).toBe(0);
+    const url = `/api/sessions/s1/events?after=${epoch}:0`;
+    const first = await app.request(url);
+    expect(hub.hasSubscribers("s1")).toBe(true);
+    await first.body!.cancel();
+    const second = await app.request(url);
+    const reader = second.body!.getReader();
+    hub.emit("s1", { type: "turn-start" });
+    const frame = new TextDecoder().decode((await reader.read()).value);
+    expect(frame).toContain(`id: ${epoch}:1`);
+    expect(frame).not.toContain("event: reset");
+    await reader.cancel();
+  });
+
+  it("does not mistake a large live-only text gap for lost replay coverage", async () => {
+    const { app, hub } = setup();
+    const { epoch } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string };
+    for (let i = 0; i < 2000; i++) hub.emit("s1", { type: "text-delta", text: "x" });
+    hub.emit("s1", { type: "turn-end", text: "done" });
+    const res = await app.request(`/api/sessions/s1/events?after=${epoch}:0`);
+    const reader = res.body!.getReader();
+    const frame = new TextDecoder().decode((await reader.read()).value);
+    expect(frame).toContain('"seq":2001');
+    expect(frame).not.toContain("event: reset");
+    await reader.cancel();
+  });
+
+  it.each(["history", "queue"])("retries a snapshot when events arrive during %s, then replays only later events", async (during) => {
+    const { app, hub, session } = setup();
+    let turns: ChatTurn[] = [{ role: "user", text: "before" }];
+    const change = () => {
+      turns = [...turns, { role: "user", text: "during" }];
+      hub.emit("s1", { type: "user-message", text: "during" });
+    };
+    session.history = vi.fn(async () => turns);
+    if (during === "history") {
+      vi.mocked(session.history).mockImplementationOnce(async () => {
+        const old = turns;
+        await Promise.resolve();
+        change();
+        return old;
+      });
+    } else {
+      const pending = session.pendingQueue;
+      session.pendingQueue = vi.fn(pending).mockImplementationOnce(async () => {
+        await Promise.resolve();
+        change();
+        return pending();
+      });
+    }
+    const snap = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string; lastSeq: number; turns: ChatTurn[] };
+    expect(snap.turns).toEqual(turns);
+    expect(snap.lastSeq).toBe(1);
+    expect(session.history).toHaveBeenCalledTimes(2);
+    hub.emit("s1", { type: "user-message", text: "after" });
+    const res = await app.request(`/api/sessions/s1/events?after=${snap.epoch}:${snap.lastSeq}`);
+    const reader = res.body!.getReader();
+    const frame = new TextDecoder().decode((await reader.read()).value);
+    expect(frame).toContain('"text":"after"');
+    expect(frame).not.toContain('"text":"during"');
+    await reader.cancel();
+  });
+
+  it("reports a bounded failure when every snapshot read races a new event", async () => {
+    const { app, hub, session } = setup();
+    session.history = vi.fn(async () => {
+      hub.emit("s1", { type: "text-delta", text: "busy" });
+      return [];
+    });
+    const res = await app.request("/api/sessions/s1/history");
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "Session changed while loading history; retry loading the session" });
+    expect(session.history).toHaveBeenCalledTimes(3);
+  });
+
   it("SSE honors the after query param", async () => {
     const { app, hub } = setup();
+    const { epoch } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string };
     hub.emit("s1", { type: "turn-start" });
     hub.emit("s1", { type: "state", state: "idle" });
-    const res = await app.request("/api/sessions/s1/events?after=1");
+    const res = await app.request(`/api/sessions/s1/events?after=${epoch}:1`);
     const reader = res.body!.getReader();
     const { value } = await reader.read();
     const chunk = new TextDecoder().decode(value);
@@ -2024,14 +2138,15 @@ describe("workbench server", () => {
 
   it("SSE replays buffered events after Last-Event-ID, in one write", async () => {
     const { app, hub } = setup();
+    const { epoch } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string };
     hub.emit("s1", { type: "turn-start" });
     hub.emit("s1", { type: "text-delta", text: "a" }); // live-only, never replayed
     hub.emit("s1", { type: "thinking-delta", text: "considering" });
     hub.emit("s1", { type: "state", state: "streaming" });
     hub.emit("s1", { type: "turn-end", text: "a" });
 
-    const res = await app.request("/api/sessions/s1/events", {
-      headers: { "Last-Event-ID": "1" },
+    const res = await app.request(`/api/sessions/s1/events?after=${epoch}:0`, {
+      headers: { "Last-Event-ID": `${epoch}:1` },
     });
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     // The replay write is waiting on this unread body, but the live subscription
@@ -2046,7 +2161,8 @@ describe("workbench server", () => {
     // write instead of one await per event, and the later live frame follows it.
     expect(replay).toContain('"seq":4');
     expect(replay).toContain('"seq":5');
-    expect(replay).toContain("id: 5\n\n");
+    expect(replay).toContain(`id: ${epoch}:5\n\n`);
+    expect(replay).not.toContain("event: reset");
     expect(replay).not.toContain('"seq":1,');
     expect(replay).not.toContain('"seq":6');
     expect(live).toContain('"seq":6');
@@ -2060,7 +2176,8 @@ describe("workbench server", () => {
     // ceiling one stalled tab would hold a turn's worth of events in memory.
     // The reason goes to the log, which the suite runs silent (vitest.config).
     const { app, hub } = setup();
-    const res = await app.request("/api/sessions/s1/events");
+    const { epoch } = await (await app.request("/api/sessions/s1/history")).json() as { epoch: string };
+    const res = await app.request(`/api/sessions/s1/events?after=${epoch}:0`);
     expect(hub.hasSubscribers("s1")).toBe(true);
     const big = "x".repeat(64 * 1024);
     let emitted = 0;

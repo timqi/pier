@@ -93,6 +93,7 @@ import type {
 interface SessionSnapshot {
   turns: ChatTurn[];
   lastSeq: number;
+  epoch: string;
   model: ModelRef | null;
   state: SessionState;
   context: ContextUsage | null;
@@ -107,6 +108,8 @@ declare const __PIER_VERSION__: string; // injected by vite.config.ts
 
 let sessions: SessionInfo[] = [];
 let selectionSeq = 0;
+let loadSeq = 0;
+let loading = false;
 let currentId: string | null = null;
 let currentState: SessionState = "idle";
 let source: EventSource | null = null;
@@ -119,6 +122,9 @@ let starting = false;
 // --- sessions --------------------------------------------------------------------
 
 async function createSession(cwd: string): Promise<void> {
+  const seq = ++selectionSeq;
+  ++loadSeq;
+  loading = false;
   // Opening a session in Pi costs a round trip long enough to look ignored —
   // the dialog closes and the *previous* session stays on screen. So the pane
   // becomes the new session's before the POST is sent: skeleton, the title an
@@ -128,6 +134,7 @@ async function createSession(cwd: string): Promise<void> {
   closeDrawer();
   currentId = null;
   source?.close();
+  source = null;
   resetChat();
   resetHeaderState();
   setHeaderPending(cwd);
@@ -135,6 +142,7 @@ async function createSession(cwd: string): Promise<void> {
   starting = true;
   updateComposer();
   const res = await sendJson("/api/sessions", { cwd });
+  if (seq !== selectionSeq) return;
   starting = false;
   if (!res.ok) {
     chatLoading(false);
@@ -144,6 +152,7 @@ async function createSession(cwd: string): Promise<void> {
     return;
   }
   const { id } = (await res.json()) as { id: string };
+  if (seq !== selectionSeq) return;
   // The row is known here and the POST already broadcast `sessions-changed`,
   // so it is rendered now and the workspace stream's own refresh reconciles it
   // — selecting must not wait for a full listing (principle 7). Repo and branch
@@ -155,7 +164,7 @@ async function createSession(cwd: string): Promise<void> {
     activeRuns: 0, repo, branch,
   });
   await select(id); // renders the rail and the header with the row above
-  focusInput();
+  if (currentId === id) focusInput();
 }
 
 /** `complete` = every session Pi knows, so it replaces the list. A Projects
@@ -340,18 +349,25 @@ function connectWorkspace(): void {
   };
 }
 
-function connect(id: string, after: number): void {
+function connect(id: string, cursor: string, generation: number): void {
   source?.close();
-  const stream = new EventSource(`/api/sessions/${id}/events?after=${after}`);
-  stream.onmessage = (m) => handleEvent(JSON.parse(m.data) as SessionEvent);
-  stream.onerror = () => streamDied(stream, "Session");
+  const stream = new EventSource(`/api/sessions/${id}/events?after=${cursor}`);
+  const current = (): boolean => source === stream && currentId === id && generation === loadSeq;
+  stream.onmessage = (m) => {
+    if (current()) handleEvent(JSON.parse(m.data) as SessionEvent);
+  };
+  stream.addEventListener("reset", () => {
+    if (current()) void loadSession(id);
+  });
+  stream.onerror = () => {
+    if (current()) streamDied(stream, "Session");
+  };
   source = stream;
 }
 
 // --- selection --------------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
-  const seq = ++selectionSeq;
   // The pane opens before anything is fetched. A session named from Activity or
   // from the hash is usually not in the list yet, and the full listing that
   // decides that costs ~150ms in which the click looked ignored.
@@ -359,7 +375,10 @@ async function select(id: string): Promise<void> {
   closeDrawer(); // on mobile the drawer is how you got here
   setSessionHash(id);
   const listed = sessions.some((s) => s.id === id);
-  if (id === currentId && listed) return;
+  if (id === currentId && listed && (source || loading)) return;
+  const seq = ++selectionSeq;
+  ++loadSeq;
+  starting = false;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
@@ -373,6 +392,7 @@ async function select(id: string): Promise<void> {
   // blank pane during it is not. The old stream closes with the pane it was
   // painting, or a delta from the session just left lands in the empty one.
   source?.close();
+  source = null;
   resetChat();
   chatLoading(true);
   await refreshSessions();
@@ -382,7 +402,11 @@ async function select(id: string): Promise<void> {
 
 /** (Re)load the current session's snapshot and reconnect its event stream. */
 async function loadSession(id: string, missing = false): Promise<void> {
+  if (currentId !== id) return;
+  const generation = ++loadSeq;
   source?.close();
+  source = null;
+  loading = true;
   resetChat();
   renderQueue([], []);
   resetHeaderState();
@@ -393,12 +417,14 @@ async function loadSession(id: string, missing = false): Promise<void> {
   // render, and until then the pane would look like an empty session.
   chatLoading(true);
   if (missing) {
+    loading = false;
     chatLoading(false);
     appendTurn("error", `session not found: ${id}`);
     return;
   }
   const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
-  if (currentId !== id) return; // stale: the user switched again mid-fetch
+  if (currentId !== id || generation !== loadSeq) return;
+  loading = false;
   if (!got.ok) {
     chatLoading(false);
     appendTurn("error", got.error);
@@ -416,7 +442,7 @@ async function loadSession(id: string, missing = false): Promise<void> {
   // the last reply — no role test, and none of Array#findLast (web target).
   const lastReply = snap.turns.reduce<number | null>((at, t) => t.meta?.completedAt ?? at, null);
   setHeaderState(snap.model, snap.context, snap.thinkingLevel, lastReply);
-  connect(id, snap.lastSeq);
+  connect(id, `${snap.epoch}:${snap.lastSeq}`, generation);
 }
 
 // --- wiring ----------------------------------------------------------------------------

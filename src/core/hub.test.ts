@@ -53,6 +53,10 @@ describe("EventHub", () => {
     expect(hub.replay("s", 1003).map((e) => e.seq)).toEqual([1004, 1005]);
     expect(hub.replay("s", 2)[0]?.seq).toBe(6);
     expect(hub.replay("s", 1005)).toEqual([]);
+    expect(hub.covers("s", 4)).toBe(false);
+    expect(hub.covers("s", 5)).toBe(true);
+    expect(hub.covers("s", 1005)).toBe(true);
+    expect(hub.covers("s", 1006)).toBe(false);
   });
 
   it("text deltas fan out live but never enter the ring", () => {
@@ -70,6 +74,29 @@ describe("EventHub", () => {
     // the transcript snapshot, and turn-end only restores the final text.
     expect(hub.replay("s", 0).map((e) => e.seq)).toEqual([1, 2002, 2003]);
     expect(hub.lastSeq("s")).toBe(2003); // deltas still take their number
+    expect(hub.covers("s", 0)).toBe(true);
+    expect(hub.covers("s", 1000)).toBe(true);
+  });
+
+  it("tracks dropped replay without treating trailing text deltas as lost history", () => {
+    const hub = new EventHub();
+    expect(hub.covers("s", 0)).toBe(true);
+    hub.emit("s", { type: "turn-start" });
+    hub.emit("s", { type: "text-delta", text: "x" });
+    const unsubscribe = hub.subscribe("s", () => {});
+    hub.dropReplay("s");
+    expect(hub.covers("s", 0)).toBe(true); // watched rings stay intact
+    unsubscribe();
+    hub.dropReplay("s");
+    hub.dropReplay("s"); // dropping an empty ring must preserve the floor
+    expect(hub.covers("s", 0)).toBe(false);
+    expect(hub.covers("s", 1)).toBe(true);
+    expect(hub.covers("s", 2)).toBe(true);
+    hub.emit("s", { type: "turn-end", text: "x" });
+    expect(hub.replay("s", 1).map((e) => e.seq)).toEqual([3]);
+    expect(hub.covers("s", -1)).toBe(false);
+    expect(hub.covers("s", NaN)).toBe(false);
+    expect(hub.covers("s", 1.5)).toBe(false);
   });
 
   it("fans workspace events out to every client", () => {

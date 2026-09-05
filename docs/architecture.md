@@ -203,6 +203,14 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   would be the only thing in the ring, and `turn-end` carries the turn's full text. No persistence — pi's session files are the durable
   record. Pi's `queue_update` is translated to a `queue-state` event at the
   seam (`agent/events.ts`), so surfaces can show what is waiting.
+  The hub exposes replay coverage using the highest discarded replayable seq,
+  not gaps left by live-only deltas. Web owns a per-server epoch: history
+  includes `epoch` and `lastSeq`, and SSE ids / `?after` are `epoch:seq`.
+  Foreign, missing or uncovered cursors receive a named `reset` event; the
+  client replaces its snapshot before reconnecting. History retries up to
+  three times if events arrive across async reads, then reports 503 rather
+  than pairing stale content with a newer cursor. Load generations prevent
+  obsolete history responses or streams from changing the selected pane.
 - **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory.
   Unknown conversation → create a session lazily via the injected resolver.
   Durability is the caller's business, not core's: web conversation ids already

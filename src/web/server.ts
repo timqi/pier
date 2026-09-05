@@ -2,6 +2,7 @@
 // See docs/design/03-web-workbench.md for the route contract.
 
 import { hostname } from "node:os";
+import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,24 +115,6 @@ const SSE_HIGH_WATER = 4 * 1024 * 1024;
 // Canonical base64 only: Buffer.from(.., "base64") happily "decodes" garbage.
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
-/** The SSE frame for one event, built once and shared by every stream watching
- *  that session — three open tabs used to stringify the same delta three
- *  times. One slot is the whole cache: the hub fans an event out to its
- *  subscribers in one synchronous loop, so the reuse is always of the event
- *  just built, and the memo is keyed on identity so a miss only costs a
- *  rebuild. The hub stays transport-blind; this is the transport's business.
- *  Byte-identical to hono's `writeSSE`: JSON has no raw newline, so `data` is
- *  one line. */
-let lastEvent: SessionEvent | null = null;
-let lastFrame = "";
-const sseFrame = (e: SessionEvent): string => {
-  if (e !== lastEvent) {
-    lastEvent = e;
-    lastFrame = `data: ${JSON.stringify(e)}\nid: ${e.seq}\n\n`;
-  }
-  return lastFrame;
-};
-
 export function createServer(
   {
     factory,
@@ -156,6 +139,18 @@ export function createServer(
   }: WebDeps,
 ): Hono {
   const app = new Hono();
+  const epoch = randomUUID();
+  // One frame shared by synchronous fan-out to every watching tab. The epoch
+  // and wire encoding stay here; core only stamps transport-blind events.
+  let lastEvent: SessionEvent | null = null;
+  let lastFrame = "";
+  const sseFrame = (e: SessionEvent): string => {
+    if (e !== lastEvent) {
+      lastEvent = e;
+      lastFrame = `data: ${JSON.stringify(e)}\nid: ${epoch}:${e.seq}\n\n`;
+    }
+    return lastFrame;
+  };
 
   // A finished turn marks its session unread until some client reports it was
   // seen (session selected + tab visible → POST read below). Server-side so
@@ -353,16 +348,25 @@ export function createServer(
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
     const session = await ensureLoadable(id);
-    return c.json({
-      turns: (await session.history()).map(slim),
-      lastSeq: hub.lastSeq(id),
-      model: session.model ?? null,
-      state: session.state,
-      context: session.contextUsage ?? null,
-      thinkingLevel: session.thinkingLevel,
-      queue: await session.pendingQueue(),
-      backgroundRuns: backgroundRuns?.(id) ?? [],
-    });
+    // Async seam reads can straddle an event. Never label older content with a
+    // newer cursor, and never spin indefinitely if the session stays busy.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const lastSeq = hub.lastSeq(id);
+      const turns = (await session.history()).map(slim);
+      const queue = await session.pendingQueue();
+      if (hub.lastSeq(id) !== lastSeq) continue;
+      return c.json({
+        turns, lastSeq, epoch,
+        model: session.model ?? null,
+        state: session.state,
+        context: session.contextUsage ?? null,
+        thinkingLevel: session.thinkingLevel,
+        queue,
+        backgroundRuns: backgroundRuns?.(id) ?? [],
+      });
+    }
+    log.warn(`snapshot for ${id} changed during all 3 reads`);
+    return c.json({ error: "Session changed while loading history; retry loading the session" }, 503);
   });
 
   // One turn's activity in full, for the group the user just opened. Indexed
@@ -615,11 +619,14 @@ export function createServer(
 
   app.get("/api/sessions/:id/events", (c) => {
     const id = c.req.param("id");
-    const lastId =
-      Number(c.req.header("Last-Event-ID") ?? "") ||
-      Number(c.req.query("after") ?? "") ||
-      0;
+    const cursor = c.req.header("Last-Event-ID") ?? c.req.query("after") ?? "";
+    const match = /^([^:]+):(0|[1-9]\d*)$/.exec(cursor);
+    const lastId = match ? Number(match[2]) : NaN;
     return streamSSE(c, async (stream) => {
+      if (match?.[1] !== epoch || !hub.covers(id, lastId)) {
+        await stream.writeSSE({ event: "reset", data: "snapshot required" });
+        return;
+      }
       let queued = 0; // frame chars written but not yet drained by the reader
       const send = (frame: string): void => {
         if (stream.aborted || stream.closed) return;

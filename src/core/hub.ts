@@ -21,6 +21,7 @@ function fanOut<E>(subscribers: Iterable<(e: E) => void>, event: E): void {
 
 interface SessionBus {
   seq: number;
+  replayFloor: number; // highest replayable seq discarded, not a live-only delta
   buffer: SessionEvent[]; // ring of replayable events, oldest first; emptied once nobody watches
   subscribers: Set<(e: SessionEvent) => void>;
 }
@@ -34,7 +35,7 @@ export class EventHub {
   private bus(sessionId: string): SessionBus {
     let b = this.buses.get(sessionId);
     if (!b) {
-      b = { seq: 0, buffer: [], subscribers: new Set() };
+      b = { seq: 0, replayFloor: 0, buffer: [], subscribers: new Set() };
       this.buses.set(sessionId, b);
     }
     return b;
@@ -57,7 +58,7 @@ export class EventHub {
     // not reload the transcript snapshot that would otherwise restore it.
     if (payload.type !== "text-delta") {
       b.buffer.push(event);
-      if (b.buffer.length > RING_SIZE) b.buffer.shift();
+      if (b.buffer.length > RING_SIZE) b.replayFloor = b.buffer.shift()!.seq;
     }
     fanOut(b.subscribers, event);
   }
@@ -72,6 +73,12 @@ export class EventHub {
    *  and without text deltas, which are live-only. */
   replay(sessionId: string, afterSeq: number): SessionEvent[] {
     return this.bus(sessionId).buffer.filter((e) => e.seq > afterSeq);
+  }
+
+  /** Whether replay covers this cursor; live-only text gaps are intentional. */
+  covers(sessionId: string, afterSeq: number): boolean {
+    const b = this.bus(sessionId);
+    return Number.isSafeInteger(afterSeq) && afterSeq >= b.replayFloor && afterSeq <= b.seq;
   }
 
   emitWorkspace(event: WorkspaceEvent): void {
@@ -105,6 +112,9 @@ export class EventHub {
   dropReplay(sessionId: string): void {
     if (this.hasSubscribers(sessionId)) return;
     const b = this.buses.get(sessionId);
-    if (b) b.buffer = [];
+    if (b) {
+      b.replayFloor = b.buffer.at(-1)?.seq ?? b.replayFloor;
+      b.buffer = [];
+    }
   }
 }
