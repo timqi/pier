@@ -46,6 +46,8 @@ const imageStrip = $("#image-strip");
 const attachInput = $<HTMLInputElement>("#attach-input");
 
 let queueHasRows = false;
+let queueVersion = 0;
+const recalling = new Set<string>();
 let pendingFiles: PendingFile[] = [];
 // Texts already rendered optimistically, awaiting their user-message event so
 // the same turn isn't drawn twice.
@@ -182,6 +184,7 @@ export function renderRecovery(batches: QueueRecovery[], uncertain = false): voi
 }
 
 export function renderQueue(steering: string[], followUp: string[]): void {
+  ++queueVersion;
   const rows = [
     ...steering.map((text) => ({ mode: "steer", text })),
     ...followUp.map((text) => ({ mode: "queued", text })),
@@ -277,15 +280,16 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
 // is the client's business, never the agent's.
 
 const draftKey = (id: string): string => `pier.draft.${id}`;
+let draftVersion = 0;
 
-export function saveDraft(): void {
-  const id = deps.sessionId();
+export function saveDraft(id = deps.sessionId(), text = input.value): void {
   if (!id) return;
-  if (input.value.trim()) localStorage.setItem(draftKey(id), input.value);
+  if (text) localStorage.setItem(draftKey(id), text);
   else localStorage.removeItem(draftKey(id));
 }
 
 export function restoreDraft(id: string): void {
+  ++draftVersion;
   input.value = localStorage.getItem(draftKey(id)) ?? "";
   autosize();
   pendingFiles = [];
@@ -387,22 +391,42 @@ async function deliverQueue(mode: "steer" | "restart"): Promise<void> {
 
 async function recallQueue(): Promise<void> {
   const id = deps.sessionId();
-  if (!id) return;
-  const res = await fetch(`/api/sessions/${id}/queue/recall`, { method: "POST" });
-  if (!res.ok) {
-    const why = await failure(res, "Could not recall queued messages");
-    if (deps.sessionId() === id) appendTurn("error", why);
-    return;
-  }
-  const { messages } = (await res.json()) as { messages: string[] };
-  // Append (not replace) so an existing draft isn't clobbered — avibe recall rule.
-  if (messages.length) {
-    input.value = [input.value.trim(), ...messages].filter(Boolean).join("\n");
-    autosize();
+  if (!id || recalling.has(id)) return;
+  recalling.add(id);
+  const queueAtStart = queueVersion;
+  const draftAtStart = draftVersion;
+  const focusAtStart = document.activeElement;
+  try {
+    // Creating a session clears the selection without saving the outgoing input.
     saveDraft();
-    input.focus();
+    const res = await fetch(`/api/sessions/${id}/queue/recall`, { method: "POST" });
+    if (!res.ok) {
+      const why = await failure(res, "Could not recall queued messages");
+      if (deps.sessionId() === id) appendTurn("error", why);
+      return;
+    }
+    const { messages } = (await res.json()) as { messages: string[] };
+    const selected = deps.sessionId() === id;
+    if (messages.length) {
+      // The server already removed these messages: retain them even after navigation.
+      try {
+        const draft = selected ? input.value : localStorage.getItem(draftKey(id)) ?? "";
+        const text = (draft ? [draft, ...messages] : messages).join("\n");
+        if (selected) {
+          input.value = text;
+          autosize();
+          if (draftAtStart === draftVersion && deps.chatVisible() && document.activeElement === focusAtStart) input.focus();
+        }
+        saveDraft(id, text);
+      } catch (error) {
+        appendTurn("error", `Could not save recalled messages for session ${id}: ${String(error)}\nRecalled messages (not saved):\n${messages.join("\n")}`);
+      }
+    }
+    // A newer snapshot/event (including a reselected session) owns the queue now.
+    if (selected && queueAtStart === queueVersion) renderQueue([], []);
+  } finally {
+    recalling.delete(id);
   }
-  renderQueue([], []);
 }
 
 // --- wiring ----------------------------------------------------------------------------
