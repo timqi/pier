@@ -33,6 +33,7 @@ import {
   markOptimisticUser,
   reconcileOptimisticUser,
   renderQueue,
+  renderRecovery,
   restoreDraft,
   saveDraft,
   send,
@@ -83,6 +84,7 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
+  QueueRecovery,
   SessionEvent,
   SessionState,
   ThinkingLevel,
@@ -99,6 +101,7 @@ interface SessionSnapshot {
   context: ContextUsage | null;
   thinkingLevel: ThinkingLevel;
   queue: { steering: string[]; followUp: string[] };
+  queueRecovery: QueueRecovery[];
   backgroundRuns: BackgroundRun[];
 }
 
@@ -136,6 +139,7 @@ async function createSession(cwd: string): Promise<void> {
   source?.close();
   source = null;
   resetChat();
+  renderRecovery([]);
   resetHeaderState();
   setHeaderPending(cwd);
   chatLoading(true);
@@ -294,6 +298,9 @@ function handleEvent(e: SessionEvent): void {
     case "queue-state":
       renderQueue(e.steering, e.followUp);
       break;
+    case "queue-recovery":
+      renderRecovery(e.batches);
+      break;
     case "context-compacted":
       // The transcript keeps no trace of a compaction, so this line is the
       // only place the button's effect — or an automatic one — is ever seen.
@@ -409,6 +416,7 @@ async function loadSession(id: string, missing = false): Promise<void> {
   loading = true;
   resetChat();
   renderQueue([], []);
+  renderRecovery([]);
   resetHeaderState();
   turnOpen = false;
   clearOptimistic();
@@ -438,6 +446,7 @@ async function loadSession(id: string, missing = false): Promise<void> {
   turnOpen = snap.state === "streaming";
   setState(snap.state);
   renderQueue(snap.queue.steering, snap.queue.followUp);
+  renderRecovery(snap.queueRecovery);
   // meta is assistant-only (core/types.ts), so the last one that carries it is
   // the last reply — no role test, and none of Array#findLast (web target).
   const lastReply = snap.turns.reduce<number | null>((at, t) => t.meta?.completedAt ?? at, null);

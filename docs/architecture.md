@@ -197,6 +197,21 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   Explicit `mode` always wins and takes the text verbatim: IM sends steer for
   every message, so a `!` there is content. This is the whole policy; do not
   add options.
+- **Queue promotion recovery** (`core/router.ts`): manual promotion, automatic
+  promotion and recall share exclusion only through queue removal, optional
+  abort and submission launch, never for a whole model turn. Each promotion
+  retains the original queue arrays until its submission promise settles.
+  Failure before invocation is `not-submitted`; rejection after invocation is
+  `uncertain`, not proof that the agent never accepted it. Failed batches stay
+  outside the agent queue, visible through the existing session event stream
+  and history snapshot, until explicitly acknowledged. Recovery copies exact
+  individual messages without an operator prefix; it never automatically
+  resends. Separate batch IDs keep later queue arrivals and late settlements
+  independent. Records survive runtime eviction, but are memory-only: a process
+  restart loses them. This is not a crash-durability or exactly-once guarantee.
+  Unresolved recovery holds automatic promotion only: a queue event followed
+  by rejection may describe the same input. Manual live-queue controls still
+  work, and acknowledgement itself never launches a promotion.
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
   fan-out to subscribers. Text deltas are fanned out but not buffered — they

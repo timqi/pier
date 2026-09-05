@@ -12,7 +12,7 @@ import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
-import { Router } from "../core/router.js";
+import { QueueOperationError, Router } from "../core/router.js";
 import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
 import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes, scopedFile } from "./fs.js";
@@ -44,6 +44,17 @@ import type { ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
 
 const log = logger("web");
+
+async function queueResponse(action: () => Promise<unknown>, status: 200 | 202 = 200): Promise<Response> {
+  try {
+    return Response.json(await action(), { status });
+  } catch (err) {
+    const code = err instanceof QueueOperationError
+      ? err.reason === "draining" ? 503 : err.reason === "missing" ? 404 : 409
+      : 404;
+    return Response.json({ error: String(err) }, { status: code });
+  }
+}
 
 /** A transcript without the bytes nobody has asked to see yet. A step's `args`
  *  and `output` are ~90% of a long session's snapshot and sit inside a
@@ -362,6 +373,7 @@ export function createServer(
         context: session.contextUsage ?? null,
         thinkingLevel: session.thinkingLevel,
         queue,
+        queueRecovery: router.recoveryOf(id),
         backgroundRuns: backgroundRuns?.(id) ?? [],
       });
     }
@@ -520,8 +532,8 @@ export function createServer(
   });
 
   // Promote queued messages: "steer" delivers them into the running turn,
-  // "restart" aborts the turn and sends them as a fresh prompt. Pi has no
-  // promote primitive, so this is clear-queue + re-dispatch through core.
+  // "restart" aborts the turn and sends them as a fresh prompt. Core owns
+  // exclusion and retains originals through the asynchronous handoff.
   guarded(app, "POST", "/api/sessions/:id/queue/deliver", 404, async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
@@ -529,35 +541,24 @@ export function createServer(
     if (mode !== "steer" && mode !== "restart") {
       return c.json({ error: "mode must be steer or restart" }, 400);
     }
-    // Same reason as edit above: a refused dispatch must not cost the queue.
-    if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
-    const session = await ensure(id);
-    const { steering, followUp } = await session.clearQueue();
-    const text = [...steering, ...followUp].join("\n").trim();
-    if (!text) return c.json({ error: "queue is empty" }, 409);
-    if (mode === "restart") await router.abort(id); // resolves once idle
-    // No sender here, unlike the other dispatches: the queued texts were
-    // headed when they were first dispatched — and in a shared session they
-    // are other speakers' words, which an operator header would claim.
-    await router.dispatch({
-      key: { channelId: "web", conversationId: id },
-      senderId: "web",
-      text,
-      mode: mode === "steer" ? "steer" : "auto",
-    });
-    return c.json({ delivered: text }, 202);
+    return queueResponse(async () => ({ submitted: await router.deliverQueue(id, mode) }), 202);
   });
 
   // Recall: drop all pending queued messages and hand them back (composer restore).
   guarded(app, "POST", "/api/sessions/:id/queue/recall", 404, async (c) => {
     const id = c.req.param("id");
-    const session = await ensure(id);
-    const { steering, followUp } = await session.clearQueue();
-    // Those messages carried the header that told the session who is speaking,
-    // and they are going back to the composer instead of to the model.
-    if (steering.length || followUp.length) router.forgetSender(id);
-    return c.json({ messages: [...steering, ...followUp] });
+    return queueResponse(async () => {
+      const { steering, followUp } = await router.recallQueue(id);
+      return { messages: [...steering, ...followUp] };
+    });
   });
+
+  guarded(app, "POST", "/api/sessions/:id/queue/recovery/:batchId/ack", 404, async (c) =>
+    queueResponse(async () => {
+      router.acknowledgeRecovery(c.req.param("id"), c.req.param("batchId"));
+      return { ok: true };
+    }),
+  );
 
   // Shrink the context on demand: Pi summarizes the older transcript away and
   // the session continues from the summary. Refused while streaming, like the

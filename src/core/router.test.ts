@@ -44,8 +44,10 @@ function fakeSession(id: string) {
       calls.push("clearQueue");
       const drained = queued;
       queued = { steering: [], followUp: [] };
+      for (const fn of listeners) fn({ type: "queue-state", ...queued });
       return Promise.resolve(drained);
     },
+    pendingQueue: () => Promise.resolve(structuredClone(queued)),
     dispose: () => {
       calls.push("dispose");
       return Promise.resolve();
@@ -459,8 +461,8 @@ describe("a queue with no turn left to drain it", () => {
     fake.emit({ type: "queue-state", steering: ["the thing I typed"], followUp: [] });
     await settle();
     expect(fake.prompts).toEqual([]);
-    // Out of the queue and into nothing, unless someone is told.
-    expect(tg.notes.at(-1)?.[1].text).toContain("the thing I typed");
+    expect(await fake.session.pendingQueue()).toEqual({ steering: ["the thing I typed"], followUp: [] });
+    expect(tg.notes.at(-1)?.[1].text).toContain("restarting");
     expect(tg.notes.at(-1)?.[1].origin).toEqual({ kind: "error" });
   });
 
@@ -471,6 +473,198 @@ describe("a queue with no turn left to drain it", () => {
     fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
     await settle();
     expect(tg.notes.at(-1)?.[1].text).toContain("session gone");
+  });
+});
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+describe("queue promotion recovery", () => {
+  const originals = {
+    steering: ["[Ada<U1> 09:00]\n  first\n", "second\n"],
+    followUp: ["[Bob<U2> 09:01]\n" + "long text ".repeat(1000)],
+  };
+  beforeEach(async () => {
+    await router.ensure(KEY);
+    fake.setQueue(structuredClone(originals));
+  });
+
+  it.each(["steer", "restart", "auto"] as const)("retains originals when drain begins during %s clear", async (mode) => {
+    const clear = fake.session.clearQueue;
+    fake.session.clearQueue = async () => {
+      const queue = await clear();
+      router.beginDrain();
+      return queue;
+    };
+    await expect(router.deliverQueue("s1", mode)).rejects.toThrow("restarting");
+    expect(fake.prompts).toEqual([]);
+    expect(router.recoveryOf("s1")).toEqual([expect.objectContaining({ ...originals, status: "not-submitted" })]);
+    expect(tg.notes).toHaveLength(1);
+  });
+
+  it.each(["reject", "drain"])("retains originals after abort %s and does not touch new arrivals", async (outcome) => {
+    const abort = deferred();
+    fake.session.abort = () => abort.promise;
+    const deliver = router.deliverQueue("s1", "restart");
+    await settle();
+    fake.setQueue({ followUp: ["new arrival"] });
+    if (outcome === "reject") abort.reject(new Error("abort failed"));
+    else { router.beginDrain(); abort.resolve(); }
+    await expect(deliver).rejects.toThrow(outcome === "reject" ? "abort failed" : "restarting");
+    expect(router.recoveryOf("s1")[0]).toMatchObject({ ...originals, status: "not-submitted" });
+    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
+    expect(fake.prompts).toEqual([]);
+  });
+
+  it.each([false, true])("retains a rejection with uncertain acceptance, observed user-message=%s", async (accepted) => {
+    const prompt = deferred();
+    fake.session.prompt = (text) => {
+      if (accepted) fake.emit({ type: "user-message", text });
+      return prompt.promise;
+    };
+    await router.deliverQueue("s1", "steer");
+    const batch = router.recoveryOf("s1")[0]!;
+    expect(() => router.acknowledgeRecovery("s1", batch.id)).toThrow("not settled");
+    prompt.reject(new Error("prompt failed"));
+    await settle();
+    expect(router.recoveryOf("s1")[0]).toMatchObject({ ...originals, status: "uncertain" });
+    expect(tg.notes).toHaveLength(1);
+    // Reading/copying cannot consume or mutate the retained originals.
+    batch.steering[0] = "changed by reader";
+    expect(router.recoveryOf("s1")[0]?.steering).toEqual(originals.steering);
+    router.acknowledgeRecovery("s1", batch.id);
+    await settle();
+    expect(router.recoveryOf("s1")).toEqual([]);
+  });
+
+  it.each(["success", "failure"])("releases exclusion at launch and survives late %s after another batch's ACK", async (outcome) => {
+    const first = deferred(), second = deferred();
+    fake.session.prompt = () => first.promise;
+    await router.deliverQueue("s1", "steer");
+    const firstId = router.recoveryOf("s1")[0]!.id;
+    Object.assign(fake.session, { state: "streaming" });
+    fake.setQueue({ followUp: ["second"] });
+    fake.session.steer = () => second.promise;
+    await router.deliverQueue("s1", "steer");
+    const secondId = router.recoveryOf("s1")[1]!.id;
+    fake.setQueue({ steering: ["third"] });
+    expect(await router.recallQueue("s1")).toEqual({ steering: ["third"], followUp: [] });
+    second.reject(new Error("second failed"));
+    await settle();
+    router.acknowledgeRecovery("s1", secondId);
+    expect(router.recoveryOf("s1").map((b) => b.id)).toEqual([firstId]);
+    if (outcome === "success") first.resolve();
+    else first.reject(new Error("late first failure"));
+    await settle();
+    expect(router.recoveryOf("s1")).toEqual(outcome === "success" ? [] : [
+      expect.objectContaining({ id: firstId, ...originals, status: "uncertain" }),
+    ]);
+  });
+
+  it("keeps settled recovery through eviction but pins a pending preflight", async () => {
+    const prompt = deferred();
+    fake.session.prompt = () => prompt.promise;
+    await router.deliverQueue("s1", "steer");
+    expect(await router.evictIdle(0, Date.now() + 1)).toBe(0);
+    prompt.reject(new Error("preflight failed"));
+    await settle();
+    const batch = router.recoveryOf("s1")[0]!;
+    expect(await router.evictIdle(0, Date.now() + 1)).toBe(1);
+    expect(router.recoveryOf("s1")[0]).toEqual(batch);
+    router.acknowledgeRecovery("s1", batch.id);
+    await settle();
+    expect(router.recoveryOf("s1")).toEqual([]);
+  });
+
+  it.each(["manual", "automatic"])("shares exclusion with %s promotion and recall", async (owner) => {
+    const clear = fake.session.clearQueue;
+    const gate = deferred<Awaited<ReturnType<typeof clear>>>();
+    fake.session.clearQueue = () => { fake.calls.push("blocked clear"); return gate.promise; };
+    let deliver: Promise<string> | undefined;
+    if (owner === "manual") deliver = router.deliverQueue("s1", "steer");
+    else fake.emit({ type: "queue-state", ...originals });
+    await settle();
+    await expect(router.deliverQueue("s1", "restart")).rejects.toThrow("in progress");
+    await expect(router.recallQueue("s1")).rejects.toThrow("in progress");
+    fake.emit({ type: "queue-state", ...originals });
+    fake.session.clearQueue = clear;
+    gate.resolve(await clear());
+    await deliver;
+    await settle();
+    expect(fake.prompts).toEqual([[...originals.steering, ...originals.followUp].join("\n")]);
+  });
+
+  it("does not clear reentrantly before the backend enqueue has completed", async () => {
+    let notifying = true;
+    const clear = fake.session.clearQueue;
+    fake.session.clearQueue = () => {
+      expect(notifying).toBe(false);
+      return clear();
+    };
+    fake.emit({ type: "queue-state", ...originals });
+    notifying = false;
+    await settle();
+    expect(fake.prompts).toHaveLength(1);
+  });
+
+  it.each(["preflight", "turn"])("handles fresh queue events during successful %s exactly once", async (phase) => {
+    const first = deferred();
+    const prompt = fake.session.prompt;
+    fake.session.prompt = () => first.promise;
+    await router.deliverQueue("s1", "steer");
+    if (phase === "turn") {
+      Object.assign(fake.session, { state: "streaming" });
+      fake.emit({ type: "state", state: "streaming" });
+      // The turn became idle, but its promise has not settled yet.
+      Object.assign(fake.session, { state: "idle" });
+      fake.emit({ type: "state", state: "idle" });
+    }
+    fake.setQueue({ followUp: ["new arrival"] });
+    fake.emit({ type: "queue-state", steering: [], followUp: ["new arrival"] });
+    await settle();
+    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
+    fake.session.prompt = prompt;
+    first.resolve();
+    await settle();
+    expect(fake.prompts).toEqual(["new arrival"]);
+    expect(router.recoveryOf("s1")).toEqual([]);
+  });
+
+  it("does not blindly promote an enqueue followed by rejection, even after ACK", async () => {
+    let submissions = 0;
+    fake.session.prompt = async (text) => {
+      submissions++;
+      fake.setQueue({ followUp: [text] });
+      fake.emit({ type: "queue-state", steering: [], followUp: [text] });
+      throw new Error("acceptance unknown");
+    };
+    await router.deliverQueue("s1", "steer");
+    await settle();
+    const batch = router.recoveryOf("s1")[0]!;
+    fake.emit({ type: "queue-state", steering: [], followUp: ["later event"] });
+    await settle();
+    router.acknowledgeRecovery("s1", batch.id);
+    await settle();
+    expect(submissions).toBe(1);
+    expect((await fake.session.pendingQueue()).followUp).toHaveLength(1);
+    expect(router.recoveryOf("s1")).toEqual([]);
+  });
+
+  it("does not promote a deferred queue event after /stop", async () => {
+    const prompt = deferred();
+    fake.session.prompt = () => prompt.promise;
+    await router.deliverQueue("s1", "steer");
+    fake.setQueue({ followUp: ["still queued"] });
+    fake.emit({ type: "queue-state", steering: [], followUp: ["still queued"] });
+    await router.abortConversation(KEY);
+    prompt.resolve();
+    await settle();
+    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["still queued"] });
+    expect(fake.calls.filter((c) => c === "clearQueue")).toHaveLength(1);
   });
 });
 

@@ -147,7 +147,19 @@ export type SessionEventPayload =
   | { type: "state"; state: SessionState }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
   | { type: "queue-state"; steering: string[]; followUp: string[] }
+  | { type: "queue-recovery"; batches: QueueRecovery[] }
   | { type: "error"; message: string };
+
+/** Originals removed for a promotion, retained in memory, not another queue.
+ *  A rejected submission may already have been accepted; only a human may
+ *  acknowledge its recovery record. Nothing here is automatically resent. */
+export interface QueueRecovery {
+  id: string;
+  steering: string[];
+  followUp: string[];
+  status: "submitting" | "not-submitted" | "uncertain";
+  error?: string;
+}
 
 /** Stamped by core/hub.ts — seq is per-session monotonic. */
 export type SessionEvent = {

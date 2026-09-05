@@ -3,12 +3,12 @@
 // reconciles against `user-message` events.
 
 import { failure, sendJson } from "./api.js";
-import { $, h } from "./dom.js";
+import { $, copyBtn, h } from "./dom.js";
 import { appendTurn, followTail, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { escapeKey, letterKey } from "./shortcut.js";
-import type { SessionState } from "../../core/types.js";
+import type { QueueRecovery, SessionState } from "../../core/types.js";
 
 /** A file picked but not yet sent; uploaded to the inbox on send. */
 interface PendingFile {
@@ -40,6 +40,8 @@ const stopBtn = $("#stop");
 const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
 const queueLabel = $("#queue-label");
+const recoveryPanel = h("div", "hidden max-h-48 overflow-y-auto border-t border-neutral-200 px-3 py-1.5 text-[13px]");
+queuePanel.after(recoveryPanel);
 const imageStrip = $("#image-strip");
 const attachInput = $<HTMLInputElement>("#attach-input");
 
@@ -134,6 +136,39 @@ export function syncQueuePanel(): void {
   const visible = deps.chatVisible() && queueHasRows;
   queuePanel.classList.toggle("hidden", !visible);
   queuePanel.classList.toggle("flex", visible);
+  recoveryPanel.classList.toggle("hidden", !deps.chatVisible() || !recoveryPanel.childElementCount);
+}
+
+export function renderRecovery(batches: QueueRecovery[]): void {
+  const sessionId = deps.sessionId();
+  recoveryPanel.replaceChildren(...batches.map((batch) => {
+    const group = h("details", "py-1");
+    const status = batch.status === "submitting" ? "Handing off"
+      : batch.status === "not-submitted" ? "Not submitted" : "Acceptance unknown";
+    const paused = batch.status === "submitting" ? "" : "; automatic queue paused";
+    group.append(h("summary", "cursor-pointer break-words text-amber-700", `Queue recovery: ${status}${paused} (in memory)`));
+    for (const text of [...batch.steering, ...batch.followUp]) {
+      const row = h("div", "flex items-start gap-2 border-t border-neutral-100 py-1");
+      row.append(h("span", "min-w-0 flex-1 whitespace-pre-wrap break-words", text),
+        copyBtn("flex-none cursor-pointer px-1 text-neutral-500 hover:text-neutral-800", () => text));
+      group.append(row);
+    }
+    if (batch.error) group.append(h("div", "break-words text-red-600", batch.error));
+    const ack = h("button", "cursor-pointer py-1 text-neutral-500 disabled:cursor-default disabled:opacity-40", "Acknowledge") as HTMLButtonElement;
+    ack.type = "button";
+    ack.disabled = batch.status === "submitting";
+    ack.title = "Remove this recovery copy without sending it";
+    ack.onclick = async () => {
+      if (!sessionId || !confirm("Remove this recovery copy? This does not resend the messages.")) return;
+      const res = await sendJson(`/api/sessions/${sessionId}/queue/recovery/${batch.id}/ack`, {});
+      if (deps.sessionId() !== sessionId) return;
+      if (!res.ok) appendTurn("error", await failure(res, "Could not acknowledge queue recovery"));
+      else await deps.reload(sessionId);
+    };
+    group.append(ack);
+    return group;
+  }));
+  syncQueuePanel();
 }
 
 export function renderQueue(steering: string[], followUp: string[]): void {
@@ -333,7 +368,11 @@ async function deliverQueue(mode: "steer" | "restart"): Promise<void> {
   if (!id) return;
   renderQueue([], []); // optimistic; queue-state snapshots reconcile
   const res = await sendJson(`/api/sessions/${id}/queue/deliver`, { mode });
-  if (!res.ok) appendTurn("error", `queue ${mode} failed: ${res.status}`);
+  if (!res.ok) {
+    const why = await failure(res, `Queue ${mode} failed`);
+    await deps.reload(id);
+    if (deps.sessionId() === id) appendTurn("error", why);
+  }
 }
 
 async function recallQueue(): Promise<void> {

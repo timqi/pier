@@ -17,6 +17,7 @@ import type {
   ModelRef,
   ProviderManager,
   SessionEventPayload,
+  QueueRecovery,
   SessionState,
   ThinkingLevel,
 } from "../core/types.js";
@@ -834,6 +835,7 @@ describe("workbench server", () => {
       context: { tokens: 1200, contextWindow: 200_000 },
       thinkingLevel: "medium",
       queue: { steering: ["s-msg"], followUp: ["f-msg"] },
+      queueRecovery: [],
       backgroundRuns: [],
     });
     session.setState("idle");
@@ -2058,6 +2060,60 @@ describe("workbench server", () => {
       body: JSON.stringify({ mode: "nope" }),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("returns launch acknowledgement before settlement, snapshots exact recovery, and ACKs only that batch", async () => {
+    const { app, router, session, hub } = setup();
+    let reject!: (err: Error) => void;
+    session.prompt = () => new Promise<void>((_done, fail) => { reject = fail; });
+    const originals = { steering: ["[Ada<U1> 09:00]\nfirst\n", "  second"], followUp: ["[Bob<U2>]\nthird"] };
+    session.clearQueue = async () => structuredClone(originals);
+    const post = (path: string, body = {}) => app.request(`/api/sessions/s1/queue/${path}`, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    const launched = await post("deliver", { mode: "steer" });
+    expect(launched.status).toBe(202);
+    expect(await launched.json()).toEqual({ submitted: [...originals.steering, ...originals.followUp].join("\n") });
+    const batch = router.recoveryOf("s1")[0]!;
+    expect((await post(`recovery/${batch.id}/ack`)).status).toBe(409);
+    // Ordinary recall is not locked behind the whole model turn.
+    expect((await post("recall")).status).toBe(200);
+    reject(new Error("failed after launch"));
+    await new Promise((done) => setTimeout(done, 0));
+    const snapshot = async () => (await (await app.request("/api/sessions/s1/history")).json()) as {
+      queueRecovery: QueueRecovery[]; lastSeq: number;
+    };
+    const recovered = await snapshot();
+    expect(recovered.queueRecovery).toEqual([expect.objectContaining({ id: batch.id, ...originals, status: "uncertain" })]);
+    expect((await snapshot()).queueRecovery).toEqual(recovered.queueRecovery); // lost response/copy is nondestructive
+    expect(hub.replay("s1", 0)).toContainEqual(expect.objectContaining({ type: "queue-recovery", batches: recovered.queueRecovery }));
+    const calls = [...session.calls];
+    expect((await post("recovery/absent/ack")).status).toBe(404);
+    expect((await post(`recovery/${batch.id}/ack`)).status).toBe(200);
+    expect((await snapshot()).queueRecovery).toEqual([]);
+    expect(session.calls).toEqual(calls); // ACK cannot touch the agent queue
+    expect((await post(`recovery/${batch.id}/ack`)).status).toBe(404);
+    expect((await post("retry")).status).toBe(404);
+  });
+
+  it.each(["drain", "abort"])("retains recovery in the history snapshot after a post-clear %s failure", async (failure) => {
+    const { app, router, session } = setup();
+    const clear = session.clearQueue;
+    session.clearQueue = async () => {
+      const queue = await clear();
+      if (failure === "drain") router.beginDrain();
+      return queue;
+    };
+    session.abort = async () => { throw new Error("abort failed"); };
+    const res = await app.request("/api/sessions/s1/queue/deliver", {
+      method: "POST", body: JSON.stringify({ mode: "restart" }),
+    });
+    expect(res.status).toBe(failure === "drain" ? 503 : 404);
+    const snapshot = await (await app.request("/api/sessions/s1/history")).json() as { queueRecovery: QueueRecovery[] };
+    expect(snapshot.queueRecovery).toEqual([expect.objectContaining({
+      steering: ["s-msg"], followUp: ["f-msg"], status: "not-submitted",
+    })]);
+    expect(session.calls).toEqual(["clearQueue"]);
   });
 
   it("logs a client report, rejects an empty one, and caps the rate", async () => {

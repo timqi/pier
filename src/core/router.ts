@@ -1,6 +1,7 @@
 // Conversation → session routing plus event wiring. In-memory on purpose:
 // the durable chat → session map lives in channels/conversations.ts.
 
+import { randomUUID } from "node:crypto";
 import { logger } from "../log.js";
 import { EventHub } from "./hub.js";
 import { SenderPrefix, withPrefix } from "./identity.js";
@@ -12,6 +13,7 @@ import type {
   ConversationKey,
   InboundMessage,
   ModelRef,
+  QueueRecovery,
   SessionState,
 } from "./types.js";
 
@@ -49,6 +51,12 @@ interface Attached {
   /** Its event subscription, so eviction can stop listening to a disposed
    *  session instead of leaking the closure that holds it. */
   unsubscribe: () => void;
+}
+
+export class QueueOperationError extends Error {
+  constructor(readonly reason: "busy" | "empty" | "draining" | "missing", message: string) {
+    super(message);
+  }
 }
 
 export class Router {
@@ -144,6 +152,7 @@ export class Router {
     // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, attached] of [...this.bySession]) {
       if (attached.session.state === "streaming") continue;
+      if (this.queueOperations.has(id) || this.recoveries.get(id)?.some((b) => b.status === "submitting")) continue;
       if (!includeWatched && this.hub.hasSubscribers(id)) continue;
       if (now - attached.activeAt < ttlMs) continue;
       this.bySession.delete(id);
@@ -267,7 +276,7 @@ export class Router {
       // its own queues up to the agent_end handler, so a non-empty queue on an
       // idle session is exactly the message that missed that window.
       if (payload.type === "queue-state" && (payload.steering.length || payload.followUp.length)) {
-        this.promoteQueued(session, key);
+        this.promoteQueued(session);
       }
       // Every turn-end reaches the channel, empty text included: an adapter's
       // per-turn UI (Telegram's 👀 receipts) is retired here, and a turn that
@@ -293,10 +302,102 @@ export class Router {
     });
   }
 
-  /** Sessions whose queue is being promoted right now. `clearQueue` and the
-   *  prompt that follows it both emit queue-state of their own, so without
-   *  this the handler would re-enter on its own effects. */
-  private readonly promoting = new Set<string>();
+  private readonly queueOperations = new Set<string>();
+  private readonly promotionRequested = new Set<string>();
+  private readonly recoveries = new Map<string, QueueRecovery[]>();
+
+  recoveryOf(sessionId: string): QueueRecovery[] {
+    return structuredClone(this.recoveries.get(sessionId) ?? []);
+  }
+
+  private recoveryChanged(sessionId: string): void {
+    if (!this.recoveries.get(sessionId)?.length) this.recoveries.delete(sessionId);
+    this.hub.emit(sessionId, { type: "queue-recovery", batches: this.recoveryOf(sessionId) });
+  }
+
+  acknowledgeRecovery(sessionId: string, batchId: string): void {
+    const batches = this.recoveries.get(sessionId);
+    const batch = batches?.find((b) => b.id === batchId);
+    if (!batch) throw new QueueOperationError("missing", "No such recovery batch");
+    if (batch.status === "submitting") throw new QueueOperationError("busy", "Submission has not settled");
+    this.recoveries.set(sessionId, batches!.filter((b) => b !== batch));
+    this.promotionRequested.delete(sessionId);
+    this.recoveryChanged(sessionId);
+  }
+
+  /** Only queue mutation owns this lock. A model turn owns its batch, not the
+   *  next queue: manual controls remain available while that turn runs. */
+  private async useQueue<T>(sessionId: string, action: (session: AgentSession) => Promise<T>): Promise<T> {
+    if (this.queueOperations.has(sessionId)) throw new QueueOperationError("busy", "Queue operation in progress");
+    this.queueOperations.add(sessionId);
+    try {
+      return await action(await this.ensure({ channelId: "web", conversationId: sessionId }));
+    } finally {
+      this.queueOperations.delete(sessionId);
+      this.resumePromotion(sessionId);
+    }
+  }
+
+  async recallQueue(sessionId: string): Promise<{ steering: string[]; followUp: string[] }> {
+    return this.useQueue(sessionId, async (session) => {
+      const queue = await session.clearQueue();
+      if (queue.steering.length || queue.followUp.length) this.forgetSender(sessionId);
+      return queue;
+    });
+  }
+
+  private checkQueueDrain(): void {
+    if (this.draining) throw new QueueOperationError("draining", "Pier is restarting; queued messages were not submitted");
+  }
+
+  async deliverQueue(sessionId: string, mode: "steer" | "restart" | "auto"): Promise<string> {
+    let retained = false;
+    try {
+      this.checkQueueDrain();
+      return await this.useQueue(sessionId, async (session) => {
+        this.checkQueueDrain();
+        if (mode === "auto" && session.state !== "idle") return "";
+        const queue = await session.clearQueue();
+        if (!queue.steering.length && !queue.followUp.length) throw new QueueOperationError("empty", "Queue is empty");
+        const batch: QueueRecovery = { id: randomUUID(), ...queue, status: "submitting" };
+        this.recoveries.set(sessionId, [...(this.recoveries.get(sessionId) ?? []), batch]);
+        retained = true;
+        this.recoveryChanged(sessionId);
+        const text = [...batch.steering, ...batch.followUp].join("\n");
+        let invoked = false;
+        const failed = (err: unknown): void => {
+          this.promotionRequested.delete(sessionId);
+          batch.status = invoked ? "uncertain" : "not-submitted";
+          batch.error = String(err);
+          this.recoveryChanged(sessionId);
+          this.reportTo(sessionId, `Queue promotion failed (${batch.status}); originals remain available in queue recovery: ${String(err)}`);
+        };
+        try {
+          this.checkQueueDrain();
+          if (mode === "restart") await this.abort(sessionId);
+          this.checkQueueDrain();
+          // Already headed at original dispatch. Calling dispatch again would
+          // discard rejection and could attribute these words to the operator.
+          invoked = true;
+          const submitted = mode === "steer" && session.state === "streaming"
+            ? session.steer(text) : session.prompt(text);
+          void submitted.then(() => {
+            this.recoveries.set(sessionId, (this.recoveries.get(sessionId) ?? []).filter((b) => b !== batch));
+            this.recoveryChanged(sessionId);
+          }, failed).finally(() => this.resumePromotion(sessionId));
+          return text;
+        } catch (err) {
+          failed(err);
+          throw err;
+        }
+      });
+    } catch (err) {
+      if (!retained && !(err instanceof QueueOperationError && (err.reason === "busy" || err.reason === "empty"))) {
+        this.reportTo(sessionId, `Could not promote queued messages: ${String(err)}`);
+      }
+      throw err;
+    }
+  }
 
   /**
    * Turn a stranded queue into the turn it was waiting for. Not routed through
@@ -308,42 +409,36 @@ export class Router {
    * start the very turn it was asked to stop. Recovering *those* messages stays
    * the web's recall route, which hands them back to the composer.
    */
-  private promoteQueued(session: AgentSession, key: ConversationKey): void {
-    if (session.state !== "idle" || this.promoting.has(session.id)) return;
-    this.promoting.add(session.id);
-    void (async () => {
-      try {
-        // Re-read: a turn may have started since the event, and it will drain
-        // the queue itself — clearing it here would take the messages out of it.
-        if (session.state !== "idle") return;
-        const { steering, followUp } = await session.clearQueue();
-        const text = [...steering, ...followUp].join("\n").trim();
-        if (!text) return;
-        // A drain is "no new turns", and this would be one. Told to the
-        // conversation rather than dropped, because the message is now out of
-        // the queue and nothing else would ever mention it (§5b).
-        if (this.draining) {
-          this.report(
-            session.id,
-            key,
-            `queued message not taken — Pier is restarting; send it again: ${truncate(text)}`,
-          );
-          return;
-        }
-        log.info(
-          `promoting ${String(steering.length + followUp.length)} queued message(s) → session ${session.id}`,
-        );
-        await session.prompt(text);
-      } catch (err) {
-        this.report(session.id, key, `delivering the queued messages failed: ${String(err)}`);
-      } finally {
-        this.promoting.delete(session.id);
-      }
-    })();
+  private promoteQueued(session: AgentSession): void {
+    if (session.state !== "idle") return;
+    this.promotionRequested.add(session.id);
+    this.resumePromotion(session.id);
+  }
+
+  private resumePromotion(sessionId: string): void {
+    // queue_update precedes the backend's enqueue. Never clear it reentrantly.
+    queueMicrotask(() => {
+      if (!this.promotionRequested.has(sessionId) || this.queueOperations.has(sessionId)) return;
+      // A queue event followed by rejection might describe the same input.
+      // Retained failures require a human decision, not an automatic resend.
+      if (this.recoveries.get(sessionId)?.length) return;
+      this.promotionRequested.delete(sessionId);
+      const attached = this.bySession.get(sessionId);
+      if (!attached || attached.session.state !== "idle") return;
+      void this.deliverQueue(sessionId, "auto").catch((err: unknown) => {
+        // deliverQueue reports failures; empty/busy simply lost the race.
+        log.debug(`automatic promotion of ${sessionId} stopped: ${String(err)}`);
+      });
+    });
   }
 
   async abort(sessionId: string): Promise<void> {
-    await this.bySession.get(sessionId)?.session.abort();
+    this.promotionRequested.delete(sessionId);
+    try {
+      await this.bySession.get(sessionId)?.session.abort();
+    } finally {
+      this.promotionRequested.delete(sessionId);
+    }
   }
 
   /**
@@ -408,7 +503,8 @@ export class Router {
   }
 
   async abortConversation(key: ConversationKey): Promise<void> {
-    await this.sessionOf(key)?.abort();
+    const session = this.sessionOf(key);
+    if (session) await this.abort(session.id);
   }
 
   /** Session owning a conversation, resolving and attaching it on first use. */

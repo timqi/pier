@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   renderSnapshot: vi.fn(),
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
+  renderRecovery: vi.fn(),
   content: [] as string[],
 }));
 vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
@@ -24,7 +25,7 @@ vi.mock("./composer.js", () => ({
   clearOptimistic: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
-  renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), updateComposer: vi.fn(),
+  renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), updateComposer: vi.fn(),
 }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
 vi.mock("./report.js", () => ({ initReport: vi.fn() }));
@@ -69,7 +70,7 @@ function deferred<T = Response>() {
 }
 const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
   turns: [{ role: "user", text }], lastSeq, epoch, model: null, state: "idle",
-  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [] }, backgroundRuns: [],
+  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [] }, queueRecovery: [], backgroundRuns: [],
 });
 const latest = () => Stream.all.at(-1)!;
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -97,6 +98,17 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("session loads", () => {
+  it("restores queue recovery from the snapshot and reconciles it from the same event stream", async () => {
+    const batch = { id: "batch", steering: ["[Ada<U1>]\nfirst", "second"], followUp: [], status: "uncertain" };
+    const response = await snapshot("loaded").json();
+    h.history.mockResolvedValueOnce(Response.json({ ...response, queueRecovery: [batch] }));
+    h.sidebar.select("a");
+    await settled();
+    expect(h.renderRecovery).toHaveBeenLastCalledWith([batch]);
+    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 1, ts: 1, type: "queue-recovery", batches: [] }) });
+    expect(h.renderRecovery).toHaveBeenLastCalledWith([]);
+  });
+
   it("reselecting during a load or on a healthy stream keeps the current generation", async () => {
     const history = deferred();
     h.history.mockReturnValueOnce(history.promise);
