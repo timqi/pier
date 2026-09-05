@@ -1,8 +1,8 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { openDb } from "../db.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
@@ -220,6 +220,162 @@ describe("drain pause", () => {
     expect(() => service.resume(before.id, "go on")).toThrow(/restarting/);
     // A child of a run that is still finishing is the drain's own work.
     expect(() => service.run(task.id, null, "task", before.id)).not.toThrow();
+  });
+});
+
+describe("callback recovery across database connections", () => {
+  function diskRig() {
+    const home = mkdtempSync(join(tmpdir(), "pier-callback-restart-"));
+    const proof = join(home, "recipient.json");
+    writeFileSync(proof, "[]");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("PIER_HOME", home);
+    const boots: { close(): void }[] = [];
+    onTestFinished(() => {
+      for (const boot of boots) boot.close();
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    });
+    const history = (): ChatTurn[] => JSON.parse(readFileSync(proof, "utf8")) as ChatTurn[];
+    const boot = (mode: "record" | "accept" | "reject" = "record") => {
+      const db = openDb(join(home, "db", "pier.db"));
+      const store = new TaskStore(db);
+      const parent = fakeSession("parent");
+      // Fixture-owned proof, deliberately independent of process-local inputs.
+      // This tests the AgentSession contract, not Pi on-disk semantics.
+      parent.history = async () => history();
+      parent.systemInput = vi.fn(async (text, origin, delivery) => {
+        parent.systemInputs.push({ text, origin, mode: delivery });
+        if (mode === "record") {
+          writeFileSync(proof, JSON.stringify([...history(), { role: "system", text, origin }]));
+        }
+      });
+      const factory: AgentFactory = {
+        availableModels: async () => [],
+        create: async () => fakeSession(newId()),
+        fork: async () => { throw new Error("unexpected fork"); },
+        resume: async (id) => {
+          if (mode === "reject") throw new Error("fixture recipient unavailable");
+          if (id !== parent.id) throw new Error(`unexpected recipient ${id}`);
+          return parent;
+        },
+        list: async () => [{ id: parent.id, cwd: home, createdAt: 1 }],
+        find: async (id) => id === parent.id ? { id, cwd: home, createdAt: 1 } : undefined,
+      };
+      const hub = new EventHub();
+      const router = new Router(hub, (key) => factory.resume(key.conversationId));
+      const service = new TaskService(store, factory, router, hub);
+      let closed = false;
+      const rig = { store, service, parent, hub, close() {
+        if (closed) return;
+        service.pause();
+        db.close();
+        closed = true;
+      } };
+      boots.push(rig);
+      return rig;
+    };
+    return { home, boot, history };
+  }
+
+  it("writes off queued and running rows after reopen and tells their parent once", async () => {
+    const disk = diskRig();
+    const first = disk.boot();
+    const task = await first.service.create(bashDraft(disk.home, "true"));
+    for (const state of ["queued", "running"] as const) {
+      first.store.saveRun(storedRun(state, task, Date.now(), {
+        state, startedAt: state === "queued" ? null : Date.now(), finishedAt: null, result: null,
+        invokedBySessionId: "parent", callbackSessionId: "parent", background: true,
+      }));
+    }
+    first.close();
+    const second = disk.boot();
+    const statuses: { runId: string; state: string }[] = [];
+    second.hub.subscribe("parent", (event) => {
+      if (event.type === "task-status") statuses.push({ runId: event.run.runId, state: event.run.state });
+    });
+    second.service.start(60_000);
+    await vi.waitFor(() => {
+      for (const id of ["queued", "running"]) expect(second.service.getRun(id)).toMatchObject({
+        state: "interrupted", callbackState: "delivered", finishedAt: expect.any(Number),
+        error: "Pier restarted while the run was active",
+      });
+    });
+    expect(statuses).toEqual(expect.arrayContaining([
+      { runId: "queued", state: "interrupted" }, { runId: "running", state: "interrupted" },
+    ]));
+    expect(second.parent.systemInputs).toHaveLength(1);
+    expect(second.parent.systemInputs[0]!.origin).toMatchObject({ runIds: ["queued", "running"] });
+    expect(second.parent.systemInputs[0]!.text).toContain("state: interrupted");
+    expect(second.parent.systemInputs[0]!.text).toContain("Pier restarted while the run was active");
+    second.close();
+    const third = disk.boot();
+    third.service.start(60_000);
+    expect(third.store.listPendingCallbacks()).toEqual([]);
+    expect(third.parent.systemInputs).toEqual([]);
+    expect(disk.history()).toHaveLength(1);
+  });
+
+  it.each(["accept", "reject"] as const)("recovers pending callbacks after a boot that can only %s input", async (mode) => {
+    const disk = diskRig();
+    const seed = disk.boot();
+    const task = await seed.service.create(bashDraft(disk.home, "true"));
+    seed.store.saveRun(storedRun("pending", task, Date.now(), {
+      callbackSessionId: "parent", callbackState: "pending",
+    }));
+    seed.close();
+    const first = disk.boot(mode);
+    const errors: string[] = [];
+    first.hub.subscribe("parent", (event) => { if (event.type === "error") errors.push(event.message); });
+    first.service.start(60_000);
+    await vi.waitFor(() => expect(first.service.getRun("pending")).toMatchObject({
+      callbackState: mode === "accept" ? "pending" : "failed", callbackAttempts: 1,
+    }));
+    expect(disk.history()).toEqual([]);
+    if (mode === "reject") {
+      expect(errors.join(" ")).toContain("fixture recipient unavailable");
+      expect(first.service.getRun("pending").callbackError).toContain("fixture recipient unavailable");
+    } else expect(first.parent.systemInputs).toHaveLength(1);
+    first.close();
+    const second = disk.boot();
+    const pending = second.service.getRun("pending");
+    expect(pending.callbackNextAttemptAt).toEqual(expect.any(Number));
+    // Move the clock to the persisted due time, without sleeping out backoff.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(pending.callbackNextAttemptAt!);
+    try {
+      second.service.start(60_000);
+      await vi.waitFor(() => expect(second.service.getRun("pending")).toMatchObject({
+        callbackState: "delivered", callbackAttempts: 2, callbackError: null, callbackNextAttemptAt: null,
+      }));
+    } finally { clock.mockRestore(); }
+    expect(second.parent.systemInputs).toHaveLength(1);
+    expect(disk.history()).toHaveLength(1);
+  });
+
+  it.each(["run", "group"] as const)("settles a pending %s from persisted recipient proof without reinjection", async (kind) => {
+    const disk = diskRig();
+    const first = disk.boot();
+    const task = await first.service.create({
+      name: "worker", action: { type: "agent", session: { mode: "fresh", cwd: disk.home }, prompt: "work" },
+    });
+    const id = kind === "run"
+      ? first.service.run(task.id, null, "agent", null, { callbackSessionId: "parent" }).id
+      : first.service.runGroup([task, task], "all", "parent", null, "parent").group.id;
+    const record = () => kind === "run" ? first.store.getRun(id)! : first.store.getGroup(id)!;
+    await vi.waitFor(() => expect(record().callbackState).toBe("delivered"));
+    expect(disk.history()).toHaveLength(1);
+    // Crash window: the recipient committed its proof, but Pier retained the
+    // pre-confirmation row. Both new connections and a fresh router are used.
+    if (kind === "run") {
+      first.store.saveRun({ ...first.store.getRun(id)!, callbackState: "pending" });
+    } else first.store.saveGroup({ ...first.store.getGroup(id)!, callbackState: "pending" });
+    first.close();
+    const second = disk.boot();
+    second.service.start(60_000);
+    await vi.waitFor(() => expect((kind === "run" ? second.store.getRun(id) : second.store.getGroup(id)))
+      .toMatchObject({ callbackState: "delivered", callbackAttempts: 1 }));
+    expect(second.parent.systemInputs).toEqual([]);
+    expect(disk.history()).toHaveLength(1);
   });
 });
 
