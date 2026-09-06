@@ -44,14 +44,20 @@ new day — so the last one still applies; a gap alone shows as time only, like
 `;
 
 /**
- * The contract above plus the two facts about *this* deployment that an agent
+ * The contract above plus the facts about *this* deployment that an agent
  * cannot work out for itself.
  *
- * Told, not discovered. Pier knows both — the home is its own startup argument
+ * Told, not discovered. Pier knows them — the home is its own startup argument
  * and the address is a file it wrote — while an agent can only guess at a
  * path and shell out to look. The guess is wrong on every instance that moves
  * `PIER_HOME`, and it fails as "nothing is configured": indistinguishable from
  * the truth, and reported to the user as such. Which is what happened.
+ *
+ * The editing line is the same shape of fact, learned the same way: GPT models
+ * carry `apply_patch` from their own post-training, and not finding it in the
+ * tool list they go looking in the shell — one failed call, then a filesystem
+ * hunt, and in one session a stale Codex binary that worked, which put every
+ * later edit outside Pi's tooling.
  */
 export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }): string {
   const reach = instance.publicUrl
@@ -64,6 +70,10 @@ export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }
 ## This Pier instance
 
 Boards: \`${instance.boardsDir}/<slug>/\` — this path, not \`~/.pier\`. ${reach}
+
+Editing: files change through the \`edit\` tool (exact text replacement) or
+\`write\`. There is no \`apply_patch\` here — not as a tool, not as a command —
+so do not call one or go looking for one in the shell.
 `;
 }
 
