@@ -101,6 +101,11 @@ export interface TaskRunContext {
   thinking?: ThinkingLevel;
   renderedPrompt?: string;
   resumePrompt?: string;
+  /** What a fork actually copied, filled in when the child session opens.
+   *  `mode:"fork"` copies a whole transcript, tool output included, and the
+   *  caller that chose it never sees the bill; `turns` and `tokens` are that
+   *  bill, and `cwd` is the directory those copied paths belong to. */
+  forkedFrom?: { sessionId: string; cwd: string; turns: number; tokens?: number };
 }
 
 export interface TaskRun extends CallbackFields {

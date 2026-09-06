@@ -29,9 +29,16 @@ const preamble = (run: TaskRun): string => {
   const contact = run.invokedBySessionId
     ? ' Mid-run, the task tool\'s contact operation reaches that agent: reason "progress" is fire-and-forget, "decision" waits for a reply — state what you await and end your turn.'
     : "";
+  // A fork into another directory hands the child a transcript full of paths
+  // that resolve — to the wrong tree. The delegating prompt can only ask it
+  // not to; this says which paths it is about.
+  const forked = run.context.forkedFrom;
+  const drift = forked && run.context.cwd && forked.cwd !== run.context.cwd
+    ? ` The context above was copied from a session in ${forked.cwd}; you are working in ${run.context.cwd}. Paths from those earlier turns point at the other tree — re-read them here before acting on them.`
+    : "";
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there.${contact}\n\n`;
+    `next-step buttons and file:// attachments do not render there.${contact}${drift}\n\n`;
 };
 
 export class AgentTaskRunner {
@@ -188,6 +195,20 @@ export class AgentTaskRunner {
     run.targetSessionId = session.id;
     run.context.sessionId = session.id;
     run.context.cwd = cwd;
+    if (run.sessionMode === "fork") {
+      // Read off the child, not estimated: what it opened with is the copy.
+      // Tokens are what Pi knows of the copied context — absent rather than
+      // guessed, since a turn count understates a transcript of tool output.
+      // An unlocatable source cannot be forked at all (the factory threw), so
+      // its cwd falls back to the child's: same directory, nothing to warn of.
+      const tokens = session.contextUsage?.tokens ?? undefined;
+      run.context.forkedFrom = {
+        sessionId: run.sourceSessionId!,
+        cwd: source?.cwd ?? cwd,
+        turns: (await session.history()).length,
+        ...(tokens ? { tokens } : {}),
+      };
+    }
     this.store.saveRun(run);
     this.router.attach({ channelId: "task", conversationId: session.id }, session);
     this.changed(run);

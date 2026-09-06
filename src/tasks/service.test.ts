@@ -926,6 +926,47 @@ describe("task service", () => {
     expect(forkRun.sourceSessionId).toBe("s1");
   });
 
+  it("bills a fork to its caller and tells the child which tree the copy came from", async () => {
+    const { cwd, service, factory } = setup();
+    const elsewhere = mkdtempSync(join(tmpdir(), "pier-fork-"));
+    onTestFinished(() => rmSync(elsewhere, { recursive: true, force: true }));
+    const forkChild = fakeSession("drifted-child");
+    vi.mocked(factory.fork).mockResolvedValueOnce(forkChild);
+
+    const task = await service.create({
+      name: "worktree worker",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fork", cwd: elsewhere }, prompt: "Implement it" },
+    });
+    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
+    await service.waitForRun(queued.runId);
+
+    // The caller reads the price of its own choice off the run.
+    const summary = await service.tool({ operation: "get", run_id: queued.runId }, "s1") as RunSummary;
+    expect(summary.forkedFrom).toEqual({ sessionId: "s1", cwd, turns: expect.any(Number) });
+    expect(factory.fork).toHaveBeenCalledWith("s1", expect.objectContaining({ cwd: elsewhere }));
+
+    // And the child is told the copied paths belong to the other tree.
+    expect(forkChild.systemInputs[0]?.text).toContain(`copied from a session in ${cwd}`);
+    expect(forkChild.systemInputs[0]?.text).toContain(`you are working in ${elsewhere}`);
+  });
+
+  it("reports no fork bill and no directory warning on a same-cwd fork", async () => {
+    const { cwd, service, factory } = setup();
+    const forkChild = fakeSession("same-cwd-child");
+    vi.mocked(factory.fork).mockResolvedValueOnce(forkChild);
+    const task = await service.create({
+      name: "context worker",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fork" }, prompt: "Continue" },
+    });
+    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
+    await service.waitForRun(queued.runId);
+    const summary = await service.tool({ operation: "get", run_id: queued.runId }, "s1") as RunSummary;
+    expect(summary.forkedFrom).toMatchObject({ sessionId: "s1", cwd });
+    expect(forkChild.systemInputs[0]?.text).not.toContain("copied from a session in");
+  });
+
   it("allows concurrent interactive fresh runs of one role", async () => {
     const { cwd, service, factory } = setup();
     vi.mocked(factory.create)

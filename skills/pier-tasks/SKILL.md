@@ -32,9 +32,14 @@ A summary's `triggerSource` is who fired that run (`agent` when you did, plus
 `manual` / `cron` / `watch` / `task`); a definition's `trigger` is only its
 schedule policy, where `manual` means on-demand — by a human or by you.
 
-- `fresh`: clean context, requires `cwd`. `fork`: child starts with a copy of
-  your conversation — use when the task needs your context. `reuse`: sends
-  work to an existing session by id.
+- `fresh`: clean context, requires `cwd` — the default. `fork`: the child opens
+  on a copy of your **whole transcript**, tool output included, and carries it
+  every turn; the run reports the bill as `forkedFrom`. Fork when the child
+  needs the discussion verbatim, not when a paragraph in the prompt would do —
+  "see fork context" in an otherwise self-contained prompt means you paid a
+  transcript for that paragraph. A fork with a different `cwd` also hands the
+  child paths from the other tree. `reuse`: sends work to an existing session
+  by id.
 - The child inherits your current model unless `launch.model` is set.
   Unknown models fail with the available list in the error. `launch` applies to
   `fresh` and `fork` only — a `reuse` session owns its own model and tools.

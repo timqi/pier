@@ -4,7 +4,7 @@ import { TaskDefinitions, record, requiredString } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { TaskDefinition, TaskGroup, TaskResult, TaskRun } from "./types.js";
+import type { TaskDefinition, TaskGroup, TaskResult, TaskRun, TaskRunContext } from "./types.js";
 
 // JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
 const strEnum = <const T extends readonly string[]>(...values: T) =>
@@ -21,6 +21,9 @@ export interface RunSummary {
   triggerSource: TaskRun["triggerSource"];
   groupId?: string;
   sessionMode: TaskRun["sessionMode"];
+  /** What `mode:"fork"` copied into the child — the price of the choice,
+   *  back at the caller that made it. Appears once the child session opens. */
+  forkedFrom?: TaskRunContext["forkedFrom"];
   targetSessionId?: string;
   callbackSessionId?: string;
   callbackState: TaskRun["callbackState"];
@@ -67,6 +70,7 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   triggerSource: run.triggerSource,
   groupId: run.groupId,
   sessionMode: run.sessionMode,
+  forkedFrom: run.context.forkedFrom ?? null,
   targetSessionId: run.targetSessionId,
   callbackSessionId: run.callbackSessionId,
   callbackState: run.callbackState,
