@@ -106,7 +106,10 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
       const saved = task?.action.type === "agent" ? task.action : null;
       const savedSessionId = saved?.session.mode === "reuse" ? saved.session.sessionId : "";
       const choices = sessionChoices(sessions, savedSessionId || null);
-      agentMode = select([["Reuse session", "reuse"], ["Fresh child per run", "fresh"]], saved?.session.mode ?? "fresh");
+      // A definition stored with the removed `fork` mode has no option to
+      // select: it opens as fresh, so the directory it needs is asked for
+      // rather than left blank on a control showing nothing.
+      agentMode = select([["Reuse session", "reuse"], ["Fresh child per run", "fresh"]], saved?.session.mode === "reuse" ? "reuse" : "fresh");
       agentSession = select(choices, savedSessionId || choices[0]?.[1] || "");
       const savedCwd = saved?.session.mode === "fresh" ? saved.session.cwd : "";
       agentCwd = input(savedCwd || sessions[0]?.cwd || "");
