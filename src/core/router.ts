@@ -30,6 +30,39 @@ const SWEEP_MS = 5 * 60_000;
 const truncate = (message: string): string =>
   message.length > 600 ? `${message.slice(0, 600)}…` : message;
 
+/** What a chat window gets of a system input, and how much it may stand in
+ *  for. A task callback carries up to 8000 characters of result text
+ *  (tasks/callbacks.ts). */
+const NOTE_CHARS = 200;
+const NOTE_LINES = 4;
+
+/**
+ * The head of a system input plus a count of what was left out.
+ *
+ * A note is *context* for the turn it precedes, not the message: pasted whole,
+ * a run result buries the conversation it was meant to explain — and on IM
+ * that is the one surface with no way to collapse it. The hub, the web
+ * timeline and the Pi transcript keep every character.
+ *
+ * Cut on a line boundary and then on a word, so the head reads as text rather
+ * than as a string that ran out.
+ */
+function digest(text: string): string {
+  const body = text.trimEnd();
+  let head = body.split("\n").slice(0, NOTE_LINES).join("\n");
+  if (head.length > NOTE_CHARS) {
+    const capped = head.slice(0, NOTE_CHARS);
+    // Only a boundary in the second half is worth taking: cutting further back
+    // than that loses more than the ragged edge was costing.
+    const boundary = Math.max(capped.lastIndexOf("\n"), capped.lastIndexOf(" "));
+    head = capped.slice(0, boundary > NOTE_CHARS / 2 ? boundary : NOTE_CHARS);
+  }
+  const rest = body.slice(head.length).trim();
+  if (!rest) return body;
+  const dropped = rest.split("\n").length;
+  return `${head.trimEnd()}\n… +${String(dropped)} more line${dropped === 1 ? "" : "s"}`;
+}
+
 function keyOf(key: ConversationKey): string {
   return `${key.channelId}:${key.conversationId}`;
 }
@@ -260,7 +293,8 @@ export class Router {
       // out before the turn it triggers, so the answer has a visible cause.
       if (payload.type === "system-input") {
         const channel = this.channels.get(key.channelId);
-        channel?.notify(key.conversationId, { text: payload.text, origin: payload.origin })
+        // A digest, not the input: the hub emit above is what carries it whole.
+        channel?.notify(key.conversationId, { text: digest(payload.text), origin: payload.origin })
           .catch((err) => {
             log.error(`notify ${key.channelId} failed`, err);
             this.hub.emit(session.id, {

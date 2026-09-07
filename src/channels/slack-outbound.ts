@@ -5,7 +5,7 @@
 // limit, and what an empty turn still has to say. The adapter keeps the 👀
 // receipts, because those are about the turn ending, not about what was said.
 
-import type { AgentReply, SystemInputOrigin, TurnMeta } from "../core/types.js";
+import type { AgentReply, NoteOrigin, TurnMeta } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
@@ -87,17 +87,23 @@ export class SlackOutbound {
    * A system note: quoted, labelled with where it came from, and deliberately
    * plain — no buttons and no turn footer, because the turn this input
    * triggers has not ended yet.
+   *
+   * Answers with the `ts` of the last message it posted — where the caller
+   * puts the 👀 for that turn, at the foot of the thread the reply will land
+   * in. Undefined when there was nothing to post.
    */
   async note(
     channel: string,
     threadTs: string,
-    note: { text: string; origin: SystemInputOrigin },
-  ): Promise<void> {
+    note: { text: string; origin: NoteOrigin },
+  ): Promise<string | undefined> {
     // Markdown's own blockquote, so the note reads as quoted on either path.
     const body = note.text.split("\n").map((line) => `> ${line}`).join("\n");
+    let ts: string | undefined;
     for (const part of chunk(`_${originLabel(note.origin)}_\n${body}`, this.budget())) {
-      await this.post(channel, threadTs, part, []);
+      ts = await this.post(channel, threadTs, part, []);
     }
+    return ts;
   }
 
   /** Which budget `chunk()` should respect, given the path we are on. */
@@ -119,16 +125,16 @@ export class SlackOutbound {
     threadTs: string,
     body: string,
     trailing: SlackBlock[],
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     // `text` is the notification and accessibility fallback, never shown
     // beside the blocks.
     const notice = body || trailing.length ? body || "…" : "";
     if (this.markdownBlocks) {
       const blocks = [...(body ? [markdown(body)] : []), ...trailing];
-      if (!blocks.length) return;
+      if (!blocks.length) return undefined;
       try {
-        await this.api.postMessage({ channel, thread_ts: threadTs, text: notice, blocks });
-        return;
+        const sent = await this.api.postMessage({ channel, thread_ts: threadTs, text: notice, blocks });
+        return sent.ts;
       } catch (err) {
         if (!isBlockRejection(err)) throw err;
         this.markdownBlocks = false;
@@ -137,15 +143,18 @@ export class SlackOutbound {
     }
     // Legacy path: translate to mrkdwn and split into section blocks. The body
     // was chunked against the larger budget, so it may need splitting again.
+    let ts: string | undefined;
     for (const part of body ? chunk(toMrkdwn(body), MRKDWN_MAX) : [""]) {
       const blocks = [...sections(part), ...trailing];
       if (!blocks.length) continue;
-      await this.api.postMessage({
+      const sent = await this.api.postMessage({
         channel,
         thread_ts: threadTs,
         text: part || notice || "…",
         blocks,
       });
+      ts = sent.ts;
     }
+    return ts;
   }
 }

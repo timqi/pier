@@ -884,11 +884,28 @@ describe("system notes", () => {
     expect(client.sent[0]?.text).toContain("decision needed");
   });
 
-  it("leaves the 👀 receipts up — the turn it triggers has not ended", async () => {
+  it("hands the note the 👀 for the turn it triggers, and the turn-end clears it", async () => {
     openGates();
     await feed(message({ chat: DM, text: "go" }));
+    // The typed message's own receipt, settled by the turn it started — what
+    // follows is the turn nobody typed anything for.
+    await channel.send("42", { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    const noteId = client.nextMessageId;
     await channel.notify("42", { text: "note", origin: ORIGIN });
-    expect(client.reactions).toEqual([{ chatId: "42", messageId: 10, emoji: "👀" }]);
+    expect(client.reactions).toEqual([{ chatId: "42", messageId: noteId, emoji: "👀" }]);
+    await channel.send("42", { text: "answered", suggestions: [] });
+    expect(client.reactions.at(-1)).toEqual({ chatId: "42", messageId: noteId, emoji: null });
+  });
+
+  it("leaves an error note unmarked — no turn is coming to clear it", async () => {
+    openGates();
+    await feed(message({ chat: DM, text: "go" }));
+    await channel.send("42", { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    await channel.notify("42", { text: "it broke", origin: { kind: "error" } });
+    expect(client.sent.at(-1)?.text).toContain("it broke");
+    expect(client.reactions).toEqual([]);
   });
 });
 

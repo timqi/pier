@@ -100,6 +100,19 @@ export function originLabel(origin: NoteOrigin): string {
 }
 
 /**
+ * Is a turn coming, once this note is posted?
+ *
+ * A system input is context for the turn it triggers, so on IM the note is the
+ * only message that turn has to wear the 👀 — nobody typed one. An error note
+ * is the opposite: it reports a turn that already ended or never began, and a
+ * receipt marked on it would hang until the stale sweep.
+ *
+ * Beside `originLabel` for the same reason it is: three adapters ask this, and
+ * three copies of the answer are three chances to drift.
+ */
+export const awaitsTurn = (origin: NoteOrigin): boolean => origin.kind !== "error";
+
+/**
  * Quote and bracket characters that may be lifted out of a `**strong**` run.
  * Moving them changes nothing a reader can see — the punctuation is simply no
  * longer bold — while taking the delimiter off a character the parser refuses

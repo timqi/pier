@@ -28,10 +28,11 @@ import type {
   Channel,
   ConversationKey,
   InboundMessage,
-  SystemInputOrigin,
+  NoteOrigin,
 } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
@@ -696,18 +697,28 @@ export class SlackChannel implements Channel {
     await this.receipts.settleAfter(conversation, () => this.out.reply(channel, threadTs, reply));
   }
 
-  /** A system note, posted without touching the receipts: the turn it triggers
-   * has not ended yet. */
+  /**
+   * A system note, and the 👀 goes on the note itself: the turn it triggers has
+   * no message of the user's to carry them — nobody typed one — so without this
+   * the thread shows nothing at all while the agent works. The turn-end `send`
+   * clears it like any other receipt; an error note is not marked, because no
+   * turn follows it (`awaitsTurn`) and the eyes would sit there until the stale
+   * sweep.
+   */
   async notify(
     conversation: string,
-    note: { text: string; origin: SystemInputOrigin },
+    note: { text: string; origin: NoteOrigin },
   ): Promise<void> {
     const { channel, threadTs } = parseConversation(conversation);
     if (!threadTs) {
       this.log(`refusing to post a system note to ${conversation}: no thread in the conversation id`);
       return;
     }
-    await this.out.note(channel, threadTs, note);
+    const ts = await this.out.note(channel, threadTs, note);
+    // The last chunk of a long note, so the eyes sit at the foot of the thread,
+    // where the reply will land. A reaction that fails is swallowed and logged
+    // by receipts.ts, so the note itself is never lost to one.
+    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, channel, ts);
   }
 }
 

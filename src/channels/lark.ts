@@ -30,6 +30,7 @@ import type {
 } from "../core/types.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
@@ -542,14 +543,24 @@ export class LarkChannel implements Channel {
     await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply));
   }
 
-  /** A system note, posted without touching the receipts: the turn it
-   *  triggers has not ended yet. */
+  /**
+   * A system note, and the 👀 goes on the note itself: the turn it triggers has
+   * no message of the user's to carry them — nobody typed one — so without this
+   * the topic shows nothing at all while the agent works. The turn-end `send`
+   * clears it like any other receipt; an error note is not marked, because no
+   * turn follows it (`awaitsTurn`) and the eyes would sit there until the stale
+   * sweep.
+   */
   async notify(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
-    const { root } = parseConversation(conversation);
+    const { chatId, root } = parseConversation(conversation);
     if (!root) {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
-    await this.out.note(root, note);
+    const messageId = await this.out.note(root, note);
+    // The last card of a long note, so the eyes sit at the foot of the topic,
+    // where the reply will land. A reaction that fails is swallowed and logged
+    // by receipts.ts, so the note itself is never lost to one.
+    if (messageId && awaitsTurn(note.origin)) this.receipts.mark(conversation, chatId, messageId);
   }
 }

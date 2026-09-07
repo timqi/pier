@@ -519,16 +519,33 @@ describe("outbound shapes", () => {
     expect(cards[1]!.body.elements.some((el) => el.tag === "column_set")).toBe(true);
   });
 
-  it("posts a system note as a labelled quote without touching receipts", async () => {
+  it("posts a system note as a labelled quote, and hands it the eyes", async () => {
     openGates();
     await feed(message({ text: "task", messageId: "om_t" }));
-    const before = client.reactions.length;
+    // The typed message's own receipt, settled by the turn it started — what
+    // follows is the turn nobody typed anything for.
+    await channel.send(`${CHAT}/om_t`, { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
     await channel.notify(`${CHAT}/om_t`, {
       text: "delegated: audit the logs",
       origin: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: null },
     });
+    const noteId = [...client.cards.keys()].at(-1)!;
     expect(bodyText(client.replied.at(-1)!.card)).toContain("> delegated: audit the logs");
-    expect(client.reactions.length).toBe(before);
+    expect(client.reactions).toEqual([{ messageId: noteId, emoji: "OnIt", add: true }]);
+    // Cleared by the turn-end, like a receipt on a message someone typed.
+    await channel.send(`${CHAT}/om_t`, { text: "answered", suggestions: [] });
+    expect(client.reactions.at(-1)).toEqual({ messageId: noteId, emoji: "OnIt", add: false });
+  });
+
+  it("leaves an error note unmarked — no turn is coming to clear it", async () => {
+    openGates();
+    await feed(message({ text: "task", messageId: "om_e" }));
+    await channel.send(`${CHAT}/om_e`, { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    await channel.notify(`${CHAT}/om_e`, { text: "it broke", origin: { kind: "error" } });
+    expect(bodyText(client.replied.at(-1)!.card)).toContain("> it broke");
+    expect(client.reactions).toEqual([]);
   });
 });
 

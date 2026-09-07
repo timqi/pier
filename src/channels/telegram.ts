@@ -17,10 +17,10 @@ import type {
   Channel,
   ConversationKey,
   InboundMessage,
-  SystemInputOrigin,
+  NoteOrigin,
   TurnMeta,
 } from "../core/types.js";
-import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
+import { awaitsTurn, formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { saveInboundAll } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
@@ -513,19 +513,30 @@ export class TelegramChannel implements Channel {
 
   /**
    * A system note: quoted, labelled with where it came from, and deliberately
-   * plain — no buttons, no turn footer, and the 👀 receipts stay up, because
-   * the turn this input triggers has not ended yet.
+   * plain — no buttons and no turn footer, because the turn this input triggers
+   * has not ended yet.
+   *
+   * That turn has no message of the user's to carry the 👀 — nobody typed one —
+   * so the note wears them, on its last chunk, until the turn-end `send`
+   * clears it. An error note is not marked: no turn follows it (`awaitsTurn`),
+   * and the eyes would sit there until the stale sweep.
    */
-  async notify(conversation: string, note: { text: string; origin: SystemInputOrigin }): Promise<void> {
+  async notify(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
     const { chatId, topicId } = parseConversation(conversation);
     const label = originLabel(note.origin);
+    let posted: TgMessage | undefined;
     for (const part of chunk(`<i>${label}</i>\n<blockquote>${toTelegramHtml(note.text)}</blockquote>`)) {
-      await this.api.sendMessage({
+      posted = await this.api.sendMessage({
         chat_id: chatId,
         message_thread_id: topicId,
         text: part,
         parse_mode: "HTML",
       });
+    }
+    // A failed reaction is swallowed and logged by receipts.ts, so the note
+    // itself is never lost to one.
+    if (posted && awaitsTurn(note.origin)) {
+      this.receipts.mark(conversation, chatId, String(posted.message_id));
     }
   }
 

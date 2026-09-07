@@ -886,17 +886,34 @@ describe("outbound", () => {
     expect(dropped.filter((d) => d.includes("no thread in the conversation id"))).toHaveLength(2);
   });
 
-  it("renders a system note as a quote, without retiring the receipts", async () => {
+  it("renders a system note as a quote, and hands it the eyes for the turn", async () => {
     openGates();
     await feed(message({ text: "go", ts: "1705.000100" }));
-    const before = client.reactions.length;
+    // The typed message's own receipt, settled by the turn it started — what
+    // follows is the turn nobody typed anything for.
+    await channel.send("C100/1705.000100", { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    const noteTs = `${client.nextTs}.000100`;
     await channel.notify("C100/1705.000100", {
       text: "subagent says hi",
       origin: { kind: "task-delegation", taskId: "t", runId: "r", sourceSessionId: null },
     });
     expect(client.sent.at(-1)!.text).toContain("> subagent says hi");
-    // The turn this input triggers has not ended, so the 👀 stays up.
-    expect(client.reactions).toHaveLength(before);
+    expect(client.reactions).toEqual([{ channel: CHANNEL, ts: noteTs, name: "eyes", add: true }]);
+    // Cleared by the turn-end, like a receipt on a message someone typed.
+    await channel.send("C100/1705.000100", { text: "answered", suggestions: [] });
+    expect(client.reactions.at(-1))
+      .toEqual({ channel: CHANNEL, ts: noteTs, name: "eyes", add: false });
+  });
+
+  it("leaves an error note unmarked — no turn is coming to clear it", async () => {
+    openGates();
+    await feed(message({ text: "go", ts: "1706.000100" }));
+    await channel.send("C100/1706.000100", { text: "on it", suggestions: [] });
+    client.reactions.length = 0;
+    await channel.notify("C100/1706.000100", { text: "it broke", origin: { kind: "error" } });
+    expect(client.sent.at(-1)!.text).toContain("> it broke");
+    expect(client.reactions).toEqual([]);
   });
 });
 

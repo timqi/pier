@@ -115,11 +115,16 @@ export class LarkOutbound {
    * A system note: quoted, labelled with where it came from, and deliberately
    * plain — no buttons and no turn footer, because the turn this input
    * triggers has not ended yet.
+   *
+   * Answers with the id of the last card it posted — where the caller puts the
+   * 👀 for that turn, at the foot of the topic the reply will land in.
    */
-  async note(root: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+  async note(root: string, note: { text: string; origin: NoteOrigin }): Promise<string | undefined> {
     const body = note.text.split("\n").map((line) => `> ${line}`).join("\n");
+    let messageId: string | undefined;
     for (const part of chunk(`*${originLabel(note.origin)}*\n${body}`, LARK_MAX)) {
-      await this.api.replyCard(root, card([markdown(part)]));
+      messageId = (await this.api.replyCard(root, card([markdown(part)]))).messageId;
     }
+    return messageId;
   }
 }
