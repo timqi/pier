@@ -13,7 +13,6 @@ import { TaskStore } from "./store.js";
 import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
 
 const MAX_ACTIVE_AGENTS = 4;
-const MAX_ACTIVE_PER_ROOT = 4;
 
 /** What a child cannot know unless told. Every session gets the chat-surface
  * contract (<pier>/AGENTS.md), task runs included — so the delegation prompt
@@ -190,7 +189,7 @@ export class AgentTaskRunner {
   }
 
   private async acquireSlot(run: TaskRun, signal: AbortSignal): Promise<void> {
-    while (this.active.size >= MAX_ACTIVE_AGENTS || this.activeForRoot(run.rootRunId) >= MAX_ACTIVE_PER_ROOT) {
+    while (this.active.size >= MAX_ACTIVE_AGENTS) {
       if (signal.aborted) throw new Error("cancelled");
       await new Promise<void>((resolve, reject) => {
         const wake = (): void => {
@@ -207,14 +206,6 @@ export class AgentTaskRunner {
       });
     }
     this.active.add(run.id);
-  }
-
-  private activeForRoot(rootRunId: string): number {
-    let count = 0;
-    for (const id of this.active) {
-      if (this.store.getRun(id)?.rootRunId === rootRunId) count += 1;
-    }
-    return count;
   }
 
   private releaseSlot(id: string): void {
