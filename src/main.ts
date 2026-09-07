@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { PiConfigStore } from "./agent/config.js";
+import { normalizeAgentSnapshot } from "./agent/config-sync.js";
+import { ConfigSync } from "./config-sync.js";
+import { configSyncTask } from "./config-sync-task.js";
 import { CredentialStore } from "./agent/credentials.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
@@ -37,6 +40,7 @@ import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
 import { startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
+import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config-sync.js";
 import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
@@ -96,7 +100,12 @@ let channelStore: ChannelStore;
 // Shared by the adapter and the tool: a display name is looked up once per
 // process, not once per message and again per transcript.
 const slackDirectory = new SlackDirectory((m) => logger("slack").warn(m));
+let readyForConfigReload = false;
 const piConfig = new PiConfigStore();
+const configSync = new ConfigSync({
+  db, settings, config: piConfig, normalizeAgent: normalizeAgentSnapshot,
+  reload: () => readyForConfigReload ? reloadInstance() : Promise.resolve(),
+});
 const factory = new PiAgentFactory(
   [
     taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
@@ -158,8 +167,9 @@ const router = new Router(hub, (key) => {
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
+  systemActions: { "config-sync": (signal) => configSync.sync(signal) },
 });
-tasks.start();
+const configurationSync = configSyncTask(tasks, configSync);
 
 // The managed CLI tools (src/tools.ts), and the daily task that keeps them
 // current (src/tools-task.ts) — an ordinary bash task on an ordinary cron,
@@ -204,6 +214,16 @@ const reloadInstance = async (includeWatched = false): Promise<number> => {
   await channels.reload();
   return router.evictIdle(0, Date.now(), { includeWatched });
 };
+
+// Bound the startup check before sessions and scheduled work can start.
+// Remote outages keep the last local configuration available.
+if (configSync.status().enabled) {
+  try { await configSync.sync(); }
+  catch { log.error("Startup configuration sync failed; using the last local configuration"); }
+}
+await configurationSync.reconcile();
+tasks.start();
+readyForConfigReload = true;
 
 void secrets.unlock().then(
   startChannels,
@@ -318,8 +338,15 @@ app.onError((err, c) => {
 // so a surface added later is covered without knowing this exists. Built
 // before the listener: a first run generates and prints its password here.
 const auth = new AuthStore(db);
+registerConfigShareRoute(app, configSync);
 app.use("*", requireAuth(auth));
 registerAuthRoutes(app, auth);
+registerConfigSyncRoutes(app, {
+  sync: configSync,
+  status: () => ({ ...configurationSync.status(), publicUrl: settings.get().publicUrl }),
+  reconcile: configurationSync.reconcile,
+  run: configurationSync.run,
+});
 registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);

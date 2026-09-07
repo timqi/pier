@@ -18,7 +18,7 @@ import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { TaskStore } from "./store.js";
 import { handleTaskTool } from "./tool.js";
-import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { GroupJoinMode, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -46,6 +46,7 @@ export class TaskService {
      *  hands in a closure over the store instead. Absent in bare test rigs. */
     private readonly instance?: {
       modelMenu(): { provider: string; id: string; thinking?: string; note?: string }[];
+      systemActions?: SystemActions;
     },
   ) {
     const unreachable = (sessionId: string, what: string, why: string): void =>
@@ -53,7 +54,7 @@ export class TaskService {
     this.messages = new TaskMessenger(store, router, hub, (runId, prompt, fromSessionId) =>
       this.resume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }),
       unreachable);
-    this.definitions = new TaskDefinitions(store, factory, router, hub);
+    this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),

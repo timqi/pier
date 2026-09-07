@@ -15,3 +15,17 @@ export type ToolsSyncNote =
   | { state: "started" }
   | { state: "waiting" }
   | { state: "refused"; reason: string };
+
+/** Settings -> Agent configuration subscription, without credential material. */
+export interface ConfigSyncStatus {
+  publishedPath: string | null;
+  sourceUrl: string;
+  enabled: boolean;
+  lastChecked: number | null;
+  lastApplied: number | null;
+  error: string | null;
+  needsReload: boolean;
+  taskId?: string | null;
+  nextRunAt?: number | null;
+  publicUrl?: string;
+}

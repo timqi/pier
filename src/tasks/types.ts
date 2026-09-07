@@ -29,7 +29,10 @@ export type AgentTaskAction = {
 export type TaskAction =
   | AgentTaskAction
   | { type: "bash"; script: string; cwd: string }
+  | { type: "system"; name: string }
   | { type: "task"; taskId: string };
+
+export type SystemActions = Record<string, (signal: AbortSignal) => Promise<string>>;
 
 export type TaskCallback =
   | { type: "none" }
@@ -85,6 +88,7 @@ export interface CommandResult {
 
 export type TaskResult =
   | { type: "agent"; text: string; sessionId: string }
+  | { type: "system"; text: string }
   | ({ type: "bash" } & CommandResult)
   | { type: "task"; runId: string; result: TaskResult | null }
   | { type: "watch"; matched: false };

@@ -729,7 +729,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     return loader;
   }
 
-  private async open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
+  private open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
+    return this.providerConfig.withSnapshot(() => this.openSnapshot(cwd, sessionManager, opts));
+  }
+
+  private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
     let live: PiAgentSession | undefined;
     // Asked per open, not captured at wiring: a tool whose channel is not
     // configured yet would otherwise cost context on every turn of every

@@ -126,7 +126,7 @@ function hangingSession(id: string): ReturnType<typeof fakeSession> {
   return session;
 }
 
-function setup(session = fakeSession()) {
+function setup(session = fakeSession(), instance?: ConstructorParameters<typeof TaskService>[4]) {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => []),
@@ -140,7 +140,7 @@ function setup(session = fakeSession()) {
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
   const store = new TaskStore(openDb(":memory:"));
-  const service = new TaskService(store, factory, router, hub);
+  const service = new TaskService(store, factory, router, hub, instance);
   return { cwd, session, factory, hub, router, store, service };
 }
 
@@ -1582,6 +1582,156 @@ describe("task HTTP routes", () => {
     });
     expect(overridden.status).toBe(400);
     expect(await overridden.text()).toContain("unsupported sessionMode");
+  });
+});
+
+describe("owned system actions", () => {
+  const draft = (name = "config-sync") => ({
+    name: "Configuration sync",
+    trigger: { type: "cron", expression: "*/5 * * * *", timezone: "UTC" },
+    action: { type: "system", name },
+  });
+  const instance = (handler: (signal: AbortSignal) => Promise<string>) => ({
+    modelMenu: () => [], systemActions: { "config-sync": handler },
+  });
+
+  it("reconciles by owner, preserves scheduling policy, and runs in process", async () => {
+    const handler = vi.fn(async () => "Applied revision 2");
+    const { service, factory } = setup(fakeSession(), instance(handler));
+    const task = await service.create(draft(), "config-sync");
+    expect(task).toMatchObject({ creator: "config-sync", revision: 1, enabled: true });
+    expect(task.nextRunAt).not.toBeNull();
+    const updated = await service.update(task.id, { ...draft(), enabled: false }, "config-sync");
+    expect(updated).toMatchObject({ id: task.id, revision: 2, enabled: false, nextRunAt: null });
+    service.start(60_000);
+    onTestFinished(() => service.stop());
+    expect(service.get(task.id)).toMatchObject({ enabled: false, nextRunAt: null });
+    // Disabled only suspends scheduling; the owning Settings action still runs it.
+    const done = await service.waitForRun(service.run(task.id).id);
+    expect(done).toMatchObject({ state: "succeeded", result: { type: "system", text: "Applied revision 2" }, error: null });
+    expect(done.startedAt).not.toBeNull();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(factory.resume).not.toHaveBeenCalled();
+    expect(service.get(task.id)).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(service.setEnabled(task.id, true, "config-sync").nextRunAt).not.toBeNull();
+    expect(service.archive(task.id, "config-sync")).toMatchObject({ enabled: false, archived: true, nextRunAt: null });
+  });
+
+  it("rejects HTTP, tool and inline spoofing while preserving owner guards", async () => {
+    const handler = vi.fn(async () => "applied");
+    const { cwd, service } = setup(fakeSession(), instance(handler));
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    const task = await service.create(draft(), "config-sync");
+    const publicTask = await service.create(bashDraft(cwd, "echo public"));
+    const spoofed = { ...draft(), creator: "config-sync", by: "config-sync", id: task.id };
+    for (const creator of ["http", "session:s1", "other"]) {
+      await expect(service.create(draft(), creator)).rejects.toThrow(/trusted owner/);
+    }
+    for (const name of ["unknown", "toString", "__proto__"]) {
+      await expect(service.create(draft(name), name)).rejects.toThrow(/unregistered/);
+    }
+    for (const name of ["http", "session:s1"]) {
+      const rig = setup(fakeSession(), { modelMenu: () => [], systemActions: { [name]: handler } });
+      await expect(rig.service.create(draft(name), name)).rejects.toThrow(/trusted owner/);
+    }
+    for (const [method, url] of [["POST", "/api/tasks"], ["PATCH", `/api/tasks/${task.id}`], ["PATCH", `/api/tasks/${publicTask.id}`]]) {
+      const response = await app.request(url!, {
+        method, headers: { "content-type": "application/json" }, body: JSON.stringify(spoofed),
+      });
+      expect(response.status).toBe(400);
+    }
+    for (const operation of ["create", "run"]) {
+      await expect(service.tool({ operation, task: { ...spoofed, trigger: { type: "manual" } }, creator: "config-sync" }, "s1")).rejects.toThrow(/trusted owner/);
+      await expect(service.tool({ operation, task: { ...draft("unknown"), trigger: { type: "manual" } } }, "s1")).rejects.toThrow(/trusted owner/);
+    }
+    await expect(service.tool({ operation: "update", task_id: task.id, task: bashDraft(cwd, "echo spoof"), by: "config-sync" }, "s1")).rejects.toThrow(/reconciled by Pier/);
+    await expect(service.tool({ operation: "update", task_id: publicTask.id, task: spoofed }, "s1")).rejects.toThrow(/trusted owner/);
+    await expect(service.update(publicTask.id, draft(), "config-sync")).rejects.toThrow(/trusted owner/);
+    await expect(service.update(task.id, draft(), "other")).rejects.toThrow(/reconciled by Pier/);
+    await expect(service.update(task.id, draft("unknown"), "config-sync")).rejects.toThrow(/trusted owner/);
+    for (const route of ["pause", "resume", "archive"]) {
+      expect((await app.request(`/api/tasks/${task.id}/${route}`, { method: "POST" })).status).toBe(400);
+    }
+    expect(service.get(task.id)).toEqual(task);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("reports handler errors through the persisted run and HTTP", async () => {
+    const { service } = setup(fakeSession(), instance(async () => { throw new Error("apply failed"); }));
+    const task = await service.create(draft(), "config-sync");
+    const done = await service.waitForRun(service.run(task.id).id);
+    expect(done).toMatchObject({ state: "failed", error: "Error: apply failed", result: null });
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    expect(await (await app.request(`/api/task-runs/${done.id}`)).json()).toMatchObject({ state: "failed", error: "Error: apply failed" });
+  });
+
+  it.each(["cancel", "timeout", "stop"] as const)("observes %s even when the cooperative handler resolves after abort", async (operation) => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const handler = vi.fn((signal: AbortSignal) => new Promise<string>((resolve) => {
+      signal.addEventListener("abort", () => resolve("aborted work"), { once: true });
+    }));
+    const { service } = setup(fakeSession(), instance(handler));
+    onTestFinished(() => service.stop());
+    const task = await service.create({ ...draft(), timeoutSeconds: 1 }, "config-sync");
+    const run = service.run(task.id);
+    expect(service.getRun(run.id).state).toBe("running");
+    expect(service.activeRunCount()).toBe(1);
+    expect(service.run(task.id)).toMatchObject({ state: "skipped", skipReason: "overlap" });
+    if (operation === "cancel") service.cancel(run.id);
+    else if (operation === "stop") service.stop();
+    else await vi.advanceTimersByTimeAsync(1000);
+    const done = await service.waitForRun(run.id);
+    expect(handler.mock.calls[0]![0].aborted).toBe(true);
+    expect(done).toMatchObject({
+      state: operation === "timeout" ? "failed" : "cancelled",
+      error: operation === "timeout" ? "task timed out" : "cancelled",
+      result: null,
+    });
+    expect(service.activeRunCount()).toBe(0);
+  });
+
+  it("recovers interrupted runs without replay and fails observably when registration is missing", async () => {
+    const handler = vi.fn(async () => "applied");
+    const { store, factory, router, hub, service } = setup(fakeSession(), instance(handler));
+    const task = await service.create(draft(), "config-sync");
+    const now = Date.now();
+    store.saveRun(storedRun("interrupted-system", task, now, { state: "running", result: null, finishedAt: null }));
+    const restarted = new TaskService(store, factory, router, hub);
+    restarted.start(60_000);
+    onTestFinished(() => restarted.stop());
+    expect(restarted.getRun("interrupted-system")).toMatchObject({ state: "interrupted", error: "Pier restarted while the run was active" });
+    expect(restarted.get(task.id)).toMatchObject({ enabled: true, creator: "config-sync" });
+    expect(restarted.get(task.id).nextRunAt).toBeGreaterThan(now);
+    const app = new Hono();
+    registerTaskRoutes(app, restarted);
+    const response = await app.request(`/api/tasks/${task.id}/run`, { method: "POST" });
+    const { runId } = await response.json() as { runId: string };
+    expect(await restarted.waitForRun(runId)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
+    const toolRun = await restarted.tool({ operation: "run", task_id: task.id, callback: "none" }, "s1") as RunSummary;
+    expect(await restarted.waitForRun(toolRun.runId)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it.each(["http", "session:s1", "other"])("does not invoke a registered handler for a persisted definition owned by %s", async (creator) => {
+    const handler = vi.fn(async () => "applied");
+    const { service, store } = setup(fakeSession(), instance(handler));
+    const task = await service.create(draft(), "config-sync");
+    store.saveTask({ ...task, creator });
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    const response = await app.request(`/api/tasks/${task.id}/run`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ creator: "config-sync", action: draft().action }),
+    });
+    const { runId } = await response.json() as { runId: string };
+    expect(await service.waitForRun(runId)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
+    const toolRun = await service.tool({ operation: "run", task_id: task.id, callback: "none", creator: "config-sync" }, "s1") as RunSummary;
+    expect(await service.waitForRun(toolRun.runId)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
+    expect(handler).not.toHaveBeenCalled();
   });
 });
 

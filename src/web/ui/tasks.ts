@@ -24,6 +24,7 @@ const triggerSummary = (task: TaskDefinition): string => {
 const actionSummary = (task: TaskDefinition): string => {
   if (task.action.type === "agent") return `Agent · ${task.action.session.mode}`;
   if (task.action.type === "bash") return "Bash";
+  if (task.action.type === "system") return "System";
   return "Task";
 };
 
@@ -244,13 +245,13 @@ export function createTasksView(
     run.disabled = task.archived;
     run.onclick = () => void runTask(task.id);
     const pause = button(task.enabled ? "Pause schedule" : "Resume schedule");
-    pause.disabled = task.archived || task.trigger.type === "manual";
+    pause.disabled = task.archived || task.action.type === "system" || task.trigger.type === "manual";
     pause.onclick = () => void mutate(`/api/tasks/${task.id}/${task.enabled ? "pause" : "resume"}`);
     const edit = button("Edit");
-    edit.disabled = task.archived;
+    edit.disabled = task.archived || task.action.type === "system";
     edit.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps, task));
     const archive = button("Archive");
-    archive.disabled = task.archived;
+    archive.disabled = task.archived || task.action.type === "system";
     archive.onclick = () => void mutate(`/api/tasks/${task.id}/archive`);
 
     const tabs = h("div", "flex flex-none gap-1 border-b border-neutral-200 px-4 py-2");
@@ -297,6 +298,7 @@ export function createTasksView(
     }
     if (task.action.type === "bash") values.push(["Directory", task.action.cwd], ["Script", task.action.script]);
     if (task.action.type === "task") values.push(["Target task", task.action.taskId]);
+    if (task.action.type === "system") values.push(["System action", task.action.name]);
     if (task.trigger.type === "watch") values.push(["Probe", task.trigger.script]);
     for (const [label, value] of values) {
       content.append(

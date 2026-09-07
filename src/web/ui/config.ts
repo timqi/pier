@@ -13,6 +13,7 @@ import { codePane, plainRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, CONTROL, field, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
+import { configSyncPane } from "./config-sync.js";
 
 interface ConfigIndex {
   dir: string;
@@ -26,7 +27,8 @@ type Selection =
   | { type: "bundled"; name: string }
   /** One pane for every command-line tool: a row and a switch each, because a
    *  page per binary is four pages saying the same three facts. */
-  | { type: "tools" };
+  | { type: "tools" }
+  | { type: "sync" };
 
 /** The one settings answer every switch here is drawn from. */
 interface CatalogResponse {
@@ -137,6 +139,14 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   let catalogError = "";
   /** The daily update task, where every install and failure is a run. */
   let toolsTaskId: string | null = null;
+  let syncPane: ReturnType<typeof configSyncPane> | null = null;
+  const closeSync = (): void => { syncPane?.dispose(); syncPane = null; };
+  const openSync = (): void => {
+    closeSync();
+    ++paneRequest;
+    syncPane = configSyncPane();
+    pane.replaceChildren(syncPane.el);
+  };
   /** The custom blocks, as stored: what a save has to send back unchanged. */
   let customTools: { name: string; toml: string }[] = [];
   const extensionEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "extension");
@@ -151,6 +161,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   scopeSelect.className =
     "select w-full rounded-md border border-neutral-300 px-2 py-1 text-[12.5px] focus:border-indigo-400 focus:outline-none";
   scopeSelect.onchange = () => {
+    closeSync();
     scope = scopeSelect.value;
     selection = null;
     openDirs.clear();
@@ -165,10 +176,10 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   // No header of its own: embedded under Settings → Agent files, whose strip
   // already names it.
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1");
-  const nav = h("nav", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[13px]");
+  const nav = h("nav", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[13px] max-md:max-h-48 max-md:w-full max-md:border-r-0 max-md:border-b");
   nav.append(scopeBox, navList);
   const pane = h("div", "flex min-w-0 flex-1 flex-col");
-  const body = h("div", "flex min-h-0 flex-1");
+  const body = h("div", "flex min-h-0 flex-1 max-md:flex-col");
   body.append(nav, pane);
   root.append(body);
 
@@ -246,6 +257,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     lastIndex = index;
     renderNav(index);
     if (!selection) renderPlaceholder();
+    else if (selection.type === "sync") openSync();
   }
 
   // --- nav ---------------------------------------------------------------------
@@ -364,14 +376,20 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     const isActive = (sel: Selection): boolean => JSON.stringify(sel) === JSON.stringify(selection);
     const open = (sel: Selection): void => {
+      closeSync();
       selection = sel;
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name);
       else if (sel.type === "bundled") openBundled(sel.name);
       else if (sel.type === "tools") openTools();
+      else if (sel.type === "sync") openSync();
       else void openResource(sel.kind, sel.name);
     };
     const rows: HTMLElement[] = [];
+    if (scope === "global") {
+      const sel: Selection = { type: "sync" };
+      rows.push(navSection("Instance"), navRow("Configuration sync", isActive(sel), false, () => open(sel)));
+    }
     rows.push(navSection("Files"));
     for (const f of index.files) {
       const sel: Selection = { type: "file", name: f.name };
@@ -762,5 +780,5 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   return consoleView(root, () => {
     renderScopeOptions();
     void load();
-  });
+  }, closeSync);
 }
