@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -37,6 +37,17 @@ beforeEach(() => {
 });
 
 describe("scanning", () => {
+  it("lists the freshest board first, slug breaking ties", async () => {
+    const stale = makeBoard("stale");
+    const fresh = makeBoard("fresh");
+    const tied = makeBoard("a-tied");
+    utimesSync(join(stale, "site"), new Date(1e9), new Date(1e9));
+    utimesSync(join(fresh, "site"), new Date(2e9), new Date(2e9));
+    utimesSync(join(tied, "site"), new Date(2e9), new Date(2e9));
+
+    expect((await listBoards(dir)).map((b) => b.slug)).toEqual(["a-tied", "fresh", "stale"]);
+  });
+
   it("lists boards with manifest defaults and skips non-boards", async () => {
     makeBoard("weekly-digest", { description: "what changed", sessions: ["s1"] });
     makeBoard("no-title", {});

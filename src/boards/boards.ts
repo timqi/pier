@@ -150,13 +150,17 @@ export async function listBoards(dir: string): Promise<BoardSummary[]> {
   }
   // One board's manifest says nothing about the next one's, so the scan waits
   // once for all of them rather than once per board.
-  const boards = await Promise.all(entries.sort().map(async (slug): Promise<BoardSummary | null> => {
+  const boards = await Promise.all(entries.map(async (slug): Promise<BoardSummary | null> => {
     const manifest = await readManifest(dir, slug);
     if (!manifest) return null;
     const { title, description, sessions, public: isPublic, token } = manifest;
     return { slug, title, description, sessions, public: isPublic, token, updatedAt: await updatedAt(dir, slug) };
   }));
-  return boards.filter((board): board is BoardSummary => board !== null);
+  // Freshest first: the board someone just wrote is the one they came to see.
+  // Slug breaks ties so equal mtimes still list in a stable order.
+  return boards
+    .filter((board): board is BoardSummary => board !== null)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.slug.localeCompare(b.slug));
 }
 
 /** Containment, not normalization: the resolved realpath must sit inside the
