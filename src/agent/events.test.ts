@@ -13,7 +13,10 @@ describe("toSessionEvents", () => {
       ],
     },
     {
-      name: "agent_end → turn-end with last assistant text + idle",
+      // Ends the turn and nothing else: Pi is still run-active here (it has
+      // auto-compaction and queued continuations to run), so an idle on this
+      // event would contradict the seam's own `state` getter.
+      name: "agent_end → turn-end with last assistant text, and no idle",
       input: {
         type: "agent_end",
         messages: [
@@ -22,10 +25,14 @@ describe("toSessionEvents", () => {
           { role: "toolResult" },
         ],
       },
-      expected: [
-        { type: "turn-end", text: "hello world" },
-        { type: "state", state: "idle" },
-      ],
+      expected: [{ type: "turn-end", text: "hello world" }],
+    },
+    {
+      // Pi's own "the run-active flag is now false", and the only thing idle
+      // rides on.
+      name: "agent_settled → idle",
+      input: { type: "agent_settled" },
+      expected: [{ type: "state", state: "idle" }],
     },
     {
       name: "agent_end with error stopReason ends the turn *as* the failure",
@@ -40,7 +47,6 @@ describe("toSessionEvents", () => {
         // (what a chat surface reports) — never as a turn that said nothing.
         { type: "turn-end", text: "", error: "boom" },
         { type: "error", message: "boom" },
-        { type: "state", state: "idle" },
       ],
     },
     {
@@ -52,7 +58,6 @@ describe("toSessionEvents", () => {
       expected: [
         { type: "turn-end", text: "", error: "unknown agent error" },
         { type: "error", message: "unknown agent error" },
-        { type: "state", state: "idle" },
       ],
     },
     {

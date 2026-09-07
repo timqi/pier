@@ -38,6 +38,7 @@ export const triggerSummary = (task: TaskDefinition): string => {
 export const actionSummary = (task: TaskDefinition): string => {
   if (task.action.type === "agent") return `Agent · ${task.action.session.mode}`;
   if (task.action.type === "bash") return "Bash";
+  if (task.action.type === "system") return "System";
   return "Task";
 };
 
@@ -68,6 +69,7 @@ export function definitionView(task: TaskDefinition, openSession: (id: string) =
   }
   if (task.action.type === "bash") values.push(["Directory", task.action.cwd], ["Script", task.action.script]);
   if (task.action.type === "task") values.push(["Target task", task.action.taskId]);
+  if (task.action.type === "system") values.push(["System action", task.action.name]);
   if (task.trigger.type === "watch") values.push(["Probe", task.trigger.script]);
   for (const [label, value] of values) {
     content.append(
@@ -216,7 +218,7 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   }
   if (run.result) {
     const result = run.result;
-    const text = result.type === "agent" ? result.text : result.type === "bash" ? commandText(result)
+    const text = result.type === "agent" || result.type === "system" ? result.text : result.type === "bash" ? commandText(result)
       : result.type === "task" ? `Child run: ${result.runId}` : "Watch did not match.";
     body.append(h("h3", "px-4 pt-3 text-[12px] font-medium", "Result"), h("pre", "whitespace-pre-wrap break-words p-4 font-mono text-[12px]", text || "No output."));
   }

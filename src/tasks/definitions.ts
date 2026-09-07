@@ -15,6 +15,7 @@ import type {
   AgentLaunchPolicy,
   AgentSessionPolicy,
   AgentTaskAction,
+  SystemActions,
   TaskAction,
   TaskCallback,
   TaskDefinition,
@@ -144,6 +145,7 @@ export class TaskDefinitions {
     private readonly factory: AgentFactory,
     private readonly router: Router,
     private readonly hub: EventHub,
+    private readonly systemActions: SystemActions = {},
   ) {}
 
   list(): TaskDefinition[] { return this.store.listTasks(); }
@@ -160,6 +162,7 @@ export class TaskDefinitions {
     const value = record(raw);
     const draft = await this.parseDraft(
       value && value.trigger === undefined ? { ...value, trigger: { type: "manual" } } : raw,
+      creator,
     );
     const now = Date.now();
     const task: TaskDefinition = {
@@ -190,7 +193,7 @@ export class TaskDefinitions {
     const old = this.get(id);
     this.assertOwner(old, by, "edited");
     if (old.archived) throw new Error("archived tasks cannot be edited");
-    const draft = await this.parseDraft(raw);
+    const draft = await this.parseDraft(raw, ownerOf(old) ? by : undefined);
     const now = Date.now();
     const task: TaskDefinition = {
       ...old,
@@ -265,7 +268,18 @@ export class TaskDefinitions {
     }
   }
 
-  private async parseDraft(raw: unknown): Promise<TaskDraft> {
+  /** Checked again at execution: persisted definitions can outlive registration. */
+  systemAction(name: string, owner?: string): SystemActions[string] {
+    if (!owner || owner === "http" || owner.startsWith("session:") || owner !== name) {
+      throw new Error(`system action "${name}" requires its trusted owner`);
+    }
+    if (!Object.hasOwn(this.systemActions, name) || typeof this.systemActions[name] !== "function") {
+      throw new Error(`unregistered system action: ${name}`);
+    }
+    return this.systemActions[name]!;
+  }
+
+  private async parseDraft(raw: unknown, owner?: string): Promise<TaskDraft> {
     const value = record(raw);
     if (!value) throw new Error("task definition required");
     const timeoutSeconds = value.timeoutSeconds === undefined ? DEFAULT_TIMEOUT : Number(value.timeoutSeconds);
@@ -288,6 +302,10 @@ export class TaskDefinitions {
       const taskId = requiredString(actionRaw.taskId, "target task");
       this.get(taskId);
       action = { type: "task", taskId };
+    } else if (actionRaw.type === "system") {
+      const name = requiredString(actionRaw.name, "system action name");
+      this.systemAction(name, owner);
+      action = { type: "system", name };
     } else if (actionRaw.type === "agent") {
       action = await this.parseAgentAction(actionRaw);
     } else throw new Error("unknown action type");

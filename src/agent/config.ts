@@ -7,7 +7,10 @@ import { promises as fs } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { isProviderApi, validateEndpoint, validateProviderSetup } from "../core/types.js";
 import { pierPath } from "../paths.js";
+import { mergeSnapshotProviders, normalizeAgentSnapshot, snapshotProviders } from "./config-sync.js";
 import type {
+  AgentConfigSnapshot,
+  AgentConfigSync,
   ConfigResource,
   ConfigResourceKind,
   ConfigScope,
@@ -18,6 +21,7 @@ import type {
 
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
+const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json"] as const;
 const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
 /** Pier owns the Pi runtime dir: config lives in the syncable `~/.pier/pi`
@@ -51,14 +55,16 @@ export interface ProviderStructure {
 const missing = (err: unknown): boolean =>
   err instanceof Error && "code" in err && err.code === "ENOENT";
 
-const readOptional = async (path: string): Promise<string> => {
+const readNullable = async (path: string): Promise<string | null> => {
   try {
     return await fs.readFile(path, "utf8");
   } catch (err) {
-    if (missing(err)) return "";
+    if (missing(err)) return null;
     throw err;
   }
 };
+
+const readOptional = async (path: string): Promise<string> => (await readNullable(path)) ?? "";
 
 const pathExists = async (path: string): Promise<boolean> => {
   try {
@@ -85,10 +91,15 @@ const atomicWrite = async (path: string, data: string, mode = 0o644): Promise<vo
   }
 };
 
-export class PiConfigStore implements ConfigStore {
+export class PiConfigStore implements ConfigStore, AgentConfigSync {
   #writes: Promise<void> = Promise.resolve();
+  #rollbackFailed = false;
 
   constructor(private readonly agentDir: string = defaultAgentDir()) {}
+
+  #assertSnapshot(): void {
+    if (this.#rollbackFailed) throw new Error("Configuration rollback failed; repair agent files before restarting");
+  }
 
   get globalDir(): string {
     return this.agentDir;
@@ -124,6 +135,7 @@ export class PiConfigStore implements ConfigStore {
   async readFile(scope: ConfigScope, name: string): Promise<string> {
     const path = this.filePath(scope, name);
     await this.#writes;
+    if (scope.kind === "global") this.#assertSnapshot();
     const raw = await readOptional(path);
     return name === "models.json" ? maskModels(raw) : raw;
   }
@@ -142,6 +154,7 @@ export class PiConfigStore implements ConfigStore {
 
   async providerStructures(): Promise<Record<string, ProviderStructure>> {
     await this.#writes;
+    this.#assertSnapshot();
     const raw = await readOptional(join(this.agentDir, "models.json"));
     const parsed = parseModels(raw);
     const out: Record<string, ProviderStructure> = {};
@@ -226,8 +239,75 @@ export class PiConfigStore implements ConfigStore {
     });
   }
 
+  exportSnapshot(): Promise<AgentConfigSnapshot> {
+    return this.#withWrite(async () => {
+      const [system, agents, raw] = await Promise.all(
+        SNAPSHOT_FILES.map((name) => readNullable(join(this.agentDir, name))),
+      );
+      const parsed = raw?.trim() ? parseModels(raw) : {};
+      if (!parsed) throw new Error("models.json must be valid JSON before exporting configuration");
+      return normalizeAgentSnapshot({
+        files: { "SYSTEM.md": system, "AGENTS.md": agents },
+        providers: snapshotProviders(parsed.providers),
+      });
+    });
+  }
+
+  async applySnapshot(snapshot: AgentConfigSnapshot, commit?: (changed: boolean) => void): Promise<void> {
+    const incoming = normalizeAgentSnapshot(snapshot);
+    await this.#withWrite(async () => {
+      const names = SNAPSHOT_FILES;
+      const before = await Promise.all(names.map((name) => readNullable(join(this.agentDir, name))));
+      const raw = before[2];
+      const parsed = raw?.trim() ? parseModels(raw) : {};
+      if (!parsed) throw new Error("models.json must be valid JSON before importing configuration");
+      const providers = mergeSnapshotProviders(parsed.providers, incoming.providers);
+      const models = JSON.stringify(providers) === JSON.stringify(parsed.providers ?? {})
+        ? raw : `${JSON.stringify({ ...parsed, providers }, null, 2)}\n`;
+      const after = [incoming.files["SYSTEM.md"], incoming.files["AGENTS.md"], models];
+      const changes = names.flatMap((name, index) => before[index] === after[index] ? [] : [{
+        path: join(this.agentDir, name), before: before[index]!, after: after[index]!,
+        temp: join(this.agentDir, `${name}.${process.pid}.${randomUUID()}.tmp`),
+        mode: name === "models.json" ? 0o600 : 0o644,
+      }]);
+      const applied: typeof changes = [];
+      try {
+        // Prepare every replacement before touching a live file.
+        if (changes.length) await fs.mkdir(this.agentDir, { recursive: true });
+        for (const change of changes) {
+          if (change.after !== null) await fs.writeFile(change.temp, change.after, { mode: change.mode });
+        }
+        for (const change of changes) {
+          if (change.after === null) await fs.unlink(change.path);
+          else await fs.rename(change.temp, change.path);
+          applied.push(change);
+        }
+        commit?.(changes.length > 0);
+      } catch (err) {
+        const errors = [err];
+        for (const change of applied.reverse()) {
+          try {
+            if (change.before === null) await fs.unlink(change.path);
+            else await atomicWrite(change.path, change.before, change.mode);
+          } catch (rollback) { this.#rollbackFailed = true; errors.push(rollback); }
+        }
+        for (const change of changes) {
+          try { await fs.unlink(change.temp); }
+          catch (cleanup) { if (!missing(cleanup)) errors.push(cleanup); }
+        }
+        if (errors.length > 1) throw new AggregateError(errors, "configuration import rollback failed");
+        throw err;
+      }
+    });
+  }
+
+  /** Pi loads several files directly; hold the same queue while it opens a session. */
+  withSnapshot<T>(read: () => Promise<T>): Promise<T> {
+    return this.#withWrite(read);
+  }
+
   #withWrite<T>(write: () => Promise<T>): Promise<T> {
-    const result = this.#writes.then(write);
+    const result = this.#writes.then(() => { this.#assertSnapshot(); return write(); });
     this.#writes = result.then(() => undefined, () => undefined);
     return result;
   }

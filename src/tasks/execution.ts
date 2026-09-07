@@ -1,7 +1,7 @@
 // One queued run carried to a result: dispatched by action kind (a bash
-// script, an agent session, another task), abortable while it goes, settled
-// exactly once. What the two action kinds actually do lives in command.ts and
-// agent.ts; this file owns only the lifecycle they share.
+// script, an agent session, another task or an owned system action), abortable
+// while it goes, settled exactly once. Command and agent work lives in
+// command.ts and agent.ts; this file owns the lifecycle they share.
 
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
@@ -126,6 +126,14 @@ export class TaskExecution {
         throw new Error(`bash exited ${String(result.exitCode)}`);
       }
       return output;
+    }
+    if (action.type === "system") {
+      this.markRunning(run);
+      const handler = this.definitions.systemAction(action.name, run.context.definition.creator);
+      signal.throwIfAborted();
+      const text = await handler(signal);
+      signal.throwIfAborted();
+      return { type: "system", text };
     }
     if (action.type === "task") {
       this.markRunning(run);

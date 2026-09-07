@@ -150,6 +150,17 @@ describe("Tasks", () => {
     fetcher.mockRejectedValueOnce(new Error("offline")); await click("Run now");
     expect(root.text).toContain("Failed to run task: Error: offline"); expect(openRuns).not.toHaveBeenCalled();
   });
+  it("preserves system action details and owner controls after navigation into Runs", async () => {
+    task.action = { type: "system", name: "config-sync" };
+    task.trigger = { type: "cron", expression: "*/5 * * * *", timezone: "UTC" };
+    run.result = { type: "system", text: "Applied revision 2" };
+    openTask(task.id); await settled(); await click("Definition");
+    expect(root.text).toContain("ActionSystem"); expect(root.text).toContain("System actionconfig-sync");
+    for (const label of ["Edit", "Archive", "Pause schedule"]) expect(button(label)!.disabled).toBe(true);
+    openRuns({}, run.id); await settled();
+    expect(root.text).toContain("Applied revision 2"); expect(root.text).toContain("System actionconfig-sync");
+    expect(root.text).not.toContain("Watch did not match");
+  });
   it("does not call unmatched probes successful actions or infer watch firing from disabled", async () => {
     task.trigger = { type: "watch", cwd: "/test", script: "true", intervalSeconds: 30, mode: "once" };
     task.enabled = false; run.state = "succeeded"; run.matched = false;

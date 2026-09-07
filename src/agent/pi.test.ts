@@ -12,6 +12,8 @@ type Stream = (model: unknown, context: unknown, options?: unknown) => unknown;
 type Runtime = { providers: Set<string>; registerProvider(name: string): void; streamSimple: Stream };
 const runtimes: Runtime[] = [];
 const streamed: unknown[] = [];
+/** The Pi sessions the factory opened, for the settings it applies to them. */
+const opened: { agent: { followUpMode: string } }[] = [];
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -38,7 +40,16 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   createAgentSession: async ({ cwd, modelRuntime }: { cwd: string; modelRuntime: Runtime }) => {
     // Pi extensions register providers onto the runtime handed to this session.
     modelRuntime.registerProvider(cwd);
-    return { session: { sessionId: cwd, isStreaming: false, messages: [], dispose() {} } };
+    const session = {
+      sessionId: cwd,
+      isStreaming: false,
+      messages: [],
+      // Pi's default: one queued follow-up per turn boundary.
+      agent: { followUpMode: "one-at-a-time" },
+      dispose() {},
+    };
+    opened.push(session);
+    return { session };
   },
 }));
 
@@ -148,6 +159,15 @@ describe("session model runtimes", () => {
       { cacheRetention: "none" },
     ]);
     await Promise.all([a.dispose(), b.dispose()]);
+  });
+
+  it("takes Pi's whole follow-up queue at each turn boundary, not one message", async () => {
+    const factory = new PiAgentFactory();
+    const session = await factory.create({ cwd: "/tmp/queue" });
+    // Pi's default drains one queued follow-up per boundary, so N progress
+    // reports cost N model turns and a message behind them waits them all out.
+    expect(opened.at(-1)?.agent.followUpMode).toBe("all");
+    await session.dispose();
   });
 });
 
@@ -376,7 +396,6 @@ describe("a turn the provider never answered", () => {
     expect(seen).toMatchObject([
       { type: "turn-end", text: "", error: outage },
       { type: "error", message: outage },
-      { type: "state", state: "idle" },
     ]);
   });
 
@@ -392,6 +411,7 @@ describe("a turn the provider never answered", () => {
     fake.emit({ type: "agent_end", willRetry: true, messages: [final] });
     expect(seen).toEqual([]);
     fake.emit({ type: "agent_end", willRetry: false, messages: [final] });
+    fake.emit({ type: "agent_settled" });
     expect(seen).toMatchObject([
       { type: "turn-end", text: "", error: outage },
       { type: "error", message: outage },
@@ -413,6 +433,37 @@ describe("a turn the provider never answered", () => {
       { type: "turn-end", text: "" },
       { type: "state", state: "idle" },
     ]);
+  });
+});
+
+describe("the moment the seam calls a session idle", () => {
+  it("already reads idle inside the subscriber the idle event wakes", () => {
+    const fake = fakePi();
+    // Pi's real order: `_isAgentRunActive` stays true across the last
+    // `agent_end` — auto-compaction and queued continuations run past it — and
+    // is cleared one statement before `agent_settled` is emitted.
+    fake.pi.isStreaming = true;
+    const s = new PiSession(fake.pi as never);
+    const seen: SessionEventPayload[] = [];
+    const readBack: string[] = [];
+    s.subscribe((event) => {
+      seen.push(event);
+      if (event.type === "state" && event.state === "idle") readBack.push(s.state);
+    });
+    const answer: PiMessage = { role: "assistant", content: [{ type: "text", text: "done" }], timestamp: 1 };
+    fake.pi.messages.push(answer);
+    fake.emit({ type: "agent_end", messages: [answer] });
+    // An idle here would be the seam contradicting itself, which is what left
+    // tasks/agent.ts re-arming for an event it had already been handed.
+    expect(seen).toMatchObject([{ type: "turn-end", text: "done" }]);
+    expect(s.state).toBe("streaming");
+
+    fake.pi.isStreaming = false;
+    fake.emit({ type: "agent_settled" });
+    expect(seen.at(-1)).toEqual({ type: "state", state: "idle" });
+    // The inverted assertion is the contract: whoever the idle wakes may act
+    // on `state` without racing Pi.
+    expect(readBack).toEqual(["idle"]);
   });
 });
 

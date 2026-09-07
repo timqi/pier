@@ -126,7 +126,7 @@ function hangingSession(id: string): ReturnType<typeof fakeSession> {
   return session;
 }
 
-function setup(session = fakeSession()) {
+function setup(session = fakeSession(), instance?: ConstructorParameters<typeof TaskService>[4]) {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => []),
@@ -140,7 +140,7 @@ function setup(session = fakeSession()) {
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
   const store = new TaskStore(openDb(":memory:"));
-  const service = new TaskService(store, factory, router, hub);
+  const service = new TaskService(store, factory, router, hub, instance);
   return { cwd, session, factory, hub, router, store, service };
 }
 
@@ -160,6 +160,53 @@ function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<
     error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: now,
     ...over,
   };
+}
+
+/** A supervisor session and the child it delegates to on one service: the rig
+ *  every decision/reply path needs, and the only one where `resume` has to
+ *  answer with a different session than `create`. */
+function supervised() {
+  const cwd = mkdtempSync(join(tmpdir(), "pier-supervisor-"));
+  const parent = fakeSession("parent");
+  const child = fakeSession("child");
+  const sessions = new Map([[parent.id, parent], [child.id, child]]);
+  const factory: AgentFactory = {
+    availableModels: vi.fn(async () => []),
+    create: vi.fn(async () => child),
+    resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
+    list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
+    find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
+  };
+  const hub = new EventHub();
+  const router = new Router(hub, (key) => factory.resume(key.conversationId));
+  const store = new TaskStore(openDb(":memory:"));
+  return { cwd, parent, child, hub, router, store, service: new TaskService(store, factory, router, hub) };
+}
+
+/** Where every reply path starts: a background run on the child that asked its
+ *  supervisor a question and then ended its turn with the question open. */
+async function askedAndFinished(rig: ReturnType<typeof supervised>) {
+  const { service, child, parent } = rig;
+  child.setState("streaming");
+  const task = await service.create({
+    name: "worker",
+    trigger: { type: "manual" },
+    action: { type: "agent", session: { mode: "reuse", sessionId: child.id }, prompt: "Work" },
+  });
+  const run = service.run(task.id, null, "agent", null, {
+    invokedBySessionId: parent.id,
+    sourceSessionId: parent.id,
+    callbackSessionId: parent.id,
+    background: true,
+  });
+  const question = await service.tool({
+    operation: "contact",
+    reason: "decision",
+    message: "Use API A or B?",
+  }, child.id) as TaskMessage;
+  child.setState("idle");
+  await service.waitForRun(run.id);
+  return { task, run, question };
 }
 
 const bashDraft = (cwd: string, script: string) => ({
@@ -1114,21 +1161,8 @@ describe("task service", () => {
   });
 
   it("routes supervisor decisions asynchronously: receipt, suppressed callback, reply auto-resume", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pier-supervisor-"));
-    const parent = fakeSession("parent");
-    const child = fakeSession("child");
+    const { cwd, parent, child, service } = supervised();
     child.setState("streaming");
-    const sessions = new Map([[parent.id, parent], [child.id, child]]);
-    const factory: AgentFactory = {
-      availableModels: vi.fn(async () => []),
-    create: vi.fn(async () => child),
-      resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
-      list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
-      find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
-    };
-    const hub = new EventHub();
-    const router = new Router(hub, (key) => factory.resume(key.conversationId));
-    const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub);
     const task = await service.create({
       name: "worker",
       trigger: { type: "manual" },
@@ -1188,6 +1222,71 @@ describe("task service", () => {
       origin: { kind: "task-callback", runId: resumed!.id },
       mode: "followUp",
     });
+  });
+
+  it("holds a reply undelivered until the continuation that carries it starts", async () => {
+    const rig = supervised();
+    rig.service.start(20);
+    onTestFinished(() => rig.service.stop());
+    const { run, question } = await askedAndFinished(rig);
+
+    const reply = await rig.service.tool({
+      operation: "reply",
+      message_id: question.id,
+      message: "Use API A",
+    }, rig.parent.id) as TaskMessage;
+    // Creating the continuation is not delivering: its prompt is the only copy
+    // of the text, and a restart or a cancel before it starts loses it.
+    expect(reply).toMatchObject({ kind: "reply", state: "pending", deliveredAt: null });
+    expect(reply.resumeRunId).toBeDefined();
+    expect(rig.service.getRun(reply.resumeRunId!).resumedFromRunId).toBe(run.id);
+
+    // `startedAt` is written one statement before the prompt reaches the
+    // session, so it is the proof: handed to the run that reports for it.
+    await vi.waitFor(() => expect(rig.service.listMessages(run.id)
+      .find((m) => m.id === reply.id)).toMatchObject({ state: "delivered" }));
+    expect(rig.service.getRun(reply.resumeRunId!).startedAt).toBeTruthy();
+    expect(rig.child.systemInputs.at(-1)?.text).toContain("Use API A");
+    // ...and the sweep never *also* injects it: that would be a second copy of
+    // the same text, starting a turn no run owns.
+    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
+  });
+
+  it("reports a reply whose continuation was cancelled before it started, to both ends", async () => {
+    const rig = supervised();
+    const errors = new Map<string, string[]>([[rig.parent.id, []], [rig.child.id, []]]);
+    for (const [id, sink] of errors) {
+      rig.hub.subscribe(id, (event) => { if (event.type === "error") sink.push(event.message); });
+    }
+    rig.service.start(20);
+    onTestFinished(() => rig.service.stop());
+    const { run, question } = await askedAndFinished(rig);
+
+    // The child is busy with something else, so the continuation sits queued.
+    rig.child.setState("streaming");
+    const reply = await rig.service.tool({
+      operation: "reply",
+      message_id: question.id,
+      message: "Use API A",
+    }, rig.parent.id) as TaskMessage;
+    expect(rig.service.getRun(reply.resumeRunId!).startedAt).toBeNull();
+    // Sweeps while it waits must leave it alone: re-injecting it would put a
+    // second copy of the resume prompt's text into the child and start a turn
+    // no run owns.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id)?.state).toBe("pending");
+    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
+
+    rig.service.cancel(reply.resumeRunId!);
+
+    // Nothing will ever carry the text now, so the sweep says so rather than
+    // retrying to a ceiling four minutes away — on both ends (§5b).
+    await vi.waitFor(() => expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id))
+      .toMatchObject({ state: "expired", error: expect.stringContaining(reply.resumeRunId!) }));
+    for (const [, sink] of errors) {
+      expect(sink.some((message) => message.includes("cancelled before it started"))).toBe(true);
+    }
+    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
   });
 
   it("expires an open decision when the run is manually resumed", async () => {
@@ -1671,6 +1770,156 @@ describe("task HTTP routes", () => {
     });
     expect(overridden.status).toBe(400);
     expect(await overridden.text()).toContain("unsupported sessionMode");
+  });
+});
+
+describe("owned system actions", () => {
+  const draft = (name = "config-sync") => ({
+    name: "Configuration sync",
+    trigger: { type: "cron", expression: "*/5 * * * *", timezone: "UTC" },
+    action: { type: "system", name },
+  });
+  const instance = (handler: (signal: AbortSignal) => Promise<string>) => ({
+    modelMenu: () => [], systemActions: { "config-sync": handler },
+  });
+
+  it("reconciles by owner, preserves scheduling policy, and runs in process", async () => {
+    const handler = vi.fn(async () => "Applied revision 2");
+    const { service, factory } = setup(fakeSession(), instance(handler));
+    const task = await service.create(draft(), "config-sync");
+    expect(task).toMatchObject({ creator: "config-sync", revision: 1, enabled: true });
+    expect(task.nextRunAt).not.toBeNull();
+    const updated = await service.update(task.id, { ...draft(), enabled: false }, "config-sync");
+    expect(updated).toMatchObject({ id: task.id, revision: 2, enabled: false, nextRunAt: null });
+    service.start(60_000);
+    onTestFinished(() => service.stop());
+    expect(service.get(task.id)).toMatchObject({ enabled: false, nextRunAt: null });
+    // Disabled only suspends scheduling; the owning Settings action still runs it.
+    const done = await service.waitForRun(service.run(task.id).id);
+    expect(done).toMatchObject({ state: "succeeded", result: { type: "system", text: "Applied revision 2" }, error: null });
+    expect(done.startedAt).not.toBeNull();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(factory.resume).not.toHaveBeenCalled();
+    expect(service.get(task.id)).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(service.setEnabled(task.id, true, "config-sync").nextRunAt).not.toBeNull();
+    expect(service.archive(task.id, "config-sync")).toMatchObject({ enabled: false, archived: true, nextRunAt: null });
+  });
+
+  it("rejects HTTP, tool and inline spoofing while preserving owner guards", async () => {
+    const handler = vi.fn(async () => "applied");
+    const { cwd, service } = setup(fakeSession(), instance(handler));
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    const task = await service.create(draft(), "config-sync");
+    const publicTask = await service.create(bashDraft(cwd, "echo public"));
+    const spoofed = { ...draft(), creator: "config-sync", by: "config-sync", id: task.id };
+    for (const creator of ["http", "session:s1", "other"]) {
+      await expect(service.create(draft(), creator)).rejects.toThrow(/trusted owner/);
+    }
+    for (const name of ["unknown", "toString", "__proto__"]) {
+      await expect(service.create(draft(name), name)).rejects.toThrow(/unregistered/);
+    }
+    for (const name of ["http", "session:s1"]) {
+      const rig = setup(fakeSession(), { modelMenu: () => [], systemActions: { [name]: handler } });
+      await expect(rig.service.create(draft(name), name)).rejects.toThrow(/trusted owner/);
+    }
+    for (const [method, url] of [["POST", "/api/tasks"], ["PATCH", `/api/tasks/${task.id}`], ["PATCH", `/api/tasks/${publicTask.id}`]]) {
+      const response = await app.request(url!, {
+        method, headers: { "content-type": "application/json" }, body: JSON.stringify(spoofed),
+      });
+      expect(response.status).toBe(400);
+    }
+    for (const operation of ["create", "run"]) {
+      await expect(service.tool({ operation, task: { ...spoofed, trigger: { type: "manual" } }, creator: "config-sync" }, "s1")).rejects.toThrow(/trusted owner/);
+      await expect(service.tool({ operation, task: { ...draft("unknown"), trigger: { type: "manual" } } }, "s1")).rejects.toThrow(/trusted owner/);
+    }
+    await expect(service.tool({ operation: "update", task_id: task.id, task: bashDraft(cwd, "echo spoof"), by: "config-sync" }, "s1")).rejects.toThrow(/reconciled by Pier/);
+    await expect(service.tool({ operation: "update", task_id: publicTask.id, task: spoofed }, "s1")).rejects.toThrow(/trusted owner/);
+    await expect(service.update(publicTask.id, draft(), "config-sync")).rejects.toThrow(/trusted owner/);
+    await expect(service.update(task.id, draft(), "other")).rejects.toThrow(/reconciled by Pier/);
+    await expect(service.update(task.id, draft("unknown"), "config-sync")).rejects.toThrow(/trusted owner/);
+    for (const route of ["pause", "resume", "archive"]) {
+      expect((await app.request(`/api/tasks/${task.id}/${route}`, { method: "POST" })).status).toBe(400);
+    }
+    expect(service.get(task.id)).toEqual(task);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("reports handler errors through the persisted run and HTTP", async () => {
+    const { service } = setup(fakeSession(), instance(async () => { throw new Error("apply failed"); }));
+    const task = await service.create(draft(), "config-sync");
+    const done = await service.waitForRun(service.run(task.id).id);
+    expect(done).toMatchObject({ state: "failed", error: "Error: apply failed", result: null });
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    expect(await (await app.request(`/api/task-runs/${done.id}`)).json()).toMatchObject({ state: "failed", error: "Error: apply failed" });
+  });
+
+  it.each(["cancel", "timeout", "stop"] as const)("observes %s even when the cooperative handler resolves after abort", async (operation) => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const handler = vi.fn((signal: AbortSignal) => new Promise<string>((resolve) => {
+      signal.addEventListener("abort", () => resolve("aborted work"), { once: true });
+    }));
+    const { service } = setup(fakeSession(), instance(handler));
+    onTestFinished(() => service.stop());
+    const task = await service.create({ ...draft(), timeoutSeconds: 1 }, "config-sync");
+    const run = service.run(task.id);
+    expect(service.getRun(run.id).state).toBe("running");
+    expect(service.activeRunCount()).toBe(1);
+    expect(service.run(task.id)).toMatchObject({ state: "skipped", skipReason: "overlap" });
+    if (operation === "cancel") service.cancel(run.id);
+    else if (operation === "stop") service.stop();
+    else await vi.advanceTimersByTimeAsync(1000);
+    const done = await service.waitForRun(run.id);
+    expect(handler.mock.calls[0]![0].aborted).toBe(true);
+    expect(done).toMatchObject({
+      state: operation === "timeout" ? "failed" : "cancelled",
+      error: operation === "timeout" ? "task timed out" : "cancelled",
+      result: null,
+    });
+    expect(service.activeRunCount()).toBe(0);
+  });
+
+  it("recovers interrupted runs without replay and fails observably when registration is missing", async () => {
+    const handler = vi.fn(async () => "applied");
+    const { store, factory, router, hub, service } = setup(fakeSession(), instance(handler));
+    const task = await service.create(draft(), "config-sync");
+    const now = Date.now();
+    store.saveRun(storedRun("interrupted-system", task, now, { state: "running", result: null, finishedAt: null }));
+    const restarted = new TaskService(store, factory, router, hub);
+    restarted.start(60_000);
+    onTestFinished(() => restarted.stop());
+    expect(restarted.getRun("interrupted-system")).toMatchObject({ state: "interrupted", error: "Pier restarted while the run was active" });
+    expect(restarted.get(task.id)).toMatchObject({ enabled: true, creator: "config-sync" });
+    expect(restarted.get(task.id).nextRunAt).toBeGreaterThan(now);
+    const app = new Hono();
+    registerTaskRoutes(app, restarted);
+    const response = await app.request(`/api/tasks/${task.id}/run`, { method: "POST" });
+    const { runId } = await response.json() as { runId: string };
+    expect(await restarted.waitForRun(runId)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
+    const toolRun = await restarted.tool({ operation: "run", task_id: task.id, callback: "none" }, "s1") as RunSummary;
+    expect(await restarted.waitForRun(toolRun.runId)).toMatchObject({ state: "failed", error: "Error: unregistered system action: config-sync" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it.each(["http", "session:s1", "other"])("does not invoke a registered handler for a persisted definition owned by %s", async (creator) => {
+    const handler = vi.fn(async () => "applied");
+    const { service, store } = setup(fakeSession(), instance(handler));
+    const task = await service.create(draft(), "config-sync");
+    store.saveTask({ ...task, creator });
+    const app = new Hono();
+    registerTaskRoutes(app, service);
+    const response = await app.request(`/api/tasks/${task.id}/run`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ creator: "config-sync", action: draft().action }),
+    });
+    const { runId } = await response.json() as { runId: string };
+    expect(await service.waitForRun(runId)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
+    const toolRun = await service.tool({ operation: "run", task_id: task.id, callback: "none", creator: "config-sync" }, "s1") as RunSummary;
+    expect(await service.waitForRun(toolRun.runId)).toMatchObject({ state: "failed", error: expect.stringContaining("trusted owner") });
+    expect(handler).not.toHaveBeenCalled();
   });
 });
 

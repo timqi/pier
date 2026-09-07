@@ -29,7 +29,10 @@ export type AgentTaskAction = {
 export type TaskAction =
   | AgentTaskAction
   | { type: "bash"; script: string; cwd: string }
+  | { type: "system"; name: string }
   | { type: "task"; taskId: string };
+
+export type SystemActions = Record<string, (signal: AbortSignal) => Promise<string>>;
 
 export type TaskCallback =
   | { type: "none" }
@@ -85,6 +88,7 @@ export interface CommandResult {
 
 export type TaskResult =
   | { type: "agent"; text: string; sessionId: string }
+  | { type: "system"; text: string }
   | ({ type: "bash" } & CommandResult)
   | { type: "task"; runId: string; result: TaskResult | null }
   | { type: "watch"; matched: false };
@@ -195,6 +199,11 @@ export interface TaskMessage {
    *  counter that resets with the process is a ceiling that never arrives. */
   attempts: number;
   nextAttemptAt: number | null;
+  /** A reply that resumed a terminal run: the continuation that carries it.
+   *  Lives in the existing JSON column, so no migration — and it is the only
+   *  proof this delivery has, the resume prompt being the message itself
+   *  rather than a system input the recipient's transcript can be read for. */
+  resumeRunId?: string;
 }
 
 /** The delivery record runs and groups share (their callback* columns are the

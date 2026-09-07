@@ -26,7 +26,7 @@ export const runSource = (run: TaskRun): SystemInputSource => ({
 
 export function runResultText(run: TaskRun): string {
   let result = run.error ?? "No result";
-  if (run.result?.type === "agent") result = run.result.text;
+  if (run.result?.type === "agent" || run.result?.type === "system") result = run.result.text;
   if (run.result?.type === "bash") result = run.result.stdout || run.result.stderr || `exit ${String(run.result.exitCode)}`;
   if (run.result?.type === "task") result = JSON.stringify(run.result.result);
   if (run.result?.type === "watch") result = "Watch condition did not match";

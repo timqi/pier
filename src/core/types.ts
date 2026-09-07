@@ -615,3 +615,27 @@ export interface ProviderManager {
   ): Promise<() => Promise<void>>;
   logout(providerId: string): Promise<void>;
 }
+
+/** Portable model metadata; transport, credentials and executable specs stay local. */
+export interface SyncModelDefinition {
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+  input?: ("text" | "image")[];
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextWindow?: number;
+  maxTokens?: number;
+  api?: string;
+}
+
+export interface AgentConfigSnapshot {
+  files: { "SYSTEM.md": string | null; "AGENTS.md": string | null };
+  providers: Record<string, { models: SyncModelDefinition[] }>;
+}
+
+/** Global portable config only; apply holds the config write lock through commit. */
+export interface AgentConfigSync {
+  exportSnapshot(): Promise<AgentConfigSnapshot>;
+  /** Restores files if a write or commit throws; commit receives whether files changed. */
+  applySnapshot(snapshot: AgentConfigSnapshot, commit?: (changed: boolean) => void): Promise<void>;
+}

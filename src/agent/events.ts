@@ -262,9 +262,18 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
         { type: "turn-end", text: textOf(final?.content), ...(failure ? { error: failure } : {}) },
       ];
       if (failure) out.push({ type: "error", message: failure });
-      out.push({ type: "state", state: "idle" });
       return out;
     }
+    // Pi's own "the run-active flag is now false": `_emitAgentSettled` clears
+    // `isStreaming` one statement before emitting this, and reaches it from the
+    // finally of the prompt — many microtasks after the last `agent_end`. Idle
+    // rides on it rather than on the turn ending, so the seam's `state` getter
+    // and this stream stop being two derivations of one fact (§5): a waiter the
+    // idle wakes now re-reads `state` as idle instead of re-arming for an event
+    // that is already spent. It is also the truthful moment — Pi's
+    // auto-compaction and queued continuations run past `agent_end`.
+    case "agent_settled":
+      return [{ type: "state", state: "idle" }];
     case "message_start": {
       // Pi emits this for every message entering the context; the user ones are
       // what a client can't know about (queued/steered messages, IM traffic).
