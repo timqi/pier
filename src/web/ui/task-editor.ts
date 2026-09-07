@@ -2,6 +2,8 @@
 // sections re-render as their type selects change; submit assembles a
 // TaskDraft and POSTs/PATCHes it. tasks.ts owns the list this returns to.
 
+import { THINKING_LEVELS, isThinkingLevel } from "../../core/types.js";
+import { thinkingLabel } from "../../core/reply.js";
 import type { TaskDefinition, TaskDraft } from "../../tasks/types.js";
 import { sendJson } from "./api.js";
 import { h } from "./dom.js";
@@ -117,7 +119,7 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
       const savedCwd = saved && "cwd" in saved.session ? saved.session.cwd ?? "" : "";
       agentCwd = input(savedCwd || sessions[0]?.cwd || "");
       agentPrompt = textarea(saved?.prompt ?? "", 6);
-      agentThinking = select([["Project default", ""], ["Off", "off"], ["Low", "low"], ["Medium", "medium"], ["High", "high"], ["Extra high", "xhigh"]], saved?.launch?.thinking ?? "");
+      agentThinking = select([["Project default", ""], ...THINKING_LEVELS.map((level): [string, string] => [thinkingLabel(level), level])], saved?.launch?.thinking ?? "");
       agentModelProvider = input(saved?.launch?.model?.provider ?? "");
       agentModelId = input(saved?.launch?.model?.id ?? "");
       const sessionField = field("Session", agentSession);
@@ -148,7 +150,7 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
           : { type: "watch" as const, script: watchScript!.value, cwd: watchCwd!.value, intervalSeconds: Number(watchInterval!.value), mode: watchMode!.value as "once" | "repeat" };
       const agentLaunch = actionType.value === "agent" && agentMode!.value !== "reuse"
         ? {
-            ...(agentThinking!.value ? { thinking: agentThinking!.value as "off" | "low" | "medium" | "high" | "xhigh" } : {}),
+            ...(isThinkingLevel(agentThinking!.value) ? { thinking: agentThinking!.value } : {}),
             ...(agentModelProvider!.value.trim() && agentModelId!.value.trim()
               ? { model: { provider: agentModelProvider!.value.trim(), id: agentModelId!.value.trim() } }
               : {}),
