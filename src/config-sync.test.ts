@@ -266,8 +266,8 @@ describe("two isolated configuration stores over HTTP", () => {
       const published = await source.publish();
       const url = `https://source.example${published.publishedPath}`;
       const statuses: number[] = [];
-      // Only transport is redirected to loopback; production address/TLS checks
-      // remain tested in config-sync-fetch.test.ts and are not relaxed in code.
+      // Only transport is redirected to loopback; the production URL, redirect
+      // and JSON checks remain tested in config-sync-fetch.test.ts.
       const download = async (raw: string, etag: string | null, signal: AbortSignal): Promise<ConfigDownload> => {
         const res = await fetch(`http://127.0.0.1:${port}${new URL(raw).pathname}`, {
           signal, headers: etag ? { "if-none-match": etag } : {},
