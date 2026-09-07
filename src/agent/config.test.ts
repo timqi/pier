@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, promises as fs, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigScope } from "../core/types.js";
 import { PiConfigStore } from "./config.js";
 import { pierSystemPrompt } from "./pi.js";
@@ -18,6 +18,10 @@ beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "pier-proj-"));
   store = new PiConfigStore(agentDir);
   project = { kind: "project", cwd };
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("Pier system prompt", () => {
@@ -210,14 +214,38 @@ describe("provider setup", () => {
     await expect(store.writeFile(GLOBAL, "models.json", "{}", expected)).rejects.toThrow(/changed on disk/);
   });
 
-  it("restores models.json when post-write validation fails", async () => {
-    const before = JSON.stringify({ providers: { anthropic: { headers: { route: "one" } } } });
-    writeFileSync(join(agentDir, "models.json"), before);
+  it.each([
+    { state: "missing", before: null },
+    { state: "empty", before: "" },
+    { state: "populated", before: JSON.stringify({ providers: { anthropic: { headers: { route: "one" } } } }) },
+  ])("restores $state models.json when post-write validation fails", async ({ before }) => {
+    const path = join(agentDir, "models.json");
+    if (before !== null) writeFileSync(path, before);
+    const invalid = new Error("invalid composed provider");
     await expect(store.setupProvider(
       { kind: "builtin", id: "anthropic", endpoint: "https://proxy.example/v1" },
-      async () => { throw new Error("invalid composed provider"); },
-    )).rejects.toThrow(/invalid composed provider/);
-    expect(readFileSync(join(agentDir, "models.json"), "utf8")).toBe(before);
+      async () => { throw invalid; },
+    )).rejects.toBe(invalid);
+    if (before === null) await expect(fs.readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    else expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it.each(["missing", "populated"])("reports rollback failures for %s models.json with the validation error", async (state) => {
+    const path = join(agentDir, "models.json");
+    if (state === "populated") writeFileSync(path, "{}");
+    const invalid = new Error("invalid composed provider");
+    const rollback = new Error("restore failed");
+    await expect(store.setupProvider(
+      { kind: "builtin", id: "anthropic", endpoint: "https://proxy.example/v1" },
+      async () => {
+        if (state === "missing") vi.spyOn(fs, "unlink").mockRejectedValueOnce(rollback);
+        else vi.spyOn(fs, "rename").mockRejectedValueOnce(rollback);
+        throw invalid;
+      },
+    )).rejects.toMatchObject({
+      name: "AggregateError", message: `failed to restore ${path}`, errors: [invalid, rollback],
+    });
+    expect(JSON.parse(readFileSync(path, "utf8")).providers.anthropic.baseUrl).toBe("https://proxy.example/v1");
   });
 
   it("does not roll back over an external edit made during validation", async () => {

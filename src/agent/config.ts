@@ -187,9 +187,8 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
     validateProviderSetup(input);
     await this.#withWrite(async () => {
       const path = join(this.agentDir, "models.json");
-      const existed = await pathExists(path);
-      const raw = await readOptional(path);
-      const parsed = raw.trim() ? parseModels(raw) : {};
+      const raw = await readNullable(path);
+      const parsed = raw?.trim() ? parseModels(raw) : {};
       if (!parsed) throw new Error("models.json must be valid JSON before configuring a provider");
       const providers = { ...parsed.providers };
       const current = { ...providers[input.id] };
@@ -229,7 +228,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
           throw new Error(`${path} changed while provider setup was being validated`, { cause: err });
         }
         try {
-          if (existed) await atomicWrite(path, raw, 0o600);
+          if (raw !== null) await atomicWrite(path, raw, 0o600);
           else await fs.unlink(path);
         } catch (rollback) {
           throw new AggregateError([err, rollback], `failed to restore ${path}`);
