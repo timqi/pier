@@ -172,6 +172,11 @@ export interface TaskMessage {
    *  counter that resets with the process is a ceiling that never arrives. */
   attempts: number;
   nextAttemptAt: number | null;
+  /** A reply that resumed a terminal run: the continuation that carries it.
+   *  Lives in the existing JSON column, so no migration — and it is the only
+   *  proof this delivery has, the resume prompt being the message itself
+   *  rather than a system input the recipient's transcript can be read for. */
+  resumeRunId?: string;
 }
 
 /** The delivery record runs and groups share (their callback* columns are the

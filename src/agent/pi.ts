@@ -422,11 +422,11 @@ export class PiSession implements AgentSession {
       const piEvent = event as PiEvent;
       if (piEvent.type === "agent_end") retryPending = piEvent.willRetry === true;
       if (piEvent.type === "agent_settled" && retryPending) {
-        // Aborting Pi during retry backoff produces no final agent_end.
+        // Aborting Pi during retry backoff produces no final agent_end, so the
+        // turn has to be ended here. The idle is not: `agent_settled` carries
+        // it through the table below like any other settle.
         retryPending = false;
         fn({ type: "turn-end", text: "", meta: this.lastTurnMeta() });
-        fn({ type: "state", state: "idle" });
-        return;
       }
       for (const payload of toSessionEvents(piEvent)) {
         fn(payload.type === "turn-end" ? { ...payload, meta: this.lastTurnMeta() } : payload);
@@ -794,6 +794,13 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       resourceLoader: await this.resourceLoader(cwd),
     });
     live = created.session;
+    // Pi's queue defaults to handing over one follow-up per turn boundary, so N
+    // queued messages cost N model turns and anything behind them waits them
+    // out — 11 progress reports drained over 2.5 minutes and put a guidance
+    // message 11 minutes late (2026-09-07). The agent's own setter only flips
+    // the in-memory queue; `session.setFollowUpMode` would persist it to Pi's
+    // settings.json on every open and make it global forever.
+    live.agent.followUpMode = "all";
     const session = new PiSession(live, this.pinned, () => {
       this.listing = undefined;
     }, retention);

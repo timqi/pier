@@ -34,6 +34,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
       sessionId: sessionManager.path,
       isStreaming: false,
       messages: [],
+      agent: { followUpMode: "one-at-a-time" },
       dispose() {},
     },
   }),

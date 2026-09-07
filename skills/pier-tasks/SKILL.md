@@ -108,8 +108,8 @@ list in the error, so a stale guess costs one call.
 
 `{"operation":"contact","reason":"decision","message":"..."}` returns a
 receipt immediately. State what you are waiting for and **end your turn** —
-never spin or poll. The answer arrives as a follow-up if your run is still
-active; if your run already finished, Pier resumes your session with the
+never spin or poll. The answer is steered into your current turn if your run is
+still active; if your run already finished, Pier resumes your session with the
 reply as the prompt. One open decision per run.
 
 As a parent: the question arrives as a system input with a message id, steered

@@ -162,6 +162,53 @@ function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<
   };
 }
 
+/** A supervisor session and the child it delegates to on one service: the rig
+ *  every decision/reply path needs, and the only one where `resume` has to
+ *  answer with a different session than `create`. */
+function supervised() {
+  const cwd = mkdtempSync(join(tmpdir(), "pier-supervisor-"));
+  const parent = fakeSession("parent");
+  const child = fakeSession("child");
+  const sessions = new Map([[parent.id, parent], [child.id, child]]);
+  const factory: AgentFactory = {
+    availableModels: vi.fn(async () => []),
+    create: vi.fn(async () => child),
+    resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
+    list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
+    find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
+  };
+  const hub = new EventHub();
+  const router = new Router(hub, (key) => factory.resume(key.conversationId));
+  const store = new TaskStore(openDb(":memory:"));
+  return { cwd, parent, child, hub, router, store, service: new TaskService(store, factory, router, hub) };
+}
+
+/** Where every reply path starts: a background run on the child that asked its
+ *  supervisor a question and then ended its turn with the question open. */
+async function askedAndFinished(rig: ReturnType<typeof supervised>) {
+  const { service, child, parent } = rig;
+  child.setState("streaming");
+  const task = await service.create({
+    name: "worker",
+    trigger: { type: "manual" },
+    action: { type: "agent", session: { mode: "reuse", sessionId: child.id }, prompt: "Work" },
+  });
+  const run = service.run(task.id, null, "agent", null, {
+    invokedBySessionId: parent.id,
+    sourceSessionId: parent.id,
+    callbackSessionId: parent.id,
+    background: true,
+  });
+  const question = await service.tool({
+    operation: "contact",
+    reason: "decision",
+    message: "Use API A or B?",
+  }, child.id) as TaskMessage;
+  child.setState("idle");
+  await service.waitForRun(run.id);
+  return { task, run, question };
+}
+
 const bashDraft = (cwd: string, script: string) => ({
   name: "command",
   trigger: { type: "manual" },
@@ -1025,21 +1072,8 @@ describe("task service", () => {
   });
 
   it("routes supervisor decisions asynchronously: receipt, suppressed callback, reply auto-resume", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pier-supervisor-"));
-    const parent = fakeSession("parent");
-    const child = fakeSession("child");
+    const { cwd, parent, child, service } = supervised();
     child.setState("streaming");
-    const sessions = new Map([[parent.id, parent], [child.id, child]]);
-    const factory: AgentFactory = {
-      availableModels: vi.fn(async () => []),
-    create: vi.fn(async () => child),
-      resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
-      list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
-      find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
-    };
-    const hub = new EventHub();
-    const router = new Router(hub, (key) => factory.resume(key.conversationId));
-    const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub);
     const task = await service.create({
       name: "worker",
       trigger: { type: "manual" },
@@ -1099,6 +1133,71 @@ describe("task service", () => {
       origin: { kind: "task-callback", runId: resumed!.id },
       mode: "followUp",
     });
+  });
+
+  it("holds a reply undelivered until the continuation that carries it starts", async () => {
+    const rig = supervised();
+    rig.service.start(20);
+    onTestFinished(() => rig.service.stop());
+    const { run, question } = await askedAndFinished(rig);
+
+    const reply = await rig.service.tool({
+      operation: "reply",
+      message_id: question.id,
+      message: "Use API A",
+    }, rig.parent.id) as TaskMessage;
+    // Creating the continuation is not delivering: its prompt is the only copy
+    // of the text, and a restart or a cancel before it starts loses it.
+    expect(reply).toMatchObject({ kind: "reply", state: "pending", deliveredAt: null });
+    expect(reply.resumeRunId).toBeDefined();
+    expect(rig.service.getRun(reply.resumeRunId!).resumedFromRunId).toBe(run.id);
+
+    // `startedAt` is written one statement before the prompt reaches the
+    // session, so it is the proof: handed to the run that reports for it.
+    await vi.waitFor(() => expect(rig.service.listMessages(run.id)
+      .find((m) => m.id === reply.id)).toMatchObject({ state: "delivered" }));
+    expect(rig.service.getRun(reply.resumeRunId!).startedAt).toBeTruthy();
+    expect(rig.child.systemInputs.at(-1)?.text).toContain("Use API A");
+    // ...and the sweep never *also* injects it: that would be a second copy of
+    // the same text, starting a turn no run owns.
+    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
+  });
+
+  it("reports a reply whose continuation was cancelled before it started, to both ends", async () => {
+    const rig = supervised();
+    const errors = new Map<string, string[]>([[rig.parent.id, []], [rig.child.id, []]]);
+    for (const [id, sink] of errors) {
+      rig.hub.subscribe(id, (event) => { if (event.type === "error") sink.push(event.message); });
+    }
+    rig.service.start(20);
+    onTestFinished(() => rig.service.stop());
+    const { run, question } = await askedAndFinished(rig);
+
+    // The child is busy with something else, so the continuation sits queued.
+    rig.child.setState("streaming");
+    const reply = await rig.service.tool({
+      operation: "reply",
+      message_id: question.id,
+      message: "Use API A",
+    }, rig.parent.id) as TaskMessage;
+    expect(rig.service.getRun(reply.resumeRunId!).startedAt).toBeNull();
+    // Sweeps while it waits must leave it alone: re-injecting it would put a
+    // second copy of the resume prompt's text into the child and start a turn
+    // no run owns.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id)?.state).toBe("pending");
+    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
+
+    rig.service.cancel(reply.resumeRunId!);
+
+    // Nothing will ever carry the text now, so the sweep says so rather than
+    // retrying to a ceiling four minutes away — on both ends (§5b).
+    await vi.waitFor(() => expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id))
+      .toMatchObject({ state: "expired", error: expect.stringContaining(reply.resumeRunId!) }));
+    for (const [, sink] of errors) {
+      expect(sink.some((message) => message.includes("cancelled before it started"))).toBe(true);
+    }
+    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
   });
 
   it("expires an open decision when the run is manually resumed", async () => {

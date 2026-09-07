@@ -101,6 +101,28 @@ export class TaskMessenger {
         this.changed(message);
         continue;
       }
+      // A reply that resumed a terminal run was never a system input: its text
+      // is the continuation's prompt, so the transcript read below would find
+      // nothing and re-inject a second copy, starting a turn no run owns. The
+      // continuation is the proof instead. `startedAt` is written one statement
+      // before the prompt reaches the session (agent.ts), so `delivered` here
+      // means "handed to the run that reports for it" — a `systemInput` that
+      // then throws fails *that* run, and the failure reaches the replier
+      // through its callback.
+      if (message.kind === "reply" && isTerminal(run.state)) {
+        const resumed = message.resumeRunId ? this.store.getRun(message.resumeRunId) : undefined;
+        if (resumed?.startedAt) this.confirmed(message.id);
+        else if (!resumed) this.abandon(message, `continuation ${message.resumeRunId ?? "(none)"} is gone`);
+        else if (isTerminal(resumed.state)) {
+          // Never started, and never will: say so rather than wait for a
+          // ceiling that would only report the same thing four minutes later.
+          // Both ends hear it here; the supervisor may also get the
+          // continuation's own cancelled callback, and a duplicate beats a
+          // special case that could suppress the only report either gets.
+          this.abandon(message, `continuation ${resumed.id} ${resumed.state} before it started`);
+        }
+        continue;
+      }
       if ((message.nextAttemptAt ?? 0) > now) continue;
       const target = message.toSessionId || run.targetSessionId;
       if (target) this.deliver(message, run, target);
@@ -153,9 +175,11 @@ export class TaskMessenger {
     if (run.targetSessionId && (run.state === "queued" || run.state === "running")) {
       this.deliver(reply, run, run.targetSessionId);
     } else if (isTerminal(run.state)) {
-      this.resumeRun(run.id, this.format(reply, run), fromSessionId);
-      reply.state = "delivered";
-      reply.deliveredAt = Date.now();
+      // Creating the continuation is not delivering the reply: the run is
+      // queued, and a restart or a cancel before it starts loses the prompt
+      // that carries the text. So the id is recorded and the sweep below
+      // settles it against the continuation's own `startedAt`.
+      reply.resumeRunId = this.resumeRun(run.id, this.format(reply, run), fromSessionId).id;
       this.store.saveMessage(reply);
       this.changed(reply);
     }
@@ -271,10 +295,12 @@ export class TaskMessenger {
     }
   }
 
-  /** A decision steers — a follow-up would land only after the supervisor runs
-   * out of tool calls, leaving the child waiting out the whole turn. */
+  /** Steer whatever someone is blocked on: a decision, and the reply that
+   * answers it — a follow-up lands only once the recipient runs out of tool
+   * calls, so each would wait out a whole turn (the reply waited 3 minutes
+   * behind one on 2026-09-07). Progress is a follow-up because nobody waits. */
   private mode(message: TaskMessage): "steer" | "follow_up" {
-    return message.kind === "steer" || message.kind === "decision" ? "steer" : "follow_up";
+    return message.kind === "follow_up" || message.kind === "progress" ? "follow_up" : "steer";
   }
 
   private failed(id: string, error: unknown, spent: boolean): void {
