@@ -22,39 +22,62 @@ export const dateTime = (value: number | null): string =>
 export const runDuration = (run: TaskRun): string =>
   run.startedAt === null ? "-" : fmtDuration((run.finishedAt ?? Date.now()) - run.startedAt);
 
-export function renderRuns(pane: HTMLElement, runs: TaskRun[], deps: TaskRunsDeps): void {
+export interface RunViewState {
+  selectedId: string | null;
+  rawOpen: boolean;
+  scrollTop: number;
+  listScroll: number;
+}
+
+export function renderRuns(pane: HTMLElement, runs: TaskRun[], deps: TaskRunsDeps, state: RunViewState): void {
+  pane.dataset.runView = "runs";
+  pane.onscroll = null;
   const list = h("div", "divide-y divide-neutral-100");
   for (const run of runs) {
-    const row = h("button", "grid w-full cursor-pointer grid-cols-[7.5rem_1fr_7.5rem_6.25rem] gap-3 px-4 py-2.5 text-left text-[12.5px] hover:bg-neutral-50");
+    const row = h("button", "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[12.5px] hover:bg-neutral-50 md:grid-cols-[7.5rem_minmax(0,1fr)_7.5rem_6.25rem]");
+    row.setAttribute("type", "button");
     row.append(
       h("span", "font-medium", run.state),
       h("span", "truncate text-neutral-500", dateTime(run.queuedAt)),
       h("span", "text-neutral-500", run.triggerSource),
       h("span", "text-right text-neutral-500", runDuration(run)),
     );
-    row.onclick = () => void openRun(pane, run.id, list, deps);
+    row.onclick = () => {
+      state.selectedId = run.id;
+      state.rawOpen = false;
+      state.scrollTop = 0;
+      void openRun(pane, run.id, () => renderRuns(pane, runs, deps, state), deps, state);
+    };
     list.append(row);
   }
   if (!runs.length) list.append(h("p", "p-4 text-[13px] text-neutral-400", "No runs yet."));
   pane.replaceChildren(list);
+  pane.scrollTop = state.listScroll;
+  pane.onscroll = () => { state.listScroll = pane.scrollTop; };
+  if (state.selectedId) void openRun(pane, state.selectedId, () => renderRuns(pane, runs, deps, state), deps, state);
 }
 
-async function openRun(pane: HTMLElement, id: string, list: HTMLElement, deps: TaskRunsDeps): Promise<void> {
+async function openRun(pane: HTMLElement, id: string, backToList: () => void, deps: TaskRunsDeps, state: RunViewState): Promise<void> {
+  const request = String(Number(pane.dataset.runRequest ?? 0) + 1);
+  pane.dataset.runRequest = request;
+  pane.onscroll = null;
+  const back = button("Runs");
+  back.className = "cursor-pointer text-neutral-500 hover:underline";
+  back.onclick = () => { state.selectedId = null; state.scrollTop = 0; backToList(); };
+  const actions = h("div", "flex flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2");
+  actions.append(back, h("span", "text-neutral-400", "\u203a"), h("span", "min-w-0 truncate font-mono text-[12px] text-neutral-400", id));
+  pane.replaceChildren(actions, h("p", "p-4 text-[13px] text-neutral-500", "Loading run..."));
   const [got, gotMessages] = await Promise.all([
     getJson<TaskRun>(`/api/task-runs/${id}`, "Could not load the run"),
     getJson<TaskMessage[]>(`/api/task-runs/${id}/messages`, "Could not load the run's messages"),
   ]);
-  // A row that opens into nothing is the 5b shape: say which half failed and
-  // leave the list reachable.
+  if (!pane.isConnected || pane.dataset.runView !== "runs" || pane.dataset.runRequest !== request || state.selectedId !== id) return;
   if (!got.ok) {
-    return void pane.replaceChildren(h("p", "p-4 text-[13px] text-red-600", got.error));
+    pane.replaceChildren(actions, h("p", "p-4 text-[13px] text-red-600", got.error));
+    return;
   }
   const run = got.value;
   const messages = gotMessages.ok ? gotMessages.value : [];
-  const back = button("Back to runs");
-  back.onclick = () => pane.replaceChildren(list);
-  const actions = h("div", "flex items-center gap-2 border-b border-neutral-200 px-4 py-2");
-  actions.append(back, h("span", "font-mono text-[12px] text-neutral-400", run.id));
   if (run.targetSessionId) {
     const open = button("Open session");
     open.classList.add("ml-auto");
@@ -71,7 +94,7 @@ async function openRun(pane: HTMLElement, id: string, list: HTMLElement, deps: T
         }, "Run control failed"),
         deps,
       );
-    const cancel = button("Stop");
+    const cancel = button("Stop run");
     cancel.onclick = () => void deps.mutate(`/api/task-runs/${run.id}/cancel`);
     actions.append(steer, cancel);
   } else if (run.targetSessionId) {
@@ -85,20 +108,41 @@ async function openRun(pane: HTMLElement, id: string, list: HTMLElement, deps: T
       );
     actions.append(resume);
   }
-  const body = h("div", "min-h-0 flex-1 overflow-auto");
-  const pre = h("pre", "whitespace-pre-wrap break-words p-4 font-mono text-[12px]", JSON.stringify(run, null, 2));
-  body.append(pre);
+  const body = h("div", "min-w-0");
+  body.append(h("div", "flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-neutral-100 px-4 py-3 text-[12.5px]",
+    h("span", "font-medium", run.state),
+    h("span", "text-neutral-500", dateTime(run.queuedAt)),
+    h("span", "text-neutral-500", run.triggerSource),
+    h("span", "text-neutral-500", runDuration(run)),
+  ));
+  if (run.error || run.skipReason) body.append(h("p", "whitespace-pre-wrap break-words p-4 text-[13px] text-red-600", run.error ?? run.skipReason!));
+  if (run.result) {
+    const result = run.result;
+    const text = result.type === "agent" ? result.text
+      : result.type === "bash" ? `Exit code: ${result.exitCode ?? "-"}\n${result.stdout}${result.stdoutTruncated ? "\n[stdout truncated]" : ""}\n${result.stderr}${result.stderrTruncated ? "\n[stderr truncated]" : ""}`
+      : result.type === "task" ? `Child run: ${result.runId}` : "Watch did not match.";
+    body.append(h("h3", "px-4 pt-3 text-[12px] font-medium", "Result"), h("pre", "whitespace-pre-wrap break-words p-4 font-mono text-[12px]", text || "No output."));
+  }
+  if (!gotMessages.ok) body.append(h("p", "p-4 text-[13px] text-red-600", gotMessages.error));
   if (messages.length) {
     const ledger = h("div", "border-t border-neutral-200");
     ledger.append(h("div", "px-4 py-2 text-[11px] font-semibold uppercase text-neutral-400", "Messages"));
     for (const message of messages) {
-      const row = h("div", "grid grid-cols-[6.25rem_6.25rem_1fr] gap-3 border-t border-neutral-100 px-4 py-2 text-[12px]");
-      row.append(h("span", "font-medium", message.kind), h("span", "text-neutral-500", message.state), h("span", "whitespace-pre-wrap", message.content));
+      const row = h("div", "grid grid-cols-[auto_1fr] gap-3 border-t border-neutral-100 px-4 py-2 text-[12px] md:grid-cols-[6.25rem_6.25rem_minmax(0,1fr)]");
+      row.append(h("span", "font-medium", message.kind), h("span", "text-neutral-500", message.state), h("span", "col-span-2 whitespace-pre-wrap break-words md:col-span-1", message.content));
       ledger.append(row);
     }
     body.append(ledger);
   }
+  const raw = h("details", "border-t border-neutral-200") as HTMLDetailsElement;
+  raw.open = state.rawOpen;
+  raw.ontoggle = () => { if (raw.isConnected) state.rawOpen = raw.open; };
+  raw.append(h("summary", "cursor-pointer px-4 py-3 text-[12px] text-neutral-500", "Raw record"),
+    h("pre", "whitespace-pre-wrap break-words px-4 pb-4 font-mono text-[12px]", JSON.stringify(run, null, 2)));
+  body.append(raw);
   pane.replaceChildren(actions, body);
+  pane.scrollTop = state.scrollTop;
+  pane.onscroll = () => { state.scrollTop = pane.scrollTop; };
 }
 
 /** Show what went wrong, or reload so the run's new state is on screen. */

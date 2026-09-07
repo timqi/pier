@@ -5,9 +5,9 @@
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
 import { coalesce, failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { button, tabButton } from "./form.js";
+import { button, select, tabButton } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
-import { dateTime, renderRuns, runDuration } from "./task-runs.js";
+import { dateTime, renderRuns, runDuration, type RunViewState } from "./task-runs.js";
 
 interface TaskRow extends TaskDefinition {
   lastRun: TaskRun | null;
@@ -39,6 +39,12 @@ export function createTasksView(
   let availableTasks: TaskRow[] = [];
   let selectedId: string | null = null;
   let filter = "active";
+  let trigger = "all";
+  let kind = "task";
+  let detailTab: "runs" | "definition" = "runs";
+  const runView: RunViewState = { selectedId: null, rawOpen: false, scrollTop: 0, listScroll: 0 };
+  let detailRequest = 0;
+  let listScroll = 0;
   /** Filter plus payload of the last list drawn — the Activity view's guard
    *  (activity.ts), for the same reason: most workspace events change nothing
    *  here, and replacing the table anyway loses its scroll position and the
@@ -47,17 +53,16 @@ export function createTasksView(
   let drawn = "";
 
   const load = coalesce(async () => {
-    const wanted = filter;
-    const state = wanted === "archived" ? "archived" : "active";
+    const wanted = `${filter}:${kind}:${trigger}`;
     const got = await getJson<TaskRow[]>(
-      `/api/tasks?state=${state}${wanted === "subagent" ? "&kind=subagent" : ""}`,
+      `/api/tasks?state=${filter}${kind === "subagent" ? "&kind=subagent" : ""}`,
       "Failed to load tasks",
     );
     if (!got.ok) {
       drawn = "";
       return renderError(got.error);
     }
-    if (wanted !== filter) return; // stale: the filter changed mid-fetch
+    if (wanted !== `${filter}:${kind}:${trigger}`) return;
     // The detail page has endpoints of its own — a run's state changes without
     // this list changing — so only the list may be skipped.
     const body = JSON.stringify(got.value);
@@ -67,17 +72,19 @@ export function createTasksView(
     // The editor offers active tasks as chain targets whatever the list is
     // filtered to, so a filter that cannot stand in for that list fetches it.
     // Reusing the wrong list left the target picker empty or stale.
-    if (wanted === "archived" || wanted === "subagent") availableTasks = await activeTasks();
+    if (filter === "archived" || kind === "subagent") availableTasks = await activeTasks();
     else availableTasks = rows;
-    if (wanted !== "active" && wanted !== "archived" && wanted !== "subagent") {
-      rows = rows.filter((task) => task.trigger.type === wanted);
-    }
+    if (wanted !== `${filter}:${kind}:${trigger}`) return;
+    if (trigger !== "all") rows = rows.filter((task) => task.trigger.type === trigger);
     if (selectedId) await renderDetail(selectedId);
     else renderList();
   });
 
   function renderError(message: string): void {
-    root.replaceChildren(h("p", "p-4 text-[13px] text-red-600", message));
+    root.querySelector("[role=alert]")?.remove();
+    const error = h("p", "flex-none p-4 text-[13px] text-red-600", message);
+    error.setAttribute("role", "alert");
+    root.append(error);
   }
 
   /** Keep the last good list on a failed refetch: a stale picker beats none. */
@@ -90,7 +97,8 @@ export function createTasksView(
     sessions: getSessions,
     tasks: () => availableTasks,
     onSaved: (id: string) => {
-      selectedId = id;
+      selectTask(id);
+      detailTab = "definition";
       void load();
     },
   };
@@ -104,14 +112,14 @@ export function createTasksView(
   };
 
   function header(title: string | HTMLElement, actions: HTMLElement[]): HTMLElement {
-    const el = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4");
+    const el = h("header", "flex min-h-10 flex-none flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2");
     // A plain string title repeats the mobile top bar; a breadcrumb element
     // (the task detail page) does not, so only the former hides below md.
     el.append(
       typeof title === "string" ? h("span", "truncate font-medium max-md:hidden", title) : title,
     );
     if (actions.length) {
-      const box = h("div", "ml-auto flex items-center gap-2");
+      const box = h("div", "ml-auto flex flex-wrap items-center gap-2 max-md:w-full");
       box.append(...actions);
       el.append(box);
     }
@@ -127,13 +135,23 @@ export function createTasksView(
       "div",
       "tabstrip",
       tabButton("Sessions", false, () => openActivity("sessions")),
-      tabButton("Dependencies", false, () => openActivity("dependencies")),
+      tabButton("Relationships", false, () => openActivity("dependencies")),
       tabButton("Tasks", true, showList),
     );
   }
 
+  function selectTask(id: string): void {
+    selectedId = id;
+    detailTab = "runs";
+    runView.selectedId = null;
+    runView.rawOpen = false;
+    runView.scrollTop = 0;
+    runView.listScroll = 0;
+  }
+
   function showList(): void {
     selectedId = null;
+    detailRequest++;
     renderList();
   }
 
@@ -141,55 +159,60 @@ export function createTasksView(
     const create = button("New task", true);
     create.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps));
     const filters = consoleTabs();
-    // w-full below md forces its own line inside the wrapping .tabstrip — six
-    // filters crammed beside the console tabs are unreachable on a phone.
-    const filterBox = h(
-      "div",
-      "ml-auto flex flex-none items-center gap-1 pl-1 max-md:ml-0 max-md:w-full max-md:overflow-x-auto max-md:pl-0",
-    );
-    const filterOptions: [string, string][] = [["All", "active"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"], ["Subagents", "subagent"], ["Archived", "archived"]];
-    for (const [label, key] of filterOptions) {
-      filterBox.append(tabButton(label, filter === key, () => {
-        filter = key;
-        selectedId = null;
+    const filterBox = h("div", "flex flex-none flex-wrap items-center gap-3 border-b border-neutral-200 px-4 py-2");
+    const addFilter = (label: string, options: [string, string][], value: string, change: (value: string) => void): void => {
+      const input = select(options, value);
+      input.setAttribute("aria-label", label);
+      input.classList.add("!w-auto", "pr-8");
+      input.onchange = () => {
+        change(input.value);
+        listScroll = 0;
         void load();
-      }));
-    }
-    filters.append(filterBox);
+      };
+      filterBox.append(h("label", "flex items-center gap-2 text-[12px] text-neutral-500", label, input));
+    };
+    addFilter("Status", [["Current", "active"], ["Archived", "archived"]], filter, (v) => { filter = v; });
+    addFilter("Type", [["Tasks", "task"], ["Subagents", "subagent"]], kind, (v) => { kind = v; });
+    addFilter("Trigger", [["All triggers", "all"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"]], trigger, (v) => { trigger = v; });
     const table = document.createElement("table");
-    // Six table-fixed columns collide at phone width; keep the desktop minimum
-    // and let the pane scroll sideways.
-    table.className = "w-full min-w-[52rem] table-fixed text-left text-[12.5px]";
+    table.className = "w-full table-fixed text-left text-[12.5px]";
     table.innerHTML = `<thead class="sticky top-0 bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
-      <th class="w-[24%] px-4 py-2 font-semibold">Name</th><th class="w-[10%] px-2 py-2 font-semibold">Action</th>
-      <th class="w-[23%] px-2 py-2 font-semibold">Trigger</th><th class="w-[17%] px-2 py-2 font-semibold">Next</th>
-      <th class="w-[14%] px-2 py-2 font-semibold">Last result</th><th class="px-2 py-2 font-semibold"></th></tr></thead>`;
+      <th class="w-[42%] px-4 py-2 font-semibold md:w-[24%]">Name</th><th class="hidden w-[10%] px-2 py-2 font-semibold md:table-cell">Action</th>
+      <th class="hidden w-[23%] px-2 py-2 font-semibold md:table-cell">Trigger</th><th class="hidden w-[17%] px-2 py-2 font-semibold md:table-cell">Next</th>
+      <th class="px-2 py-2 font-semibold md:w-[14%]">Last result</th><th class="w-[6rem] px-2 py-2 font-semibold"></th></tr></thead>`;
     const body = document.createElement("tbody");
     for (const task of rows) body.append(taskRow(task));
     table.append(body);
-    root.replaceChildren(header("Tasks", [create]), filters, h("div", "min-h-0 flex-1 overflow-auto", table));
+    const pane = h("div", "min-h-0 flex-1 overflow-auto", table);
+    if (!rows.length) pane.append(h("p", "p-4 text-[13px] text-neutral-500", "No matching tasks."));
+    pane.onscroll = () => { listScroll = pane.scrollTop; };
+    root.replaceChildren(header("Activity", [create]), filters, filterBox, pane);
+    pane.scrollTop = listScroll;
   }
 
   function taskRow(task: TaskRow): HTMLElement {
     const tr = document.createElement("tr");
     tr.className = "cursor-pointer border-b border-neutral-100 hover:bg-neutral-50";
     tr.onclick = () => {
-      selectedId = task.id;
+      selectTask(task.id);
       void renderDetail(task.id);
     };
     const state = task.archived ? "Archived" : task.enabled ? "Enabled" : "Paused";
-    tr.append(h("td", "truncate py-2.5 pl-4 pr-2",
-      h("div", "truncate font-medium", task.name),
-      h("div", "text-[11px] text-neutral-400", state)));
-    for (const text of [
-      actionSummary(task),
-      triggerSummary(task),
-      dateTime(task.nextRunAt),
-      task.lastRun ? `${task.lastRun.state} · ${runDuration(task.lastRun)}` : "-",
-    ]) {
-      tr.append(h("td", "truncate px-2 py-2.5", text));
+    const name = button(task.name);
+    name.className = "block w-full cursor-pointer truncate text-left font-medium";
+    name.title = task.name;
+    tr.append(h("td", "truncate py-2.5 pl-4 pr-2", name,
+      h("div", "truncate text-[11px] text-neutral-400", state),
+      h("div", "truncate text-[11px] text-neutral-400 md:hidden", triggerSummary(task))));
+    for (const text of [actionSummary(task), triggerSummary(task), dateTime(task.nextRunAt)]) {
+      const cell = h("td", "hidden truncate px-2 py-2.5 md:table-cell", text);
+      cell.title = text;
+      tr.append(cell);
     }
-    const run = button("Run");
+    tr.append(h("td", "px-2 py-2.5",
+      h("div", "break-words", task.lastRun?.state ?? "-"),
+      h("div", "text-[11px] text-neutral-400", task.lastRun ? runDuration(task.lastRun) : "")));
+    const run = button("Run now");
     run.disabled = task.archived;
     run.onclick = (event) => {
       event.stopPropagation();
@@ -200,10 +223,13 @@ export function createTasksView(
   }
 
   async function renderDetail(id: string): Promise<void> {
+    const request = ++detailRequest;
+    const previousPane = root.querySelector<HTMLElement>("[data-task-detail]");
     const [gotTask, gotRuns] = await Promise.all([
       getJson<TaskDefinition>(`/api/tasks/${id}`, "Failed to load task"),
       getJson<TaskRun[]>(`/api/tasks/${id}/runs`, "Failed to load the task's runs"),
     ]);
+    if (request !== detailRequest || selectedId !== id) return;
     if (!gotTask.ok) return renderError(gotTask.error);
     if (!gotRuns.ok) return renderError(gotRuns.error);
     const task = gotTask.value;
@@ -217,7 +243,7 @@ export function createTasksView(
     const run = button("Run now", true);
     run.disabled = task.archived;
     run.onclick = () => void runTask(task.id);
-    const pause = button(task.enabled ? "Pause" : "Resume");
+    const pause = button(task.enabled ? "Pause schedule" : "Resume schedule");
     pause.disabled = task.archived || task.trigger.type === "manual";
     pause.onclick = () => void mutate(`/api/tasks/${task.id}/${task.enabled ? "pause" : "resume"}`);
     const edit = button("Edit");
@@ -228,28 +254,26 @@ export function createTasksView(
     archive.onclick = () => void mutate(`/api/tasks/${task.id}/archive`);
 
     const tabs = h("div", "flex flex-none gap-1 border-b border-neutral-200 px-4 py-2");
-    const definitionTab = button("Definition");
-    const runsTab = button(`Runs (${runs.length})`);
     const pane = h("div", "min-h-0 flex-1 overflow-auto");
-    const showDefinition = (): void => {
-      definitionTab.classList.add("bg-neutral-200");
-      runsTab.classList.remove("bg-neutral-200");
-      renderDefinition(pane, task);
+    pane.dataset.taskDetail = id;
+    const drawPane = (): void => {
+      tabs.replaceChildren(
+        tabButton(`Runs (${runs.length})`, detailTab === "runs", () => { detailTab = "runs"; drawPane(); }),
+        tabButton("Definition", detailTab === "definition", () => { detailTab = "definition"; drawPane(); }),
+      );
+      if (detailTab === "runs") renderRuns(pane, runs, runsDeps, runView);
+      else renderDefinition(pane, task);
     };
-    definitionTab.onclick = showDefinition;
-    runsTab.onclick = () => {
-      runsTab.classList.add("bg-neutral-200");
-      definitionTab.classList.remove("bg-neutral-200");
-      renderRuns(pane, runs, runsDeps);
-    };
-    tabs.append(definitionTab, runsTab);
+    const previousScroll = previousPane?.scrollTop ?? 0;
     root.replaceChildren(header(crumb, [run, pause, edit, archive]), consoleTabs(), tabs, pane);
-    if (runs.length) runsTab.click();
-    else showDefinition();
+    drawPane();
+    pane.scrollTop = previousScroll;
   }
 
   function renderDefinition(pane: HTMLElement, task: TaskDefinition): void {
-    const content = h("div", "grid max-w-4xl grid-cols-[9.375rem_minmax(0,1fr)] gap-x-5 gap-y-3 p-4 text-[13px]");
+    pane.dataset.runView = "definition";
+    pane.onscroll = null;
+    const content = h("div", "grid max-w-4xl grid-cols-[6rem_minmax(0,1fr)] gap-x-5 gap-y-3 p-4 text-[13px] md:grid-cols-[9.375rem_minmax(0,1fr)]");
     const values: [string, string][] = [
       ["Status", task.archived ? "Archived" : task.enabled ? "Enabled" : "Paused"],
       ["Trigger", triggerSummary(task)],
@@ -290,7 +314,7 @@ export function createTasksView(
   async function runTask(id: string): Promise<void> {
     const res = await sendJson(`/api/tasks/${id}/run`, { sourceSessionId: getCurrentSessionId() });
     if (!res.ok) return renderError(await failure(res, "Failed to run task"));
-    selectedId = id;
+    selectTask(id);
     await renderDetail(id);
   }
 
@@ -301,7 +325,8 @@ export function createTasksView(
   }
 
   const view = consoleView(root, (taskId) => {
-    if (taskId) selectedId = taskId;
+    if (taskId && taskId !== selectedId) selectTask(taskId);
+    if (!root.childElementCount) renderList();
     void load();
   });
   return Object.assign(view, {

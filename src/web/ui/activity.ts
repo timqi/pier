@@ -109,8 +109,8 @@ export function createActivityView(
     }
     if (wanted !== scope) return; // stale: the scope changed mid-fetch
     const body = JSON.stringify(got.value);
-    if (body === drawn) return;
-    drawn = body;
+    if (`${wanted}:${body}` === drawn) return;
+    drawn = `${wanted}:${body}`;
     const fresh = got.value;
     // Same speaker-header cleanup the sidebar does (dom.ts): a session titled
     // by an IM prompt must not show a raw platform id here either.
@@ -125,14 +125,12 @@ export function createActivityView(
     const tabs = h("div", "tabstrip");
     tabs.append(
       control("Sessions", tab === "sessions", () => { tab = "sessions"; render(); }),
-      control("Dependencies", tab === "dependencies", () => { tab = "dependencies"; render(); }),
+      control("Relationships", tab === "dependencies", () => { tab = "dependencies"; render(); }),
       // Tasks is the sibling console view; the strip just navigates to it.
       control("Tasks", false, () => openTask()),
     );
-    // Scope is one filter over one snapshot, so it applies to both tabs and
-    // survives switching them — Sessions gets the same 24h history the graph
-    // shows. w-full below md forces its own line inside the wrapping .tabstrip.
-    const scopeControl = h("div", "ml-auto flex gap-1 max-md:ml-0 max-md:w-full");
+    // Scope applies to both views; filters sit below object navigation.
+    const scopeControl = h("div", "flex flex-none gap-1 border-b border-neutral-200 px-4 py-2");
     // render() first, load() second: the fetch behind a scope is ~150ms, and
     // until it lands the pressed button would show no sign of having been hit.
     const setScope = (next: typeof scope) => () => {
@@ -141,39 +139,40 @@ export function createActivityView(
       void load();
     };
     scopeControl.append(
-      control("Active", scope === "active", setScope("active")),
+      control("Current", scope === "active", setScope("active")),
       control("Last 24h", scope === "recent", setScope("recent")),
     );
-    tabs.append(scopeControl);
     const body = h("div", "min-h-0 flex-1 overflow-auto");
     if (tab === "sessions") renderSessions(body);
     else renderGraph(body);
-    root.replaceChildren(header, tabs, body);
+    root.replaceChildren(header, tabs, scopeControl, body);
   }
 
   function renderSessions(body: HTMLElement): void {
     const table = document.createElement("table");
-    // table-fixed at phone width crushes four columns into each other, so the
-    // table keeps its desktop minimum and the pane scrolls sideways instead.
-    table.className = "w-full min-w-[38rem] table-fixed text-left text-[12.5px]";
+    table.className = "w-full table-fixed text-left text-[12.5px]";
     table.innerHTML = `<thead class="bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
-      <th class="w-[34%] px-4 py-2 font-semibold">Session</th>
-      <th class="w-[38%] px-2 py-2 font-semibold">Project</th>
-      <th class="w-[14%] px-2 py-2 font-semibold">State</th>
-      <th class="px-2 py-2 font-semibold">Duration</th></tr></thead>`;
+      <th class="w-[50%] px-4 py-2 font-semibold md:w-[34%]">Session</th>
+      <th class="hidden w-[38%] px-2 py-2 font-semibold md:table-cell">Project</th>
+      <th class="px-2 py-2 font-semibold md:w-[14%]">State</th>
+      <th class="px-2 py-2 font-semibold">In state</th></tr></thead>`;
     const tbody = document.createElement("tbody");
     for (const session of snapshot.sessions) {
       const tr = document.createElement("tr");
       tr.className = "cursor-pointer border-b border-neutral-100 hover:bg-neutral-50";
       tr.onclick = () => openSession(session.id);
+      const title = h("button", "block w-full cursor-pointer truncate text-left font-medium", session.title ?? untitled(session.cwd));
+      title.setAttribute("type", "button");
+      title.title = `${session.id}\n${session.cwd}`;
+      title.onclick = (event) => { event.stopPropagation(); openSession(session.id); };
       tr.append(
-        h("td", "px-4 py-2.5",
-          h("div", "truncate font-medium", session.title ?? untitled(session.cwd)),
-          h("div", "truncate font-mono text-[11px] text-neutral-400", session.id)),
-        h("td", "truncate px-2 py-2.5 font-mono text-[11.5px]", session.cwd || "-"),
+        h("td", "px-4 py-2.5", title,
+          h("div", "truncate font-mono text-[11px] text-neutral-400 md:hidden", session.cwd || "-")),
+        h("td", "hidden truncate px-2 py-2.5 font-mono text-[11.5px] md:table-cell", session.cwd || "-"),
         h("td", "px-2 py-2.5",
-          h("span", `mr-2 inline-block h-2 w-2 rounded-full ${session.state === "streaming" ? "animate-pulse bg-green-500" : "bg-neutral-300"}`),
-          session.state),
+          h("span", "inline-flex items-center gap-1.5 whitespace-nowrap",
+            h("span", `inline-block h-2 w-2 flex-none rounded-full ${session.state === "streaming" ? "animate-pulse bg-green-500" : "bg-neutral-300"}`),
+            session.state)),
         h("td", "px-2 py-2.5 text-neutral-500", elapsed(session.stateSince)),
       );
       tbody.append(tr);
@@ -338,7 +337,7 @@ export function createActivityView(
         y: String(-NODE_H / 2),
         width: String(NODE_W),
         height: String(NODE_H),
-        rx: "10",
+        rx: "8",
         fill: card.fill,
         stroke: card.stroke,
         "stroke-width": node.kind === "session" && node.state === "streaming" ? "1.5" : "1",
