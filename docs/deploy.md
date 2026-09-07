@@ -58,7 +58,6 @@ WorkingDirectory=%h
 # installed by nvm/fnm/asdf is not on it — the installer fills in the node
 # that installed Pier and the globally installed entry point.
 ExecStart="/absolute/path/to/node" "/absolute/npm/prefix/lib/node_modules/@timqi/pier/dist/main.js"
-Environment="NODE_ENV=production"
 # Inherited by every command a turn runs: on systemd's bare PATH an agent asked
 # to run npm or node would be told they do not exist. The installer records the
 # PATH of the shell that ran it — that shell is your login one — with the node

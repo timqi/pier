@@ -413,6 +413,15 @@ app.route("/", createServer({
 
 const port = Number(process.env.PORT ?? 3141);
 const hostname = process.env.HOST ?? "127.0.0.1";
+
+// Read above, and dropped here so nothing else reads them: these three
+// configure *this* process, and every command a turn runs inherits its env.
+// `NODE_ENV=production` makes an agent's `npm install` skip devDependencies and
+// silently changes what half the ecosystem builds; PORT and HOST would aim an
+// agent's own dev server at Pier's socket. Deleted at runtime rather than only
+// dropped from the unit, because an installed unit is rewritten by
+// `pier service install --force` and by nothing else.
+for (const leak of ["NODE_ENV", "PORT", "HOST"]) delete process.env[leak];
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
   log.info(`workbench on http://${hostname}:${port}`);
   log.info(`pid ${process.pid}, node ${process.version}, home ${PIER_HOME}`);

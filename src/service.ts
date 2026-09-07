@@ -92,7 +92,8 @@ WorkingDirectory=%h
 # Absolute paths on purpose: systemd starts with a minimal PATH, and the node
 # that installed Pier is usually not on it.
 ExecStart=${quote(execPath, true)} ${quote(entry, true)}
-${environment("NODE_ENV", "production")}
+# No NODE_ENV: nothing in Pier reads it, and it is inherited by every command a
+# turn runs — an agent's "npm install" would skip devDependencies.
 # Inherited by every command a turn runs, which is why it is here and not just
 # in the updater: an agent typing "npm test" on systemd's minimal PATH would be
 # told node does not exist on a machine that installed Pier with it.
