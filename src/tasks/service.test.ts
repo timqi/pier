@@ -80,6 +80,7 @@ function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
     setThinkingLevel: () => {},
     setCacheRetention: () => {},
     pendingQueue: async () => ({ steering: [], followUp: [] }),
+    pendingSystemInputs: async () => [],
     clearQueue: async () => ({ steering: [], followUp: [] }),
     rewindToUserTurn: async () => {},
     compact: async () => {},
@@ -706,46 +707,86 @@ describe("task service", () => {
     expect(hub.lastSeq(session.id)).toBeDefined();
   });
 
+  /** A recipient that is mid-turn, queueing what it is handed the way Pi does:
+   *  the input goes into the agent's queue — not the transcript, and not the
+   *  text queue `pendingQueue` reads — until the turn drains it. */
+  function streamingRecipient(id: string) {
+    const session = fakeSession(id);
+    const queued: { text: string; origin: SystemInputOrigin }[] = [];
+    session.systemInput = async (text, origin) => { queued.push({ text, origin }); };
+    session.pendingSystemInputs = async () => queued.map((entry) => entry.origin);
+    session.setState("streaming");
+    /** The turn ends and takes the queue with it, into the transcript. */
+    const drain = (): void => {
+      for (const entry of queued) session.systemInputs.push({ ...entry, mode: "steer" });
+      queued.length = 0;
+    };
+    return { session, queued, drain };
+  }
+
   it("does not send a steer twice while the first one waits in Pi's queue", async () => {
     // A steer is not deferred on a busy target — reaching the running turn is
     // the point — so it sits in Pi's in-memory queue, invisible in the
     // transcript until the turn drains it. Re-sending it there is a duplicate.
-    const busy = fakeSession("busy");
-    const queued: string[] = [];
-    busy.systemInput = async (text) => { queued.push(text); };
-    busy.pendingQueue = async () => ({ steering: [...queued], followUp: [] });
-    busy.setState("streaming");
-    const { cwd, service, store, router, hub } = setup(busy);
+    const busy = streamingRecipient("busy");
+    const { cwd, service, store, router, hub } = setup(busy.session);
     const messenger = new TaskMessenger(store, router, hub, () => { throw new Error("no resume"); }, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("steered", task, now, {
       state: "running", finishedAt: null, result: null,
-      targetSessionId: busy.id, sessionMode: "reuse", invokedBySessionId: "owner",
+      targetSessionId: busy.session.id, sessionMode: "reuse", invokedBySessionId: "owner",
     }));
     const message = await messenger.control(store.getRun("steered")!, "owner", "steer", "Change direction");
 
-    await vi.waitFor(() => expect(queued).toHaveLength(1));
+    await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
     for (let i = 1; i <= 3; i++) {
       messenger.retryUndelivered(now + i * 600_000);
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(queued).toHaveLength(1);
+    expect(busy.queued).toHaveLength(1);
     expect(store.getMessage(message.id)).toMatchObject({ state: "pending", attempts: 1 });
 
     // The turn drains it: now it is in the transcript, and only now delivered.
-    busy.systemInputs.push({
-      text: queued[0]!,
-      origin: {
-        kind: "task-message", taskId: task.id, runId: "steered",
-        sourceSessionId: "owner", messageId: message.id, messageKind: "steer",
-      },
-      mode: "steer",
-    });
-    queued.length = 0;
+    busy.drain();
     messenger.retryUndelivered(now + 999 * 600_000);
     await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
-    expect(queued).toHaveLength(0);
+    expect(busy.queued).toHaveLength(0);
+  });
+
+  it("waits out a long turn instead of spending a follow-up's attempts on it", async () => {
+    // A follow-up is drained when the turn ends, so a recipient that streams
+    // for an hour holds it that long. Every sweep in between is a wait, not an
+    // attempt: counting them expires a message that was never undeliverable —
+    // and queues a copy of it per sweep, all of which land at once.
+    const busy = streamingRecipient("long-turn");
+    const { cwd, service, store, router, hub } = setup(busy.session);
+    const told: string[] = [];
+    const messenger = new TaskMessenger(
+      store, router, hub,
+      () => { throw new Error("no resume"); },
+      (...args) => told.push(args.join("|")),
+    );
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    store.saveRun(storedRun("guided", task, now, {
+      state: "running", finishedAt: null, result: null,
+      targetSessionId: busy.session.id, sessionMode: "reuse", invokedBySessionId: "owner",
+    }));
+    const message = await messenger.control(store.getRun("guided")!, "owner", "follow_up", "Also check the tests");
+
+    await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
+    for (let i = 1; i <= MAX_DELIVERY_ATTEMPTS + 2; i++) {
+      messenger.retryUndelivered(now + i * 600_000);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(busy.queued).toHaveLength(1);
+    expect(store.getMessage(message.id)).toMatchObject({ state: "pending", attempts: 1 });
+    expect(told).toEqual([]);
+
+    busy.drain();
+    messenger.retryUndelivered(now + 999 * 600_000);
+    await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
   });
 
   it("gives up on an unreachable callback target and reports it instead of retrying forever", async () => {

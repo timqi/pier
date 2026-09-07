@@ -5,7 +5,7 @@
 // finished — an undelivered message is retried, expired and *said*, never
 // dropped (§5b).
 
-import type { SystemInputOrigin } from "../core/types.js";
+import type { AgentSession, SystemInputOrigin } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { logger } from "../log.js";
@@ -221,6 +221,17 @@ export class TaskMessenger {
     this.changed(message);
   }
 
+  /** Waiting is not a failed attempt: the message is in flight or the turn it
+   *  has to wait for is still running, so it is tried again shortly and the
+   *  ceiling is left for the deliveries that actually failed (the rule
+   *  outbox.ts keeps for callbacks). */
+  private defer(id: string): void {
+    const message = this.store.getMessage(id);
+    if (!message || message.state !== "pending") return;
+    message.nextAttemptAt = Date.now() + 1000;
+    this.store.saveMessage(message);
+  }
+
   /** Counts one hand-off and says whether it may happen: a recipient that
    *  never records the message must not be re-sent once a second forever.
    *  False means the ceiling was reached and the message is now expired. */
@@ -304,13 +315,12 @@ export class TaskMessenger {
         (await session.history()).some((turn) =>
           turn.role === "system" && turn.origin?.kind === "task-message" && turn.origin.messageId === message.id);
       if (await recorded()) return this.confirmed(message.id);
-      // Accepted and waiting in Pi's queue for the running turn to drain it:
-      // not recorded yet, and sending again would deliver the same steer twice.
-      // Unlike a callback this is not deferred — a steer's whole point is to
-      // reach the turn already running — so the queue is where it sits, and
-      // waiting for it to drain costs no attempt.
-      const queue = await session.pendingQueue();
-      if ([...queue.steering, ...queue.followUp].some((text) => text.includes(message.id))) return;
+      // Accepted and waiting in the recipient's queue for the running turn to
+      // drain it: not recorded yet, and sending again would deliver the same
+      // guidance twice. Unlike a callback this is not deferred on a busy
+      // target — a steer's whole point is to reach the turn already running —
+      // so the queue is where it sits, and waiting for it costs no attempt.
+      if (await this.queued(session, message.id)) return this.defer(message.id);
       spent = this.spend(message.id);
       if (!spent) return;
       await session.systemInput(
@@ -322,6 +332,13 @@ export class TaskMessenger {
     } catch (error) {
       this.failed(message.id, error, spent);
     }
+  }
+
+  /** In the recipient's queue, by the id its origin carries — the transcript
+   *  read above answers "landed", this answers "handed over and waiting". */
+  private async queued(session: AgentSession, id: string): Promise<boolean> {
+    return (await session.pendingSystemInputs()).some((origin) =>
+      origin.kind === "task-message" && origin.messageId === id);
   }
 
   private format(message: TaskMessage, run: TaskRun): string {

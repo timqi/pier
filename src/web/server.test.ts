@@ -97,6 +97,7 @@ function fakeSession(id: string): AgentSession & {
     compact: async () => void calls.push("compact"),
     rename: async (name: string) => void calls.push(`rename:${name}`),
     pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
+    pendingSystemInputs: async () => [],
     clearQueue: async () => {
       calls.push("clearQueue");
       return { steering: ["s-msg"], followUp: ["f-msg"] };

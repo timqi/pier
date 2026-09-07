@@ -107,6 +107,12 @@ function fakePi() {
         calls.push("sendCustomMessage");
         return Promise.resolve();
       },
+      getSteeringMessages: () => [] as string[],
+      getFollowUpMessages: () => [] as string[],
+      clearQueue: () => {
+        calls.push("clearQueue");
+        return { steering: [], followUp: [] };
+      },
       dispose: () => calls.push("dispose"),
     },
   };
@@ -245,6 +251,50 @@ describe("a prompt that races a turn", () => {
       { streamingBehavior: "followUp" },
       { streamingBehavior: "followUp" },
     ]);
+  });
+});
+
+describe("a system input handed to a streaming session", () => {
+  const origin = {
+    kind: "task-message", taskId: "t", runId: "r", sourceSessionId: "parent",
+    messageId: "m1", messageKind: "follow_up",
+  } as const;
+
+  it("is reported as in flight — Pi's own queues cannot see it", async () => {
+    const { fake, session: s } = session();
+    fake.pi.isStreaming = true;
+    await s.systemInput("guidance", origin, "followUp");
+    // Pi parks a custom message on the agent, so both of these stay empty and
+    // the transcript has nothing either: a sender asking them would re-send
+    // the same guidance every sweep until it gave up on a delivered message.
+    expect(await s.pendingQueue()).toEqual({ steering: [], followUp: [] });
+    expect(await s.pendingSystemInputs()).toEqual([origin]);
+  });
+
+  it("stops being in flight once the turn that would drain it is over", async () => {
+    const { fake, session: s } = session();
+    fake.pi.isStreaming = true;
+    await s.systemInput("guidance", origin, "followUp");
+    fake.pi.isStreaming = false;
+    // Idle means drained, aborted or cleared — never "still on its way": a
+    // sender told otherwise waits on it forever (§5b).
+    expect(await s.pendingSystemInputs()).toEqual([]);
+  });
+
+  it("is dropped from the queue the composer recalls, though it is nobody's draft", async () => {
+    const { fake, session: s } = session();
+    fake.pi.isStreaming = true;
+    await s.systemInput("guidance", origin, "followUp");
+    await s.clearQueue();
+    expect(await s.pendingSystemInputs()).toEqual([]);
+    expect(fake.calls).toEqual(["sendCustomMessage", "clearQueue"]);
+  });
+
+  it("is not in flight when the session took it as a turn", async () => {
+    const { session: s } = session();
+    await s.systemInput("guidance", origin, "followUp");
+    // Idle: Pi appended it and started a turn, so the transcript is the answer.
+    expect(await s.pendingSystemInputs()).toEqual([]);
   });
 });
 

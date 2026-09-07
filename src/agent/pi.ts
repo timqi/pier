@@ -260,7 +260,25 @@ export class PiSession implements AgentSession {
     };
   }
 
+  /** A system input handed to a streaming session goes into Pi's *agent*
+   *  queue, and the arrays above are the *session's* — they only ever hold
+   *  text a `prompt`/`steer`/`followUp` call queued. So a task message sitting
+   *  in front of a running turn is in neither the queue nor the transcript,
+   *  and this list is the only thing that says it exists. */
+  private readonly queuedInputs: SystemInputOrigin[] = [];
+
+  async pendingSystemInputs(): Promise<SystemInputOrigin[]> {
+    // Pi drains its follow-up queue before the turn ends, so an idle session
+    // has nothing in flight. Anything still listed was aborted or cleared, and
+    // calling that queued would leave its sender waiting on it forever (§5b).
+    if (!this.pi.isStreaming) this.queuedInputs.length = 0;
+    return [...this.queuedInputs];
+  }
+
   async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    // Not among the texts returned — a system input is nobody's draft — but
+    // dropped all the same, so its sender stops being told it is on its way.
+    this.queuedInputs.length = 0;
     return this.pi.clearQueue();
   }
 
@@ -376,10 +394,22 @@ export class PiSession implements AgentSession {
     // the summary too.
     await this.whenCompacted();
     this.live();
-    return this.pi.sendCustomMessage(
-      { customType: "pier.system-input", content: text, display: true, details: origin },
-      { triggerTurn: true, deliverAs: mode === "prompt" ? undefined : mode },
-    );
+    // Read here, not before the wait, and whatever the mode says: a turn is
+    // running, so the call below queues this input rather than starting one.
+    const queued = this.pi.isStreaming;
+    if (queued) this.queuedInputs.push(origin);
+    try {
+      return await this.pi.sendCustomMessage(
+        { customType: "pier.system-input", content: text, display: true, details: origin },
+        { triggerTurn: true, deliverAs: mode === "prompt" ? undefined : mode },
+      );
+    } catch (error) {
+      // Refused: nothing is in flight, and the caller is about to retry. The
+      // turn may have ended while we waited, so the entry may be gone already.
+      const at = this.queuedInputs.indexOf(origin);
+      if (at >= 0) this.queuedInputs.splice(at, 1);
+      throw error;
+    }
   }
 
   abort(): Promise<void> {

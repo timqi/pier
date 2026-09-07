@@ -269,6 +269,13 @@ export interface AgentSession {
   setCacheRetention(retention: "short" | "long"): void;
   /** Pending queue as-is, for snapshotting a session into a fresh client. */
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
+  /** System inputs handed over while the session was streaming and not in the
+   * transcript yet. A backend may queue such an input where its own queue
+   * readers cannot see it, and a sender that cannot tell "in flight" from
+   * "never arrived" re-sends it every sweep until it gives up on a message it
+   * delivered several times over. Empty on an idle session: nothing survives a
+   * turn, so the sender is free to try again. */
+  pendingSystemInputs(): Promise<SystemInputOrigin[]>;
   /** Drop all pending queued messages and return them (for recall-to-composer). */
   clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /**
