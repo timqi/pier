@@ -39,9 +39,6 @@ export interface Settings {
   /** Let Pier install a newer release of itself while nothing is running.
    *  Off by default: replacing your own code is the operator's decision. */
   autoUpdate: boolean;
-  /** Typed into every Web Terminal shell as it starts — `tmux new -As run`
-   *  and friends. Empty means a plain shell. */
-  terminalInitCommand: string;
   /** Names of the bundled extensions switched on (src/extensions). Empty by
    *  default: an extension gives every session new tools, which is the
    *  operator's call, and a name nobody ships any more is simply not found. */
@@ -105,22 +102,6 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
 }
 
 /**
- * One line, typed into a shell. Same reject-don't-repair contract: a command
- * silently truncated at a newline would run half of what the operator wrote,
- * in every project shell, with no sign of what was dropped.
- */
-export function normalizeTerminalInitCommand(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const text = raw.trim();
-  if (!text) return "";
-  if (text.length > 500) return null;
-  // A tty reads these as keys, not text: an embedded newline is a second
-  // command nobody would see in the field it was typed in.
-  for (const ch of text) if (ch < " " || ch === "\u007f") return null;
-  return text;
-}
-
-/**
  * Shape only — an unknown name is not an error here. This file must not know
  * what Pier bundles (that catalog is code, and importing it would drag the Pi
  * SDK into the instance layer); agent/ matches the names it recognizes and
@@ -162,7 +143,6 @@ export class SettingsStore {
       publicUrl: this.#value("publicUrl") ?? "",
       modelMenu: this.#json("modelMenu", normalizeModelMenu, "a valid menu") ?? [],
       autoUpdate: this.#value("autoUpdate") === "1",
-      terminalInitCommand: this.#value("terminalInitCommand") ?? "",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
       customTools: this.#json("customTools", normalizeCustomTools, "a list of {name, spec}") ?? [],
@@ -199,12 +179,6 @@ export class SettingsStore {
   /** Same contract: hand this `normalizeModelMenu`'s output, not raw input. */
   setModelMenu(menu: ModelMenuEntry[]): Settings {
     this.#set("modelMenu", JSON.stringify(menu));
-    return this.get();
-  }
-
-  /** Same contract again: hand this `normalizeTerminalInitCommand`'s output. */
-  setTerminalInitCommand(command: string): Settings {
-    this.#set("terminalInitCommand", command);
     return this.get();
   }
 

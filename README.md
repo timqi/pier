@@ -17,7 +17,6 @@ versioned from `0.0.1` on — earlier databases are not migrated. Read
 ## Requirements
 
 - Node 24 or newer (`node:sqlite` is used unflagged)
-- Linux: Python 3, `make` and a C/C++ compiler for `node-pty`
 - A provider account (Anthropic, OpenAI, …) — configure its API key or OAuth
   login from Console → Settings → Models after signing in
 - A user-writable global npm prefix if `pier update` should update a service
@@ -61,8 +60,8 @@ an existing Pi setup:
 PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier serve
 ```
 
-Pier exports that variable for the SDK, so anything it starts inherits it — a
-shell in the Web Terminal included. A second Pier launched from there with its
+Pier exports that variable for the SDK, so anything it starts inherits it — an
+agent's shell included. A second Pier launched from there with its
 own `PIER_HOME` derives its own agent directory rather than adopting the first
 one's; setting `PI_CODING_AGENT_DIR` again on that command line still wins.
 
@@ -92,8 +91,8 @@ Console → Settings is the normal setup path:
   Below it, the same tab switches on the command-line tools Pier manages —
   `rtk`, `rg`, `fd`, `wt`, `jq`, or a tool of your own written as a
   [ubix](https://github.com/timqi/ubix) block. A switch installs the binary
-  into `~/.pier/tools/bin`, which is first on the PATH every session, task and
-  terminal inherits, and a task you can read keeps them current.
+  into `~/.pier/tools/bin`, which is first on the PATH every session and task
+  inherits, and a task you can read keeps them current.
 
 On first credential access, Pier imports an existing `auth.json` into its sealed
 store and renames the source to `auth.json.imported`. Literal provider keys left

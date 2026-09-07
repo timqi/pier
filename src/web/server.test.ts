@@ -138,7 +138,6 @@ const SETTINGS_JSON = {
   publicUrl: "",
   modelMenu: [],
   autoUpdate: false,
-  terminalInitCommand: "",
   extensions: [],
   tools: [],
   customTools: [],
@@ -1310,26 +1309,6 @@ describe("workbench server", () => {
     expect((await put(42)).status).toBe(400);
     // A rejected write leaves the stored value alone.
     expect(settings.get().publicUrl).toBe("https://pier.example.com");
-  });
-
-  it("writes the terminal startup command and rejects one a tty would split", async () => {
-    const { app, settings } = setup();
-    const put = (terminalInitCommand: unknown) =>
-      app.request("/api/settings", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ terminalInitCommand }),
-      });
-    const ok = await put("  tmux new -As run  ");
-    expect(ok.status).toBe(200);
-    expect(settings.get().terminalInitCommand).toBe("tmux new -As run");
-
-    expect((await put("tmux new\nrm -rf /")).status).toBe(400);
-    expect((await put(42)).status).toBe(400);
-    expect(settings.get().terminalInitCommand).toBe("tmux new -As run");
-
-    expect((await put("")).status).toBe(200);
-    expect(settings.get().terminalInitCommand).toBe("");
   });
 
   it("writes the model menu without disturbing the URL, and rejects a bad one", async () => {

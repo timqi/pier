@@ -16,7 +16,6 @@ import { closeDrawer, setBarTitle } from "./shell.js";
 import { groupByCwd, type SessionInfo } from "./sidebar.js";
 import type { RunsView } from "./runs.js";
 import type { TasksView } from "./tasks.js";
-import { shortcut } from "./shortcut.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 export interface ViewsDeps {
@@ -40,7 +39,7 @@ const chatEls = [chatHeader, turnsPane, composerForm];
 
 export const isChatVisible = (): boolean => openName === null;
 
-export type ConsoleName = "tasks" | "runs" | "activity" | "boards" | "settings" | "files" | "terminal";
+export type ConsoleName = "tasks" | "runs" | "activity" | "boards" | "settings" | "files";
 
 let tasksView: TasksView | undefined;
 let runsView: RunsView | undefined;
@@ -56,9 +55,9 @@ const consoleBtns = new Map<ConsoleName, HTMLElement>();
 let openName: ConsoleName | null = null;
 let openRequest = 0;
 
-// Files and Terminal drop over whatever was on screen and their ✕ returns
-// there — each remembers where it was opened from.
-const OVERLAYS: ConsoleName[] = ["files", "terminal"];
+// Files drops over whatever was on screen and its ✕ returns there — it
+// remembers where it was opened from.
+const OVERLAYS: ConsoleName[] = ["files"];
 const origins = new Map<ConsoleName, Route>();
 
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
@@ -68,7 +67,6 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   boards: "Boards",
   settings: "Settings",
   files: "Files",
-  terminal: "Terminal",
 };
 
 // Three views, one page: they share a sidebar row, a title and a tab strip,
@@ -166,9 +164,6 @@ export const showRun = (id: string): void => showRuns({}, id);
  *  none, which reopens where the current session left off. */
 export const showFiles = (dir?: string): void => showConsole("files", dir);
 
-/** Entry for the project row menu and the sidebar icon: a shell in a cwd. */
-export const showTerminal = (dir?: string): void => showConsole("terminal", dir);
-
 /** The chord's version: one key both opens the overlay and, pressed again, is
  *  its ✕. A menu row keeps opening — it names a directory, so it always does. */
 const toggleOverlay = (name: ConsoleName, dir?: string): void => {
@@ -177,7 +172,6 @@ const toggleOverlay = (name: ConsoleName, dir?: string): void => {
 };
 
 export const toggleFiles = (dir?: string): void => toggleOverlay("files", dir);
-export const toggleTerminal = (dir?: string): void => toggleOverlay("terminal", dir);
 
 /** An overlay's ✕. Back to the route it was opened from — a session's chat, or
  *  the Console view you came from — and the current session when that is
@@ -295,17 +289,7 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
       () => deps.currentSession(),
       // Through the router, so Back walks directory switches too.
       (dir) => showConsole("files", dir),
-      (dir) => showConsole("terminal", dir),
       () => closeOverlay("files"),
-    ),
-  terminal: async (root) =>
-    (await import("./terminal.js")).createTerminalView(
-      root,
-      () => [...groupByCwd(deps.sessions()).keys()],
-      () => deps.currentSession()?.cwd,
-      (dir) => showConsole("terminal", dir),
-      (dir) => showConsole("files", dir),
-      () => closeOverlay("terminal"),
     ),
   settings: async (root) =>
     (await import("./settings.js")).createSettingsView(
@@ -319,13 +303,6 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
 
 export function initViews(d: ViewsDeps): void {
   deps = d;
-  // The sidebar icon and its chord both toggle. ⌘; and not ⌃`: the backtick
-  // chord is what quake-mode terminals and editors grab globally, and a ⌘
-  // chord is Pier's own everywhere — including inside Terminal, whose shell
-  // keeps every Ctrl chord.
-  const termBtn = $("#open-terminal");
-  termBtn.onclick = () => toggleTerminal();
-  shortcut(termBtn, "meta+;", "Terminal", () => toggleTerminal());
   for (const name of ["tasks", "boards", "settings"] as const) {
     const btn = $(`#open-${name}`);
     consoleBtns.set(name, btn);

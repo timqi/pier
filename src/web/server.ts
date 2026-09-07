@@ -758,16 +758,16 @@ export function createServer(
   // Hashed bundles never change under their name — a release writes new names,
   // and the shell above is what re-points at them. Without this they carry only
   // the auth layer's bare `private`, so a browser revalidates each one before it
-  // may reuse it: three round trips on a remote instance, one of them in front
-  // of the 636KB terminal emulator, every time the workbench is opened.
+  // may reuse it: a round trip per bundle on a remote instance, every time the
+  // workbench is opened.
   app.get("/assets/*", async (c, next) => {
     c.header("cache-control", "private, max-age=31536000, immutable");
     await next();
   });
   // `precompressed` looks for a `.br`/`.gz` sibling of the file it is about to
   // serve and hands that over when the request accepts the encoding; the build
-  // writes them (vite.config.ts). Without it the 325 kB bundle, the 87 kB
-  // stylesheet and the 636 kB terminal emulator all go out verbatim.
+  // writes them (vite.config.ts). Without it the 325 kB bundle and the 87 kB
+  // stylesheet go out verbatim.
   // serveStatic only sets Vary when it selects a sibling. Identity must carry
   // it too, or a cache can reuse that response for a later Brotli request.
   app.use("/*", async (c, next) => {

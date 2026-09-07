@@ -49,8 +49,6 @@ export interface SidebarDeps {
   createSession: (cwd: string) => Promise<void>;
   /** Open the Files view on a project's cwd (views.ts, wired through main). */
   openFiles: (cwd: string) => void;
-  /** Open the Terminal view on a project's cwd (views.ts, wired through main). */
-  openTerminal: (cwd: string) => void;
   /** Open a Console view by name — the palette lists them beside sessions. */
   openConsole: (name: "tasks" | "runs" | "activity" | "boards" | "settings") => void;
   /** Pin state changed — the chat header may need re-rendering. */
@@ -101,7 +99,7 @@ function groupBy(list: SessionInfo[], key: (s: SessionInfo) => string): Map<stri
 }
 
 /** Distinct directories, for the things that address one: the New-session
- *  suggestions and the Files/Terminal pickers. */
+ *  suggestions and the Files picker. */
 export const groupByCwd = (list: SessionInfo[]): Map<string, SessionInfo[]> =>
   groupBy(list, (s) => s.cwd);
 
@@ -126,7 +124,7 @@ const groupName = (key: string, list: SessionInfo[]): string =>
   basename(mainCheckout(key) ?? list[0]?.cwd ?? key);
 
 /** The checkouts in a group, main one first when it is among them: the actions
- *  that take a single directory (files, terminal) mean that one. */
+ *  that take a single directory (files) mean that one. */
 function cwdsOf(key: string, list: SessionInfo[]): string[] {
   const main = mainCheckout(key);
   const cwds = [...new Set(list.map((s) => s.cwd))];
@@ -463,13 +461,6 @@ function projectNode(key: string, list: SessionInfo[]): HTMLElement {
         onSelect: () => {
           closeMenu();
           deps.openFiles(cwd);
-        },
-      },
-      {
-        label: "Terminal here",
-        onSelect: () => {
-          closeMenu();
-          deps.openTerminal(cwd);
         },
       },
       {

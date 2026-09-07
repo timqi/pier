@@ -7,11 +7,8 @@ import { defineConfig, type Plugin } from "vite";
 
 const { version } = createRequire(import.meta.url)("./package.json") as { version: string };
 
-// Vite's chunk warning is one global number, so the lazy ghostty-web chunk
-// (~640 kB, fetched only when a terminal opens) would set the bar for our own
-// code too. Exempt it by name and hold everything else to a real budget.
-const LAZY_VENDOR = /ghostty-web/;
-// The boot chunk is ~160 kB now that the Console views and the highlighter
+// Vite's chunk warning is one global number; hold every chunk to a real
+// budget. The boot chunk is ~160 kB now that the Console views and the highlighter
 // load on first use; a limit that only the old single bundle could reach was
 // a gate nothing would trip for years.
 const OWN_CHUNK_LIMIT_KB = 200;
@@ -20,7 +17,7 @@ const chunkBudget = (): Plugin => ({
   name: "pier:chunk-budget",
   generateBundle(_options, bundle) {
     for (const [file, chunk] of Object.entries(bundle)) {
-      if (chunk.type !== "chunk" || LAZY_VENDOR.test(file)) continue;
+      if (chunk.type !== "chunk") continue;
       const kb = Buffer.byteLength(chunk.code) / 1024;
       if (kb > OWN_CHUNK_LIMIT_KB)
         this.warn(`${file} is ${kb.toFixed(1)} kB, over the ${OWN_CHUNK_LIMIT_KB} kB budget`);

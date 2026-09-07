@@ -1,12 +1,11 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { ALL, AuthStore, requireAuth, registerAuthRoutes, upgradeAuthorized } from "./auth.js";
+import { ALL, AuthStore, requireAuth, registerAuthRoutes} from "./auth.js";
 
 /** A store on a throwaway file, plus the password it printed on first boot. */
 function store(path = join(mkdtempSync(join(tmpdir(), "pier-auth-")), "pier.db")): {
@@ -149,42 +148,6 @@ describe("requireAuth", () => {
       incoming: { socket: { remoteAddress: "127.0.0.1", remotePort: 443, remoteFamily: "IPv4" } },
     });
     expect(proxied.status).toBe(200);
-  });
-});
-
-describe("WebSocket auth", () => {
-  const upgrade = (
-    cookie: string,
-    origin?: string,
-    host = "pier.example",
-    remoteAddress = "127.0.0.1",
-    forwardedHost?: string,
-  ): IncomingMessage => ({
-    headers: { cookie, origin, host, ...(forwardedHost ? { "x-forwarded-host": forwardedHost } : {}) },
-    socket: { remoteAddress },
-  }) as unknown as IncomingMessage;
-
-  it("uses the HTTP boundary's cookie and normalized Origin rules", async () => {
-    const { store: s, password } = store();
-    const a = app(s);
-    const cookie = cookieOf(await login(a, password));
-    // The session id comes back, so the socket knows what revoking it means.
-    const id = s.list()[0]?.id;
-    expect(upgradeAuthorized(s, upgrade(cookie, "https://pier.example"))).toBe(id);
-    expect(upgradeAuthorized(s, upgrade(cookie))).toBe(id); // non-browser client
-    expect(upgradeAuthorized(s, upgrade("pier_session=bad", "https://pier.example")))
-      .toBeUndefined();
-    expect(upgradeAuthorized(s, upgrade(cookie, "https://other.example"))).toBeUndefined();
-    // A loopback TLS proxy's external host is trusted and URL-normalized.
-    expect(upgradeAuthorized(
-      s,
-      upgrade(cookie, "https://pier.example", "127.0.0.1:3141", "::1", "PIER.EXAMPLE:443"),
-    )).toBe(id);
-    // A remote caller cannot make its own forwarded host authoritative.
-    expect(upgradeAuthorized(
-      s,
-      upgrade(cookie, "https://pier.example", "127.0.0.1:3141", "10.0.0.2", "pier.example"),
-    )).toBeUndefined();
   });
 });
 

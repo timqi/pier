@@ -586,7 +586,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         toggle(
           "Enabled",
           ext.source === "binary"
-            ? "Installed into Pier's own bin directory, first on the PATH every session, task and terminal "
+            ? "Installed into Pier's own bin directory, first on the PATH every session and task "
               + "inherits; it registers its own Pi extension. Switching it off uninstalls both."
             : "Loaded from inside Pier — nothing is installed and no update touches your own extensions. "
               + "A session mid-turn keeps the tools it started with; the next message picks this up.",

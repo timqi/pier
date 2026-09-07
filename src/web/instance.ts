@@ -9,7 +9,6 @@ import type { SecretsMode } from "../secrets.js";
 import {
   normalizeModelMenu,
   normalizePublicUrl,
-  normalizeTerminalInitCommand,
   type SettingsStore,
 } from "../settings.js";
 // Type-only, and only for the shape the injected validator answers with:
@@ -239,18 +238,17 @@ export function registerInstanceRoutes(
         publicUrl?: unknown;
         modelMenu?: unknown;
         autoUpdate?: unknown;
-        terminalInitCommand?: unknown;
         customTools?: unknown;
         extension?: unknown;
         tool?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.terminalInitCommand, body.customTools, body.extension, body.tool]
+      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.customTools, body.extension, body.tool]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, terminalInitCommand, customTools, extension or tool required",
+        error: "publicUrl, modelMenu, autoUpdate, customTools, extension or tool required",
       }, 400);
     }
     // Everything is validated before anything is written, and everything is
@@ -273,11 +271,6 @@ export function registerInstanceRoutes(
       const { autoUpdate } = body;
       if (typeof autoUpdate !== "boolean") return refuse("autoUpdate must be a boolean");
       writes.push(() => settings.setAutoUpdate(autoUpdate));
-    }
-    if (body?.terminalInitCommand !== undefined) {
-      const command = normalizeTerminalInitCommand(body.terminalInitCommand);
-      if (command === null) return refuse("terminalInitCommand must be one line of at most 500 characters");
-      writes.push(() => settings.setTerminalInitCommand(command));
     }
     /** The blocks this request declares, or null when it does not touch them.
      *  Adding a tool is declaring it *and* switching it on, so a name declared

@@ -1,6 +1,6 @@
 // Working-directory picker, shared by every surface that asks for a path: the
-// new-session dialog, the IM channel config, the Files view's root chip and
-// the Terminal's. Two shared parts: the folder tree, and the menu of paths the
+// new-session dialog, the IM channel config and the Files view's root chip.
+// Two shared parts: the folder tree, and the menu of paths the
 // surface can already name with the tree one row below it. Both decorate an
 // existing text input rather than replacing it, so form semantics (required,
 // validation) stay where they are and typing a path still works.

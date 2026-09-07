@@ -19,7 +19,6 @@
 // EventSource sends no headers.
 
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
-import type { IncomingMessage } from "node:http";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Hono, MiddlewareHandler } from "hono";
@@ -328,8 +327,7 @@ function noteFailure(client: string): void {
 }
 
 /** Browsers name the source of unsafe requests. Compare hosts rather than
- * schemes because TLS commonly terminates at the reverse proxy. Shared by HTTP
- * and WebSocket so the password boundary cannot disagree with itself. */
+ * schemes because TLS commonly terminates at the reverse proxy. */
 function originMatches(origin: string | undefined, host: string | undefined): boolean {
   if (!origin) return true; // curl and other non-browser clients
   try {
@@ -358,26 +356,6 @@ function sameOrigin(c: Context): boolean {
  *  surface that belongs to one browser (its push subscription) names it the
  *  same way, rather than parsing the cookie a second way. */
 export const sessionIdOf = (c: Context): string => (getCookie(c, COOKIE) ?? "").split(".")[0] ?? "";
-
-/** The same cookie + Origin boundary for a WebSocket upgrade, where no Hono
- *  context exists before the handshake completes. The session id comes back
- *  with the verdict: a socket outlives the request that opened it, so it has
- *  to know which row signing out would close it. */
-export function upgradeAuthorized(store: AuthStore, req: IncomingMessage): string | undefined {
-  const raw = req.headers.cookie
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${COOKIE}=`))
-    ?.slice(COOKIE.length + 1);
-  const session = store.check(raw);
-  if (!session) return undefined;
-  const remote = req.socket.remoteAddress ?? "";
-  const forwardedHeader = req.headers["x-forwarded-host"];
-  const forwarded = loopback(remote) && typeof forwardedHeader === "string"
-    ? forwardedHeader.split(",").at(-1)?.trim()
-    : undefined;
-  return originMatches(req.headers.origin, forwarded || req.headers.host) ? session.id : undefined;
-}
 
 /** Every route, in one place — no per-route opt-in to forget on the next one. */
 export function requireAuth(store: AuthStore): MiddlewareHandler {

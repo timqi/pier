@@ -46,7 +46,7 @@ vi.mock("./turn-activity.js", () => ({
 vi.mock("./views.js", () => ({
   applyRoute: vi.fn(), initViews: vi.fn(), isChatVisible: vi.fn(() => true),
   refreshActivity: vi.fn(), refreshTasks: vi.fn(), refreshRuns: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
-  showConsole: vi.fn(), showFiles: vi.fn(), showRun: vi.fn(), showTerminal: vi.fn(),
+  showConsole: vi.fn(), showFiles: vi.fn(), showRun: vi.fn(),
   syncBar: vi.fn(), toggleFiles: vi.fn(),
 }));
 

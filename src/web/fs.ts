@@ -1,6 +1,6 @@
 // Every path the Console reaches on disk resolves here: the browse/read/mkdir
-// routes, the session attachments server.ts serves, and the pty's cwd all ask
-// the same question, and asked it four different ways until this file existed.
+// routes and the session attachments server.ts serves all ask the same
+// question, and asked it several different ways until this file existed.
 //
 // A `root` is any directory the process can read — sessions work in worktrees
 // and siblings of their cwd, and an owner already past the Console password

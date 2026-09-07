@@ -171,10 +171,6 @@ export function chord(spec: string, run: () => void, unless?: () => boolean): vo
     (ev) => {
       if (!ev.key || ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
       if (meta ? !ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
-      // A surface that owns the keyboard keeps Ctrl chords (Ctrl+K is shell
-      // kill-line), while Cmd remains Pier's application modifier — which is
-      // also how the Terminal toggle closes Terminal from inside it.
-      if (!ev.metaKey && (ev.target as Element | null)?.closest?.("[data-owns-keyboard]")) return;
       if (unless?.()) return;
       ev.preventDefault();
       ev.stopPropagation();

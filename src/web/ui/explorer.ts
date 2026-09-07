@@ -93,9 +93,6 @@ export function createExplorerView(
   session: () => { id: string; cwd: string } | undefined,
   /** Through the router (hash), so Back walks directories too. */
   openDir: (dir: string) => void,
-  /** The other half of this directory: a shell in it. The two overlays ask
-   *  about one folder, so neither makes you name it twice. */
-  openTerminal: (dir: string) => void,
   /** The ✕: leave the view, back to wherever it was opened from. */
   close: () => void,
 ): ConsoleView {
@@ -635,22 +632,16 @@ export function createExplorerView(
         cwd || undefined,
         openDir, // hash first; show() reloads
       );
-    const termBtn = chip("Terminal", "neutral");
-    termBtn.title = "Open a shell in this folder";
-    termBtn.onclick = () => openTerminal(cwd);
     const closeBtn = h("button", "icon-btn", "✕") as HTMLButtonElement;
     closeBtn.type = "button";
     closeBtn.title = "Close Files";
     closeBtn.setAttribute("aria-label", "Close Files");
     closeBtn.onclick = close;
-    // No folder yet → no shell to offer: a chip that answers a click with
-    // nothing is worse than one that isn't there.
-    const tail = cwd ? [termBtn, closeBtn] : [closeBtn];
-    tail[0]!.classList.add("ml-auto");
+    closeBtn.classList.add("ml-auto");
     header.replaceChildren(
       cwdChip,
       h("span", "truncate font-mono text-[11.5px] text-neutral-400", git.branch ? `⎇ ${git.branch}` : "no git"),
-      ...tail,
+      closeBtn,
     );
   }
 

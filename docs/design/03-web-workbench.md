@@ -43,9 +43,8 @@ themselves live there and are not mirrored here:
 `auth.ts` (the password boundary ahead of everything, `/login`, `/logout`,
 `/api/password`), `config.ts` (`/api/config*`, scoped Pi config editing),
 `fs.ts` (`/api/fs/{ls,file,mkdir}` — and the containment check behind every
-path the Console reaches, including `/api/sessions/:id/files` and the pty's
-cwd), `explorer.ts` (`/api/explorer/{git,diff}` for the Files view, read-only),
-`terminal.ts` (`/api/terminal`, the one WebSocket upgrade), `instance.ts`
+path the Console reaches, including `/api/sessions/:id/files`), `explorer.ts`
+(`/api/explorer/{git,diff}` for the Files view, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below), `tasks/routes.ts` and

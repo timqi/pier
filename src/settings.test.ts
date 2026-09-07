@@ -7,7 +7,6 @@ import {
   normalizeExtensions,
   normalizeModelMenu,
   normalizePublicUrl,
-  normalizeTerminalInitCommand,
   normalizeTools,
   SettingsStore,
 } from "./settings.js";
@@ -16,7 +15,6 @@ const EMPTY = {
   publicUrl: "",
   modelMenu: [],
   autoUpdate: false,
-  terminalInitCommand: "",
   extensions: [],
   tools: [],
   customTools: [],
@@ -82,22 +80,6 @@ describe("SettingsStore", () => {
     db.prepare("UPDATE settings SET value = '{\"provider\":1}' WHERE key = 'modelMenu'").run();
     expect(store.get().modelMenu).toEqual([]);
     db.close();
-  });
-});
-
-describe("normalizeTerminalInitCommand", () => {
-  it("keeps one trimmed line", () => {
-    expect(normalizeTerminalInitCommand('  tmux new -As "$(basename $PWD)"  ')).toBe(
-      'tmux new -As "$(basename $PWD)"',
-    );
-    expect(normalizeTerminalInitCommand("   ")).toBe("");
-  });
-
-  it("rejects what a tty would read as more than that line", () => {
-    expect(normalizeTerminalInitCommand("tmux new\nrm -rf /")).toBeNull();
-    expect(normalizeTerminalInitCommand("tmux\tnew")).toBeNull();
-    expect(normalizeTerminalInitCommand("echo \u0007")).toBeNull();
-    expect(normalizeTerminalInitCommand("x".repeat(501))).toBeNull();
   });
 });
 

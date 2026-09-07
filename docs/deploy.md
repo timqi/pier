@@ -24,8 +24,6 @@ you want the unit to say something different.
 ## Prerequisites
 
 - Node 24 or newer (`node:sqlite` is used unflagged).
-- Python 3, `make` and a C/C++ compiler for Microsoft's `node-pty`; its npm
-  package has no Linux prebuild (`apt install python3 build-essential` on Debian/Ubuntu).
 - A user-writable global npm prefix. The updater runs as you, so an initial
   install that needed `sudo npm install -g` cannot later update itself.
 - The `sqlite3` CLI is optional, for the off-machine backup and password steps
@@ -178,7 +176,7 @@ journalctl --user -u pier --since -1h | grep 'tasks:'   # one area
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
 `lark`, `channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `drain`,
-`secrets`, `settings`, `credentials`, `update`, `tools`, `terminal`, `push`,
+`secrets`, `settings`, `credentials`, `update`, `tools`, `push`,
 `web`, `web.providers`, `pier` — so an area is a grep
 and a level is a `-p`. The level reaches journald as a syslog priority prefix, which Pier
 emits only when systemd says the output is a journal (`$JOURNAL_STREAM`); run
@@ -257,7 +255,7 @@ has one shared 10-second bound regardless of how many sessions are stuck.
 
 `pier tools sync` converges the command-line tools switched on in Console →
 Settings — they install into `~/.pier/tools/bin`, which the service puts first
-on the PATH every session, task and terminal inherits. Normally a switch runs
+on the PATH every session and task inherits. Normally a switch runs
 it for you as a task; typing it is for a machine that was offline when one was
 flipped. One sync runs at a time per machine: an overlapping one waits for the
 lock (and converges on the switches as they stand when its turn comes) instead
@@ -421,9 +419,7 @@ elsewhere, pick a tunnel rather than a wider bind:
   `X-Forwarded-For`; Pier uses the external host for write-origin checks and
   counts login failures per forwarded client. Its session cookie is marked
   `Secure` when a loopback proxy reports `X-Forwarded-Proto: https` (the header
-  is ignored from anywhere else, where it is a header the client wrote). The proxy must
-  pass WebSocket upgrades for `/api/terminal` (Caddy does automatically;
-  nginx needs its usual HTTP/1.1 `Upgrade`/`Connection` forwarding).
+  is ignored from anywhere else, where it is a header the client wrote).
 
 ## Backups
 
