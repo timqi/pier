@@ -218,17 +218,21 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   if (run.state === "queued" || run.state === "running") {
     if (run.context.definition.action.type === "agent") {
       const steer = button("Steer");
-      steer.onclick = () => void control(promptRun("Steer run", `/api/task-runs/${run.id}/steer`, {
+      steer.onclick = () => void control(promptRun(steer, "Steer run", `/api/task-runs/${run.id}/steer`, {
         mode: "steer", sourceSessionId: deps.currentSessionId(),
       }, "Run control failed"), deps);
       actions.append(steer);
     }
     const cancel = button("Stop run");
-    cancel.onclick = () => void deps.mutate(`/api/task-runs/${run.id}/cancel`);
+    // Stop is one click from a running agent's end, next to controls that only
+    // add to it — the ask is what tells the two apart.
+    cancel.onclick = () => {
+      if (window.confirm(`Stop this run of "${run.context.definition.name}"?`)) void deps.mutate(`/api/task-runs/${run.id}/cancel`);
+    };
     actions.append(cancel);
   } else if (run.context.definition.action.type === "agent" && run.targetSessionId) {
     const resume = button("Continue");
-    resume.onclick = () => void control(promptRun("Continue run", `/api/task-runs/${run.id}/resume`, {
+    resume.onclick = () => void control(promptRun(resume, "Continue run", `/api/task-runs/${run.id}/resume`, {
       sourceSessionId: deps.currentSessionId(),
     }, "Run control failed"), deps, true);
     actions.append(resume);
@@ -236,7 +240,7 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   const decision = messages.find((message) => message.id === run.pendingDecisionId);
   if (decision && decision.toSessionId === deps.currentSessionId()) {
     const reply = button("Reply to decision");
-    reply.onclick = () => void control(promptRun("Reply to decision", `/api/task-messages/${decision.id}/reply`, {
+    reply.onclick = () => void control(promptRun(reply, "Reply to decision", `/api/task-messages/${decision.id}/reply`, {
       sourceSessionId: deps.currentSessionId(),
     }, "Reply failed"), deps);
     actions.append(reply);

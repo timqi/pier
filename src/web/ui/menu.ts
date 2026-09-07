@@ -1,7 +1,9 @@
 // Anchored popover: one open at a time, closed by outside pointerdown, Esc,
-// scroll or resize. Used by the session context menu and the model picker.
+// scroll or resize. Used by the session context menu, the model picker and the
+// one-line ask a run control needs.
 
 import { h } from "./dom.js";
+import { button, textarea } from "./form.js";
 
 export interface MenuItem {
   label: string;
@@ -11,6 +13,10 @@ export interface MenuItem {
 }
 
 let panel: HTMLElement | null = null;
+/** What a dismissal owes an awaiting caller — Esc and an outside click end a
+ *  prompt as much as its own Cancel does, and a promise nobody settles is a
+ *  click that did nothing without saying so. */
+let dismissed: (() => void) | null = null;
 
 function onOutside(ev: Event): void {
   if (panel && !panel.contains(ev.target as Node)) closeMenu();
@@ -38,6 +44,45 @@ export function closeMenu(): void {
   window.removeEventListener("resize", closeMenu);
   panel.remove();
   panel = null;
+  const owed = dismissed;
+  dismissed = null;
+  owed?.();
+}
+
+/**
+ * Ask for a message under the control that asked for it, and resolve with it
+ * (or null if the reader backed out). `window.prompt` is a single line in the
+ * browser's own chrome, styled like nothing else in the Console, and it blocks
+ * the page while a run keeps streaming behind it.
+ */
+export function promptText(anchor: HTMLElement, title: string, action: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      closeMenu();
+    };
+    const area = textarea("", 3);
+    const send = button(action, true);
+    const cancel = button("Cancel");
+    send.onclick = () => finish(area.value.trim() || null);
+    cancel.onclick = () => finish(null);
+    // Enter sends, Shift+Enter is a newline — the composer's own contract, so a
+    // steer is typed the way every other message in this app is.
+    area.onkeydown = (ev) => {
+      if (ev.key !== "Enter" || ev.shiftKey) return;
+      ev.preventDefault();
+      finish(area.value.trim() || null);
+    };
+    openPanel(anchor, h("div", "flex w-[min(26rem,calc(100vw-1.5rem))] flex-col gap-2 px-2.5 py-2",
+      h("p", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title),
+      area,
+      h("div", "flex justify-end gap-2", cancel, send)));
+    dismissed = () => finish(null);
+    area.focus();
+  });
 }
 
 /** Where the last panel was placed, and what it was placed against.

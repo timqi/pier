@@ -2,6 +2,8 @@
 // write, the sentence a failure shows, the scheduling of a re-read. Nine
 // modules had grown their own copy of the method/headers/body triple.
 
+import { promptText } from "./menu.js";
+
 /**
  * One list request in flight at a time; anything asked for during one runs
  * after it, so a burst of workspace events costs two fetches, not twenty.
@@ -117,7 +119,8 @@ export async function refused(
 }
 
 /**
- * Ask for one line of text and post it to a run-control endpoint.
+ * Ask for a message under the control that was clicked and post it to a
+ * run-control endpoint.
  *
  * Both surfaces that steer a subagent — the chat's background-run row and the
  * Tasks console — had grown their own copy of this, with the first two
@@ -125,13 +128,14 @@ export async function refused(
  * and fails at runtime.
  */
 export async function promptRun(
+  anchor: HTMLElement,
   title: string,
   url: string,
   fields: Record<string, unknown>,
   fallback: string,
 ): Promise<Sent> {
-  const message = window.prompt(title);
-  if (!message?.trim()) return { sent: false };
+  const message = await promptText(anchor, title, title.split(" ")[0]!);
+  if (!message) return { sent: false };
   try {
     const res = await sendJson(url, { message, ...fields });
     return { sent: true, ...(res.ok ? { response: res } : { error: await failure(res, fallback) }) };

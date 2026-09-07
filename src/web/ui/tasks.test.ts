@@ -66,6 +66,9 @@ vi.mock("./form.js", () => ({
   select: (_options: unknown, value: string) => { const el = new Element("select"); el.value = value; return el; },
 }));
 vi.mock("./task-editor.js", () => ({ openTaskEditor: vi.fn() }));
+// The ask itself is an anchored panel (menu.ts); these tests are about what the
+// views do with the answer.
+vi.mock("./menu.js", () => ({ promptText: vi.fn(async () => "continue please") }));
 
 import { createTasksView } from "./tasks.js";
 import { createRunsView } from "./runs.js";
@@ -107,7 +110,7 @@ beforeEach(async () => {
     winnerRunId: null, callbackState: "delivered", callbackError: null, callbackAttempts: 1, callbackNextAttemptAt: null,
     createdAt: 1, finishedAt: 2 };
   vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
-  vi.stubGlobal("window", { prompt: vi.fn(() => "continue please") });
+  vi.stubGlobal("window", { confirm: vi.fn(() => true) });
   fetcher = vi.fn(async (url: string) => {
     if (url.startsWith("/api/tasks?")) return Response.json(url.includes("archived") ? [] : [{ ...task, lastRun: run }]);
     if (url.startsWith("/api/task-runs?")) return Response.json(page);
@@ -234,6 +237,15 @@ describe("Runs", () => {
     run.targetSessionId = "child"; run.state = "succeeded"; runsView.refresh(); await settled();
     expect(button("Stop run")).toBeUndefined(); await click("Continue");
     expect(openRuns).toHaveBeenLastCalledWith({}, "continued-run");
+  });
+  it("asks before stopping a run, and stops it once the answer is yes", async () => {
+    openRuns({}, run.id); await settled();
+    const confirm = window.confirm as unknown as ReturnType<typeof vi.fn>;
+    confirm.mockReturnValueOnce(false);
+    await click("Stop run");
+    expect(fetcher).not.toHaveBeenCalledWith("/api/task-runs/run-a/cancel", expect.anything());
+    await click("Stop run");
+    expect(fetcher).toHaveBeenCalledWith("/api/task-runs/run-a/cancel", expect.objectContaining({ method: "POST" }));
   });
   it("matches the actual unresolved decision and only offers reply to its supervisor", async () => {
     run.pendingDecisionId = "question";

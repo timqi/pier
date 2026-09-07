@@ -187,17 +187,17 @@ async function post(url: string, fallback: string): Promise<void> {
   if (error) turns.append("error", error);
 }
 
-async function replyToDecision(messageId: string): Promise<void> {
+async function replyToDecision(anchor: HTMLElement, messageId: string): Promise<void> {
   const id = deps.sessionId();
   if (!id) return;
   const url = `/api/task-messages/${messageId}/reply`;
-  await say(promptRun("Reply to subagent", url, { sourceSessionId: id }, "reply failed"));
+  await say(promptRun(anchor, "Reply to subagent", url, { sourceSessionId: id }, "reply failed"));
 }
 
 /** The "Reply" affordance on a decision message (rendered by chat.ts). */
 export function decisionReplyBtn(messageId: string): HTMLElement {
   const reply = h("button", "flex-none text-[11px] font-semibold normal-case text-cyan-800 hover:underline", "Reply");
-  reply.onclick = () => void replyToDecision(messageId);
+  reply.onclick = () => void replyToDecision(reply, messageId);
   return reply;
 }
 
@@ -232,15 +232,18 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     const steer = h("button", "hover:underline", "Steer");
     const steerBody = { mode: "steer", sourceSessionId: deps.sessionId() };
     steer.onclick = () =>
-      void say(promptRun("Steer subagent", `${runUrl}/steer`, steerBody, "could not steer the run"));
+      void say(promptRun(steer, "Steer subagent", `${runUrl}/steer`, steerBody, "could not steer the run"));
     const cancel = h("button", "hover:underline", "Stop");
-    cancel.onclick = () => void post(`${runUrl}/cancel`, "could not stop the run");
+    // Sits a few pixels from Steer, and ends the run rather than adding to it.
+    cancel.onclick = () => {
+      if (window.confirm(`Stop "${run.taskName}"?`)) void post(`${runUrl}/cancel`, "could not stop the run");
+    };
     controls.append(steer, cancel);
   } else if (run.targetSessionId && run.sessionMode !== null) {
     const resume = h("button", "hover:underline", "Continue");
     const body = { sourceSessionId: deps.sessionId() };
     resume.onclick = () =>
-      void say(promptRun("Continue subagent", `${runUrl}/resume`, body, "could not continue"));
+      void say(promptRun(resume, "Continue subagent", `${runUrl}/resume`, body, "could not continue"));
     controls.append(resume);
   }
   if (controls.childElementCount) head.append(controls);
