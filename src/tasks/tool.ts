@@ -227,7 +227,12 @@ export async function handleTaskTool(
     const task = draft
       ? await resolveDraft(definitions, draft, active, callerSessionId)
       : resolveStored(definitions, input.task_id, active);
-    const sessionMode = input.session_mode === "fresh" ? input.session_mode : undefined;
+    // Same as the HTTP route: a named mode the schema no longer offers is
+    // answered, not quietly swapped for the definition's own policy.
+    if (input.session_mode !== undefined && input.session_mode !== "fresh") {
+      throw new Error(`unsupported session_mode: ${String(input.session_mode)}`);
+    }
+    const sessionMode = input.session_mode;
     let callbackSessionId: string | null = input.callback === "none" ? null : callerSessionId;
     if (!active && callbackSessionId && typeof input.callback_session_id === "string") {
       callbackSessionId = requiredString(input.callback_session_id, "callback_session_id");

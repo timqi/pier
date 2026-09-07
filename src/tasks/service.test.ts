@@ -968,6 +968,11 @@ describe("task service", () => {
     expect(run.state).toBe("failed");
     expect(run.error).toContain("removed fork session mode");
     expect(factory.create).not.toHaveBeenCalled();
+
+    // Naming the mode as an override is answered too: dropping it would run
+    // the definition's own policy under the caller's word for something else.
+    await expect(service.tool({ operation: "run", task_id: legacy.id, session_mode: "fork" }, "s1"))
+      .rejects.toThrow("unsupported session_mode");
   });
 
   it("allows concurrent interactive fresh runs of one role", async () => {
@@ -1567,6 +1572,16 @@ describe("task HTTP routes", () => {
     });
     expect(invalid.status).toBe(400);
     expect(await invalid.text()).toContain("agent session policy required");
+
+    // Nor as a run-time override: silently ignoring it would run the stored
+    // policy — on a reuse definition, into a live session.
+    const overridden = await app.request(`/api/tasks/${task.id}/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionMode: "fork", sourceSessionId: "owner" }),
+    });
+    expect(overridden.status).toBe(400);
+    expect(await overridden.text()).toContain("unsupported sessionMode");
   });
 });
 

@@ -192,10 +192,6 @@ export class TaskService {
     return this.definitions.archive(id, by);
   }
 
-  sessionExists(sessionId: string): Promise<boolean> {
-    return this.definitions.sessionExists(sessionId);
-  }
-
   listRuns(taskId: string, limit = 50, offset = 0): TaskRun[] {
     this.get(taskId);
     return this.store.listRuns(taskId, Math.min(Math.max(limit, 1), 200), Math.max(offset, 0));

@@ -288,7 +288,9 @@ export function createTasksView(
     if (task.action.type === "agent") {
       values.push(["Session policy", task.action.session.mode]);
       if (task.action.session.mode === "reuse") values.push(["Session", task.action.session.sessionId]);
-      if (task.action.session.mode === "fresh") values.push(["Directory", task.action.session.cwd]);
+      // By shape: a legacy `fork` definition carries a directory the details
+      // view would otherwise stop showing.
+      if ("cwd" in task.action.session) values.push(["Directory", task.action.session.cwd]);
       if (task.action.launch?.model) values.push(["Model", `${task.action.launch.model.provider}/${task.action.launch.model.id}`]);
       if (task.action.launch?.thinking) values.push(["Thinking", task.action.launch.thinking]);
       values.push(["Prompt", task.action.prompt]);

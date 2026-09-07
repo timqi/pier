@@ -111,7 +111,10 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
       // rather than left blank on a control showing nothing.
       agentMode = select([["Reuse session", "reuse"], ["Fresh child per run", "fresh"]], saved?.session.mode === "reuse" ? "reuse" : "fresh");
       agentSession = select(choices, savedSessionId || choices[0]?.[1] || "");
-      const savedCwd = saved?.session.mode === "fresh" ? saved.session.cwd : "";
+      // Read by shape, not by mode: a legacy `fork` definition stored a
+      // directory too, and substituting an unrelated session's cwd would save
+      // a child into the wrong tree.
+      const savedCwd = saved && "cwd" in saved.session ? saved.session.cwd ?? "" : "";
       agentCwd = input(savedCwd || sessions[0]?.cwd || "");
       agentPrompt = textarea(saved?.prompt ?? "", 6);
       agentThinking = select([["Project default", ""], ["Off", "off"], ["Low", "low"], ["Medium", "medium"], ["High", "high"], ["Extra high", "xhigh"]], saved?.launch?.thinking ?? "");
