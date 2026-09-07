@@ -119,14 +119,18 @@ export function runHead(o: RunHead): HTMLElement {
     effort.title = "Reasoning effort";
     meta.append(effort);
   }
-  const run = h("button", "flex-none hover:underline", `run ${shortId(o.runId)}`);
-  run.title = o.runId;
+  // The ids carry no word: a mono 8-char id in the run's own grey opens the
+  // run, in indigo the session — the colour boards.ts already spends on a
+  // session chip. What each one is stays in its tooltip, where a reader who
+  // does not know the convention yet looks anyway.
+  const run = h("button", "flex-none hover:underline", shortId(o.runId));
+  run.title = `Run ${o.runId}`;
   run.onclick = () => deps.showRun(o.runId);
   meta.append(run);
   if (o.sessionId && o.sessionId !== "console") {
     const id = o.sessionId;
-    const session = h("button", "flex-none hover:underline", `session ${shortId(id)}`);
-    session.title = `Open ${id}`;
+    const session = h("button", "flex-none text-indigo-600 hover:underline", shortId(id));
+    session.title = `Open session ${id}`;
     session.onclick = () => deps.select(id);
     meta.append(session);
   }
