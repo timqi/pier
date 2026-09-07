@@ -165,8 +165,10 @@ html {
   body:not([data-rail="closed"]) #rail-toggle .attention {
     display: none;
   }
+  /* Direct children only: Automation's inner views sit under its header and
+     must not indent their own toolbars a second time. */
   body[data-rail="closed"]
-    :is(#chat-header, main section > header:first-child, main section > div:first-child > header:first-child) {
+    :is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
     padding-left: 2.75rem;
   }
 }
@@ -251,7 +253,7 @@ html {
   .icon-btn {
     @apply flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700;
   }
-  /* Console tab strip (Activity, Tasks). Desktop keeps the view's tabs and its
+  /* Console tab strip (Settings, Automation). Desktop keeps the view's tabs and its
      right-hand control group on one line; below md the right group takes
      `w-full` and this wraps to give it a line of its own, within thumb reach. */
   .tabstrip {

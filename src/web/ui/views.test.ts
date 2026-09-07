@@ -1,16 +1,17 @@
 // Hash routes and first-level entries, without loading chat or a browser runtime.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
-  const elements = new Map<string, { onclick?: () => void; open?: boolean; ontoggle?: () => void; textContent: string; classList: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn>; toggle: ReturnType<typeof vi.fn> } }>();
+  const elements = new Map<string, { onclick?: () => void; open?: boolean; ontoggle?: () => void; textContent: string; replaceChildren: ReturnType<typeof vi.fn>; classList: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn>; toggle: ReturnType<typeof vi.fn> } }>();
   const element = (id: string) => {
     let el = elements.get(id);
-    if (!el) { el = { textContent: "", classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() } }; elements.set(id, el); }
+    if (!el) { el = { textContent: "", replaceChildren: vi.fn(), classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() } }; elements.set(id, el); }
     return el;
   };
   const view = () => ({ show: vi.fn(), hide: vi.fn(), refresh: vi.fn(), visible: true });
-  return { element, elements, tasks: view(), runs: view(), activity: view(), bar: vi.fn() };
+  return { element, elements, tasks: view(), runs: view(), activity: view(), bar: vi.fn(), pill: vi.fn() };
 });
 vi.mock("./dom.js", () => ({ $: mocks.element, h: vi.fn(), consoleView: vi.fn() }));
+vi.mock("./form.js", () => ({ pill: mocks.pill }));
 vi.mock("./chat.js", () => ({ turnsPane: mocks.element("turns") }));
 vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
 vi.mock("./session-header.js", () => ({ renderHeader: vi.fn() }));
@@ -20,6 +21,7 @@ vi.mock("./shortcut.js", () => ({ shortcut: vi.fn() }));
 vi.mock("./tasks.js", () => ({ createTasksView: () => mocks.tasks }));
 vi.mock("./runs.js", () => ({ createRunsView: () => mocks.runs }));
 vi.mock("./activity.js", () => ({ createActivityView: () => mocks.activity }));
+vi.mock("./boards.js", () => ({ createBoardsView: () => mocks.activity }));
 const settled = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 let views: typeof import("./views.js");
 beforeEach(async () => {
@@ -32,16 +34,30 @@ beforeEach(async () => {
   views.initViews({ sessions: () => [], loadSessions: async () => {}, currentId: () => null, currentSession: () => undefined, select: vi.fn(), maybeAckRead: vi.fn() });
 });
 afterEach(() => vi.unstubAllGlobals());
-it("keeps Tasks, Runs and Activity independent in sidebar and mobile title", async () => {
+it("hosts Tasks, Runs and Activity as tabs of one Automation entry", async () => {
+  const pane = mocks.element("#automation-view");
+  const tabs = mocks.element("#automation-tabs");
   for (const name of ["tasks", "runs", "activity"] as const) {
-    mocks.element(`#open-${name}`).onclick!(); await settled();
+    views.showConsole(name); await settled();
     expect(location.hash).toBe(`#/${name}`);
-    expect(mocks.bar).toHaveBeenLastCalledWith(name[0]!.toUpperCase() + name.slice(1), false);
-    for (const other of ["tasks", "runs", "activity"]) expect(mocks.element(`#open-${other}`).classList.toggle).toHaveBeenLastCalledWith("bg-indigo-50", name === other);
+    // One title on the mobile bar, one lit sidebar row, whichever tab is open.
+    expect(mocks.bar).toHaveBeenLastCalledWith("Automation", false);
+    expect(mocks.element("#open-tasks").classList.toggle).toHaveBeenLastCalledWith("bg-indigo-50", true);
+    expect(pane.classList.toggle).toHaveBeenCalledWith("hidden", false);
+    // The strip redraws with the open view's pill active and the others as links.
+    const drawn = mocks.pill.mock.calls.slice(-3).map(([label, active]) => `${label}:${active}`);
+    expect(drawn).toEqual(["Tasks", "Runs", "Activity"].map((label) => `${label}:${label.toLowerCase() === name}`));
+    expect(tabs.replaceChildren).toHaveBeenCalled();
   }
-  mocks.element("#open-tasks").onclick!(); await settled();
-  mocks.element("#open-activity").onclick!(); await settled();
-  expect(location.hash).toBe("#/activity");
+  // A pill click routes: Back walks tabs like any other view.
+  const [, , openRuns] = mocks.pill.mock.calls.at(-2)!;
+  (openRuns as () => void)(); await settled();
+  expect(location.hash).toBe("#/runs");
+  // Boards is its own entry: the hub hides and its row goes dark.
+  mocks.element("#open-boards").onclick!(); await settled();
+  expect(mocks.element("#open-tasks").classList.toggle).toHaveBeenLastCalledWith("bg-indigo-50", false);
+  expect(pane.classList.toggle).toHaveBeenLastCalledWith("flex", false);
+  expect(mocks.bar).toHaveBeenLastCalledWith("Boards", false);
 });
 it("round-trips run deep links with standard query filters and Back", async () => {
   views.showRuns({ taskId: "task/a?b", state: "failed" }, "run/a"); await settled();

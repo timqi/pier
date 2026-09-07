@@ -6,9 +6,9 @@
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
 import { coalesce, failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { button, select, tabButton } from "./form.js";
+import { button, CONTROL, empty, segmented, select, toolbar } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
-import { actionSummary, dateTime, definitionView, renderRuns, runDuration, runLabel, triggerSummary } from "./task-runs.js";
+import { actionSummary, dateTime, definitionView, renderRuns, runBadge, runDuration, taskBadge, triggerSummary } from "./task-runs.js";
 
 interface TaskRow extends TaskDefinition {
   lastRun: TaskRun | null;
@@ -92,20 +92,10 @@ export function createTasksView(
     },
   };
 
-  function header(title: string | HTMLElement, actions: HTMLElement[]): HTMLElement {
-    const el = h("header", "flex min-h-10 flex-none flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2");
-    // A plain string title repeats the mobile top bar; a breadcrumb element
-    // (the task detail page) does not, so only the former hides below md.
-    el.append(
-      typeof title === "string" ? h("span", "truncate font-medium max-md:hidden", title) : title,
-    );
-    if (actions.length) {
-      const box = h("div", "ml-auto flex flex-wrap items-center gap-2 max-md:w-full");
-      box.append(...actions);
-      el.append(box);
-    }
-    return el;
-  }
+  /** What names the page on the left (the detail's breadcrumb, the list's
+   *  filters), its actions on the right. */
+  const bar = (lead: HTMLElement[], actions: HTMLElement[]): HTMLElement =>
+    toolbar(...lead, h("div", "ml-auto flex flex-wrap items-center gap-2 max-md:w-full", ...actions));
 
   function selectTask(id: string): void {
     selectedId = id;
@@ -122,7 +112,7 @@ export function createTasksView(
   function renderList(): void {
     const create = button("New task", true);
     create.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps));
-    const filterBox = h("div", "flex flex-none flex-wrap items-center gap-3 border-b border-neutral-200 px-4 py-2");
+    const filters: HTMLElement[] = [];
     const addFilter = (label: string, options: [string, string][], value: string, change: (value: string) => void): void => {
       const input = select(options, value);
       input.setAttribute("aria-label", label);
@@ -132,20 +122,20 @@ export function createTasksView(
         listScroll = 0;
         void load();
       };
-      filterBox.append(h("label", "flex items-center gap-2 text-[12px] text-neutral-500", label, input));
+      filters.push(input);
     };
-    addFilter("Status", [["Current", "active"], ["Archived", "archived"]], filter, (v) => { filter = v; });
-    const searchInput = h("input", "min-w-0 rounded border border-neutral-200 px-2 py-1 text-[13px]") as HTMLInputElement;
+    const searchInput = h("input", `${CONTROL} !w-48 max-md:!w-full`) as HTMLInputElement;
     searchInput.type = "search";
     searchInput.placeholder = "Search tasks";
     searchInput.setAttribute("aria-label", "Search tasks");
     searchInput.value = search;
     searchInput.oninput = () => { search = searchInput.value; drawRows(); };
-    filterBox.append(searchInput);
+    filters.push(searchInput);
+    addFilter("Status", [["Current", "active"], ["Archived", "archived"]], filter, (v) => { filter = v; });
     addFilter("Trigger", [["All triggers", "all"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"]], trigger, (v) => { trigger = v; });
     const table = document.createElement("table");
     table.className = "w-full table-fixed text-left text-[12.5px]";
-    table.innerHTML = `<thead class="sticky top-0 bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
+    table.innerHTML = `<thead class="sticky top-0 bg-neutral-50 text-[10.5px] uppercase tracking-wide text-neutral-400 shadow-[inset_0_-1px_0_var(--color-neutral-200)]"><tr>
       <th class="w-[42%] px-4 py-2 font-semibold md:w-[24%]">Name</th><th class="hidden w-[10%] px-2 py-2 font-semibold md:table-cell">Action</th>
       <th class="hidden w-[23%] px-2 py-2 font-semibold md:table-cell">Trigger</th><th class="hidden w-[17%] px-2 py-2 font-semibold md:table-cell">Next</th>
       <th class="px-2 py-2 font-semibold md:w-[14%]">Last result</th><th class="w-[6rem] px-2 py-2 font-semibold"></th></tr></thead>`;
@@ -154,36 +144,37 @@ export function createTasksView(
     const drawRows = (): void => {
       const matching = rows.filter((task) => `${task.name} ${task.description ?? ""}`.toLowerCase().includes(search.toLowerCase()));
       body.replaceChildren(...matching.map(taskRow));
-      empty.classList.toggle("hidden", matching.length > 0);
+      none.classList.toggle("hidden", matching.length > 0);
     };
     table.append(body);
-    const empty = h("p", "p-4 text-[13px] text-neutral-500", "No matching tasks.");
-    const pane = h("div", "min-h-0 flex-1 overflow-auto", table, empty);
+    const none = h("div", "p-4", empty("No matching tasks."));
+    const pane = h("div", "min-h-0 flex-1 overflow-auto", table, none);
     drawRows();
     pane.onscroll = () => { listScroll = pane.scrollTop; };
-    root.replaceChildren(header("Tasks", [create]), filterBox, pane);
+    root.replaceChildren(bar(filters, [create]), pane);
     pane.scrollTop = listScroll;
   }
 
   function taskRow(task: TaskRow): HTMLElement {
     const tr = document.createElement("tr");
-    tr.className = "cursor-pointer border-b border-neutral-100 hover:bg-neutral-50";
+    tr.className = "cursor-pointer border-b border-neutral-100 transition-colors hover:bg-neutral-50";
     tr.onclick = () => openTask(task.id);
-    const state = task.archived ? "Archived" : task.trigger.type === "manual" ? "Manual" : task.enabled ? "Enabled" : "Paused";
     const name = button(task.name);
-    name.className = "block w-full cursor-pointer truncate text-left font-medium";
+    name.className = "min-w-0 cursor-pointer truncate text-left font-medium text-neutral-800";
     name.title = task.name;
-    tr.append(h("td", "truncate py-2.5 pl-4 pr-2", name,
-      h("div", "truncate text-[11px] text-neutral-400", state),
+    tr.append(h("td", "py-2.5 pl-4 pr-2",
+      // Wraps so a phone shows the whole name with the badge under it.
+      h("div", "flex flex-wrap items-center gap-x-2 gap-y-1", name, taskBadge(task)),
+      h("div", "truncate text-[11px] text-neutral-400", task.description || ""),
       h("div", "truncate text-[11px] text-neutral-400 md:hidden", triggerSummary(task))));
     for (const text of [actionSummary(task), triggerSummary(task), dateTime(task.nextRunAt)]) {
-      const cell = h("td", "hidden truncate px-2 py-2.5 md:table-cell", text);
+      const cell = h("td", "hidden truncate px-2 py-2.5 text-neutral-600 md:table-cell", text);
       cell.title = text;
       tr.append(cell);
     }
     tr.append(h("td", "px-2 py-2.5",
-      h("div", "break-words", task.lastRun ? runLabel(task.lastRun) : "-"),
-      h("div", "text-[11px] text-neutral-400", task.lastRun ? runDuration(task.lastRun) : "")));
+      task.lastRun ? h("div", "flex", runBadge(task.lastRun)) : h("div", "text-neutral-400", "–"),
+      h("div", "mt-0.5 font-mono text-[11px] text-neutral-400", task.lastRun ? runDuration(task.lastRun) : "")));
     const run = button("Run now");
     run.disabled = task.archived;
     run.onclick = (event) => {
@@ -209,9 +200,9 @@ export function createTasksView(
     // "Tasks › <name>" breadcrumb: names the task being viewed and doubles
     // as the way back to the list (replaces the old Back button).
     const listLink = button("Tasks");
-    listLink.className = "cursor-pointer text-neutral-500 hover:underline";
+    listLink.className = "cursor-pointer text-neutral-500 hover:text-neutral-800 hover:underline";
     listLink.onclick = () => openTask();
-    const crumb = h("span", "flex min-w-0 items-center gap-1.5", listLink, h("span", "text-neutral-400", "›"), h("span", "truncate font-medium", task.name));
+    const crumb = h("span", "flex min-w-0 items-center gap-2", listLink, h("span", "text-neutral-400", "›"), h("span", "truncate font-medium", task.name), taskBadge(task));
     const run = button("Run now", true);
     run.disabled = task.archived;
     run.onclick = () => void runTask(task.id);
@@ -225,21 +216,21 @@ export function createTasksView(
     archive.disabled = task.archived || task.action.type === "system";
     archive.onclick = () => void mutate(`/api/tasks/${task.id}/archive`);
 
-    const tabs = h("div", "flex flex-none gap-1 border-b border-neutral-200 px-4 py-2");
+    const tabs = toolbar();
     const pane = h("div", "min-h-0 flex-1 overflow-auto");
     pane.dataset.taskDetail = id;
+    const allRuns = button("All runs");
+    allRuns.onclick = () => openRuns({ taskId: task.id });
     const drawPane = (): void => {
       tabs.replaceChildren(
-        tabButton(`Recent runs (${runs.length})`, detailTab === "runs", () => { detailTab = "runs"; drawPane(); }),
-        tabButton("Definition", detailTab === "definition", () => { detailTab = "definition"; drawPane(); }),
+        segmented<typeof detailTab>([[`Recent runs (${runs.length})`, "runs"], ["Definition", "definition"]], detailTab, (next) => { detailTab = next; drawPane(); }),
+        h("span", "ml-auto", allRuns),
       );
       if (detailTab === "runs") renderRuns(pane, runs, (id) => openRuns({}, id), runsScroll);
       else { pane.onscroll = null; pane.replaceChildren(definitionView(task, openSession)); }
     };
     const previousScroll = previousPane?.scrollTop ?? 0;
-    const allRuns = button("All runs");
-    allRuns.onclick = () => openRuns({ taskId: task.id });
-    root.replaceChildren(header(crumb, [run, ...(task.trigger.type === "manual" ? [] : [pause]), edit, archive, allRuns]), tabs, pane);
+    root.replaceChildren(bar([crumb], [run, ...(task.trigger.type === "manual" ? [] : [pause]), edit, archive]), tabs, pane);
     drawPane();
     pane.scrollTop = previousScroll;
   }

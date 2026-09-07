@@ -1,6 +1,7 @@
 // Chat ↔ Console switching and the hash router. Owns the Console views
-// (Tasks, Runs, Activity, Boards, Settings — which hosts Providers, Models,
-// Channels and Agent files as tabs), which chat elements hide while one is
+// (Automation — which hosts Tasks, Runs and Activity as tabs — Boards, and
+// Settings — which hosts Providers, Models, Channels and Agent files as
+// tabs), which chat elements hide while one is
 // open, and the address bar's copy of "where am I" — so refresh, bookmarks
 // and back/forward land where the user was. main.ts owns sessions and
 // selection and feeds them in through init.
@@ -9,6 +10,7 @@ import type { ActivityView } from "./activity.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
+import { pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { groupByCwd, type SessionInfo } from "./sidebar.js";
@@ -69,6 +71,26 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   terminal: "Terminal",
 };
 
+// Three views, one page: they share a sidebar row, a title and a tab strip,
+// and each keeps its own route so deep links (#/runs/<id>, #/tasks/<id>)
+// and Back still name the tab.
+const AUTOMATION: readonly ConsoleName[] = ["tasks", "runs", "activity"];
+const AUTOMATION_LABEL = "Automation";
+const automationPane = $("#automation-view");
+const automationTabs = $("#automation-tabs");
+/** The sidebar row a view lights up: the hub's for its tabs, its own otherwise. */
+const sidebarEntry = (name: ConsoleName): ConsoleName => (AUTOMATION.includes(name) ? "tasks" : name);
+
+function syncAutomation(name: ConsoleName | null): void {
+  const open = name !== null && AUTOMATION.includes(name);
+  automationPane.classList.toggle("hidden", !open);
+  automationPane.classList.toggle("flex", open);
+  if (!open) return;
+  automationTabs.replaceChildren(
+    ...AUTOMATION.map((tab) => pill(CONSOLE_LABELS[tab], tab === name, () => showConsole(tab))),
+  );
+}
+
 // Workspace events fan into whichever of these views is open — and into none
 // while a view has never been opened: its first show() loads what it missed.
 export const refreshTasks = (taskId?: string): void => tasksView?.refresh(taskId);
@@ -78,7 +100,7 @@ export const refreshActivity = (): void => activityView?.refresh();
 /** Mobile top bar mirrors the route: a Console view's name, or the chat title
  *  plus its ⋯ menu (the chat header itself is hidden below md). */
 export function syncBar(): void {
-  if (openName) setBarTitle(CONSOLE_LABELS[openName], false);
+  if (openName) setBarTitle(AUTOMATION.includes(openName) ? AUTOMATION_LABEL : CONSOLE_LABELS[openName], false);
   else setBarTitle(chatTitle.textContent ?? "", deps.currentSession() !== undefined);
 }
 
@@ -96,7 +118,8 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
-  for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === name);
+  for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === sidebarEntry(name));
+  syncAutomation(name);
   syncBar();
   void openView(name, arg, query, ++openRequest);
 }
@@ -175,6 +198,7 @@ export function showChat(): void {
   openName = null;
   for (const view of views.values()) view.hide();
   for (const btn of consoleBtns.values()) btn.classList.remove("bg-indigo-50");
+  syncAutomation(null);
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
   syncBar();
@@ -302,7 +326,7 @@ export function initViews(d: ViewsDeps): void {
   const termBtn = $("#open-terminal");
   termBtn.onclick = () => toggleTerminal();
   shortcut(termBtn, "meta+;", "Terminal", () => toggleTerminal());
-  for (const name of ["tasks", "runs", "activity", "boards", "settings"] as const) {
+  for (const name of ["tasks", "boards", "settings"] as const) {
     const btn = $(`#open-${name}`);
     consoleBtns.set(name, btn);
     btn.onclick = () => showConsole(name);

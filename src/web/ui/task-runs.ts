@@ -8,7 +8,7 @@
 import type { CommandResult, RunView, TaskDefinition, TaskMessage, TaskRun } from "../../tasks/types.js";
 import { getJson, promptRun, type Sent } from "./api.js";
 import { fmtDuration, h } from "./dom.js";
-import { button } from "./form.js";
+import { badge, button, empty, toolbar } from "./form.js";
 
 export interface TaskRunsDeps {
   openSession: (id: string) => void;
@@ -29,6 +29,43 @@ export const runDuration = (run: TaskRun): string =>
 export const runLabel = (run: TaskRun): string =>
   run.state === "succeeded" && run.matched === false ? "No match" : run.state;
 
+/** One tint per outcome, so a list of runs reads by colour before by word.
+ *  Neutral is "nothing to act on": queued, skipped, a probe that did not match. */
+const RUN_TINT: Record<TaskRun["state"], string> = {
+  queued: "bg-neutral-100 text-neutral-600 ring-neutral-200",
+  running: "bg-sky-50 text-sky-700 ring-sky-200",
+  succeeded: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  failed: "bg-red-50 text-red-700 ring-red-200",
+  cancelled: "bg-amber-50 text-amber-700 ring-amber-200",
+  interrupted: "bg-amber-50 text-amber-700 ring-amber-200",
+  skipped: "bg-neutral-100 text-neutral-600 ring-neutral-200",
+};
+
+/** The run's state as a badge — the same chip in every list and on the run page. */
+export function runBadge(run: TaskRun): HTMLElement {
+  const label = runLabel(run);
+  return badge(
+    label,
+    label === "No match" ? RUN_TINT.skipped : RUN_TINT[run.state],
+    run.state === "running" ? "animate-pulse bg-sky-500" : undefined,
+  );
+}
+
+/** A task's standing as a badge: scheduled and live, scheduled but paused,
+ *  fired by hand only, or retired. */
+export function taskBadge(task: TaskDefinition): HTMLElement {
+  if (task.archived) return badge("Archived", "bg-neutral-50 text-neutral-400 ring-neutral-200");
+  if (task.trigger.type === "manual") return badge("Manual", "bg-neutral-100 text-neutral-600 ring-neutral-200");
+  return task.enabled
+    ? badge("Enabled", "bg-emerald-50 text-emerald-700 ring-emerald-200")
+    : badge("Paused", "bg-amber-50 text-amber-700 ring-amber-200");
+}
+
+/** Section label and code block on the run page — the Console's label type
+ *  and the chat's code tint, so the page reads like the rest of the product. */
+const SECTION = "px-4 pt-4 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400";
+const CODE = "m-4 mt-2 whitespace-pre-wrap break-words rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2 font-mono text-[12px] leading-snug dark:border-neutral-200 dark:bg-neutral-100";
+
 export const triggerSummary = (task: TaskDefinition): string => {
   if (task.trigger.type === "manual") return "Manual";
   if (task.trigger.type === "cron") return `${task.trigger.expression} (${task.trigger.timezone})`;
@@ -45,7 +82,7 @@ export const actionSummary = (task: TaskDefinition): string => {
 /** A definition as readable fields: the task page's Definition tab, and the
  *  revision a run carried in its snapshot. */
 export function definitionView(task: TaskDefinition, openSession: (id: string) => void): HTMLElement {
-  const content = h("div", "grid max-w-4xl grid-cols-[6rem_minmax(0,1fr)] gap-x-5 gap-y-3 p-4 text-[13px] md:grid-cols-[9.375rem_minmax(0,1fr)]");
+  const content = h("div", "grid max-w-4xl grid-cols-[6rem_minmax(0,1fr)] gap-x-5 gap-y-3.5 p-4 text-[13px] md:grid-cols-[9.375rem_minmax(0,1fr)]");
   const values: [string, string][] = [
     ["Status", task.archived ? "Archived" : task.trigger.type === "manual" ? "Manual" : task.enabled ? "Enabled" : "Paused"],
     ["Trigger", triggerSummary(task)],
@@ -73,8 +110,8 @@ export function definitionView(task: TaskDefinition, openSession: (id: string) =
   if (task.trigger.type === "watch") values.push(["Probe", task.trigger.script]);
   for (const [label, value] of values) {
     content.append(
-      h("span", "text-[11px] font-semibold uppercase text-neutral-400", label),
-      h("pre", "whitespace-pre-wrap break-words font-mono text-[12.5px]", value),
+      h("span", "pt-px text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
+      h("pre", "whitespace-pre-wrap break-words font-mono text-[12.5px] leading-snug", value),
     );
   }
   if (task.action.type === "agent" && task.action.session.mode === "reuse") {
@@ -107,18 +144,18 @@ export interface RunViewState {
 export function renderRuns(pane: HTMLElement, runs: TaskRun[], openRun: (id: string) => void, scroll: { top: number }): void {
   const list = h("div", "divide-y divide-neutral-100");
   for (const run of runs) {
-    const row = h("button", "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[12.5px] hover:bg-neutral-50 md:grid-cols-[7.5rem_minmax(0,1fr)_7.5rem_6.25rem]");
+    const row = h("button", "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[12.5px] transition-colors hover:bg-neutral-50 md:grid-cols-[7.5rem_minmax(0,1fr)_7.5rem_6.25rem]");
     row.setAttribute("type", "button");
     row.append(
-      h("span", "font-medium", runLabel(run)),
+      h("span", "flex", runBadge(run)),
       h("span", "truncate text-neutral-500", dateTime(run.queuedAt)),
       h("span", "text-neutral-500", run.triggerSource),
-      h("span", "text-right text-neutral-500", runDuration(run)),
+      h("span", "text-right font-mono text-[11.5px] text-neutral-400", runDuration(run)),
     );
     row.onclick = () => openRun(run.id);
     list.append(row);
   }
-  if (!runs.length) list.append(h("p", "p-4 text-[13px] text-neutral-400", "No runs yet."));
+  if (!runs.length) list.append(h("div", "p-4", empty("No runs yet.")));
   pane.replaceChildren(list);
   pane.scrollTop = scroll.top;
   pane.onscroll = () => { scroll.top = pane.scrollTop; };
@@ -132,10 +169,9 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   pane.dataset.runRequest = request;
   pane.onscroll = () => { state.scrollTop = pane.scrollTop; };
   const back = button("Runs");
-  back.className = "cursor-pointer text-neutral-500 hover:underline";
+  back.className = "cursor-pointer text-neutral-500 hover:text-neutral-800 hover:underline";
   back.onclick = () => { state.selectedId = null; state.scrollTop = 0; backToList(); };
-  const actions = h("div", "flex flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2");
-  actions.append(back, h("span", "min-w-0 truncate font-mono text-[12px] text-neutral-400", id));
+  const actions = toolbar(back, h("span", "text-neutral-400", "›"), h("span", "min-w-0 truncate font-mono text-[12px] text-neutral-500", id));
   // Only a pane that shows another run (or nothing) gets the placeholder: a
   // refresh of the run on screen redraws it in place.
   const fresh = pane.dataset.runId !== id;
@@ -191,16 +227,17 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
     actions.append(reply);
   }
   const body = h("div", "min-w-0");
-  body.append(h("div", "flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-neutral-100 px-4 py-3 text-[12.5px]",
-    h("span", "font-medium", runLabel(run)),
-    h("span", "text-amber-700", runAttention(run)),
+  const attention = runAttention(run);
+  body.append(h("div", "flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-neutral-100 bg-neutral-50/60 px-4 py-3 text-[12.5px]",
+    h("span", "flex items-center gap-2", runBadge(run), h("span", "font-medium", run.context.definition.name)),
+    ...(attention ? [h("span", "rounded-md bg-amber-50 px-2 py-0.5 text-[12px] text-amber-700 ring-1 ring-amber-200", attention)] : []),
     h("span", "text-neutral-500", dateTime(run.queuedAt)),
     h("span", "text-neutral-500", run.triggerSource),
-    h("span", "text-neutral-500", runDuration(run)),
+    h("span", "font-mono text-[11.5px] text-neutral-400", runDuration(run)),
   ));
   // Where this run sits: the task it belongs to, and the runs it came from or
   // produced, each one click away. A group has no page; it is named.
-  const links = h("div", "flex flex-wrap items-center gap-3 border-b border-neutral-100 px-4 py-3 text-[12px]");
+  const links = h("div", "flex flex-wrap items-center gap-2 border-b border-neutral-100 px-4 py-3 text-[12px]");
   const link = (label: string, go: () => void): void => {
     const el = button(label); el.classList.add("max-w-full", "break-all", "!whitespace-normal"); el.onclick = go; links.append(el);
   };
@@ -211,43 +248,42 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
     const childId = run.result.runId;
     link(`Child result: ${childId}`, () => deps.openRun(childId));
   }
-  if (run.groupId) links.append(h("span", "break-all text-neutral-500", `Group: ${run.groupId}`));
+  if (run.groupId) links.append(h("span", "break-all font-mono text-[11.5px] text-neutral-500", `Group: ${run.groupId}`));
   body.append(links);
   for (const error of [run.error, run.skipReason, run.callbackError]) {
-    if (error) body.append(h("p", "whitespace-pre-wrap break-words p-4 text-[13px] text-red-600", error));
+    if (error) body.append(h("p", "m-4 whitespace-pre-wrap break-words rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700", error));
   }
   if (run.result) {
     const result = run.result;
     const text = result.type === "agent" || result.type === "system" ? result.text : result.type === "bash" ? commandText(result)
       : result.type === "task" ? `Child run: ${result.runId}` : "Watch did not match.";
-    body.append(h("h3", "px-4 pt-3 text-[12px] font-medium", "Result"), h("pre", "whitespace-pre-wrap break-words p-4 font-mono text-[12px]", text || "No output."));
+    body.append(h("h3", SECTION, "Result"), h("pre", CODE, text || "No output."));
   }
   if (run.probe) body.append(
-    h("h3", "px-4 pt-3 text-[12px] font-medium", `Watch probe: ${run.matched === null ? "not evaluated" : run.matched ? "matched" : "not matched"}`),
-    h("pre", "whitespace-pre-wrap break-words p-4 font-mono text-[12px]", commandText(run.probe)),
+    h("h3", SECTION, `Watch probe: ${run.matched === null ? "not evaluated" : run.matched ? "matched" : "not matched"}`),
+    h("pre", CODE, commandText(run.probe)),
   );
   // The definition as it was when this run was queued, not as it is now.
   const config = h("details", "border-t border-neutral-200");
-  config.append(h("summary", "cursor-pointer px-4 py-3 text-[12px] text-neutral-500", `Configuration snapshot (revision ${run.taskRevision})`),
+  config.append(h("summary", "flex cursor-pointer items-center gap-1.5 px-4 py-3 text-[12px] text-neutral-500 hover:text-neutral-800", h("span", "chev", "▶"), `Configuration snapshot (revision ${run.taskRevision})`),
     definitionView(run.context.definition, deps.openSession));
   body.append(config);
-  if (!gotMessages.ok) body.append(h("p", "p-4 text-[13px] text-red-600", gotMessages.error));
+  if (!gotMessages.ok) body.append(h("p", "m-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700", gotMessages.error));
   if (messages.length) {
-    const ledger = h("div", "border-t border-neutral-200");
-    ledger.append(h("div", "px-4 py-2 text-[11px] font-semibold uppercase text-neutral-400", "Messages"));
+    const rows = h("div", "mt-2 divide-y divide-neutral-100 border-t border-neutral-100");
     for (const message of messages) {
-      const row = h("div", "grid grid-cols-[auto_1fr] gap-3 border-t border-neutral-100 px-4 py-2 text-[12px] md:grid-cols-[6.25rem_6.25rem_minmax(0,1fr)]");
+      const row = h("div", "grid grid-cols-[auto_1fr] gap-3 px-4 py-2 text-[12px] md:grid-cols-[6.25rem_6.25rem_minmax(0,1fr)]");
       row.append(h("span", "font-medium", message.kind), h("span", "text-neutral-500", message.state), h("span", "col-span-2 whitespace-pre-wrap break-words md:col-span-1", message.content));
       if (message.error) row.append(h("span", "col-span-2 break-words text-red-600 md:col-span-3", message.error));
-      ledger.append(row);
+      rows.append(row);
     }
-    body.append(ledger);
+    body.append(h("div", "border-t border-neutral-200", h("div", SECTION, "Messages"), rows));
   }
   const raw = h("details", "border-t border-neutral-200") as HTMLDetailsElement;
   raw.open = state.rawOpen;
   raw.ontoggle = () => { if (raw.isConnected) state.rawOpen = raw.open; };
-  raw.append(h("summary", "cursor-pointer px-4 py-3 text-[12px] text-neutral-500", "Raw record"),
-    h("pre", "whitespace-pre-wrap break-words px-4 pb-4 font-mono text-[12px]", JSON.stringify(run, null, 2)));
+  raw.append(h("summary", "flex cursor-pointer items-center gap-1.5 px-4 py-3 text-[12px] text-neutral-500 hover:text-neutral-800", h("span", "chev", "▶"), "Raw record"),
+    h("pre", CODE, JSON.stringify(run, null, 2)));
   body.append(raw);
   pane.replaceChildren(actions, body);
   pane.scrollTop = state.scrollTop;

@@ -567,9 +567,9 @@ interface Target {
 // Searchable by what they are called *and* by what is inside them: "password"
 // and "channel" are how someone looks for Settings.
 const CONSOLE_TARGETS: { name: "tasks" | "runs" | "activity" | "boards" | "settings"; label: string; detail: string }[] = [
-  { name: "tasks", label: "Tasks", detail: "Console — task definitions and schedules" },
-  { name: "runs", label: "Runs", detail: "Console — executions, subagents, decisions and callbacks" },
-  { name: "activity", label: "Activity", detail: "Console — sessions and relationships" },
+  { name: "tasks", label: "Tasks", detail: "Automation — task definitions and schedules" },
+  { name: "runs", label: "Runs", detail: "Automation — executions, subagents, decisions and callbacks" },
+  { name: "activity", label: "Activity", detail: "Automation — sessions and relationships" },
   { name: "boards", label: "Boards", detail: "Console — the static pages Pier publishes" },
   { name: "settings", label: "Settings", detail: "Console — models and providers, agent files and extensions, channels, password, sign out, security" },
 ];

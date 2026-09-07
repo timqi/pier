@@ -9,7 +9,7 @@ import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
 import { coalesce, getJson } from "./api.js";
 import { consoleView, fmtDuration, h, untitled, type ConsoleView } from "./dom.js";
-import { tabButton as control } from "./form.js";
+import { badge, empty, segmented, toolbar } from "./form.js";
 
 interface ActivitySession {
   id: string;
@@ -119,37 +119,30 @@ export function createActivityView(
   });
 
   function render(): void {
-    // The mobile top bar already names this view, and this header carries
-    // nothing else — below md it would be a duplicate title in its own row.
-    const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 px-4 max-md:hidden", h("span", "font-medium", "Activity"));
-    const tabs = h("div", "tabstrip");
-    tabs.append(
-      control("Sessions", tab === "sessions", () => { tab = "sessions"; render(); }),
-      control("Relationships", tab === "dependencies", () => { tab = "dependencies"; render(); }),
-    );
-    // Scope applies to both views; filters sit below object navigation.
-    const scopeControl = h("div", "flex flex-none gap-1 border-b border-neutral-200 px-4 py-2");
-    // render() first, load() second: the fetch behind a scope is ~150ms, and
-    // until it lands the pressed button would show no sign of having been hit.
-    const setScope = (next: typeof scope) => () => {
-      scope = next;
-      render();
-      void load();
-    };
-    scopeControl.append(
-      control("Current", scope === "active", setScope("active")),
-      control("Last 24h", scope === "recent", setScope("recent")),
+    // One toolbar under the Automation strip: which picture on the left, the
+    // time scope it covers on the right. The strip names the view, so no title.
+    const bar = toolbar(
+
+      segmented<typeof tab>([["Sessions", "sessions"], ["Relationships", "dependencies"]], tab, (next) => { tab = next; render(); }),
+      h("span", "ml-auto text-[11.5px] text-neutral-400", `${snapshot.sessions.length} sessions · ${snapshot.runs.length} runs`),
+      // render() first, load() second: the fetch behind a scope is ~150ms, and
+      // until it lands the pressed button would show no sign of having been hit.
+      segmented<typeof scope>([["Current", "active"], ["Last 24h", "recent"]], scope, (next) => {
+        scope = next;
+        render();
+        void load();
+      }),
     );
     const body = h("div", "min-h-0 flex-1 overflow-auto");
     if (tab === "sessions") renderSessions(body);
     else renderGraph(body);
-    root.replaceChildren(header, tabs, scopeControl, body);
+    root.replaceChildren(bar, body);
   }
 
   function renderSessions(body: HTMLElement): void {
     const table = document.createElement("table");
     table.className = "w-full table-fixed text-left text-[12.5px]";
-    table.innerHTML = `<thead class="bg-neutral-50 text-[10.5px] uppercase text-neutral-400"><tr>
+    table.innerHTML = `<thead class="sticky top-0 bg-neutral-50 text-[10.5px] uppercase tracking-wide text-neutral-400 shadow-[inset_0_-1px_0_var(--color-neutral-200)]"><tr>
       <th class="w-[50%] px-4 py-2 font-semibold md:w-[34%]">Session</th>
       <th class="hidden w-[38%] px-2 py-2 font-semibold md:table-cell">Project</th>
       <th class="px-2 py-2 font-semibold md:w-[14%]">State</th>
@@ -157,27 +150,31 @@ export function createActivityView(
     const tbody = document.createElement("tbody");
     for (const session of snapshot.sessions) {
       const tr = document.createElement("tr");
-      tr.className = "cursor-pointer border-b border-neutral-100 hover:bg-neutral-50";
+      tr.className = "cursor-pointer border-b border-neutral-100 transition-colors hover:bg-neutral-50";
       tr.onclick = () => openSession(session.id);
-      const title = h("button", "block w-full cursor-pointer truncate text-left font-medium", session.title ?? untitled(session.cwd));
+      const title = h("button", "block w-full cursor-pointer truncate text-left font-medium text-neutral-800", session.title ?? untitled(session.cwd));
       title.setAttribute("type", "button");
       title.title = `${session.id}\n${session.cwd}`;
       title.onclick = (event) => { event.stopPropagation(); openSession(session.id); };
       tr.append(
         h("td", "px-4 py-2.5", title,
           h("div", "truncate font-mono text-[11px] text-neutral-400 md:hidden", session.cwd || "-")),
-        h("td", "hidden truncate px-2 py-2.5 font-mono text-[11.5px] md:table-cell", session.cwd || "-"),
-        h("td", "px-2 py-2.5",
-          h("span", "inline-flex items-center gap-1.5 whitespace-nowrap",
-            h("span", `inline-block h-2 w-2 flex-none rounded-full ${session.state === "streaming" ? "animate-pulse bg-green-500" : "bg-neutral-300"}`),
-            session.state)),
-        h("td", "px-2 py-2.5 text-neutral-500", elapsed(session.stateSince)),
+        h("td", "hidden truncate px-2 py-2.5 font-mono text-[11.5px] text-neutral-500 md:table-cell", session.cwd || "-"),
+        h("td", "px-2 py-2.5", stateBadge(session.state)),
+        h("td", "px-2 py-2.5 font-mono text-[11.5px] text-neutral-400", elapsed(session.stateSince)),
       );
       tbody.append(tr);
     }
     table.append(tbody);
     body.append(table);
-    if (!snapshot.sessions.length) body.append(h("p", "p-4 text-[13px] text-neutral-400", scope === "active" ? "No active sessions." : "No sessions in the last 24 hours."));
+    if (!snapshot.sessions.length) body.append(h("div", "p-4", empty(scope === "active" ? "No active sessions." : "No sessions in the last 24 hours.")));
+  }
+
+  /** Streaming is the one state that is happening; every other reads as rest. */
+  function stateBadge(state: SessionState): HTMLElement {
+    return state === "streaming"
+      ? badge(state, "bg-emerald-50 text-emerald-700 ring-emerald-200", "animate-pulse bg-emerald-500")
+      : badge(state, "bg-neutral-100 text-neutral-600 ring-neutral-200", "bg-neutral-300");
   }
 
   function renderGraph(body: HTMLElement): void {
@@ -212,7 +209,7 @@ export function createActivityView(
       edges.push({ from: message.fromSessionId, to: message.toSessionId, run, kind: "message" });
     }
     if (!nodes.size) {
-      body.append(h("p", "p-4 text-[13px] text-neutral-400", scope === "active" ? "No active dependencies." : "No dependencies in the last 24 hours."));
+      body.append(h("div", "p-4", empty(scope === "active" ? "No active dependencies." : "No dependencies in the last 24 hours.")));
       return;
     }
 
@@ -367,12 +364,14 @@ export function createActivityView(
       graph.append(group);
     }
     const legendDot = (cls: string): HTMLElement => h("span", `inline-block h-2 w-2 rounded-full ${cls}`);
+    // Line samples drawn the way the edges are, so the legend is read, not decoded.
+    const legendLine = (cls: string): HTMLElement => h("span", `inline-block h-0 w-6 border-t-2 ${cls}`);
     body.append(h("div", "w-max p-4", graph), h(
       "div",
-      "flex flex-wrap gap-x-5 gap-y-1 border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-500",
-      h("span", "", "Solid: task invocation"),
-      h("span", "text-cyan-700", "Dashed: callback"),
-      h("span", "text-amber-700", "Dotted: supervisor/control"),
+      "flex flex-wrap gap-x-5 gap-y-1.5 border-t border-neutral-200 bg-neutral-50/60 px-4 py-2 text-[11px] text-neutral-500",
+      h("span", "inline-flex items-center gap-2", legendLine("border-solid border-neutral-400"), "task invocation"),
+      h("span", "inline-flex items-center gap-2 text-cyan-700", legendLine("border-dashed border-cyan-500"), "callback"),
+      h("span", "inline-flex items-center gap-2 text-amber-700", legendLine("border-dotted border-amber-500"), "supervisor / control"),
       h("span", "inline-flex items-center gap-1.5", legendDot("bg-emerald-500"), "streaming"),
       h("span", "inline-flex items-center gap-1.5", legendDot("bg-neutral-300"), "idle"),
     ));

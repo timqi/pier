@@ -32,16 +32,35 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
   return el;
 };
 
-/** A tab in a Console tab strip: house button chrome plus the active tint. */
-export function tabButton(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
-  const el = button(label);
-  if (active) el.classList.add("bg-neutral-200");
-  el.onclick = onClick;
+/** The row under a Console view's title (or its Automation strip): filters,
+ * a breadcrumb, a segmented switch, with actions pushed right by `ml-auto`.
+ * Wraps below md so the right-hand group gets its own line. */
+export const toolbar = (...children: (HTMLElement | string)[]): HTMLElement =>
+  h("div", "flex min-h-10 flex-none flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2", ...children);
+
+/** A segmented switch — a few exclusive choices inside a toolbar (a task
+ * page's Runs/Definition, Activity's table/graph and its time scope). Smaller
+ * than a pill strip on purpose: it sits under one, and two rows of the same
+ * chrome would read as two levels of the same navigation. */
+export function segmented<K extends string>(options: [string, K][], value: K, onChange: (key: K) => void): HTMLElement {
+  const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-lg bg-neutral-100 p-0.5");
+  for (const [label, key] of options) {
+    const active = key === value;
+    const opt = btn(
+      label,
+      `cursor-pointer whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+        active ? "bg-white font-medium text-neutral-800 shadow-xs" : "text-neutral-500 hover:text-neutral-700"
+      }`,
+    );
+    opt.setAttribute("aria-pressed", String(active));
+    opt.onclick = () => onChange(key);
+    el.append(opt);
+  }
   return el;
 }
 
-/** A pill tab — the topic strips (Settings, Channels platforms). One chrome,
- * so two strips on the same page read as the same control. */
+/** A pill tab — the topic strips (Settings, Automation, Channels platforms).
+ * One chrome, so two strips on the same page read as the same control. */
 export function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
   const el = btn(
     label,
@@ -182,8 +201,15 @@ export function setStatus(el: HTMLElement, state: SaveState, text: string): void
   el.textContent = text;
 }
 
-export const badge = (text: string, cls: string): HTMLElement =>
-  h("span", `flex-none rounded-full px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ring-1 ${cls}`, text);
+/** `dot` adds a leading status dot (its own colour classes, e.g. a pulsing
+ * one for "happening now"). */
+export const badge = (text: string, cls: string, dot?: string): HTMLElement =>
+  h(
+    "span",
+    `inline-flex flex-none items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ring-1 ${cls}`,
+    ...(dot ? [h("span", `inline-block h-1.5 w-1.5 flex-none rounded-full ${dot}`)] : []),
+    text,
+  );
 
 export const empty = (text: string): HTMLElement =>
   h(

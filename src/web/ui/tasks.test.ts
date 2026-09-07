@@ -54,10 +54,15 @@ vi.mock("./dom.js", () => ({
   },
 }));
 vi.mock("./form.js", () => ({
+  CONTROL: "",
   button: (label: string) => make("button", "", label),
-  tabButton: (label: string, active: boolean, click: () => void) => {
-    const el = make("button", active ? "active" : "", label); el.onclick = click; return el;
-  },
+  badge: (label: string) => make("span", "", label),
+  empty: (label: string) => make("p", "", label),
+  toolbar: (...children: (Element | string)[]) => make("div", "", ...children),
+  segmented: (options: [string, string][], value: string, change: (key: string) => void) =>
+    make("div", "", ...options.map(([label, key]) => {
+      const el = make("button", key === value ? "active" : "", label); el.onclick = () => change(key); return el;
+    })),
   select: (_options: unknown, value: string) => { const el = new Element("select"); el.value = value; return el; },
 }));
 vi.mock("./task-editor.js", () => ({ openTaskEditor: vi.fn() }));
@@ -80,7 +85,7 @@ const openTask = vi.fn<(id?: string) => void>();
 const settled = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
 const button = (text: string) => walk(root).find((el) => el.tag === "button" && el.text === text);
 async function click(text: string) { expect(button(text), text).toBeDefined(); button(text)!.onclick!(); await settled(); }
-const raw = () => walk(root).find((el) => el.tag === "details" && el.text.startsWith("Raw record"))!;
+const raw = () => walk(root).find((el) => el.tag === "details" && el.text.startsWith("▶Raw record"))!;
 async function change(label: string, value: string) {
   const input = walk(root).find((el) => el.attrs["aria-label"] === label)!;
   input.value = value; input.onchange!(); await settled();

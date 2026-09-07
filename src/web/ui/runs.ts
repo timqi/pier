@@ -6,8 +6,8 @@
 import type { RunPage, TaskDefinition } from "../../tasks/types.js";
 import { coalesce, getJson, refused } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { button, select } from "./form.js";
-import { dateTime, openRun, runAttention, runDuration, runLabel, type RunViewState, type TaskRunsDeps } from "./task-runs.js";
+import { button, CONTROL, empty, select, toolbar } from "./form.js";
+import { dateTime, openRun, runAttention, runBadge, runDuration, type RunViewState, type TaskRunsDeps } from "./task-runs.js";
 
 export type RunsView = ConsoleView & { refresh(): void };
 
@@ -65,21 +65,21 @@ export function createRunsView(
     drawn = "";
     pane = h("div", "min-h-0 flex-1 overflow-auto");
     if (state.selectedId) { root.replaceChildren(pane); return; }
-    const header = h("header", "flex min-h-10 flex-none flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2", h("span", "font-medium max-md:hidden", "Runs"));
-    const reset = button("Reset filters"); reset.onclick = () => navigate({});
-    header.append(reset);
     controls = drawControls();
-    root.replaceChildren(header, controls, pane);
+    root.replaceChildren(controls, pane);
   }
 
+  // The filter row is the page's toolbar: the Automation strip above names
+  // the view, so this row carries only what narrows the list.
   function drawControls(): HTMLElement {
-    const box = h("div", "flex flex-none flex-wrap items-center gap-3 border-b border-neutral-200 px-4 py-2 text-[12px]");
+    const box = toolbar();
+    box.classList.add("text-[12px]", "text-neutral-500");
     const filter = (label: string, key: string, options: [string, string][]): void => {
       const input = select(options, filters.get(key) ?? "");
       input.classList.add("!w-auto", "max-w-full", "pr-8");
       input.setAttribute("aria-label", label);
       input.onchange = () => change(key, input.value);
-      box.append(h("label", "flex max-w-full items-center gap-2", label, input));
+      box.append(input);
     };
     filter("State", "state", [["All states", ""], ...["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"].map((v): [string, string] => [v, v])]);
     filter("Source", "source", [["All sources", ""], ...["manual", "agent", "cron", "watch", "task"].map((v): [string, string] => [v, v])]);
@@ -88,7 +88,7 @@ export function createRunsView(
     if (selectedTask && !tasks.some((task) => task.id === selectedTask)) taskOptions.push([selectedTask, selectedTask]);
     filter("Task", "taskId", [["All tasks", ""], ...taskOptions]);
     for (const [label, key] of [["From", "since"], ["Through", "until"]] as const) {
-      const input = h("input", "min-w-0 rounded border border-neutral-200 px-2 py-1") as HTMLInputElement;
+      const input = h("input", `${CONTROL} !w-auto min-w-0`) as HTMLInputElement;
       input.type = "datetime-local"; input.setAttribute("aria-label", label);
       const value = filters.get(key);
       if (value) {
@@ -98,6 +98,12 @@ export function createRunsView(
       input.onchange = () => change(key, input.value ? String(new Date(input.value).getTime()) : "");
       box.append(h("label", "flex min-w-0 items-center gap-2", label, input));
     }
+    const active = [...filters.keys()].filter((key) => key !== "cursor" && key !== "showUnmatched").length;
+    const reset = button(active ? `Reset filters (${active})` : "Reset filters");
+    reset.classList.add("ml-auto");
+    reset.disabled = !active;
+    reset.onclick = () => navigate({});
+    box.append(reset);
     return box;
   }
 
@@ -105,31 +111,37 @@ export function createRunsView(
     const toggle = h("input", "") as HTMLInputElement; toggle.type = "checkbox";
     toggle.checked = filters.get("showUnmatched") === "true";
     toggle.onchange = () => change("showUnmatched", toggle.checked ? "true" : "");
-    const visibility = h("label", "flex items-center gap-2 border-b border-neutral-100 px-4 py-2 text-[12px] text-neutral-500", toggle,
+    const visibility = h("label", "flex items-center gap-2 border-b border-neutral-100 bg-neutral-50/60 px-4 py-1.5 text-[11.5px] text-neutral-500", toggle,
       "Show unmatched probes");
     const list = h("div", "divide-y divide-neutral-100");
     for (const run of page.runs) {
-      const row = h("div", "px-4 py-3 text-[12px]");
-      const open = h("button", "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-left hover:bg-neutral-50 md:grid-cols-[minmax(0,1fr)_8rem_12rem_5rem]");
+      const row = h("div", "px-4 py-3 text-[12px] transition-colors hover:bg-neutral-50");
+      const open = h("button", "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 text-left md:grid-cols-[minmax(0,1fr)_12rem_5rem]");
       open.setAttribute("type", "button"); open.onclick = () => go(filters, run.id);
-      open.append(h("span", "min-w-0 truncate font-medium", run.context.definition.name), h("span", "font-medium", runLabel(run)),
-        h("span", "text-neutral-500", dateTime(run.queuedAt)), h("span", "text-neutral-500", runDuration(run)),
-        h("span", "col-span-2 break-all font-mono text-[11px] text-neutral-400 md:col-span-4", `${run.id} · ${run.triggerSource}`));
+      // Phone: name and duration share the first line, the date takes the
+      // second; desktop lays the three out as columns (hence the md:order-*).
+      open.append(
+        h("span", "flex min-w-0 items-center gap-2", runBadge(run), h("span", "min-w-0 truncate font-medium text-neutral-800", run.context.definition.name)),
+        h("span", "text-right font-mono text-[11.5px] text-neutral-400 md:order-2", runDuration(run)),
+        h("span", "col-span-2 text-neutral-500 md:order-1 md:col-span-1", dateTime(run.queuedAt)),
+        h("span", "col-span-2 break-all font-mono text-[11px] text-neutral-400 md:order-3 md:col-span-3", `${run.id} · ${run.triggerSource}`));
       row.append(open);
       const attention = runAttention(run);
-      if (attention) row.append(h("p", "mt-1 break-words text-amber-700", attention));
-      const relations = h("div", "mt-1 flex flex-wrap gap-x-4 gap-y-1 text-neutral-500");
+      if (attention) row.append(h("p", "mt-1.5 inline-block break-words rounded-md bg-amber-50 px-2 py-0.5 text-[11.5px] text-amber-700 ring-1 ring-amber-200", attention));
+      const relations = h("div", "mt-1.5 flex flex-wrap gap-1.5 text-[11px] text-neutral-500");
+      const chip = "max-w-full break-all rounded-md bg-neutral-100 px-1.5 py-0.5 text-left";
       const link = (label: string, action: () => void): void => {
-        const el = h("button", "max-w-full cursor-pointer break-all text-left hover:underline", label);
+        const el = h("button", `${chip} cursor-pointer transition-colors hover:bg-neutral-200 hover:text-neutral-800`, label);
         el.setAttribute("type", "button"); el.onclick = action; relations.append(el);
       };
       if (run.parentRunId) link(`Parent ${run.parentRunId}`, () => go(filters, run.parentRunId!));
       if (run.resumedFromRunId) link(`Resumed from ${run.resumedFromRunId}`, () => go(filters, run.resumedFromRunId!));
       if (run.result?.type === "task") { const id = run.result.runId; link(`Child result ${id}`, () => go(filters, id)); }
-      if (run.groupId) relations.append(h("span", "break-all", `Group ${run.groupId}`));
-      row.append(relations); list.append(row);
+      if (run.groupId) relations.append(h("span", chip, `Group ${run.groupId}`));
+      if (relations.childElementCount) row.append(relations);
+      list.append(row);
     }
-    if (!page.runs.length) list.append(h("p", "p-4 text-[13px] text-neutral-500", "No matching runs."));
+    if (!page.runs.length) list.append(h("div", "p-4", empty("No matching runs.")));
     const paging = h("div", "flex items-center gap-3 border-t border-neutral-200 p-4");
     if (filters.has("cursor")) {
       const newest = button("Newest"); newest.onclick = () => change("cursor", ""); paging.append(newest);
