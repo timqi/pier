@@ -77,6 +77,7 @@ export function toolsTask(tasks: TaskService) {
     const draft = {
       name: "tools: daily update",
       description: "Installs the CLI tools switched on in Settings → Agent and keeps them current.",
+      enabled: true,
       trigger: {
         type: "cron" as const,
         expression: "17 4 * * *",
@@ -84,9 +85,9 @@ export function toolsTask(tasks: TaskService) {
       },
       // PIER_HOME as cwd: the command belongs to the instance, not to a project.
       action: { type: "bash" as const, script: command.script, cwd: PIER_HOME },
+      callback: { type: "none" as const },
       timeoutSeconds: 1800,
     };
-    const draftShape = [draft.name, draft.description, true, draft.trigger, draft.action, { type: "none" }, draft.timeoutSeconds];
     // Archived is not "owned but edited": nothing can un-archive a task, so the
     // replacement is a new one and the old one keeps its history.
     const owned = tasks.list().filter((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
@@ -100,13 +101,11 @@ export function toolsTask(tasks: TaskService) {
     // Every field Pier owns, not just the command: a paused task, a renamed one
     // or one pointed at a callback still claims to be keeping the tools current
     // while the daily run never happens.
-    const current = task &&
-      JSON.stringify([task.name, task.description, task.enabled, task.trigger, task.action, task.callback, task.timeoutSeconds]);
-    if (task && current !== JSON.stringify(draftShape)) {
+    if (task && Object.entries(draft).some(([key, value]) => JSON.stringify(task[key as keyof typeof task]) !== JSON.stringify(value))) {
       log.warn("the tools update task was edited — restoring the definition Pier owns");
       // Named as the owner: this is the one path allowed to write it back
       // (tasks/definitions.ts).
-      await tasks.update(task.id, { ...draft, enabled: true, callback: { type: "none" } }, TOOLS_TASK_CREATOR);
+      await tasks.update(task.id, draft, TOOLS_TASK_CREATOR);
     }
     const id = task ? task.id : (await tasks.create(draft, TOOLS_TASK_CREATOR)).id;
     toolsTaskId = id;
