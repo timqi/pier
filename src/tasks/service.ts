@@ -23,6 +23,15 @@ import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
 
+/** The text a run was given, as the operator wrote it: a resume's follow-up,
+ *  else the action's own prompt or script. Not `renderedPrompt` — that is the
+ *  preamble and the input wrapper, which the delegating session did not send. */
+const runPrompt = (run: TaskRun): string | null => {
+  if (run.context.resumePrompt) return run.context.resumePrompt;
+  const action = run.context.definition.action;
+  return action.type === "agent" ? action.prompt : action.type === "bash" ? action.script : null;
+};
+
 type TriggerSource = TaskRun["triggerSource"];
 type Waiter = (run: TaskRun) => void;
 
@@ -231,11 +240,11 @@ export class TaskService {
     return this.messages.recent(since);
   }
 
+  /** Every run this session delegated: the card is the message that started
+   *  it, and a message does not leave the transcript because the run ended. */
   backgroundRuns(sessionId: string): BackgroundRun[] {
-    const cutoff = Date.now() - 60 * 60 * 1000;
-    return this.store.listRunsForSession(sessionId, 50)
-      .filter((run) => run.background && (!isTerminal(run.state) || run.queuedAt >= cutoff))
-      .slice(0, 20)
+    return this.store.listRunsForSession(sessionId, 200)
+      .filter((run) => run.background)
       .reverse()
       .map((run) => this.backgroundRun(run));
   }
@@ -423,6 +432,7 @@ export class TaskService {
       targetSessionId: run.targetSessionId,
       sessionMode: run.sessionMode,
       depth: run.depth,
+      prompt: runPrompt(run),
       queuedAt: run.queuedAt,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,

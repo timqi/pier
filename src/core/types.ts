@@ -100,6 +100,9 @@ export type SystemInputOrigin = {
   /** Batched callback delivery: every run id contained in this input. */
   runIds?: string[];
   source?: SystemInputSource;
+  /** How the run ended, on a callback about one run: the card's caption says
+   *  it beside the name instead of the reader finding it in the text. */
+  state?: BackgroundRun["state"];
 } | {
   kind: "task-message";
   taskId: string;
@@ -120,6 +123,10 @@ export interface BackgroundRun {
    *  timeline prints what it reads. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
   depth: number;
+  /** What the run was asked to do — the card in the delegating session sits
+   *  where the message was sent, so it shows the message. Null when the
+   *  action has no text of its own (a task that runs another task). */
+  prompt: string | null;
   queuedAt: number;
   startedAt: number | null;
   finishedAt: number | null;

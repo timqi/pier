@@ -321,6 +321,13 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX task_runs_visible_time ON task_runs(queued_at DESC, id DESC)
     WHERE NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0);
   `,
+  // 18 — opening a session lists every run it delegated, not the last hour's.
+  `
+  -- The run cards are the messages a session sent, so the transcript wants
+  -- all of them: the query is by the delegating session, which lived only in
+  -- the JSON — without this every session open was a full scan of task_runs.
+  CREATE INDEX task_runs_invoked_by ON task_runs(json_extract(json, '$.invokedBySessionId'), queued_at DESC);
+  `,
 ];
 
 /**

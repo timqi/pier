@@ -60,7 +60,7 @@ export class TaskCallbacks {
           // one delivery, and the first one's name and model as the card's
           // caption would attribute every other result to it. The text names
           // each run; the card says nothing rather than something false.
-          ...(runs.length === 1 ? { source: runSource(runs[0]!) } : {}),
+          ...(runs.length === 1 ? { source: runSource(runs[0]!), state: runs[0]!.state } : {}),
         },
       }),
       describe: (run) => `the result of "${run.context.definition.name}"`,

@@ -14,13 +14,18 @@ import { highlightCode } from "./highlight.js";
 import { $, agoLabel, copyBtn, externalLinks, h, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
+  clampedBody,
   decisionReplyBtn,
   finishActivity,
   initTurnActivity,
   renderBackgroundRun,
   replayActivity,
   resetActivity,
+  runCard,
+  runHead,
   sealActivity,
+  STATE_STYLE,
+  stateGlyph,
   takeActivityGroup,
 } from "./turn-activity.js";
 import type {
@@ -252,72 +257,55 @@ function speakerLine(speaker: Omit<Speaker, "text"> | null, at?: number): HTMLEl
   return line;
 }
 
+/** Glyph and caption per input kind; the decision is the one that wants a
+ *  look, so it alone carries a colour. */
+const INPUT_KIND: Record<string, [glyph: string, label: string, cls: string]> = {
+  "task-delegation": ["\u25b6", "delegated", "text-cyan-700"],
+  "task-callback": ["\u21a9", "callback", "text-cyan-700"],
+  decision: ["?", "decision needed", "text-amber-700"],
+};
+
+/** Every task text (tasks/callbacks.ts, messages.ts, groups.ts, agent.ts) is a
+ *  block of `Key: value` lines naming the run, a blank line, then the message.
+ *  The head row already says which run, so the block is not drawn; only a
+ *  card with no source of its own (a batch, a group) borrows its first line
+ *  as a caption. The text itself is untouched — it is what the model saw. */
+function splitMetaBlock(text: string): [meta: string | null, body: string] {
+  const at = text.indexOf("\n\n");
+  if (at < 0) return [null, text];
+  const meta = text.slice(0, at);
+  if (meta.length > 600 || meta.split("\n").length > 6) return [null, text];
+  return [meta, text.slice(at + 2)];
+}
+
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
-  const kind = origin.kind === "task-callback"
-    ? "Task callback"
-    : origin.kind === "task-message"
-      ? origin.messageKind === "decision" ? "Decision needed" : `Task ${origin.messageKind.replace("_", " ")}`
-      : "Agent task input";
+  const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
+  const [glyph, label, cls] = INPUT_KIND[kindKey] ?? ["\u21a9", kindKey.replace("_", " "), "text-cyan-700"];
   sealActivity();
-  const row = h("div", "group relative mt-1.5 border-l-2 border-l-cyan-500 bg-cyan-50 px-5 py-2.5");
+  const row = runCard(kindKey === "decision" ? "border-l-amber-400 bg-amber-50" : "border-l-cyan-500 bg-cyan-50");
   row.dataset.kind = "system";
-  const head = h("div", "mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold uppercase text-cyan-800", h("span", "flex-none", kind));
+  const [meta, body] = splitMetaBlock(text);
   // What produced it, not just which run did: the task's own name, the model
   // and the effort, all riding in the origin (core/types.ts) so the card never
-  // has to fetch a run to say what it is. Same vocabulary as the session
-  // header's chips — a model is a chip, an effort is plain text beside it.
-  const src = origin.source;
-  if (src) head.append(h("span", "min-w-0 truncate font-medium normal-case text-cyan-700", src.taskName));
-  if (origin.sourceSessionId && origin.sourceSessionId !== "console") {
-    const source = h("button", "truncate font-mono normal-case text-cyan-700 hover:underline", origin.sourceSessionId.slice(0, 12));
-    source.title = "Open source session";
-    source.onclick = () => deps.select(origin.sourceSessionId!);
-    head.append(h("span", "text-cyan-400", "from"), source);
-  }
-  if (src?.model) {
-    const model = h("span", "flex-none rounded bg-cyan-100 px-1.5 py-px font-mono font-medium normal-case text-cyan-800", src.model.id);
-    model.title = `${src.model.provider} / ${src.model.id}`;
-    head.append(model);
-  }
-  if (src?.thinking) {
-    const effort = h("span", "flex-none font-mono font-normal normal-case text-cyan-600", src.thinking);
-    effort.title = "Reasoning effort";
-    head.append(effort);
-  }
-  const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
-  run.onclick = () => deps.showRun(origin.runId);
-  head.append(run);
+  // has to fetch a run to say what it is. A callback also says how the run
+  // ended, in the run card's own colours, so the two agree at a glance.
+  const state = origin.kind === "task-callback" ? origin.state : undefined;
+  const head = runHead({
+    glyph: state ? stateGlyph(state) : h("span", `w-3 flex-none text-center font-bold ${cls}`, glyph),
+    label: state ? `${label} \u00b7 ${state}` : label,
+    labelCls: state ? STATE_STYLE[state].label : cls,
+    ...(origin.source
+      ? { taskName: origin.source.taskName, model: origin.source.model, thinking: origin.source.thinking }
+      : meta ? { taskName: meta.split("\n")[0]! } : {}),
+    runId: origin.runId,
+    sessionId: origin.sourceSessionId,
+  });
   if (origin.kind === "task-message" && origin.messageKind === "decision") {
     head.append(decisionReplyBtn(origin.messageId));
   }
-  const collapsed = ["max-h-[min(18rem,40dvh)]", "overflow-hidden"];
-  const content = h("div", `whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
-  row.append(head, content);
+  row.append(head);
+  row.append(...clampedBody(body, origin.kind === "task-delegation"));
   turnsPane.append(row);
-  // Hidden chat panes cannot be measured, so an approximate text gate catches
-  // inputs likely to exceed the cap; visible panes use their rendered height.
-  const long = text.length > 800 || text.split("\n").length > 12;
-  const clipped = content.clientHeight
-    ? content.scrollHeight > content.clientHeight + 1
-    : long;
-  if (clipped) {
-    const toggle = h(
-      "button",
-      "mx-auto mt-1.5 block w-fit rounded border border-cyan-200 bg-white px-2 py-1 text-[12px] font-medium text-cyan-800 shadow-sm hover:bg-cyan-100 pointer-coarse:py-3.5",
-      "Show full message",
-    );
-    toggle.setAttribute("type", "button");
-    toggle.onclick = () => {
-      const clamped = content.classList.toggle(collapsed[0]!);
-      content.classList.toggle(collapsed[1]!, clamped);
-      toggle.textContent = clamped ? "Show full message" : "Collapse message";
-      content.tabIndex = -1;
-      content.focus({ preventScroll: true });
-    };
-    row.append(toggle);
-  } else {
-    content.classList.remove(...collapsed);
-  }
   trimRows();
   scrollBottom();
 }

@@ -7,7 +7,7 @@ import { getJson, promptRun, refused, type Sent } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
-import type { ActivityStep, BackgroundRun } from "../../core/types.js";
+import type { ActivityStep, BackgroundRun, ModelRef } from "../../core/types.js";
 
 /**
  * The bits of the turns pane this module writes into. Handed over at init
@@ -33,19 +33,135 @@ export function initTurnActivity(d: ChatDeps, pane: TurnsPane): void {
   turns = pane;
 }
 
+// --- the run head ---------------------------------------------------------------------
+// Every card that names a run — the detached run card here, the delegation,
+// callback and subagent-message cards in chat.ts — says the same things in
+// the same places: glyph, kind, task name on the left; model, effort, run and
+// session ids on the right. Three cards spelling "which run, where" three
+// ways was the bug this section exists to prevent.
+
+const shortId = (id: string): string => id.slice(0, 8);
+
+export interface RunHead {
+  glyph: HTMLElement;
+  /** The kind of card or the run's state, whichever the card is about. */
+  label: string;
+  labelCls: string;
+  taskName?: string;
+  model?: ModelRef;
+  thinking?: string;
+  /** Plain facts between the name and the ids: mode, depth, duration. */
+  note?: string;
+  runId: string;
+  /** The session doing the work when it is not this one; "console" is nobody. */
+  sessionId?: string | null;
+}
+
+/** One card body: full width, a tinted surface with a matching left edge, one
+ *  head row. `tone` is the tint (`border-l-cyan-500 bg-cyan-50`); the tint is
+ *  what tells a card apart from the conversation around it. */
+export const cardClass = (tone: string): string => `group relative mt-1.5 border-l-2 px-5 py-2 ${tone}`;
+export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
+
+/**
+ * The card's text with a toggle beneath when it overflows its cap. A prompt
+ * gets a glance (a few lines): it was sent, the reader knows roughly what it
+ * says. A result gets most of a screen: it is what the reader is waiting on.
+ * A hidden pane cannot be measured, so a guess from the text stands in for
+ * the rendered height there.
+ */
+export function clampedBody(text: string, glance: boolean): HTMLElement[] {
+  const lines = text.split("\n").length;
+  const long = glance ? text.length > 300 || lines > 4 : text.length > 800 || lines > 12;
+  const collapsed = [glance ? "max-h-24" : "max-h-[min(18rem,40dvh)]", "overflow-hidden"];
+  const content = h("div", `mt-1 whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
+  // Measured after the caller appends it: `clientHeight` is 0 until then and
+  // the guess decides.
+  const toggle = h(
+    "button",
+    "mx-auto mt-1.5 hidden w-fit rounded border border-black/10 bg-white px-2 py-1 text-[12px] font-medium text-neutral-700 shadow-sm hover:bg-black/[0.03] pointer-coarse:py-3.5 dark:border-neutral-200 dark:bg-neutral-50",
+    "Show full message",
+  );
+  toggle.setAttribute("type", "button");
+  toggle.onclick = () => {
+    const clamped = content.classList.toggle(collapsed[0]!);
+    content.classList.toggle(collapsed[1]!, clamped);
+    toggle.textContent = clamped ? "Show full message" : "Collapse message";
+    content.tabIndex = -1;
+    content.focus({ preventScroll: true });
+  };
+  queueMicrotask(() => {
+    const clipped = content.clientHeight ? content.scrollHeight > content.clientHeight + 1 : long;
+    if (clipped) toggle.classList.remove("hidden");
+    else content.classList.remove(...collapsed);
+  });
+  return [content, toggle];
+}
+
+/** Anything the caller appends after this lands right of the ids. */
+export function runHead(o: RunHead): HTMLElement {
+  const head = h("div", "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500", o.glyph);
+  head.append(h("span", `flex-none font-semibold uppercase ${o.labelCls}`, o.label));
+  if (o.taskName) head.append(h("span", "min-w-0 truncate text-[12.5px] font-medium text-neutral-800", o.taskName));
+  const meta = h("div", "ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
+  if (o.note) meta.append(h("span", "flex-none", o.note));
+  if (o.model) {
+    const model = h("span", "flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200", o.model.id);
+    model.title = `${o.model.provider} / ${o.model.id}`;
+    meta.append(model);
+  }
+  if (o.thinking) {
+    const effort = h("span", "flex-none", o.thinking);
+    effort.title = "Reasoning effort";
+    meta.append(effort);
+  }
+  const run = h("button", "flex-none hover:underline", `run ${shortId(o.runId)}`);
+  run.title = o.runId;
+  run.onclick = () => deps.showRun(o.runId);
+  meta.append(run);
+  if (o.sessionId && o.sessionId !== "console") {
+    const id = o.sessionId;
+    const session = h("button", "flex-none hover:underline", `session ${shortId(id)}`);
+    session.title = `Open ${id}`;
+    session.onclick = () => deps.select(id);
+    meta.append(session);
+  }
+  head.append(meta);
+  return head;
+}
+
 // --- background runs (detached task calls made from this session) ------------------
 
-const RUN_STYLE: Record<BackgroundRun["state"], string> = {
-  queued: "border-amber-200 bg-amber-50 text-amber-800",
-  running: "border-green-200 bg-green-50 text-green-800",
-  succeeded: "border-neutral-200 bg-neutral-50 text-neutral-600",
-  failed: "border-red-200 bg-red-50 text-red-700",
-  cancelled: "border-neutral-200 bg-neutral-50 text-neutral-500",
-  interrupted: "border-amber-200 bg-amber-50 text-amber-800",
-  skipped: "border-neutral-200 bg-neutral-50 text-neutral-500",
+/**
+ * Direction is the surface, state is the edge. A run card is a message this
+ * session sent, so it sits on the same indigo the user's own rows use; what
+ * came back (chat.ts) is cyan. The left edge, glyph and caption then say how
+ * the run is doing — green once it succeeded, red when it failed, a spinner
+ * while it is still out — so the two questions are answered by two cues that
+ * never compete for the same pixels.
+ */
+const OUTGOING = "bg-indigo-50/70";
+export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: string }> = {
+  queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: "" },
+  running: { edge: "border-l-indigo-500", label: "text-indigo-700", glyph: "" },
+  succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: "\u2713" },
+  failed: { edge: "border-l-red-500", label: "text-red-600", glyph: "\u2715" },
+  cancelled: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: "\u00b7" },
+  interrupted: { edge: "border-l-amber-400", label: "text-amber-700", glyph: "\u23f8" },
+  skipped: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: "\u00b7" },
 };
 
+/** The state's glyph: a spinner while it is still moving. */
+export const stateGlyph = (state: BackgroundRun["state"]): HTMLElement =>
+  STATE_STYLE[state].glyph
+    ? h("span", `w-3 flex-none text-center font-bold ${STATE_STYLE[state].label}`, STATE_STYLE[state].glyph)
+    : h("span", `spinner ${STATE_STYLE[state].label}`);
+
 const backgroundRows = new Map<string, HTMLElement>();
+
+/** The prompt is drawn once per card and kept across status re-renders: a
+ *  reader who expanded it must not watch it snap shut when the run moves on. */
+const promptBodies = new WeakMap<HTMLElement, HTMLElement[]>();
 
 /**
  * Every control on a background run reports here, because a control that fails
@@ -85,46 +201,49 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   for (const [id, el] of backgroundRows) if (!el.isConnected) backgroundRows.delete(id);
   let row = backgroundRows.get(run.runId);
   if (!row) {
-    row = h("div", "mx-5 my-1.5 border px-3 py-2 text-[13px]");
+    row = runCard(`${STATE_STYLE[run.state].edge} ${OUTGOING}`);
     row.dataset.kind = "background-run";
     turns.el.append(row);
     backgroundRows.set(run.runId, row);
   }
-  row.className = `mx-5 my-1.5 border px-3 py-2 text-[13px] ${RUN_STYLE[run.state]}`;
+  row.className = cardClass(`${STATE_STYLE[run.state].edge} ${OUTGOING}`);
   const active = run.state === "queued" || run.state === "running";
   const runUrl = `/api/task-runs/${run.runId}`;
-  const status = active ? h("span", "spinner") : h("span", "w-3 flex-none text-center", run.state === "succeeded" ? "✓" : run.state === "failed" ? "✕" : "·");
-  const title = h("button", "min-w-0 truncate text-left font-medium hover:underline", run.taskName);
-  title.onclick = () => deps.showRun(run.runId);
-  const head = h("div", "flex items-center gap-2", status, h("span", "flex-none text-[11px] font-semibold uppercase", run.state), title);
-  const controls = h("div", "ml-auto flex flex-none items-center gap-2");
-  if (run.targetSessionId) {
-    const target = h("button", "font-mono text-[11px] hover:underline", "Open");
-    target.title = `Open ${run.targetSessionId}`;
-    target.onclick = () => deps.select(run.targetSessionId!);
-    controls.append(target);
-  }
+  const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
+  const head = runHead({
+    glyph: stateGlyph(run.state),
+    label: run.state,
+    labelCls: STATE_STYLE[run.state].label,
+    taskName: run.taskName,
+    note: `${run.sessionMode ?? "task"} · depth ${String(run.depth)} · ${String(seconds)}s`,
+    runId: run.runId,
+    sessionId: run.targetSessionId,
+  });
+  const controls = h("div", "flex flex-none items-center gap-2 text-[11px] font-semibold text-neutral-700");
   if (active) {
-    const steer = h("button", "text-[11px] font-semibold hover:underline", "Steer");
+    const steer = h("button", "hover:underline", "Steer");
     const steerBody = { mode: "steer", sourceSessionId: deps.sessionId() };
     steer.onclick = () =>
       void say(promptRun("Steer subagent", `${runUrl}/steer`, steerBody, "could not steer the run"));
-    const cancel = h("button", "text-[11px] font-semibold hover:underline", "Stop");
+    const cancel = h("button", "hover:underline", "Stop");
     cancel.onclick = () => void post(`${runUrl}/cancel`, "could not stop the run");
     controls.append(steer, cancel);
   } else if (run.targetSessionId && run.sessionMode !== null) {
-    const resume = h("button", "text-[11px] font-semibold hover:underline", "Continue");
+    const resume = h("button", "hover:underline", "Continue");
     const body = { sourceSessionId: deps.sessionId() };
     resume.onclick = () =>
       void say(promptRun("Continue subagent", `${runUrl}/resume`, body, "could not continue"));
     controls.append(resume);
   }
-  head.append(controls);
-  const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
-  row.replaceChildren(
-    head,
-    h("div", "mt-1 break-words text-[11px] opacity-70", `${run.sessionMode ?? "task"} · depth ${run.depth} · ${seconds}s · ${run.runId}`),
-  );
+  if (controls.childElementCount) head.append(controls);
+  // This card sits where the delegating turn sent the message, so it is the
+  // message: the prompt, clamped to a glance like a delegation card's is.
+  let body = promptBodies.get(row);
+  if (!body && run.prompt !== null) {
+    body = clampedBody(run.prompt, true);
+    promptBodies.set(row, body);
+  }
+  row.replaceChildren(head, ...(body ?? []));
   turns.scroll();
 }
 
