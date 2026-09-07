@@ -1606,8 +1606,7 @@ describe("task service", () => {
     await vi.waitFor(() => expect(service.getGroup(group.groupId).group.callbackState).toBe("delivered"));
     const callback = session.systemInputs.at(-1)!;
     expect(callback).toMatchObject({
-      // `isGroup` is what keeps a card from offering that id as a run to open.
-      origin: { kind: "task-callback", runId: group.groupId, isGroup: true },
+      origin: { kind: "task-callback", runId: group.groupId },
       mode: "followUp",
     });
     expect(callback.text).toContain("angle-a");

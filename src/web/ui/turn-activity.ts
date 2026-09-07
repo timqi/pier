@@ -53,9 +53,6 @@ export interface RunHead {
   /** Plain facts between the name and the ids: mode, depth, duration. */
   note?: string;
   runId: string;
-  /** `runId` is a fan-out group: the label says so, and the click opens its
-   *  member runs instead of a run detail. */
-  runIsGroup?: boolean;
   /** The session doing the work when it is not this one; "console" is nobody. */
   sessionId?: string | null;
 }
@@ -118,9 +115,7 @@ export function runHead(o: RunHead): HTMLElement {
     effort.title = "Reasoning effort";
     meta.append(effort);
   }
-  // A group is named as one — clicking it lands on the same route, which
-  // resolves a group id to its members (task-runs.ts).
-  const run = h("button", "flex-none hover:underline", `${o.runIsGroup ? "group" : "run"} ${shortId(o.runId)}`);
+  const run = h("button", "flex-none hover:underline", `run ${shortId(o.runId)}`);
   run.title = o.runId;
   run.onclick = () => deps.showRun(o.runId);
   meta.append(run);

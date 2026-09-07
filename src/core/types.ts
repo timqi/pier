@@ -99,9 +99,6 @@ export type SystemInputOrigin = {
   sourceSessionId: string | null;
   /** Batched callback delivery: every run id contained in this input. */
   runIds?: string[];
-  /** A fan-out group's callback names the group in `runId` — there is no
-   *  single run behind it, so a card must not offer to open one. */
-  isGroup?: true;
   source?: SystemInputSource;
   /** How the run ended, on a callback about one run: the card's caption says
    *  it beside the name instead of the reader finding it in the text. */
