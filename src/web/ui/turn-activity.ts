@@ -53,6 +53,8 @@ export interface RunHead {
   /** Plain facts between the name and the ids: mode, depth, duration. */
   note?: string;
   runId: string;
+  /** `runId` is a fan-out group: it names the delivery, opens no run detail. */
+  runIsGroup?: boolean;
   /** The session doing the work when it is not this one; "console" is nobody. */
   sessionId?: string | null;
 }
@@ -115,10 +117,18 @@ export function runHead(o: RunHead): HTMLElement {
     effort.title = "Reasoning effort";
     meta.append(effort);
   }
-  const run = h("button", "flex-none hover:underline", `run ${shortId(o.runId)}`);
-  run.title = o.runId;
-  run.onclick = () => deps.showRun(o.runId);
-  meta.append(run);
+  if (o.runIsGroup) {
+    // No group detail view exists, and the member run ids are in the card's
+    // own text; a button here would only 404 on the group id.
+    const group = h("span", "flex-none", `group ${shortId(o.runId)}`);
+    group.title = o.runId;
+    meta.append(group);
+  } else {
+    const run = h("button", "flex-none hover:underline", `run ${shortId(o.runId)}`);
+    run.title = o.runId;
+    run.onclick = () => deps.showRun(o.runId);
+    meta.append(run);
+  }
   if (o.sessionId && o.sessionId !== "console") {
     const id = o.sessionId;
     const session = h("button", "flex-none hover:underline", `session ${shortId(id)}`);

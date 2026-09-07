@@ -39,10 +39,14 @@ export class TaskGroups {
       save: (group) => { this.store.saveGroup(group); },
       changed,
       // A group names itself in the origin where a run names its run id, so the
-      // engine's transcript proof works unchanged.
+      // engine's transcript proof works unchanged — and `isGroup` is how the
+      // card that reads it knows that id opens no run.
       input: (groups) => ({
         text: this.text(groups[0]!),
-        origin: { kind: "task-callback", taskId: groups[0]!.id, runId: groups[0]!.id, sourceSessionId: null },
+        origin: {
+          kind: "task-callback", taskId: groups[0]!.id, runId: groups[0]!.id,
+          sourceSessionId: null, isGroup: true,
+        },
       }),
       describe: (group) => `the result of a ${String(group.memberRunIds.length)}-run group`,
     }, unreachable);

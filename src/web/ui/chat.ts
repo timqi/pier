@@ -298,6 +298,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       ? { taskName: origin.source.taskName, model: origin.source.model, thinking: origin.source.thinking }
       : meta ? { taskName: meta.split("\n")[0]! } : {}),
     runId: origin.runId,
+    ...(origin.kind === "task-callback" && origin.isGroup ? { runIsGroup: true } : {}),
     sessionId: origin.sourceSessionId,
   });
   if (origin.kind === "task-message" && origin.messageKind === "decision") {
