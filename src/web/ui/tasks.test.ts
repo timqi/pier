@@ -68,6 +68,7 @@ vi.mock("./form.js", () => ({
 vi.mock("./task-editor.js", () => ({ openTaskEditor: vi.fn() }));
 
 import { createTasksView } from "./tasks.js";
+import { openTaskEditor } from "./task-editor.js";
 import { createRunsView } from "./runs.js";
 let root: Element;
 let tasksView: ReturnType<typeof createTasksView>;
@@ -77,12 +78,13 @@ let run: RunView;
 let page: RunPage;
 let group: TaskGroup;
 let messages: TaskMessage[];
-let fetcher: ReturnType<typeof vi.fn>;
+let fetcher: ReturnType<typeof vi.fn<(url: string) => Promise<Response>>>;
 let failMessages: boolean;
 let delayRun: Promise<void> | null;
 let currentSession: string | null;
 const openRuns = vi.fn<(filters: Record<string, string>, id?: string) => void>();
 const openTask = vi.fn<(id?: string) => void>();
+const loadSessions = vi.fn<() => Promise<void>>();
 const settled = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
 const button = (text: string) => walk(root).find((el) => el.tag === "button" && el.text === text);
 async function click(text: string) { expect(button(text), text).toBeDefined(); button(text)!.onclick!(); await settled(); }
@@ -129,13 +131,143 @@ beforeEach(async () => {
     tasksView.hide(); runsView.show(id, new URLSearchParams(filters).toString());
   });
   openTask.mockReset().mockImplementation((id) => { runsView.hide(); tasksView.show(id); });
-  tasksView = createTasksView(root as unknown as HTMLElement, () => [], async () => {}, vi.fn(), () => currentSession, openRuns, openTask);
+  vi.mocked(openTaskEditor).mockClear();
+  loadSessions.mockReset().mockResolvedValue();
+  tasksView = createTasksView(root as unknown as HTMLElement, () => [], loadSessions, vi.fn(), () => currentSession, openRuns, openTask);
   runsView = createRunsView(root as unknown as HTMLElement, vi.fn(), openRuns, openTask);
   tasksView.show(); await settled();
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Tasks", () => {
+  it("loads and refreshes details without lists, and ignores another task's refresh", async () => {
+    fetcher.mockClear();
+    openTask(task.id); await settled();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/tasks/task-a", "/api/tasks/task-a/runs"]);
+    fetcher.mockClear(); tasksView.refresh("other-task"); await settled();
+    expect(fetcher).not.toHaveBeenCalled();
+    tasksView.refresh(task.id); await settled();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/tasks/task-a", "/api/tasks/task-a/runs"]);
+    expect(loadSessions).not.toHaveBeenCalled();
+  });
+  it("reports list failure without blocking subsequent details", async () => {
+    fetcher.mockRejectedValueOnce(new Error("list offline"));
+    tasksView.refresh(); await settled();
+    expect(root.text).toContain("Failed to load tasks: Error: list offline");
+    const original = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation((url) => url.startsWith("/api/tasks?") ? Promise.reject(new Error("list offline")) : original(url));
+    fetcher.mockClear(); openTask(task.id); await settled();
+    expect(root.querySelector("[data-task-detail]")?.dataset.taskDetail).toBe(task.id);
+    expect(root.text).not.toContain("list offline");
+    expect(fetcher.mock.calls).toHaveLength(2);
+  });
+  it.each([false, true])("ignores a late list response (failure: %s) without delaying details", async (fail) => {
+    let release!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    tasksView.refresh(); tasksView.refresh(); await settled();
+    fetcher.mockClear(); openTask(task.id); await settled();
+    const detail = root.querySelector("[data-task-detail]");
+    expect(detail?.dataset.taskDetail).toBe(task.id);
+    release(fail ? Response.json({ error: "old list failed" }, { status: 500 }) : Response.json([{ ...task, name: "Old list", lastRun: null }]));
+    await settled();
+    expect(root.querySelector("[data-task-detail]")).toBe(detail);
+    expect(root.text).not.toContain("old list failed");
+    expect(fetcher.mock.calls).toHaveLength(2);
+    openTask(); await settled();
+    expect(button("Review")).toBeDefined();
+    expect(button("Old list")).toBeUndefined();
+  });
+  it.each([false, true])("ignores an older detail after returning to the same task (failure: %s)", async (fail) => {
+    let release!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    openTask(task.id); await settled(); openTask(); await settled(); openTask(task.id); await settled();
+    const detail = root.querySelector("[data-task-detail]");
+    release(fail ? Response.json({ error: "old detail failed" }, { status: 500 }) : Response.json({ ...task, name: "Old detail" }));
+    await settled();
+    expect(root.querySelector("[data-task-detail]")).toBe(detail);
+    expect(root.text).not.toContain("Old detail");
+    expect(root.text).not.toContain("old detail failed");
+  });
+  it("keeps late task details out of another view", async () => {
+    let release!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    openTask(task.id); await settled(); openRuns({}, run.id); await settled();
+    release(Response.json(task)); await settled();
+    expect(root.text).toContain("Raw record");
+    expect(root.querySelector("[data-task-detail]")).toBeNull();
+  });
+  it("preserves list filters and search after detail navigation", async () => {
+    await change("Status", "archived"); await change("Trigger", "cron");
+    const search = walk(root).find((el) => el.attrs["aria-label"] === "Search tasks")!;
+    search.value = "review"; search.oninput!();
+    openTask(task.id); await settled(); openTask(); await settled();
+    for (const [label, value] of [["Status", "archived"], ["Trigger", "cron"], ["Search tasks", "review"]]) {
+      expect(walk(root).find((el) => el.attrs["aria-label"] === label)?.value).toBe(value);
+    }
+  });
+  it("loads complete active editor targets only when opened from an archived, filtered list", async () => {
+    await change("Status", "archived"); await change("Trigger", "cron");
+    expect(fetcher).not.toHaveBeenCalledWith("/api/tasks?state=active", undefined);
+    expect(loadSessions).not.toHaveBeenCalled();
+    const targets = [{ ...task, lastRun: null }, { ...task, id: "child", kind: "subagent", lastRun: null }];
+    fetcher.mockResolvedValueOnce(Response.json(targets)); await click("New task");
+    expect(fetcher).toHaveBeenLastCalledWith("/api/tasks?state=active", undefined);
+    expect(loadSessions).toHaveBeenCalledOnce();
+    expect(vi.mocked(openTaskEditor).mock.lastCall![0].tasks()).toEqual(targets);
+  });
+  it("loads editor targets from details and retains the last good candidates on failure", async () => {
+    openTask(task.id); await settled(); await click("Edit");
+    const targets = vi.mocked(openTaskEditor).mock.lastCall![0].tasks();
+    expect(targets).toHaveLength(1);
+    expect(vi.mocked(openTaskEditor).mock.lastCall![1]).toEqual(task);
+    fetcher.mockRejectedValueOnce(new Error("targets offline")); await click("Edit");
+    expect(root.text).toContain("Failed to load tasks: Error: targets offline");
+    expect(vi.mocked(openTaskEditor).mock.lastCall![0].tasks()).toEqual(targets);
+    expect(openTaskEditor).toHaveBeenCalledTimes(2);
+  });
+  it.each(["New task", "Edit"])("reports session loading failure for %s without opening the dialog", async (label) => {
+    if (label === "Edit") { openTask(task.id); await settled(); }
+    loadSessions.mockRejectedValueOnce(new Error("sessions offline")); await click(label);
+    expect(root.text).toContain("Failed to open task editor: Error: sessions offline");
+    expect(openTaskEditor).not.toHaveBeenCalled();
+  });
+  it.each(["New task", "Edit"])("does not open a late %s dialog after navigation", async (label) => {
+    if (label === "Edit") { openTask(task.id); await settled(); }
+    let release!: () => void;
+    loadSessions.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    await click(label);
+    if (label === "Edit") openTask(); else openTask(task.id);
+    await settled(); release(); await settled();
+    expect(openTaskEditor).not.toHaveBeenCalled();
+  });
+  it.each(["New task", "Edit"])("ignores a stale %s button while the next detail loads", async (label) => {
+    if (label === "Edit") { openTask(task.id); await settled(); }
+    let release!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    fetcher.mockResolvedValueOnce(Response.json([]));
+    openTask("task-b"); await settled(); await click(label);
+    expect(loadSessions).not.toHaveBeenCalled();
+    expect(openTaskEditor).not.toHaveBeenCalled();
+    release(Response.json({ ...task, id: "task-b", name: "Next task" })); await settled();
+    expect(root.querySelector("[data-task-detail]")?.dataset.taskDetail).toBe("task-b");
+  });
+  it.each(["task", "runs"])("reports a failed detail %s request", async (endpoint) => {
+    if (endpoint === "runs") fetcher.mockResolvedValueOnce(Response.json(task));
+    fetcher.mockRejectedValueOnce(new Error("detail offline"));
+    openTask(task.id); await settled();
+    expect(root.text).toContain(endpoint === "task" ? "Failed to load task: Error: detail offline" : "Failed to load the task's runs: Error: detail offline");
+  });
+  it.each([false, true])("ignores late editor candidates after leaving Tasks (failure: %s)", async (fail) => {
+    openTask(task.id); await settled();
+    let release!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    await click("Edit"); openRuns({}, run.id); await settled();
+    release(fail ? Response.json({ error: "old candidates failed" }, { status: 500 }) : Response.json([]));
+    await settled();
+    expect(openTaskEditor).not.toHaveBeenCalled();
+    expect(root.text).toContain("Raw record");
+    expect(root.text).not.toContain("old candidates failed");
+  });
   it("only requests explicit tasks, has search/archive, and no cross-entry tabs or subagent filter", async () => {
     expect(fetcher).toHaveBeenCalledWith("/api/tasks?state=active&kind=task", undefined);
     expect(walk(root).some((el) => el.attrs["aria-label"] === "Type")).toBe(false);

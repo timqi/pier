@@ -42,32 +42,30 @@ export function createTasksView(
    *  with the same rows, and the pressed tab is drawn by this list. */
   let drawn = "";
 
-  const load = coalesce(async () => {
+  const loadList = coalesce(async () => {
+    if (selectedId || !view.visible) return;
+    const request = detailRequest;
     const wanted = `${filter}:${trigger}`;
     const got = await getJson<TaskRow[]>(
       `/api/tasks?state=${filter}&kind=task`,
       "Failed to load tasks",
     );
+    if (!view.visible || request !== detailRequest || wanted !== `${filter}:${trigger}`) return;
     if (!got.ok) {
       drawn = "";
       return renderError(got.error);
     }
-    if (wanted !== `${filter}:${trigger}`) return;
-    // The detail page has endpoints of its own; only skip the unchanged list.
     const body = JSON.stringify(got.value);
-    if (wanted + body === drawn && !selectedId) return;
+    if (wanted + body === drawn) return;
     drawn = wanted + body;
     rows = got.value;
-    // The editor offers active tasks as chain targets whatever the list is
-    // filtered to, so a filter that cannot stand in for that list fetches it.
-    // Reusing the wrong list left the target picker empty or stale.
-    if (filter === "archived") availableTasks = await activeTasks();
-    else availableTasks = rows;
-    if (wanted !== `${filter}:${trigger}`) return;
     if (trigger !== "all") rows = rows.filter((task) => task.trigger.type === trigger);
-    if (selectedId) await renderDetail(selectedId);
-    else renderList();
+    renderList();
   });
+
+  function load(): Promise<void> {
+    return selectedId ? renderDetail(selectedId) : loadList();
+  }
 
   function renderError(message: string): void {
     root.querySelector("[role=alert]")?.remove();
@@ -78,7 +76,9 @@ export function createTasksView(
 
   /** Keep the last good list on a failed refetch: a stale picker beats none. */
   async function activeTasks(): Promise<TaskRow[]> {
+    const request = detailRequest;
     const got = await getJson<TaskRow[]>("/api/tasks?state=active", "Failed to load tasks");
+    if (!got.ok && view.visible && request === detailRequest) renderError(got.error);
     return got.ok ? got.value : availableTasks;
   }
 
@@ -111,7 +111,17 @@ export function createTasksView(
 
   function renderList(): void {
     const create = button("New task", true);
-    create.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps));
+    create.onclick = () => {
+      if (selectedId) return;
+      const request = detailRequest;
+      void Promise.all([loadSessions(), activeTasks()]).then(([, tasks]) => {
+        if (!view.visible || request !== detailRequest) return;
+        availableTasks = tasks;
+        openTaskEditor(editorDeps);
+      }).catch((err) => {
+        if (view.visible && request === detailRequest) renderError(`Failed to open task editor: ${String(err)}`);
+      });
+    };
     const filters: HTMLElement[] = [];
     const addFilter = (label: string, options: [string, string][], value: string, change: (value: string) => void): void => {
       const input = select(options, value);
@@ -202,7 +212,7 @@ export function createTasksView(
       getJson<TaskDefinition>(`/api/tasks/${id}`, "Failed to load task"),
       getJson<TaskRun[]>(`/api/tasks/${id}/runs`, "Failed to load the task's runs"),
     ]);
-    if (request !== detailRequest || selectedId !== id) return;
+    if (!view.visible || request !== detailRequest || selectedId !== id) return;
     if (!gotTask.ok) return renderError(gotTask.error);
     if (!gotRuns.ok) return renderError(gotRuns.error);
     const task = gotTask.value;
@@ -221,7 +231,16 @@ export function createTasksView(
     pause.onclick = () => void mutate(`/api/tasks/${task.id}/${task.enabled ? "pause" : "resume"}`);
     const edit = button("Edit");
     edit.disabled = task.archived || task.action.type === "system";
-    edit.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps, task));
+    edit.onclick = () => {
+      if (request !== detailRequest) return;
+      void Promise.all([loadSessions(), activeTasks()]).then(([, tasks]) => {
+        if (!view.visible || request !== detailRequest) return;
+        availableTasks = tasks;
+        openTaskEditor(editorDeps, task);
+      }).catch((err) => {
+        if (view.visible && request === detailRequest) renderError(`Failed to open task editor: ${String(err)}`);
+      });
+    };
     const archive = button("Archive");
     archive.disabled = task.archived || task.action.type === "system";
     archive.onclick = () => void mutate(`/api/tasks/${task.id}/archive`);
