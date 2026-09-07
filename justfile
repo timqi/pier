@@ -19,3 +19,4 @@ release bump="patch":
     git push
     npm version {{bump}}
     git push --follow-tags
+    gh run watch --exit-status $(sleep 5 && gh run list --workflow=release.yml -L1 --json databaseId -q '.[0].databaseId')
