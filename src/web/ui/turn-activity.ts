@@ -102,7 +102,11 @@ export function clampedBody(text: string, glance: boolean): HTMLElement[] {
 export function runHead(o: RunHead): HTMLElement {
   const head = h("div", "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500", o.glyph);
   head.append(h("span", `flex-none font-semibold uppercase ${o.labelCls}`, o.label));
-  if (o.taskName) head.append(h("span", "min-w-0 truncate text-[12.5px] font-medium text-neutral-800", o.taskName));
+  // `basis-0`, not just `min-w-0`: a subagent's name is its whole prompt line,
+  // and a wrapping flex row breaks *before* it shrinks an item — which pushed
+  // the ids and controls onto a second line for the long ones. Zero-basis, the
+  // name takes what is left and truncates there, so the head is one line.
+  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800", o.taskName));
   const meta = h("div", "ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "flex-none", o.note));
   if (o.model) {

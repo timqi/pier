@@ -44,7 +44,6 @@ import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config
 import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
-import { attachTerminal } from "./web/terminal.js";
 
 const log = logger("pier");
 
@@ -53,7 +52,7 @@ const log = logger("pier");
 // bin) lands under PIER_HOME instead of ~/.pi.
 //
 // An operator override wins — but only a human's. Everything Pier spawns (the
-// Web Terminal, the agent's own shell) inherits this variable, so a second
+// agent's own shell, task sessions) inherits this variable, so a second
 // Pier started from inside the first with its own PIER_HOME would adopt the
 // first one's agent dir and write its sessions, SYSTEM.md and models.json
 // there: two instances sharing a directory neither was told to share, and
@@ -63,8 +62,8 @@ const log = logger("pier");
 process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
 process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
-// Ahead of everything Pier spawns — sessions, tasks, the Web Terminal all
-// inherit this process's env. A tool switched on in the Console is Pier's
+// Ahead of everything Pier spawns — sessions and tasks all inherit this
+// process's env. A tool switched on in the Console is Pier's
 // copy at Pier's version, so it goes first, not last.
 prependPath(process.env);
 
@@ -423,11 +422,6 @@ const server = serve({ fetch: app.fetch, port, hostname }, () => {
     log.info(`agent dir ${process.env.PI_CODING_AGENT_DIR} (PI_CODING_AGENT_DIR)`);
   }
 });
-// The one WebSocket surface (see web/terminal.ts); `serve` above builds a
-// plain node:http server, which is the only shape with an upgrade event.
-const terminals = attachTerminal(server as import("node:http").Server, auth, {
-  initCommand: () => settings.get().terminalInitCommand,
-});
 
 // A crash and a clean stop must be distinguishable after the fact, and both
 // left nothing behind before this.
@@ -450,7 +444,6 @@ const shutdown = (stopTasks = true): void => {
   // `systemctl restart` into a 90-second wait for SIGKILL.
   setTimeout(() => process.exit(0), 3000).unref();
   stopEviction();
-  terminals.close(); // no shell outlives the workbench
   // The drain path leaves task runs alone: aborting them here would record
   // them cancelled and race their callbacks against dying channels, when the
   // boot-time interrupted marking is the recovery that was promised.
