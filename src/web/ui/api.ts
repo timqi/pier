@@ -39,7 +39,7 @@ export const sendJson = (
  * need the same three cases and got them subtly wrong on their own: nothing
  * was sent, it worked, or here is the sentence to show a human.
  */
-export type Sent = { sent: false } | { sent: true; error?: string };
+export type Sent = { sent: false } | { sent: true; error?: string; response?: Response };
 
 /** Read a failed response's `error`, whatever the server managed to send. */
 export async function failure(res: Response, fallback: string): Promise<string> {
@@ -134,7 +134,7 @@ export async function promptRun(
   if (!message?.trim()) return { sent: false };
   try {
     const res = await sendJson(url, { message, ...fields });
-    return { sent: true, ...(res.ok ? {} : { error: await failure(res, fallback) }) };
+    return { sent: true, ...(res.ok ? { response: res } : { error: await failure(res, fallback) }) };
   } catch (err) {
     return { sent: true, error: `${fallback}: ${String(err)}` };
   }

@@ -36,7 +36,7 @@ export interface ChatDeps {
   sessionId: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
-  showTasks: (taskId?: string) => void;
+  showRun: (runId: string) => void;
   send: (mode: "auto" | "steer", label?: string) => void;
   /** A user turn this client just drew itself: ledger it so the `user-message`
    *  event reconciles instead of drawing it twice, and show the run as live. */
@@ -285,7 +285,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     head.append(effort);
   }
   const run = h("button", "ml-auto flex-none font-mono normal-case text-cyan-700 hover:underline", `run ${origin.runId.slice(0, 8)}`);
-  run.onclick = () => deps.showTasks(origin.taskId);
+  run.onclick = () => deps.showRun(origin.runId);
   head.append(run);
   if (origin.kind === "task-message" && origin.messageKind === "decision") {
     head.append(decisionReplyBtn(origin.messageId));

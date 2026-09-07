@@ -5,7 +5,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements } from "../db.js";
-import type { TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { RunPage, RunQuery, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
   json: string;
@@ -17,7 +17,7 @@ export class TaskStore {
   /** Every query below is a fixed string, so each is compiled once. */
   private readonly sql: (sql: string) => StatementSync;
 
-  constructor(db: DatabaseSync = pierDb()) {
+  constructor(private readonly db: DatabaseSync = pierDb()) {
     this.sql = statements(db);
   }
 
@@ -84,6 +84,46 @@ export class TaskStore {
       run.callbackState,
       JSON.stringify(run),
     );
+  }
+
+  /** The global list: filters precede the limit, and the id breaks timestamp
+   *  ties so a page boundary never repeats or skips a row. The statement is
+   *  built per call and not cached — the filter set makes it. */
+  queryRuns(query: RunQuery = {}): RunPage {
+    const where: string[] = [];
+    const params: (string | number)[] = [];
+    const add = (sql: string, value: string | number | undefined): void => {
+      if (value !== undefined) { where.push(sql); params.push(value); }
+    };
+    add("r.state = ?", query.state);
+    add("r.task_id = ?", query.taskId);
+    add("json_extract(r.json, '$.triggerSource') = ?", query.source);
+    add("r.queued_at >= ?", query.since);
+    add("r.queued_at <= ?", query.until);
+    // Keep this predicate identical to migration 17's partial index.
+    if (!query.showUnmatched) where.push("NOT (r.state = 'succeeded' AND json_extract(r.json, '$.matched') IS 0)");
+    if (query.cursor) {
+      where.push("(r.queued_at, r.id) < (?, ?)");
+      params.push(query.cursor.queuedAt, query.cursor.id);
+    }
+    const limit = clamp(query.limit ?? 50, 200);
+    const rows = this.db.prepare(`
+      SELECT r.json, g.callback_state AS group_callback_state,
+        (SELECT m.id FROM task_messages m WHERE m.run_id = r.id
+          AND m.state IN ('pending', 'delivered') AND json_extract(m.json, '$.kind') = 'decision'
+          ORDER BY m.created_at, m.id LIMIT 1) AS decision_id
+      FROM task_runs r LEFT JOIN task_groups g ON g.id = json_extract(r.json, '$.groupId')
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY r.queued_at DESC, r.id DESC LIMIT ?
+    `).all(...params, limit + 1) as unknown as { json: string; decision_id: string | null; group_callback_state: RunView["groupCallbackState"] }[];
+    const runs: RunView[] = rows.slice(0, limit).map((row) => ({
+      ...JSON.parse(row.json) as TaskRun, pendingDecisionId: row.decision_id, groupCallbackState: row.group_callback_state,
+    }));
+    const last = runs.at(-1);
+    return {
+      runs,
+      nextCursor: rows.length > limit && last ? { queuedAt: last.queuedAt, id: last.id } : null,
+    };
   }
 
   listRecentRuns(limit = 100): TaskRun[] {

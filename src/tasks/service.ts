@@ -18,7 +18,7 @@ import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { TaskStore } from "./store.js";
 import { handleTaskTool } from "./tool.js";
-import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { GroupJoinMode, RunPage, RunQuery, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -203,6 +203,12 @@ export class TaskService {
     return run;
   }
 
+  getRunView(id: string): RunView {
+    const run = this.getRun(id);
+    return { ...run, pendingDecisionId: this.openDecisionId(id),
+      groupCallbackState: run.groupId ? this.store.getGroup(run.groupId)?.callbackState ?? null : null };
+  }
+
   listMessages(runId: string): TaskMessage[] {
     this.getRun(runId);
     return this.messages.list(runId);
@@ -210,6 +216,10 @@ export class TaskService {
 
   openDecisionId(runId: string): string | null {
     return this.messages.openDecisionId(runId);
+  }
+
+  queryRuns(query: RunQuery = {}): RunPage {
+    return this.store.queryRuns(query);
   }
 
   recentRuns(limit = 100): TaskRun[] {

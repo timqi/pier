@@ -315,6 +315,12 @@ const MIGRATIONS: readonly string[] = [
     GENERATED ALWAYS AS (json_extract(json, '$.nextRunAt')) VIRTUAL;
   CREATE INDEX tasks_due ON tasks(next_run_at) WHERE next_run_at IS NOT NULL;
   `,
+  // 17 — stable global pages, including sparse lists with unmatched probes hidden.
+  `
+  CREATE INDEX task_runs_time_id ON task_runs(queued_at DESC, id DESC);
+  CREATE INDEX task_runs_visible_time ON task_runs(queued_at DESC, id DESC)
+    WHERE NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0);
+  `,
 ];
 
 /**

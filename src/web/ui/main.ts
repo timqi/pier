@@ -68,11 +68,12 @@ import {
   isChatVisible,
   refreshActivity,
   refreshTasks,
+  refreshRuns,
   setSessionHash,
   showChat,
   showConsole,
   showFiles,
-  showTasks,
+  showRun,
   showTerminal,
   syncBar,
   toggleFiles,
@@ -342,6 +343,7 @@ function connectWorkspace(): void {
     }
     if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
       refreshTasks(e.type === "task-run-changed" ? e.taskId : undefined);
+      refreshRuns();
       refreshActivity();
       // A run starting or settling changes its launcher's activeRuns dot.
       if (e.type === "task-run-changed") void refreshProjects();
@@ -473,7 +475,7 @@ initChat({
   sessionId: () => currentId,
   sessionState: () => currentState,
   select: (id) => void select(id),
-  showTasks,
+  showRun,
   send: (mode, label) => void send(mode, label),
   ownTurn: (text) => {
     markOptimisticUser(text);

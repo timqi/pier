@@ -1,13 +1,14 @@
 // Console → Tasks view: the task list with its filters, and one task's detail
-// page (definition tab + actions). The runs pane lives in task-runs.ts and the
-// create/edit dialog in task-editor.ts; this file owns navigation and state.
+// page (definition tab + actions). The recent-runs pane lives in task-runs.ts,
+// a run itself in the Runs view, and the create/edit dialog in task-editor.ts;
+// this file owns navigation and state.
 
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
 import { coalesce, failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { button, select, tabButton } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
-import { dateTime, renderRuns, runDuration, type RunViewState } from "./task-runs.js";
+import { actionSummary, dateTime, definitionView, renderRuns, runDuration, runLabel, triggerSummary } from "./task-runs.js";
 
 interface TaskRow extends TaskDefinition {
   lastRun: TaskRun | null;
@@ -15,34 +16,23 @@ interface TaskRow extends TaskDefinition {
 
 export type TasksView = ConsoleView & { refresh(taskId?: string): void };
 
-const triggerSummary = (task: TaskDefinition): string => {
-  if (task.trigger.type === "manual") return "Manual";
-  if (task.trigger.type === "cron") return `${task.trigger.expression} (${task.trigger.timezone})`;
-  return `Every ${task.trigger.intervalSeconds}s · ${task.trigger.mode}`;
-};
-
-const actionSummary = (task: TaskDefinition): string => {
-  if (task.action.type === "agent") return `Agent · ${task.action.session.mode}`;
-  if (task.action.type === "bash") return "Bash";
-  return "Task";
-};
-
 export function createTasksView(
   root: HTMLElement,
   getSessions: () => SessionChoice[],
   loadSessions: () => Promise<void>,
   openSession: (id: string) => void,
   getCurrentSessionId: () => string | null,
-  openActivity: (arg?: string) => void,
+  openRuns: (filters: Record<string, string>, id?: string) => void,
+  openTask: (id?: string) => void,
 ): TasksView {
   let rows: TaskRow[] = [];
   let availableTasks: TaskRow[] = [];
   let selectedId: string | null = null;
   let filter = "active";
   let trigger = "all";
-  let kind = "task";
+  let search = "";
   let detailTab: "runs" | "definition" = "runs";
-  const runView: RunViewState = { selectedId: null, rawOpen: false, scrollTop: 0, listScroll: 0 };
+  const runsScroll = { top: 0 };
   let detailRequest = 0;
   let listScroll = 0;
   /** Filter plus payload of the last list drawn — the Activity view's guard
@@ -53,18 +43,17 @@ export function createTasksView(
   let drawn = "";
 
   const load = coalesce(async () => {
-    const wanted = `${filter}:${kind}:${trigger}`;
+    const wanted = `${filter}:${trigger}`;
     const got = await getJson<TaskRow[]>(
-      `/api/tasks?state=${filter}${kind === "subagent" ? "&kind=subagent" : ""}`,
+      `/api/tasks?state=${filter}&kind=task`,
       "Failed to load tasks",
     );
     if (!got.ok) {
       drawn = "";
       return renderError(got.error);
     }
-    if (wanted !== `${filter}:${kind}:${trigger}`) return;
-    // The detail page has endpoints of its own — a run's state changes without
-    // this list changing — so only the list may be skipped.
+    if (wanted !== `${filter}:${trigger}`) return;
+    // The detail page has endpoints of its own; only skip the unchanged list.
     const body = JSON.stringify(got.value);
     if (wanted + body === drawn && !selectedId) return;
     drawn = wanted + body;
@@ -72,9 +61,9 @@ export function createTasksView(
     // The editor offers active tasks as chain targets whatever the list is
     // filtered to, so a filter that cannot stand in for that list fetches it.
     // Reusing the wrong list left the target picker empty or stale.
-    if (filter === "archived" || kind === "subagent") availableTasks = await activeTasks();
+    if (filter === "archived") availableTasks = await activeTasks();
     else availableTasks = rows;
-    if (wanted !== `${filter}:${kind}:${trigger}`) return;
+    if (wanted !== `${filter}:${trigger}`) return;
     if (trigger !== "all") rows = rows.filter((task) => task.trigger.type === trigger);
     if (selectedId) await renderDetail(selectedId);
     else renderList();
@@ -99,16 +88,8 @@ export function createTasksView(
     onSaved: (id: string) => {
       selectTask(id);
       detailTab = "definition";
-      void load();
+      openTask(id);
     },
-  };
-
-  const runsDeps = {
-    openSession,
-    currentSessionId: getCurrentSessionId,
-    mutate,
-    onError: renderError,
-    reload: load,
   };
 
   function header(title: string | HTMLElement, actions: HTMLElement[]): HTMLElement {
@@ -126,27 +107,10 @@ export function createTasksView(
     return el;
   }
 
-  // Console tab strip (Sessions | Dependencies | Tasks) mirrors the Activity
-  // view's; the first two navigate there, Tasks returns to this view's list.
-  // Rendered on the list and the detail page alike, so the console tabs never
-  // disappear while inside a task.
-  function consoleTabs(): HTMLElement {
-    return h(
-      "div",
-      "tabstrip",
-      tabButton("Sessions", false, () => openActivity("sessions")),
-      tabButton("Relationships", false, () => openActivity("dependencies")),
-      tabButton("Tasks", true, showList),
-    );
-  }
-
   function selectTask(id: string): void {
     selectedId = id;
     detailTab = "runs";
-    runView.selectedId = null;
-    runView.rawOpen = false;
-    runView.scrollTop = 0;
-    runView.listScroll = 0;
+    runsScroll.top = 0;
   }
 
   function showList(): void {
@@ -158,7 +122,6 @@ export function createTasksView(
   function renderList(): void {
     const create = button("New task", true);
     create.onclick = () => void loadSessions().then(() => openTaskEditor(editorDeps));
-    const filters = consoleTabs();
     const filterBox = h("div", "flex flex-none flex-wrap items-center gap-3 border-b border-neutral-200 px-4 py-2");
     const addFilter = (label: string, options: [string, string][], value: string, change: (value: string) => void): void => {
       const input = select(options, value);
@@ -172,7 +135,13 @@ export function createTasksView(
       filterBox.append(h("label", "flex items-center gap-2 text-[12px] text-neutral-500", label, input));
     };
     addFilter("Status", [["Current", "active"], ["Archived", "archived"]], filter, (v) => { filter = v; });
-    addFilter("Type", [["Tasks", "task"], ["Subagents", "subagent"]], kind, (v) => { kind = v; });
+    const searchInput = h("input", "min-w-0 rounded border border-neutral-200 px-2 py-1 text-[13px]") as HTMLInputElement;
+    searchInput.type = "search";
+    searchInput.placeholder = "Search tasks";
+    searchInput.setAttribute("aria-label", "Search tasks");
+    searchInput.value = search;
+    searchInput.oninput = () => { search = searchInput.value; drawRows(); };
+    filterBox.append(searchInput);
     addFilter("Trigger", [["All triggers", "all"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"]], trigger, (v) => { trigger = v; });
     const table = document.createElement("table");
     table.className = "w-full table-fixed text-left text-[12.5px]";
@@ -181,23 +150,26 @@ export function createTasksView(
       <th class="hidden w-[23%] px-2 py-2 font-semibold md:table-cell">Trigger</th><th class="hidden w-[17%] px-2 py-2 font-semibold md:table-cell">Next</th>
       <th class="px-2 py-2 font-semibold md:w-[14%]">Last result</th><th class="w-[6rem] px-2 py-2 font-semibold"></th></tr></thead>`;
     const body = document.createElement("tbody");
-    for (const task of rows) body.append(taskRow(task));
+    // Search narrows client-side by name and description; the list is small.
+    const drawRows = (): void => {
+      const matching = rows.filter((task) => `${task.name} ${task.description ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+      body.replaceChildren(...matching.map(taskRow));
+      empty.classList.toggle("hidden", matching.length > 0);
+    };
     table.append(body);
-    const pane = h("div", "min-h-0 flex-1 overflow-auto", table);
-    if (!rows.length) pane.append(h("p", "p-4 text-[13px] text-neutral-500", "No matching tasks."));
+    const empty = h("p", "p-4 text-[13px] text-neutral-500", "No matching tasks.");
+    const pane = h("div", "min-h-0 flex-1 overflow-auto", table, empty);
+    drawRows();
     pane.onscroll = () => { listScroll = pane.scrollTop; };
-    root.replaceChildren(header("Activity", [create]), filters, filterBox, pane);
+    root.replaceChildren(header("Tasks", [create]), filterBox, pane);
     pane.scrollTop = listScroll;
   }
 
   function taskRow(task: TaskRow): HTMLElement {
     const tr = document.createElement("tr");
     tr.className = "cursor-pointer border-b border-neutral-100 hover:bg-neutral-50";
-    tr.onclick = () => {
-      selectTask(task.id);
-      void renderDetail(task.id);
-    };
-    const state = task.archived ? "Archived" : task.enabled ? "Enabled" : "Paused";
+    tr.onclick = () => openTask(task.id);
+    const state = task.archived ? "Archived" : task.trigger.type === "manual" ? "Manual" : task.enabled ? "Enabled" : "Paused";
     const name = button(task.name);
     name.className = "block w-full cursor-pointer truncate text-left font-medium";
     name.title = task.name;
@@ -210,7 +182,7 @@ export function createTasksView(
       tr.append(cell);
     }
     tr.append(h("td", "px-2 py-2.5",
-      h("div", "break-words", task.lastRun?.state ?? "-"),
+      h("div", "break-words", task.lastRun ? runLabel(task.lastRun) : "-"),
       h("div", "text-[11px] text-neutral-400", task.lastRun ? runDuration(task.lastRun) : "")));
     const run = button("Run now");
     run.disabled = task.archived;
@@ -238,7 +210,7 @@ export function createTasksView(
     // as the way back to the list (replaces the old Back button).
     const listLink = button("Tasks");
     listLink.className = "cursor-pointer text-neutral-500 hover:underline";
-    listLink.onclick = showList;
+    listLink.onclick = () => openTask();
     const crumb = h("span", "flex min-w-0 items-center gap-1.5", listLink, h("span", "text-neutral-400", "›"), h("span", "truncate font-medium", task.name));
     const run = button("Run now", true);
     run.disabled = task.archived;
@@ -258,66 +230,27 @@ export function createTasksView(
     pane.dataset.taskDetail = id;
     const drawPane = (): void => {
       tabs.replaceChildren(
-        tabButton(`Runs (${runs.length})`, detailTab === "runs", () => { detailTab = "runs"; drawPane(); }),
+        tabButton(`Recent runs (${runs.length})`, detailTab === "runs", () => { detailTab = "runs"; drawPane(); }),
         tabButton("Definition", detailTab === "definition", () => { detailTab = "definition"; drawPane(); }),
       );
-      if (detailTab === "runs") renderRuns(pane, runs, runsDeps, runView);
-      else renderDefinition(pane, task);
+      if (detailTab === "runs") renderRuns(pane, runs, (id) => openRuns({}, id), runsScroll);
+      else { pane.onscroll = null; pane.replaceChildren(definitionView(task, openSession)); }
     };
     const previousScroll = previousPane?.scrollTop ?? 0;
-    root.replaceChildren(header(crumb, [run, pause, edit, archive]), consoleTabs(), tabs, pane);
+    const allRuns = button("All runs");
+    allRuns.onclick = () => openRuns({ taskId: task.id });
+    root.replaceChildren(header(crumb, [run, ...(task.trigger.type === "manual" ? [] : [pause]), edit, archive, allRuns]), tabs, pane);
     drawPane();
     pane.scrollTop = previousScroll;
   }
 
-  function renderDefinition(pane: HTMLElement, task: TaskDefinition): void {
-    pane.dataset.runView = "definition";
-    pane.onscroll = null;
-    const content = h("div", "grid max-w-4xl grid-cols-[6rem_minmax(0,1fr)] gap-x-5 gap-y-3 p-4 text-[13px] md:grid-cols-[9.375rem_minmax(0,1fr)]");
-    const values: [string, string][] = [
-      ["Status", task.archived ? "Archived" : task.enabled ? "Enabled" : "Paused"],
-      ["Trigger", triggerSummary(task)],
-      ["Action", actionSummary(task)],
-      ["Timeout", `${task.timeoutSeconds}s`],
-      ["Next run", dateTime(task.nextRunAt)],
-      ["Revision", String(task.revision)],
-      ["Created by", task.createdBySessionId ?? task.creator],
-      ["Callback", task.callback.type === "session" ? task.callback.sessionId : task.callback.type],
-      ["Description", task.description || "-"],
-    ];
-    if (task.action.type === "agent") {
-      values.push(["Session policy", task.action.session.mode]);
-      if (task.action.session.mode === "reuse") values.push(["Session", task.action.session.sessionId]);
-      // By shape: a legacy `fork` definition carries a directory the details
-      // view would otherwise stop showing.
-      if ("cwd" in task.action.session) values.push(["Directory", task.action.session.cwd]);
-      if (task.action.launch?.model) values.push(["Model", `${task.action.launch.model.provider}/${task.action.launch.model.id}`]);
-      if (task.action.launch?.thinking) values.push(["Thinking", task.action.launch.thinking]);
-      values.push(["Prompt", task.action.prompt]);
-    }
-    if (task.action.type === "bash") values.push(["Directory", task.action.cwd], ["Script", task.action.script]);
-    if (task.action.type === "task") values.push(["Target task", task.action.taskId]);
-    if (task.trigger.type === "watch") values.push(["Probe", task.trigger.script]);
-    for (const [label, value] of values) {
-      content.append(
-        h("span", "text-[11px] font-semibold uppercase text-neutral-400", label),
-        h("pre", "whitespace-pre-wrap break-words font-mono text-[12.5px]", value),
-      );
-    }
-    if (task.action.type === "agent" && task.action.session.mode === "reuse") {
-      const { sessionId } = task.action.session;
-      const open = button("Open session");
-      open.onclick = () => openSession(sessionId);
-      content.append(h("span", "", ""), open);
-    }
-    pane.replaceChildren(content);
-  }
-
   async function runTask(id: string): Promise<void> {
-    const res = await sendJson(`/api/tasks/${id}/run`, { sourceSessionId: getCurrentSessionId() });
-    if (!res.ok) return renderError(await failure(res, "Failed to run task"));
-    selectTask(id);
-    await renderDetail(id);
+    try {
+      const res = await sendJson(`/api/tasks/${id}/run`, { sourceSessionId: getCurrentSessionId() });
+      if (!res.ok) return renderError(await failure(res, "Failed to run task"));
+      const result = await res.json() as { runId: string };
+      openRuns({}, result.runId);
+    } catch (err) { renderError(`Failed to run task: ${String(err)}`); }
   }
 
   async function mutate(url: string): Promise<void> {
@@ -328,6 +261,7 @@ export function createTasksView(
 
   const view = consoleView(root, (taskId) => {
     if (taskId && taskId !== selectedId) selectTask(taskId);
+    if (!taskId) showList();
     if (!root.childElementCount) renderList();
     void load();
   });

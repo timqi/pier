@@ -149,7 +149,7 @@ per-turn Activity groups):
 - **Console Activity**: active Session table plus a directed task dependency
   graph. Invocation edges are solid, callbacks dashed, and Subagent control or
   supervisor messages dotted; Session nodes
-  open chat and edges open Tasks. Active and last-hour scopes share the same
+  open chat and run edges open Runs. Active and last-hour scopes share the same
   task-run records.
 - **Task communication**: detached task calls create live Background Run rows in
   the invoking chat, updated in place from `task-status` session events. Agent

@@ -1,0 +1,59 @@
+// Hash routes and first-level entries, without loading chat or a browser runtime.
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => {
+  const elements = new Map<string, { onclick?: () => void; open?: boolean; ontoggle?: () => void; textContent: string; classList: { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn>; toggle: ReturnType<typeof vi.fn> } }>();
+  const element = (id: string) => {
+    let el = elements.get(id);
+    if (!el) { el = { textContent: "", classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() } }; elements.set(id, el); }
+    return el;
+  };
+  const view = () => ({ show: vi.fn(), hide: vi.fn(), refresh: vi.fn(), visible: true });
+  return { element, elements, tasks: view(), runs: view(), activity: view(), bar: vi.fn() };
+});
+vi.mock("./dom.js", () => ({ $: mocks.element, h: vi.fn(), consoleView: vi.fn() }));
+vi.mock("./chat.js", () => ({ turnsPane: mocks.element("turns") }));
+vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
+vi.mock("./session-header.js", () => ({ renderHeader: vi.fn() }));
+vi.mock("./shell.js", () => ({ closeDrawer: vi.fn(), setBarTitle: mocks.bar }));
+vi.mock("./sidebar.js", () => ({ groupByCwd: vi.fn() }));
+vi.mock("./shortcut.js", () => ({ shortcut: vi.fn() }));
+vi.mock("./tasks.js", () => ({ createTasksView: () => mocks.tasks }));
+vi.mock("./runs.js", () => ({ createRunsView: () => mocks.runs }));
+vi.mock("./activity.js", () => ({ createActivityView: () => mocks.activity }));
+const settled = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+let views: typeof import("./views.js");
+beforeEach(async () => {
+  vi.resetModules(); vi.clearAllMocks();
+  vi.stubGlobal("location", { hash: "#/" });
+  vi.stubGlobal("history", { replaceState: (_a: unknown, _b: string, hash: string) => { location.hash = hash; } });
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
+  vi.stubGlobal("window", {});
+  views = await import("./views.js");
+  views.initViews({ sessions: () => [], loadSessions: async () => {}, currentId: () => null, currentSession: () => undefined, select: vi.fn(), maybeAckRead: vi.fn() });
+});
+afterEach(() => vi.unstubAllGlobals());
+it("keeps Tasks, Runs and Activity independent in sidebar and mobile title", async () => {
+  for (const name of ["tasks", "runs", "activity"] as const) {
+    mocks.element(`#open-${name}`).onclick!(); await settled();
+    expect(location.hash).toBe(`#/${name}`);
+    expect(mocks.bar).toHaveBeenLastCalledWith(name[0]!.toUpperCase() + name.slice(1), false);
+    for (const other of ["tasks", "runs", "activity"]) expect(mocks.element(`#open-${other}`).classList.toggle).toHaveBeenLastCalledWith("bg-indigo-50", name === other);
+  }
+  mocks.element("#open-tasks").onclick!(); await settled();
+  mocks.element("#open-activity").onclick!(); await settled();
+  expect(location.hash).toBe("#/activity");
+});
+it("round-trips run deep links with standard query filters and Back", async () => {
+  views.showRuns({ taskId: "task/a?b", state: "failed" }, "run/a"); await settled();
+  expect(location.hash).toBe("#/runs/run%2Fa?taskId=task%2Fa%3Fb&state=failed");
+  views.applyRoute(); await settled();
+  expect(mocks.runs.show).toHaveBeenLastCalledWith("run/a", "taskId=task%2Fa%3Fb&state=failed");
+  location.hash = "#/tasks/task-a"; views.applyRoute(); await settled();
+  expect(mocks.tasks.show).toHaveBeenLastCalledWith("task-a", undefined);
+  location.hash = "#/runs?taskId=task-a"; views.applyRoute(); await settled();
+  expect(mocks.runs.show).toHaveBeenLastCalledWith(undefined, "taskId=task-a");
+  views.showRun("child"); await settled(); expect(location.hash).toBe("#/runs/child");
+});
+it("ignores malformed encoded routes without crashing", () => {
+  location.hash = "#/runs/%E0%A4%A"; expect(() => views.applyRoute()).not.toThrow();
+});

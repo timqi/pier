@@ -169,6 +169,95 @@ const bashDraft = (cwd: string, script: string) => ({
   timeoutSeconds: 5,
 });
 
+describe("global run queries", () => {
+  it("filters before limiting and keyset-pages timestamp ties without hiding child failures", async () => {
+    const { cwd, service, store } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    for (let i = 0; i < 620; i++) store.saveRun(storedRun(`noise-${i}`, task, 1000 + i));
+    for (const id of ["a", "b", "c"]) store.saveRun(storedRun(id, task, 10, {
+      state: "failed", triggerSource: "watch", parentRunId: "parent", groupId: "group",
+    }));
+    const query = { state: "failed" as const, source: "watch" as const, taskId: task.id, since: 10, until: 10, limit: 2 };
+    const first = service.queryRuns(query);
+    expect(first.runs.map((r) => r.id)).toEqual(["c", "b"]);
+    expect(first.nextCursor).toEqual({ queuedAt: 10, id: "b" });
+    store.saveRun(storedRun("newer", task, 20, { state: "failed", triggerSource: "watch" }));
+    const second = service.queryRuns({ ...query, cursor: first.nextCursor! });
+    expect(second.runs.map((r) => r.id)).toEqual(["a"]);
+    expect(second.nextCursor).toBeNull();
+    // Children are rows like any other: a failed child is never folded away.
+    expect(service.queryRuns({ state: "failed" }).runs.map((r) => r.parentRunId)).toContain("parent");
+    expect(service.queryRuns({ taskId: "' OR 1=1 --" }).runs).toHaveLength(0);
+  });
+
+  it("hides only successful unmatched probes without returning a hidden count", async () => {
+    const { cwd, service, store } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    store.saveRun(storedRun("no-match", task, 5, { matched: false, result: { type: "watch", matched: false }, triggerSource: "watch" }));
+    store.saveRun(storedRun("failed-probe", task, 4, { state: "failed", matched: false, triggerSource: "watch" }));
+    store.saveRun(storedRun("skipped", task, 3, { state: "skipped", matched: false, triggerSource: "watch" }));
+    store.saveRun(storedRun("action", task, 2, { matched: true }));
+    store.saveRun(storedRun("ordinary", task, 1));
+    const page = service.queryRuns({ limit: 1 });
+    expect(page.runs.map((r) => r.id)).toEqual(["failed-probe"]);
+    expect(Object.keys(page).sort()).toEqual(["nextCursor", "runs"]);
+    expect(service.queryRuns({ cursor: page.nextCursor! }).runs.map((r) => r.id)).toEqual(["skipped", "action", "ordinary"]);
+    expect(service.queryRuns().runs.map((r) => r.id)).toEqual(["failed-probe", "skipped", "action", "ordinary"]);
+    expect(service.queryRuns({ showUnmatched: true }).runs).toHaveLength(5);
+    expect(service.queryRuns({ source: "agent" }).runs.map((r) => r.id)).toEqual(["action", "ordinary"]);
+    expect(service.queryRuns({ state: "failed" }).runs).toHaveLength(1);
+  });
+
+  it("joins the unresolved decision, not an arbitrary recent message, beside the group's callback state", async () => {
+    const { cwd, service, store } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    store.saveRun(storedRun("run", task, 1, { callbackState: "failed", callbackError: "unreachable" }));
+    store.saveRun(storedRun("other", task, 2, { callbackState: "abandoned" }));
+    store.saveRun(storedRun("member", task, 3, { groupId: "group" }));
+    store.saveGroup({ id: "group", join: "all", invokedBySessionId: "supervisor", callbackSessionId: "supervisor",
+      memberRunIds: ["member"], winnerRunId: null, createdAt: 1, finishedAt: 2,
+      callbackState: "failed", callbackAttempts: 1, callbackError: "unreachable", callbackNextAttemptAt: 3 });
+    const message = (id: string, state: TaskMessage["state"], kind: TaskMessage["kind"], runId = "run"): TaskMessage => ({
+      id, runId, kind, state, fromSessionId: "child", toSessionId: "supervisor", replyTo: null,
+      content: id, createdAt: 1, deliveredAt: null, answeredAt: null, error: null, attempts: 0, nextAttemptAt: null,
+    });
+    store.saveMessage(message("answered", "answered", "decision"));
+    store.saveMessage(message("progress", "pending", "progress"));
+    store.saveMessage(message("question", "delivered", "decision"));
+    store.saveMessage(message("expired", "expired", "decision", "other"));
+    const page = service.queryRuns();
+    expect(page.runs.find((r) => r.id === "run")).toMatchObject({ pendingDecisionId: "question", callbackState: "failed" });
+    expect(page.runs.find((r) => r.id === "other")!.pendingDecisionId).toBeNull();
+    expect(page.runs.find((r) => r.id === "member")!.groupCallbackState).toBe("failed");
+    expect(service.getRunView("member").groupCallbackState).toBe("failed");
+    const app = new Hono(); registerTaskRoutes(app, service);
+    const detail = await (await app.request("/api/task-runs/run")).json();
+    expect(detail.pendingDecisionId).toBe("question");
+    store.saveMessage(message("question", "answered", "decision"));
+    expect(service.queryRuns().runs.find((r) => r.id === "run")!.pendingDecisionId).toBeNull();
+  });
+
+  it("validates HTTP filters and leaves the Activity snapshot as it was", async () => {
+    const { cwd, service, store, factory, router } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    store.saveRun(storedRun("active", task, 1, { state: "running" }));
+    store.saveRun(storedRun("old", task, 2));
+    store.saveRun(storedRun("new", task, Date.now()));
+    const app = new Hono(); registerTaskRoutes(app, service, { factory, router });
+    for (const query of ["state=unknown", "source=console", "limit=NaN", "limit=0", "limit=201", "since=x", "since=9&until=1", "cursor={}", "cursor=garbage", "showUnmatched=yes"]) {
+      expect((await app.request(`/api/task-runs?${query}`)).status, query).toBe(400);
+    }
+    const activity = await (await app.request("/api/activity")).json();
+    expect(activity.runs.map((r: TaskRun) => r.id)).toEqual(["active"]);
+    const recent = await (await app.request("/api/activity?scope=recent")).json();
+    expect(recent.runs.map((r: TaskRun) => r.id)).toEqual(["new", "active"]);
+    const list = await (await app.request("/api/task-runs?state=running&limit=1")).json();
+    expect(list.runs[0].id).toBe("active");
+    expect(list.runs[0].triggerSource).toBe("agent");
+    expect(Object.keys(list).sort()).toEqual(["nextCursor", "runs"]);
+  });
+});
+
 describe("newId", () => {
   // Spelled out rather than derived: a character that drifts out of the
   // alphabet has to fail against something written independently of it.

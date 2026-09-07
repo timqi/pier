@@ -34,10 +34,13 @@ const indexes = (db: DatabaseSync): string[] =>
   (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as unknown as
     { name: string }[]).map((r) => r.name);
 
+/** Winds a fresh database back past migration 17, for the upgrade tests. */
+const UNDO_17 = "DROP INDEX task_runs_time_id; DROP INDEX task_runs_visible_time;";
+
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(16);
+    expect(version(db)).toBe(17);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -83,7 +86,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(16);
+    expect(version(second)).toBe(17);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -96,7 +99,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 16/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 17/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -271,6 +274,35 @@ describe("openDb", () => {
     after.close();
   });
 
+  it("indexes the global run list, on a database that predates it", () => {
+    const path = dbPath();
+    const before = openDb(path);
+    before.exec(UNDO_17 + " PRAGMA user_version = 16");
+    const insert = before.prepare("INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?)");
+    insert.run("probe", "t", 3, "succeeded", null, JSON.stringify({ matched: false }));
+    insert.run("failed", "t", 2, "failed", null, JSON.stringify({ matched: false }));
+    insert.run("run", "t", 1, "succeeded", null, JSON.stringify({ matched: null }));
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(17);
+    expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
+      { id: "probe", json: JSON.stringify({ matched: false }) },
+      { id: "failed", json: JSON.stringify({ matched: false }) },
+      { id: "run", json: JSON.stringify({ matched: null }) },
+    ]);
+    expect(db.prepare("PRAGMA table_xinfo(task_runs)").all().map((row) => row.name)).not.toContain("unmatched");
+    expect(indexes(db)).not.toContain("task_runs_unmatched_time");
+    const plan = (sql: string): string => JSON.stringify(db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all());
+    const seek = plan("SELECT json FROM task_runs WHERE (queued_at, id) < (2, 'z') ORDER BY queued_at DESC, id DESC LIMIT 50");
+    expect(seek).toContain("task_runs_time_id");
+    expect(seek).not.toContain("TEMP B-TREE");
+    const visible = plan("SELECT json FROM task_runs WHERE NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0) AND (queued_at, id) < (2, 'z') ORDER BY queued_at DESC, id DESC LIMIT 50");
+    expect(visible).toContain("task_runs_visible_time");
+    expect(visible).not.toContain("TEMP B-TREE");
+    db.close();
+  });
+
   it("indexes the two columns the scheduler sweeps, on a database that predates them", () => {
     const path = dbPath();
     // Wound back to 14: the migration has to arrive as an upgrade of a
@@ -279,12 +311,12 @@ describe("openDb", () => {
     before.exec(
       "DROP INDEX task_runs_callback_state; DROP INDEX task_messages_state;" +
         " DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        " PRAGMA user_version = 14",
+        UNDO_17 + " PRAGMA user_version = 14",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(16);
+    expect(version(db)).toBe(17);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -306,7 +338,7 @@ describe("openDb", () => {
     const before = openDb(path);
     before.exec(
       "DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        " PRAGMA user_version = 15",
+        UNDO_17 + " PRAGMA user_version = 15",
     );
     // Three rows the upgrade has to tell apart: one due, two that never are.
     before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
@@ -318,7 +350,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(16);
+    expect(version(db)).toBe(17);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([

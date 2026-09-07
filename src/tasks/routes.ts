@@ -8,6 +8,41 @@ import type { AgentFactory } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { record, requiredString } from "./definitions.js";
 import type { TaskService } from "./service.js";
+import type { RunQuery, TaskRunState, TaskRun } from "./types.js";
+
+/** Reject malformed filters instead of silently widening a global query. */
+function runQuery(params: Record<string, string>): RunQuery {
+  const query: RunQuery = {};
+  const states: TaskRunState[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"];
+  const sources: TaskRun["triggerSource"][] = ["manual", "cron", "watch", "agent", "task"];
+  if (params.state) {
+    if (!states.includes(params.state as TaskRunState)) throw new Error("invalid state");
+    query.state = params.state as TaskRunState;
+  }
+  if (params.source) {
+    if (!sources.includes(params.source as TaskRun["triggerSource"])) throw new Error("invalid source");
+    query.source = params.source as TaskRun["triggerSource"];
+  }
+  if (params.taskId) query.taskId = params.taskId;
+  for (const key of ["since", "until", "limit"] as const) {
+    if (params[key] === undefined) continue;
+    const value = Number(params[key]);
+    if (!params[key] || !Number.isSafeInteger(value) || value < 0 || (key === "limit" && (value < 1 || value > 200))) throw new Error(`invalid ${key}`);
+    query[key] = value;
+  }
+  if (query.since !== undefined && query.until !== undefined && query.since > query.until) throw new Error("since exceeds until");
+  if (params.showUnmatched !== undefined) {
+    if (!["true", "false"].includes(params.showUnmatched)) throw new Error("invalid showUnmatched");
+    query.showUnmatched = params.showUnmatched === "true";
+  }
+  if (params.cursor) {
+    const cursor: unknown = JSON.parse(params.cursor);
+    const value = record(cursor);
+    if (!value || !Number.isSafeInteger(value.queuedAt) || Number(value.queuedAt) < 0 || typeof value.id !== "string" || !value.id) throw new Error("invalid cursor");
+    query.cursor = { queuedAt: Number(value.queuedAt), id: value.id };
+  }
+  return query;
+}
 
 const jsonBody = async (req: { json(): Promise<unknown> }): Promise<unknown> =>
   req.json().catch(() => null);
@@ -60,13 +95,21 @@ export function registerTaskRoutes(
     });
   });
 
+  app.get("/api/task-runs", (c) => {
+    try {
+      return c.json(tasks.queryRuns(runQuery(c.req.query())));
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
   app.get("/api/tasks", (c) => {
     const trigger = c.req.query("trigger");
     const state = c.req.query("state");
     const kind = c.req.query("kind");
     let rows = tasks.list();
     // Subagent one-shots are hidden unless explicitly requested via ?kind=subagent.
-    rows = kind ? rows.filter((task) => task.kind === kind) : rows.filter((task) => task.kind !== "subagent");
+    rows = rows.filter((task) => task.kind === (kind ?? "task"));
     if (trigger) rows = rows.filter((task) => task.trigger.type === trigger);
     if (state === "archived") rows = rows.filter((task) => task.archived);
     else if (state === "active") rows = rows.filter((task) => !task.archived);
@@ -101,10 +144,7 @@ export function registerTaskRoutes(
 
   app.get("/api/task-runs/:id", (c) => {
     try {
-      const run = tasks.getRun(c.req.param("id"));
-      // Same view as the task tool: a pending decision is the one run fact that
-      // lives on the messages, and HTTP callers need it too.
-      return c.json({ ...run, pendingDecisionId: tasks.openDecisionId(run.id) });
+      return c.json(tasks.getRunView(c.req.param("id")));
     } catch (err) {
       return c.json({ error: String(err) }, 404);
     }

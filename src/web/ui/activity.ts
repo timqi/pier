@@ -88,7 +88,7 @@ const palette = (): Palette => PALETTE[document.documentElement.dataset.theme ==
 export function createActivityView(
   root: HTMLElement,
   openSession: (id: string) => void,
-  openTask: (id?: string) => void,
+  openRun: (id: string) => void,
 ): ActivityView {
   let tab: "sessions" | "dependencies" = "sessions";
   let scope: "active" | "recent" = "active";
@@ -126,8 +126,6 @@ export function createActivityView(
     tabs.append(
       control("Sessions", tab === "sessions", () => { tab = "sessions"; render(); }),
       control("Relationships", tab === "dependencies", () => { tab = "dependencies"; render(); }),
-      // Tasks is the sibling console view; the strip just navigates to it.
-      control("Tasks", false, () => openTask()),
     );
     // Scope applies to both views; filters sit below object navigation.
     const scopeControl = h("div", "flex flex-none gap-1 border-b border-neutral-200 px-4 py-2");
@@ -309,7 +307,7 @@ export function createActivityView(
       if (edge.kind === "callback") path.setAttribute("stroke-dasharray", "6 5");
       if (edge.kind === "message") path.setAttribute("stroke-dasharray", "2 5");
       path.classList.add("cursor-pointer");
-      path.onclick = () => openTask(edge.run.taskId);
+      path.onclick = () => openRun(edge.run.id);
       graph.append(path);
     }
 

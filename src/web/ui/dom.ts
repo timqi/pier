@@ -66,7 +66,9 @@ export function fmtDuration(ms: number): string {
 
 /** What main.ts's view switcher needs from every Console view. */
 export interface ConsoleView {
-  show(arg?: string): void;
+  /** `arg` is the route's path segment (a task, a run, a folder); `query` its
+   *  `?k=v` tail, for the one view (Runs) whose state is a filter set. */
+  show(arg?: string, query?: string): void;
   hide(): void;
   visible: boolean;
 }
@@ -75,16 +77,16 @@ export interface ConsoleView {
  *  root's classes, track visibility, load on show, optionally flush on hide. */
 export function consoleView(
   root: HTMLElement,
-  load: (arg?: string) => void,
+  load: (arg?: string, query?: string) => void,
   onHide?: () => void,
 ): ConsoleView {
   return {
     visible: false,
-    show(arg) {
+    show(arg, query) {
       this.visible = true;
       root.classList.remove("hidden");
       root.classList.add("flex");
-      load(arg);
+      load(arg, query);
     },
     hide() {
       onHide?.();

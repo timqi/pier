@@ -77,6 +77,16 @@
         <span class="chev">▶</span>Console
       </summary>
       <ul class="pb-1 text-[13.5px]">
+        <li><button type="button" id="open-tasks"
+          class="flex w-full cursor-pointer items-center gap-2 py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5 flex-none text-neutral-400">
+            <path d="M6 3h8M6 8h8M6 13h8M2 3h1M2 8h1M2 13h1" />
+          </svg>Tasks</button></li>
+        <li><button type="button" id="open-runs"
+          class="flex w-full cursor-pointer items-center gap-2 py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5 flex-none text-neutral-400">
+            <path d="m5 3 7 5-7 5z" stroke-linejoin="round" />
+          </svg>Runs</button></li>
         <li><button type="button" id="open-activity"
           class="flex w-full cursor-pointer items-center gap-2 py-1.5 pl-6 pr-3 text-left hover:bg-neutral-100">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5 flex-none text-neutral-400">
@@ -137,6 +147,7 @@
         class="hidden h-10 w-10 flex-none cursor-pointer items-center justify-center rounded-md text-[20px] leading-none text-neutral-500 active:bg-neutral-200">⋯</button>
     </header>
     <section id="activity-view" class="hidden min-h-0 flex-1 flex-col"></section>
+    <section id="runs-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="tasks-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="boards-view" class="hidden min-h-0 flex-1 flex-col"></section>
     <section id="settings-view" class="hidden min-h-0 flex-1 flex-col"></section>

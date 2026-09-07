@@ -95,7 +95,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   const runUrl = `/api/task-runs/${run.runId}`;
   const status = active ? h("span", "spinner") : h("span", "w-3 flex-none text-center", run.state === "succeeded" ? "✓" : run.state === "failed" ? "✕" : "·");
   const title = h("button", "min-w-0 truncate text-left font-medium hover:underline", run.taskName);
-  title.onclick = () => deps.showTasks(run.taskId);
+  title.onclick = () => deps.showRun(run.runId);
   const head = h("div", "flex items-center gap-2", status, h("span", "flex-none text-[11px] font-semibold uppercase", run.state), title);
   const controls = h("div", "ml-auto flex flex-none items-center gap-2");
   if (run.targetSessionId) {
