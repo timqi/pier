@@ -97,6 +97,10 @@ html[data-theme="dark"] {
   --color-sky-500: oklch(68% 0.165 237.323);
   --color-sky-700: oklch(80% 0.115 242.749);
 
+  --color-fuchsia-50: oklch(24.5% 0.028 320.058);
+  --color-fuchsia-500: oklch(68% 0.165 322.15);
+  --color-fuchsia-700: oklch(80% 0.115 323.949);
+
   --color-violet-50: oklch(24.5% 0.028 293.756);
   --color-violet-200: oklch(40% 0.09 293.283);
   --color-violet-700: oklch(80% 0.115 292.581);

@@ -142,16 +142,18 @@ export function runHead(o: RunHead): HTMLElement {
 
 /**
  * Direction is the surface, state is the edge. A run card is a message this
- * session sent, so it sits on the same indigo the user's own rows use; what
- * came back (chat.ts) is cyan. The left edge, glyph and caption then say how
- * the run is doing — green once it succeeded, red when it failed, a spinner
+ * session sent — but not one the user typed, and on indigo it was
+ * indistinguishable from their own rows, so outgoing runs get fuchsia: the one
+ * hue the pane does not already spend (indigo user, cyan inbound, amber
+ * decision, red error, green done). The left edge, glyph and caption then say
+ * how the run is doing — green once it succeeded, red when it failed, a spinner
  * while it is still out — so the two questions are answered by two cues that
  * never compete for the same pixels.
  */
-const OUTGOING = "bg-indigo-50/70";
+const OUTGOING = "bg-fuchsia-50/70";
 export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: string }> = {
   queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: "" },
-  running: { edge: "border-l-indigo-500", label: "text-indigo-700", glyph: "" },
+  running: { edge: "border-l-fuchsia-500", label: "text-fuchsia-700", glyph: "" },
   succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: "\u2713" },
   failed: { edge: "border-l-red-500", label: "text-red-600", glyph: "\u2715" },
   cancelled: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: "\u00b7" },
