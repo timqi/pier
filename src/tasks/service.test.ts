@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -1337,6 +1337,46 @@ describe("task service", () => {
         trigger: { type: "cron", expression: "* * * * *", timezone: "UTC" },
       },
     }, "s1")).rejects.toThrow("manual trigger");
+  });
+
+  it("runs a prompt shorthand in the caller's directory with a name from the prompt", async () => {
+    const { cwd, service } = setup();
+    mkdirSync(join(cwd, "sub"));
+    const summary = await service.tool({
+      operation: "run",
+      prompt: "## Review the **auth** module\nLook at src/auth for injection risks.",
+    }, "s1") as RunSummary;
+    expect(summary.taskName).toBe("Review the auth module");
+    expect(service.get(summary.taskId)).toMatchObject({
+      kind: "subagent",
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: expect.stringContaining("injection") },
+    });
+
+    // Relative cwd resolves against the caller; a long first line is cut, not dropped.
+    const long = `${"word ".repeat(20).trim()}`;
+    const nested = await service.tool({ operation: "run", prompt: long, cwd: "sub" }, "s1") as RunSummary;
+    expect(service.get(nested.taskId).action).toMatchObject({ session: { cwd: join(cwd, "sub") } });
+    expect(nested.taskName.length).toBe(60);
+    expect(nested.taskName.endsWith("…")).toBe(true);
+
+    // The same defaults inside a full draft: no cwd means the caller's.
+    const full = await service.tool({
+      operation: "run",
+      task: { action: { type: "agent", session: { mode: "fresh" }, prompt: "Plain" } },
+    }, "s1") as RunSummary;
+    expect(service.get(full.taskId)).toMatchObject({ name: "Plain", action: { session: { cwd } } });
+
+    // Fan-out members may be bare prompts.
+    const group = await service.tool({ operation: "run", tasks: ["angle a", { prompt: "angle b", cwd: "./sub" }] }, "s1") as GroupSummary;
+    expect(group.members.map((m) => m.taskName)).toEqual(["angle a", "angle b"]);
+
+    await expect(service.tool({ operation: "run", prompt: "x", task: { name: "y", action: { type: "bash", cwd, script: "true" } } }, "s1"))
+      .rejects.toThrow("either prompt or task");
+    await expect(service.tool({ operation: "run", prompt: "x", cwd: "missing" }, "s1"))
+      .rejects.toThrow("working directory does not exist");
+    // A caller Pier cannot place has no directory to resolve against.
+    await expect(service.tool({ operation: "run", prompt: "x" }, "nobody"))
+      .rejects.toThrow("no working directory");
   });
 
   it("defaults a trigger-less create to manual but keeps update strict", async () => {

@@ -7,9 +7,10 @@ description: Delegate work to Pier subagents with the task tool — one-shot, pa
 
 ## Core model
 
-- Every run executes a persisted task definition. An inline `task` draft
-  (`operation:"run"` without `task_id`) creates and runs a one-shot subagent
-  atomically; it is tagged `kind:"subagent"` and hidden from task lists.
+- Every run executes a persisted task definition. A `run` without `task_id`
+  — a bare `prompt`, or a full `task` draft — creates and runs a one-shot
+  subagent atomically; it is tagged `kind:"subagent"` and hidden from task
+  lists. You never name or file it: the name is the prompt's first line.
 - **Nothing blocks.** Every operation returns immediately; results, group
   joins, and decision replies arrive later as system follow-up messages in
   your session. Your only waiting primitive is ending your turn.
@@ -20,10 +21,16 @@ description: Delegate work to Pier subagents with the task tool — one-shot, pa
 ## Single delegation (the common case)
 
 ```json
-{"operation":"run","task":{"name":"review-auth","action":{
-  "type":"agent","session":{"mode":"fresh","cwd":"/abs/project"},
-  "prompt":"Review src/auth/*.ts for injection risks. Output: file:line + issue + fix."}}}
+{"operation":"run","prompt":"Review src/auth/*.ts for injection risks. Output: file:line + issue + fix."}
 ```
+
+That is the whole call: a fresh session in **your own directory**. Add `cwd`
+to place it elsewhere — absolute, or relative to your directory
+(`"cwd":"../pier.feature-x"` for a sibling worktree); it must already exist.
+`launch` picks a model/thinking level, `name` overrides the label. The full
+`task` draft form (`{"name","action":{"type":"agent","session":{...},"prompt"}}`)
+is for what the shorthand cannot say: `reuse` a session, `timeoutSeconds`,
+`callback`.
 
 Returns a run summary (`runId`, `state:"queued"`, ids). Finish your turn; the
 result arrives as a follow-up. `callback:"none"` silences it.
@@ -32,7 +39,8 @@ A summary's `triggerSource` is who fired that run (`agent` when you did, plus
 `manual` / `cron` / `watch` / `task`); a definition's `trigger` is only its
 schedule policy, where `manual` means on-demand — by a human or by you.
 
-- `fresh`: clean context, requires `cwd` — how a child normally starts.
+- `fresh`: clean context in a `cwd` (yours when omitted) — how a child
+  normally starts.
   `reuse`: sends work to an existing session by id, continuing its history.
   There is no way to copy your context into a child: what the child needs, you
   write down.
@@ -50,13 +58,14 @@ schedule policy, where `manual` means on-demand — by a human or by you.
 
 ## Parallel fan-out (core-joined)
 
-Pass `tasks[]` (each entry a draft or `{"task_id":"..."}`) and Pier joins the
-group in core — you never track run ids across turns:
+Pass `tasks[]` (each entry a prompt string, `{"prompt","cwd"?}`, a full
+draft, or `{"task_id":"..."}`) and Pier joins the group in core — you never
+track run ids across turns:
 
 ```json
 {"operation":"run","join":"all","tasks":[
-  {"name":"review-correctness","action":{...}},
-  {"name":"review-tests","action":{...}}]}
+  "Review src/ for correctness bugs. Output: file:line + issue.",
+  {"prompt":"Review the tests for gaps. Output: missing case + file.","cwd":"packages/web"}]}
 ```
 
 - `join:"all"` (default): one aggregated follow-up when every member

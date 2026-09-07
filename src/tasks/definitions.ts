@@ -259,6 +259,10 @@ export class TaskDefinitions {
     return this.router.stateOf(sessionId) !== undefined ||
       (await this.factory.find(sessionId)) !== undefined;
   }
+  /** A caller's own directory — what a relative or omitted cwd resolves against. */
+  async sessionCwd(sessionId: string): Promise<string | undefined> {
+    return (await this.factory.find(sessionId))?.cwd;
+  }
 
   /** The guard `ownerOf` exists for, on the three ways a definition changes. */
   private assertOwner(task: TaskDefinition, by: string | undefined, what: string): void {

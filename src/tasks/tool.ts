@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path";
 import { Type } from "typebox";
 import type { AgentCustomTool } from "../core/types.js";
 import { TaskDefinitions, record, requiredString } from "./definitions.js";
@@ -102,10 +103,15 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMess
   members: members.map((run) => trimResult(summarize(run, messages.openDecisionId(run.id)))),
 });
 
+const LaunchSchema = Type.Object({
+  model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
+  thinking: Type.Optional(Type.String()),
+});
+
 // Model-facing draft shape. Guidance only: runtime truth stays in parseDraft,
 // so schema drift can never loosen boundary validation.
 const DraftSchema = Type.Object({
-  name: Type.String(),
+  name: Type.Optional(Type.String({ description: "Defaults to the prompt's first line." })),
   description: Type.Optional(Type.String()),
   trigger: Type.Optional(Type.Union([
     Type.Object({ type: Type.Literal("manual") }),
@@ -122,14 +128,11 @@ const DraftSchema = Type.Object({
     Type.Object({
       type: Type.Literal("agent"),
       session: Type.Union([
-        Type.Object({ mode: Type.Literal("fresh"), cwd: Type.String() }),
+        Type.Object({ mode: Type.Literal("fresh"), cwd: Type.Optional(Type.String({ description: "Absolute, or relative to your session's directory; omitted = your directory." })) }),
         Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
       ]),
       prompt: Type.String(),
-      launch: Type.Optional(Type.Object({
-        model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
-        thinking: Type.Optional(Type.String()),
-      })),
+      launch: Type.Optional(LaunchSchema),
     }),
     Type.Object({ type: Type.Literal("bash"), script: Type.String(), cwd: Type.String() }),
     Type.Object({ type: Type.Literal("task"), taskId: Type.String() }),
@@ -148,7 +151,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. Run executes a stored task by task_id, a one-shot subagent from an inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
+      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
     parameters: Type.Object({
       operation: strEnum(
         "list", "create", "update", "run", "get", "cancel",
@@ -161,13 +164,19 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       message: Type.Optional(Type.String()),
       reason: Type.Optional(strEnum("progress", "decision")),
       session_mode: Type.Optional(strEnum("fresh")),
+      // The one-shot shorthand: a prompt is the whole delegation, and the
+      // fresh session in the caller's own directory is what it means.
+      prompt: Type.Optional(Type.String()),
+      cwd: Type.Optional(Type.String()),
+      launch: Type.Optional(LaunchSchema),
+      name: Type.Optional(Type.String()),
       task: Type.Optional(DraftSchema),
       // The same draft again, spelled out, cost more tokens in every session
       // than the whole rest of this contract. One copy is the guidance; this
       // one points at it, and `parseDraft` is what actually validates either.
       tasks: Type.Optional(Type.Unsafe<unknown[]>({
         type: "array",
-        description: "2+ entries, each either a task draft shaped exactly like `task`, or {task_id}.",
+        description: "2+ entries, each a prompt string, {prompt, cwd?, launch?, name?}, a task draft shaped exactly like `task`, or {task_id}.",
         items: { type: "object" },
       })),
       join: Type.Optional(strEnum("all", "first")),
@@ -194,11 +203,11 @@ export async function handleTaskTool(
   if (input.operation === "models") return host.models();
   if (input.operation === "create") {
     if (active) throw new Error("subagents cannot create task definitions");
-    return definitions.create(input.task, `session:${callerSessionId}`);
+    return definitions.create(await expandDraft(definitions, input.task, callerSessionId), `session:${callerSessionId}`);
   }
   if (input.operation === "update") {
     if (active) throw new Error("subagents cannot update task definitions");
-    return definitions.update(requiredString(input.task_id, "task_id"), input.task);
+    return definitions.update(requiredString(input.task_id, "task_id"), await expandDraft(definitions, input.task, callerSessionId));
   }
   if (input.operation === "run") {
     if (Array.isArray(input.tasks)) {
@@ -208,7 +217,7 @@ export async function handleTaskTool(
       if (input.tasks.length < 2) throw new Error("tasks[] needs at least 2 entries; use task for a single run");
       const resolved: TaskDefinition[] = [];
       for (const rawEntry of input.tasks) {
-        const entry = record(rawEntry);
+        const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
         resolved.push(entry.task_id === undefined
           ? await resolveDraft(definitions, entry, active, callerSessionId)
@@ -223,7 +232,7 @@ export async function handleTaskTool(
       );
       return summarizeGroup(group, runs, messages);
     }
-    const draft = input.task_id === undefined ? record(input.task) : undefined;
+    const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
     const task = draft
       ? await resolveDraft(definitions, draft, active, callerSessionId)
       : resolveStored(definitions, input.task_id, active);
@@ -298,14 +307,59 @@ export async function handleTaskTool(
   throw new Error("unknown task operation");
 }
 
+/** A single run's draft: the top-level shorthand (`prompt` …) or `task`, never both. */
+function inlineDraft(input: Record<string, unknown>): Record<string, unknown> | undefined {
+  const { prompt, cwd, launch, name } = input;
+  if (prompt === undefined) return record(input.task) ?? undefined;
+  if (input.task !== undefined) throw new Error("use either prompt or task");
+  return { prompt, cwd, launch, name };
+}
+
+/** The prompt's first line, unmarked and cut short: a label for the Console,
+ *  not an identifier — the run's id is what anything addresses. */
+function nameFromPrompt(prompt: string): string {
+  const line = prompt.split("\n")
+    .map((l) => l.replace(/^[\s#>*-]+/, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim())
+    .find(Boolean) ?? "subagent";
+  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
+}
+
+/**
+ * The shape a draft is validated in, from the shapes a caller may write it in.
+ * A `prompt` shorthand becomes a fresh Agent action; a fresh session's cwd
+ * resolves against the caller's own directory (and is that directory when
+ * omitted); a missing name is the prompt's first line. Everything the caller
+ * did spell out passes through untouched — parseDraft still judges it.
+ */
+async function expandDraft(definitions: TaskDefinitions, raw: unknown, callerSessionId: string): Promise<unknown> {
+  let draft = record(raw);
+  if (!draft) return raw;
+  if (typeof draft.prompt === "string") {
+    if (draft.action !== undefined) throw new Error("use either prompt (shorthand) or action");
+    const { prompt, cwd, launch, name, ...rest } = draft;
+    draft = { ...rest, name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt, launch } };
+  }
+  const action = record(draft.action);
+  const session = record(action?.session);
+  if (action?.type === "agent" && session?.mode === "fresh" && (session.cwd === undefined || (typeof session.cwd === "string" && !isAbsolute(session.cwd)))) {
+    const base = await definitions.sessionCwd(callerSessionId);
+    if (!base) throw new Error(`cwd ${session.cwd === undefined ? "omitted" : `"${session.cwd}" is relative`} and the calling session has no working directory; give an absolute path`);
+    draft = { ...draft, action: { ...action, session: { ...session, cwd: resolve(base, session.cwd ?? ".") } } };
+  }
+  if (draft.name === undefined && typeof action?.prompt === "string") draft = { ...draft, name: nameFromPrompt(action.prompt) };
+  return draft;
+}
+
 /** Inline one-shot subagent: persisted like any task (kind "subagent",
  * filtered from default lists) so runs stay auditable and resumable. */
 async function resolveDraft(
   definitions: TaskDefinitions,
-  draft: Record<string, unknown>,
+  raw: unknown,
   active: TaskRun | undefined,
   callerSessionId: string,
 ): Promise<TaskDefinition> {
+  const draft = record(await expandDraft(definitions, raw, callerSessionId));
+  if (!draft) throw new Error("task definition required");
   if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
     throw new Error("inline subagent tasks must use a manual trigger");
   }
