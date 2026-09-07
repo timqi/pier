@@ -134,8 +134,10 @@ sends no completion callback — the question is the notification.
 
 - One concern per child. For fan-out, let core join via `tasks[]` — never
   hand-aggregate run ids across turns.
-- Repeating the same role? Create a durable task once (`operation:"create"`)
-  and run it by `task_id` — cheaper than re-sending the draft every time.
+- `create` is for definitions that outlive one job: a schedule (`cron` /
+  `watch`), or a role you will run by `task_id` again and again. It files a
+  task the operator sees and has to archive by hand — never use it for a
+  one-off; that is `run` with a prompt.
 - Inline drafts must use `action.type:"agent"`; triggers are forced manual;
   do not target another session with `reuse` from an inline draft.
 - After launching work, end your turn. The callback starts your next one.

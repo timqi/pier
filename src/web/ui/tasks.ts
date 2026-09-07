@@ -6,7 +6,7 @@
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
 import { coalesce, failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { button, CONTROL, empty, segmented, select, toolbar } from "./form.js";
+import { badge, button, CONTROL, empty, segmented, select, toolbar } from "./form.js";
 import { openTaskEditor, type SessionChoice } from "./task-editor.js";
 import { actionSummary, dateTime, definitionView, renderRuns, runBadge, runDuration, taskBadge, triggerSummary } from "./task-runs.js";
 
@@ -164,7 +164,7 @@ export function createTasksView(
     name.title = task.name;
     tr.append(h("td", "py-2.5 pl-4 pr-2",
       // Wraps so a phone shows the whole name with the badge under it.
-      h("div", "flex flex-wrap items-center gap-x-2 gap-y-1", name, taskBadge(task)),
+      h("div", "flex flex-wrap items-center gap-x-2 gap-y-1", name, taskBadge(task), ...creatorBadge(task)),
       h("div", "truncate text-[11px] text-neutral-400", task.description || ""),
       h("div", "truncate text-[11px] text-neutral-400 md:hidden", triggerSummary(task))));
     for (const text of [actionSummary(task), triggerSummary(task), dateTime(task.nextRunAt)]) {
@@ -183,6 +183,16 @@ export function createTasksView(
     };
     tr.append(h("td", "px-2 py-1 text-right", run));
     return tr;
+  }
+
+  /** Who filed it. Agents may `create` durable tasks, and a list where their
+   *  definitions look like yours is one you cannot tidy: the badge is what
+   *  tells a one-shot an agent should have `run` from a schedule you wrote. */
+  function creatorBadge(task: TaskDefinition): HTMLElement[] {
+    if (!task.createdBySessionId) return [];
+    const el = badge("agent", "bg-violet-50 text-violet-700 ring-violet-200");
+    el.title = `Created by session ${task.createdBySessionId}`;
+    return [el];
   }
 
   async function renderDetail(id: string): Promise<void> {
