@@ -230,8 +230,9 @@ void secrets.unlock().then(
   (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
 );
 
-// Replacing Pier is systemd's job, not this process's: the oneshot unit stops
-// the service, snapshots the database, installs and starts it again. Without
+// Replacing Pier is systemd's job, not this process's: the oneshot unit
+// snapshots the database, installs, then stops the service and starts it again
+// on the new version — in that order, so only the last two are downtime. Without
 // that unit there is nothing to hand the work to, and the Console says so
 // instead of offering a button that cannot work.
 const updates = new UpdateCheck();
@@ -272,8 +273,14 @@ const takeWorkAgain = (why: string): void => {
 };
 /** How long the handover has to actually stop us. `systemctl start --no-block`
  *  returns when the job is *queued*, so "started" is not proof of anything;
- *  the real outcome is a SIGTERM a second or two later. */
-const HANDOVER_GRACE_MS = 60_000;
+ *  the real outcome is a SIGTERM — but only after the updater has snapshotted
+ *  the database and installed the new version, which is a registry download on
+ *  someone else's network — ten seconds on a good day, minutes on a bad one.
+ *  So this waits far longer than the stop itself needs, because reopening the
+ *  gate mid-install would take work we are about to be SIGTERM'd out of, and
+ *  still short enough that a handover which never happens does not refuse
+ *  messages all afternoon. */
+const HANDOVER_GRACE_MS = 5 * 60_000;
 const handOverToUpdater = async (): Promise<UpdateStart> => {
   // One handover at a time, and never on top of a restart: the Console button,
   // the auto-update tick and SIGUSR2 would otherwise drain the same Pier

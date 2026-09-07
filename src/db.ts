@@ -369,9 +369,11 @@ let shared: DatabaseSync | undefined;
  */
 export const pierDb = (): DatabaseSync => (shared ??= openDb(PIER_DB));
 
-/** A release-level restore point, taken while the service is stopped even when
- * the release has no schema migration. The previous complete copies stay put if
- * writing this one fails.
+/** A release-level restore point, taken for every release even when it has no
+ * schema migration. The previous complete copies stay put if writing this one
+ * fails, and the service may be running while it is written: `copyDatabase`
+ * reads through a read-only connection, so what it writes is one consistent
+ * snapshot of a live database rather than a torn `cp`.
  *
  * `version` is the Pier that produced this database, not the one being
  * installed: the updater runs this from the tree it is about to replace, and

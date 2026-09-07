@@ -182,9 +182,9 @@ export function registerInstanceRoutes(
     }));
 
   // Applying. Nothing is installed here: the work is handed to the service
-  // manager's own oneshot unit, which stops Pier, backs the database up,
-  // installs and starts Pier again — an npm child of this process would be
-  // killed by the very restart it is performing.
+  // manager's own oneshot unit, which backs the database up and installs while
+  // Pier still runs, then stops it and starts the new version — an npm child of
+  // this process would be killed by the very restart it is performing.
   app.post("/api/update", async (c) => {
     if (!updater) {
       return c.json({ error: "no service manager owns this Pier — update it with: pier update" }, 409);

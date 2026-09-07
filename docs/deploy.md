@@ -280,7 +280,7 @@ hard-stop paths. Let active work finish first when using either one.
 ## Updating
 
 ```sh
-pier update           # installs the latest release; hard-stops/restarts Pier
+pier update           # installs the latest release, then hard-stops/restarts Pier
 pier update --check   # only says whether one exists
 ```
 
@@ -300,7 +300,7 @@ npm ci && npm run build
 systemctl --user start pier
 ```
 
-For a service install, `pier update` stops Pier first; it does not use the
+For a service install, `pier update` hard-stops Pier; it does not use the
 graceful `pier restart` path. The Console's **Update now** and the automatic
 path do: both drain (new work refused, running turns finished, the rest
 ledgered for the next boot to report) before the updater unit is started.
@@ -309,9 +309,19 @@ Either way the updater snapshots the database to
 `~/.pier/db/backups/pier.db.release-<version>.bak` before npm touches the
 package — `<version>` being the Pier that is being replaced, i.e. the release to
 reinstall if that copy is ever restored. This happens for every release,
-including releases with no schema change. If installation or backup fails, the
-updater unit still tries to start the previously installed service and reports
-the failure in its journal.
+including releases with no schema change.
+
+Both of those steps run while Pier is still serving: the snapshot is taken
+through a read-only connection, so it is consistent on a live database, and npm
+writes into the global prefix rather than into the running process. Only the
+stop and the start that follow them are downtime — a second or two instead of
+the ten to twenty an install takes. A backup or install that fails therefore
+never stops anything; the failure is in the updater's journal and the running
+Pier keeps serving the version it already loaded. (For those seconds the live
+process is running code whose files on disk have already been replaced: a
+browser left open on the old page can see a lazily loaded asset 404 until it
+reloads. On the drained paths nothing else is running by then; `pier update`
+does not drain, which is the same reason to let active work finish first.)
 
 ### Automatic updates
 
@@ -380,9 +390,10 @@ Type=oneshot
 # recorded PATH as pier.service, and recorded rather than sourced from a login
 # shell at run time: a dotfile must not get to decide which node npm uses.
 Environment="PATH=/path/to/node/bin:/your/shell/PATH:/usr/local/bin:/usr/bin:/bin"
-ExecStart=systemctl --user stop pier.service
 ExecStart=/path/to/node /path/to/pier/dist/cli.js backup
 ExecStart=/path/to/node /recorded/path/to/npm install -g @timqi/pier@latest
+# Last: everything above it runs with Pier still up, so the stop is the downtime.
+ExecStart=systemctl --user stop pier.service
 ExecStopPost=systemctl --user start pier.service
 ```
 
@@ -394,8 +405,9 @@ Deliberately **not** a `systemd.timer`. An unattended update is a machine that
 rewrites its own code from the network while holding your API keys, and its hard
 stop interrupts whatever session was mid-turn. Pier notices a newer release
 and says so in the workbench footer; starting the update stays a decision someone
-makes. The updater's `ExecStopPost` is what brings the service back after both
-success and failure.
+makes. The updater's `ExecStopPost` is what brings the service back: after a
+successful stop, and — as a no-op, since nothing was stopped — after a backup or
+install that failed.
 
 ## Remote access
 

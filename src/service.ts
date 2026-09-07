@@ -133,8 +133,14 @@ function legacyOptions(home: string): UnitOptions {
   };
 }
 
-/** A separate cgroup stops Pier, takes a consistent backup, updates the exact
- * npm installation recorded at install time, and always starts Pier again. */
+/** A separate cgroup snapshots the database, updates the exact npm
+ * installation recorded at install time, and only then restarts Pier.
+ *
+ * Both slow steps run while the service is still up, so the downtime is one
+ * stop and one start rather than the ~10s an install takes. The snapshot is
+ * consistent on a live database — `VACUUM INTO` off a read-only connection
+ * (db.ts) — and it still runs from the tree npm is about to replace, so the
+ * copy carries the version whose schema it pairs with. */
 export function renderUpdateUnit(options: UnitOptions): string {
   const { execPath, npmPath, entry, pierHome, shellPath } = options;
   const cli = join(dirname(entry), "cli.js");
@@ -149,12 +155,16 @@ Type=oneshot
 # resolves node from PATH, and systemd's minimal PATH has no fnm/nvm node —
 # the install then dies with "node: not found" with the tree half written.
 ${environment("PATH", pathEnv(execPath, shellPath))}
-${pierHome ? `${environment("PIER_HOME", pierHome)}\n` : ""}ExecStart=systemctl --user stop ${UNIT_NAME}
-ExecStart=${quote(execPath, true)} ${quote(cli, true)} backup
+${pierHome ? `${environment("PIER_HOME", pierHome)}\n` : ""}ExecStart=${quote(execPath, true)} ${quote(cli, true)} backup
 # npm runs under the recorded node: its shebang needs a node on PATH too.
 ExecStart=${quote(execPath, true)} ${quote(npmPath, true)} install -g @timqi/pier@latest
-# ExecStopPost runs on success and failure, so a failed backup or npm install
-# does not leave the previously working service stopped.
+# Last, because everything above it is downtime the running Pier does not owe
+# anyone. A failed backup or install never gets here: the service stays up on
+# the code it already loaded.
+ExecStart=systemctl --user stop ${UNIT_NAME}
+# ExecStopPost runs on success and failure. After a failed step above, Pier was
+# never stopped and this is a no-op; it is here for the window that is still
+# fatal — the unit dying between that stop and the start of the new version.
 ExecStopPost=systemctl --user start ${UNIT_NAME}
 `;
 }
@@ -347,7 +357,7 @@ export function startUpdate(options: {
   if (!run(["systemctl", "--user", "daemon-reload"])) return "failed";
   if (!run(["systemctl", "--user", "start", "--no-block", UPDATE_UNIT_NAME])) return "failed";
   say(`updating in the background — follow it with: journalctl --user -u ${UPDATE_UNIT_NAME} -f`);
-  say(`Pier stops, snapshots the database into db/backups/, installs, then starts again.`);
+  say(`Pier snapshots the database into db/backups/ and installs while still up, then stops and starts on the new version.`);
   return "started";
 }
 

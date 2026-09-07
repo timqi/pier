@@ -164,7 +164,7 @@ describe("install", () => {
 });
 
 describe("update", () => {
-  it("stops, backs up, updates the recorded npm installation, and always starts again", () => {
+  it("backs up and updates the recorded npm installation before it stops, and always starts again", () => {
     const unit = renderUpdateUnit({
       execPath: "/opt/node/bin/node",
       npmPath: "/opt/npm-global/bin/npm",
@@ -177,6 +177,13 @@ describe("update", () => {
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/lib/node_modules/@timqi/pier/dist/cli.js" backup');
     // npm under the recorded node: its shebang cannot resolve on systemd's PATH.
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/npm-global/bin/npm" install -g @timqi/pier@latest');
+    // The order *is* the downtime: both slow steps run while Pier is still up,
+    // so the stop is last and a failed backup or install never stops anything.
+    expect(unit.match(/^ExecStart=.*$/gm)?.map((line) => line.replace(/"[^"]*"/g, "_"))).toEqual([
+      "ExecStart=_ _ backup",
+      "ExecStart=_ _ install -g @timqi/pier@latest",
+      "ExecStart=systemctl --user stop pier.service",
+    ]);
     // And a dependency's postinstall (`sh -c node …`) resolves node from PATH,
     // which the absolute path above does not cover.
     expect(unit).toContain('Environment="PATH=/opt/node/bin:/usr/local/bin:/usr/bin:/bin"');

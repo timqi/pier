@@ -113,8 +113,8 @@ function panel(): HTMLElement {
         // 202: something is still running, and the update waits for it.
         const { draining } = await res.json() as { draining?: boolean };
         status$.textContent = draining
-          ? "Waiting for running work to finish — Pier then stops, installs and starts again."
-          : "Pier is stopping, installing and starting again — this page reconnects on its own.";
+          ? "Waiting for running work to finish — Pier then installs and restarts."
+          : "Installing — Pier restarts once it is on disk, and this page reconnects on its own.";
       })();
     };
     actions.append(now);
