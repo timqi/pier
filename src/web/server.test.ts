@@ -272,7 +272,6 @@ function setup(
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
     create: vi.fn(async () => session),
-    fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
     // `modified` is the listing's own date for a session: the transcript's
     // mtime, which is the only record of a turn that survives a restart.
@@ -540,7 +539,6 @@ describe("workbench server", () => {
     const factory: AgentFactory = {
       availableModels: vi.fn(async () => [{ provider: "anthropic", id: "claude-opus-4-5" }]),
     create: vi.fn(async () => session),
-      fork: vi.fn(async () => session),
       resume: vi.fn(async () => session),
       list: vi.fn(async () => listed),
       find: vi.fn(async (id: string) => listed.find((s) => s.id === id)),

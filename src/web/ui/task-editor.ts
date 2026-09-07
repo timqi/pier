@@ -106,9 +106,9 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
       const saved = task?.action.type === "agent" ? task.action : null;
       const savedSessionId = saved?.session.mode === "reuse" ? saved.session.sessionId : "";
       const choices = sessionChoices(sessions, savedSessionId || null);
-      agentMode = select([["Reuse session", "reuse"], ["Fresh child per run", "fresh"], ["Fork caller context", "fork"]], saved?.session.mode ?? "fresh");
+      agentMode = select([["Reuse session", "reuse"], ["Fresh child per run", "fresh"]], saved?.session.mode ?? "fresh");
       agentSession = select(choices, savedSessionId || choices[0]?.[1] || "");
-      const savedCwd = saved?.session.mode === "fresh" || saved?.session.mode === "fork" ? saved.session.cwd ?? "" : "";
+      const savedCwd = saved?.session.mode === "fresh" ? saved.session.cwd : "";
       agentCwd = input(savedCwd || sessions[0]?.cwd || "");
       agentPrompt = textarea(saved?.prompt ?? "", 6);
       agentThinking = select([["Project default", ""], ["Off", "off"], ["Low", "low"], ["Medium", "medium"], ["High", "high"], ["Extra high", "xhigh"]], saved?.launch?.thinking ?? "");
@@ -156,9 +156,7 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
               prompt: agentPrompt!.value,
               session: agentMode!.value === "reuse"
                 ? { mode: "reuse" as const, sessionId: agentSession!.value }
-                : agentMode!.value === "fork"
-                  ? { mode: "fork" as const, ...(agentCwd!.value.trim() ? { cwd: agentCwd!.value.trim() } : {}) }
-                  : { mode: "fresh" as const, cwd: agentCwd!.value },
+                : { mode: "fresh" as const, cwd: agentCwd!.value },
               ...(agentLaunch ? { launch: agentLaunch } : {}),
             }
           : { type: "task" as const, taskId: targetTask!.value };

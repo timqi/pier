@@ -12,8 +12,7 @@ export type TaskTrigger =
 
 export type AgentSessionPolicy =
   | { mode: "reuse"; sessionId: string }
-  | { mode: "fresh"; cwd: string }
-  | { mode: "fork"; cwd?: string };
+  | { mode: "fresh"; cwd: string };
 
 export interface AgentLaunchPolicy {
   model?: ModelRef;
@@ -101,11 +100,6 @@ export interface TaskRunContext {
   thinking?: ThinkingLevel;
   renderedPrompt?: string;
   resumePrompt?: string;
-  /** What a fork actually copied, filled in when the child session opens.
-   *  `mode:"fork"` copies a whole transcript, tool output included, and the
-   *  caller that chose it never sees the bill; `turns` and `tokens` are that
-   *  bill, and `cwd` is the directory those copied paths belong to. */
-  forkedFrom?: { sessionId: string; cwd: string; turns: number; tokens?: number };
 }
 
 export interface TaskRun extends CallbackFields {
@@ -121,6 +115,8 @@ export interface TaskRun extends CallbackFields {
   invokedBySessionId: string | null;
   sourceSessionId: string | null;
   targetSessionId: string | null;
+  /** `"fork"` is legacy: runs stored before the mode was removed still say it,
+   *  and the runner refuses them by name rather than guessing a directory. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
   callbackSessionId: string | null;
   background: boolean;

@@ -32,17 +32,18 @@ A summary's `triggerSource` is who fired that run (`agent` when you did, plus
 `manual` / `cron` / `watch` / `task`); a definition's `trigger` is only its
 schedule policy, where `manual` means on-demand — by a human or by you.
 
-- `fresh`: clean context, requires `cwd` — the default. `fork`: the child opens
-  on a copy of your **whole transcript**, tool output included, and carries it
-  every turn; the run reports the bill as `forkedFrom`. Fork when the child
-  needs the discussion verbatim, not when a paragraph in the prompt would do —
-  "see fork context" in an otherwise self-contained prompt means you paid a
-  transcript for that paragraph. A fork with a different `cwd` also hands the
-  child paths from the other tree. `reuse`: sends work to an existing session
-  by id.
+- `fresh`: clean context, requires `cwd` — how a child normally starts.
+  `reuse`: sends work to an existing session by id, continuing its history.
+  There is no way to copy your context into a child: what the child needs, you
+  write down.
+- **The handoff is the prompt.** A child cannot see your discussion, so state:
+  the goal; the decisions *currently* in force (not the ones you argued out of);
+  the constraints the user added late; absolute paths; what "done" means and how
+  to verify it. Writing it is also the check — a decision you cannot state in a
+  sentence was not settled.
 - The child inherits your current model unless `launch.model` is set.
   Unknown models fail with the available list in the error. `launch` applies to
-  `fresh` and `fork` only — a `reuse` session owns its own model and tools.
+  `fresh` only — a `reuse` session owns its own model and tools.
 - The child has the same tools you do.
 - Runs time out after 900s by default; set `timeoutSeconds` in the draft for
   longer jobs.
@@ -70,9 +71,8 @@ group in core — you never track run ids across turns:
 ## Chains
 
 Run step 1, end your turn, receive its callback, splice the needed part into
-step 2's prompt. Children share nothing implicitly (except fork's copied
-history) — every prompt must be self-contained: paths, acceptance criteria,
-expected output format. Branching and retries are your own logic between
+step 2's prompt. Children share nothing implicitly — every prompt must be
+self-contained: paths, acceptance criteria, expected output format. Branching and retries are your own logic between
 turns.
 
 ## Choosing a model and thinking level

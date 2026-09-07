@@ -174,8 +174,8 @@ export class PiSession implements AgentSession {
     /** "What I just wrote is not in your listing yet." The factory retains a
      *  scan for a few seconds, which is exactly the window a rename lands in:
      *  every surface would re-read the old title and keep it until some
-     *  unrelated event moved the list again. Same drop `create` and `fork`
-     *  do — a callback only because the session is what knows it happened. */
+     *  unrelated event moved the list again. Same drop `create` does — a
+     *  callback only because the session is what knows it happened. */
     private readonly wrote: () => void = () => {},
     private readonly retention: CacheRetentionBox = { value: "long" },
   ) {}
@@ -486,7 +486,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   private located = new Map<string, { path: string; cwd: string }>();
   /** That same scan, retained for LIST_TTL_MS instead of paid once per asking
    *  surface — one workspace event has three (sidebar, Activity, task lookups).
-   *  Dropped on create/fork; ids appear for reasons this factory never sees, so
+   *  Dropped on create; ids appear for reasons this factory never sees, so
    *  a miss that decides something re-lists rather than trusts it (`resume`). */
   private listing?: { at: number; infos: Promise<SessionInfos> };
   private refreshQueue: Promise<void> = Promise.resolve();
@@ -802,25 +802,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   async create(opts: AgentLaunchOptions): Promise<AgentSession> {
     this.listing = undefined;
     return this.open(opts.cwd, SessionManager.create(opts.cwd), opts);
-  }
-
-  async fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession> {
-    const infos = await this.listed();
-    const source = infos.find((session) => session.id === sourceSessionId);
-    if (!source) throw new Error(`unknown session: ${sourceSessionId}`);
-    const targetDir = SessionManager.create(opts.cwd).getSessionDir();
-    const manager = SessionManager.open(source.path, targetDir, opts.cwd);
-    const branch = manager.getBranch();
-    const latest = branch.at(-1);
-    const hasPendingToolCall = latest?.type === "message" &&
-      latest.message.role === "assistant" &&
-      Array.isArray(latest.message.content) &&
-      latest.message.content.some((part) => part.type === "toolCall");
-    const leafId = hasPendingToolCall ? latest.parentId : latest?.id;
-    if (!leafId) throw new Error("cannot fork a session before its first persisted input");
-    manager.createBranchedSession(leafId);
-    this.listing = undefined;
-    return this.open(opts.cwd, manager, opts);
   }
 
   async resume(sessionId: string): Promise<AgentSession> {

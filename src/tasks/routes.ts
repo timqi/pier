@@ -194,13 +194,9 @@ export function registerTaskRoutes(
     const body = record(await jsonBody(c.req));
     const input = body && "input" in body ? body.input : null;
     try {
-      const sessionMode = body?.sessionMode === "fresh" || body?.sessionMode === "fork" ? body.sessionMode : undefined;
+      const sessionMode = body?.sessionMode === "fresh" ? body.sessionMode : undefined;
       const sourceSessionId = typeof body?.sourceSessionId === "string" && body.sourceSessionId ? body.sourceSessionId : null;
       const task = tasks.get(c.req.param("id"));
-      const effectiveMode = task.action.type === "agent" ? sessionMode ?? task.action.session.mode : null;
-      if (effectiveMode === "fork" && (!sourceSessionId || !(await tasks.sessionExists(sourceSessionId)))) {
-        throw new Error("fork requires a known sourceSessionId");
-      }
       return c.json({ runId: tasks.run(task.id, input, "manual", null, {
         invokedBySessionId: sourceSessionId,
         sourceSessionId,

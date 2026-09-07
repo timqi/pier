@@ -21,7 +21,7 @@ export interface RunProvenance {
   targetSessionId?: string | null;
   callbackSessionId?: string | null;
   background?: boolean;
-  sessionMode?: "reuse" | "fresh" | "fork";
+  sessionMode?: "reuse" | "fresh";
   groupId?: string | null;
   resumedFromRunId?: string | null;
   rootRunId?: string;
@@ -58,10 +58,6 @@ export class TaskRunQueue {
     const sessionMode = definition.action.type === "agent"
       ? provenance.sessionMode ?? definition.action.session.mode
       : null;
-    if (sessionMode === "fork" && !sourceSessionId) throw new Error("fork requires a source session");
-    if (sessionMode === "fork" && (source === "cron" || source === "watch")) {
-      throw new Error("scheduled and watch runs cannot fork a caller session");
-    }
     const targetSessionId = provenance.targetSessionId ?? (
       definition.action.type === "agent" && sessionMode === "reuse" && definition.action.session.mode === "reuse"
         ? definition.action.session.sessionId

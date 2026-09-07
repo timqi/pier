@@ -1,4 +1,4 @@
-// A run that *is* a Pi session: which session it opens (reuse, fresh, fork),
+// A run that *is* a Pi session: which session it opens (fresh or reused),
 // what the child is told before the prompt, and how many may run at once. The
 // concurrency caps are here rather than in execution.ts because they bound
 // agents specifically — a bash run costs a process, an agent run costs a
@@ -29,16 +29,9 @@ const preamble = (run: TaskRun): string => {
   const contact = run.invokedBySessionId
     ? ' Mid-run, the task tool\'s contact operation reaches that agent: reason "progress" is fire-and-forget, "decision" waits for a reply — state what you await and end your turn.'
     : "";
-  // A fork into another directory hands the child a transcript full of paths
-  // that resolve — to the wrong tree. The delegating prompt can only ask it
-  // not to; this says which paths it is about.
-  const forked = run.context.forkedFrom;
-  const drift = forked && run.context.cwd && forked.cwd !== run.context.cwd
-    ? ` The context above was copied from a session in ${forked.cwd}; you are working in ${run.context.cwd}. Paths from those earlier turns point at the other tree — re-read them here before acting on them.`
-    : "";
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there.${contact}${drift}\n\n`;
+    `next-step buttons and file:// attachments do not render there.${contact}\n\n`;
 };
 
 export class AgentTaskRunner {
@@ -67,7 +60,7 @@ export class AgentTaskRunner {
         await this.waitUntilIdle(session, signal);
         // Task requests come seconds apart — the 1h Anthropic cache-write premium
         // never earns its 2× back, so task runs use the 5m TTL. Set here, not in
-        // resolveSession: this covers create, fork, reuse and resume alike, on
+        // resolveSession: this covers create, reuse and resume alike, on
         // every attempt — and only after the session is idle, so a reused
         // interactive session's in-flight turn keeps its 1h writes.
         session.setCacheRetention("short");
@@ -164,21 +157,18 @@ export class AgentTaskRunner {
     if (run.targetSessionId) {
       return this.router.ensure({ channelId: "task", conversationId: run.targetSessionId });
     }
-    const source = run.sourceSessionId
-      ? await this.factory.find(run.sourceSessionId)
-      : undefined;
     const policy = action.session;
-    let cwd: string;
-    if (run.sessionMode === "fork") {
-      if (!run.sourceSessionId) throw new Error("fork requires a source session");
-      cwd = policy.mode === "fork" && policy.cwd ? policy.cwd : source?.cwd ?? "";
-    } else if (policy.mode === "fresh") {
-      cwd = policy.cwd;
-    } else if (policy.mode === "reuse") {
-      cwd = (await this.factory.find(policy.sessionId))?.cwd ?? "";
-    } else {
-      cwd = policy.cwd ?? source?.cwd ?? "";
+    // Definitions stored before fork was removed still say `"fork"`. Refused by
+    // name: every directory this could pick instead is a guess at what the
+    // author meant, and a child in the wrong tree edits real files.
+    if (run.sessionMode === "fork" || (policy as { mode: string }).mode === "fork") {
+      throw new Error(
+        `task "${run.context.definition.name}" uses the removed fork session mode; recreate it with {"mode":"fresh","cwd":"/abs/path"}`,
+      );
     }
+    const cwd = policy.mode === "fresh"
+      ? policy.cwd
+      : (await this.factory.find(policy.sessionId))?.cwd ?? "";
     if (!cwd) throw new Error("could not resolve child working directory");
     const opts = {
       cwd,
@@ -189,26 +179,10 @@ export class AgentTaskRunner {
         (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
       thinking: action.launch?.thinking,
     };
-    const session = run.sessionMode === "fork"
-      ? await this.factory.fork(run.sourceSessionId!, opts)
-      : await this.factory.create(opts);
+    const session = await this.factory.create(opts);
     run.targetSessionId = session.id;
     run.context.sessionId = session.id;
     run.context.cwd = cwd;
-    if (run.sessionMode === "fork") {
-      // Read off the child, not estimated: what it opened with is the copy.
-      // Tokens are what Pi knows of the copied context — absent rather than
-      // guessed, since a turn count understates a transcript of tool output.
-      // An unlocatable source cannot be forked at all (the factory threw), so
-      // its cwd falls back to the child's: same directory, nothing to warn of.
-      const tokens = session.contextUsage?.tokens ?? undefined;
-      run.context.forkedFrom = {
-        sessionId: run.sourceSessionId!,
-        cwd: source?.cwd ?? cwd,
-        turns: (await session.history()).length,
-        ...(tokens ? { tokens } : {}),
-      };
-    }
     this.store.saveRun(run);
     this.router.attach({ channelId: "task", conversationId: session.id }, session);
     this.changed(run);

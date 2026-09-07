@@ -178,7 +178,7 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   received it and rides the prompt as a `[name](file:///…)` line; bytes in
   `core/inbox.ts`, marker grammar in `core/inbound-file.ts`), persisted
   system input, abort, history, rename,
-  model get/set/list, clearQueue, create/fork/resume, `list`/`find` (one
+  model get/set/list, clearQueue, create/resume, `list`/`find` (one
   session by id, so no surface scans the whole listing for one), and a
   payload-only `subscribe`. Must stay implementable over RPC.
 - `SessionEventPayload` — the only observability currency: turn/text/thinking/
@@ -344,10 +344,14 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - Frontend build: Vite + Tailwind (static CSS, zero runtime). Adopted early by
   explicit decision instead of the original no-bundler plan; still no UI
   framework until componentization is needed.
-- Subagent is an Agent Task run in a reused, fresh, or forked persisted Session;
-  there is no second scheduler, Agent Profile store, broker, or event stream.
-  Fork follows Pi's active compacted branch and excludes the in-flight Task
-  tool-call leaf, whose tool result does not exist when the child starts.
+- Subagent is an Agent Task run in a fresh or reused persisted Session; there
+  is no second scheduler, Agent Profile store, broker, or event stream. A
+  third mode, `fork`, copied the caller's transcript into the child and was
+  removed: it cost a whole transcript (31k tokens in the run that settled it)
+  to carry a paragraph of decisions, and what it carried was the caller's
+  superseded turns as much as its conclusions. Context travels as a written
+  handoff in the prompt. Runs stored before the removal keep `sessionMode:
+  "fork"`, and the runner refuses them by name rather than guess a directory.
 - Projects are derived, not registered: a project is a distinct session cwd.
   No project store exists; the sidebar groups by cwd and the new-session
   dialog suggests known cwds. A real registry only arrives if derivation

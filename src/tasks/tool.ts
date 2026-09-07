@@ -4,7 +4,7 @@ import { TaskDefinitions, record, requiredString } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { TaskDefinition, TaskGroup, TaskResult, TaskRun, TaskRunContext } from "./types.js";
+import type { TaskDefinition, TaskGroup, TaskResult, TaskRun } from "./types.js";
 
 // JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
 const strEnum = <const T extends readonly string[]>(...values: T) =>
@@ -21,9 +21,6 @@ export interface RunSummary {
   triggerSource: TaskRun["triggerSource"];
   groupId?: string;
   sessionMode: TaskRun["sessionMode"];
-  /** What `mode:"fork"` copied into the child — the price of the choice,
-   *  back at the caller that made it. Appears once the child session opens. */
-  forkedFrom?: TaskRunContext["forkedFrom"];
   targetSessionId?: string;
   callbackSessionId?: string;
   callbackState: TaskRun["callbackState"];
@@ -70,7 +67,6 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   triggerSource: run.triggerSource,
   groupId: run.groupId,
   sessionMode: run.sessionMode,
-  forkedFrom: run.context.forkedFrom ?? null,
   targetSessionId: run.targetSessionId,
   callbackSessionId: run.callbackSessionId,
   callbackState: run.callbackState,
@@ -127,7 +123,6 @@ const DraftSchema = Type.Object({
       type: Type.Literal("agent"),
       session: Type.Union([
         Type.Object({ mode: Type.Literal("fresh"), cwd: Type.String() }),
-        Type.Object({ mode: Type.Literal("fork"), cwd: Type.Optional(Type.String()) }),
         Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
       ]),
       prompt: Type.String(),
@@ -153,7 +148,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks support reused, fresh, or forked sessions. Run executes a stored task by task_id, a one-shot subagent from an inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
+      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. Run executes a stored task by task_id, a one-shot subagent from an inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
     parameters: Type.Object({
       operation: strEnum(
         "list", "create", "update", "run", "get", "cancel",
@@ -165,7 +160,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       message_id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
       reason: Type.Optional(strEnum("progress", "decision")),
-      session_mode: Type.Optional(strEnum("fresh", "fork")),
+      session_mode: Type.Optional(strEnum("fresh")),
       task: Type.Optional(DraftSchema),
       // The same draft again, spelled out, cost more tokens in every session
       // than the whole rest of this contract. One copy is the guidance; this
@@ -232,7 +227,7 @@ export async function handleTaskTool(
     const task = draft
       ? await resolveDraft(definitions, draft, active, callerSessionId)
       : resolveStored(definitions, input.task_id, active);
-    const sessionMode = input.session_mode === "fresh" || input.session_mode === "fork" ? input.session_mode : undefined;
+    const sessionMode = input.session_mode === "fresh" ? input.session_mode : undefined;
     let callbackSessionId: string | null = input.callback === "none" ? null : callerSessionId;
     if (!active && callbackSessionId && typeof input.callback_session_id === "string") {
       callbackSessionId = requiredString(input.callback_session_id, "callback_session_id");

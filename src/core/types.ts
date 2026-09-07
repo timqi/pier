@@ -116,6 +116,8 @@ export interface BackgroundRun {
   taskName: string;
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "skipped";
   targetSessionId: string | null;
+  /** Runs from before fork was removed still carry `"fork"` on disk; the
+   *  timeline prints what it reads. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
   depth: number;
   queuedAt: number;
@@ -456,7 +458,6 @@ export interface AgentFactory {
    */
   availableModels(): Promise<ModelRef[]>;
   create(opts: AgentLaunchOptions): Promise<AgentSession>;
-  fork(sourceSessionId: string, opts: AgentLaunchOptions): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
   list(): Promise<SessionSummary[]>;
   /**

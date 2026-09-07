@@ -131,7 +131,6 @@ function setup(session = fakeSession()) {
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => []),
     create: vi.fn(async () => session),
-    fork: vi.fn(async () => session),
     resume: vi.fn(async () => session),
     list: vi.fn(async () => [{ id: session.id, cwd, createdAt: 1 }]),
     // Derived from the same list, like the real seam: a fake that answers the
@@ -254,7 +253,6 @@ describe("callback recovery across database connections", () => {
       const factory: AgentFactory = {
         availableModels: async () => [],
         create: async () => fakeSession(newId()),
-        fork: async () => { throw new Error("unexpected fork"); },
         resume: async (id) => {
           if (mode === "reject") throw new Error("fixture recipient unavailable");
           if (id !== parent.id) throw new Error(`unexpected recipient ${id}`);
@@ -917,12 +915,10 @@ describe("task service", () => {
     service.stop();
   });
 
-  it("creates persisted fresh and forked child sessions with lineage", async () => {
+  it("creates a persisted fresh child session with lineage", async () => {
     const { cwd, service, factory } = setup();
     const freshChild = fakeSession("fresh-child");
-    const forkChild = fakeSession("fork-child");
     vi.mocked(factory.create).mockResolvedValueOnce(freshChild);
-    vi.mocked(factory.fork).mockResolvedValueOnce(forkChild);
 
     const fresh = await service.create({
       name: "fresh reviewer",
@@ -950,62 +946,28 @@ describe("task service", () => {
       targetSessionId: "fresh-child",
       sessionMode: "fresh",
     });
-
-    const forked = await service.create({
-      name: "context worker",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "fork" }, prompt: "Continue from context" },
-    });
-    const forkQueued = await service.tool({ operation: "run", task_id: forked.id }, "s1") as RunSummary;
-    const forkRun = await service.waitForRun(forkQueued.runId);
-    expect(factory.fork).toHaveBeenCalledWith("s1", expect.objectContaining({ cwd }));
-    expect(forkRun).toMatchObject({
-      state: "succeeded",
-      targetSessionId: "fork-child",
-      sessionMode: "fork",
-    });
-    expect(forkRun.sourceSessionId).toBe("s1");
+    expect(freshRun.sourceSessionId).toBe("s1");
   });
 
-  it("bills a fork to its caller and tells the child which tree the copy came from", async () => {
-    const { cwd, service, factory } = setup();
-    const elsewhere = mkdtempSync(join(tmpdir(), "pier-fork-"));
-    onTestFinished(() => rmSync(elsewhere, { recursive: true, force: true }));
-    const forkChild = fakeSession("drifted-child");
-    vi.mocked(factory.fork).mockResolvedValueOnce(forkChild);
-
-    const task = await service.create({
-      name: "worktree worker",
+  it("refuses a definition stored with the removed fork mode instead of guessing a directory", async () => {
+    const { cwd, service, store, factory } = setup();
+    // Written past validation, the way the 23 definitions on disk were: created
+    // when `fork` was still a mode, and runnable by id ever since.
+    const legacy = await service.create({
+      name: "legacy forker",
       trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "fork", cwd: elsewhere }, prompt: "Implement it" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Continue from context" },
     });
-    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
-    await service.waitForRun(queued.runId);
-
-    // The caller reads the price of its own choice off the run.
-    const summary = await service.tool({ operation: "get", run_id: queued.runId }, "s1") as RunSummary;
-    expect(summary.forkedFrom).toEqual({ sessionId: "s1", cwd, turns: expect.any(Number) });
-    expect(factory.fork).toHaveBeenCalledWith("s1", expect.objectContaining({ cwd: elsewhere }));
-
-    // And the child is told the copied paths belong to the other tree.
-    expect(forkChild.systemInputs[0]?.text).toContain(`copied from a session in ${cwd}`);
-    expect(forkChild.systemInputs[0]?.text).toContain(`you are working in ${elsewhere}`);
-  });
-
-  it("reports no fork bill and no directory warning on a same-cwd fork", async () => {
-    const { cwd, service, factory } = setup();
-    const forkChild = fakeSession("same-cwd-child");
-    vi.mocked(factory.fork).mockResolvedValueOnce(forkChild);
-    const task = await service.create({
-      name: "context worker",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "fork" }, prompt: "Continue" },
+    store.saveTask({
+      ...legacy,
+      action: { type: "agent", session: { mode: "fork" } as never, prompt: "Continue from context" },
     });
-    const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
-    await service.waitForRun(queued.runId);
-    const summary = await service.tool({ operation: "get", run_id: queued.runId }, "s1") as RunSummary;
-    expect(summary.forkedFrom).toMatchObject({ sessionId: "s1", cwd });
-    expect(forkChild.systemInputs[0]?.text).not.toContain("copied from a session in");
+
+    const queued = await service.tool({ operation: "run", task_id: legacy.id }, "s1") as RunSummary;
+    const run = await service.waitForRun(queued.runId);
+    expect(run.state).toBe("failed");
+    expect(run.error).toContain("removed fork session mode");
+    expect(factory.create).not.toHaveBeenCalled();
   });
 
   it("allows concurrent interactive fresh runs of one role", async () => {
@@ -1066,7 +1028,6 @@ describe("task service", () => {
     const factory: AgentFactory = {
       availableModels: vi.fn(async () => []),
     create: vi.fn(async () => child),
-      fork: vi.fn(async () => child),
       resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
       list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
       find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
@@ -1563,8 +1524,8 @@ describe("task HTTP routes", () => {
     expect(await list.json()).toEqual([expect.objectContaining({ id: task.id, lastRun: expect.objectContaining({ id: runId }) })]);
   });
 
-  it("exposes steer, message history, wait, resume, and fork source over HTTP", async () => {
-    const { cwd, service, session, factory } = setup();
+  it("exposes steer, message history, wait, and resume over HTTP", async () => {
+    const { service, session } = setup();
     const app = new Hono();
     registerTaskRoutes(app, service);
     const task = await service.create({
@@ -1593,28 +1554,19 @@ describe("task HTTP routes", () => {
     expect(resumed.status).toBe(200);
     const resumedRun = await resumed.json() as TaskRun;
     expect(resumedRun).toMatchObject({ state: "succeeded", resumedFromRunId: done.id });
-    const forkTask = await service.create({
-      name: "http fork",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "fork" }, prompt: "Use context" },
-    });
-    const invalidFork = await app.request(`/api/tasks/${forkTask.id}/run`, {
+    // A session policy that is not a mode at all is refused by the parser, not
+    // stored and run into the runner.
+    const invalid = await app.request("/api/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sourceSessionId: "missing" }),
+      body: JSON.stringify({
+        name: "http fork",
+        trigger: { type: "manual" },
+        action: { type: "agent", session: { mode: "fork" }, prompt: "Use context" },
+      }),
     });
-    expect(invalidFork.status).toBe(400);
-    expect(service.listRuns(forkTask.id)).toHaveLength(0);
-
-    const forked = await app.request(`/api/tasks/${forkTask.id}/run`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sourceSessionId: session.id }),
-    });
-    expect(forked.status).toBe(202);
-    const { runId } = await forked.json() as { runId: string };
-    await service.waitForRun(runId);
-    expect(factory.fork).toHaveBeenCalledWith(session.id, expect.objectContaining({ cwd }));
+    expect(invalid.status).toBe(400);
+    expect(await invalid.text()).toContain("agent session policy required");
   });
 });
 

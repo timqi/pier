@@ -289,7 +289,7 @@ export class TaskDefinitions {
       this.get(taskId);
       action = { type: "task", taskId };
     } else if (actionRaw.type === "agent") {
-      action = await this.parseAgentAction(actionRaw, trigger);
+      action = await this.parseAgentAction(actionRaw);
     } else throw new Error("unknown action type");
     return {
       name: requiredString(value.name, "name"),
@@ -302,7 +302,7 @@ export class TaskDefinitions {
     };
   }
 
-  private async parseAgentAction(raw: Record<string, unknown>, trigger: TaskTrigger): Promise<AgentTaskAction> {
+  private async parseAgentAction(raw: Record<string, unknown>): Promise<AgentTaskAction> {
     const prompt = requiredString(raw.prompt, "agent prompt");
     const launch = parseLaunch(raw.launch);
     const input = record(raw.session);
@@ -315,17 +315,12 @@ export class TaskDefinitions {
       const cwd = requiredString(input.cwd, "agent cwd");
       await this.assertDirectory(cwd);
       session = { mode: "fresh", cwd };
-    } else if (input?.mode === "fork") {
-      if (trigger.type !== "manual") throw new Error("fork Agent tasks must use a manual trigger");
-      const cwd = typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : undefined;
-      if (cwd) await this.assertDirectory(cwd);
-      session = { mode: "fork", ...(cwd ? { cwd } : {}) };
     } else {
       // Validation never mutates: a dedicated session is created explicitly
       // (POST /api/sessions) and then referenced with mode:"reuse".
-      throw new Error('agent session policy required, e.g. {"mode":"fresh","cwd":"/abs/path"} or {"mode":"fork"} or {"mode":"reuse","sessionId":"..."}');
+      throw new Error('agent session policy required, e.g. {"mode":"fresh","cwd":"/abs/path"} or {"mode":"reuse","sessionId":"..."}');
     }
-    if (session.mode === "reuse" && launch) throw new Error("launch policy only applies to fresh or fork sessions");
+    if (session.mode === "reuse" && launch) throw new Error("launch policy only applies to fresh sessions");
     return { type: "agent", session, prompt, ...(launch ? { launch } : {}) };
   }
 
