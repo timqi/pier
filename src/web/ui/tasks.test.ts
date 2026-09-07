@@ -1,6 +1,6 @@
 // Real Tasks/Runs navigation, shared details and HTTP with a small DOM double.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RunPage, RunView, TaskDefinition, TaskMessage } from "../../tasks/types.js";
+import type { RunPage, RunView, TaskDefinition, TaskGroup, TaskMessage } from "../../tasks/types.js";
 
 class Element {
   children: (Element | string)[] = [];
@@ -75,6 +75,7 @@ let runsView: ReturnType<typeof createRunsView>;
 let task: TaskDefinition;
 let run: RunView;
 let page: RunPage;
+let group: TaskGroup;
 let messages: TaskMessage[];
 let fetcher: ReturnType<typeof vi.fn>;
 let failMessages: boolean;
@@ -102,6 +103,9 @@ beforeEach(async () => {
     callbackError: null, callbackAttempts: 0, callbackNextAttemptAt: null, background: false, input: null,
     context: { definition: task }, probe: null, matched: null, error: null, skipReason: null, pendingDecisionId: null, groupCallbackState: null };
   page = { runs: [run], nextCursor: null };
+  group = { id: "group-a", join: "all", invokedBySessionId: "s1", callbackSessionId: "s1", memberRunIds: [run.id, "run-c"],
+    winnerRunId: null, callbackState: "delivered", callbackError: null, callbackAttempts: 1, callbackNextAttemptAt: null,
+    createdAt: 1, finishedAt: 2 };
   vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
   vi.stubGlobal("window", { prompt: vi.fn(() => "continue please") });
   fetcher = vi.fn(async (url: string) => {
@@ -110,6 +114,10 @@ beforeEach(async () => {
     if (url === "/api/tasks/task-a") return Response.json(task);
     if (url === "/api/tasks/task-a/runs") return Response.json([run]);
     if (url === "/api/task-runs/run-a") { if (delayRun) await delayRun; return Response.json(run); }
+    if (url.startsWith("/api/task-runs/group-a")) return Response.json({ error: "unknown task run: group-a" }, { status: 404 });
+    if (url === "/api/task-groups/group-a") return Response.json({ group, members: [run, { ...run, id: "run-c" }] });
+    if (url === "/api/task-groups/run-b") return Response.json({ error: "unknown task group: run-b" }, { status: 404 });
+    if (url.startsWith("/api/task-runs/run-b")) return Response.json({ error: "unknown task run: run-b" }, { status: 404 });
     if (url.endsWith("/messages")) return failMessages ? Response.json({ error: "Ledger failed" }, { status: 500 }) : Response.json(messages);
     if (url.endsWith("/resume")) return Response.json({ ...run, id: "continued-run" });
     if (url.endsWith("/cancel") || url.endsWith("/reply")) return Response.json({});
@@ -240,5 +248,14 @@ describe("Runs", () => {
     expect(button("Parent: parent")).toBeDefined(); expect(button("Resumed from: prior")).toBeDefined();
     expect(button("Group: group")).toBeUndefined(); expect(root.text).toContain("Group: group");
     await click("Child result: child"); expect(openRuns).toHaveBeenLastCalledWith({}, "child");
+  });
+  it("resolves a group id on the run route to its members, and still reports a real unknown id", async () => {
+    openRuns({}, "group-a"); await settled();
+    expect(root.text).toContain("Task group \u00b7 join all"); expect(root.text).toContain("2 runs");
+    expect(root.text).toContain("callback delivered"); expect(root.text).not.toContain("unknown task run");
+    walk(root).find((el) => el.tag === "button" && el.text.startsWith("running"))!.onclick!();
+    expect(openRuns).toHaveBeenLastCalledWith({}, run.id);
+    openRuns({}, "run-b"); await settled();
+    expect(root.text).toContain("unknown task run: run-b");
   });
 });

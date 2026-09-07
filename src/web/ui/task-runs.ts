@@ -5,7 +5,7 @@
 // the same record at its current revision. runs.ts and tasks.ts own the
 // surrounding navigation.
 
-import type { CommandResult, RunView, TaskDefinition, TaskMessage, TaskRun } from "../../tasks/types.js";
+import type { CommandResult, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "../../tasks/types.js";
 import { getJson, promptRun, type Sent } from "./api.js";
 import { fmtDuration, h } from "./dom.js";
 import { badge, button, empty, toolbar } from "./form.js";
@@ -185,8 +185,23 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   ]);
   if (!pane.isConnected || pane.dataset.runRequest !== request || state.selectedId !== id) return;
   if (!got.ok) {
+    // A fan-out group's callback card names the group where a run's names its
+    // run, so this route is reached with a group id too — and the cards already
+    // in a transcript cannot be rewritten, which makes the fallback the only
+    // repair for them. The run error is what surfaces if it is no group either.
+    const group = await getJson<{ group: TaskGroup; members: TaskRun[] }>(`/api/task-groups/${id}`, got.error);
+    if (!pane.isConnected || pane.dataset.runRequest !== request || state.selectedId !== id) return;
     state.drawn = "";
-    pane.replaceChildren(actions, h("p", "p-4 text-[13px] text-red-600", got.error));
+    if (!group.ok) {
+      pane.replaceChildren(actions, h("p", "p-4 text-[13px] text-red-600", got.error));
+      return;
+    }
+    const { group: joined, members } = group.value;
+    const list = h("div", "min-w-0");
+    pane.replaceChildren(actions, h("div", "border-b border-neutral-100 bg-neutral-50/60 px-4 py-3 text-[12.5px] text-neutral-600",
+      [`Task group \u00b7 join ${joined.join}`, `${String(members.length)} runs`,
+        joined.callbackState ? `callback ${joined.callbackState}` : ""].filter(Boolean).join(" \u00b7 ")), list);
+    renderRuns(list, members, deps.openRun, { top: 0 });
     return;
   }
   const run = got.value;
