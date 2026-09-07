@@ -13,9 +13,11 @@ import type { ChannelControl } from "./control.js";
 import { ReceiptLedger } from "./receipts.js";
 import { SlackChannel } from "./slack.js";
 import type {
+  SlackAttachment,
   SlackBlock,
   SlackClient,
   SlackEnvelope,
+  SlackFile,
   SlackHistoryPage,
   SlackInteraction,
   SlackMessageEvent,
@@ -103,11 +105,17 @@ class FakeClient implements SlackClient {
   }
 
   userName(userId: string): Promise<string> {
-    return Promise.resolve(userId === "U42" ? "Q" : userId);
+    if (userId === "U42") return Promise.resolve("Q");
+    return Promise.resolve(userId === "U7" ? "Dana" : userId);
   }
 
   downloadFile(): Promise<{ bytes: Uint8Array; mimeType: string }> {
     return Promise.resolve({ bytes: new TextEncoder().encode("fo"), mimeType: "image/png" });
+  }
+
+  /** The adapter never calls it — an inbound event already carries the file. */
+  filesInfo(id: string): Promise<SlackFile> {
+    return Promise.reject(new Error(`unexpected files.info for ${id}`));
   }
 
   readonly uploads: { channel: string; threadTs: string; name: string; size: number }[] = [];
@@ -121,13 +129,18 @@ class FakeClient implements SlackClient {
     return Promise.resolve();
   }
 
-  // Only the agent-facing tool reads history; the adapter never does.
+  // Only the agent-facing tool reads a channel; the adapter never does.
   history(): Promise<SlackHistoryPage> {
     return Promise.resolve({ messages: [] });
   }
 
-  replies(): Promise<SlackHistoryPage> {
-    return Promise.resolve({ messages: [] });
+  /** A shared thread the adapter reads eagerly; scripted per test. */
+  threadReplies: SlackMessageEvent[] = [];
+  readonly repliesCalls: { channel: string; ts: string }[] = [];
+
+  replies(channel: string, ts: string): Promise<SlackHistoryPage> {
+    this.repliesCalls.push({ channel, ts });
+    return Promise.resolve({ messages: this.threadReplies });
   }
 }
 
@@ -470,6 +483,241 @@ describe("inbound hygiene", () => {
       files: [{ id: "F1", mimetype: "image/png", url_private_download: "https://files/x.png" }],
     }));
     expect(inbound).toEqual([]);
+  });
+});
+
+describe("shared messages", () => {
+  /** A forward as Slack sends one: both flags, the original flattened on. */
+  const share = (over: Partial<SlackAttachment> = {}): SlackAttachment => ({
+    is_share: true,
+    // A real share carries the unfurl flag too, which is why it cannot be the
+    // test for one.
+    is_msg_unfurl: true,
+    author_id: "U7",
+    author_name: "Dana",
+    channel_id: "C900",
+    channel_name: "alerts",
+    ts: "1699.000100",
+    text: "the db is on fire",
+    ...over,
+  });
+
+  it("appends the shared message after the sharer's own comment", async () => {
+    openGates();
+    await feed(message({
+      text: "have a look at this",
+      ts: "1710.000100",
+      subtype: "message_share",
+      attachments: [share()],
+    }));
+    expect(inbound).toHaveLength(1);
+    expect(inbound[0]!.text).toBe(
+      "have a look at this\n"
+        + "[shared message from Dana<U7> in #alerts<C900> at 1699.000100]\n"
+        + "the db is on fire",
+    );
+  });
+
+  it("reads the other shape too: a plain message carrying is_share", async () => {
+    openGates();
+    // Slack sends a forward either with the `message_share` subtype or with no
+    // subtype at all; the flag on the attachment is the only thing in common.
+    await feed(message({ text: "", ts: "1720.000100", attachments: [share()] }));
+    expect(inbound[0]!.text).toBe(
+      "[shared message from Dana<U7> in #alerts<C900> at 1699.000100]\nthe db is on fire",
+    );
+  });
+
+  it("logs a share it could not read instead of dropping it silently", async () => {
+    openGates();
+    // A `message_share` whose only attachment is ruled out as an unfurl, and no
+    // comment of its own: nothing reaches the agent, so the drop log is the
+    // only place it can be seen at all (5b).
+    await feed(message({
+      text: "",
+      ts: "1721.000100",
+      subtype: "message_share",
+      attachments: [{ is_msg_unfurl: true, author_name: "Dana", text: "the db is on fire" }],
+    }));
+    expect(inbound).toEqual([]);
+    expect(dropped).toContain("message_share with nothing readable in it, dropped");
+  });
+
+  it("dispatches a forward with no comment instead of opening the panel", async () => {
+    openGates();
+    // The subtype path: `is_share` is absent, so the subtype is the only flag.
+    await feed(message({
+      text: "",
+      ts: "1711.000100",
+      subtype: "message_share",
+      attachments: [share({ is_share: undefined, is_msg_unfurl: undefined })],
+    }));
+    expect(inbound).toHaveLength(1);
+    expect(inbound[0]!.text).toBe(
+      "[shared message from Dana<U7> in #alerts<C900> at 1699.000100]\nthe db is on fire",
+    );
+    // An empty text used to read as "show me the settings", which is the worst
+    // possible answer to somebody forwarding a message.
+    expect(client.sent).toEqual([]);
+  });
+
+  it("does not read a link unfurl as a share", async () => {
+    openGates();
+    // Slack previewed a permalink somebody pasted; the sender did not forward
+    // that message, so quoting it would put words in their mouth.
+    await feed(message({
+      text: "what is this about",
+      ts: "1712.000100",
+      attachments: [{
+        is_msg_unfurl: true,
+        author_name: "Grafana Alerts",
+        channel_name: "alerts",
+        text: "[FIRING:12] LedgerAdapterNotParsedLogs",
+      }],
+    }));
+    expect(inbound[0]!.text).toBe("what is this about");
+  });
+
+  /**
+   * The tool's availability rule reads the token, which the injected client
+   * makes unnecessary everywhere else in this file.
+   */
+  const agentTool = (on: boolean): void => {
+    const config = store.get("slack");
+    config.enabled = true;
+    config.token = "xoxb-test";
+    config.agentTool = on;
+    store.save("slack", config);
+  };
+
+  const shared = (over: Partial<SlackMessageEvent> = {}): SlackEnvelope =>
+    message({ text: "", ts: "1713.000100", subtype: "message_share", ...over });
+
+  it("inlines a small shared thread as the tool's own lines", async () => {
+    openGates();
+    agentTool(true);
+    client.threadReplies = [
+      { type: "message", user: "U7", ts: "1699.000100", text: "the db is on fire", reply_count: 5 },
+      { type: "message", user: "U42", ts: "1699.000200", thread_ts: "1699.000100", text: "restarting it" },
+    ];
+    await feed(shared({ attachments: [share({ reply_count: 5 })] }));
+    const lines = inbound[0]!.text.split("\n");
+    expect(lines[0]).toBe("[shared message from Dana<U7> in #alerts<C900> at 1699.000100]");
+    // The transcript opens with the shared message itself, so its text is not
+    // repeated above the thread.
+    expect(lines[1]).toBe(
+      "[thread: 5 replies, oldest first \u2014 <ts> | <time, UTC> | <name>[<id>] | <text>,"
+        + " then \u2014 when there are any \u2014 [thread: <n> replies] and one"
+        + " [file: <name> <F\u2026 id> <size>] per upload]",
+    );
+    expect(lines[2]).toContain("Dana[U7] | the db is on fire");
+    expect(lines[3]).toContain("Q[U42] | restarting it");
+    // Read through the tool's own path, at the shared message's coordinates.
+    expect(client.repliesCalls).toEqual([{ channel: "C900", ts: "1699.000100" }]);
+  });
+
+  it("does not read a big thread, and says where it is instead", async () => {
+    openGates();
+    agentTool(true);
+    await feed(shared({ attachments: [share({ reply_count: 200 })] }));
+    // Two hundred replies is not worth the tokens uninvited.
+    expect(client.repliesCalls).toEqual([]);
+    expect(inbound[0]!.text.split("\n").at(-1)).toBe(
+      "[thread: 200 replies \u2014 read with the slack tool: channel C900, thread_ts 1699.000100]",
+    );
+  });
+
+  it("names the tool only when the agent has it", async () => {
+    openGates();
+    agentTool(false);
+    await feed(shared({ attachments: [share({ reply_count: 200 })] }));
+    // The coordinates stay true with agent access off; the instruction to use
+    // a tool this session was never given does not.
+    expect(inbound[0]!.text.split("\n").at(-1)).toBe(
+      "[thread: 200 replies \u2014 channel C900, thread_ts 1699.000100]",
+    );
+  });
+
+  it("says why a thread is missing rather than dropping it silently", async () => {
+    openGates();
+    agentTool(true);
+    client.replies = () =>
+      Promise.reject(new Error("slack conversations.replies: not_in_channel"));
+    await feed(shared({ attachments: [share({ reply_count: 5 })] }));
+    // The turn still runs, and the reason is the action it implies — the
+    // translation the tool already owns.
+    expect(inbound).toHaveLength(1);
+    const lines = inbound[0]!.text.split("\n");
+    expect(lines[1]).toBe("the db is on fire");
+    expect(lines[2]).toBe(
+      "[thread not read: Pier's bot is not in that channel; someone has to run `/invite @Pier` there before it can read]",
+    );
+    // Still told where to look, and the drop is logged too.
+    expect(lines[3]).toContain("thread_ts 1699.000100");
+    expect(dropped.some((d) => d.includes("shared thread C900/1699.000100 not read"))).toBe(true);
+  });
+
+  it("reads nothing for a shared reply, which is not a thread parent", async () => {
+    openGates();
+    agentTool(true);
+    await feed(shared({
+      attachments: [share({ ts: "1699.000900", thread_ts: "1699.000100", reply_count: 5 })],
+    }));
+    expect(client.repliesCalls).toEqual([]);
+    expect(inbound[0]!.text).not.toContain("thread");
+  });
+
+  it("says an inlined thread was cut rather than reading as complete", async () => {
+    openGates();
+    agentTool(true);
+    // `reply_count` undercounted: more came back than the budget allows, so the
+    // transcript has to admit it stops short of the end.
+    client.threadReplies = Array.from({ length: 40 }, (_, i) => ({
+      type: "message",
+      user: "U7",
+      ts: `1699.0001${String(i).padStart(2, "0")}`,
+      text: `line ${i}`,
+    }));
+    await feed(shared({ attachments: [share({ reply_count: 5 })] }));
+    expect(inbound[0]!.text.split("\n").at(-1)).toBe("[thread partly read: cut at 32 lines]");
+  });
+
+  it("saves the share's files in the same loop as the event's own", async () => {
+    openGates();
+    await feed(message({
+      text: "",
+      ts: "1715.000100",
+      subtype: "message_share",
+      files: [{ id: "F8", name: "own.png", mimetype: "image/png", url_private_download: "https://files/own.png" }],
+      attachments: [share({
+        text: "logs",
+        files: [
+          { id: "F9", name: "log.txt", mimetype: "text/plain", url_private_download: "https://files/log.txt" },
+          { id: "F10", name: "dump.bin", size: 33 * 1024 * 1024, url_private_download: "https://files/dump.bin" },
+        ],
+      })],
+    }));
+    const lines = inbound[0]!.text.split("\n");
+    // One save loop over both sources, so a share's files get the size gate and
+    // the lost marker an upload's already had.
+    const markers = lines.filter((line) => line.includes("file://"));
+    expect(markers).toHaveLength(2);
+    expect(markers[0]).toMatch(/-own\.png\]/);
+    expect(markers[1]).toMatch(/-log\.txt\]/);
+    expect(lines.at(-1)).toBe("[attachment lost: dump.bin \u2014 too large]");
+  });
+
+  it("does not download a share's files for an unauthorized sender", async () => {
+    // Default policy: not addressed, so the gate closes before any bytes move.
+    await feed(message({
+      text: "",
+      subtype: "message_share",
+      attachments: [share({
+        files: [{ id: "F9", name: "log.txt", mimetype: "text/plain", url_private_download: "https://files/log.txt" }],
+      })],
+    }));
+    expect(inbound).toEqual([]);
+    expect(dropped).toEqual(["dropped message in channel C100: not-addressed"]);
   });
 });
 

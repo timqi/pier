@@ -14,15 +14,21 @@
 
 import { Type } from "typebox";
 import type { AgentCustomTool } from "../core/types.js";
+import { saveInboundAll } from "../core/inbox.js";
+import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import type { ChannelStore } from "./config.js";
 import type { SlackDirectory } from "./slack-directory.js";
-import type { SlackClient, SlackHistoryPage, SlackMessageEvent } from "./slack-api.js";
+import type { SlackClient, SlackFile, SlackHistoryPage, SlackMessageEvent } from "./slack-api.js";
 import { MARKDOWN_MAX } from "./slack-render.js";
 
 /** Hard cap on one read, so a wide range cannot blow up the model's context. */
 const MAX_MESSAGES = 400;
 /** Pages to walk before giving up on a very wide window. */
 const MAX_PAGES = 10;
+
+/** Where fetched bytes land: the adapter's own channel id, so a file the agent
+ *  asked for sits beside the ones people uploaded to Pier. */
+const INBOX_CHANNEL = "slack";
 
 /**
  * A Slack `ts` is `<epoch seconds>.<microseconds>` and sorts correctly as a
@@ -83,7 +89,7 @@ export function slackToolSpec(
     // pier-slack skill, which the description sends the model to before it
     // posts — the part that goes wrong without instructions.
     description:
-      "Read and write Slack through Pier, which holds the bot token. Operations: context (which Slack conversation this session is in), read_channel (transcript for a time range), read_thread (one thread; only what is new since a message via after), read_message (the one at ts), post, edit/delete (Pier's own messages only), channels (what Pier can reach). Omit channel and thread_ts to act on the conversation you are in. since/until/after accept ISO 8601, epoch seconds or a ts. Every read fetches live; nothing is kept between calls. @mentions, #channels and links need Slack's own syntax — read the pier-slack skill before posting.",
+      "Read and write Slack through Pier, which holds the bot token. Operations: context (which Slack conversation this session is in), read_channel (transcript for a time range), read_thread (one thread; only what is new since a message via after), read_message (the one at ts), fetch_file (save a file a transcript names, by its F… id), post, edit/delete (Pier's own messages only), channels (what Pier can reach). Omit channel and thread_ts to act on the conversation you are in. since/until/after accept ISO 8601, epoch seconds or a ts. Every read fetches live; nothing is kept between calls. @mentions, #channels and links need Slack's own syntax — read the pier-slack skill before posting.",
     parameters: Type.Object({
       // A JSON-Schema enum emits far fewer tokens than typebox's anyOf-of-consts.
       operation: Type.Unsafe<
@@ -91,6 +97,7 @@ export function slackToolSpec(
         | "read_channel"
         | "read_thread"
         | "read_message"
+        | "fetch_file"
         | "post"
         | "edit"
         | "delete"
@@ -102,6 +109,7 @@ export function slackToolSpec(
           "read_channel",
           "read_thread",
           "read_message",
+          "fetch_file",
           "post",
           "edit",
           "delete",
@@ -119,6 +127,8 @@ export function slackToolSpec(
       after: Type.Optional(Type.String()),
       /** The one message `read_message`, `edit` or `delete` is about. */
       ts: Type.Optional(Type.String()),
+      /** `fetch_file`: the `F…` id a transcript line carries. */
+      file: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Number()),
       thread_ts: Type.Optional(Type.String()),
       text: Type.Optional(Type.String()),
@@ -144,6 +154,28 @@ export interface SlackToolDeps {
    */
   here(sessionId: string): { channel: string; threadTs: string } | null;
   log(message: string): void;
+}
+
+/**
+ * What a *read* needs, which is less than the tool does: names for the
+ * speakers and somewhere to report a page that failed mid-walk. Narrower on
+ * purpose, so the adapter can reuse `readThread` for a shared thread without
+ * pretending to be the tool — it has no session to resolve "here" for and
+ * builds no client of its own.
+ */
+export type SlackReadDeps = Pick<SlackToolDeps, "directory" | "log">;
+
+/** One thread, as lines. Declared because the adapter reads these fields. */
+export interface SlackThreadRead {
+  channel: string;
+  threadTs: string;
+  count: number;
+  truncated?: boolean;
+  /** Present when a page failed: what came before it, plus why it stopped. */
+  incomplete?: string;
+  /** The line grammar, so no second copy of it has to be written down. */
+  format: string;
+  messages: string[];
 }
 
 const required = (value: unknown, field: string): string => {
@@ -212,6 +244,13 @@ export async function handleSlackTool(
       note:
         "Omit channel and thread_ts to read or post here. Speaker ids for mentions come from read_thread.",
     };
+  }
+
+  // Before the channel default below: a file id is unique workspace-wide, so
+  // asking a session that never touched Slack for a channel it has no way to
+  // name would refuse a call that needs none.
+  if (input.operation === "fetch_file") {
+    return fetchFile(deps, client, required(input.file, "file"));
   }
 
   // "Here" is the default target: an agent reached through a Slack thread
@@ -388,7 +427,7 @@ function resolveChannel(deps: SlackToolDeps, given: string): string {
 }
 
 async function readChannel(
-  deps: SlackToolDeps,
+  deps: SlackReadDeps,
   client: SlackClient,
   channel: string,
   since: string | undefined,
@@ -417,14 +456,19 @@ async function readChannel(
   };
 }
 
-async function readThread(
-  deps: SlackToolDeps,
+/**
+ * Exported for one caller: the adapter inlines a small shared thread, and a
+ * second `conversations.replies` walker — its paging, seam dedup, ordering and
+ * error translation — is exactly the copy this file exists to prevent.
+ */
+export async function readThread(
+  deps: SlackReadDeps,
   client: SlackClient,
   channel: string,
   threadTs: string,
   after: string | undefined,
   limit: number,
-): Promise<unknown> {
+): Promise<SlackThreadRead> {
   const fetched = await fetchPages(
     deps,
     (cursor) => client.replies(channel, threadTs, { oldest: after, cursor }),
@@ -449,7 +493,7 @@ async function readThread(
 
 /** One message, because that is sometimes the whole question. */
 async function readMessage(
-  deps: SlackToolDeps,
+  deps: SlackReadDeps,
   client: SlackClient,
   channel: string,
   ts: string,
@@ -473,6 +517,47 @@ async function readMessage(
 }
 
 /**
+ * A file a transcript named, on disk. Fetching is explicit rather than
+ * automatic: one channel read can name a hundred uploads, and the agent — not
+ * Pier — knows which of them the question is about. Even then the reply is only
+ * the marker line, so the bytes enter its context if it opens the file.
+ *
+ * `files.info` every call. A `SlackFile` carries a signed url that expires and
+ * a name its owner can change, so a kept copy is the same wrong-later copy this
+ * file's header refuses for messages.
+ */
+async function fetchFile(deps: SlackReadDeps, client: SlackClient, id: string): Promise<string> {
+  let file: SlackFile;
+  try {
+    file = await client.filesInfo(id);
+  } catch (err) {
+    // The manifest's scopes are only applied when an app is *created*, so an
+    // app installed before this operation existed refuses for a reason no
+    // agent can guess. Name the fix, as uploadFile does for files:write.
+    if (/missing_scope/.test(String(err))) {
+      throw new Error(
+        "Pier's Slack app cannot read files — add the files:read scope to the Slack app " +
+          "under OAuth & Permissions and reinstall it",
+      );
+    }
+    throw new Error(explain(err));
+  }
+  // The shared save loop owns the size gate, the marker and the lost-marker
+  // wording (core/inbox.ts), so a file over the cap or a refused download
+  // answers in the words every other inbound failure uses — never a stack, and
+  // never an empty reply.
+  const [marker] = await saveInboundAll(INBOX_CHANNEL, [{
+    label: file.name ?? id,
+    name: file.name,
+    mimeType: file.mimetype ?? "application/octet-stream",
+    size: file.size,
+    // The response's content-type wins: Slack's metadata is a guess.
+    fetch: () => client.downloadFile(file, MAX_INBOUND_BYTES),
+  }], deps.log);
+  return marker!;
+}
+
+/**
  * Walk the cursor until it ends or the caps bite.
  *
  * A page that fails mid-walk does not throw away the pages before it: an
@@ -481,7 +566,7 @@ async function readMessage(
  * stopped, and decides for itself whether to retry or work with it.
  */
 async function fetchPages(
-  deps: SlackToolDeps,
+  deps: SlackReadDeps,
   page: (cursor?: string) => Promise<SlackHistoryPage>,
   what: string,
 ): Promise<{ messages: SlackMessageEvent[]; truncated: boolean; incomplete?: string }> {
@@ -526,6 +611,8 @@ function explain(err: unknown): string {
       "Slack's edit window for that message has closed; post a correction instead of rewriting it",
     message_not_found:
       "no message with that ts in this channel — a ts only means anything in the conversation it came from",
+    file_not_found:
+      "no file with that id, or Pier's bot cannot see it — the F… id comes from a transcript line",
   }[code] ?? String(err);
 }
 
@@ -554,13 +641,42 @@ function transcript(messages: SlackMessageEvent[]): SlackMessageEvent[] {
  * The name makes it readable, the id is the only thing `<@…>` can be built
  * from, and Slack's own `ts` string is passed through untouched — it is what
  * a reply, a reaction or `after` has to match exactly.
+ *
+ * The two suffixes are what a message *has* rather than what it said, so they
+ * are declared here and appended only when there is one: a message with
+ * neither reads exactly as it always did. Kept terse — the adapter puts this
+ * string in a prompt (`slack.ts`, an inlined shared thread), so every word is
+ * paid for per read.
  */
-const LINE_FORMAT = "<ts> | <time, UTC> | <name>[<id>] | <text>";
+const LINE_FORMAT =
+  "<ts> | <time, UTC> | <name>[<id>] | <text>, then — when there are any —"
+  + " [thread: <n> replies] and one [file: <name> <F… id> <size>] per upload";
+
+/** Enough to judge a fetch against the 32 MB cap without arithmetic; left out
+ *  entirely when Slack sent no size, because a guessed one would be worse. */
+const sizeLabel = (bytes: number): string =>
+  bytes < 1024
+    ? `${bytes}B`
+    : bytes < 1024 * 1024
+    ? `${Math.round(bytes / 1024)}KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+
+/**
+ * A message's uploads, named with the one handle that can fetch them. Without
+ * this the transcript dropped `files` entirely: a PDF somebody posted read as
+ * an empty message, and nothing said there was anything to open.
+ */
+const uploads = (files: SlackFile[] | undefined): string =>
+  (files ?? []).map((file) =>
+    ` [file: ${file.name ?? file.mimetype ?? "file"} ${file.id}${
+      file.size === undefined ? "" : ` ${sizeLabel(file.size)}`
+    }]`
+  ).join("");
 
 const speaker = (msg: SlackMessageEvent): string | null => msg.user ?? msg.bot_id ?? null;
 
 async function lines(
-  deps: SlackToolDeps,
+  deps: SlackReadDeps,
   client: SlackClient,
   messages: SlackMessageEvent[],
 ): Promise<string[]> {
@@ -578,6 +694,8 @@ async function lines(
     const replies = msg.reply_count && (msg.thread_ts ?? msg.ts) === msg.ts
       ? ` [thread: ${msg.reply_count} replies]`
       : "";
-    return `${msg.ts} | ${tsToMinute(msg.ts!)} | ${who} | ${msg.text ?? ""}${replies}`;
+    return `${msg.ts} | ${tsToMinute(msg.ts!)} | ${who} | ${msg.text ?? ""}${replies}${
+      uploads(msg.files)
+    }`;
   });
 }

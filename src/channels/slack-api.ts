@@ -23,6 +23,45 @@ export interface SlackFile {
   url_private?: string;
 }
 
+/**
+ * A forwarded message, however the share carries it: Slack flattens these
+ * fields onto the attachment, and some shares nest the original under
+ * `original_message` instead — avibe reads both, so both are declared.
+ */
+export interface SharedMessage {
+  text?: string;
+  ts?: string;
+  thread_ts?: string;
+  /** Only when the shared message is a thread parent. */
+  reply_count?: number;
+  files?: SlackFile[];
+}
+
+/**
+ * The one secondary attachment the adapter reads: a message somebody
+ * forwarded into a channel. None of these fields is in Slack's own published
+ * types — they are what a share actually arrives with.
+ */
+export interface SlackAttachment extends SharedMessage {
+  /** The share flag proper; the `message_share` subtype may arrive without it. */
+  is_share?: boolean;
+  /**
+   * Slack previewed a permalink. Set on a real share too, so it can only ever
+   * rule a share *out*, never in — see `sharesOf` in slack.ts.
+   */
+  is_msg_unfurl?: boolean;
+  /** Absent on some shares, which give only a name; never invent one. */
+  author_id?: string;
+  author_name?: string;
+  author_subname?: string;
+  channel_id?: string;
+  /** Bare, without the `#`. */
+  channel_name?: string;
+  /** A plain-text rendering of the message, when `text` is empty. */
+  fallback?: string;
+  original_message?: SharedMessage;
+}
+
 /** The subset of a `message` event the adapter reads. */
 export interface SlackMessageEvent {
   type: string;
@@ -37,6 +76,8 @@ export interface SlackMessageEvent {
   /** Only on a thread parent in `conversations.history`. */
   reply_count?: number;
   files?: SlackFile[];
+  /** Secondary attachments; a forwarded message arrives as one of these. */
+  attachments?: SlackAttachment[];
 }
 
 export interface SlackEventPayload {
@@ -168,6 +209,11 @@ export interface SlackClient {
   history(channel: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
   /** One thread: the parent message followed by its replies, oldest first. */
   replies(channel: string, ts: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
+  /**
+   * One file's metadata by id, which is all a transcript line can carry.
+   * Needs the `files:read` scope.
+   */
+  filesInfo(id: string): Promise<SlackFile>;
   downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }>;
   /** Upload one file into a thread. Needs the `files:write` scope. */
   uploadFile(
@@ -478,6 +524,14 @@ export class SlackApi implements SlackClient {
    * Slack file URLs are private: they need the bot token as a bearer header and
    * answer HTML (a login page) rather than an error when it is missing.
    */
+  /** A read method, so form-encoded (see read()); `id` is the `F…` id. */
+  async filesInfo(id: string): Promise<SlackFile> {
+    const body = await this.read<SlackResponse & { file?: SlackFile }>("files.info", { file: id });
+    // `ok` without a file would leave the caller downloading `undefined`.
+    if (!body.file) throw new Error("slack files.info: no file in the response");
+    return body.file;
+  }
+
   async downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
     const url = file.url_private_download ?? file.url_private;
     if (!url) throw new Error("slack file has no private url");

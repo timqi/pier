@@ -257,7 +257,7 @@ one skill (`skills/pier-slack/`), and a deliberate shape:
   the model, and the tool takes a `#name` and an ISO time rather than a channel
   id and a Slack `ts`. If the agent had to know what a `ts` is, this would be a
   documented API instead of a tool — and the skill would be a Slack manual
-  rather than five operations.
+  rather than nine operations.
 - **"Here" is the default target.** Omitting `channel` acts on the conversation
   the calling session is answering, resolved through
   `Router.conversationOf(sessionId)`. Without this the agent could read and post
@@ -277,7 +277,17 @@ one skill (`skills/pier-slack/`), and a deliberate shape:
   returning only the name is why the agent once asked a human for their own
   user id. A thread's `threadTs` is hoisted out of the lines, and a channel
   read marks parents with `[thread: N replies]` so opening one is a decision
-  rather than a probe.
+  rather than a probe. An upload is named the same way —
+  `[file: <name> <F… id> <size>]` — because a line that dropped `files`
+  entirely made a posted PDF read as a message about nothing.
+- **A file is fetched explicitly, never automatically.** `fetch_file` takes the
+  `F…` id off that line, resolves it through `files.info` and saves the bytes
+  into `$PIER_HOME/inbox/slack/` — the same place an upload to Pier lands — and
+  answers with the marker line alone, so the agent spends the context only if it
+  opens the file. Downloading every file a read mentions would pull a hundred
+  attachments nobody asked about, and only the agent knows which one the
+  question is about; a refusal or a file over the cap comes back in the shared
+  `[attachment lost: … ]` wording rather than as a stack.
 - **The agent states an intent; Pier does the API work.** A channel and a
   range, a thread, or `after: <the last ts I saw>` — paging, cursors, ordering,
   dedup and the caps are Pier's problem. `after` filters strictly, because
@@ -314,7 +324,10 @@ one skill (`skills/pier-slack/`), and a deliberate shape:
 - **No second ACL.** Slack already enforces channel membership, and the bot
   reaches only what it was invited to; inventing a per-channel allowlist on top
   would duplicate that and drift from it. The switch is one bit, and the help
-  bubble says plainly that it covers task and subagent sessions too.
+  bubble says plainly that it covers task and subagent sessions too. `fetch_file`
+  is answered before the channel default for that reason — a file id is unique
+  workspace-wide, so the gate is `files.info` against the bot's own visibility
+  (`file_not_found` otherwise), not a channel the call never needed.
 - **A `ts` stays TEXT everywhere.** A Slack ts has 16 significant digits; a
   REAL column hands back `…000100` as `…0001`, and an id that cannot be
   reproduced is a reply that lands nowhere. The receipts table stores it TEXT
@@ -684,6 +697,22 @@ The facts you build against. Where a fact also cost a mistake, the mistake is in
 - **`app_mention` is a duplicate** of `message.channels` with its own
   `event_id`, so the adapter ignores the type and the walkthrough says not to
   subscribe.
+- **A forwarded message hides in `attachments`**, and none of its fields is in
+  Slack's published types: `is_share`, `author_id`/`author_name`, `channel_id`,
+  `ts`, `reply_count`, and the share's own `files`. It arrives either with
+  `subtype: "message_share"` or with no subtype at all, so both are read — and
+  a share must not be detected by `is_msg_unfurl`, which a real share sets
+  *and* which Slack also sets when it previews a permalink somebody merely
+  pasted. The adapter turns a share into one `[shared message from …]` block,
+  and a shared **thread parent** is read eagerly when `reply_count <= 30` (a
+  token budget, not a Slack limit) — inlined as the agent tool's own transcript
+  lines, through `readThread` from `slack-tool.ts` rather than a second
+  `conversations.replies` caller. Bigger, unknown, or failed gets the
+  coordinates instead: `[thread: N replies — read with the slack tool: channel
+  …, thread_ts …]`, with the tool named only when `agentTool` is on, plus a
+  `[thread not read: …]` line when the read itself failed. The eager read is
+  inbound normalization of a message a human handed the agent, so `agentTool`
+  does not gate it.
 - **Reactions are short names.** `reactions.add` rejects 👀 with `invalid_name`;
   it wants `eyes`. `already_reacted` / `no_reaction` are successes.
 - **A `ts` is not a float-safe number** (`1761234567.123456`, 16 significant

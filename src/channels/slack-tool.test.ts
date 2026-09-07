@@ -1,11 +1,20 @@
 // The agent-facing Slack tool: live reads, and the gates in front of them.
 // Hermetic — in-memory store, a scripted client.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { splitInboundFiles } from "../core/inbound-file.js";
 import { ChannelStore } from "./config.js";
 import { SlackDirectory } from "./slack-directory.js";
-import type { SlackClient, SlackHistoryPage, SlackHistoryQuery, SlackSend } from "./slack-api.js";
+import type {
+  SlackClient,
+  SlackFile,
+  SlackHistoryPage,
+  SlackHistoryQuery,
+  SlackSend,
+} from "./slack-api.js";
 import {
   handleSlackTool,
   slackToolAvailable,
@@ -22,6 +31,7 @@ type FakeMessage = {
   text?: string;
   thread_ts?: string;
   reply_count?: number;
+  files?: SlackFile[];
 };
 
 class FakeClient {
@@ -101,6 +111,27 @@ class FakeClient {
 
   userName(userId: string): Promise<string> {
     return Promise.resolve(userId === "U1" ? "Ada" : userId);
+  }
+
+  /** What `files.info` knows, by id. */
+  files: Record<string, SlackFile> = {};
+  /** What `files.info` refuses with, when a test is about the refusal. */
+  filesError: string | null = null;
+  readonly downloaded: string[] = [];
+
+  filesInfo(id: string): Promise<SlackFile> {
+    if (this.filesError) return Promise.reject(new Error(this.filesError));
+    const file = this.files[id];
+    if (!file) return Promise.reject(new Error("slack files.info: file_not_found"));
+    return Promise.resolve(file);
+  }
+
+  downloadFile(file: SlackFile): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    this.downloaded.push(file.id);
+    return Promise.resolve({
+      bytes: new TextEncoder().encode("pdf"),
+      mimeType: file.mimetype ?? "application/octet-stream",
+    });
   }
 }
 
@@ -206,6 +237,7 @@ describe("the advertised contract", () => {
       "read_channel",
       "read_thread",
       "read_message",
+      "fetch_file",
       "post",
       "edit",
       "delete",
@@ -689,6 +721,78 @@ describe("the current conversation", () => {
     const out = await call({ operation: "read_thread" });
     // Both: the name to read, the id to mention.
     expect(column(out, 2)).toEqual(["Ada[U1]"]);
+  });
+});
+
+describe("files", () => {
+  beforeEach(() => configure());
+
+  const pdf: SlackFile = {
+    id: "F77",
+    name: "postmortem.pdf",
+    mimetype: "application/pdf",
+    size: 84_213,
+    url_private_download: "https://files/postmortem.pdf",
+  };
+
+  it("names an upload with the id that fetches it, and leaves a plain message byte-identical", async () => {
+    client.timeline = [
+      { ts: T(100), user: "U1", text: "the writeup", files: [pdf] },
+      { ts: T(110), user: "U1", text: "no files here" },
+    ];
+    const out = await call({ operation: "read_channel", channel: "C100", until: T(200) });
+    // Dropping `files` made a PDF read as a message about nothing.
+    expect(texts(out)).toEqual([
+      "the writeup [file: postmortem.pdf F77 82KB]",
+      "no files here",
+    ]);
+    // The declared shape, not a guess the model has to make from one example.
+    expect((out as { format: string }).format).toContain("[file: <name> <F… id> <size>]");
+  });
+
+  it("invents no size and no name when Slack sent neither", async () => {
+    client.timeline = [{ ts: T(100), user: "U1", text: "", files: [{ id: "F9", mimetype: "image/png" }] }];
+    const out = await call({ operation: "read_channel", channel: "C100", until: T(200) });
+    expect(texts(out)).toEqual([" [file: image/png F9]"]);
+  });
+
+  it("saves a fetched file in the inbox and answers with its marker line", async () => {
+    client.files = { F77: pdf };
+    const reply = await call({ operation: "fetch_file", file: "F77" }) as string;
+    const { paths } = splitInboundFiles(reply);
+    expect(paths).toHaveLength(1);
+    // Beside the uploads people send Pier, under the adapter's own channel id.
+    expect(paths[0]!.startsWith(join(process.env.PIER_HOME!, "inbox", "slack"))).toBe(true);
+    expect(paths[0]!).toMatch(/-postmortem\.pdf$/);
+    expect(readFileSync(paths[0]!, "utf8")).toBe("pdf");
+    // Only the marker: the bytes enter the context if the agent opens the file.
+    expect(reply).toBe(`[${paths[0]!.split("/").pop()!}](file://${paths[0]!})`);
+  });
+
+  it("needs no channel, so a task session can fetch what it was told about", async () => {
+    at = null;
+    client.files = { F77: pdf };
+    await expect(call({ operation: "fetch_file", file: "F77" })).resolves.toContain("file://");
+  });
+
+  it("reports an oversized file as lost instead of downloading it", async () => {
+    client.files = { F77: { ...pdf, size: 64 * 1024 * 1024 } };
+    const reply = await call({ operation: "fetch_file", file: "F77" });
+    expect(reply).toBe("[attachment lost: postmortem.pdf — too large]");
+    // Never silence, and never the bytes either.
+    expect(client.downloaded).toEqual([]);
+  });
+
+  it("turns a missing files:read scope into the action it implies", async () => {
+    client.filesError = "slack files.info: missing_scope";
+    await expect(call({ operation: "fetch_file", file: "F77" }))
+      .rejects.toThrow(/add the files:read scope/);
+  });
+
+  it("says a file id means nothing here rather than passing the code through", async () => {
+    await expect(call({ operation: "fetch_file", file: "F00" }))
+      .rejects.toThrow(/no file with that id/);
+    await expect(call({ operation: "fetch_file" })).rejects.toThrow(/file is required/);
   });
 });
 

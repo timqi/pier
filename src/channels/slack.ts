@@ -44,6 +44,7 @@ import { ReceiptLedger, Receipts } from "./receipts.js";
 import { SlackDirectory } from "./slack-directory.js";
 import {
   SlackApi,
+  type SlackAttachment,
   type SlackBlock,
   type SlackClient,
   type SlackEnvelope,
@@ -54,6 +55,7 @@ import {
   type SlackSocket,
 } from "./slack-api.js";
 import { SlackOutbound } from "./slack-outbound.js";
+import { readThread, slackToolAvailable } from "./slack-tool.js";
 import { SlackPanel } from "./slack-panel.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
@@ -108,8 +110,35 @@ const threadOf = (event: SlackMessageEvent): string => event.thread_ts ?? event.
 /**
  * Subtypes worth reading. Everything else (joins, edits, deletions, topic
  * changes) is noise, and `bot_message` is either our own echo or another app's.
+ * `message_share` is in because a forward is a person handing the agent
+ * something to look at; dropping it delivered the sharer's comment alone, or
+ * nothing at all when they forwarded without one.
  */
-const READABLE_SUBTYPES = new Set(["file_share", "thread_broadcast"]);
+const READABLE_SUBTYPES = new Set(["file_share", "thread_broadcast", "message_share"]);
+
+/**
+ * The forwarded messages an event carries. `is_share` is the flag proper, and
+ * a `message_share` may arrive without it. An `is_msg_unfurl` on its own is
+ * Slack previewing a permalink somebody pasted — the sender did not choose to
+ * forward that message, so quoting it as if they had puts words in their mouth.
+ * A real share carries *both* flags, which is why the unfurl flag can only
+ * rule one out.
+ */
+const sharesOf = (event: SlackMessageEvent): SlackAttachment[] =>
+  (event.attachments ?? []).filter((a) =>
+    a.is_share === true || (event.subtype === "message_share" && !a.is_msg_unfurl));
+
+/** A share's own uploads, which Slack hangs off the attachment. */
+const sharedFiles = (share: SlackAttachment): SlackFile[] =>
+  share.files ?? share.original_message?.files ?? [];
+
+/**
+ * How many replies a shared thread may have before Pier stops reading it
+ * eagerly. A token budget, not a Slack limit: a handful of lines is worth
+ * spending on something a human deliberately forwarded, a few hundred is not,
+ * and past this the agent gets the coordinates and decides for itself.
+ */
+const INLINE_REPLY_MAX = 30;
 
 interface SlackCommand {
   name: string;
@@ -293,8 +322,19 @@ export class SlackChannel implements Channel {
     const ts = event.ts;
     if (!ts) return this.log("message event without a ts, dropped");
     const raw = (event.text ?? "").trim();
-    const files = event.files ?? [];
-    if (!raw && !files.length) return;
+    const shares = sharesOf(event);
+    // A share's files are in the attachment, so they join the event's own and
+    // ride the one save loop below — size gate and lost markers included.
+    const files = [...(event.files ?? []), ...shares.flatMap(sharedFiles)];
+    // A forward with no comment of its own is still content, and the whole
+    // point of the message.
+    if (!raw && !files.length && !shares.length) {
+      // A subtype we opted into that carried nothing readable is a shape this
+      // adapter did not recognize, not an empty message — most likely a share
+      // whose attachment `sharesOf` ruled out. Saying so beats vanishing (5b).
+      if (event.subtype) this.log(`${event.subtype} with nothing readable in it, dropped`);
+      return;
+    }
 
     const { kind } = await this.directory.channel(this.api, channel, event);
     const isDm = kind === "dm";
@@ -323,13 +363,14 @@ export class SlackChannel implements Channel {
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
     // `@bot` on its own (the text is empty once the mention is stripped) and
     // `settings` are the same request: show me this conversation's settings.
-    if (this.panel && (command?.name === "settings" || (!text && !files.length))) {
+    if (this.panel && (command?.name === "settings" || (!text && !files.length && !shares.length))) {
       return this.panel.open(here, channel, threadTs);
     }
 
     // Downloading only past the gate: an unauthorized sender must not be able
     // to make the bot pull bytes on their behalf.
     const markers = await this.saveAttachments(files);
+    const shared = await Promise.all(shares.map((share) => this.sharedBlock(share)));
     // A Slack thread is many people talking into one session, so the agent is
     // told who spoke — and the id, which is what a mention needs. Resolved
     // *before* the mark: every await between mark() and dispatch is a window
@@ -343,7 +384,8 @@ export class SlackChannel implements Channel {
       key: here,
       senderId: event.user,
       sender,
-      text: [text, ...markers].filter(Boolean).join("\n"),
+      // Markers stay last: the inbound-file convention is a *trailing* block.
+      text: [text, ...shared, ...markers].filter(Boolean).join("\n"),
       mode: "steer",
     });
   }
@@ -511,6 +553,111 @@ export class SlackChannel implements Channel {
       return event.user ? `DM · ${await this.directory.user(this.api, event.user)}` : channel;
     }
     return name ?? channel;
+  }
+
+  /**
+   * What a forwarded message contributes to the prompt: who wrote it, where it
+   * lives, its text, and — when it is a thread parent — either the thread
+   * itself or the coordinates for `read_thread`. Nothing is invented: a name, a
+   * channel or a ts the event does not carry is simply left out of the line.
+   *
+   * The eager read runs whether or not `agentTool` is on, because this is
+   * inbound normalization of a message a human deliberately handed the agent —
+   * the same act as an upload, which nothing gates either. `agentTool` governs
+   * the agent reaching *out*, and the only thing it changes here is the hint,
+   * which would otherwise name a tool this session does not have.
+   */
+  private async sharedBlock(share: SlackAttachment): Promise<string> {
+    const source = share.original_message;
+    const ts = share.ts ?? source?.ts;
+    const threadTs = share.thread_ts ?? source?.thread_ts ?? ts;
+    const replies = share.reply_count ?? source?.reply_count;
+    // A share of a *reply* is one message; only a parent has a thread — and
+    // the three fields a thread needs travel together so neither branch below
+    // has to assert they are there.
+    const parent = share.channel_id && ts && threadTs === ts && replies
+      ? { channel: share.channel_id, ts, replies }
+      : null;
+    // `name<id>` is the sender prefix's grammar (core/identity.ts), and the id
+    // is the only thing a mention can be built from. Resolved through the same
+    // cache the senders use, so a shared author already seen costs nothing.
+    const author = share.author_id
+      ? `${await this.directory.user(this.api, share.author_id)}<${share.author_id}>`
+      : share.author_name || share.author_subname;
+    const where = share.channel_name
+      ? `#${share.channel_name}${share.channel_id ? `<${share.channel_id}>` : ""}`
+      : share.channel_id;
+    const head = [
+      "shared message",
+      author && `from ${author}`,
+      where && `in ${where}`,
+      ts && `at ${ts}`,
+    ].filter(Boolean).join(" ");
+    // `fallback` is the plain-text rendering Slack sends when a share's `text`
+    // is empty (a file-only forward, or one whose body is all blocks).
+    // Empty rather than absent is the normal case for a file-only forward, so
+    // these fall through on "" as well.
+    const body = (share.text || share.fallback || source?.text || "").trim();
+    const thread = parent && parent.replies <= INLINE_REPLY_MAX
+      ? await this.sharedThread(parent.channel, parent.ts, parent.replies)
+      : { transcript: false, lines: [] };
+    // Past the budget, or read and failed: the coordinates are what is left,
+    // and they carry the tool's own parameter names so nothing has to be
+    // guessed from a permalink. Naming the tool is a lie when the Console has
+    // switched agent access off, so only that half goes — the coordinates are
+    // true either way.
+    const how = slackToolAvailable(this.deps.store) ? "read with the slack tool: " : "";
+    const hint = parent && !thread.transcript
+      ? `[thread: ${parent.replies} replies — ${how}channel ${parent.channel}, thread_ts ${parent.ts}]`
+      : "";
+    // The transcript opens with the shared message itself, so repeating its
+    // text above it would only cost tokens.
+    return [`[${head}]`, thread.transcript ? "" : body, ...thread.lines, hint]
+      .filter(Boolean).join("\n");
+  }
+
+  /**
+   * A small shared thread, read eagerly and inlined as the slack tool's own
+   * lines — through the tool's own read, so the paging, the seam dedup, the
+   * ordering and the error-to-action translation exist once (slack-tool.ts).
+   *
+   * A read that fails or comes back cut says so in the prompt (5b): a thread
+   * the agent silently never saw is indistinguishable from one with nothing in
+   * it, and the turn is dispatched either way.
+   */
+  private async sharedThread(
+    channel: string,
+    ts: string,
+    replies: number,
+  ): Promise<{ transcript: boolean; lines: string[] }> {
+    const deps = { directory: this.directory, log: this.log };
+    try {
+      // The parent plus its replies, and one over the budget so a reply_count
+      // that undercounts still reports itself as cut rather than as complete.
+      const read = await readThread(deps, this.api, channel, ts, undefined, INLINE_REPLY_MAX + 2);
+      if (!read.messages.length) return { transcript: false, lines: [] };
+      return {
+        transcript: true,
+        lines: [
+          `[thread: ${replies} replies, oldest first — ${read.format}]`,
+          ...read.messages,
+          // Cut either because a page failed or because the thread turned out
+          // longer than `reply_count` promised; a transcript that answers as
+          // if it were complete is the one nobody double-checks.
+          ...(read.incomplete || read.truncated
+            ? [`[thread partly read: ${read.incomplete ?? `cut at ${read.count} lines`}]`]
+            : []),
+        ],
+      };
+    } catch (err) {
+      this.log(`shared thread ${channel}/${ts} not read: ${String(err)}`);
+      // Said in the prompt in the same shape as an attachment that never made
+      // it, because it is the same fact to the reader.
+      return {
+        transcript: false,
+        lines: [`[thread not read: ${err instanceof Error ? err.message : String(err)}]`],
+      };
+    }
   }
 
   /** The upload list as the shared save loop wants it (the loop itself, size
