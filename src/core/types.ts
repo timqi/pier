@@ -617,20 +617,13 @@ export interface ProviderManager {
 }
 
 /** Portable model metadata; transport, credentials and executable specs stay local. */
-export interface SyncModelDefinition {
-  id: string;
-  name?: string;
-  reasoning?: boolean;
-  input?: ("text" | "image")[];
-  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  contextWindow?: number;
-  maxTokens?: number;
-  api?: string;
-}
+/** One models.json provider with its credentials and endpoints removed; the
+ * remaining metadata is Pi's to validate, so this seam does not restate it. */
+export type SyncProvider = Record<string, unknown>;
 
 export interface AgentConfigSnapshot {
   files: { "SYSTEM.md": string | null; "AGENTS.md": string | null };
-  providers: Record<string, { models: SyncModelDefinition[] }>;
+  providers: Record<string, SyncProvider>;
 }
 
 /** Global portable config only; apply holds the config write lock through commit. */

@@ -54,38 +54,59 @@ describe("snapshot export", () => {
     });
   });
 
-  it("strictly projects model metadata without provider or nested model credentials", async () => {
+  it("shares metadata at any depth while dropping credentials and endpoints", async () => {
     const metadata = {
       id: "m", name: "Model", api: "openai-completions", reasoning: true,
       input: ["text", "image"], contextWindow: 128000, maxTokens: 4096,
-      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+      thinkingLevelMap: { off: null, high: "high" }, samplingParams: { temperature: 0.7 },
+      compat: { forceAdaptiveThinking: true, allowedFallbackModels: [] },
+      cost: {
+        input: 1, output: 2, cacheRead: 0, cacheWrite: 0,
+        tiers: [{ input: 1, output: 2, cacheRead: 0, cacheWrite: 0, inputTokensAbove: 200000 }],
+      },
     };
     saveModels({
       proxy: {
-        name: "private-provider-name", api: "private-provider-api", baseUrl: "https://private-provider-url",
-        apiKey: "!private-provider-secret", headers: { Authorization: "private-provider-header" },
-        modelOverrides: { m: { headers: { secret: "private-override" } } },
+        name: "Proxy", api: "openai-completions", authHeader: true,
+        baseUrl: "https://private-provider-url", apiKey: "!private-provider-secret",
+        headers: { Authorization: "private-provider-header" },
+        modelOverrides: { built: { reasoning: true, headers: { secret: "private-override" } } },
         models: [{
-          ...metadata, baseUrl: "https://private-model-base-url", url: "https://private-model-url",
+          ...metadata, baseUrl: "https://private-model-base-url",
           apiKey: "!private-model-key", headers: { Authorization: "private-model-header" },
-          compat: { nested: { headers: { secret: "private-compat" }, apiKey: "private-key" } },
-          cost: { ...metadata.cost, headers: { token: "private-cost-header" }, apiKey: "private-cost-key", url: "private-cost-url" },
+          compat: { ...metadata.compat, nested: { headers: { secret: "private-compat" }, apiKey: "private-key" } },
         }],
       },
-      credentialOnly: { apiKey: "private-credential-only" },
+      "credential-only": { apiKey: "private-credential-only", baseUrl: "https://private-credential-only" },
     });
     const snapshot = await store.exportSnapshot();
-    expect(snapshot).toEqual({ ...empty(), providers: { proxy: { models: [metadata] } } });
+    expect(snapshot).toEqual({ ...empty(), providers: { proxy: {
+      name: "Proxy", api: "openai-completions", authHeader: true,
+      modelOverrides: { built: { reasoning: true } },
+      models: [{ ...metadata, compat: { ...metadata.compat, nested: {} } }],
+    } } });
     expect(JSON.stringify(snapshot)).not.toContain("private-");
     expect(JSON.stringify(snapshot)).not.toContain("apiKey");
     expect(JSON.stringify(snapshot)).not.toContain("headers");
   });
 
-  it("fails closed on malformed models.json and malformed whitelisted metadata", async () => {
+  it("refuses to share a credential or endpoint that a metadata field repeats", async () => {
+    saveModels({ proxy: { apiKey: "supersecretkey", models: [{ id: "m", name: "supersecretkey" }] } });
+    await expect(store.exportSnapshot()).rejects.toThrow(/repeats a credential or endpoint/);
+    saveModels({ proxy: { baseUrl: "https://gateway.example", models: [{ id: "m", docs: "see https://gateway.example" }] } });
+    await expect(store.exportSnapshot()).rejects.toThrow(/repeats a credential or endpoint/);
+    // Short dropped values are metadata everywhere; only long ones are a leak.
+    saveModels({ proxy: { headers: { accept: "json" }, models: [{ id: "m", name: "json" }] } });
+    expect((await store.exportSnapshot()).providers.proxy).toEqual({ models: [{ id: "m", name: "json" }] });
+  });
+
+  it("fails closed on malformed models.json and an unaddressable catalog", async () => {
     write("models.json", "{broken");
     await expect(store.exportSnapshot()).rejects.toThrow(/valid JSON/);
-    saveModels({ proxy: { models: [{ id: "m", name: { apiKey: "secret" } }] } });
-    await expect(store.exportSnapshot()).rejects.toThrow(/name must be a non-empty string/);
+    saveModels({ proxy: { models: [{ name: "no id" }] } });
+    await expect(store.exportSnapshot()).rejects.toThrow(/model id must be a non-empty trimmed string/);
+    saveModels({ proxy: { models: { m: {} } } });
+    await expect(store.exportSnapshot()).rejects.toThrow(/models must be an array/);
   });
 });
 
@@ -94,7 +115,7 @@ describe("snapshot validation", () => {
     const source = { ...empty(), providers: { proxy: { models: [{ id: "m", input: ["text"] as "text"[] }] } } };
     const normalized = normalizeAgentSnapshot(source);
     source.providers.proxy.models[0]!.input.push("text");
-    expect(normalized.providers.proxy!.models[0]!.input).toEqual(["text"]);
+    expect(normalized.providers.proxy).toEqual({ models: [{ id: "m", input: ["text"] }] });
   });
 
   it.each([
@@ -104,9 +125,9 @@ describe("snapshot validation", () => {
     { ...empty(), files: { ...empty().files, "SYSTEM.md": 1 } },
     { ...empty(), providers: [] },
     { ...empty(), providers: { proxy: { models: [], apiKey: "masked" } } },
-    { ...empty(), providers: { proxy: { models: [], api: "openai-completions" } } },
-    { ...empty(), providers: { proxy: { models: [], name: "not portable" } } },
+    { ...empty(), providers: { proxy: { models: [], headers: { Authorization: "masked" } } } },
     { ...empty(), providers: { proxy: { models: [], baseUrl: "https://local" } } },
+    { ...empty(), providers: { proxy: { models: [], modelOverrides: { m: "bad" } } } },
     { ...empty(), providers: { proxy: { models: "bad" } } },
     { ...empty(), providers: { "../escape": { models: [] } } },
     JSON.parse('{"files":{"SYSTEM.md":null,"AGENTS.md":null},"providers":{"__proto__":{"models":[]}}}'),
@@ -115,17 +136,12 @@ describe("snapshot validation", () => {
   });
 
   it.each([
-    {}, { id: " " }, { id: 1 }, { id: "m", name: "" }, { id: "m", name: {} }, { id: "m", reasoning: "true" },
-    { id: "m", input: ["text", { apiKey: "secret" }] }, { id: "m", input: [] },
-    { id: "m", input: ["text", "text"] }, { id: "m", contextWindow: 0 },
-    { id: "m", maxTokens: Infinity }, { id: "m", maxTokens: 1.5 },
-    { id: "m", api: "!command" }, { id: "m", api: "https://url" },
+    {}, { id: " " }, { id: 1 }, { id: "m", name: undefined },
+    { id: "m", input: ["text", { apiKey: "secret" }] },
     { id: "m", apiKey: "masked" }, { id: "m", headers: { Authorization: "masked" } },
-    { id: "m", url: "https://url" }, { id: "m", baseUrl: "https://url" },
+    { id: "m", baseUrl: "https://url" },
     { id: "m", compat: { headers: { secret: "value" } } },
-    { id: "m", cost: { input: 1 } },
-    { id: "m", cost: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0 } },
-    { id: "m", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, apiKey: "secret" } },
+    { id: "m", compat: { nested: [{ baseUrl: "https://url" }] } },
     { id: "m", cost: { input: { headers: "secret" }, output: 0, cacheRead: 0, cacheWrite: 0 } },
   ])("rejects invalid model metadata %#", (model) => {
     expect(() => normalizeAgentSnapshot({ ...empty(), providers: { proxy: { models: [model] } } })).toThrow();
@@ -138,36 +154,45 @@ describe("snapshot validation", () => {
 });
 
 describe("snapshot apply", () => {
-  it("replaces definitions, retains matching local transport, and leaves settings/auth untouched", async () => {
-    const transport = { baseUrl: "https://local-model", apiKey: "!local-key", headers: { token: "local-header" }, compat: { nested: { apiKey: "local" } } };
-    const provider = { name: "Local", api: "anthropic-messages", baseUrl: "https://local", apiKey: "local-key", headers: { token: "local" }, modelOverrides: { built: { reasoning: true } } };
-    saveModels({ proxy: { ...provider, models: [{ id: "m", name: "old", reasoning: true, ...transport }, { id: "removed" }] } });
+  it("replaces the catalog, retains local credentials, and leaves settings/auth untouched", async () => {
+    const transport = { baseUrl: "https://local-model", apiKey: "!local-key", headers: { token: "local-header" } };
+    const provider = { name: "Local", api: "anthropic-messages", baseUrl: "https://local", apiKey: "local-key", headers: { token: "local" } };
+    saveModels({ proxy: { ...provider,
+      modelOverrides: { built: { reasoning: true, headers: { token: "local-override" } } },
+      models: [{ id: "m", name: "old", reasoning: true, compat: { supportsStore: true }, ...transport }, { id: "removed" }],
+    } });
     write("settings.json", '{"model":"local-only"}');
     write("auth.json", '{"apiKey":"local-auth"}');
     await store.applySnapshot({
       files: { "SYSTEM.md": "new system", "AGENTS.md": "new agents" },
-      providers: { proxy: { models: [{ id: "m", name: "New", maxTokens: 12 }, { id: "new" }] } },
+      providers: { proxy: {
+        authHeader: true, modelOverrides: { built: { reasoning: false } },
+        models: [{ id: "m", name: "New", maxTokens: 12 }, { id: "new" }],
+      } },
     });
-    expect(models()).toEqual({ version: 1, providers: { proxy: { ...provider, models: [
-      { ...transport, id: "m", name: "New", maxTokens: 12 }, { id: "new" },
-    ] } } });
+    // The source states authHeader and the catalog; name/api it never states
+    // stay, credentials stay, and a model arrives whole (no local compat).
+    expect(models()).toEqual({ version: 1, providers: { proxy: { ...provider, authHeader: true,
+      modelOverrides: { built: { reasoning: false, headers: { token: "local-override" } } },
+      models: [{ ...transport, id: "m", name: "New", maxTokens: 12 }, { id: "new" }],
+    } } });
     expect(read("SYSTEM.md")).toBe("new system");
     expect(read("AGENTS.md")).toBe("new agents");
     expect(read("settings.json")).toBe('{"model":"local-only"}');
     expect(read("auth.json")).toBe('{"apiKey":"local-auth"}');
   });
 
-  it("removes explicitly absent files and model arrays without removing local credentials", async () => {
+  it("removes explicitly absent files and catalogs without removing local credentials", async () => {
     write("SYSTEM.md", "delete me");
     write("AGENTS.md", "delete me too");
     saveModels({
-      proxy: { apiKey: "keep", baseUrl: "https://keep", models: [{ id: "m" }] },
+      proxy: { apiKey: "keep", baseUrl: "https://keep", name: "Keep", modelOverrides: { m: {} }, models: [{ id: "m" }] },
       onlymodels: { models: [{ id: "m" }] },
     });
     await store.applySnapshot(empty());
     expect(existsSync(join(dir, "SYSTEM.md"))).toBe(false);
     expect(existsSync(join(dir, "AGENTS.md"))).toBe(false);
-    expect(models()).toEqual({ version: 1, providers: { proxy: { apiKey: "keep", baseUrl: "https://keep" }, onlymodels: {} } });
+    expect(models()).toEqual({ version: 1, providers: { proxy: { apiKey: "keep", baseUrl: "https://keep", name: "Keep" }, onlymodels: {} } });
     await store.applySnapshot({ ...empty(), providers: { onlymodels: { models: [{ id: "restored" }] } } });
     expect(models().providers.onlymodels.models).toEqual([{ id: "restored" }]);
   });
@@ -192,7 +217,7 @@ describe("snapshot apply", () => {
 
   it("validates typed callers too, without importing masks", async () => {
     const snapshot = { ...empty(), providers: { proxy: { models: [{ id: "m", apiKey: "masked" }] } } };
-    await expect(store.applySnapshot(snapshot)).rejects.toThrow(/unsupported/);
+    await expect(store.applySnapshot(snapshot)).rejects.toThrow(/must not carry apiKey/);
     expect(readdirSync(dir)).toEqual([]);
   });
 
