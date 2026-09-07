@@ -63,8 +63,12 @@ export function createTasksView(
     renderList();
   });
 
+  const loadDetail = coalesce(async () => {
+    if (selectedId && view.visible) await renderDetail(selectedId);
+  });
+
   function load(): Promise<void> {
-    return selectedId ? renderDetail(selectedId) : loadList();
+    return selectedId ? loadDetail() : loadList();
   }
 
   function renderError(message: string): void {
@@ -76,9 +80,9 @@ export function createTasksView(
 
   /** Keep the last good list on a failed refetch: a stale picker beats none. */
   async function activeTasks(): Promise<TaskRow[]> {
-    const request = detailRequest;
+    const id = selectedId;
     const got = await getJson<TaskRow[]>("/api/tasks?state=active", "Failed to load tasks");
-    if (!got.ok && view.visible && request === detailRequest) renderError(got.error);
+    if (!got.ok && view.visible && selectedId === id) renderError(got.error);
     return got.ok ? got.value : availableTasks;
   }
 
@@ -99,6 +103,7 @@ export function createTasksView(
 
   function selectTask(id: string): void {
     selectedId = id;
+    detailRequest++;
     detailTab = "runs";
     runsScroll.top = 0;
   }
@@ -112,14 +117,11 @@ export function createTasksView(
   function renderList(): void {
     const create = button("New task", true);
     create.onclick = () => {
-      if (selectedId) return;
-      const request = detailRequest;
+      if (!view.visible || selectedId !== null) return;
       void Promise.all([loadSessions(), activeTasks()]).then(([, tasks]) => {
-        if (!view.visible || request !== detailRequest) return;
+        if (!view.visible || selectedId !== null) return;
         availableTasks = tasks;
         openTaskEditor(editorDeps);
-      }).catch((err) => {
-        if (view.visible && request === detailRequest) renderError(`Failed to open task editor: ${String(err)}`);
       });
     };
     const filters: HTMLElement[] = [];
@@ -232,13 +234,11 @@ export function createTasksView(
     const edit = button("Edit");
     edit.disabled = task.archived || task.action.type === "system";
     edit.onclick = () => {
-      if (request !== detailRequest) return;
+      if (!view.visible || selectedId !== task.id) return;
       void Promise.all([loadSessions(), activeTasks()]).then(([, tasks]) => {
-        if (!view.visible || request !== detailRequest) return;
+        if (!view.visible || selectedId !== task.id) return;
         availableTasks = tasks;
         openTaskEditor(editorDeps, task);
-      }).catch((err) => {
-        if (view.visible && request === detailRequest) renderError(`Failed to open task editor: ${String(err)}`);
       });
     };
     const archive = button("Archive");
