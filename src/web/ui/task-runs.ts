@@ -6,16 +6,13 @@
 // surrounding navigation.
 
 import type { CommandResult, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "../../tasks/types.js";
-import { getJson, promptRun, type Sent } from "./api.js";
+import { getJson } from "./api.js";
 import { fmtDuration, h } from "./dom.js";
 import { badge, button, empty, toolbar } from "./form.js";
 
 export interface TaskRunsDeps {
   openSession: (id: string) => void;
-  currentSessionId: () => string | null;
   mutate: (url: string) => Promise<void>;
-  onError: (message: string) => void;
-  reload: () => Promise<void>;
   openRun: (id: string) => void;
   openTask: (id: string) => void;
 }
@@ -215,35 +212,16 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
     open.onclick = () => deps.openSession(run.targetSessionId!);
     actions.append(open);
   }
+  // Stop is the only control here. Steering a run, continuing it and answering
+  // its decision are messages to an agent, and the session that delegated it is
+  // where a message to an agent is typed — the task tool carries it from there.
   if (run.state === "queued" || run.state === "running") {
-    if (run.context.definition.action.type === "agent") {
-      const steer = button("Steer");
-      steer.onclick = () => void control(promptRun(steer, "Steer run", `/api/task-runs/${run.id}/steer`, {
-        mode: "steer", sourceSessionId: deps.currentSessionId(),
-      }, "Run control failed"), deps);
-      actions.append(steer);
-    }
     const cancel = button("Stop run");
-    // Stop is one click from a running agent's end, next to controls that only
-    // add to it — the ask is what tells the two apart.
+    // It ends a running agent in one click, so it asks first.
     cancel.onclick = () => {
       if (window.confirm(`Stop this run of "${run.context.definition.name}"?`)) void deps.mutate(`/api/task-runs/${run.id}/cancel`);
     };
     actions.append(cancel);
-  } else if (run.context.definition.action.type === "agent" && run.targetSessionId) {
-    const resume = button("Continue");
-    resume.onclick = () => void control(promptRun(resume, "Continue run", `/api/task-runs/${run.id}/resume`, {
-      sourceSessionId: deps.currentSessionId(),
-    }, "Run control failed"), deps, true);
-    actions.append(resume);
-  }
-  const decision = messages.find((message) => message.id === run.pendingDecisionId);
-  if (decision && decision.toSessionId === deps.currentSessionId()) {
-    const reply = button("Reply to decision");
-    reply.onclick = () => void control(promptRun(reply, "Reply to decision", `/api/task-messages/${decision.id}/reply`, {
-      sourceSessionId: deps.currentSessionId(),
-    }, "Reply failed"), deps);
-    actions.append(reply);
   }
   const body = h("div", "min-w-0");
   const attention = runAttention(run);
@@ -307,18 +285,4 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   pane.replaceChildren(actions, body);
   pane.scrollTop = state.scrollTop;
   pane.onscroll = () => { state.scrollTop = pane.scrollTop; };
-}
-
-/** Show what went wrong, or reload so the run's new state is on screen — or,
- *  for a continuation, open the run it created. */
-async function control(outcome: Promise<Sent>, deps: TaskRunsDeps, continued = false): Promise<void> {
-  const result = await outcome;
-  if (!result.sent) return;
-  if (result.error) deps.onError(result.error);
-  else if (continued && result.response) {
-    try {
-      const run = await result.response.json() as TaskRun;
-      deps.openRun(run.id);
-    } catch (err) { deps.onError(`Could not open continuation: ${String(err)}`); }
-  } else await deps.reload();
 }

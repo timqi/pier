@@ -66,9 +66,6 @@ vi.mock("./form.js", () => ({
   select: (_options: unknown, value: string) => { const el = new Element("select"); el.value = value; return el; },
 }));
 vi.mock("./task-editor.js", () => ({ openTaskEditor: vi.fn() }));
-// The ask itself is an anchored panel (menu.ts); these tests are about what the
-// views do with the answer.
-vi.mock("./menu.js", () => ({ promptText: vi.fn(async () => "continue please") }));
 
 import { createTasksView } from "./tasks.js";
 import { createRunsView } from "./runs.js";
@@ -133,7 +130,7 @@ beforeEach(async () => {
   });
   openTask.mockReset().mockImplementation((id) => { runsView.hide(); tasksView.show(id); });
   tasksView = createTasksView(root as unknown as HTMLElement, () => [], async () => {}, vi.fn(), () => currentSession, openRuns, openTask);
-  runsView = createRunsView(root as unknown as HTMLElement, vi.fn(), () => currentSession, openRuns, openTask);
+  runsView = createRunsView(root as unknown as HTMLElement, vi.fn(), openRuns, openTask);
   tasksView.show(); await settled();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -231,12 +228,15 @@ describe("Runs", () => {
     openRuns({}, run.id); await settled(); openTask(task.id); await settled(); await click("Definition");
     release(); await settled(); expect(root.text).toContain("Scripttrue"); expect(root.text).not.toContain("Raw record");
   });
-  it("only offers actual controls and Continue opens the newly created run", async () => {
-    openRuns({}, run.id); await settled(); expect(button("Steer")).toBeUndefined(); expect(button("Stop run")).toBeDefined();
+  it("offers Stop while a run is live and nothing that types a message to it", async () => {
     task.action = { type: "agent", session: { mode: "fresh", cwd: "/test" }, prompt: "work" };
+    openRuns({}, run.id); await settled();
+    expect(button("Stop run")).toBeDefined();
+    expect(button("Steer")).toBeUndefined(); expect(button("Continue")).toBeUndefined();
     run.targetSessionId = "child"; run.state = "succeeded"; runsView.refresh(); await settled();
-    expect(button("Stop run")).toBeUndefined(); await click("Continue");
-    expect(openRuns).toHaveBeenLastCalledWith({}, "continued-run");
+    // Finished: the session that delegated it is where a follow-up is typed.
+    expect(button("Stop run")).toBeUndefined(); expect(button("Continue")).toBeUndefined();
+    expect(button("Open session")).toBeDefined();
   });
   it("asks before stopping a run, and stops it once the answer is yes", async () => {
     openRuns({}, run.id); await settled();
@@ -247,12 +247,12 @@ describe("Runs", () => {
     await click("Stop run");
     expect(fetcher).toHaveBeenCalledWith("/api/task-runs/run-a/cancel", expect.objectContaining({ method: "POST" }));
   });
-  it("matches the actual unresolved decision and only offers reply to its supervisor", async () => {
+  it("reports an unresolved decision without offering to answer it here", async () => {
     run.pendingDecisionId = "question";
     messages = [{ id: "question", runId: run.id, kind: "decision", toSessionId: "supervisor", fromSessionId: "child", state: "pending", content: "Choose?" } as TaskMessage];
-    openRuns({}, run.id); await settled(); expect(button("Reply to decision")).toBeUndefined();
-    currentSession = "supervisor"; openRuns({}, run.id); await settled(); expect(button("Reply to decision")).toBeDefined();
-    await click("Reply to decision"); expect(fetcher).toHaveBeenCalledWith("/api/task-messages/question/reply", expect.objectContaining({ body: JSON.stringify({ message: "continue please", sourceSessionId: "supervisor" }) }));
+    currentSession = "supervisor"; openRuns({}, run.id); await settled();
+    expect(root.text).toContain("Awaiting decision"); expect(root.text).toContain("Choose?");
+    expect(button("Reply to decision")).toBeUndefined();
   });
   it("links parent, resume and wrapper child, and names the group without a page for it", async () => {
     run.parentRunId = "parent"; run.resumedFromRunId = "prior"; run.groupId = "group"; run.result = { type: "task", runId: "child", result: null };

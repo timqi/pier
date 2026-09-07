@@ -2,8 +2,6 @@
 // write, the sentence a failure shows, the scheduling of a re-read. Nine
 // modules had grown their own copy of the method/headers/body triple.
 
-import { promptText } from "./menu.js";
-
 /**
  * One list request in flight at a time; anything asked for during one runs
  * after it, so a burst of workspace events costs two fetches, not twenty.
@@ -35,13 +33,6 @@ export const sendJson = (
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-
-/**
- * What a write did. Kept distinct from a plain `Response` because both callers
- * need the same three cases and got them subtly wrong on their own: nothing
- * was sent, it worked, or here is the sentence to show a human.
- */
-export type Sent = { sent: false } | { sent: true; error?: string; response?: Response };
 
 /** Read a failed response's `error`, whatever the server managed to send. */
 export async function failure(res: Response, fallback: string): Promise<string> {
@@ -118,28 +109,3 @@ export async function refused(
   }
 }
 
-/**
- * Ask for a message under the control that was clicked and post it to a
- * run-control endpoint.
- *
- * Both surfaces that steer a subagent — the chat's background-run row and the
- * Tasks console — had grown their own copy of this, with the first two
- * arguments in opposite orders. Both are strings, so swapping them type-checks
- * and fails at runtime.
- */
-export async function promptRun(
-  anchor: HTMLElement,
-  title: string,
-  url: string,
-  fields: Record<string, unknown>,
-  fallback: string,
-): Promise<Sent> {
-  const message = await promptText(anchor, title, title.split(" ")[0]!);
-  if (!message) return { sent: false };
-  try {
-    const res = await sendJson(url, { message, ...fields });
-    return { sent: true, ...(res.ok ? { response: res } : { error: await failure(res, fallback) }) };
-  } catch (err) {
-    return { sent: true, error: `${fallback}: ${String(err)}` };
-  }
-}

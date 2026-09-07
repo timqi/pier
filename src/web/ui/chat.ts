@@ -15,7 +15,6 @@ import { $, agoLabel, copyBtn, externalLinks, h, stampTime, STREAM_PAINT_MS } fr
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
   clampedBody,
-  decisionReplyBtn,
   finishActivity,
   initTurnActivity,
   renderBackgroundRun,
@@ -300,9 +299,6 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     runId: origin.runId,
     sessionId: origin.sourceSessionId,
   });
-  if (origin.kind === "task-message" && origin.messageKind === "decision") {
-    head.append(decisionReplyBtn(origin.messageId));
-  }
   row.append(head);
   row.append(...clampedBody(body, origin.kind === "task-delegation"));
   turnsPane.append(row);

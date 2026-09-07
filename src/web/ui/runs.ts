@@ -14,7 +14,6 @@ export type RunsView = ConsoleView & { refresh(): void };
 export function createRunsView(
   root: HTMLElement,
   openSession: (id: string) => void,
-  currentSessionId: () => string | null,
   navigate: (filters: Record<string, string>, id?: string) => void,
   openTask: (id: string) => void,
 ): RunsView {
@@ -31,9 +30,8 @@ export function createRunsView(
     error.setAttribute("role", "alert"); root.append(error);
   };
   const deps: TaskRunsDeps = {
-    openSession, currentSessionId, onError, openTask,
+    openSession, openTask,
     openRun: (id) => go(filters, id),
-    reload: async () => { await load(); },
     mutate: async (url) => {
       const error = await refused(url, "POST", "Run update failed");
       if (error) onError(error);

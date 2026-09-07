@@ -3,7 +3,7 @@
 // rendered into #turns between chat rows. chat.ts owns the rows themselves and
 // calls seal/finish/reset here so a group closes when the transcript moves on.
 
-import { getJson, promptRun, refused, type Sent } from "./api.js";
+import { getJson, refused } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
@@ -172,33 +172,13 @@ const backgroundRows = new Map<string, HTMLElement>();
 const promptBodies = new WeakMap<HTMLElement, HTMLElement[]>();
 
 /**
- * Every control on a background run reports here, because a control that fails
- * silently is the worst of both worlds: the run did not change and the chat
- * says nothing, which is indistinguishable from a dropped connection.
+ * Stopping a run reports here, because a control that fails silently is the
+ * worst of both worlds: the run did not change and the chat says nothing,
+ * which is indistinguishable from a dropped connection.
  */
-async function say(outcome: Promise<Sent>): Promise<void> {
-  const result = await outcome;
-  if (result.sent && result.error) turns.append("error", result.error);
-}
-
-/** The controls that take no typed message still have to report a refusal. */
 async function post(url: string, fallback: string): Promise<void> {
   const error = await refused(url, "POST", fallback);
   if (error) turns.append("error", error);
-}
-
-async function replyToDecision(anchor: HTMLElement, messageId: string): Promise<void> {
-  const id = deps.sessionId();
-  if (!id) return;
-  const url = `/api/task-messages/${messageId}/reply`;
-  await say(promptRun(anchor, "Reply to subagent", url, { sourceSessionId: id }, "reply failed"));
-}
-
-/** The "Reply" affordance on a decision message (rendered by chat.ts). */
-export function decisionReplyBtn(messageId: string): HTMLElement {
-  const reply = h("button", "flex-none text-[11px] font-semibold normal-case text-cyan-800 hover:underline", "Reply");
-  reply.onclick = () => void replyToDecision(reply, messageId);
-  return reply;
 }
 
 export function renderBackgroundRun(run: BackgroundRun): void {
@@ -227,24 +207,17 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     runId: run.runId,
     sessionId: run.targetSessionId,
   });
+  // Stop is the card's only control: anything with a message in it — steering
+  // the run, continuing it, answering its decision — is typed in this session,
+  // which is the session that delegated the run and can say so to its agent.
   const controls = h("div", "flex flex-none items-center gap-2 text-[11px] font-semibold text-neutral-700");
   if (active) {
-    const steer = h("button", "hover:underline", "Steer");
-    const steerBody = { mode: "steer", sourceSessionId: deps.sessionId() };
-    steer.onclick = () =>
-      void say(promptRun(steer, "Steer subagent", `${runUrl}/steer`, steerBody, "could not steer the run"));
     const cancel = h("button", "hover:underline", "Stop");
-    // Sits a few pixels from Steer, and ends the run rather than adding to it.
+    // One click from the end of a running agent, so it asks first.
     cancel.onclick = () => {
       if (window.confirm(`Stop "${run.taskName}"?`)) void post(`${runUrl}/cancel`, "could not stop the run");
     };
-    controls.append(steer, cancel);
-  } else if (run.targetSessionId && run.sessionMode !== null) {
-    const resume = h("button", "hover:underline", "Continue");
-    const body = { sourceSessionId: deps.sessionId() };
-    resume.onclick = () =>
-      void say(promptRun(resume, "Continue subagent", `${runUrl}/resume`, body, "could not continue"));
-    controls.append(resume);
+    controls.append(cancel);
   }
   if (controls.childElementCount) head.append(controls);
   // This card sits where the delegating turn sent the message, so it is the

@@ -278,7 +278,7 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
       showTasks,
     )),
   runs: async (root) =>
-    (runsView = (await import("./runs.js")).createRunsView(root, deps.select, () => deps.currentId(), showRuns, showTasks)),
+    (runsView = (await import("./runs.js")).createRunsView(root, deps.select, showRuns, showTasks)),
   activity: async (root) =>
     (activityView = (await import("./activity.js")).createActivityView(root, deps.select, showRun)),
   boards: async (root) => (await import("./boards.js")).createBoardsView(root, deps.select),
