@@ -43,7 +43,9 @@ themselves live there and are not mirrored here:
 `auth.ts` (the password boundary ahead of everything, `/login`, `/logout`,
 `/api/password`), `config.ts` (`/api/config*`, scoped Pi config editing),
 `fs.ts` (`/api/fs/{ls,file,mkdir}` — and the containment check behind every
-path the Console reaches, including `/api/sessions/:id/files`), `explorer.ts`
+browse the Console makes; `/api/sessions/:id/files` shares only its size cap
+and headers, because the boundary there is the password, not a tree),
+`explorer.ts`
 (`/api/explorer/{git,diff}` for the Files view, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe

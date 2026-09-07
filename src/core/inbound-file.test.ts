@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fileMarker, lostMarker, safeName, splitInboundFiles } from "./inbound-file.js";
+import {
+  fileMarker,
+  lostMarker,
+  replaceOutsideCode,
+  safeName,
+  splitInboundFiles,
+} from "./inbound-file.js";
 
 describe("safeName", () => {
   it("keeps an ordinary filename", () => {
@@ -58,5 +64,38 @@ describe("fileMarker ↔ splitInboundFiles", () => {
   it("a lost-marker line is text, not an attachment", () => {
     const raw = `look\n${lostMarker("a.jpg", "download failed")}`;
     expect(splitInboundFiles(raw)).toEqual({ text: raw, paths: [] });
+  });
+
+  it("needs no code scan: a fenced example sits above its closing line", () => {
+    const raw = ["write it as", "```", fileMarker("/tmp/report.md"), "```"].join("\n");
+    expect(splitInboundFiles(raw)).toEqual({ text: raw, paths: [] });
+  });
+});
+
+describe("replaceOutsideCode", () => {
+  const hit = (text: string): string => replaceOutsideCode(text, /LINK/g, () => "X");
+
+  it("replaces in prose and leaves code byte-identical", () => {
+    expect(hit("a LINK b")).toBe("a X b");
+    expect(hit("a `LINK` b")).toBe("a `LINK` b");
+    expect(hit("a ``LINK`` b")).toBe("a ``LINK`` b");
+    expect(hit("```\nLINK\n```")).toBe("```\nLINK\n```");
+    expect(hit("~~~md\nLINK\n~~~")).toBe("~~~md\nLINK\n~~~");
+    // Indented fence, and a fence closed only by its own character.
+    expect(hit("  ```\nLINK\n  ```")).toBe("  ```\nLINK\n  ```");
+    expect(hit("~~~\nLINK\n```\nLINK\n~~~")).toBe("~~~\nLINK\n```\nLINK\n~~~");
+  });
+
+  it("keeps prose on either side of a span, and both spans of a line", () => {
+    expect(hit("LINK `LINK` LINK `LINK` LINK")).toBe("X `LINK` X `LINK` X");
+  });
+
+  it("treats an unterminated fence as code to the end, an unpaired tick as prose", () => {
+    expect(hit("open\n```\nLINK")).toBe("open\n```\nLINK");
+    expect(hit("a ` LINK")).toBe("a ` X");
+  });
+
+  it("does not let a span on one line swallow a link on the next", () => {
+    expect(hit("`code`\nLINK")).toBe("`code`\nX");
   });
 });

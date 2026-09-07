@@ -63,6 +63,27 @@ describe("splitAttachments", () => {
     const raw = "see [docs](https://example.com) and `file:///tmp/x`";
     expect(splitAttachments(raw)).toEqual({ text: raw, paths: [] });
   });
+
+  it("leaves an example of the convention in code exactly as written", () => {
+    // A turn that documented the convention had its example uploaded as a real
+    // file, so the chat showed "attachment lost: report.md — ENOENT".
+    const raw = [
+      "Link a file you produced like `[report.md](file:///abs/path/report.md)`:",
+      "",
+      "```md",
+      "[chart.png](file:///abs/path/chart.png)",
+      "```",
+    ].join("\n");
+    expect(splitAttachments(raw)).toEqual({ text: raw, paths: [] });
+  });
+
+  it("still takes a real link written beside an example", () => {
+    const { text, paths } = splitAttachments(
+      "as in `[x](file:///tmp/x.md)` — here it is: [out.md](file:///tmp/out.md)",
+    );
+    expect(text).toBe("as in `[x](file:///tmp/x.md)` — here it is: out.md");
+    expect(paths).toEqual(["/tmp/out.md"]);
+  });
 });
 
 describe("sendAttachments", () => {

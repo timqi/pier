@@ -2,12 +2,13 @@
 // routes and the session attachments server.ts serves all ask the same
 // question, and asked it several different ways until this file existed.
 //
-// A `root` is any directory the process can read — sessions work in worktrees
-// and siblings of their cwd, and an owner already past the Console password
-// can reach those paths anyway. What is confined is `path`: it resolves under
+// The boundary is the Console password, not a path: an owner past it picks a
+// session's cwd from anywhere under `$HOME`, so anything this process can read
+// is already reachable — which is why the session attachments route (server.ts)
+// takes any absolute file. What `root` confines is a *listing*, so a browse
+// cannot widen itself past the tree the view asked for: `path` resolves under
 // the `root` it was asked with, realpath on both ends, so neither `..` nor a
-// symlink steps outside and a listing can never widen itself. Only mkdir
-// writes, and only a name.
+// symlink steps outside. Only mkdir writes, and only a name.
 
 import { mkdir, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -48,22 +49,6 @@ export async function scoped(root: string | undefined, path = ""): Promise<strin
   const target = await realpath(resolve(real, path));
   if (target !== real && !target.startsWith(real + sep)) throw new Error("path escapes root");
   return target;
-}
-
-/** The same containment against several roots, for the caller that has more
- *  than one: a session's attachments come from its own cwd or from the inbox
- *  its inbound files landed in. null rather than a throw, because to that
- *  caller "outside every root", "not a file" and "gone" are one answer. */
-export async function scopedFile(roots: string[], path: string): Promise<string | null> {
-  for (const root of roots) {
-    try {
-      const file = await scoped(root, path);
-      if ((await stat(file)).isFile()) return file;
-    } catch {
-      /* outside this root, unreadable, or gone — try the next */
-    }
-  }
-  return null;
 }
 
 /** How bytes leave: the type they may be served as, and whether a browser may

@@ -5,6 +5,7 @@
 // the rendered node is upgraded: images become thumbnails, everything else an
 // attachment card with preview + download.
 
+import { replaceOutsideCode } from "../../core/inbound-file.js";
 import { failure } from "./api.js";
 import { $, basename, h } from "./dom.js";
 
@@ -105,12 +106,13 @@ const fileUrl = (sessionId: string, path: string, download = false): string =>
     download ? "&download=1" : ""
   }`;
 
-/** `[x](file:///p)` → the session's files route, so the sanitizer keeps it. */
+/** `[x](file:///p)` → the session's files route, so the sanitizer keeps it.
+ *  Not inside code: an example link is the code the reader asked to see. */
 export function rewriteFileLinks(markdown: string, sessionId: string): string {
-  return markdown.replace(/\]\(\s*<?file:\/\/(\/[^)>\s]*)>?\s*\)/g, (_m, path: string) => {
-    let decoded = path;
+  return replaceOutsideCode(markdown, /\]\(\s*<?file:\/\/(\/[^)>\s]*)>?\s*\)/g, (match) => {
+    let decoded = match[1]!;
     try {
-      decoded = decodeURIComponent(path);
+      decoded = decodeURIComponent(decoded);
     } catch {
       /* not percent-encoded — take the path as written */
     }

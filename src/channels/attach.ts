@@ -15,7 +15,7 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
-import { lostMarker } from "../core/inbound-file.js";
+import { lostMarker, replaceOutsideCode } from "../core/inbound-file.js";
 
 /**
  * One cap for every platform: Telegram refuses a photo past 10 MB, which is
@@ -50,11 +50,14 @@ const nameOf = (path: string): string => basename(path) || "file";
  * Split a turn's markdown into the text an IM chat should show and the files
  * it linked. Each link collapses to its label — or to the file's name when the
  * agent wrote none — so the sentence it sat in still reads, and the turn never
- * becomes empty just because its only content was an attachment.
+ * becomes empty just because its only content was an attachment. A link inside
+ * code is an example of the convention, not a use of it: it is left alone.
  */
 export function splitAttachments(markdown: string): { text: string; paths: string[] } {
   const paths: string[] = [];
-  const text = markdown.replace(LINK, (_m, label: string, raw: string) => {
+  const text = replaceOutsideCode(markdown, LINK, (match) => {
+    const label = match[1]!;
+    const raw = match[2]!;
     let path = raw;
     try {
       path = decodeURIComponent(raw);

@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
@@ -31,6 +39,7 @@ import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
+import { MAX_FILE_BYTES } from "./fs.js";
 import { createServer, tabPrefix, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
 import type { ToolsSyncNote } from "./types.js";
@@ -781,12 +790,12 @@ describe("workbench server", () => {
     expect(garbage.status).toBe(400);
   });
 
-  it("serves agent attachments from the session cwd, and nothing outside it", async () => {
+  it("serves any readable file the agent linked, wherever it wrote it", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "pier-files-")));
     writeFileSync(join(root, "report.md"), "# hi");
-    const outside = join(realpathSync(mkdtempSync(join(tmpdir(), "pier-outside-"))), "secret.txt");
-    writeFileSync(outside, "nope");
-    symlinkSync(outside, join(root, "escape.txt"));
+    const outside = join(realpathSync(mkdtempSync(join(tmpdir(), "pier-outside-"))), "elsewhere.md");
+    writeFileSync(outside, "# there");
+    symlinkSync(outside, join(root, "link.md"));
     const { app } = setup(root);
     const url = (p: string) => `/api/sessions/s1/files?path=${encodeURIComponent(p)}`;
 
@@ -806,13 +815,27 @@ describe("workbench server", () => {
     expect(fromInbox.status).toBe(200);
     expect(await fromInbox.text()).toBe("from user");
 
-    // Traversal, symlink escape, relative paths, missing file: all refused.
-    expect((await app.request(url(outside))).status).toBe(404);
-    expect((await app.request(url(join(root, "..", "..", "etc", "passwd")))).status).toBe(404);
-    expect((await app.request(url(join(root, "escape.txt")))).status).toBe(404);
+    // A file outside the session's cwd is served: the cwd was never the
+    // boundary (the Console password is), and confining to it left a report
+    // the agent wrote in another project as a dead card in the chat.
+    const elsewhere = await app.request(url(outside));
+    expect(elsewhere.status).toBe(200);
+    expect(await elsewhere.text()).toBe("# there");
+    // A symlink is followed and judged by what it landed on, not by the tree.
+    expect(await (await app.request(url(join(root, "link.md")))).text()).toBe("# there");
+
+    // Relative paths, a missing file, a directory, no path at all: refused.
     expect((await app.request(url("report.md"))).status).toBe(404);
+    expect((await app.request(url(join(root, "gone.md")))).status).toBe(404);
     expect((await app.request(url(root))).status).toBe(404); // a directory is not a file
     expect((await app.request("/api/sessions/s1/files")).status).toBe(400);
+
+    // Still capped: sparse, because the cap is on what a browser is asked to
+    // hold and 32MB of real bytes buys the test nothing.
+    const big = join(root, "big.bin");
+    writeFileSync(big, "");
+    truncateSync(big, MAX_FILE_BYTES + 1);
+    expect((await app.request(url(big))).status).toBe(413);
   });
 
   it("snapshots history, live state and pending queue on demand", async () => {

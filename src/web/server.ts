@@ -3,7 +3,7 @@
 
 import { hostname } from "node:os";
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -15,7 +15,7 @@ import { logger } from "../log.js";
 import { QueueOperationError, Router } from "../core/router.js";
 import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
-import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes, scopedFile } from "./fs.js";
+import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
 import type {
   AgentFactory,
@@ -32,7 +32,7 @@ import type {
 } from "../core/types.js";
 import { isThinkingLevel } from "../core/types.js";
 import { SESSION_TITLE_MAX } from "../limits.js";
-import { INBOX_DIR, saveInbound } from "../core/inbox.js";
+import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { RepoIndex } from "./repos.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
@@ -397,19 +397,19 @@ export function createServer(
   });
 
   // Attachments, both directions: the agent links a file it produced, the chat
-  // renders a file the user sent. Read-only, and only from the session's own
-  // cwd or the inbox inbound files land in (core/inbox.ts) — a session route
-  // rather than an /api/fs one, because the session *is* the scope here.
+  // renders a file the user sent. Read-only, and any readable file — the
+  // boundary here is the Console password (web/fs.ts), not the session's cwd:
+  // a cwd is chosen by whoever creates the session, so confining to it stopped
+  // nothing and left a report the agent wrote elsewhere as a dead card.
   guarded(app, "GET", "/api/sessions/:id/files", 400, async (c) => {
     const raw = c.req.query("path");
     if (!raw) return c.json({ error: "path required" }, 400);
-    const id = c.req.param("id");
-    const cwd = nascent.get(id)?.cwd ?? (await factory.find(id))?.cwd;
     // Absolute only: a link into a session's files is written by the agent or
     // by Pier, and neither of them writes a path relative to anything.
-    const file = cwd && isAbsolute(raw) ? await scopedFile([cwd, INBOX_DIR], raw) : null;
-    if (!file) return c.json({ error: "no such file" }, 404);
-    if ((await stat(file)).size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
+    const file = isAbsolute(raw) ? await realpath(raw).catch(() => null) : null;
+    const info = file ? await stat(file).catch(() => null) : null;
+    if (!file || !info?.isFile()) return c.json({ error: "no such file" }, 404);
+    if (info.size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
     const bytes = await readFile(file);
     return c.body(bytes, 200, {
       ...fileHeaders(file, bytes, c.req.query("download") === "1"),
