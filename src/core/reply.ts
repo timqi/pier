@@ -232,7 +232,7 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
   // Every surface that renders this goes through here, and every CommonMark
   // parser has some version of the CJK emphasis hole — so the repair belongs
   // once, at the seam, not per adapter.
-  const markdown = cjkFriendly(rawMarkdown.replace(SILENT, "").trim());
+  const markdown = streamBody(rawMarkdown);
   const silence = silentReason(rawMarkdown);
   const m = BLOCK.exec(markdown);
   if (!m?.[1]) return { text: markdown, suggestions: [], meta, silence };

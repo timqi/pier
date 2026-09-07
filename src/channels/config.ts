@@ -108,13 +108,7 @@ export class ChannelStore {
         id: chat.id,
         name: chat.name,
         kind: chat.kind,
-        enabled: true,
-        requireMention: config.requireMention,
-        requireBind: config.requireBind,
-        topicMode: config.topicMode,
-        cwd: config.cwd,
-        model: config.model,
-        thinking: config.thinking,
+        ...this.policy(platform, chat.id),
       });
     }
     this.save(platform, config);
