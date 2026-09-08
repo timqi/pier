@@ -170,9 +170,11 @@ function sortable(row: HTMLElement, key: string, drop: (target: string, after: b
   };
 }
 
+/** A row action: the hover background needs room around the glyph. */
+const ROW_BTN = "flex-none rounded p-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
+
 /** Row action revealed on hover (resident on touch, which has no hover). */
-const HOVER_BTN =
-  "hidden flex-none rounded px-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:block pointer-coarse:block";
+const HOVER_BTN = `hidden group-hover:block pointer-coarse:block ${ROW_BTN}`;
 
 /**
  * Waiting for *you*, which is narrower than `unread`.
@@ -208,15 +210,15 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
 
 /** One pushpin for every surface that pins — Lucide's `pin` (ISC), inlined
  *  like the other icons (index.html); `h` makes HTML elements and an SVG is
- *  not one. State is not a second glyph: a pinned row's pin is resident and
- *  indigo, an unpinned row's appears on hover in grey. */
+ *  not one. State is not a second glyph: a pinned row's pin is resident, an
+ *  unpinned row's appears on hover. */
 const PIN_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>';
 
 /** Pinned: always on the row, in colour — that is how the top of the list
  *  says which rows are pinned, no divider needed. Otherwise `cls` decides. */
 function pinButton(s: SessionInfo, cls: string): HTMLElement {
-  const pin = h("button", s.pinned ? "flex-none rounded px-1 leading-none text-indigo-500 hover:bg-neutral-200" : cls);
+  const pin = h("button", s.pinned ? ROW_BTN : cls);
   pin.innerHTML = PIN_ICON;
   pin.title = s.pinned ? "Unpin" : "Pin to top";
   pin.onclick = (ev) => {
@@ -423,7 +425,7 @@ function paletteRow(t: Target): HTMLElement {
   if (t.session) {
     li.append(
       h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)),
-      pinButton(t.session, "flex-none rounded p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"),
+      pinButton(t.session, ROW_BTN),
     );
   }
   // Hover is its own grey, and it does not move the selection. Driving one
