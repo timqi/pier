@@ -37,10 +37,15 @@ const indexes = (db: DatabaseSync): string[] =>
 /** Winds a fresh database back past migrations 17 and 18, for the upgrade tests. */
 const UNDO_17 = "DROP INDEX task_runs_time_id; DROP INDEX task_runs_visible_time; DROP INDEX task_runs_invoked_by;";
 
+/** Winds one back past 20, which dropped the column 19 and 20 both write: an
+ *  older user_version on its own would replay them against a table that no
+ *  longer has it. */
+const UNDO_20 = "ALTER TABLE session_state ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;";
+
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(19);
+    expect(version(db)).toBe(20);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -67,10 +72,9 @@ describe("openDb", () => {
       // The summary a transcript already carries (title, created_at,
       // last_active) is not here: migration 9 dropped it. Neither are the
       // Projects lease's two columns (kept, pinned_at): migration 11 dropped
-      // those with the lease itself. project_sort is orphaned, not dropped
-      // (migration 19).
+      // those with the lease itself, nor `pinned`, which migration 20 dropped
+      // with pinning. project_sort is orphaned, not dropped (migration 19).
       "session_id",
-      "pinned",
       "unread",
       "cwd",
       "sort",
@@ -86,7 +90,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(19);
+    expect(version(second)).toBe(20);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -99,7 +103,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 19/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 20/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -277,7 +281,7 @@ describe("openDb", () => {
   it("indexes the global run list, on a database that predates it", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_17 + " PRAGMA user_version = 16");
+    before.exec(UNDO_20 + UNDO_17 + " PRAGMA user_version = 16");
     const insert = before.prepare("INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?)");
     insert.run("probe", "t", 3, "succeeded", null, JSON.stringify({ matched: false }));
     insert.run("failed", "t", 2, "failed", null, JSON.stringify({ matched: false }));
@@ -285,7 +289,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(19);
+    expect(version(db)).toBe(20);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -311,12 +315,12 @@ describe("openDb", () => {
     before.exec(
       "DROP INDEX task_runs_callback_state; DROP INDEX task_messages_state;" +
         " DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        UNDO_17 + " PRAGMA user_version = 14",
+        UNDO_20 + UNDO_17 + " PRAGMA user_version = 14",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(19);
+    expect(version(db)).toBe(20);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -338,7 +342,7 @@ describe("openDb", () => {
     const before = openDb(path);
     before.exec(
       "DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        UNDO_17 + " PRAGMA user_version = 15",
+        UNDO_20 + UNDO_17 + " PRAGMA user_version = 15",
     );
     // Three rows the upgrade has to tell apart: one due, two that never are.
     before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
@@ -350,7 +354,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(19);
+    expect(version(db)).toBe(20);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -377,22 +381,57 @@ describe("openDb", () => {
   it("unpins every session a database pinned while pinned meant listed", () => {
     const path = dbPath();
     // Wound back to 18: every web session ever created carried pinned = 1,
-    // because that was membership in Projects. Now it is "stuck to the top".
+    // because that was membership in Projects. 19 reset that, and 20 read
+    // whatever was still pinned as the working set — so these two, unpinned by
+    // 19, keep their unread marks and hold no slot.
     const before = openDb(path);
     before.exec(
-      "INSERT INTO session_state(session_id, pinned, unread, cwd, sort, project_sort)" +
+      UNDO_20 +
+        "INSERT INTO session_state(session_id, pinned, unread, cwd, sort, project_sort)" +
         " VALUES ('s1', 1, 1, '/a', 2, 0), ('s2', 1, 0, '/b', NULL, 1); PRAGMA user_version = 18",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(19);
-    // Only the pin is reset: the unread mark and the hand-given place stay.
-    expect(db.prepare("SELECT session_id, pinned, unread, sort FROM session_state ORDER BY session_id").all())
+    expect(version(db)).toBe(20);
+    expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
       .toEqual([
-        { session_id: "s1", pinned: 0, unread: 1, sort: 2 },
-        { session_id: "s2", pinned: 0, unread: 0, sort: null },
+        { session_id: "s1", unread: 1, sort: null },
+        { session_id: "s2", unread: 0, sort: null },
       ]);
+    db.close();
+  });
+
+  // The pinned rows are what somebody was working on, so they seed the set the
+  // rail now maintains itself: their arranged order, never-dragged first, and
+  // no more of them than the set holds.
+  it("seeds the working set from the pinned rows, and drops the rest of the pins", () => {
+    const path = dbPath();
+    const before = openDb(path);
+    before.exec(UNDO_20);
+    const insert = before.prepare(
+      "INSERT INTO session_state(session_id, pinned, unread, sort) VALUES (?, ?, ?, ?)",
+    );
+    insert.run("dragged-second", 1, 0, 1);
+    insert.run("dragged-first", 1, 0, 0);
+    insert.run("never-dragged", 1, 1, null);
+    // Nine pins for eight slots, and one row that is not pinned at all but
+    // still carries the place a drag once gave it.
+    for (let i = 0; i < 6; i++) insert.run(`p${String(i)}`, 1, 0, 10 + i);
+    insert.run("unpinned", 0, 1, 3);
+    before.exec("PRAGMA user_version = 19");
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(20);
+    expect(
+      db.prepare("SELECT session_id FROM session_state WHERE sort IS NOT NULL ORDER BY sort, session_id")
+        .all().map((row) => (row as unknown as { session_id: string }).session_id),
+    ).toEqual(["never-dragged", "dragged-first", "dragged-second", "p0", "p1", "p2", "p3", "p4"]);
+    // The ninth pin and the stale place are gone; the unread marks are not.
+    expect(db.prepare("SELECT sort FROM session_state WHERE session_id = 'p5'").get()).toEqual({ sort: null });
+    expect(db.prepare("SELECT sort, unread FROM session_state WHERE session_id = 'unpinned'").get())
+      .toEqual({ sort: null, unread: 1 });
     db.close();
   });
 

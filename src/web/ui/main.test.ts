@@ -86,7 +86,7 @@ beforeEach(async () => {
   vi.stubGlobal("__PIER_VERSION__", "test");
   vi.stubGlobal("document", { hidden: true, addEventListener: vi.fn() });
   vi.stubGlobal("window", { addEventListener: vi.fn() });
-  const rows = ["a", "b"].map((id) => ({ id, cwd: "/test", createdAt: 1, state: "idle", pinned: false }));
+  const rows = ["a", "b"].map((id) => ({ id, cwd: "/test", createdAt: 1, state: "idle" }));
   vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
     if (url === "/api/sessions" && init?.method === "POST") return h.create();

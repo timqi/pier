@@ -337,6 +337,24 @@ const MIGRATIONS: readonly string[] = [
   -- — a SQLite column drop rewrites the table for a NULL nobody pays for.
   UPDATE session_state SET pinned = 0;
   `,
+  // 20 — the top of the rail is maintained, not arranged: no pin, no drag.
+  `
+  -- sort was the place a hand dragged a pinned row to; it is now the rank in
+  -- the working set the rail keeps on top, which a session enters by being
+  -- spoken to and leaves by being pushed out of the last slot. The pinned rows
+  -- are that set's first members — they are what somebody was working on — in
+  -- the order they were arranged in; never-dragged ones sorted first, so -1 is
+  -- the rank that keeps them there.
+  UPDATE session_state SET sort = -1 WHERE pinned = 1 AND sort IS NULL;
+  UPDATE session_state SET sort = NULL WHERE pinned = 0;
+  -- The set has a size (web/session-state.ts); more pins than that is a list
+  -- the promotion rule would never have built.
+  UPDATE session_state SET sort = NULL WHERE session_id IN (
+    SELECT session_id FROM session_state WHERE sort IS NOT NULL
+    ORDER BY sort, session_id LIMIT -1 OFFSET 8
+  );
+  ALTER TABLE session_state DROP COLUMN pinned;
+  `,
 ];
 
 /**

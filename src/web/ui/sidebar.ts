@@ -1,5 +1,6 @@
-// The left rail: one flat list of every session Pi lists, pinned rows on top,
-// the search palette that reaches everything (⌘K), and the New-session dialog.
+// The left rail: one flat list of every session Pi lists, the working set on
+// top, the search palette that reaches everything (⌘K), and the New-session
+// dialog.
 // main.ts owns the session list; this module renders it and reports
 // interactions back.
 
@@ -16,21 +17,20 @@ export interface SessionInfo {
   id: string;
   cwd: string;
   createdAt: number;
-  /** When the transcript was last written — what orders the unpinned rows.
-   *  Absent from a session Pi has not persisted yet. */
+  /** When the transcript was last written — the row's tooltip, and nothing
+   *  else: it moved with every background turn, so it orders nothing. Absent
+   *  from a session Pi has not persisted yet. */
   modified?: number;
   title?: string;
   state: SessionState;
-  /** Stuck to the top of the rail. */
-  pinned: boolean;
+  /** Place in the working set on top of the rail; unset = not in it. */
+  rank?: number;
   /** Turn finished, no client has viewed it yet (server-side, all clients agree). */
   unread: boolean;
   /** The IM channel that owns it, or `"web"` for everything else. */
   channel: string;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
-  /** Where it was dragged to among the pinned rows; unset = never dragged. */
-  sort?: number;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -43,8 +43,8 @@ export interface SidebarDeps {
   createSession: (cwd: string) => Promise<void>;
   /** Open a Console view by name — the palette lists them beside sessions. */
   openConsole: (name: "tasks" | "runs" | "activity" | "boards" | "settings") => void;
-  /** Pin state changed — the chat header may need re-rendering. */
-  onPinsChanged: () => void;
+  /** The selected session's title changed — the chat header draws it too. */
+  onTitleChanged: () => void;
 }
 
 let deps: SidebarDeps;
@@ -57,40 +57,33 @@ const archiveCount = $("#archive-count");
 const newDialog = $<HTMLDialogElement>("#new-dialog");
 
 // --- order -------------------------------------------------------------------------
-// Two runs of one list. Pinned rows are arranged by hand and kept on the
-// server; everything else follows the transcript — most recently written
-// first — and nothing anyone does to it is remembered.
+// Two runs of one list, and neither of them moves on its own. On top, the
+// working set the server maintains: a session enters it at the front when a
+// human speaks to it, members hold their places until one is pushed out of the
+// last slot (web/session-state.ts). Below it, everything else by birth, which
+// never changes at all. Nothing here reads `modified` — ordering by it is what
+// made the rail jump under the pointer.
 
 /** Rows on the screen before "Load more" is asked for. */
 export const PAGE = 20;
 
-/** Never-dragged sorts first, so a newly pinned row lands on top of the pinned
- *  rows and an instance that has never been arranged keeps a stable order. */
-function byRank(a: number | undefined, b: number | undefined): number {
-  if (a === b) return 0;
-  if (a === undefined) return -1;
-  if (b === undefined) return 1;
-  return a - b;
-}
-
 /** A session Pi has not persisted yet has no transcript to date; its creation
- *  is the last thing that happened to it. */
+ *  is the last thing that happened to it. Tooltip only. */
 const lastActive = (s: SessionInfo): number => s.modified ?? s.createdAt;
 
-/** Pinned in their arranged order (ties: newest created first), then the rest
- *  by last activity. */
-export function orderSessions(list: SessionInfo[]): { pinned: SessionInfo[]; rest: SessionInfo[] } {
+/** The working set in its own order, then the rest newest first. */
+export function orderSessions(list: SessionInfo[]): { top: SessionInfo[]; rest: SessionInfo[] } {
   return {
-    pinned: list.filter((s) => s.pinned).sort((a, b) => byRank(a.sort, b.sort) || b.createdAt - a.createdAt),
-    rest: list.filter((s) => !s.pinned).sort((a, b) => lastActive(b) - lastActive(a)),
+    top: list.filter((s) => s.rank !== undefined).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)),
+    rest: list.filter((s) => s.rank === undefined).sort((a, b) => b.createdAt - a.createdAt),
   };
 }
 
 /** The first `shown` rows of that order, and how many are still behind
- *  "Load more". Pinned rows count against the page like any other. */
+ *  "Load more". The working set counts against the page like any other row. */
 export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[]; hidden: number } {
-  const { pinned, rest } = orderSessions(list);
-  const rows = [...pinned, ...rest].slice(0, shown);
+  const { top, rest } = orderSessions(list);
+  const rows = [...top, ...rest].slice(0, shown);
   return { rows, hidden: list.length - rows.length };
 }
 
@@ -98,76 +91,6 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
  *  and the Settings scope list offer. */
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
-
-/** `id` out, back in above or below `target`. */
-function moved(ids: string[], id: string, target: string, after: boolean): string[] {
-  const rest = ids.filter((k) => k !== id);
-  rest.splice(rest.indexOf(target) + (after ? 1 : 0), 0, id);
-  return rest;
-}
-
-/** Optimistic, like the pin toggle: the new places are on the rows and drawn
- *  before the write, and whatever the server says wins over them. A rejected
- *  or unreachable write reloads the list, so the order visibly snaps back
- *  rather than lying about having been saved. */
-function dropSession(id: string, target: string, after: boolean): void {
-  const sessions = moved(orderSessions(deps.sessions()).pinned.map((s) => s.id), id, target, after);
-  const rank = new Map(sessions.map((key, i) => [key, i]));
-  for (const s of deps.sessions()) {
-    const at = rank.get(s.id);
-    if (at !== undefined) s.sort = at;
-  }
-  renderSessions();
-  const reload = () => void deps.loadSessions();
-  void sendJson("/api/sessions/order", { sessions }).then((res) => {
-    if (!res.ok) reload();
-  }, reload);
-}
-
-/** Which pinned row is being dragged. */
-let dragging: string | null = null;
-
-/** The line the row would land on — inline rather than a class, so it cannot
- *  collide with the row's own borders. */
-function dropLine(row: HTMLElement, after: boolean | null): void {
-  row.style.boxShadow = after === null ? "" : `inset 0 ${after ? -2 : 2}px 0 0 #818cf8`;
-}
-
-/** Make one pinned row draggable, dropping above or below whichever half of a
- *  row it is released on. */
-function sortable(row: HTMLElement, key: string, drop: (target: string, after: boolean) => void): void {
-  row.draggable = true;
-  row.ondragstart = (ev) => {
-    dragging = key;
-    // Firefox starts no drag at all without payload; the key is the payload.
-    ev.dataTransfer?.setData("text/plain", key);
-  };
-  // Re-render on end, not only on drop: a drag abandoned outside every row
-  // leaves the last drop line drawn, and a stray line is an order nobody made.
-  // Forced, because that line is inline style no render model knows about.
-  row.ondragend = () => {
-    dragging = null;
-    renderSessions(true);
-  };
-  const half = (ev: DragEvent): boolean => {
-    const box = row.getBoundingClientRect();
-    return ev.clientY > box.top + box.height / 2;
-  };
-  const droppable = (ev: DragEvent): boolean => {
-    if (!dragging || dragging === key) return false;
-    ev.preventDefault(); // the default is "reject the drop"
-    return true;
-  };
-  row.ondragover = (ev) => {
-    if (droppable(ev)) dropLine(row, half(ev));
-  };
-  row.ondragleave = () => dropLine(row, null);
-  row.ondrop = (ev) => {
-    const from = dragging;
-    dropLine(row, null);
-    if (droppable(ev) && from) drop(from, half(ev));
-  };
-}
 
 /** A row action: a fixed 20px box, which is the row's own line height, so a
  *  button appearing on hover never makes its row taller — padding did. */
@@ -209,74 +132,33 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
   return [dot];
 }
 
-/** One pushpin for every surface that pins — Lucide's `pin` (ISC), inlined
- *  like the other icons (index.html); `h` makes HTML elements and an SVG is
- *  not one. State is the fill: solid when pinned, outline when not. */
-const pinIcon = (pinned: boolean): string =>
-  `<svg viewBox="0 0 24 24" fill="${pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>`;
-
-/** Hover-only in the rail, like the ⫶ beside it — a resident pin on every
- *  pinned row was clutter, and the top of the list already says which rows
- *  are pinned. The palette shows the pin on every row. */
-function pinButton(s: SessionInfo, hover: boolean): HTMLElement {
-  const pin = h("button", hover ? HOVER_BTN : `flex ${ROW_BTN}`);
-  pin.innerHTML = pinIcon(s.pinned);
-  pin.title = s.pinned ? "Unpin" : "Pin to top";
-  pin.onclick = (ev) => {
-    ev.stopPropagation();
-    void setPinned(s, !s.pinned);
-  };
-  return pin;
-}
-
 // --- row actions ---------------------------------------------------------------------
-// All three do the same thing: draw the new state, send it, and let the server
-// have the last word. Only the field, the request and whether the answer can
-// correct the guess differ.
-
-/** `set` writes the row — with the new value, and again with the old one if the
- *  write failed. What a successful write settles on comes back as a
- *  `sessions-changed` re-read, like every other change to a session. */
-async function optimistic<T>(
-  set: (value: T) => void,
-  next: T,
-  previous: T,
-  url: string,
-  body: Record<string, unknown>,
-): Promise<void> {
-  const draw = (value: T): void => {
-    set(value);
-    renderSessions();
-    deps.onPinsChanged();
-  };
-  draw(next);
-  if (!(await sendJson(url, body)).ok) draw(previous); // the server is the truth
-}
 
 /** Give the session a name. The transcript is where it lands, so it is the
  *  title on every surface and after every restart — including the IM panels,
  *  which read the same listing.
  *
  *  `prompt` is the idiom already in use for a one-line answer (ui/api.ts):
- *  a dialog of our own would be the third place this page asks for a string. */
+ *  a dialog of our own would be the third place this page asks for a string.
+ *
+ *  Drawn before the write and taken back if it fails; what a successful write
+ *  settles on comes back as a `sessions-changed` re-read, like every other
+ *  change to a session. */
 export async function renameSession(s: SessionInfo): Promise<void> {
   const typed = window.prompt("Session name — empty resets it to the first message", s.title ?? "");
   if (typed === null) return; // cancelled, which is not the same as cleared
+  const previous = s.title;
+  const draw = (title: string | undefined): void => {
+    s.title = title;
+    renderSessions();
+    deps.onTitleChanged();
+  };
   // A cleared name shows as untitled for the moment between here and the
   // re-read: the title it falls back to is derived from a transcript, and this
   // page has none.
-  await optimistic<string | undefined>(
-    (title) => (s.title = title),
-    typed.trim() || undefined,
-    s.title,
-    `/api/sessions/${s.id}/rename`,
-    { name: typed },
-  );
+  draw(typed.trim() || undefined);
+  if (!(await sendJson(`/api/sessions/${s.id}/rename`, { name: typed })).ok) draw(previous);
 }
-
-/** Unpin keeps the session — it just drops back into the list below. */
-export const setPinned = (s: SessionInfo, pinned: boolean): Promise<void> =>
-  optimistic((v) => (s.pinned = v), pinned, !pinned, `/api/sessions/${s.id}/pin`, { pinned });
 
 /** One faint letter, no box: on an instance that mostly talks through Slack
  *  the chip is on most rows, and a boxed constant is noise. */
@@ -300,7 +182,6 @@ function sessionRow(s: SessionInfo): HTMLElement {
   );
   // Touch has no hover, so a hover-revealed control there is unreachable —
   // pointer-coarse makes it resident instead.
-  const pin = pinButton(s, true);
   const more = h("button", HOVER_BTN, "\u22ef");
   more.title = "Session actions";
   more.onclick = (ev) => {
@@ -312,7 +193,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
     // Not the header's `untitled(cwd)`: the row's title attribute already
     // names the directory, and the long form would truncate to "New session i…".
     h("span", "truncate", s.title ?? "untitled"),
-    h("div", "ml-auto flex flex-none items-center gap-1", ...channelChip(s), pin, more),
+    h("div", "ml-auto flex flex-none items-center gap-1", ...channelChip(s), more),
   );
   li.onclick = () => deps.select(s.id);
   // The facts the row has no room for, on the native tooltip: where it runs,
@@ -322,17 +203,16 @@ function sessionRow(s: SessionInfo): HTMLElement {
     `active ${relTime(lastActive(s))} ago · created ${new Date(s.createdAt).toLocaleDateString()}`,
     ...(s.channel && s.channel !== "web" ? [`answering ${s.channel}`] : []),
   ].join("\n");
-  if (s.pinned) sortable(li, s.id, (id, after) => dropSession(id, s.id, after));
   return li;
 }
 
 /** The render model as one string — every field of a row the rail or the
  *  palette draws, plus which row is selected and how many rows are asked for.
  *  Same short-circuit the Activity view uses (ui/activity.ts): a rebuild
- *  replaces every node, so it drops the drag handlers and the hover the pointer
- *  is on, and one landing between a mousedown and its mouseup swallows the
- *  click that was already happening — and ~12 call sites reach here on state
- *  events that changed none of this. */
+ *  replaces every node, so it drops the hover the pointer is on, and one
+ *  landing between a mousedown and its mouseup swallows the click that was
+ *  already happening — and ~12 call sites reach here on state events that
+ *  changed none of this. */
 const renderKey = (): string => `${deps.currentId() ?? ""}\n${shown}\n${JSON.stringify(deps.sessions())}`;
 
 let drawn = "";
@@ -340,10 +220,9 @@ let drawn = "";
 /** How many rows the rail shows; "Load more" grows it, nothing shrinks it. */
 let shown = PAGE;
 
-/** `force` redraws whatever the key says — the drag handlers' only way back. */
-export function renderSessions(force = false): void {
+export function renderSessions(): void {
   const key = renderKey();
-  if (key === drawn && !force) return;
+  if (key === drawn) return;
   drawn = key;
   const sessions = deps.sessions();
   // The one place the dots are painted, so also the one place the two surfaces
@@ -376,7 +255,7 @@ export function renderSessions(force = false): void {
 // with the cwd on the row.
 
 /** One thing the palette can open. `session` is what makes a row a session
- *  row: the state dot, its age and the pin toggle all hang off it. */
+ *  row: the state dot and its age hang off it. */
 interface Target {
   label: string;
   detail: string;
@@ -428,10 +307,7 @@ function paletteRow(t: Target): HTMLElement {
     h("span", "max-w-[45%] flex-none truncate text-[11.5px] text-neutral-400", t.detail),
   );
   if (t.session) {
-    li.append(
-      h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)),
-      pinButton(t.session, false),
-    );
+    li.append(h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)));
   }
   // Hover is its own grey, and it does not move the selection. Driving one
   // highlight from both pointer and keyboard meant the browser could aim it:
@@ -484,7 +360,7 @@ function renderArchive(): void {
   ];
   const sections: [string, Target[]][] = [
     ["Running", streaming.sort(byAge).map(target)],
-    ["Pinned", idle.pinned.map(target)],
+    ["Recent", idle.top.map(target)],
     ["Sessions", idle.rest.map(target)],
   ];
   // A query is a question about everything, so the Console answers it up top;

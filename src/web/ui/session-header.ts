@@ -1,6 +1,6 @@
 // The selected session's header: its title row, the meta chips (model,
-// reasoning, context usage) and the ⋯ menu — info panel, pin, model and
-// reasoning pickers, compacting the context and starting a session beside it.
+// reasoning, context usage) and the ⋯ menu — info panel, model and reasoning
+// pickers, compacting the context and starting a session beside it.
 // Owns the model/context state the snapshot reports; main.ts owns which
 // session is selected and feeds state in through init.
 
@@ -11,7 +11,7 @@ import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel } from "./shortcut.js";
-import { renameSession, setPinned, type SessionInfo } from "./sidebar.js";
+import { renameSession, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel, TurnMeta } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
@@ -36,15 +36,9 @@ let deps: HeaderDeps;
 
 export function initHeader(d: HeaderDeps): void {
   deps = d;
-  // Two of the ⋯ menu's actions are frequent enough to earn a chord. They act
-  // on the *current* session — the menu also opens from a rail row, which
-  // is why the rows only advertise the chord for the one it would hit.
-  chord(PIN_KEY, () => {
-    const s = deps.currentSession();
-    if (!s) return;
-    closeMenu();
-    void setPinned(s, !s.pinned);
-  }, modal);
+  // One of the ⋯ menu's actions is frequent enough to earn a chord. It acts on
+  // the *current* session — the menu also opens from a rail row, which is why
+  // the rows only advertise the chord when it would hit theirs.
   chord(FILES_KEY, () => {
     const s = deps.currentSession();
     if (!s) return;
@@ -57,7 +51,6 @@ export function initHeader(d: HeaderDeps): void {
  *  over a view it was never opened from, so both chords stand down. */
 const modal = (): boolean => document.querySelector("dialog[open]") !== null;
 
-const PIN_KEY = "d"; // bookmark — the gesture every browser already spells ⌘D
 const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘O are taken
 
 const chatTitle = $("#chat-title");
@@ -127,7 +120,7 @@ export function renderHeader(): void {
   chatTitle.title = s ? "Session info" : "";
   chatTitle.onclick = s ? () => sessionInfo(chatTitle, s) : null;
   chatMenu.classList.toggle("hidden", !s);
-  // Everything per-session (info, pin, model) lives in the ⋯ menu.
+  // Everything per-session (info, rename, model) lives in the ⋯ menu.
   if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
   renderSessionMeta();
   deps.syncBar();
@@ -331,16 +324,6 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       onSelect: () => {
         closeMenu();
         void renameSession(s);
-      },
-    },
-    {
-      label: s.pinned ? "Unpin" : "Pin",
-      hint: current ? chordLabel(PIN_KEY) : "",
-      // No checkmark: it would sit on a verb, so a pinned session reads as
-      // "already unpinned". The label is the state, and it already switched.
-      onSelect: () => {
-        closeMenu();
-        void setPinned(s, !s.pinned);
       },
     },
     {

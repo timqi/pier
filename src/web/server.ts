@@ -83,7 +83,8 @@ export interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;
-  /** Pinned sessions, and the ones whose last finished turn nobody viewed. */
+  /** The rail's working set, and the sessions whose last finished turn nobody
+   *  viewed. */
   sessions: SessionStateStore;
   config: ConfigStore;
   providers: ProviderManager;
@@ -201,7 +202,7 @@ export function createServer(
    *  not survive a restart or an eviction (Pi persisted nothing), but while
    *  this process lives it is in `nascent` and therefore in the rail — left
    *  alone, clicking it 404s forever. The load path is where a ghost is
-   *  discovered, so it is where the entry and its pin are dropped and every
+   *  discovered, so it is where the entry and its row are dropped and every
    *  rail told; the 404 then says what happened instead of looking like a
    *  crash (§5b). */
   const ensureLoadable = async (id: string): Promise<AgentSession> => {
@@ -244,30 +245,24 @@ export function createServer(
   };
 
   // One session as every list renders it: the summary, what the workbench
-  // decided about it, and what is true of it right now. `modified` rides
-  // along: it is the rail's sort key for everything not pinned.
+  // decided about it, and what is true of it right now. `rank` is the place in
+  // the rail's working set, when it has one; `modified` rides along for the
+  // row's tooltip, and orders nothing.
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>) => ({
     ...s,
-    ...(own?.sort === undefined ? {} : { sort: own.sort }),
+    ...(own?.rank === undefined ? {} : { rank: own.rank }),
     state: router.stateOf(s.id) ?? "idle",
-    pinned: own?.pinned ?? false,
     unread: own?.unread ?? false,
     channel: channelOf?.(s.id) ?? "web",
     activeRuns: active.get(s.id) ?? 0,
   });
 
-  // One drag, one write of the pinned list. The whole list rather than a move
-  // — the client has just rendered the result, and replaying a move on top of
-  // a stale list would put the row somewhere nobody dropped it.
-  app.post("/api/sessions/order", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    const sessions: unknown = body?.sessions;
-    if (!Array.isArray(sessions) || !sessions.every((x) => typeof x === "string" && x)) {
-      return c.json({ error: "sessions must be a list of ids" }, 400);
-    }
-    state.reorder(sessions as string[]);
-    hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ ok: true });
+  // The rail's top rows are maintained here and nowhere else: a session a
+  // human speaks to and that is not in the working set already takes the front
+  // slot (web/session-state.ts). No route — there is no gesture to make, and
+  // an IM message has no browser to make it from.
+  router.onSpokenTo((id) => {
+    if (state.promote(id)) hub.emitWorkspace({ type: "sessions-changed" });
   });
 
   app.get("/api/sessions", async (c) => {
@@ -297,18 +292,6 @@ export function createServer(
       hub.emitWorkspace({ type: "sessions-changed" });
     }
     return c.json({ ok: true });
-  });
-
-  app.post("/api/sessions/:id/pin", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
-    const id = c.req.param("id");
-    // A pin is a row in the workbench's own table, so it has to be a session
-    // Pi knows — or one created here that Pi has not persisted yet.
-    if (!nascent.has(id) && !(await factory.find(id))) return c.json({ error: `session ${id} not found` }, 404);
-    state.pin(id, body.pinned);
-    hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ pinned: body.pinned });
   });
 
   // The two responses big enough to matter: a transcript, and one turn's tool
@@ -567,7 +550,7 @@ export function createServer(
   });
 
   // Workspace stream: one per client, keeps every session list in sync
-  // (created/pinned → re-list, run state → patch) without polling.
+  // (created/promoted → re-list, run state → patch) without polling.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       // A write to a torn-down stream must not become an unhandled rejection.

@@ -250,10 +250,10 @@ export function applyRoute(): void {
   const sessions = deps.sessions();
   const currentId = deps.currentId();
   const wanted = route?.kind === "session" ? route.id : null;
-  // Nothing asked for: the rail's first row, which is the top pinned session
-  // when there is one.
-  const { pinned, rest } = orderSessions(sessions);
-  const id = wanted ?? currentId ?? (pinned[0] ?? rest[0])?.id ?? null;
+  // Nothing asked for: the rail's first row, which is the front of the working
+  // set when there is one.
+  const { top, rest } = orderSessions(sessions);
+  const id = wanted ?? currentId ?? (top[0] ?? rest[0])?.id ?? null;
   applyingRoute = true;
   try {
     if (id && id !== currentId) deps.select(id);

@@ -162,7 +162,7 @@ async function createSession(cwd: string): Promise<void> {
   // so it is rendered now and the workspace stream's own refresh reconciles it
   // — selecting must not wait for a full listing (principle 7).
   sessions.unshift({
-    id, cwd, createdAt: Date.now(), state: "idle", pinned: false, unread: false, channel: "web",
+    id, cwd, createdAt: Date.now(), state: "idle", unread: false, channel: "web",
     activeRuns: 0,
   });
   await select(id); // renders the rail and the header with the row above
@@ -472,7 +472,7 @@ initSidebar({
   sessionMenu,
   createSession,
   openConsole: showConsole,
-  onPinsChanged: renderHeader,
+  onTitleChanged: renderHeader,
 });
 initHeader({
   currentId: () => currentId,

@@ -186,7 +186,7 @@ export type SessionState = "idle" | "streaming";
  * comes from that session's own event stream.
  */
 export type WorkspaceEvent =
-  | { type: "sessions-changed" } // created, pinned/unpinned → re-list
+  | { type: "sessions-changed" } // created, renamed, promoted, read → re-list
   | { type: "session-state"; sessionId: string; state: SessionState }
   | { type: "tasks-changed" }
   | { type: "task-run-changed"; taskId: string; runId: string }

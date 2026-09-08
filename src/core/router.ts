@@ -106,6 +106,7 @@ export class Router {
    *  the process exits when the drain ends — `endDrain` exists for the one
    *  caller that drains *speculatively* and may not get to exit. */
   private draining = false;
+  private spokenTo?: (sessionId: string) => void;
 
   constructor(
     private readonly hub: EventHub,
@@ -115,6 +116,15 @@ export class Router {
 
   registerChannel(channel: Channel): void {
     this.channels.set(channel.id, channel);
+  }
+
+  /** Told which session a human just spoke to — every message from a chat or
+   *  the workbench passes through `dispatch`, and nothing a task or a subagent
+   *  starts does. Registered rather than a constructor argument: the one
+   *  listener is the rail's working set (web/session-state.ts), built with the
+   *  web surface long after the router. */
+  onSpokenTo(listener: (sessionId: string) => void): void {
+    this.spokenTo = listener;
   }
 
   /**
@@ -640,6 +650,7 @@ export class Router {
     // … and after — a dispatch that was inside a slow ensure when the gate
     // closed must not start the turn the drain just declared finished with.
     if (this.draining) this.refuseDraining(msg.key);
+    this.spokenTo?.(session.id);
     const { action, text } = decide(msg, session.state);
     // A group chat is many people talking into one session; without a speaker
     // line the agent cannot tell them apart or mention anyone back. Emitted

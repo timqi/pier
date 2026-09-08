@@ -62,7 +62,7 @@ src/
                fs.ts (one confined resolver, and the listing/bytes/mkdir
                routes on it), explorer.ts (what git knows about a project
                directory: refs, worktrees, diffs), session-state.ts (what
-               the workbench decided about a session: pinned, unread, order),
+               the workbench decided about a session: unread, working set),
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,
                ui/ modules (form.ts + dom.ts are the shared vocabulary;
@@ -352,4 +352,11 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
 - No project concept: the rail is a flat list of sessions, and a directory is
   chosen once, when a session is created. The new-session dialog suggests the
   distinct cwds of the list; a grouping by repository existed and was removed
-  as noise a pin and recency ordering did better.
+  as noise the order below did better.
+- The rail's order never moves on its own. On top is a working set of eight,
+  which a session enters at the front when a human speaks to it and only when
+  it is not in the set already — members hold their places until one is pushed
+  out of the last slot; below it, every other session by birth. Pinning and
+  drag-ordering were what this replaced, and "most recently active" is what
+  they were both compensating for: it moved a row for every background turn.
+  web/session-state.ts owns the set, core/router.ts reports who was spoken to.

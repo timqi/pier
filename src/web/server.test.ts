@@ -403,17 +403,17 @@ function setup(
 
 /** The rail, as a surface reads it: the listing joined with what the store
  *  owns, and the route is where that happens. */
-const rail = async (app: Hono): Promise<{ id: string; title?: string; pinned: boolean; sort?: number; modified?: number }[]> =>
-  (await (await app.request("/api/sessions")).json()) as { id: string; title?: string; pinned: boolean; sort?: number; modified?: number }[];
+const rail = async (app: Hono): Promise<{ id: string; title?: string; rank?: number; modified?: number }[]> =>
+  (await (await app.request("/api/sessions")).json()) as { id: string; title?: string; rank?: number; modified?: number }[];
 
 describe("workbench server", () => {
-  // `modified` is forwarded: it is what orders every row that is not pinned.
+  // `modified` is forwarded for the row's tooltip; it orders nothing.
   it("lists sessions with live state, dated by their transcript", async () => {
     const { app } = setup();
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: expect.any(Number), state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: expect.any(Number), state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -493,18 +493,18 @@ describe("workbench server", () => {
     expect(rows[0]?.channel).toBe("slack");
   });
 
-  // One source, one shape: the pin is joined onto the listing's row, and the
-  // title comes off the transcript like everywhere else.
+  // One source, one shape: the working-set rank is joined onto the listing's
+  // row, and the title comes off the transcript like everywhere else.
   it("joins what it owns onto the listing", async () => {
     const { app, factory, state } = setup();
     vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: 5 },
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Worked on", modified: 5 },
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6 },
     ]);
-    state.pin("s1", true);
+    state.promote("s1");
     expect(await rail(app)).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: 5, state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
-      { id: "s2", cwd: "/other", createdAt: 2, modified: 6, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Worked on", modified: 5, rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/other", createdAt: 2, modified: 6, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -596,46 +596,20 @@ describe("workbench server", () => {
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
-    // Not on disk yet — the nascent entry fills the gap. Not pinned: a new
-    // session is the newest row, which is where the list puts it anyway.
+    // Not on disk yet — the nascent entry fills the gap. No rank: a new
+    // session is the newest row, which is where the list puts it anyway, and
+    // nobody has spoken to it yet.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
     listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: 7 });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
-  });
-
-  it("toggles pins on demand", async () => {
-    const { app } = setup();
-    const pin = (pinned: unknown) =>
-      app.request("/api/sessions/s1/pin", { method: "POST", body: JSON.stringify({ pinned }) });
-    expect((await pin(true)).status).toBe(200);
-    expect((await rail(app)).map((r) => [r.id, r.pinned])).toEqual([["s1", true]]);
-    expect((await pin(false)).status).toBe(200);
-    expect((await rail(app)).map((r) => [r.id, r.pinned])).toEqual([["s1", false]]);
-
-    const bad = await app.request("/api/sessions/s1/pin", { method: "POST", body: "{}" });
-    expect(bad.status).toBe(400);
-  });
-
-  // A session no listing knows has no row to pin, and saying so beats writing
-  // a row keyed on nothing.
-  it("refuses to pin a session no listing knows", async () => {
-    const { app, factory } = setup();
-    vi.mocked(factory.list).mockResolvedValue([]);
-    vi.mocked(factory.find).mockResolvedValue(undefined);
-    const res = await app.request("/api/sessions/nowhere/pin", {
-      method: "POST",
-      body: JSON.stringify({ pinned: true }),
-    });
-    expect(res.status).toBe(404);
-    expect(((await res.json()) as { error: string }).error).toContain("not found");
   });
 
   // The name goes into the transcript and nowhere else; the rail re-reads it
@@ -659,46 +633,57 @@ describe("workbench server", () => {
       .toBe(400);
   });
 
-  // A row that predates all of this holds a pin and a directory and nothing
+  // A row that predates all of this holds a rank and a directory and nothing
   // else. Everything the rail draws comes off the listing, so there is no
-  // backfill to run and no stale summary to repair. Nothing dates a pin
-  // either: a month-old session stays on top until a hand unpins it.
-  it("renders a pin that carries no summary at all", async () => {
+  // backfill to run and no stale summary to repair. Nothing dates a rank
+  // either: a month-old session holds its slot until eight newer ones push it
+  // out.
+  it("renders a working-set row that carries no summary at all", async () => {
     const month = Date.now() - 30 * 86_400_000;
     const { app, factory } = setup(
       "/tmp",
       fakeSecrets(),
       {},
       (db) =>
-        db.prepare("INSERT INTO session_state(session_id, pinned, cwd) VALUES ('s1', 1, '/tmp')")
+        db.prepare("INSERT INTO session_state(session_id, sort, cwd) VALUES ('s1', 0, '/tmp')")
           .run(),
     );
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: month, title: "from the transcript", modified: Date.now() },
     ]);
     expect(await rail(app)).toEqual([
-      expect.objectContaining({ id: "s1", title: "from the transcript", pinned: true }),
+      expect.objectContaining({ id: "s1", title: "from the transcript", rank: 0 }),
     ]);
   });
 
-  it("keeps the order the pinned rows were dragged into", async () => {
-    const { app, state, factory } = setup();
+  // The rail's order is maintained by one rule and no gesture: whoever is
+  // spoken to and is not up there already takes the front slot. A member is
+  // left exactly where it is — that is the whole point, so switching between
+  // two sessions cannot make the list dance.
+  it("promotes a session a human speaks to, and moves nothing that is already up there", async () => {
+    const { app, router, factory, hub } = setup();
     vi.mocked(factory.list).mockResolvedValue([
       { id: "a", cwd: "/a", createdAt: 1, modified: 1 },
       { id: "b", cwd: "/b", createdAt: 2, modified: 2 },
     ]);
-    state.pin("a", true);
-    state.pin("b", true);
-    const order = (body: string) => app.request("/api/sessions/order", { method: "POST", body });
+    router.attach({ channelId: "web", conversationId: "a" }, fakeSession("a"));
+    router.attach({ channelId: "web", conversationId: "b" }, fakeSession("b"));
+    const changed = vi.fn();
+    hub.subscribeWorkspace(changed);
+    const speak = (id: string) =>
+      app.request(`/api/sessions/${id}/messages`, { method: "POST", body: JSON.stringify({ text: "hi" }) });
 
-    expect((await order(JSON.stringify({ sessions: ["b", "a"] }))).status).toBe(200);
-    expect((await rail(app)).map((r) => [r.id, r.sort])).toEqual([["a", 1], ["b", 0]]);
+    expect((await speak("a")).status).toBe(202);
+    expect((await rail(app)).map((r) => [r.id, r.rank])).toEqual([["a", 0], ["b", undefined]]);
+    expect((await speak("b")).status).toBe(202);
+    expect((await rail(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
 
-    // Whatever else the body carries, the list is the only thing that is read.
-    expect((await order("{}")).status).toBe(400);
-    expect((await order(JSON.stringify({ sessions: ["a", 7] }))).status).toBe(400);
-    expect((await order(JSON.stringify({ sessions: "a" }))).status).toBe(400);
-    expect((await order(JSON.stringify({ projects: ["/a"] }))).status).toBe(400);
+    // Back to the one already in the set: nothing moves, and no re-list is
+    // broadcast for an order that did not change.
+    changed.mockClear();
+    expect((await speak("a")).status).toBe(202);
+    expect((await rail(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
+    expect(changed).not.toHaveBeenCalledWith({ type: "sessions-changed" });
   });
 
   it("creates a session in the given project directory, never pier's own", async () => {
@@ -711,8 +696,9 @@ describe("workbench server", () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: "s1" });
     expect(factory.create).toHaveBeenCalledExactlyOnceWith({ cwd: "/tmp" });
-    // Not pinned: pinned is "stuck to the top", and nobody put it there.
-    expect(state.flags().get("s1")?.pinned ?? false).toBe(false);
+    // No rank: the working set is what has been spoken to, and creating a
+    // session is not speaking to it.
+    expect(state.flags().get("s1")?.rank).toBeUndefined();
     // attached: session events now reach the hub
     const seen = vi.fn();
     hub.subscribe("s1", seen);
@@ -1352,9 +1338,9 @@ describe("workbench server", () => {
       throw new Error("unknown session: ghost");
     });
     const state = new SessionStateStore(openDb(":memory:"));
-    // The create-time write: pinned with a cwd, exactly what POST /api/desk
-    // and POST /api/sessions persist before Pi has anything on disk.
-    state.pin("ghost", true);
+    // The create-time write: a rank and a cwd, exactly what an old POST
+    // /api/desk persisted before Pi had anything on disk.
+    state.promote("ghost");
     const events: string[] = [];
     hub.subscribeWorkspace((e) => events.push(e.type));
     const app = createServer({
