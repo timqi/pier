@@ -15,7 +15,7 @@ catch, not the line count.
 | `POST /api/sessions/order` | body `{sessions}` (list of ids) → the order of the pinned rows, the only manual order the UI owns |
 | `GET /api/sessions` | `AgentFactory.list()` (with `modified`, the rail's sort key) + live state from router + `pinned`/`unread`/`sort` from the pin store (`pinned` = stuck to the top: nothing expires) |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
-| `POST /api/sessions/:id/pin` | body `{pinned}` → stick to / release from the top of the rail, returns `{pinned}`; the directory it records comes from the listing, 404 when nothing can place the session |
+| `POST /api/sessions/:id/pin` | body `{pinned}` → stick to / release from the top of the rail, returns `{pinned}`; 404 for a session no listing knows |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn and re-dispatch the new text; 409 while streaming |
@@ -102,31 +102,26 @@ the list). `npm run dev:web` gives HMR with an
 Single page, with chat plus Console views (the raw timeline pane was folded into
 per-turn Activity groups):
 
-- **Projects** (left): a working set, not an archive — the pinned sessions,
-  for as long as a hand leaves them pinned. A seven-day lease used to hide the
-  quiet ones and `kept` used to opt out of it; both are gone (migration 11).
-  Expiry destroyed nothing — the transcript, the place in the order and the
-  pin all survived it — so what it actually did was hide rows nobody asked it
-  to hide, and it needed a second state to say "not this one". The ✓ on the row
-  is the only way out. The rows are the listing joined with what `session_state` owns:
-  no second copy of a summary, so nothing to keep in step. Grouped
-  by project (derived from session cwd). Sessions created in Pier are pinned
-  automatically; everything else stays out of the sidebar. The row's `✓` gives
-  membership up — the session, its transcript and its place all stay, and All
-  sessions pins it back. One group is one *repository*, not one directory:
-  `web/repos.ts` reports the common git dir behind each cwd (off the request
-  path — the first read answers without it and a `sessions-changed` regroups
-  the rail), so every worktree of a repo lands in the same group with its
-  branch on the row, and "New session" offers one row per checkout. Each project is a collapsible group (collapse
-  state in `localStorage`) whose header shows the session count, or a green dot
-  while any of its sessions stream; rows carry a state dot, relative time and a
-  hover `⋯` opening the session menu. The section header carries the only two
-  sidebar actions as icons (avibe layout): search → All sessions, plus → the
-  "New session" dialog with cwd input + known-project suggestions.
-- **All sessions** (search icon → modal): everything `AgentFactory.list()`
-  knows about, searchable over title + cwd, grouped by project, each row with a
-  pin toggle; click opens the session. Pins, the unread dot and the two
-  manual orders are the only UI-owned persisted state — ownership flags on the
+- **Sessions** (left): one flat list of every session Pi lists — the
+  workbench's own, the IM channels' (a one-letter chip says which) — minus the
+  ones task runs created for themselves (`taskSessions`, a set the tasks area
+  hands `createServer`; they stay reachable by id from Runs and Activity).
+  Pinned rows on top in a hand-arranged order (drag; `sort`), a resident pin
+  saying which they are; everything else by last transcript write, newest
+  first, never remembered. Twenty rows, then "Load more" — client-side, the
+  list is already in memory. A row is a state dot only when there is a state
+  (streaming, unread-by-you, subagents in flight), the title, and on hover a
+  pin and `⋯`; cwd, activity and channel sit on the row's native tooltip. The
+  rows are the listing joined with what `session_state` owns — no second copy
+  of a summary, so nothing to keep in step. The cwd is chosen once, in the
+  "New session" dialog (plus icon), whose picker offers the list's distinct
+  directories. There is no membership: the grouping by repository, the
+  per-directory order, the archive dialog and a "listed" flag all went with it
+  (migration 19 reset the pins whose meaning changed).
+- **Search palette** (search icon, ⌘K): every session, searchable over title,
+  cwd and channel, in the rail's order under Running / Pinned / Sessions, plus
+  the Console views; each session row carries the pin. Pins, the unread dot
+  and the pinned order are the only UI-owned persisted state — flags on the
   `session_state` table (`src/web/session-state.ts`), everything else derived
   from the transcript; outside the seams, injected into `createServer` so tests
   stay hermetic.
@@ -140,9 +135,9 @@ per-turn Activity groups):
   in the menu instead of taking permanent header space.
 - **Session menu** (`menu.ts`): one anchored popover primitive, one open at a
   time, closed by outside pointerdown / Esc / page scroll (scrolling *inside*
-  the panel does not close it). Opened from the chat header and from project
+  the panel does not close it). Opened from the chat header and from rail
   rows; holds session info (title, cwd, id, model, context usage from the
-  snapshot), pin-to-Projects and the model picker. `model-picker.ts` is the
+  snapshot), pin/unpin, "New session here", files and the model picker. `model-picker.ts` is the
   standalone grouped-by-provider list, groups collapsed except the one holding
   the current model — separate because model choice will also be needed outside
   chat (scheduled tasks).

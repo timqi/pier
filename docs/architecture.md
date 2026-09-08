@@ -63,7 +63,6 @@ src/
                routes on it), explorer.ts (what git knows about a project
                directory: refs, worktrees, diffs), session-state.ts (what
                the workbench decided about a session: pinned, unread, order),
-               repos.ts (which repository a project directory belongs to),
                push.ts (who is notified of a finished turn) + webpush.ts
                (the RFC 8291/8292 wire format), ui/public/sw.js,
                ui/ modules (form.ts + dom.ts are the shared vocabulary;
@@ -315,7 +314,7 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   ships.
 - Web workbench before IM channels (fastest loop for steering/observability).
 - Boards (avibe's "Show pages", renamed): a board is a *directory* under
-  `$PIER_HOME/boards`, derived by scanning like Projects are — no table, no
+  `$PIER_HOME/boards`, derived by scanning like sessions are — no table, no
   store. Only `<board>/site/` is served; sources, README and manifest stay off
   the wire. Many-to-many with sessions and independent of their lifecycle.
   Hand-written static HTML against one shipped classless stylesheet: Pier ships
@@ -350,7 +349,7 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   superseded turns as much as its conclusions. Context travels as a written
   handoff in the prompt. Runs stored before the removal keep `sessionMode:
   "fork"`, and the runner refuses them by name rather than guess a directory.
-- Projects are derived, not registered: a project is a distinct session cwd.
-  No project store exists; the sidebar groups by cwd and the new-session
-  dialog suggests known cwds. A real registry only arrives if derivation
-  proves insufficient.
+- No project concept: the rail is a flat list of sessions, and a directory is
+  chosen once, when a session is created. The new-session dialog suggests the
+  distinct cwds of the list; a grouping by repository existed and was removed
+  as noise a pin and recency ordering did better.

@@ -13,7 +13,7 @@ predates that and holds unchanged.
 
 1. **A board is a directory, not a record.** `$PIER_HOME/boards/<slug>/`, served
    from its `site/` subdir. The filesystem is the source of truth; boards are
-   *derived* by scanning, exactly like Projects are derived from session cwds.
+   *derived* by scanning, exactly like the session list is derived from transcripts.
    No table, no store, no migration.
 2. **Lifecycle is independent of sessions.** A board links 0..n sessions and a
    session appears on 0..n boards (many-to-many, kept in the board's manifest).
