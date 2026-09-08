@@ -270,7 +270,12 @@
        arrows sit at the screen's edges and a tall shot and a wide one don't
        move the control under your thumb; #image-stage is the box a zoomed
        image scrolls inside (ui/attachments.ts). -->
-  <dialog id="image-dialog" class="fixed inset-0 m-0 max-h-none max-w-none bg-transparent p-0 backdrop:bg-black/70">
+  <!-- The size is written out, not left to `inset-0`: a dialog is `width:
+       fit-content` in the UA sheet, and an inset pair does not stretch a box
+       that already has a width — it sized itself to the image and sat in the
+       top-left corner, with the backdrop clicks landing on the dialog instead
+       of on #image-stage. -->
+  <dialog id="image-dialog" class="fixed inset-0 m-0 h-[100dvh] w-full max-h-none max-w-none bg-transparent p-0 backdrop:bg-black/70">
     <div id="image-stage" class="flex h-full w-full items-center justify-center overflow-hidden">
       <img id="image-full" alt="" class="max-h-[92dvh] max-w-[92vw] cursor-zoom-in rounded-xl object-contain" />
     </div>
