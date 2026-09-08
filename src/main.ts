@@ -408,6 +408,7 @@ app.route("/", createServer({
   reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
+  taskSessions: () => tasks.taskSessions(),
   channelOf: (id) => conversations.channelOf(id),
 }));
 

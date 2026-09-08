@@ -179,6 +179,19 @@ export class TaskStore {
     return new Map(rows.map((row) => [row.session_id, row.n]));
   }
 
+  /** Every session a run created for itself — `fresh` is the one mode that
+   *  makes a session rather than borrowing one, and a resumed run reuses the
+   *  session its `fresh` predecessor already stamped. These are the agent's
+   *  conversations with itself, which the rail does not list. */
+  taskOwnedSessionIds(): Set<string> {
+    const rows = this.sql(`
+      SELECT DISTINCT json_extract(json, '$.context.sessionId') AS id
+      FROM task_runs
+      WHERE json_extract(json, '$.sessionMode') = 'fresh' AND id IS NOT NULL
+    `).all() as unknown as { id: string }[];
+    return new Set(rows.map((row) => row.id));
+  }
+
   listRunsForSession(sessionId: string, limit = 50): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs

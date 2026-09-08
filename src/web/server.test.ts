@@ -376,6 +376,7 @@ function setup(
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
+    taskSessions: () => tasks.taskSessions(),
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -448,6 +449,39 @@ describe("workbench server", () => {
     const rows = (await (await app.request("/api/sessions")).json()) as
       { id: string; activeRuns: number }[];
     expect(rows.map((row) => [row.id, row.activeRuns])).toEqual([["s1", 1], ["s2", 0]]);
+  });
+
+  // A run's own session is the agent talking to itself: not the operator's
+  // conversation, so not a row. A run that *borrowed* a session (reuse) made
+  // nothing, and the session it ran in stays the operator's. Still readable by
+  // id — Runs and Activity link there — which is /history's business.
+  it("leaves the sessions task runs created out of the list", async () => {
+    const { app, db, factory, tasks } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1 },
+      { id: "child", cwd: "/tmp", createdAt: 2, modified: 2 },
+    ]);
+    const task = await tasks.create({
+      name: "delegate",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "work" },
+    });
+    const store = new TaskStore(db);
+    const run = (id: string, over: Partial<TaskRun>): TaskRun => ({
+      id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      rootRunId: id, depth: 0, resumedFromRunId: null, triggerSource: "agent",
+      invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
+      sessionMode: "fresh", callbackSessionId: null, background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+      state: "succeeded", input: null, context: { definition: task }, probe: null,
+      matched: null, result: null, error: null, skipReason: null,
+      queuedAt: 1, startedAt: 1, finishedAt: 2,
+      ...over,
+    });
+    store.saveRun(run("made-one", { targetSessionId: "child", context: { definition: task, sessionId: "child" } }));
+    store.saveRun(run("borrowed", { sessionMode: "reuse", targetSessionId: "s1", context: { definition: task, sessionId: "s1" } }));
+    const rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
+    expect(rows.map((row) => row.id)).toEqual(["s1"]);
   });
 
   // The badge counts "web" rows only (ui/sidebar.ts): an IM turn is delivered

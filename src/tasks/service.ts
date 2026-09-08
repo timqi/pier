@@ -255,6 +255,11 @@ export class TaskService {
     return this.store.countActiveBackgroundRunsBySession();
   }
 
+  /** The sessions runs made for themselves, for a list of the operator's own. */
+  taskSessions(): Set<string> {
+    return this.store.taskOwnedSessionIds();
+  }
+
   run(
     taskId: string,
     input: unknown = null,

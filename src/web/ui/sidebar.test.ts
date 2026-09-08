@@ -1,7 +1,7 @@
 // The rail's order and its page, without a browser: pinned rows by hand then by
 // birth, the rest by last activity, and twenty rows before "Load more".
 import { beforeEach, expect, it, vi } from "vitest";
-vi.mock("./dom.js", () => ({ $: () => ({}), basename: vi.fn(), h: vi.fn(), relTime: vi.fn(), untitled: vi.fn() }));
+vi.mock("./dom.js", () => ({ $: () => ({}), basename: vi.fn(), h: (_tag: string, cls: string) => ({ cls }), relTime: vi.fn(), untitled: vi.fn() }));
 vi.mock("./api.js", () => ({ sendJson: vi.fn() }));
 vi.mock("./dir-picker.js", () => ({ pathTrigger: vi.fn() }));
 vi.mock("./notifications.js", () => ({ setUnreadBadge: vi.fn() }));
@@ -60,4 +60,16 @@ it("offers each directory once, newest session first", () => {
     row("b", { cwd: "/y", createdAt: 3 }),
     row("c", { cwd: "/x", createdAt: 2 }),
   ])).toEqual(["/y", "/x"]);
+});
+
+// The idle row draws no dot but keeps its width, so the title column does not
+// move between an idle row and a working one above it.
+it("keeps the dot's slot on an idle row and paints it only for something to look at", () => {
+  const dot = (over: Partial<Row>) => sidebar.stateDot(row("x", over)) as unknown as { cls: string; title: string };
+  expect(dot({})).toEqual({ cls: "h-2 w-2 flex-none rounded-full ", title: "" });
+  expect(dot({ state: "streaming" }).cls).toContain("bg-green-500");
+  expect(dot({ unread: true }).cls).toContain("bg-amber-500");
+  // Unread, but answering Slack: that turn was delivered where it came from.
+  expect(dot({ unread: true, channel: "slack" }).cls).not.toContain("bg-");
+  expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
 });

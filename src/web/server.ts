@@ -109,6 +109,10 @@ export interface WebDeps {
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
   /** The same runs, counted per session in one query — what a list needs. */
   activeBackgroundRunCounts?: () => Map<string, number>;
+  /** Sessions a task run created for itself: subagents, cron and manual runs.
+   *  Not the operator's conversations, so the list leaves them out; they stay
+   *  reachable by id from the Runs and Activity views. */
+  taskSessions?: () => Set<string>;
   /** The IM channel that durably owns a session, absent for everything else.
    *  Injected because the mapping lives in channels/. Not push.ts's question:
    *  that one asks which conversation produced *this* turn and is answered
@@ -145,6 +149,7 @@ export function createServer(
     updater,
     backgroundRuns,
     activeBackgroundRunCounts,
+    taskSessions,
     channelOf,
   }: WebDeps,
 ): Hono {
@@ -223,16 +228,18 @@ export function createServer(
       listing = undefined;
     });
 
-  /** Every session a surface may show: what Pi has written, plus the ones
-   *  created here that it has not persisted yet. */
+  /** Every session the rail may show: what Pi has written, plus the ones
+   *  created here that it has not persisted yet, minus the ones task runs
+   *  made for themselves. */
   const allSessions = async (): Promise<SessionSummary[]> => {
     const sessions = await listSessions();
     for (const s of sessions) nascent.delete(s.id);
     // A session created but never prompted would otherwise be listed forever.
     for (const [id, n] of nascent) if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
+    const owned = taskSessions?.() ?? new Set<string>();
     return [
       ...[...nascent].map(([id, n]) => ({ id, ...n })),
-      ...sessions,
+      ...sessions.filter((s) => !owned.has(s.id)),
     ];
   };
 

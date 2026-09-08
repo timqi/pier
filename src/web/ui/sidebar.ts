@@ -188,8 +188,9 @@ const HOVER_BTN =
 const waitingForYou = (s: SessionInfo): boolean => s.unread && s.channel === "web";
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
- *  sky = idle itself but subagents still in flight, grey = idle. */
-function stateDot(s: SessionInfo): HTMLElement {
+ *  sky = idle itself but subagents still in flight. Idle draws nothing — but
+ *  keeps the slot, so titles line up down the list whatever their row says. */
+export function stateDot(s: SessionInfo): HTMLElement {
   const [cls, title] =
     s.state === "streaming"
       ? ["bg-green-500 animate-pulse", "working…"]
@@ -197,10 +198,27 @@ function stateDot(s: SessionInfo): HTMLElement {
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
           ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
-          : ["bg-neutral-300", "idle"];
+          : ["", ""];
   const dot = h("span", `h-2 w-2 flex-none rounded-full ${cls}`);
   dot.title = title;
   return dot;
+}
+
+/** One pushpin for every surface that pins: upright and filled when the row is
+ *  on top, tilted and hollow when it is not. Inline like the other icons
+ *  (index.html, theme.ts); `h` makes HTML elements and an SVG is not one. */
+const pinIcon = (pinned: boolean): string =>
+  `<svg viewBox="0 0 16 16" fill="${pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 ${pinned ? "text-indigo-500" : "rotate-45"}"><path d="M6 2v4L4.5 8.5h7L10 6V2z" /><path d="M5 2h6M8 8.5V14" /></svg>`;
+
+function pinButton(s: SessionInfo, cls: string): HTMLElement {
+  const pin = h("button", cls);
+  pin.innerHTML = pinIcon(s.pinned);
+  pin.title = s.pinned ? "Unpin" : "Pin to top";
+  pin.onclick = (ev) => {
+    ev.stopPropagation();
+    void setPinned(s, !s.pinned);
+  };
+  return pin;
 }
 
 // --- row actions ---------------------------------------------------------------------
@@ -276,12 +294,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
   );
   // Touch has no hover, so a hover-revealed control there is unreachable —
   // pointer-coarse makes it resident instead.
-  const pin = h("button", HOVER_BTN, s.pinned ? "\u2193" : "\u2191");
-  pin.title = s.pinned ? "Unpin" : "Pin to top";
-  pin.onclick = (ev) => {
-    ev.stopPropagation();
-    void setPinned(s, !s.pinned);
-  };
+  const pin = pinButton(s, HOVER_BTN);
   const more = h("button", HOVER_BTN, "\u22ef");
   more.title = "Session actions";
   more.onclick = (ev) => {
@@ -393,24 +406,6 @@ function setActive(index: number): void {
   rows[active]?.el.scrollIntoView({ block: "nearest" });
 }
 
-function pinButton(s: SessionInfo): HTMLElement {
-  const pin = h(
-    "button",
-    `flex-none rounded px-1.5 py-0.5 text-[11.5px] ${
-      s.pinned
-        ? "bg-indigo-50 text-indigo-600"
-        : "text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"
-    }`,
-    s.pinned ? "pinned" : "pin",
-  );
-  pin.title = s.pinned ? "Unpin" : "Pin to top";
-  pin.onclick = (ev) => {
-    ev.stopPropagation();
-    void setPinned(s, !s.pinned);
-  };
-  return pin;
-}
-
 function paletteRow(t: Target): HTMLElement {
   // The transparent bar is always there so gaining it costs no reflow.
   const li = h(
@@ -427,7 +422,7 @@ function paletteRow(t: Target): HTMLElement {
   if (t.session) {
     li.append(
       h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)),
-      pinButton(t.session),
+      pinButton(t.session, "flex-none rounded p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"),
     );
   }
   // Hover is its own grey, and it does not move the selection. Driving one

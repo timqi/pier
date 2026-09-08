@@ -359,14 +359,14 @@ function connect(id: string, cursor: string, generation: number): void {
 
 async function select(id: string): Promise<void> {
   // The pane opens before anything is fetched. A session named from Activity or
-  // from the hash is usually not in the list yet, and the full listing that
-  // decides that costs ~150ms in which the click looked ignored.
+  // Runs is usually not in the list at all — a task run's own session is not
+  // a row — and the snapshot is what says whether the id exists: its 404
+  // carries the reason (ui/api.ts), so nothing is decided here first.
   showChat();
   closeDrawer(); // on mobile the drawer is how you got here
   setSessionHash(id);
-  const listed = sessions.some((s) => s.id === id);
-  if (id === currentId && listed && (source || loading)) return;
-  const seq = ++selectionSeq;
+  if (id === currentId && (source || loading)) return;
+  ++selectionSeq; // a create in flight is abandoned; its answer must not land here
   ++loadSeq;
   starting = false;
   saveDraft(); // the outgoing session keeps its unsent text
@@ -376,22 +376,11 @@ async function select(id: string): Promise<void> {
   renderSessions();
   renderHeader();
   maybeAckRead(); // selecting an unread session is looking at it
-  if (listed) return await loadSession(id);
-  // Unlisted: show the transcript placeholder first, then pay the listing that
-  // says whether this id exists at all — "not found" is worth the wait, a
-  // blank pane during it is not. The old stream closes with the pane it was
-  // painting, or a delta from the session just left lands in the empty one.
-  source?.close();
-  source = null;
-  resetChat();
-  chatLoading(true);
-  await refreshSessions();
-  if (seq !== selectionSeq || currentId !== id) return;
-  await loadSession(id, !sessions.some((s) => s.id === id));
+  await loadSession(id);
 }
 
 /** (Re)load the current session's snapshot and reconnect its event stream. */
-async function loadSession(id: string, missing = false): Promise<void> {
+async function loadSession(id: string): Promise<void> {
   if (currentId !== id) return;
   const generation = ++loadSeq;
   source?.close();
@@ -407,12 +396,6 @@ async function loadSession(id: string, missing = false): Promise<void> {
   // Painted before the fetch: a long transcript takes a moment to arrive and
   // render, and until then the pane would look like an empty session.
   chatLoading(true);
-  if (missing) {
-    loading = false;
-    chatLoading(false);
-    appendTurn("error", `session not found: ${id}`);
-    return;
-  }
   const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   loading = false;
