@@ -1,11 +1,11 @@
 // The selected session's header: its title row, the meta chips (model,
 // reasoning, context usage) and the ⋯ menu — info panel, model and reasoning
-// pickers, compacting the context and starting a session beside it.
+// pickers and starting a session beside it.
 // Owns the model/context state the snapshot reports; main.ts owns which
 // session is selected and feeds state in through init.
 
 import { compact } from "../../core/reply.js";
-import { failure, mustGetJson, sendJson } from "./api.js";
+import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
 import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -185,11 +185,9 @@ function renderSessionMeta(): void {
 
 /** Read-only details panel: what this session is and how full its context is.
  *  Opened from the ⋯ menu, from either title bar, or from a project row. */
-export function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
-  // Third field: a note trailing the value, but not *in* it — every row is
-  // copyable, and "12m ago" pasted anywhere is worthless.
+export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = false): void {
+  // The trailing relative time is supporting text, not part of the value.
   const rows: [string, string, string?][] = [
-    ["Title", s.title ?? "untitled"],
     ["Directory", s.cwd],
     ["Session", s.id],
   ];
@@ -209,26 +207,56 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo): void {
     const at = lastReplyAt;
     rows.push(at === null ? ["Last reply", "—"] : ["Last reply", stampTime(at), agoLabel(at)]);
   }
-  const panel = h("div", "flex max-w-80 flex-col gap-1.5 px-3 py-2");
-  for (const [label, value, note] of rows) {
-    const head = h(
-      "div",
-      "flex items-center gap-1.5",
-      h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", label),
-      // Every field is copyable — cheaper than deciding which ones deserve it.
-      copyBtn(
-        "cursor-pointer text-[10.5px] uppercase tracking-wide text-neutral-400 opacity-0 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100",
-        () => value,
-      ),
-    );
-    const shown = h("span", "break-all font-mono text-[12px] text-neutral-700", value);
-    if (note) shown.append(h("span", "ml-1.5 font-sans text-[11px] text-neutral-400", note));
-    panel.append(h("div", "group flex flex-col", head, shown));
+  const panel = h("div", "w-[min(30rem,calc(100vw-2rem))] max-sm:w-full rounded-xl bg-white px-4 py-4 font-sans text-[15px] leading-[1.6]");
+  const close = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", "×");
+  close.setAttribute("aria-label", "Close session info");
+  close.onclick = closeMenu;
+  const heading = h("div", "sticky top-0 z-10 flex items-start gap-2 bg-white pb-3",
+    h("div", "min-w-0 flex-1",
+      h("div", "text-sm font-medium text-neutral-500", "Session info"),
+      h("h2", "mt-1 [overflow-wrap:anywhere] text-lg leading-7 font-semibold text-neutral-900", s.title ?? untitled(s.cwd))), close);
+  if (fromMenu) {
+    const back = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", "←");
+    back.setAttribute("aria-label", "Back to session actions");
+    back.onclick = () => sessionMenu(anchor, s);
+    heading.prepend(back);
   }
+  panel.append(heading);
+  const fields = h("dl", "");
+  for (const [label, value, note] of rows) {
+    const mono = ["Directory", "Session"].includes(label);
+    const shown = h("dd", `min-w-0 flex items-start gap-2 text-neutral-700 ${mono ? "font-mono text-sm leading-6" : ""}`,
+      h("span", "min-w-0 flex-1 [overflow-wrap:anywhere]", value));
+    if (label === "Directory" || label === "Session") {
+      const copy = copyBtn("min-h-11 min-w-11 sm:min-h-8 shrink-0 cursor-pointer rounded-lg px-2 py-1 text-[13px] font-sans text-neutral-500 hover:bg-neutral-100 focus-visible:outline-2", () => value);
+      copy.setAttribute("aria-label", `Copy ${label.toLowerCase()}`);
+      shown.append(copy);
+    }
+    if (note) shown.firstElementChild?.append(h("span", "mt-1 block font-sans text-[13px] leading-5 text-neutral-500", note));
+    const boundary = label === "Model" || label === "Created";
+    fields.append(h("div", `grid gap-1.5 py-3 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-4 ${boundary ? "mt-3 border-t border-neutral-200 pt-4" : ""}`,
+      h("dt", "text-[15px] text-neutral-500", label === "Session" ? "Session ID" : label), shown));
+  }
+  panel.append(fields);
   openPanel(anchor, panel);
 }
 
-async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
+async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo): Promise<void> {
+  const loading = h("div", "px-3 py-3 text-[15px] text-neutral-500", "Loading models…");
+  const content = h("div", "", loading);
+  if (session) {
+    const back = h("button", "icon-btn h-11 w-11", "←");
+    back.setAttribute("aria-label", "Back to session actions");
+    back.onclick = () => sessionMenu(anchor, session);
+    const close = h("button", "icon-btn h-11 w-11", "×");
+    close.setAttribute("aria-label", "Close model picker");
+    close.onclick = closeMenu;
+    content.prepend(h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2",
+      back, h("span", "min-w-0 flex-1 truncate text-sm font-medium", session.title ?? untitled(session.cwd)), close));
+  }
+  openPanel(anchor, content);
+  // Closing or replacing the panel cancels presentation of an in-flight read.
+  const visible = (): boolean => loading.isConnected && !loading.closest("[inert]");
   try {
     const [models, thinking] = await Promise.all([
       mustGetJson<ModelRef[]>(`/api/sessions/${id}/models`, "Could not load models"),
@@ -237,8 +265,8 @@ async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
         "Could not read the reasoning level",
       ),
     ]);
-    openPanel(
-      anchor,
+    if (!visible()) return;
+    loading.replaceWith(
       modelPicker({
         models,
         current: id === deps.currentId() ? currentModel : null,
@@ -251,8 +279,14 @@ async function pickModel(anchor: HTMLElement, id: string): Promise<void> {
         onThinkingPick: (level) => void setThinkingLevel(id, level),
       }),
     );
+    openPanel(anchor, content);
   } catch (err) {
-    appendTurn("error", `model options failed: ${String(err)}`);
+    if (visible()) {
+      loading.textContent = `Could not load models: ${String(err)}`;
+      loading.setAttribute("role", "alert");
+    } else {
+      appendTurn("error", `model options failed: ${String(err)}`);
+    }
   }
 }
 
@@ -302,23 +336,10 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
   }
 }
 
-/** Summarize the older transcript away. Success says nothing here: what
- *  happened arrives on the session's own stream as `context-compacted`, which
- *  is where an automatic compaction shows up too — and the route is refused
- *  outright while a turn is running, which is a sentence the user must see. */
-async function compactContext(id: string): Promise<void> {
-  const res = await sendJson(`/api/sessions/${id}/compact`, {});
-  if (!res.ok) appendTurn("error", `compact failed: ${await failure(res, "no reason given")}`);
-}
-
 /** Same menu from the chat header and from a rail row's ⋯ button. */
 export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
   const current = s.id === deps.currentId();
   openMenu(anchor, [
-    {
-      label: "Session info",
-      onSelect: () => sessionInfo(anchor, s),
-    },
     {
       label: "Rename…",
       onSelect: () => {
@@ -327,18 +348,16 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       },
     },
     {
-      label: "Model",
-      hint: current ? (currentModel?.id ?? "…") : "",
-      onSelect: () => void pickModel(anchor, s.id),
+      label: "Session info",
+      onSelect: () => sessionInfo(anchor, s, true),
     },
     {
-      // For every session the menu opens on, not only the selected one: this
-      // is the one menu the chat header and the rail rows share, so neither
-      // surface needs a copy of either row (budget rule 3).
-      label: "Compact context",
+      label: "Browse files",
+      separatorBefore: true,
+      hint: current ? chordLabel(FILES_KEY) : "",
       onSelect: () => {
         closeMenu();
-        void compactContext(s.id);
+        deps.openFiles(current ? undefined : s.cwd);
       },
     },
     {
@@ -350,14 +369,10 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       },
     },
     {
-      label: "Browse files",
-      hint: current ? chordLabel(FILES_KEY) : "",
-      onSelect: () => {
-        closeMenu();
-        // The current session reopens where it left off; another session's row
-        // names a directory, since only the current one has a remembered diff.
-        deps.openFiles(current ? undefined : s.cwd);
-      },
+      label: "Model & reasoning…",
+      separatorBefore: true,
+      hint: current ? (currentModel?.id ?? "…") : "",
+      onSelect: () => void pickModel(anchor, s.id, s),
     },
-  ]);
+  ], s.title ?? untitled(s.cwd));
 }

@@ -98,7 +98,7 @@ const ROW_BTN =
   "h-5 w-5 flex-none items-center justify-center rounded leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
 /** Row action revealed on hover (resident on touch, which has no hover). */
-const HOVER_BTN = `hidden group-hover:flex pointer-coarse:flex ${ROW_BTN}`;
+const HOVER_BTN = `flex opacity-0 group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 pointer-coarse:opacity-100 ${ROW_BTN}`;
 
 /**
  * Waiting for *you*, which is narrower than `unread`.

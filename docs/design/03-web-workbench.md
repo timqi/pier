@@ -30,7 +30,7 @@ catch, not the line count.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `POST /api/sessions/:id/compact` | compact the transcript now (the ⋯ menu). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5b), automatic ones included |
+| `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5b), automatic ones included |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
@@ -122,9 +122,20 @@ per-turn Activity groups):
   session menu. The mobile top bar retains the title and session actions.
 - **Session menu** (`menu.ts`): one anchored popover primitive, one open at a
   time, closed by outside pointerdown / Esc / page scroll (scrolling *inside*
-  the panel does not close it). Opened from the chat header and from rail
-  rows; holds session info (title, cwd, id, model, context usage from the
-  snapshot), rename, "New session here", files and the model picker. `model-picker.ts` is the
+  the panel does not close it). Below 640px it becomes a bottom sheet with the
+  session title and an explicit close button; its backdrop consumes the dismissal
+  click so background controls do not activate. Rail actions remain keyboard
+  reachable and visible while focused or open. Menus focus a control on open,
+  support arrow / Home / End navigation, and return focus when dismissed from
+  inside. Session actions have no reserved checkmark column and are grouped as
+  Rename / Session info, Browse files / New session here, Model & reasoning.
+  Model and directory hints truncate; model loading is immediate and a cancelled
+  load cannot reopen the panel. Manual compaction remains an API capability.
+  Session info has a solid reading surface, title, close button and a return
+  button when opened from the menu. Its directory/ID, model/context and time
+  groups use label/value columns on desktop and stacked fields on phones;
+  only directory and ID have copy buttons. Snapshot-only details appear for the
+  selected session. `model-picker.ts` is the
   standalone grouped-by-provider list, groups collapsed except the one holding
   the current model — separate because model choice will also be needed outside
   chat (scheduled tasks).

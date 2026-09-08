@@ -7,16 +7,29 @@ export interface MenuItem {
   label: string;
   hint?: string; // right-aligned secondary text
   checked?: boolean;
+  separatorBefore?: boolean;
   onSelect: () => void;
 }
 
 let panel: HTMLElement | null = null;
+let trigger: HTMLElement | null = null;
+let backdrop: HTMLElement | null = null;
 
 function onOutside(ev: Event): void {
-  if (panel && !panel.contains(ev.target as Node)) closeMenu();
+  if (panel && !panel.contains(ev.target as Node) && ev.target !== backdrop) closeMenu();
 }
 
 function onKey(ev: KeyboardEvent): void {
+  if (panel?.dataset.menu === "true" && ["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) {
+    const rows = [...panel.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    if (!rows.length) return;
+    const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const next = ev.key === "Home" ? 0 : ev.key === "End" ? rows.length - 1
+      : (index + (ev.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+    ev.preventDefault();
+    rows[next]?.focus();
+    return;
+  }
   if (ev.key !== "Escape") return;
   // The topmost overlay consumes Escape: a panel anchored inside a modal
   // <dialog> must not dismiss the dialog underneath it on the way out.
@@ -38,6 +51,11 @@ export function closeMenu(): void {
   window.removeEventListener("resize", closeMenu);
   const closing = panel;
   panel = null;
+  backdrop?.remove();
+  backdrop = null;
+  if (closing.contains(document.activeElement)) trigger?.focus({ preventScroll: true });
+  trigger?.removeAttribute("aria-expanded");
+  trigger = null;
   closing.inert = true;
   closing.dataset.closing = "";
   // Pending transitions include an interrupted entrance. Cancellation still
@@ -46,16 +64,7 @@ export function closeMenu(): void {
     .then(() => closing.remove());
 }
 
-/** Where the last panel was placed, and what it was placed against.
- *
- *  A follow-up panel — Session info, the model picker — is opened from inside
- *  the menu it replaces, and by then the pointer is on the menu rather than on
- *  the row that owns the anchor. In the session rail the ⋯ is revealed on
- *  hover, so it is `display: none` again and measures 0×0; the same is true of
- *  a row the list re-rendered under the open menu. Anchoring to a box like that
- *  put the panel in the top-left corner of the window, which is how this was
- *  found. The panel it replaces belongs in the same place, so that is the
- *  fallback. */
+/** Follow-up panels keep the prior position if a list re-render removed their anchor. */
 let placed: { anchor: HTMLElement; top: number; left: number } | null = null;
 
 /** Under the anchor, or where the panel this one replaces already sat when the
@@ -80,10 +89,10 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   const sheet = isSheet();
   panel = h(
     "div",
-    `glass glass-menu fixed z-50 rounded-3xl border border-neutral-200 p-2 ${
+    `glass glass-menu fixed z-50 border border-neutral-200 p-2 font-sans leading-6 ${
       sheet
-        ? "inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
-        : "min-w-52 max-w-[min(42rem,calc(100vw-1rem))] text-[13px]"
+        ? "rounded-3xl inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
+        : "rounded-2xl min-w-60 max-w-[min(42rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] overflow-y-auto text-[15px]"
     }`,
   );
   panel.dataset.presentation = sheet ? "sheet" : "popover";
@@ -91,7 +100,16 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   // A modal <dialog> paints in the top layer, above anything in the document —
   // so a panel anchored inside one has to live in that dialog, not on body,
   // or no z-index can bring it in front (the folder picker in New session).
-  (anchor.closest("dialog[open]") ?? document.body).append(panel);
+  const host = anchor.closest("dialog[open]") ?? document.body;
+  if (sheet) {
+    backdrop = h("div", "fixed inset-0 z-50 bg-black/15");
+    backdrop.onclick = (ev) => {
+      ev.stopPropagation();
+      closeMenu();
+    };
+    host.append(backdrop);
+  }
+  host.append(panel);
   if (!sheet) {
     // Remembered before the clamp: it is where the panel was *meant* to go, and
     // the next panel is a different size with a clamp of its own.
@@ -100,6 +118,10 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
     panel.style.top = `${Math.max(8, Math.min(box.top, window.innerHeight - panel.offsetHeight - 8))}px`;
     panel.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - panel.offsetWidth - 8))}px`;
   }
+  trigger = anchor;
+  trigger.setAttribute("aria-expanded", "true");
+  panel.tabIndex = -1;
+  (panel.querySelector<HTMLElement>("button, input, select, [tabindex='0']") ?? panel).focus({ preventScroll: true });
   // Safe to bind now: the pointerdown that opened this already fired.
   document.addEventListener("pointerdown", onOutside, true);
   document.addEventListener("keydown", onKey, true);
@@ -111,17 +133,38 @@ function menuItem(item: MenuItem): HTMLElement {
   const row = h(
     "button",
     `flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100 ${
-      isSheet() ? "py-3" : "py-1.5"
+      isSheet() ? "min-h-12 py-3" : "min-h-10 py-2"
     }`,
-    h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : ""),
-    h("span", "truncate", item.label),
+    ...(item.checked === undefined ? [] : [h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : "")]),
+    h("span", "min-w-0 max-w-full flex-none truncate", item.label),
   );
-  if (item.hint) row.append(h("span", "ml-auto flex-none text-[11.5px] text-neutral-400", item.hint));
+  if (item.hint) {
+    const hint = h("span", "ml-auto max-w-28 truncate text-[13px] text-neutral-500", item.hint);
+    hint.title = item.hint;
+    row.append(hint);
+  }
   row.onclick = () => item.onSelect();
   return row;
 }
 
 /** A list of actions; call from a click handler with the trigger element. */
-export function openMenu(anchor: HTMLElement, items: MenuItem[]): void {
-  openPanel(anchor, h("div", "", ...items.map(menuItem)));
+export function openMenu(anchor: HTMLElement, items: MenuItem[], title?: string): void {
+  const content = h("div", "");
+  if (title && isSheet()) {
+    const close = h("button", "icon-btn h-11 w-11", "×");
+    close.setAttribute("aria-label", "Close session actions");
+    close.onclick = closeMenu;
+    content.append(h("div", "flex items-center gap-3 border-b border-neutral-200 px-3 pb-1 mb-1",
+      h("span", "min-w-0 flex-1 truncate text-sm font-medium text-neutral-500", title), close));
+  }
+  for (const item of items) {
+    if (item.separatorBefore) content.append(h("hr", "my-2 border-neutral-200"));
+    content.append(menuItem(item));
+  }
+  openPanel(anchor, content);
+  if (panel) {
+    panel.dataset.menu = "true";
+    panel.setAttribute("aria-label", title ? `Actions for ${title}` : "Actions");
+    panel.setAttribute("role", "group");
+  }
 }
