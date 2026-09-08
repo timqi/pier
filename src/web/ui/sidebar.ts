@@ -173,8 +173,10 @@ function sortable(row: HTMLElement, key: string, drop: (target: string, after: b
 /** A row action: the hover background needs room around the glyph. */
 const ROW_BTN = "flex-none rounded p-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
-/** Row action revealed on hover (resident on touch, which has no hover). */
-const HOVER_BTN = `hidden group-hover:block pointer-coarse:block ${ROW_BTN}`;
+/** Row action revealed on hover (resident on touch, which has no hover).
+ *  `invisible`, not `hidden`: the button keeps its width, so hovering a row
+ *  changes its colour and nothing else moves. */
+const HOVER_BTN = `invisible group-hover:visible pointer-coarse:visible ${ROW_BTN}`;
 
 /**
  * Waiting for *you*, which is narrower than `unread`.
