@@ -87,7 +87,11 @@ must not force the whole conversation to scroll horizontally. Navigation titles
 keep their geometry when status or hover actions change. Primary sidebar actions
 have visible labels; row actions remain reachable by keyboard and touch, with
 44px minimum touch targets. A closed mobile drawer is inert; an open drawer owns
-keyboard focus, supports Escape, and returns focus on dismissal.
+keyboard focus, supports Escape, and returns focus on dismissal. Sidebar type
+uses the system sans-serif stack, a shared reading size and line height across
+desktop and mobile, sentence-case section labels and medium-weight selection.
+Increase row breathing room with a minimum height, preserving single-line titles
+and a scrolling session list instead of enlarging all metadata equally.
 
 Validate the behavior affected by a change: normal use, failure, cancellation, interruption,
 loading, and reconnection. Exercise keyboard, pointer, touch, narrow and wide viewports,

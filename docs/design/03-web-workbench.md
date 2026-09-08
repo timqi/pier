@@ -116,7 +116,10 @@ per-turn Activity groups):
   The mobile drawer removes hidden controls from the tab order, contains focus
   while open, and restores its toggle on dismissal; Escape dismisses it before
   reaching the conversation's stop shortcut. Touch controls have 44px minimum
-  targets.
+  targets. Desktop and drawer share system sans-serif type at 0.9375rem with
+  1.5 line height and 2.5rem minimum navigation rows (about 17/25/45px at the
+  workbench's default scale). Section labels use sentence case; selected rows
+  use medium weight, and channel initials retain readable secondary contrast.
 - **Search palette** (search icon, ⌘K): sessions searchable by title, directory
   and channel, under Running / Recent / Sessions, plus Console destinations.
   Working-set rank and unread state belong to `web/session-state.ts`; the

@@ -154,9 +154,8 @@ export async function renameSession(s: SessionInfo): Promise<void> {
   if (!(await sendJson(`/api/sessions/${s.id}/rename`, { name: typed })).ok) draw(previous);
 }
 
-/** One faint letter, no box: on an instance that mostly talks through Slack
- *  the chip is on most rows, and a boxed constant is noise. */
-const CHIP = "flex-none font-mono text-[10px] uppercase leading-[15px] text-neutral-300";
+/** A readable channel initial without a box on every IM row. */
+const CHIP = "flex-none text-xs font-medium uppercase leading-5 text-neutral-500";
 
 /** Which conversation a session answers, when it is not this workbench. Typing
  *  into a Slack thread's session sends to the people in that thread, and the
@@ -230,7 +229,7 @@ export function renderSessions(): void {
   const { rows, hidden } = pageOf(sessions, shown);
   const nodes: HTMLElement[] = rows.map(sessionRow);
   if (hidden > 0) {
-    const more = h("button", "session-open w-full cursor-pointer rounded-lg py-1.5 text-left text-[12.5px] text-neutral-400", `Load more (${hidden})`);
+    const more = h("button", "session-open w-full cursor-pointer rounded-lg py-1.5 text-left text-sm text-neutral-500", `Load more (${hidden})`);
     more.setAttribute("type", "button");
     more.onclick = () => {
       shown += PAGE;
@@ -245,7 +244,7 @@ export function renderSessions(): void {
   sessionList.replaceChildren(
     ...(nodes.length
       ? [h("ul", "pb-1", ...nodes)]
-      : [h("p", "px-3 py-2 text-[12.5px] leading-snug text-neutral-400", "No sessions yet — create one.")]),
+      : [h("p", "px-3 py-2 text-sm leading-normal text-neutral-500", "No sessions yet — create one.")]),
   );
   if (focusId) {
     const row = [...sessionList.querySelectorAll<HTMLElement>("[data-session-id]")].find((el) => el.dataset.sessionId === focusId);
