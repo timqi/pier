@@ -7,7 +7,7 @@
 // server-side to the root it was asked under, and nothing here writes.
 
 import { mustGetJson } from "./api.js";
-import { codePane, plainRows, type CodeRow } from "./code.js";
+import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
 import { langFor } from "./highlight.js";
@@ -343,12 +343,11 @@ export function createExplorerView(
     if (!(res.headers.get("content-type") ?? "").startsWith("text/plain")) {
       return void body.replaceChildren(note("Binary file — use Download."));
     }
-    const lines = (await res.text()).split("\n");
+    const rows = fileRows(await res.text());
     if (!current(seq)) return;
-    if (lines.at(-1) === "") lines.pop(); // the trailing newline is not a line
     const lang = await langFor(path); // first file of the session waits for hljs
     if (!current(seq)) return;
-    body.replaceChildren(codePane(plainRows(lines), lang));
+    body.replaceChildren(codePane(rows, lang));
   }
 
   /** `+`/`-`/context off the wire, two number columns on screen. The request

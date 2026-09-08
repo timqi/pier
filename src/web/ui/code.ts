@@ -1,10 +1,10 @@
 // Source on screen: numbered gutters, per-line highlighting, diff tones.
 //
 // One renderer for every place the Console shows a file it did not write —
-// the Files view's previews and whole-file diffs, and Settings → Agent's
-// read-only skills and extensions. It was the Files view's private closure
-// until the second reader arrived with a bare <pre>, which is how a viewer
-// ends up with two spellings of a line of code.
+// the Files view's previews and whole-file diffs, Settings → Agent's read-only
+// skills and extensions, and the chat's attachment preview. It was the Files
+// view's private closure until the second reader arrived with a bare <pre>,
+// which is how a viewer ends up with two spellings of a line of code.
 
 import { h } from "./dom.js";
 import { lineEl } from "./highlight.js";
@@ -20,9 +20,14 @@ export type CodeRow = {
   mark?: [number, number];
 };
 
-/** Every line numbered once and toned not at all: a file, as itself. */
-export const plainRows = (lines: string[]): CodeRow[] =>
-  lines.map((text, i) => ({ nums: [i + 1], text, tone: "" as const }));
+/** Every line numbered once and toned not at all: a file, as itself. The
+ *  trailing newline is not a line — every caller reads a whole file, so the
+ *  convention lives here rather than at each of them. */
+export function fileRows(text: string): CodeRow[] {
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines.map((line, i) => ({ nums: [i + 1], text: line, tone: "" as const }));
+}
 
 /** Gutter number column(s), toned diff lines, per-line highlighting, long
  *  lines wrapping past the gutter. */

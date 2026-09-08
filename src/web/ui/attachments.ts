@@ -7,7 +7,9 @@
 
 import { replaceOutsideCode } from "../../core/inbound-file.js";
 import { failure } from "./api.js";
+import { codePane, fileRows } from "./code.js";
 import { $, basename, h } from "./dom.js";
+import { langFor } from "./highlight.js";
 
 // --- image lightbox + thumbnails ---------------------------------------------------
 
@@ -86,16 +88,15 @@ export function imageThumb(src: string): HTMLImageElement {
 
 // --- agent attachments -------------------------------------------------------------
 
-// No svg: it is served as octet-stream on purpose (inline markup is a script
-// vector), so it renders as a card rather than an image.
+// No svg: it is served as a download on purpose (inline markup is a script
+// vector), so it renders as a card rather than an image — the preview below
+// shows its markup, which is safe, instead of rendering it.
 const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"]);
-// Kinds the preview dialog can show as text; pdf/images open in their own viewer.
-const TEXT_EXT = new Set(["txt", "md", "log", "json", "csv", "yaml", "yml"]);
 const MAX_PREVIEW_BYTES = 512 * 1024;
 
 const fileDialog = $<HTMLDialogElement>("#file-dialog");
 const fileName = $("#file-name");
-const fileText = $("#file-text");
+const fileBody = $("#file-text");
 const fileDownload = $<HTMLAnchorElement>("#file-download");
 $("#file-close").onclick = () => fileDialog.close();
 
@@ -135,20 +136,45 @@ function pathOf(url: string): string {
   return new URLSearchParams(url.slice(url.indexOf("?") + 1)).get("path") ?? "";
 }
 
+const previewNote = (msg: string, tone = "text-neutral-500"): HTMLElement =>
+  h("div", `px-3 py-2 text-[12.5px] ${tone}`, msg);
+
+/** Only the newest open may write the dialog: a slow fetch for the file just
+ *  closed must not land on the one now shown. */
+let previewSeq = 0;
+
+/**
+ * Any text file, as itself: the Files view's numbered, highlighted pane
+ * (ui/code.ts), so a `.diff`, a `.ts` or a `.md` reads here the way it reads
+ * there. What counts as text is not an extension list but the type the server
+ * served the bytes as — it sniffs (web/fs.ts), and bytes it won't vouch for
+ * are a download, not a pane full of mojibake. An SVG comes back as itself and
+ * is shown as its markup: a card on purpose, never rendered.
+ */
 async function preview(url: string, name: string): Promise<void> {
+  const seq = ++previewSeq;
   fileName.textContent = name;
   fileDownload.href = `${url}&download=1`;
-  fileText.textContent = "loading…";
+  fileBody.replaceChildren(previewNote("loading…"));
   fileDialog.showModal();
-  let body: string;
+  const show = (node: HTMLElement): void => {
+    if (seq === previewSeq) fileBody.replaceChildren(node);
+  };
+  let res: Response;
   try {
-    const res = await fetch(url);
-    body = res.ok ? await res.text() : await failure(res, "failed to load");
+    res = await fetch(url);
   } catch (err) {
-    body = `failed to load: ${String(err)}`;
+    return show(previewNote(`failed to load: ${String(err)}`, "text-red-600"));
   }
-  fileText.textContent =
-    body.length > MAX_PREVIEW_BYTES ? `${body.slice(0, MAX_PREVIEW_BYTES)}\n…` : body;
+  if (!res.ok) return show(previewNote(await failure(res, "failed to load"), "text-red-600"));
+  const type = res.headers.get("content-type") ?? "";
+  if (!type.startsWith("text/") && !type.startsWith("image/svg+xml")) {
+    return show(previewNote("Binary file — use Download."));
+  }
+  const body = await res.text();
+  const text = body.length > MAX_PREVIEW_BYTES ? `${body.slice(0, MAX_PREVIEW_BYTES)}\n…` : body;
+  const lang = await langFor(name); // the first preview waits for hljs
+  show(codePane(fileRows(text), lang));
 }
 
 function thumb(url: string, name: string): HTMLElement {
@@ -172,16 +198,17 @@ function card(url: string, name: string): HTMLElement {
   );
   const label = h("span", "min-w-0 truncate text-[13px] font-medium text-neutral-800", name);
   const actions = h("span", "ml-1 flex flex-none items-center gap-0.5");
-  if (TEXT_EXT.has(ext) || ext === "pdf") {
-    const eye = h("button", "icon-btn h-6 w-6 text-[13px]", "◉");
-    eye.title = "Preview";
-    eye.onclick = (ev) => {
-      ev.preventDefault();
-      if (ext === "pdf") window.open(url, "_blank", "noopener");
-      else void preview(url, name);
-    };
-    actions.append(eye);
-  }
+  // Every card offers a look: what it can show is decided by the bytes, not
+  // by the name, so a file with no extension or an unusual one is not a
+  // download-only dead end.
+  const eye = h("button", "icon-btn h-6 w-6 text-[13px]", "◉");
+  eye.title = "Preview";
+  eye.onclick = (ev) => {
+    ev.preventDefault();
+    if (ext === "pdf") window.open(url, "_blank", "noopener");
+    else void preview(url, name);
+  };
+  actions.append(eye);
   const download = document.createElement("a");
   download.className = "icon-btn h-6 w-6 text-[13px] no-underline";
   download.href = `${url}&download=1`;
