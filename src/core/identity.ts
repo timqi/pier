@@ -122,6 +122,14 @@ export function splitSpeaker(text: string): Speaker {
   };
 }
 
+/** Trailing lines that open a `[name](file://` link — or a last line that is
+ *  only `[name` because the clip fell inside it. */
+const ATTACHMENT_LINES = /(?:\n\[[^\]\n]*(?:\]\(\s*<?file:\/\/[^\n]*|$))+$/;
+
+/** A long code span that opens the message, when something else follows it.
+ *  Long, because `npm test` before "fails" is the subject, not a paste. */
+const LEADING_CODE_SPAN = /^\s*`[^`\n]{40,}`\s+(\S[\s\S]*)$/;
+
 /**
  * A session titled by its first prompt inherits that prompt's header, and the
  * header is for the model: anything a person reads — a list row, a session
@@ -129,6 +137,11 @@ export function splitSpeaker(text: string): Speaker {
  * the workbench ever opened. So the speaker comes off and what they said is
  * the title. Here rather than in a UI module because the push notification
  * needs the same answer and a second copy of this would drift (AGENTS.md §3).
+ *
+ * Two more things a first prompt carries that a title should not: the
+ * attachment lines a channel appended (`[name](file:///…)`, often cut mid-name
+ * by the title clip), and a pasted log line in backticks ahead of the actual
+ * question — dropped only when a question follows; a paste alone stays.
  */
 export function readableTitle(title: string | undefined): string | undefined {
   if (!title) return title;
@@ -136,5 +149,10 @@ export function readableTitle(title: string | undefined): string | undefined {
   // No header — the title is what the person typed, and reflowing it would
   // change what the sidebar's search is matching against for nothing.
   if (text === title) return title;
-  return text.replace(/\s+/g, " ").trim() || title;
+  const said = text
+    .replace(ATTACHMENT_LINES, "")
+    .replace(LEADING_CODE_SPAN, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return said || title;
 }

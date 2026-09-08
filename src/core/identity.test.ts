@@ -144,6 +144,22 @@ describe("readableTitle", () => {
     expect(readableTitle(undefined)).toBeUndefined();
   });
 
+  it("drops the attachment lines a channel appended, even one the clip cut in half", () => {
+    expect(readableTitle("[qiqi<U1> 22:34]\n总结一下文档\n[a.docx](file:///inbox/a.docx)\n[b.pdf](file:///inbox/b.pdf)")).toBe("总结一下文档");
+    expect(readableTitle("[qiqi<U1> 22:34]\n总结一下文档\n[1788791643950-88490b-Tether-x-F")).toBe("总结一下文档");
+    // A bracketed line that is not a file link is what was said.
+    expect(readableTitle("[qiqi<U1> 22:34]\nplan\n[TODO] fix it")).toBe("plan [TODO] fix it");
+    // Only an attachment: the file is what the session is about.
+    expect(readableTitle("[qiqi<U1> 22:34]\n[a.docx](file:///inbox/a.docx)")).toBe("[a.docx](file:///inbox/a.docx)");
+  });
+
+  it("drops a pasted log line ahead of the question, and keeps one that is the whole message", () => {
+    expect(readableTitle("[operator<web> 14:05]\n`2026-09-08T00:28:52Z WARN settings: ignoring it` 这个报错是怎么回事")).toBe("这个报错是怎么回事");
+    // A short span is the subject, not a paste.
+    expect(readableTitle("[operator<web> 14:05]\n`npm test` fails")).toBe("`npm test` fails");
+    expect(readableTitle("[operator<web> 14:05]\n`2026-09-08T00:28:52Z WARN settings`")).toBe("`2026-09-08T00:28:52Z WARN settings`");
+  });
+
   it("falls back to the raw title when the header was all there was", () => {
     // Better a title only the operator can parse than a blank row.
     expect(readableTitle("[operator<web> 12:01]\n")).toBe("[operator<web> 12:01]\n");

@@ -279,7 +279,9 @@ export async function renameSession(s: SessionInfo): Promise<void> {
 export const setPinned = (s: SessionInfo, pinned: boolean): Promise<void> =>
   optimistic((v) => (s.pinned = v), pinned, !pinned, `/api/sessions/${s.id}/pin`, { pinned });
 
-const CHIP = "flex-none rounded bg-neutral-200/70 px-1 font-mono text-[10px] uppercase leading-[15px] text-neutral-500";
+/** One faint letter, no box: on an instance that mostly talks through Slack
+ *  the chip is on most rows, and a boxed constant is noise. */
+const CHIP = "flex-none font-mono text-[10px] uppercase leading-[15px] text-neutral-300";
 
 /** Which conversation a session answers, when it is not this workbench. Typing
  *  into a Slack thread's session sends to the people in that thread, and the
