@@ -83,7 +83,11 @@ Presentation must not introduce parallel records. Extend shared primitives, remo
 styles, and consolidate repeated logic without speculative abstractions or new frameworks.
 Use native controls and semantics, readable contrast, visible focus, and generous touch targets.
 Account for safe areas and software keyboards; content panels own scrolling, and wide content
-must not force the whole conversation to scroll horizontally.
+must not force the whole conversation to scroll horizontally. Navigation titles
+keep their geometry when status or hover actions change. Primary sidebar actions
+have visible labels; row actions remain reachable by keyboard and touch, with
+44px minimum touch targets. A closed mobile drawer is inert; an open drawer owns
+keyboard focus, supports Escape, and returns focus on dismissal.
 
 Validate the behavior affected by a change: normal use, failure, cancellation, interruption,
 loading, and reconnection. Exercise keyboard, pointer, touch, narrow and wide viewports,

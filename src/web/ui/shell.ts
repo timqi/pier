@@ -25,6 +25,7 @@ const menuBtn = $("#mobile-menu");
 export function closeDrawer(): void {
   delete sidebar.dataset.open;
   scrim.classList.add("hidden");
+  syncDrawer();
 }
 
 /** The bar names wherever we are — a session's title or the Console view. */
@@ -48,11 +49,24 @@ function toggleDrawer(): void {
   if (sidebar.dataset.open !== undefined) return closeDrawer();
   sidebar.dataset.open = "";
   scrim.classList.remove("hidden");
+  syncDrawer();
 }
 
 /** Below md the rail attribute does nothing — the sidebar is the drawer there,
  *  so one chord has to mean whichever of the two this width has. */
-const isDrawer = (): boolean => window.innerWidth < 768;
+const drawerMedia = window.matchMedia("(width < 48rem)");
+const isDrawer = (): boolean => drawerMedia.matches;
+
+/** Closed drawers leave the tab order; open drawers own focus until dismissed. */
+function syncDrawer(): void {
+  const open = isDrawer() && sidebar.dataset.open !== undefined;
+  const main = $("main");
+  main.inert = open;
+  sidebar.inert = isDrawer() && !open;
+  $("#drawer-toggle").setAttribute("aria-expanded", String(open));
+  if (open && !sidebar.contains(document.activeElement)) $("#new-session").focus();
+  if (sidebar.inert && sidebar.contains(document.activeElement)) $("#drawer-toggle").focus();
+}
 
 // --- attention ----------------------------------------------------------------------
 // With the rail collapsed — and on a phone, always — the amber dots in the
@@ -133,6 +147,7 @@ function initSwipe(): void {
     if (open) {
       sidebar.dataset.open = "";
       scrim.classList.remove("hidden");
+      syncDrawer();
     } else closeDrawer();
     from = -1;
     dragging = false;
@@ -191,6 +206,26 @@ function initSwipe(): void {
 
 export function initShell(deps: ShellDeps): void {
   initSwipe();
+  syncDrawer();
+  drawerMedia.addEventListener("change", closeDrawer);
+  $("#drawer-toggle").setAttribute("aria-controls", "sidebar");
+  sidebar.addEventListener("keydown", (ev) => {
+    if (!isDrawer() || sidebar.dataset.open === undefined || ev.defaultPrevented || ev.isComposing) return;
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeDrawer();
+    } else if (ev.key === "Tab") {
+      const controls = [...sidebar.querySelectorAll<HTMLElement>("button, a[href], summary")]
+        .filter((el) => el.getClientRects().length && !el.matches(":disabled"));
+      const target = ev.shiftKey ? controls.at(-1) : controls[0];
+      const edge = ev.shiftKey ? controls[0] : controls.at(-1);
+      if (document.activeElement === edge) {
+        ev.preventDefault();
+        target?.focus();
+      }
+    }
+  });
   $("#drawer-toggle").onclick = toggleDrawer;
   scrim.onclick = closeDrawer;
   menuBtn.onclick = () => deps.sessionMenu(menuBtn);

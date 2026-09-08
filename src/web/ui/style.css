@@ -269,7 +269,6 @@ html {
     padding-top: env(safe-area-inset-top);
   }
   /* Thumb-sized rows in the drawer; the desktop rail stays compact. */
-  #session-list li,
   #console-section li button {
     padding-block: 0.5rem;
   }
@@ -296,7 +295,18 @@ html {
   transition: background-color 180ms, color 180ms;
 }
 #console-section li button { padding-left: 0.75rem; }
-#session-list li { padding-inline: 0.625rem; }
+#session-list li { padding-inline: 0.375rem; }
+#session-list .session-open { padding-left: 0.25rem; }
+#session-list :focus-visible { outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) {
+  .session-more { opacity: 0; }
+  #session-list li:is(:hover, :focus-within) .session-more { opacity: 1; }
+}
+@media (pointer: coarse), (width < 48rem) {
+  #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-archive),
+  #console-section :is(summary, li button) { min-height: 44px; }
+  #sidebar :is(.session-more, .icon-btn) { min-width: 44px; }
+}
 #console-section button.bg-indigo-50, #session-list li.bg-indigo-50 {
   color: var(--color-indigo-700);
   background-color: var(--color-white);
@@ -591,7 +601,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     background-position: right 0.5rem center;
     background-size: 0.9rem;
   }
-  /* Sidebar section actions (search / new). */
+  /* Compact icon-only controls, including the theme switch. */
   .icon-btn {
     @apply flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700;
   }

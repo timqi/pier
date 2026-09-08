@@ -107,7 +107,16 @@ per-turn Activity groups):
   set; background activity does not reorder rows under the pointer. State dots,
   titles and session actions share the existing listing and event state. More
   sessions remain available through pagination and the search palette. The New
-  session directory picker offers the listing's distinct directories.
+  session directory picker offers the listing's distinct directories. A labeled
+  New session button and Search entry sit below the brand; the desktop search
+  entry shows the platform shortcut. Session buttons reserve space for status
+  and actions so hover and state changes do not shift titles. Actions appear
+  on hover or keyboard focus and remain visible on touch; list refreshes retain
+  the focused session control, and Load more focuses the first added session.
+  The mobile drawer removes hidden controls from the tab order, contains focus
+  while open, and restores its toggle on dismissal; Escape dismisses it before
+  reaching the conversation's stop shortcut. Touch controls have 44px minimum
+  targets.
 - **Search palette** (search icon, ⌘K): sessions searchable by title, directory
   and channel, under Running / Recent / Sessions, plus Console destinations.
   Working-set rank and unread state belong to `web/session-state.ts`; the

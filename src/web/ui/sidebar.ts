@@ -9,7 +9,7 @@ import { pathTrigger, type PathOption } from "./dir-picker.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { setUnreadBadge } from "./notifications.js";
 import { setAttention } from "./shell.js";
-import { shortcut } from "./shortcut.js";
+import { chordLabel, shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
@@ -92,13 +92,8 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
 
-/** A row action: a fixed 20px box, which is the row's own line height, so a
- *  button appearing on hover never makes its row taller — padding did. */
-const ROW_BTN =
-  "h-5 w-5 flex-none items-center justify-center rounded leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
-
-/** Row action revealed on hover (resident on touch, which has no hover). */
-const HOVER_BTN = `hidden group-hover:flex pointer-coarse:flex ${ROW_BTN}`;
+/** Reserved action space keeps titles still on hover; focus and touch reveal it. */
+const HOVER_BTN = "session-more flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
 /**
  * Waiting for *you*, which is narrower than `unread`.
@@ -114,9 +109,8 @@ const HOVER_BTN = `hidden group-hover:flex pointer-coarse:flex ${ROW_BTN}`;
 const waitingForYou = (s: SessionInfo): boolean => s.unread && s.channel === "web";
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
- *  sky = idle itself but subagents still in flight. Idle is nothing at all —
- *  no slot either, so the title gets the width; a row that says something is
- *  allowed to stand out by being indented. */
+ *  sky = idle itself but subagents still in flight. Idle has no mark; the rail
+ *  reserves its slot to keep titles still, while the palette can omit it. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   const mark: [string, string] | null =
     s.state === "streaming"
@@ -176,26 +170,27 @@ function sessionRow(s: SessionInfo): HTMLElement {
   const active = s.id === deps.currentId();
   const li = h(
     "li",
-    `group flex cursor-pointer items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100 ${
+    `flex items-center gap-1 hover:bg-neutral-100 ${
       active ? "bg-indigo-50 hover:bg-indigo-50" : ""
     }`,
   );
-  // Touch has no hover, so a hover-revealed control there is unreachable —
-  // pointer-coarse makes it resident instead.
   const more = h("button", HOVER_BTN, "\u22ef");
+  more.setAttribute("type", "button");
+  more.setAttribute("aria-label", `Session actions: ${s.title ?? "untitled"}`);
   more.title = "Session actions";
   more.onclick = (ev) => {
     ev.stopPropagation();
     deps.sessionMenu(more, s);
   };
-  li.append(
-    ...stateDot(s),
-    // Not the header's `untitled(cwd)`: the row's title attribute already
-    // names the directory, and the long form would truncate to "New session i…".
+  const open = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg py-1.5 text-left",
+    h("span", "flex w-2 flex-none items-center", ...stateDot(s)),
     h("span", "truncate", s.title ?? "untitled"),
-    h("div", "ml-auto flex flex-none items-center gap-1", ...channelChip(s), more),
   );
-  li.onclick = () => deps.select(s.id);
+  open.setAttribute("type", "button");
+  if (active) open.setAttribute("aria-current", "page");
+  open.onclick = () => deps.select(s.id);
+  li.dataset.sessionId = s.id;
+  li.append(open, ...channelChip(s), more);
   // The facts the row has no room for, on the native tooltip: where it runs,
   // when it last moved, and — for an IM session — who it answers.
   li.title = [
@@ -235,18 +230,27 @@ export function renderSessions(): void {
   const { rows, hidden } = pageOf(sessions, shown);
   const nodes: HTMLElement[] = rows.map(sessionRow);
   if (hidden > 0) {
-    const more = h("li", "cursor-pointer px-3 py-1.5 text-[12.5px] text-neutral-400 hover:bg-neutral-100", `Load more (${hidden})`);
+    const more = h("button", "session-open w-full cursor-pointer rounded-lg py-1.5 text-left text-[12.5px] text-neutral-400", `Load more (${hidden})`);
+    more.setAttribute("type", "button");
     more.onclick = () => {
       shown += PAGE;
       renderSessions();
+      sessionList.querySelectorAll<HTMLElement>(".session-open")[rows.length]?.focus();
     };
-    nodes.push(more);
+    nodes.push(h("li", "hover:bg-neutral-100", more));
   }
+  const focused = document.activeElement;
+  const focusId = focused?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  const focusAction = focused?.classList.contains("session-more") ? ".session-more" : ".session-open";
   sessionList.replaceChildren(
     ...(nodes.length
       ? [h("ul", "pb-1", ...nodes)]
       : [h("p", "px-3 py-2 text-[12.5px] leading-snug text-neutral-400", "No sessions yet — create one.")]),
   );
+  if (focusId) {
+    const row = [...sessionList.querySelectorAll<HTMLElement>("[data-session-id]")].find((el) => el.dataset.sessionId === focusId);
+    row?.querySelector<HTMLElement>(focusAction)?.focus({ preventScroll: true });
+  }
   if (archiveDialog.open) renderArchive();
 }
 
@@ -431,6 +435,7 @@ export function initSidebar(d: SidebarDeps): void {
   $<HTMLFormElement>("#new-form").onsubmit = () =>
     void deps.createSession($<HTMLInputElement>("#new-cwd").value.trim());
   const search = $("#open-archive");
+  $("#search-shortcut").textContent = chordLabel("k");
   search.onclick = toggleArchive;
   // Once the palette is open the chord belongs to its list (⌃K walks up), so
   // the global binding stands down; Esc is what a <dialog> closes on anyway.

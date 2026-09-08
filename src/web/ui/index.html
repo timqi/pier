@@ -74,6 +74,19 @@
       <button type="button" id="theme-toggle" aria-label="Theme"
         class="icon-btn text-[13px]"></button>
     </header>
+    <div class="flex flex-none flex-col gap-1 px-3 pb-2">
+      <button type="button" id="new-session" aria-label="New session"
+        class="btn btn-primary flex w-full items-center justify-center gap-2 text-sm">
+        <span aria-hidden="true">＋</span> New session
+      </button>
+      <button type="button" id="open-archive" aria-label="Search sessions and Console"
+        class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-neutral-500 hover:bg-neutral-100">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" class="h-3.5 w-3.5 flex-none">
+          <circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2 14 14" stroke-linecap="round" />
+        </svg>
+        Search <kbd id="search-shortcut" class="ml-auto hidden text-xs md:block"></kbd>
+      </button>
+    </div>
     <details id="console-section" open class="flex-none border-b border-neutral-200/70">
       <summary class="flex cursor-pointer select-none items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 hover:bg-neutral-100">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" class="chev h-3 w-3"><path d="m6 4 4 4-4 4" stroke-linecap="round" stroke-linejoin="round" /></svg>Console
@@ -100,22 +113,7 @@
           </svg>Settings</button></li>
       </ul>
     </details>
-    <div class="flex items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-      Sessions
-      <button type="button" id="open-archive"
-        class="icon-btn ml-auto" aria-label="Search sessions and Console">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5">
-          <circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2 14 14" stroke-linecap="round" />
-        </svg>
-      </button>
-      <button type="button" id="new-session" title="New session"
-        class="icon-btn" aria-label="New session">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5">
-          <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.5" />
-          <path d="M8 5.5v5M5.5 8h5" stroke-linecap="round" />
-        </svg>
-      </button>
-    </div>
+    <div class="flex-none px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Sessions</div>
     <div id="session-list" class="flex-1 overflow-y-auto text-[13.5px]"></div>
   </aside>
 
