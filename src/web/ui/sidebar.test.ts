@@ -40,17 +40,16 @@ it("shows twenty rows, pinned ones counted, and says how many wait behind Load m
   ];
   const first = sidebar.pageOf(list, sidebar.PAGE);
   expect(sidebar.PAGE).toBe(20);
-  expect(ids(first.pinned)).toEqual(["p2", "p1", "p0"]);
-  expect(first.rest).toHaveLength(17);
-  expect(ids(first.rest).at(-1)).toBe("s16");
+  expect(ids(first.rows).slice(0, 3)).toEqual(["p2", "p1", "p0"]);
+  expect(first.rows).toHaveLength(20);
+  expect(ids(first.rows).at(-1)).toBe("s16");
   expect(first.hidden).toBe(13);
   const second = sidebar.pageOf(list, sidebar.PAGE * 2);
-  expect(second.rest).toHaveLength(30);
+  expect(second.rows).toHaveLength(33);
   expect(second.hidden).toBe(0);
   // More pinned rows than the page: nothing below them is drawn, and they say so.
   const pinnedOnly = sidebar.pageOf(list, 2);
-  expect(ids(pinnedOnly.pinned)).toEqual(["p2", "p1"]);
-  expect(pinnedOnly.rest).toEqual([]);
+  expect(ids(pinnedOnly.rows)).toEqual(["p2", "p1"]);
   expect(pinnedOnly.hidden).toBe(31);
 });
 

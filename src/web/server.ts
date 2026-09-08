@@ -303,12 +303,10 @@ export function createServer(
     const body = await c.req.json().catch(() => null);
     if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
     const id = c.req.param("id");
-    // The directory comes from the listing, not from the client that clicked:
-    // it is the one fact this row keeps about the session, and the browser is
-    // not where a path should come from when the server already knows it.
-    const cwd = (await factory.find(id))?.cwd ?? nascent.get(id)?.cwd;
-    if (!cwd) return c.json({ error: `session ${id} has no directory Pier can find` }, 404);
-    state.pin(id, cwd, body.pinned);
+    // A pin is a row in the workbench's own table, so it has to be a session
+    // Pi knows — or one created here that Pi has not persisted yet.
+    if (!nascent.has(id) && !(await factory.find(id))) return c.json({ error: `session ${id} not found` }, 404);
+    state.pin(id, body.pinned);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ pinned: body.pinned });
   });

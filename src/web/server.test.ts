@@ -501,7 +501,7 @@ describe("workbench server", () => {
       { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: 5 },
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6 },
     ]);
-    state.pin("s1", "/tmp", true);
+    state.pin("s1", true);
     expect(await rail(app)).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: 5, state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
@@ -624,9 +624,9 @@ describe("workbench server", () => {
     expect(bad.status).toBe(400);
   });
 
-  // The directory is the server's own fact now. A session it cannot place has
-  // no row to pin, and saying so beats writing a row keyed on nothing.
-  it("refuses to pin a session no listing knows a directory for", async () => {
+  // A session no listing knows has no row to pin, and saying so beats writing
+  // a row keyed on nothing.
+  it("refuses to pin a session no listing knows", async () => {
     const { app, factory } = setup();
     vi.mocked(factory.list).mockResolvedValue([]);
     vi.mocked(factory.find).mockResolvedValue(undefined);
@@ -635,7 +635,7 @@ describe("workbench server", () => {
       body: JSON.stringify({ pinned: true }),
     });
     expect(res.status).toBe(404);
-    expect(((await res.json()) as { error: string }).error).toContain("no directory");
+    expect(((await res.json()) as { error: string }).error).toContain("not found");
   });
 
   // The name goes into the transcript and nowhere else; the rail re-reads it
@@ -687,8 +687,8 @@ describe("workbench server", () => {
       { id: "a", cwd: "/a", createdAt: 1, modified: 1 },
       { id: "b", cwd: "/b", createdAt: 2, modified: 2 },
     ]);
-    state.pin("a", "/a", true);
-    state.pin("b", "/b", true);
+    state.pin("a", true);
+    state.pin("b", true);
     const order = (body: string) => app.request("/api/sessions/order", { method: "POST", body });
 
     expect((await order(JSON.stringify({ sessions: ["b", "a"] }))).status).toBe(200);
@@ -1354,7 +1354,7 @@ describe("workbench server", () => {
     const state = new SessionStateStore(openDb(":memory:"));
     // The create-time write: pinned with a cwd, exactly what POST /api/desk
     // and POST /api/sessions persist before Pi has anything on disk.
-    state.pin("ghost", "/tmp/desk", true);
+    state.pin("ghost", true);
     const events: string[] = [];
     hub.subscribeWorkspace((e) => events.push(e.type));
     const app = createServer({

@@ -10,9 +10,8 @@
 // every turn, a title write on the first prompt, a second write on rename.
 // Deriving beats syncing; all of it is gone.
 //
-// `cwd` stayed, and is not a mirror: a session's working directory is fixed
-// when its transcript is created — an immutable key needs no synchronising.
-// `project_sort` also stayed, as a column nothing reads (migration 19).
+// `cwd` and `project_sort` stayed as columns nothing reads: they keyed the
+// per-directory order the rail no longer has (migration 19).
 //
 // One row per session rather than two JSON files: the unread flag is written at
 // the end of every turn, and rewriting a whole file on each of those writes
@@ -51,11 +50,11 @@ export class SessionStateStore {
 
   /** Stuck to the top, or let go. Nothing expires: what is pinned stays on top
    *  until a hand unpins it. */
-  pin(sessionId: string, cwd: string, pinned: boolean): void {
+  pin(sessionId: string, pinned: boolean): void {
     this.#db.prepare(
-      `INSERT INTO session_state(session_id, pinned, cwd) VALUES (?, ?, ?)
-       ON CONFLICT(session_id) DO UPDATE SET pinned = excluded.pinned, cwd = excluded.cwd`,
-    ).run(sessionId, pinned ? 1 : 0, cwd);
+      `INSERT INTO session_state(session_id, pinned) VALUES (?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET pinned = excluded.pinned`,
+    ).run(sessionId, pinned ? 1 : 0);
   }
 
   /** One drag = one write of the whole pinned list it reordered: index is the

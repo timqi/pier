@@ -88,11 +88,10 @@ export function orderSessions(list: SessionInfo[]): { pinned: SessionInfo[]; res
 
 /** The first `shown` rows of that order, and how many are still behind
  *  "Load more". Pinned rows count against the page like any other. */
-export function pageOf(list: SessionInfo[], shown: number): { pinned: SessionInfo[]; rest: SessionInfo[]; hidden: number } {
+export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[]; hidden: number } {
   const { pinned, rest } = orderSessions(list);
-  const visiblePinned = pinned.slice(0, shown);
-  const visibleRest = rest.slice(0, Math.max(0, shown - pinned.length));
-  return { pinned: visiblePinned, rest: visibleRest, hidden: list.length - visiblePinned.length - visibleRest.length };
+  const rows = [...pinned, ...rest].slice(0, shown);
+  return { rows, hidden: list.length - rows.length };
 }
 
 /** Distinct directories, newest session first: what the New-session picker
@@ -217,10 +216,11 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
 const PIN_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>';
 
-/** Pinned: always on the row, in colour — that is how the top of the list
- *  says which rows are pinned, no divider needed. Otherwise `cls` decides. */
-function pinButton(s: SessionInfo, cls: string): HTMLElement {
-  const pin = h("button", s.pinned ? `flex ${ROW_BTN}` : cls);
+/** A pinned row's pin is always there — that is how the top of the list says
+ *  which rows are pinned, no divider needed; the rail hides the others until
+ *  hover, the palette shows them all. */
+function pinButton(s: SessionInfo, hover: boolean): HTMLElement {
+  const pin = h("button", hover && !s.pinned ? HOVER_BTN : `flex ${ROW_BTN}`);
   pin.innerHTML = PIN_ICON;
   pin.title = s.pinned ? "Unpin" : "Pin to top";
   pin.onclick = (ev) => {
@@ -285,13 +285,9 @@ const CHIP = "flex-none rounded bg-neutral-200/70 px-1 font-mono text-[10px] upp
  *  into a Slack thread's session sends to the people in that thread, and the
  *  row is the last place to notice — but `web` is nearly every row, so saying
  *  it would be the constant that means nothing. One letter: the row has no
- *  room for a word, and the title carries the name. */
-function channelChip(s: SessionInfo): HTMLElement[] {
-  if (!s.channel || s.channel === "web") return [];
-  const chip = h("span", CHIP, s.channel[0] ?? "");
-  chip.title = `answering ${s.channel}`;
-  return [chip];
-}
+ *  room for a word, and the row's tooltip carries the name. */
+const channelChip = (s: SessionInfo): HTMLElement[] =>
+  s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
 
 function sessionRow(s: SessionInfo): HTMLElement {
   const active = s.id === deps.currentId();
@@ -303,7 +299,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
   );
   // Touch has no hover, so a hover-revealed control there is unreachable —
   // pointer-coarse makes it resident instead.
-  const pin = pinButton(s, HOVER_BTN);
+  const pin = pinButton(s, true);
   const more = h("button", HOVER_BTN, "\u22ef");
   more.title = "Session actions";
   more.onclick = (ev) => {
@@ -356,8 +352,8 @@ export function renderSessions(force = false): void {
   const waiting = sessions.filter(waitingForYou);
   setAttention(waiting.length);
   setUnreadBadge(waiting.length);
-  const { pinned, rest, hidden } = pageOf(sessions, shown);
-  const nodes: HTMLElement[] = [...pinned, ...rest].map(sessionRow);
+  const { rows, hidden } = pageOf(sessions, shown);
+  const nodes: HTMLElement[] = rows.map(sessionRow);
   if (hidden > 0) {
     const more = h("li", "cursor-pointer px-3 py-1.5 text-[12.5px] text-neutral-400 hover:bg-neutral-100", `Load more (${hidden})`);
     more.onclick = () => {
@@ -375,8 +371,8 @@ export function renderSessions(force = false): void {
 }
 
 // --- the search palette (⌘K): every session, plus the Console -----------------------
-// Ordering is the feature. What is running now, then what is pinned, then
-// everything else newest-first — with the cwd on the row.
+// Ordering is the feature. What is running now, then the rail's own order —
+// with the cwd on the row.
 
 /** One thing the palette can open. `session` is what makes a row a session
  *  row: the state dot, its age and the pin toggle all hang off it. */
@@ -433,7 +429,7 @@ function paletteRow(t: Target): HTMLElement {
   if (t.session) {
     li.append(
       h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)),
-      pinButton(t.session, `flex ${ROW_BTN}`),
+      pinButton(t.session, false),
     );
   }
   // Hover is its own grey, and it does not move the selection. Driving one
@@ -475,7 +471,7 @@ function renderArchive(): void {
     session: s,
   });
   const streaming = matched.filter((s) => s.state === "streaming");
-  const idle = matched.filter((s) => s.state !== "streaming");
+  const idle = orderSessions(matched.filter((s) => s.state !== "streaming"));
 
   const consoleSection: [string, Target[]] = [
     "Console",
@@ -487,8 +483,8 @@ function renderArchive(): void {
   ];
   const sections: [string, Target[]][] = [
     ["Running", streaming.sort(byAge).map(target)],
-    ["Pinned", idle.filter((s) => s.pinned).sort(byAge).map(target)],
-    ["Sessions", idle.filter((s) => !s.pinned).sort(byAge).map(target)],
+    ["Pinned", idle.pinned.map(target)],
+    ["Sessions", idle.rest.map(target)],
   ];
   // A query is a question about everything, so the Console answers it up top;
   // an empty box is the session list it has always been, with the Console
