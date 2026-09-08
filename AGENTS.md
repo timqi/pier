@@ -55,6 +55,12 @@ scheduled tasks, live observability, and static Show pages.
   ops (`service.ts`, `update.ts`, `drain.ts`) and the leaves any area may import
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`); one reason per
   file, named in docs/architecture.md
+- **One writer per instance directory.** Pier's own process is the only thing
+  that writes its Pi session directory — no external `pi` CLI, no second Pier
+  on the same `~/.pier`. So in-process knowledge of what changed may be
+  trusted, and a listing cache does not owe correctness to writers it cannot
+  see; the filesystem scan stays the source of truth for cost reasons, not for
+  arbitration.
 - Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
   Runtime dependencies never go sideways. The browser may import owner-defined
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only; those
