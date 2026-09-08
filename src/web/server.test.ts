@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -401,26 +400,26 @@ function setup(
   };
 }
 
-/** The rail, as a surface reads it. `state.projects()` is gone: membership is
- *  the listing joined with what the store owns, and the route is where that
- *  happens. */
-const rail = async (app: Hono): Promise<{ id: string; title?: string }[]> =>
-  (await (await app.request("/api/projects")).json()) as { id: string; title?: string }[];
+/** The rail, as a surface reads it: the listing joined with what the store
+ *  owns, and the route is where that happens. */
+const rail = async (app: Hono): Promise<{ id: string; title?: string; pinned: boolean; sort?: number; modified?: number }[]> =>
+  (await (await app.request("/api/sessions")).json()) as { id: string; title?: string; pinned: boolean; sort?: number; modified?: number }[];
 
 describe("workbench server", () => {
-  it("lists sessions with live state", async () => {
+  // `modified` is forwarded: it is what orders every row that is not pinned.
+  it("lists sessions with live state, dated by their transcript", async () => {
     const { app } = setup();
     const res = await app.request("/api/sessions");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, state: "idle", listed: false, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: expect.any(Number), state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
   // The dot is a number, so the list asks for the numbers once: a finished run
   // and a foreground one are not in flight, and a session that launched
   // nothing says so. The per-session route still reads whole run objects.
-  it("counts the background runs each listed session has in flight", async () => {
+  it("counts the background runs each session has in flight", async () => {
     const { app, db, factory, tasks } = setup();
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: Date.now() },
@@ -460,20 +459,18 @@ describe("workbench server", () => {
     expect(rows[0]?.channel).toBe("slack");
   });
 
-  // One source for both lists: the rail is the full listing minus what
-  // Projects is not showing, and the title comes off the transcript like
-  // everywhere else.
-  it("renders Projects from the listing, joined with what it owns", async () => {
+  // One source, one shape: the pin is joined onto the listing's row, and the
+  // title comes off the transcript like everywhere else.
+  it("joins what it owns onto the listing", async () => {
     const { app, factory, state } = setup();
     vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: Date.now() },
-      { id: "s2", cwd: "/other", createdAt: 2, modified: Date.now() },
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: 5 },
+      { id: "s2", cwd: "/other", createdAt: 2, modified: 6 },
     ]);
     state.pin("s1", "/tmp", true);
-    const res = await app.request("/api/projects");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", state: "idle", listed: true, unread: false, activeRuns: 0, channel: "web" },
+    expect(await rail(app)).toEqual([
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Pinned", modified: 5, state: "idle", pinned: true, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/other", createdAt: 2, modified: 6, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -565,31 +562,29 @@ describe("workbench server", () => {
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
-    // Not on disk yet — the nascent entry fills the gap.
+    // Not on disk yet — the nascent entry fills the gap. Not pinned: a new
+    // session is the newest row, which is where the list puts it anyway.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", listed: true, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
-    listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: Date.now() });
+    listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: 7 });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, state: "idle", listed: true, unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, state: "idle", pinned: false, unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
-  it("pins sessions created here, and toggles pins on demand", async () => {
+  it("toggles pins on demand", async () => {
     const { app } = setup();
-    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
-    expect((await rail(app)).map((r) => r.id)).toEqual(["s1"]);
-
-    const off = await app.request("/api/sessions/s1/pin", {
-      method: "POST",
-      body: JSON.stringify({ pinned: false }),
-    });
-    expect(off.status).toBe(200);
-    expect(await rail(app)).toEqual([]);
+    const pin = (pinned: unknown) =>
+      app.request("/api/sessions/s1/pin", { method: "POST", body: JSON.stringify({ pinned }) });
+    expect((await pin(true)).status).toBe(200);
+    expect((await rail(app)).map((r) => [r.id, r.pinned])).toEqual([["s1", true]]);
+    expect((await pin(false)).status).toBe(200);
+    expect((await rail(app)).map((r) => [r.id, r.pinned])).toEqual([["s1", false]]);
 
     const bad = await app.request("/api/sessions/s1/pin", { method: "POST", body: "{}" });
     expect(bad.status).toBe(400);
@@ -630,64 +625,10 @@ describe("workbench server", () => {
       .toBe(400);
   });
 
-  // The rail groups a repository's worktrees together, so the route has to
-  // carry the identity git reports for the directory. Against a real repository,
-  // because a fake would only prove the spread operator works — its own, and not
-  // this checkout, which CI clones at a tag and hands over with a detached head.
-  it("says which repository a project directory belongs to", async () => {
-    const { app, state, factory } = setup();
-    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "pier-project-")));
-    const git = (...args: string[]) =>
-      execFileSync("git", ["-C", cwd, "-c", "user.email=t@t", "-c", "user.name=t", ...args]);
-    git("init", "-q", "-b", "main");
-    git("commit", "-q", "--allow-empty", "-m", "first");
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd, createdAt: 1, modified: Date.now() },
-    ]);
-    state.pin("s1", cwd, true);
-    await vi.waitFor(async () => {
-      const rows = (await (await app.request("/api/projects")).json()) as
-        { repo?: string; branch?: string }[];
-      // A worktree reports the *main* .git dir, which is the grouping key; what
-      // it maps to is repos.test.ts's business.
-      expect(rows[0]?.repo).toBe(join(cwd, ".git"));
-      expect(rows[0]?.branch).toBe("main");
-    });
-  });
-
-  // Membership is what a hand said, and nothing dates it: a session quiet for a
-  // month is on the rail until the ✓ takes it off. A lease used to hide those
-  // rows and `kept` used to opt out of it — two states answering one question,
-  // for an expiry that never destroyed anything.
-  it("keeps a session in the rail however quiet it goes, until a hand unpins it", async () => {
-    const { app, state, factory } = setup();
-    const month = Date.now() - 30 * 86_400_000;
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: month },
-      { id: "s2", cwd: "/tmp", createdAt: 2, modified: month },
-    ]);
-    state.pin("s1", "/tmp", true);
-    state.pin("s2", "/tmp", true);
-    expect((await rail(app)).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
-
-    expect((await app.request("/api/sessions/s1/pin", {
-      method: "POST",
-      body: JSON.stringify({ pinned: false }),
-    })).status).toBe(200);
-    expect((await rail(app)).map((r) => r.id)).toEqual(["s2"]);
-
-    // And back, on the same act: pinning a month-old session is the only thing
-    // that decides, so the re-read cannot disagree with the click.
-    expect((await app.request("/api/sessions/s1/pin", {
-      method: "POST",
-      body: JSON.stringify({ pinned: true }),
-    })).status).toBe(200);
-    expect((await rail(app)).map((r) => r.id).sort()).toEqual(["s1", "s2"]);
-  });
-
   // A row that predates all of this holds a pin and a directory and nothing
   // else. Everything the rail draws comes off the listing, so there is no
-  // backfill to run and no stale summary to repair.
+  // backfill to run and no stale summary to repair. Nothing dates a pin
+  // either: a month-old session stays on top until a hand unpins it.
   it("renders a pin that carries no summary at all", async () => {
     const month = Date.now() - 30 * 86_400_000;
     const { app, factory } = setup(
@@ -702,50 +643,32 @@ describe("workbench server", () => {
       { id: "s1", cwd: "/tmp", createdAt: month, title: "from the transcript", modified: Date.now() },
     ]);
     expect(await rail(app)).toEqual([
-      expect.objectContaining({ id: "s1", title: "from the transcript" }),
+      expect.objectContaining({ id: "s1", title: "from the transcript", pinned: true }),
     ]);
   });
 
-  it("keeps the manual order, and a new session never moves its project", async () => {
+  it("keeps the order the pinned rows were dragged into", async () => {
     const { app, state, factory } = setup();
-    const listed = [
-      { id: "a1", cwd: "/a", createdAt: 1, modified: Date.now() },
-      { id: "b1", cwd: "/b", createdAt: 2, modified: Date.now() },
-    ];
-    vi.mocked(factory.list).mockImplementation(async () => listed);
-    state.pin("a1", "/a", true);
-    state.pin("b1", "/b", true);
-    const order = (body: unknown) =>
-      app.request("/api/projects/order", { method: "POST", body: JSON.stringify(body) });
-
-    expect((await order({ projects: ["/b", "/a"], sessions: ["b1", "a1"] })).status).toBe(200);
-    const placed = (await (await app.request("/api/projects")).json()) as
-      { id: string; sort?: number; projectSort?: number }[];
-    expect(placed.map((r) => [r.id, r.sort, r.projectSort]).sort()).toEqual([
-      ["a1", 1, 1],
-      ["b1", 0, 0],
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "a", cwd: "/a", createdAt: 1, modified: 1 },
+      { id: "b", cwd: "/b", createdAt: 2, modified: 2 },
     ]);
+    state.pin("a", "/a", true);
+    state.pin("b", "/b", true);
+    const order = (body: string) => app.request("/api/sessions/order", { method: "POST", body });
 
-    // The jump this exists to stop: a second session in /a inherits /a's place.
-    listed.push({ id: "a2", cwd: "/a", createdAt: 3, modified: Date.now() });
-    state.pin("a2", "/a", true);
-    const rows = (await (await app.request("/api/projects")).json()) as
-      { id: string; sort?: number; projectSort?: number }[];
-    expect(rows.find((r) => r.id === "a2")).toMatchObject({ projectSort: 1 });
-    // Never dragged: no place of its own, which is what puts it on top of /a.
-    expect(rows.find((r) => r.id === "a2")).not.toHaveProperty("sort");
-  });
+    expect((await order(JSON.stringify({ sessions: ["b", "a"] }))).status).toBe(200);
+    expect((await rail(app)).map((r) => [r.id, r.sort])).toEqual([["a", 1], ["b", 0]]);
 
-  it("refuses an order that is not a list of ids", async () => {
-    const { app } = setup();
-    const order = (body: string) => app.request("/api/projects/order", { method: "POST", body });
+    // Whatever else the body carries, the list is the only thing that is read.
     expect((await order("{}")).status).toBe(400);
-    expect((await order(JSON.stringify({ projects: ["/a", 7] }))).status).toBe(400);
-    expect((await order(JSON.stringify({ sessions: "s1" }))).status).toBe(400);
+    expect((await order(JSON.stringify({ sessions: ["a", 7] }))).status).toBe(400);
+    expect((await order(JSON.stringify({ sessions: "a" }))).status).toBe(400);
+    expect((await order(JSON.stringify({ projects: ["/a"] }))).status).toBe(400);
   });
 
   it("creates a session in the given project directory, never pier's own", async () => {
-    const { app, factory, session, hub } = setup();
+    const { app, factory, session, hub, state } = setup();
     expect((await app.request("/api/sessions", { method: "POST", body: "{}" })).status).toBe(400);
     const res = await app.request("/api/sessions", {
       method: "POST",
@@ -754,6 +677,8 @@ describe("workbench server", () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: "s1" });
     expect(factory.create).toHaveBeenCalledExactlyOnceWith({ cwd: "/tmp" });
+    // Not pinned: pinned is "stuck to the top", and nobody put it there.
+    expect(state.flags().get("s1")?.pinned ?? false).toBe(false);
     // attached: session events now reach the hub
     const seen = vi.fn();
     hub.subscribe("s1", seen);

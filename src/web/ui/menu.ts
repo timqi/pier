@@ -44,7 +44,7 @@ export function closeMenu(): void {
  *
  *  A follow-up panel — Session info, the model picker — is opened from inside
  *  the menu it replaces, and by then the pointer is on the menu rather than on
- *  the row that owns the anchor. In the Projects rail the ⋯ is revealed on
+ *  the row that owns the anchor. In the session rail the ⋯ is revealed on
  *  hover, so it is `display: none` again and measures 0×0; the same is true of
  *  a row the list re-rendered under the open menu. Anchoring to a box like that
  *  put the panel in the top-left corner of the window, which is how this was

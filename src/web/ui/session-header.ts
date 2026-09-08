@@ -37,13 +37,13 @@ let deps: HeaderDeps;
 export function initHeader(d: HeaderDeps): void {
   deps = d;
   // Two of the ⋯ menu's actions are frequent enough to earn a chord. They act
-  // on the *current* session — the menu also opens from a project row, which
+  // on the *current* session — the menu also opens from a rail row, which
   // is why the rows only advertise the chord for the one it would hit.
   chord(PIN_KEY, () => {
     const s = deps.currentSession();
     if (!s) return;
     closeMenu();
-    void setPinned(s, !s.listed);
+    void setPinned(s, !s.pinned);
   }, modal);
   chord(FILES_KEY, () => {
     const s = deps.currentSession();
@@ -315,7 +315,7 @@ async function compactContext(id: string): Promise<void> {
   if (!res.ok) appendTurn("error", `compact failed: ${await failure(res, "no reason given")}`);
 }
 
-/** Same menu from the chat header and from a project row's ⋯ button. */
+/** Same menu from the chat header and from a rail row's ⋯ button. */
 export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
   const current = s.id === deps.currentId();
   openMenu(anchor, [
@@ -330,17 +330,14 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
         void renameSession(s);
       },
     },
-    // One answer to "is this in Projects", and the word for leaving is the one
-    // the rail's own ✓ button uses — one action, one name, whichever surface
-    // you reach it from.
     {
-      label: s.listed ? "Done — remove from Projects" : "Pin to Projects",
+      label: s.pinned ? "Unpin" : "Pin",
       hint: current ? chordLabel(PIN_KEY) : "",
-      // No checkmark: it would sit on a verb, so a listed session reads as
-      // "already removed". The label is the state, and it already switched.
+      // No checkmark: it would sit on a verb, so a pinned session reads as
+      // "already unpinned". The label is the state, and it already switched.
       onSelect: () => {
         closeMenu();
-        void setPinned(s, !s.listed);
+        void setPinned(s, !s.pinned);
       },
     },
     {
@@ -350,7 +347,7 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
     },
     {
       // For every session the menu opens on, not only the selected one: this
-      // is the one menu the chat header and the project rows share, so neither
+      // is the one menu the chat header and the rail rows share, so neither
       // surface needs a copy of either row (budget rule 3).
       label: "Compact context",
       onSelect: () => {

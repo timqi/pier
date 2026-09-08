@@ -34,7 +34,6 @@ import { isThinkingLevel } from "../core/types.js";
 import { SESSION_TITLE_MAX } from "../limits.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
-import { RepoIndex } from "./repos.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import type { SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
@@ -180,9 +179,6 @@ export function createServer(
     hub.emitWorkspace({ type: "sessions-changed" });
   });
 
-  // Repository identity per project directory, refreshed off the request path.
-  const repos = new RepoIndex(() => hub.emitWorkspace({ type: "sessions-changed" }));
-
   /** Background runs still in flight, per launching session. One query for a
    *  whole list: asking row by row loaded every run object of every session to
    *  draw one dot each. */
@@ -241,63 +237,28 @@ export function createServer(
   };
 
   // One session as every list renders it: the summary, what the workbench
-  // decided about it, and what is true of it right now.
-  // The listing's `modified` is dropped rather than forwarded: it dates a
-  // transcript, and no surface renders it.
-  const present = (
-    { modified: _drop, ...s }: SessionSummary,
-    own: SessionFlags | undefined,
-    active: Map<string, number>,
-  ) => {
-    return {
-      ...s,
-      ...(own?.sort === undefined ? {} : { sort: own.sort }),
-      ...(own?.projectSort === undefined ? {} : { projectSort: own.projectSort }),
-      // Which repository the directory belongs to, on every list and not only
-      // on the rail's: All sessions replaces the client's whole list, so a row
-      // without it there un-groups the worktrees the rail had just grouped.
-      // Whatever is known now — the probe is never waited on, and its answer
-      // arrives as a `sessions-changed`.
-      ...repos.get(s.cwd),
-      state: router.stateOf(s.id) ?? "idle",
-      listed: own?.pinned ?? false,
-      unread: own?.unread ?? false,
-      channel: channelOf?.(s.id) ?? "web",
-      activeRuns: active.get(s.id) ?? 0,
-    };
-  };
-
-  // The rail: the same rows as the full list, minus everything Projects is not
-  // showing. One source, one shape — the rail used to read a second copy of
-  // the summaries out of SQLite, which is what had to be kept in step.
-  app.get("/api/projects", async (c) => {
-    const flags = state.flags();
-    const active = activeRuns();
-    return c.json(
-      (await allSessions())
-        .map((s) => present(s, flags.get(s.id), active))
-        .filter((row) => row.listed),
-    );
+  // decided about it, and what is true of it right now. `modified` rides
+  // along: it is the rail's sort key for everything not pinned.
+  const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>) => ({
+    ...s,
+    ...(own?.sort === undefined ? {} : { sort: own.sort }),
+    state: router.stateOf(s.id) ?? "idle",
+    pinned: own?.pinned ?? false,
+    unread: own?.unread ?? false,
+    channel: channelOf?.(s.id) ?? "web",
+    activeRuns: active.get(s.id) ?? 0,
   });
 
-  // One drag, one write of the list that changed: the projects, or one
-  // project's sessions. Whole lists rather than a move — the client has just
-  // rendered the result, and replaying a move on top of a stale list would put
-  // the row somewhere nobody dropped it.
-  app.post("/api/projects/order", async (c) => {
+  // One drag, one write of the pinned list. The whole list rather than a move
+  // — the client has just rendered the result, and replaying a move on top of
+  // a stale list would put the row somewhere nobody dropped it.
+  app.post("/api/sessions/order", async (c) => {
     const body = await c.req.json().catch(() => null);
-    const list = (raw: unknown): string[] | null | undefined =>
-      raw === undefined
-        ? undefined
-        : Array.isArray(raw) && raw.every((x) => typeof x === "string" && x)
-          ? (raw as string[])
-          : null;
-    const sessions = list(body?.sessions);
-    const projects = list(body?.projects);
-    if (sessions === null || projects === null || (!sessions && !projects)) {
-      return c.json({ error: "sessions and/or projects must be lists of ids" }, 400);
+    const sessions: unknown = body?.sessions;
+    if (!Array.isArray(sessions) || !sessions.every((x) => typeof x === "string" && x)) {
+      return c.json({ error: "sessions must be a list of ids" }, 400);
     }
-    state.reorder({ sessions, projects });
+    state.reorder(sessions as string[]);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
   });
@@ -316,8 +277,6 @@ export function createServer(
     const createdAt = Date.now();
     nascent.set(session.id, { cwd: body.cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
-    // Created here = part of the workspace; pinning is what Projects lists.
-    state.pin(session.id, body.cwd, true);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
@@ -338,9 +297,8 @@ export function createServer(
     if (typeof body?.pinned !== "boolean") return c.json({ error: "pinned required" }, 400);
     const id = c.req.param("id");
     // The directory comes from the listing, not from the client that clicked:
-    // it is the one fact this row keeps about the session, it is the key a
-    // project's manual place is stamped on, and the browser is not where a
-    // path should come from when the server already knows it.
+    // it is the one fact this row keeps about the session, and the browser is
+    // not where a path should come from when the server already knows it.
     const cwd = (await factory.find(id))?.cwd ?? nascent.get(id)?.cwd;
     if (!cwd) return c.json({ error: `session ${id} has no directory Pier can find` }, 404);
     state.pin(id, cwd, body.pinned);

@@ -40,7 +40,7 @@ const UNDO_17 = "DROP INDEX task_runs_time_id; DROP INDEX task_runs_visible_time
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(18);
+    expect(version(db)).toBe(19);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -67,8 +67,8 @@ describe("openDb", () => {
       // The summary a transcript already carries (title, created_at,
       // last_active) is not here: migration 9 dropped it. Neither are the
       // Projects lease's two columns (kept, pinned_at): migration 11 dropped
-      // those with the lease itself. cwd stays as the key a project's manual
-      // place is stamped on.
+      // those with the lease itself. project_sort is orphaned, not dropped
+      // (migration 19).
       "session_id",
       "pinned",
       "unread",
@@ -86,7 +86,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(18);
+    expect(version(second)).toBe(19);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -99,7 +99,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 18/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 19/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -285,7 +285,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(18);
+    expect(version(db)).toBe(19);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -316,7 +316,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(18);
+    expect(version(db)).toBe(19);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -350,7 +350,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(18);
+    expect(version(db)).toBe(19);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -371,6 +371,28 @@ describe("openDb", () => {
         ).all(),
       ),
     ).toContain("tasks_due");
+    db.close();
+  });
+
+  it("unpins every session a database pinned while pinned meant listed", () => {
+    const path = dbPath();
+    // Wound back to 18: every web session ever created carried pinned = 1,
+    // because that was membership in Projects. Now it is "stuck to the top".
+    const before = openDb(path);
+    before.exec(
+      "INSERT INTO session_state(session_id, pinned, unread, cwd, sort, project_sort)" +
+        " VALUES ('s1', 1, 1, '/a', 2, 0), ('s2', 1, 0, '/b', NULL, 1); PRAGMA user_version = 18",
+    );
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(19);
+    // Only the pin is reset: the unread mark and the hand-given place stay.
+    expect(db.prepare("SELECT session_id, pinned, unread, sort FROM session_state ORDER BY session_id").all())
+      .toEqual([
+        { session_id: "s1", pinned: 0, unread: 1, sort: 2 },
+        { session_id: "s2", pinned: 0, unread: 0, sort: null },
+      ]);
     db.close();
   });
 

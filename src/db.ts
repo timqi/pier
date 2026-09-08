@@ -328,6 +328,15 @@ const MIGRATIONS: readonly string[] = [
   -- the JSON — without this every session open was a full scan of task_runs.
   CREATE INDEX task_runs_invoked_by ON task_runs(json_extract(json, '$.invokedBySessionId'), queued_at DESC);
   `,
+  // 19 — the rail is one flat list, and pinned means "stuck to the top".
+  `
+  -- pinned used to mean "listed under Projects", and every session created in
+  -- the workbench was. Now it means on top of the list, and nobody put a
+  -- historical session there: kept as-is, every web session ever made would
+  -- land in the pinned section. project_sort stays as a column nothing reads
+  -- — a SQLite column drop rewrites the table for a NULL nobody pays for.
+  UPDATE session_state SET pinned = 0;
+  `,
 ];
 
 /**

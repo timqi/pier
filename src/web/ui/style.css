@@ -198,7 +198,7 @@ html {
      their own size utilities, so naming them is the only way to scale them up. */
   #sidebar,
   #console-section ul,
-  #project-tree {
+  #session-list {
     font-size: 0.9375rem;
   }
   /* Pull-to-refresh would reload the workbench mid-turn; the transcript pane
@@ -208,7 +208,7 @@ html {
   }
   /* Home-indicator gutter for the two elements that sit on the bottom edge. */
   #composer,
-  #project-tree {
+  #session-list {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
   }
   /* Keyboard up (composer.ts sets it): the indicator is behind the keyboard,
@@ -225,8 +225,7 @@ html {
     padding-top: env(safe-area-inset-top);
   }
   /* Thumb-sized rows in the drawer; the desktop rail stays compact. */
-  #project-tree li,
-  #project-tree summary,
+  #session-list li,
   #console-section li button {
     padding-block: 0.5rem;
   }

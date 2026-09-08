@@ -13,7 +13,7 @@ import { $, consoleView, h, type ConsoleView } from "./dom.js";
 import { pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
-import { groupByCwd, type SessionInfo } from "./sidebar.js";
+import { distinctCwds, orderSessions, type SessionInfo } from "./sidebar.js";
 import type { RunsView } from "./runs.js";
 import type { TasksView } from "./tasks.js";
 
@@ -244,13 +244,16 @@ function setHash(r: Route, replace = false): void {
 
 export const setSessionHash = (id: string): void => setHash({ kind: "session", id });
 
-/** Hash → UI. Session routes may name non-pinned sessions; select verifies them. */
+/** Hash → UI. Session routes may name sessions not listed yet; select verifies them. */
 export function applyRoute(): void {
   const route = parseHash();
   const sessions = deps.sessions();
   const currentId = deps.currentId();
   const wanted = route?.kind === "session" ? route.id : null;
-  const id = wanted ?? (currentId ?? (sessions.find((s) => s.listed) ?? sessions[0])?.id ?? null);
+  // Nothing asked for: the rail's first row, which is the top pinned session
+  // when there is one.
+  const { pinned, rest } = orderSessions(sessions);
+  const id = wanted ?? currentId ?? (pinned[0] ?? rest[0])?.id ?? null;
   applyingRoute = true;
   try {
     if (id && id !== currentId) deps.select(id);
@@ -294,7 +297,7 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
   settings: async (root) =>
     (await import("./settings.js")).createSettingsView(
       root,
-      () => [...groupByCwd(deps.sessions()).keys()],
+      () => distinctCwds(deps.sessions()),
       // Through the router, not a local re-render: the hash is the one
       // copy of "where am I", and Back should walk tabs too.
       (t) => showConsole("settings", t),

@@ -160,49 +160,30 @@ async function createSession(cwd: string): Promise<void> {
   if (seq !== selectionSeq) return;
   // The row is known here and the POST already broadcast `sessions-changed`,
   // so it is rendered now and the workspace stream's own refresh reconciles it
-  // — selecting must not wait for a full listing (principle 7). Repo and branch
-  // come from a session in the same directory, so the row lands in its project
-  // rather than jumping there a moment later.
-  const { repo, branch } = sessions.find((s) => s.cwd === cwd) ?? {};
+  // — selecting must not wait for a full listing (principle 7).
   sessions.unshift({
-    id, cwd, createdAt: Date.now(), state: "idle", listed: true, unread: false, channel: "web",
-    activeRuns: 0, repo, branch,
+    id, cwd, createdAt: Date.now(), state: "idle", pinned: false, unread: false, channel: "web",
+    activeRuns: 0,
   });
   await select(id); // renders the rail and the header with the row above
   if (currentId === id) focusInput();
 }
 
-/** `complete` = every session Pi knows, so it replaces the list. A Projects
- *  read speaks only for the pinned ones and merges instead: dropping the rest
- *  would delete the current session out from under its own chat the moment it
- *  is unpinned — header, ⋯ menu and its Pin row with it. */
-function commitSessions(rows: SessionInfo[], complete: boolean): void {
+/** Every session Pi knows, so it replaces the list. */
+function commitSessions(rows: SessionInfo[]): void {
   // A title read off an IM prompt still carries its speaker header: every
   // surface downstream reads `title`, so it is made readable once, here.
-  const next = rows.map((s) => ({ ...s, title: readableTitle(s.title) }));
-  if (complete) {
-    sessions = next;
-  } else {
-    const fresh = new Map(next.map((s) => [s.id, s]));
-    sessions = sessions.map((s) => fresh.get(s.id) ?? (s.listed ? { ...s, listed: false } : s));
-    const known = new Set(sessions.map((s) => s.id));
-    sessions.push(...next.filter((s) => !known.has(s.id)));
-  }
+  sessions = rows.map((s) => ({ ...s, title: readableTitle(s.title) }));
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
   maybeAckRead();
 }
 
-// Thrown, not swallowed: these run as `void refresh…()` from event handlers,
-// and report.ts is listening for exactly that rejection — a rail that quietly
-// stopped updating is the shape of bug 5b is about.
-const refreshProjects = coalesce(async () => {
-  commitSessions(await mustGetJson<SessionInfo[]>("/api/projects", "Could not load projects"), false);
-});
-
-/** Full Pi transcript scan, only for surfaces that explicitly need history. */
+// Thrown, not swallowed: this runs as `void refreshSessions()` from event
+// handlers, and report.ts is listening for exactly that rejection — a rail
+// that quietly stopped updating is the shape of bug 5b is about.
 const refreshSessions = coalesce(async () => {
-  commitSessions(await mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"), true);
+  commitSessions(await mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"));
 });
 
 /** Seen = read: the selected session's chat is on screen in a *focused*
@@ -245,7 +226,7 @@ function setState(state: SessionState): void {
   renderSessions();
   renderHeader();
   updateComposer();
-  if (state === "idle") void refreshProjects();
+  if (state === "idle") void refreshSessions();
 }
 
 // --- event handling ----------------------------------------------------------------
@@ -331,13 +312,13 @@ function handleEvent(e: SessionEvent): void {
  */
 function connectWorkspace(): void {
   const src = new EventSource("/api/events");
-  // Any (re)connect may follow a gap — re-list Projects instead of replaying.
-  src.onopen = () => void refreshProjects();
+  // Any (re)connect may follow a gap — re-list instead of replaying.
+  src.onopen = () => void refreshSessions();
   src.onerror = () => streamDied(src, "Workspace");
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;
     if (e.type === "sessions-changed") {
-      void refreshProjects();
+      void refreshSessions();
       return;
     }
     if (e.type === "tasks-changed" || e.type === "task-run-changed" || e.type === "task-message-changed" || e.type === "task-group-changed") {
@@ -345,7 +326,7 @@ function connectWorkspace(): void {
       refreshRuns();
       refreshActivity();
       // A run starting or settling changes its launcher's activeRuns dot.
-      if (e.type === "task-run-changed") void refreshProjects();
+      if (e.type === "task-run-changed") void refreshSessions();
       return;
     }
     refreshActivity();
@@ -507,7 +488,6 @@ initSidebar({
   select: (id) => void select(id),
   sessionMenu,
   createSession,
-  openFiles: showFiles,
   openConsole: showConsole,
   onPinsChanged: renderHeader,
 });
@@ -539,4 +519,4 @@ document.addEventListener("visibilitychange", maybeAckRead);
 window.addEventListener("focus", maybeAckRead);
 
 connectWorkspace();
-void refreshProjects().then(applyRoute);
+void refreshSessions().then(applyRoute);

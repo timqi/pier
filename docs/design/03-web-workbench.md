@@ -12,11 +12,10 @@ catch, not the line count.
 
 | Route | Behavior |
 | ----- | -------- |
-| `POST /api/projects/order` | body `{sessions?, projects?}` (lists of ids) → the sidebar's two manual orders, the only ones the UI owns |
-| `GET /api/sessions` | `AgentFactory.list()` + live state from router + `listed`/`unread` from the pin store (`listed` = pinned: membership ends when a hand ends it, nothing expires) |
-| `GET /api/projects` | the same rows, filtered to `listed` — the rail reads no second store |
-| `POST /api/sessions` | body `{cwd?}` → create session (auto-pinned), returns `{id}` |
-| `POST /api/sessions/:id/pin` | body `{pinned}` → add/remove from Projects, returns `{pinned}`; the directory it records comes from the listing, 404 when nothing can place the session |
+| `POST /api/sessions/order` | body `{sessions}` (list of ids) → the order of the pinned rows, the only manual order the UI owns |
+| `GET /api/sessions` | `AgentFactory.list()` (with `modified`, the rail's sort key) + live state from router + `pinned`/`unread`/`sort` from the pin store (`pinned` = stuck to the top: nothing expires) |
+| `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
+| `POST /api/sessions/:id/pin` | body `{pinned}` → stick to / release from the top of the rail, returns `{pinned}`; the directory it records comes from the listing, 404 when nothing can place the session |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn and re-dispatch the new text; 409 while streaming |

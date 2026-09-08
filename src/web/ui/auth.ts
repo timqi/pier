@@ -55,7 +55,7 @@ export function streamDied(source: EventSource, what: string): void {
   };
   // Deliberately the unwrapped fetch: this *is* the 401 handler, and going
   // through the wrapper would hide which of the two answers came back.
-  void nativeFetch("/api/projects").then(
+  void nativeFetch("/api/sessions").then(
     (res) => (res.status === 401 ? toLogin() : died()),
     died,
   );
