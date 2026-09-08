@@ -29,8 +29,9 @@ its top layer, and clip only content that needs clipping. Verify actual overlay 
 
 ## Conversation and Activity
 
-Give user messages a pale mist-blue surface with dark text and a corresponding muted dark
-variant. Assistant replies use a solid reading surface, with a comfortable width for long text.
+Give user messages a clearly bounded mist-blue surface with dark text and a corresponding
+muted dark variant. Use alignment, fill, and outline to distinguish roles before reading text.
+Assistant replies use a solid reading surface, with a comfortable width for long text.
 Keep the final answer distinct from the work log. During a turn, progress text, thinking,
 and tool activity belong in expandable steps before the reply bubble. Once the turn ends,
 show the final text as the reply without duplicating it in steps or leaving empty activity groups.
@@ -38,7 +39,8 @@ Live rendering, restored history, and reconnection replay must tell the same sto
 Aborted work retains readable unfinished text; errors, pending decisions, and states without
 a reply remain explicit. Visual simplicity must never make something that happened disappear.
 
-System notices prioritize the topic, especially on phones. Keep their bodies to four rendered
+System notices use wide neutral panels with visible outlines, distinct from conversation bubbles.
+They prioritize the topic, especially on phones. Keep their bodies to four rendered
 lines by default, with the full text available on expansion. IDs remain supporting details.
 Use shared status meanings: cyan for delegation and callbacks, amber for decisions, and clear
 success, failure, or interruption states for results. Keep color accents small and restrained.
