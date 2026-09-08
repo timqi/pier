@@ -188,20 +188,22 @@ const HOVER_BTN =
 const waitingForYou = (s: SessionInfo): boolean => s.unread && s.channel === "web";
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
- *  sky = idle itself but subagents still in flight. Idle draws nothing — but
- *  keeps the slot, so titles line up down the list whatever their row says. */
-export function stateDot(s: SessionInfo): HTMLElement {
-  const [cls, title] =
+ *  sky = idle itself but subagents still in flight. Idle is nothing at all —
+ *  no slot either, so the title gets the width; a row that says something is
+ *  allowed to stand out by being indented. */
+export function stateDot(s: SessionInfo): HTMLElement[] {
+  const mark: [string, string] | null =
     s.state === "streaming"
       ? ["bg-green-500 animate-pulse", "working…"]
       : waitingForYou(s)
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
           ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
-          : ["", ""];
-  const dot = h("span", `h-2 w-2 flex-none rounded-full ${cls}`);
-  dot.title = title;
-  return dot;
+          : null;
+  if (!mark) return [];
+  const dot = h("span", `h-2 w-2 flex-none rounded-full ${mark[0]}`);
+  dot.title = mark[1];
+  return [dot];
 }
 
 /** One pushpin for every surface that pins: upright and filled when the row is
@@ -302,7 +304,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
     deps.sessionMenu(more, s);
   };
   li.append(
-    stateDot(s),
+    ...stateDot(s),
     // Not the header's `untitled(cwd)`: the row's title attribute already
     // names the directory, and the long form would truncate to "New session i…".
     h("span", "truncate", s.title ?? "untitled"),
@@ -412,9 +414,7 @@ function paletteRow(t: Target): HTMLElement {
     "li",
     "flex cursor-pointer items-center gap-2 border-l-2 border-transparent px-3 py-1.5 hover:bg-neutral-100",
   );
-  // A Console row keeps the dot's width so both kinds of row start on the
-  // same column; only a session has a state to report there.
-  li.append(t.session ? stateDot(t.session) : h("span", "h-2 w-2 flex-none"));
+  if (t.session) li.append(...stateDot(t.session));
   li.append(
     h("span", "min-w-0 flex-1 truncate", t.label),
     h("span", "max-w-[45%] flex-none truncate text-[11.5px] text-neutral-400", t.detail),

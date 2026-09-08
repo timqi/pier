@@ -62,14 +62,13 @@ it("offers each directory once, newest session first", () => {
   ])).toEqual(["/y", "/x"]);
 });
 
-// The idle row draws no dot but keeps its width, so the title column does not
-// move between an idle row and a working one above it.
-it("keeps the dot's slot on an idle row and paints it only for something to look at", () => {
-  const dot = (over: Partial<Row>) => sidebar.stateDot(row("x", over)) as unknown as { cls: string; title: string };
-  expect(dot({})).toEqual({ cls: "h-2 w-2 flex-none rounded-full ", title: "" });
-  expect(dot({ state: "streaming" }).cls).toContain("bg-green-500");
-  expect(dot({ unread: true }).cls).toContain("bg-amber-500");
+// An idle row draws nothing where the dot would be — the title takes the width.
+it("draws no dot on an idle row and paints one only for something to look at", () => {
+  const dot = (over: Partial<Row>) => sidebar.stateDot(row("x", over))[0] as unknown as { cls: string; title: string } | undefined;
+  expect(dot({})).toBeUndefined();
+  expect(dot({ state: "streaming" })?.cls).toContain("bg-green-500");
+  expect(dot({ unread: true })?.cls).toContain("bg-amber-500");
   // Unread, but answering Slack: that turn was delivered where it came from.
-  expect(dot({ unread: true, channel: "slack" }).cls).not.toContain("bg-");
+  expect(dot({ unread: true, channel: "slack" })).toBeUndefined();
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
 });
