@@ -206,15 +206,18 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
   return [dot];
 }
 
-/** One pushpin for every surface that pins: upright and filled when the row is
- *  on top, tilted and hollow when it is not. Inline like the other icons
- *  (index.html, theme.ts); `h` makes HTML elements and an SVG is not one. */
-const pinIcon = (pinned: boolean): string =>
-  `<svg viewBox="0 0 16 16" fill="${pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 ${pinned ? "text-indigo-500" : "rotate-45"}"><path d="M6 2v4L4.5 8.5h7L10 6V2z" /><path d="M5 2h6M8 8.5V14" /></svg>`;
+/** One pushpin for every surface that pins — Lucide's `pin` (ISC), inlined
+ *  like the other icons (index.html); `h` makes HTML elements and an SVG is
+ *  not one. State is not a second glyph: a pinned row's pin is resident and
+ *  indigo, an unpinned row's appears on hover in grey. */
+const PIN_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>';
 
+/** Pinned: always on the row, in colour — that is how the top of the list
+ *  says which rows are pinned, no divider needed. Otherwise `cls` decides. */
 function pinButton(s: SessionInfo, cls: string): HTMLElement {
-  const pin = h("button", cls);
-  pin.innerHTML = pinIcon(s.pinned);
+  const pin = h("button", s.pinned ? "flex-none rounded px-1 leading-none text-indigo-500 hover:bg-neutral-200" : cls);
+  pin.innerHTML = PIN_ICON;
   pin.title = s.pinned ? "Unpin" : "Pin to top";
   pin.onclick = (ev) => {
     ev.stopPropagation();
@@ -344,9 +347,7 @@ export function renderSessions(force = false): void {
   setAttention(waiting.length);
   setUnreadBadge(waiting.length);
   const { pinned, rest, hidden } = pageOf(sessions, shown);
-  const nodes: HTMLElement[] = pinned.map(sessionRow);
-  if (pinned.length && rest.length) nodes.push(h("li", "my-1 border-t border-neutral-200/70"));
-  nodes.push(...rest.map(sessionRow));
+  const nodes: HTMLElement[] = [...pinned, ...rest].map(sessionRow);
   if (hidden > 0) {
     const more = h("li", "cursor-pointer px-3 py-1.5 text-[12.5px] text-neutral-400 hover:bg-neutral-100", `Load more (${hidden})`);
     more.onclick = () => {
