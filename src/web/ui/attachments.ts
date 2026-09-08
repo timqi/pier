@@ -14,6 +14,7 @@ import { langFor } from "./highlight.js";
 // --- image lightbox + thumbnails ---------------------------------------------------
 
 const imageDialog = $<HTMLDialogElement>("#image-dialog");
+const imageStage = $("#image-stage");
 const imageFull = $<HTMLImageElement>("#image-full");
 const imagePrev = $("#image-prev");
 const imageNext = $("#image-next");
@@ -28,7 +29,39 @@ let shown = 0;
 function step(delta: number): void {
   if (gallery.length < 2) return;
   shown = (shown + delta + gallery.length) % gallery.length;
+  zoom(false);
   imageFull.src = gallery[shown]!;
+}
+
+// --- double-tap zoom ---------------------------------------------------------------
+
+const ZOOM = 2.5;
+/** The flag style.css keys the zoomed layout off is also the state — there is
+ *  no second copy of it to fall out of step. */
+const zoomed = (): boolean => imageStage.dataset.zoom !== undefined;
+
+/** Grow the image to a fixed multiple of its fitted size about the tapped
+ *  point, and let the stage scroll: panning is then the platform's own (touch
+ *  drag, wheel, scrollbars) rather than a drag handler of ours. `at` is a
+ *  viewport point — the tap — which stays where it was under the growth. */
+function zoom(on: boolean, at?: { x: number; y: number }): void {
+  if (!on) {
+    delete imageStage.dataset.zoom;
+    imageFull.style.cssText = "";
+    return;
+  }
+  // Both boxes read while the image is still fitted, the fractions with them.
+  const box = imageFull.getBoundingClientRect();
+  const stage = imageStage.getBoundingClientRect();
+  const fx = at ? (at.x - box.left) / box.width : 0.5;
+  const fy = at ? (at.y - box.top) / box.height : 0.5;
+  const width = box.width * ZOOM;
+  const height = box.height * ZOOM;
+  imageStage.dataset.zoom = "";
+  imageFull.style.width = `${String(width)}px`;
+  imageFull.style.height = `${String(height)}px`;
+  imageStage.scrollLeft = fx * width - stage.width / 2;
+  imageStage.scrollTop = fy * height - stage.height / 2;
 }
 
 /** Full-size view of any thumbnail. Paging stays within the `[data-gallery]`
@@ -49,16 +82,33 @@ function showImage(clicked: HTMLImageElement): void {
   imageDialog.showModal();
 }
 
-// Backdrop and image close; the arrows must not, hence stopPropagation.
-imageDialog.onclick = () => imageDialog.close();
-const pageOn = (btn: HTMLElement, delta: number): void => {
-  btn.onclick = (ev) => {
-    ev.stopPropagation();
-    step(delta);
-  };
+// One tap closes (or leaves the zoom), two zoom about the tap — so the close
+// waits out the double-tap window rather than firing on its first half.
+const DOUBLE_MS = 260;
+let firstTap: number | undefined;
+imageStage.onclick = (ev) => {
+  if (firstTap !== undefined) {
+    clearTimeout(firstTap);
+    firstTap = undefined;
+    zoom(!zoomed(), { x: ev.clientX, y: ev.clientY });
+    return;
+  }
+  firstTap = window.setTimeout(() => {
+    firstTap = undefined;
+    if (zoomed()) zoom(false);
+    else imageDialog.close();
+  }, DOUBLE_MS);
 };
-pageOn(imagePrev, -1);
-pageOn(imageNext, 1);
+// However it closed — tap, Esc, the backdrop — the next image opens fitted,
+// and a tap still inside its window must not close the one opened after it.
+imageDialog.onclose = () => {
+  clearTimeout(firstTap);
+  firstTap = undefined;
+  zoom(false);
+};
+// The arrows sit outside #image-stage, so paging never reaches the tap handler.
+imagePrev.onclick = () => step(-1);
+imageNext.onclick = () => step(1);
 imageDialog.onkeydown = (ev) => {
   if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
   ev.preventDefault();

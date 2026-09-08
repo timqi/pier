@@ -119,6 +119,11 @@ html[data-theme="dark"] {
    named scale (`text-sm`) and this block should shrink, not grow. */
 html {
   font-size: 112.5%; /* 18px base */
+  /* Panning is all a touch may do to the document: `user-scalable=no`
+     (index.html) is the same sentence for engines that honour it, and a
+     workbench zoomed by a stray double-tap is a phone stuck off-centre. The
+     one place a gesture should magnify is the lightbox, below. */
+  touch-action: pan-x pan-y;
 }
 .text-\[9px\] { font-size: 0.5625rem; }
 .text-\[10px\] { font-size: 0.625rem; }
@@ -267,6 +272,16 @@ html {
      stay white — which `text-white` no longer means once the palette flips. */
   .lightbox-nav {
     @apply absolute top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white dark:text-neutral-950 hover:bg-black/70;
+  }
+  /* Zoomed (attachments.ts sets the flag and the pixel size): the stage turns
+     into the scroll box, so panning is the platform's own. Centring has to go
+     with it — a flex item centred in a box it overflows cannot be scrolled
+     back to its left and top edges. */
+  #image-stage[data-zoom] {
+    @apply items-start justify-start overflow-auto;
+  }
+  #image-stage[data-zoom] img {
+    @apply max-h-none max-w-none cursor-zoom-out;
   }
   /* Collapsible rows: hide native markers, rotate our chevron on open. */
   summary {

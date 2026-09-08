@@ -496,6 +496,10 @@ initVersion(__PIER_VERSION__);
 // network gone; the notification permission is asked for in Settings, never here.
 void initPush();
 
+// The last of the three saying "the workbench does not zoom" (index.html,
+// style.css): on a pinch, Safari's own gesture events overrule both.
+document.addEventListener("gesturestart", (ev) => ev.preventDefault());
+
 // Coming back to a hidden tab — or to an unfocused window — is the other way
 // turns get seen.
 document.addEventListener("visibilitychange", maybeAckRead);

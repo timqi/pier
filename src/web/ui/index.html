@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <!-- viewport-fit=cover lets the safe-area insets in style.css do their job
-       under an iPhone's home indicator. -->
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+       under an iPhone's home indicator. No user scaling: a fixed-viewport
+       workbench zoomed by a stray gesture has no visible way back — said again
+       as `touch-action` (style.css) for the engines that ignore this pair. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#fafafa" />
   <!-- Ahead of the stylesheet, because a workbench that flashes white and then
        goes dark reads as a bug. This is the only place "system" is resolved
@@ -261,15 +263,21 @@
     <ul id="archive-list" class="max-h-[60vh] overflow-y-auto py-1 text-[13.5px]"></ul>
   </dialog>
 
-  <!-- Full-size view of a thumbnail; click anywhere (or Esc) closes.
-       The arrows page through the gallery it was opened from, as do ← / →;
-       they hide when there is only one image to look at. -->
-  <dialog id="image-dialog" class="m-auto max-h-[92vh] max-w-[92vw] rounded-xl bg-transparent p-0 backdrop:bg-black/70">
-    <div class="relative">
-      <img id="image-full" alt="" class="max-h-[92vh] max-w-[92vw] cursor-zoom-out rounded-xl object-contain" />
-      <button type="button" id="image-prev" aria-label="Previous image" class="lightbox-nav left-2">‹</button>
-      <button type="button" id="image-next" aria-label="Next image" class="lightbox-nav right-2">›</button>
+  <!-- Full-size view of a thumbnail; a single click (or Esc) closes, a double
+       one zooms about the point. The arrows page through the gallery it was
+       opened from, as do ← / →; they hide when there is only one image to look
+       at. The dialog fills the viewport rather than hugging the image, so the
+       arrows sit at the screen's edges and a tall shot and a wide one don't
+       move the control under your thumb; #image-stage is the box a zoomed
+       image scrolls inside (ui/attachments.ts). -->
+  <dialog id="image-dialog" class="fixed inset-0 m-0 max-h-none max-w-none bg-transparent p-0 backdrop:bg-black/70">
+    <div id="image-stage" class="flex h-full w-full items-center justify-center overflow-hidden">
+      <img id="image-full" alt="" class="max-h-[92dvh] max-w-[92vw] cursor-zoom-in rounded-xl object-contain" />
     </div>
+    <!-- Siblings of the stage, not children of it: the stage is what scrolls
+         when zoomed, and an arrow inside it would scroll away with the image. -->
+    <button type="button" id="image-prev" aria-label="Previous image" class="lightbox-nav left-2">‹</button>
+    <button type="button" id="image-next" aria-label="Next image" class="lightbox-nav right-2">›</button>
   </dialog>
 
   <!-- Text preview of an agent attachment — the Files view's code pane fills
