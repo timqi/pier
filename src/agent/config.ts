@@ -22,8 +22,9 @@ import type {
 
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
-// settings.json is on the list for one field: the default model. Everything
-// else in it is machine-local and survives an import untouched.
+// settings.json is on the list for two fields: the default model and its
+// reasoning effort. Everything else in it is machine-local and survives an
+// import untouched.
 const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
 const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
@@ -248,10 +249,14 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       );
       const parsed = raw?.trim() ? parseModels(raw) : {};
       if (!parsed) throw new Error("models.json must be valid JSON before exporting configuration");
+      const settings = readSettings(rawSettings);
       return normalizeAgentSnapshot({
         files: { "SYSTEM.md": system, "AGENTS.md": agents },
         providers: snapshotProviders(parsed.providers),
-        defaultModel: defaultModelRef(rawSettings),
+        defaultModel: defaultModelRef(settings),
+        // Unlike the pair, a lone level needs no reading of its own; the
+        // snapshot boundary is the one place that says which ones exist.
+        defaultThinkingLevel: settings.defaultThinkingLevel ?? null,
       });
     });
   }
@@ -267,12 +272,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       const providers = mergeSnapshotProviders(parsed.providers, incoming.providers);
       const models = JSON.stringify(providers) === JSON.stringify(parsed.providers ?? {})
         ? raw : `${JSON.stringify({ ...parsed, providers }, null, 2)}\n`;
-      const rawSettings = before[3];
-      // A source that never states a default (an older one) leaves the local
-      // settings.json alone; `null` is a stated "no default" and clears it.
-      const settings = incoming.defaultModel === undefined
-        ? rawSettings
-        : withDefaultModel(rawSettings, incoming.defaultModel);
+      const settings = withDefaults(before[3], incoming);
       const after = [incoming.files["SYSTEM.md"], incoming.files["AGENTS.md"], models, settings];
       const changes = names.flatMap((name, index) => before[index] === after[index] ? [] : [{
         path: join(this.agentDir, name), before: before[index]!, after: after[index]!,
@@ -484,9 +484,9 @@ function restoreHeaders(
   }
 }
 
-/** settings.json is read for one pair and never rewritten wholesale. Malformed
- *  JSON is refused rather than read as "no default": that would publish, or
- *  import, a cleared default nobody asked for. */
+/** settings.json is read for the deployment defaults and never rewritten
+ *  wholesale. Malformed JSON is refused rather than read as "no default":
+ *  that would publish, or import, a cleared default nobody asked for. */
 function readSettings(raw: string | null | undefined): Record<string, unknown> {
   if (!raw?.trim()) return {};
   const parsed = parseObject(raw);
@@ -496,8 +496,7 @@ function readSettings(raw: string | null | undefined): Record<string, unknown> {
 
 /** Pi writes defaultProvider and defaultModel as a pair; half of one is a hand
  *  edit that a shared default cannot represent, so it is refused. */
-function defaultModelRef(raw: string | null | undefined): ModelRef | null {
-  const settings = readSettings(raw);
+function defaultModelRef(settings: Record<string, unknown>): ModelRef | null {
   const provider = settings.defaultProvider;
   const id = settings.defaultModel;
   if (provider === undefined && id === undefined) return null;
@@ -507,17 +506,24 @@ function defaultModelRef(raw: string | null | undefined): ModelRef | null {
   return { provider, id };
 }
 
-/** The incoming default replaces the local pair and nothing else; unchanged
+/** The incoming defaults replace their own fields and nothing else; a field
+ *  the source never states (an older one) leaves the local settings.json
+ *  alone, and `null` is a stated "no default" that clears it. Unchanged
  *  content returns the original bytes so the import stays a no-op. */
-function withDefaultModel(raw: string | null | undefined, model: ModelRef | null): string | null | undefined {
+function withDefaults(raw: string | null | undefined, incoming: AgentConfigSnapshot): string | null | undefined {
+  if (incoming.defaultModel === undefined && incoming.defaultThinkingLevel === undefined) return raw;
   const settings = readSettings(raw);
   const next = { ...settings };
-  if (model) {
-    next.defaultProvider = model.provider;
-    next.defaultModel = model.id;
-  } else {
-    delete next.defaultProvider;
-    delete next.defaultModel;
+  const set = (key: string, value: string | undefined): void => {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  };
+  if (incoming.defaultModel !== undefined) {
+    set("defaultProvider", incoming.defaultModel?.provider);
+    set("defaultModel", incoming.defaultModel?.id);
+  }
+  if (incoming.defaultThinkingLevel !== undefined) {
+    set("defaultThinkingLevel", incoming.defaultThinkingLevel ?? undefined);
   }
   return JSON.stringify(next) === JSON.stringify(settings) ? raw : `${JSON.stringify(next, null, 2)}\n`;
 }

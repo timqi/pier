@@ -68,7 +68,7 @@ export function configSyncPane(): { el: HTMLElement; dispose(): void } {
       sharing.append(link, h("div", "flex flex-wrap items-center gap-2",
         copyBtn("btn text-[12px]", () => url), command("Revoke link", "revoke")));
     } else sharing.append(h("div", "", command("Generate link", "publish")));
-    sharing.append(h("p", "text-[12px] text-neutral-500", "Anyone with the link can read shared prompts, model definitions and the default model. API keys, headers and endpoints stay private."));
+    sharing.append(h("p", "text-[12px] text-neutral-500", "Anyone with the link can read shared prompts, model definitions, the default model and its reasoning effort. API keys, headers and endpoints stay private."));
 
     const urlInput = textInput(source, "https://example.com/config-sync/...", (value) => {
       source = value; sourceEdited = true;

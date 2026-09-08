@@ -8,7 +8,9 @@ import { normalizeAgentSnapshot } from "./config-sync.js";
 
 let dir: string;
 let store: PiConfigStore;
-const empty = (): AgentConfigSnapshot => ({ files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {}, defaultModel: null });
+const empty = (): AgentConfigSnapshot => ({
+  files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {}, defaultModel: null, defaultThinkingLevel: null,
+});
 const read = (name: string): string => readFileSync(join(dir, name), "utf8");
 const write = (name: string, content: string): void => writeFileSync(join(dir, name), content);
 const saveModels = (providers: object): void => write("models.json", JSON.stringify({ version: 1, providers }));
@@ -50,15 +52,18 @@ describe("snapshot export", () => {
     write("settings.json", "   ");
     write("auth.json", "private auth");
     expect(await store.exportSnapshot()).toEqual({
-      files: { "SYSTEM.md": "", "AGENTS.md": "global rules" }, providers: {}, defaultModel: null,
+      files: { "SYSTEM.md": "", "AGENTS.md": "global rules" }, providers: {},
+      defaultModel: null, defaultThinkingLevel: null,
     });
   });
 
-  it("shares the default model pair and nothing else settings.json holds", async () => {
+  it("shares the default model and reasoning effort, and nothing else settings.json holds", async () => {
     write("settings.json", JSON.stringify({
       defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "high", shellPath: "/bin/local-zsh",
     }));
-    expect(await store.exportSnapshot()).toEqual({ ...empty(), defaultModel: { provider: "proxy", id: "m" } });
+    expect(await store.exportSnapshot()).toEqual({
+      ...empty(), defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: "high",
+    });
   });
 
   it("fails closed on a settings.json it cannot read a default out of", async () => {
@@ -70,6 +75,8 @@ describe("snapshot export", () => {
     await expect(store.exportSnapshot()).rejects.toThrow(/defaultProvider and defaultModel together/);
     write("settings.json", JSON.stringify({ defaultProvider: "proxy", defaultModel: " " }));
     await expect(store.exportSnapshot()).rejects.toThrow(/model id must be a non-empty trimmed string/);
+    write("settings.json", JSON.stringify({ defaultThinkingLevel: "deep" }));
+    await expect(store.exportSnapshot()).rejects.toThrow(/default reasoning effort must be a level/);
   });
 
   it("shares metadata at any depth while dropping credentials and endpoints", async () => {
@@ -160,12 +167,19 @@ describe("snapshot validation", () => {
     expect(() => normalizeAgentSnapshot({ ...empty(), defaultModel: value })).toThrow();
   });
 
-  it("keeps a stated default model and distinguishes it from an unstated one", () => {
+  it.each(["", "deep", "HIGH", 1, {}, ["high"]])("rejects an invalid default reasoning effort %#", (value) => {
+    expect(() => normalizeAgentSnapshot({ ...empty(), defaultThinkingLevel: value })).toThrow();
+  });
+
+  it("keeps stated defaults and distinguishes them from unstated ones", () => {
     expect(normalizeAgentSnapshot({ ...empty(), defaultModel: { provider: "proxy", id: "m" } }).defaultModel)
       .toEqual({ provider: "proxy", id: "m" });
     expect(normalizeAgentSnapshot({ ...empty(), defaultModel: null }).defaultModel).toBeNull();
+    expect(normalizeAgentSnapshot({ ...empty(), defaultThinkingLevel: "off" }).defaultThinkingLevel).toBe("off");
+    expect(normalizeAgentSnapshot({ ...empty(), defaultThinkingLevel: null }).defaultThinkingLevel).toBeNull();
     const { files, providers } = empty();
     expect(normalizeAgentSnapshot({ files, providers })).not.toHaveProperty("defaultModel");
+    expect(normalizeAgentSnapshot({ files, providers })).not.toHaveProperty("defaultThinkingLevel");
   });
 
   it.each([
@@ -215,24 +229,33 @@ describe("snapshot apply", () => {
     expect(read("auth.json")).toBe('{"apiKey":"local-auth"}');
   });
 
-  it("imports the default model beside the local settings, and clears it on request", async () => {
-    write("settings.json", JSON.stringify({ shellPath: "/bin/local-zsh", defaultProvider: "old", defaultModel: "old-m" }, null, 2));
-    await store.applySnapshot({ ...empty(), defaultModel: { provider: "proxy", id: "m" } });
-    expect(JSON.parse(read("settings.json"))).toEqual({
-      shellPath: "/bin/local-zsh", defaultProvider: "proxy", defaultModel: "m",
+  it("imports the defaults beside the local settings, and clears them on request", async () => {
+    write("settings.json", JSON.stringify({
+      shellPath: "/bin/local-zsh", defaultProvider: "old", defaultModel: "old-m", defaultThinkingLevel: "low",
+    }, null, 2));
+    await store.applySnapshot({
+      ...empty(), defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: "high",
     });
-    // A source that states nothing leaves the pair as it is; `null` removes it.
+    expect(JSON.parse(read("settings.json"))).toEqual({
+      shellPath: "/bin/local-zsh", defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "high",
+    });
+    // A source that states nothing leaves the fields as they are; `null` removes them.
     const { files, providers } = empty();
     const unchanged = read("settings.json");
     await store.applySnapshot({ files, providers });
     expect(read("settings.json")).toBe(unchanged);
+    await store.applySnapshot({ files, providers, defaultModel: null });
+    expect(JSON.parse(read("settings.json"))).toEqual({ shellPath: "/bin/local-zsh", defaultThinkingLevel: "high" });
     await store.applySnapshot(empty());
     expect(JSON.parse(read("settings.json"))).toEqual({ shellPath: "/bin/local-zsh" });
   });
 
   it("creates settings.json for an imported default and refuses to read a broken one", async () => {
-    await store.applySnapshot({ ...empty(), defaultModel: { provider: "proxy", id: "m" } });
-    expect(JSON.parse(read("settings.json"))).toEqual({ defaultProvider: "proxy", defaultModel: "m" });
+    await store.applySnapshot({
+      ...empty(), defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: "medium",
+    });
+    expect(JSON.parse(read("settings.json")))
+      .toEqual({ defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "medium" });
     write("settings.json", "{broken");
     await expect(store.applySnapshot(empty())).rejects.toThrow(/settings.json must be valid JSON/);
     expect(read("settings.json")).toBe("{broken");

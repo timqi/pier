@@ -1,6 +1,6 @@
 // Credential-blind projection of the portable agent configuration.
 
-import type { AgentConfigSnapshot, ModelRef, SyncProvider } from "../core/types.js";
+import { isThinkingLevel, type AgentConfigSnapshot, type ModelRef, type SyncProvider, type ThinkingLevel } from "../core/types.js";
 
 /** Never leaves the instance, at any depth of a models.json provider: the
  *  credentials, and the endpoint they authenticate against — a sharing link is
@@ -116,11 +116,18 @@ function normalizeDefaultModel(raw: unknown): ModelRef | null {
   return { provider: providerId(ref.provider), id: modelId(ref.id) };
 }
 
+/** A default reasoning effort is one of the levels Pi accepts, nothing else. */
+function normalizeDefaultThinkingLevel(raw: unknown): ThinkingLevel | null {
+  if (raw === null) return null;
+  if (!isThinkingLevel(raw)) throw new Error("default reasoning effort must be a level Pi accepts");
+  return raw;
+}
+
 /** Strict import boundary: a source that states a private field is refused,
  *  never trusted as a mask over the local one. */
 export function normalizeAgentSnapshot(raw: unknown): AgentConfigSnapshot {
   const snapshot = record(raw, "agent snapshot");
-  only(snapshot, ["files", "providers", "defaultModel"], "agent snapshot");
+  only(snapshot, ["files", "providers", "defaultModel", "defaultThinkingLevel"], "agent snapshot");
   const files = record(snapshot.files, "snapshot files");
   only(files, ["SYSTEM.md", "AGENTS.md"], "snapshot files");
   for (const name of ["SYSTEM.md", "AGENTS.md"] as const) {
@@ -136,6 +143,8 @@ export function normalizeAgentSnapshot(raw: unknown): AgentConfigSnapshot {
     files: { "SYSTEM.md": files["SYSTEM.md"] as string | null, "AGENTS.md": files["AGENTS.md"] as string | null },
     providers,
     ...(snapshot.defaultModel !== undefined ? { defaultModel: normalizeDefaultModel(snapshot.defaultModel) } : {}),
+    ...(snapshot.defaultThinkingLevel !== undefined
+      ? { defaultThinkingLevel: normalizeDefaultThinkingLevel(snapshot.defaultThinkingLevel) } : {}),
   };
 }
 

@@ -134,6 +134,15 @@ sends no completion callback — the question is the notification.
 
 - One concern per child. For fan-out, let core join via `tasks[]` — never
   hand-aggregate run ids across turns.
+- **A change to work a child already did → `resume` that run**, not a new
+  child. Its session still holds the files it read and the decisions it made,
+  so the message can be a delta ("same file, also handle the empty input").
+  Go `fresh` instead when the new work shares nothing with the old — different
+  area, different goal — or when that session is long and mostly dead ends:
+  clean context plus a self-contained prompt beats a child sifting its own
+  noise. `resume` takes the `run_id` and only your own descendants; if you no
+  longer have it, `get` with the `task_id` from the run summary lists that
+  task's recent runs — a one-shot subagent has one too.
 - `create` is for definitions that outlive one job: a schedule (`cron` /
   `watch`), or a role you will run by `task_id` again and again. It files a
   task the operator sees and has to archive by hand — never use it for a

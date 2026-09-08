@@ -636,6 +636,10 @@ export interface AgentConfigSnapshot {
    *  one. `null` is "the source has no default"; absent is a source that
    *  predates the field, and the local default stands. */
   defaultModel?: ModelRef | null;
+  /** The reasoning effort such a session starts on — the same deployment
+   *  decision, one settings.json field over; `null` and absent read as they
+   *  do for defaultModel. */
+  defaultThinkingLevel?: ThinkingLevel | null;
 }
 
 /** Global portable config only; apply holds the config write lock through commit. */

@@ -253,7 +253,7 @@ describe("two isolated configuration stores over HTTP", () => {
     }));
     writeModels(sourceDir, "source-secret", "Remote model"); writeModels(clientDir, "client-secret", "Local model");
     writeFileSync(join(sourceDir, "SYSTEM.md"), "Source rules");
-    writeFileSync(join(sourceDir, "settings.json"), '{"localOnly":"source-settings","defaultProvider":"proxy","defaultModel":"m"}');
+    writeFileSync(join(sourceDir, "settings.json"), '{"localOnly":"source-settings","defaultProvider":"proxy","defaultModel":"m","defaultThinkingLevel":"high"}');
     writeFileSync(join(clientDir, "settings.json"), '{"localOnly":"client-settings"}');
     const source = new ConfigSync({ db: sourceDb, settings: sourceSettings, config: sourceConfig,
       normalizeAgent: normalizeAgentSnapshot, reload: async () => {},
@@ -287,9 +287,10 @@ describe("two isolated configuration stores over HTTP", () => {
         models: [{ id: "m", name: "Remote model", headers: { "x-local-key": "client-secret" } }],
       });
       expect(new SettingsStore(clientDb).get().modelMenu).toEqual(sourceSettings.get().modelMenu);
-      // The default model travels; every other settings.json field is local.
+      // The default model and its reasoning effort travel; every other
+      // settings.json field is local.
       expect(JSON.parse(readFileSync(join(clientDir, "settings.json"), "utf8"))).toEqual({
-        localOnly: "client-settings", defaultProvider: "proxy", defaultModel: "m",
+        localOnly: "client-settings", defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "high",
       });
       expect(readFileSync(join(clientDir, "SYSTEM.md"), "utf8")).toBe("Source rules");
       await client.sync();
