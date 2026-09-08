@@ -57,36 +57,37 @@ export interface RunHead {
   sessionId?: string | null;
 }
 
-/** One card body: full width, a tinted surface with a matching left edge, one
- *  head row. `tone` is the tint (`border-l-cyan-500 bg-cyan-50`); the tint is
- *  what tells a card apart from the conversation around it. */
-export const cardClass = (tone: string): string => `group relative mt-1.5 border-l-2 px-5 py-2 ${tone}`;
+/** Quiet card body; the coloured edge and labelled chip carry type/status. */
+const cardClass = (tone: string): string => `system-card group relative mt-1.5 rounded-xl px-4 py-2.5 ${tone}`;
 export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
 
-/**
- * The card's text with a toggle beneath when it overflows its cap. A prompt
- * gets a glance (a few lines): it was sent, the reader knows roughly what it
- * says. A result gets most of a screen: it is what the reader is waiting on.
- * A hidden pane cannot be measured, so a guess from the text stands in for
- * the rendered height there.
- */
-export function clampedBody(text: string, glance: boolean): HTMLElement[] {
-  const lines = text.split("\n").length;
-  const long = glance ? text.length > 300 || lines > 4 : text.length > 800 || lines > 12;
-  const collapsed = [glance ? "max-h-24" : "max-h-[min(18rem,40dvh)]", "overflow-hidden"];
-  const content = h("div", `mt-1 whitespace-pre-wrap break-words text-[14px] text-neutral-800 ${collapsed.join(" ")}`, text);
+/** Four rendered lines give the topic; the full text stays one click away.
+ *  Hidden panes use a conservative guess until their content can be measured. */
+export function clampedBody(text: string): HTMLElement[] {
+  const long = text.length > 240 || text.split("\n").length > 4;
+  const collapsed = ["max-h-[4lh]", "overflow-hidden"];
+  const content = h("div", `mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500 ${collapsed.join(" ")}`, text);
   // Measured after the caller appends it: `clientHeight` is 0 until then and
   // the guess decides.
   const toggle = h(
     "button",
-    "mx-auto mt-1.5 hidden w-fit rounded border border-black/10 bg-white px-2 py-1 text-[12px] font-medium text-neutral-700 shadow-sm hover:bg-black/[0.03] pointer-coarse:py-3.5 dark:border-neutral-200 dark:bg-neutral-50",
+    "mt-1 hidden w-fit rounded-md px-1 py-1 text-[11px] pointer-coarse:min-h-11 pointer-coarse:px-2 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700",
     "Show full message",
   );
   toggle.setAttribute("type", "button");
+  toggle.setAttribute("aria-expanded", "false");
   toggle.onclick = () => {
+    const before = content.getBoundingClientRect().height;
+    content.getAnimations().forEach((animation) => animation.cancel());
     const clamped = content.classList.toggle(collapsed[0]!);
-    content.classList.toggle(collapsed[1]!, clamped);
+    const after = content.getBoundingClientRect().height;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    content.animate(
+      reduced ? [{ opacity: 0.8 }, { opacity: 1 }] : [{ maxHeight: `${before}px`, opacity: 0.8 }, { maxHeight: `${after}px`, opacity: 1 }],
+      { duration: reduced ? 120 : 180, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+    );
     toggle.textContent = clamped ? "Show full message" : "Collapse message";
+    toggle.setAttribute("aria-expanded", String(!clamped));
     content.tabIndex = -1;
     content.focus({ preventScroll: true });
   };
@@ -101,12 +102,12 @@ export function clampedBody(text: string, glance: boolean): HTMLElement[] {
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
   const head = h("div", "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500", o.glyph);
-  head.append(h("span", `flex-none font-semibold uppercase ${o.labelCls}`, o.label));
+  head.append(h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`, not just `min-w-0`: a subagent's name is its whole prompt line,
   // and a wrapping flex row breaks *before* it shrinks an item — which pushed
   // the ids and controls onto a second line for the long ones. Zero-basis, the
   // name takes what is left and truncates there, so the head is one line.
-  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800", o.taskName));
+  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
   const meta = h("div", "ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "flex-none", o.note));
   if (o.model) {
@@ -140,17 +141,7 @@ export function runHead(o: RunHead): HTMLElement {
 
 // --- background runs (detached task calls made from this session) ------------------
 
-/**
- * Direction is the surface, state is the edge. A run card is a message this
- * session sent — but not one the user typed, and on indigo it was
- * indistinguishable from their own rows, so outgoing runs get fuchsia: the one
- * hue the pane does not already spend (indigo user, cyan inbound, amber
- * decision, red error, green done). The left edge, glyph and caption then say
- * how the run is doing — green once it succeeded, red when it failed, a spinner
- * while it is still out — so the two questions are answered by two cues that
- * never compete for the same pixels.
- */
-const OUTGOING = "bg-fuchsia-50/70";
+/** Run state colours are shared by detached runs and callback summaries. */
 export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: string }> = {
   queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: "" },
   running: { edge: "border-l-fuchsia-500", label: "text-fuchsia-700", glyph: "" },
@@ -191,18 +182,18 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   for (const [id, el] of backgroundRows) if (!el.isConnected) backgroundRows.delete(id);
   let row = backgroundRows.get(run.runId);
   if (!row) {
-    row = runCard(`${STATE_STYLE[run.state].edge} ${OUTGOING}`);
+    row = runCard(STATE_STYLE[run.state].edge);
     row.dataset.kind = "background-run";
     turns.el.append(row);
     backgroundRows.set(run.runId, row);
   }
-  row.className = cardClass(`${STATE_STYLE[run.state].edge} ${OUTGOING}`);
+  row.className = cardClass(STATE_STYLE[run.state].edge);
   const active = run.state === "queued" || run.state === "running";
   const runUrl = `/api/task-runs/${run.runId}`;
   const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
   const head = runHead({
     glyph: stateGlyph(run.state),
-    label: run.state,
+    label: `run · ${run.state}`,
     labelCls: STATE_STYLE[run.state].label,
     taskName: run.taskName,
     note: `${run.sessionMode ?? "task"} · depth ${String(run.depth)} · ${String(seconds)}s`,
@@ -226,7 +217,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   // message: the prompt, clamped to a glance like a delegation card's is.
   let body = promptBodies.get(row);
   if (!body && run.prompt !== null) {
-    body = clampedBody(run.prompt, true);
+    body = clampedBody(run.prompt);
     promptBodies.set(row, body);
   }
   row.replaceChildren(head, ...(body ?? []));
@@ -372,14 +363,7 @@ export function takeActivityGroup(): HTMLElement | null {
   return el;
 }
 
-/**
- * The steps ran *for* the message that follows them, so the group is adopted
- * into that row as its caption line (`takeActivityGroup`) and styled as one:
- * no card, no colour of its own once it is done — a card between two rows read
- * as a third speaker and left "whose steps are these?" unanswerable. Only the
- * states worth a glance keep a tint, and opening any of them draws a box
- * around the steps.
- */
+/** Work stays on its own line above the reply; status colour names the outcome. */
 const STATUS_STYLE: Record<ActivityStatus, string> = {
   running: "text-green-700 open:bg-green-50",
   done: "text-neutral-400 hover:text-neutral-600 open:bg-black/[0.02] open:text-neutral-500 dark:open:bg-neutral-100",
@@ -387,22 +371,10 @@ const STATUS_STYLE: Record<ActivityStatus, string> = {
   interrupted: "text-amber-700 open:bg-amber-50",
 };
 
-/**
- * An adopted group floats into the first line of its own message, so the
- * transcript is messages and nothing else: closed, it costs no line at all.
- * Opening it drops the float and gives the steps their own block. A group
- * still waiting for its message keeps the pane's gutter and rhythm.
- */
+/** Expanding shows an independent work log, never a disclosure inside prose. */
 function styleGroup(el: HTMLElement, status: ActivityStatus): void {
   el.dataset.status = status;
-  // Front, not end: the steps ran before the message, and a gutter of them is
-  // a dim column the eye can skip. The label stays one left-aligned unit and
-  // the gutter's min width does the aligning, so the slack falls between the
-  // label and the message instead of splitting the chevron off it.
-  const placement = el.dataset.adopted
-    ? "float-left min-w-[6.5rem] pr-3 tabular-nums mt-[3px] open:float-none open:mt-0 open:mb-1.5 open:min-w-0 open:pr-0"
-    : "mx-5 my-1.5";
-  el.className = `${placement} rounded-md text-[11.5px] leading-[1.35] open:border open:border-black/[0.06] open:px-2 open:py-1.5 dark:open:border-neutral-200 ${STATUS_STYLE[status]}`;
+  el.className = `px-2 py-1 rounded-xl text-[11.5px] leading-normal open:border open:border-neutral-200 open:px-3 open:py-2 ${STATUS_STYLE[status]}`;
 }
 
 const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, string> = {
@@ -436,6 +408,33 @@ function ensureActivity(ts: number): Activity {
   return activity;
 }
 
+/** Assistant text is provisional until turn-end: keep it with the work log. */
+export function activityProgress(ts: number, text = ""): HTMLElement {
+  const a = ensureActivity(ts);
+  flushThinking();
+  a.thinking = null;
+  const node = h("div", "whitespace-pre-wrap break-words text-[13px] text-neutral-600", text);
+  node.dataset.raw = text;
+  const row = h("div", "rounded-lg bg-neutral-50 px-2 py-1.5", h("span", "text-[10px] font-medium text-neutral-400", "Update"), node);
+  row.dataset.kind = "progress";
+  a.rowsEl.append(row);
+  activityHeadline(a, "running", "writing…");
+  tailSteps(a);
+  turns.scroll();
+  return node;
+}
+
+/** Promoting the final text must not leave a duplicate or an empty work log. */
+export function discardProgress(node: HTMLElement): void {
+  const group = node.closest<HTMLDetailsElement>('details[data-kind="activity"]');
+  node.parentElement?.remove();
+  if (group && !group.lastElementChild?.childElementCount) {
+    if (activity?.el === group) activity = null;
+    if (lastGroup === group) lastGroup = null;
+    group.remove();
+  }
+}
+
 /**
  * What a group is opened for is its newest step — the one running, or the last
  * one that ran — so opening lands at the bottom of the list instead of at a
@@ -466,12 +465,12 @@ function tailSteps(a: Activity): void {
 
 function activityHeadline(a: Activity, status: ActivityStatus, latest?: string): void {
   const secs = Math.max(1, Math.round((Date.now() - a.startTs) / 1000));
-  const base = `${a.steps} step${a.steps === 1 ? "" : "s"} · ${secs}s`;
+  const base = `${a.steps ? `${a.steps} step${a.steps === 1 ? "" : "s"}` : "Progress"} · ${secs}s`;
   a.headline.textContent =
     status === "running" && latest
       ? `${base} · ${latest}`
       : status === "done"
-        ? base
+        ? `Completed · ${base}`
         : `${base} · ${status}`;
   styleGroup(a.el, status);
   const icon = statusIconEl(status);
@@ -491,7 +490,8 @@ export function finishActivity(status: ActivityStatus): void {
   const allFailed = activity.steps > 0 && activity.failedSteps === activity.steps;
   activityHeadline(
     activity,
-    (activity.sawError || allFailed) && status === "done" ? "failed" : status,
+    (activity.sawError || allFailed) && status === "done" ? "failed"
+      : status === "done" && activity.toolRows.size ? "interrupted" : status,
   );
   activity = null;
 }
@@ -595,6 +595,10 @@ export function replayActivity(
   const start = Date.now() - durationMs; // headline duration is now - startTs
   const group = ensureActivity(start).el;
   for (const s of steps) {
+    if (s.kind === "progress") {
+      activityProgress(start, s.text ?? "");
+      continue;
+    }
     if (s.kind === "thinking") {
       activityThinking(start, s.text ?? "");
       continue;

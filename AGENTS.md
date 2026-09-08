@@ -66,6 +66,20 @@ scheduled tasks, live observability, and static Show pages.
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only; those
   imports are erased at build and do not let web implement either area.
 
+## UI/UX
+
+Before changing browser presentation or interaction, read
+[UI/UX design guidelines](docs/design/06-ui-ux.md). It is the shared contract
+for materials, chat hierarchy, editing, filters, motion and accessibility;
+[Web Workbench](docs/design/03-web-workbench.md) owns the web behavior and wire contract.
+
+- Reuse the existing controls, palette and event state; do not grow per-page
+  versions of the same component or parallel bookkeeping for presentation.
+- Treat interaction correctness as part of design: verify overlay hit targets,
+  keyboard/touch access, cancellation and replay, not just screenshots.
+- Keep both documents current when behavior changes. Report actual browser
+  coverage; Chromium emulation is not native Safari/iOS verification.
+
 ## Budgets
 
 The target is disordered growth and duplication. Line counts are a *proxy* for

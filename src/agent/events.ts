@@ -59,6 +59,9 @@ export interface PiEvent {
   willRetry?: boolean;
 }
 
+const hasToolCalls = (message: PiMessage | undefined): boolean =>
+  Array.isArray(message?.content) && message.content.some((part) => part.type === "toolCall");
+
 export function textOf(content: string | TextPart[] | undefined): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -168,6 +171,7 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
   let steps: ActivityStep[] = []; // activity seen since the last emitted turn
   const pendingTools = new Map<string, ActivityStep>();
+  let candidate: ChatTurn | undefined; // text-only reply, until another assistant message follows
 
   const flush = (
     role: ChatTurn["role"],
@@ -206,15 +210,27 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     }
     const origin = systemOrigin(m);
     if (origin) {
+      candidate = undefined;
       const text = textOf(m.content);
       if (text) flush("system", text, undefined, origin, m.timestamp);
       continue;
     }
     if (m.role !== "user" && m.role !== "assistant") continue;
+    if (m.role === "user") candidate = undefined;
+    else if (candidate) {
+      // Some providers separate commentary from the following tool-call message.
+      turns.pop();
+      steps = candidate.steps ?? [];
+      steps.push({ kind: "progress", text: candidate.text });
+      candidate = undefined;
+    }
 
+    const hasTools = m.role === "assistant" && hasToolCalls(m);
     if (m.role === "assistant" && Array.isArray(m.content)) {
       for (const part of m.content) {
-        if (part.type === "thinking" && part.thinking) {
+        if (hasTools && part.type === "text" && part.text) {
+          steps.push({ kind: "progress", text: part.text });
+        } else if (part.type === "thinking" && part.thinking) {
           steps.push({ kind: "thinking", text: part.thinking });
         } else if (part.type === "toolCall") {
           const step: ActivityStep = {
@@ -230,9 +246,10 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     }
 
     const text = textOf(m.content);
-    // step-only assistant messages keep buffering activity
-    if (!text) continue;
+    // Tool-bearing messages are intermediate work, even when they include text.
+    if (!text || hasTools) continue;
     flush(m.role, text, m.role === "assistant" ? turnMetaAt(messages, i) : undefined, undefined, m.timestamp);
+    if (m.role === "assistant") candidate = turns[turns.length - 1];
   }
   // Activity with no answer after it (aborted run) still belongs on the page.
   if (steps.length) flush("assistant", "");
@@ -259,7 +276,7 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
         ? final.errorMessage || "unknown agent error"
         : undefined;
       const out: SessionEventPayload[] = [
-        { type: "turn-end", text: textOf(final?.content), ...(failure ? { error: failure } : {}) },
+        { type: "turn-end", text: hasToolCalls(final) ? "" : textOf(final?.content), ...(failure ? { error: failure } : {}) },
       ];
       if (failure) out.push({ type: "error", message: failure });
       return out;
@@ -279,6 +296,7 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       // what a client can't know about (queued/steered messages, IM traffic).
       const m = e.message;
       if (!m) return [];
+      if (m.role === "assistant") return [{ type: "text-start" }];
       const origin = systemOrigin(m);
       const text = textOf(m.content);
       if (origin) return text ? [{ type: "system-input", text, origin }] : [];

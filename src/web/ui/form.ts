@@ -11,8 +11,6 @@
 
 import { h, prose } from "./dom.js";
 
-const LABEL = "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400";
-
 /**
  * A button wearing the house chrome. `.btn`/`.btn-primary` are the only custom
  * classes style.css declares, which makes them the Console's button, so this is
@@ -43,12 +41,12 @@ export const toolbar = (...children: (HTMLElement | string)[]): HTMLElement =>
  * than a pill strip on purpose: it sits under one, and two rows of the same
  * chrome would read as two levels of the same navigation. */
 export function segmented<K extends string>(options: [string, K][], value: K, onChange: (key: K) => void): HTMLElement {
-  const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-lg bg-neutral-100 p-0.5");
+  const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-full bg-neutral-100 p-1");
   for (const [label, key] of options) {
     const active = key === value;
     const opt = btn(
       label,
-      `cursor-pointer whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+      `cursor-pointer whitespace-nowrap rounded-full px-3 py-1 text-[12px] transition-colors ${
         active ? "bg-white font-medium text-neutral-800 shadow-xs" : "text-neutral-500 hover:text-neutral-700"
       }`,
     );
@@ -64,7 +62,7 @@ export function segmented<K extends string>(options: [string, K][], value: K, on
 export function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
   const el = btn(
     label,
-    `flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[13px] transition-colors ${
+    `flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] transition-colors ${
       active
         ? "bg-indigo-50 font-medium text-indigo-700 ring-1 ring-indigo-200/70"
         : "text-neutral-600 hover:bg-neutral-100"
@@ -78,11 +76,11 @@ export function pill(label: string, active: boolean, onClick: () => void): HTMLB
 // No overflow-hidden: help bubbles escape their card, so the header rounds its
 // own top corners instead of being clipped into shape by the section.
 export function card(title: string, subtitle: string, ...body: HTMLElement[]): HTMLElement {
-  const el = h("section", "rounded-xl border border-neutral-200 bg-white shadow-xs");
-  const head = h("div", "rounded-t-xl border-b border-neutral-200/70 bg-neutral-50/70 px-4 py-2.5");
-  head.append(h("h2", "text-[13px] font-semibold text-neutral-700", title));
-  if (subtitle) head.append(h("p", "mt-0.5 text-[11.5px] leading-snug text-neutral-500", subtitle));
-  el.append(head, h("div", "flex flex-col gap-4 px-4 py-3.5", ...body));
+  const el = h("section", "rounded-3xl border border-neutral-200 bg-white shadow-sm");
+  const head = h("div", "rounded-t-3xl border-b border-neutral-200/70 bg-neutral-50/50 px-5 py-4");
+  head.append(h("h2", "text-[14px] font-semibold text-neutral-800", title));
+  if (subtitle) head.append(h("p", "mt-1 text-[12px] leading-normal text-neutral-500", subtitle));
+  el.append(head, h("div", "flex flex-col gap-4 px-5 py-5", ...body));
   return el;
 }
 
@@ -100,7 +98,7 @@ export interface FieldOptions {
  */
 export function field(label: string, control: HTMLElement, opts: FieldOptions = {}): HTMLElement {
   const box = h("div", "flex flex-col gap-1.5");
-  const head = h("div", "flex items-center gap-1.5", h("span", LABEL, label));
+  const head = h("div", "flex items-center gap-1.5", h("span", "field-label", label));
   if (opts.help) head.append(opts.help);
   box.append(head, control);
   if (opts.hint) box.append(h("span", "text-[11.5px] leading-snug text-neutral-400", opts.hint));
@@ -110,7 +108,7 @@ export function field(label: string, control: HTMLElement, opts: FieldOptions = 
 /** The one control skin. Exported so a control that is not an `<input>` — a
  * dropdown trigger, say — stays in step instead of copying the string. */
 export const CONTROL =
-  "w-full rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-[12.5px] transition-colors placeholder:text-neutral-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none";
+  "w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-3 py-2.5 text-[12.5px] transition-colors placeholder:text-neutral-400 hover:border-neutral-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none";
 
 export const textInput = (
   value: string,
@@ -167,7 +165,7 @@ export function toggle(
   box.onchange = () => onChange(box.checked);
   const track = h(
     "span",
-    "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200",
+    "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white dark:after:bg-neutral-950 after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200",
   );
   const row = h("label", `flex cursor-pointer gap-2.5 ${label ? "items-start" : "items-center"}`);
   row.append(box, track);

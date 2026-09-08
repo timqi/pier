@@ -14,7 +14,7 @@ interface TaskRow extends TaskDefinition {
   lastRun: TaskRun | null;
 }
 
-export type TasksView = ConsoleView & { refresh(taskId?: string): void };
+export type TasksView = ConsoleView & { create(): void; refresh(taskId?: string): void };
 
 export function createTasksView(
   root: HTMLElement,
@@ -114,35 +114,41 @@ export function createTasksView(
     renderList();
   }
 
-  function renderList(): void {
-    const create = button("New task", true);
-    create.onclick = () => {
+  function createTask(): void {
+    if (!view.visible || selectedId !== null) return;
+    void Promise.all([loadSessions(), activeTasks()]).then(([, tasks]) => {
       if (!view.visible || selectedId !== null) return;
-      void Promise.all([loadSessions(), activeTasks()]).then(([, tasks]) => {
-        if (!view.visible || selectedId !== null) return;
-        availableTasks = tasks;
-        openTaskEditor(editorDeps);
-      });
-    };
+      availableTasks = tasks;
+      openTaskEditor(editorDeps);
+    });
+  }
+
+  function renderList(): void {
     const filters: HTMLElement[] = [];
     const addFilter = (label: string, options: [string, string][], value: string, change: (value: string) => void): void => {
       const input = select(options, value);
       input.setAttribute("aria-label", label);
-      input.classList.add("!w-auto", "pr-8");
+      input.dataset.active = String(value !== options[0]?.[1]);
       input.onchange = () => {
+        input.dataset.active = String(input.value !== options[0]?.[1]);
         change(input.value);
         listScroll = 0;
         void load();
       };
-      filters.push(input);
+      filters.push(h("label", "filter-field", h("span", "", label), input));
     };
-    const searchInput = h("input", `${CONTROL} !w-48 max-md:!w-full`) as HTMLInputElement;
+    const searchInput = h("input", CONTROL) as HTMLInputElement;
     searchInput.type = "search";
     searchInput.placeholder = "Search tasks";
     searchInput.setAttribute("aria-label", "Search tasks");
     searchInput.value = search;
-    searchInput.oninput = () => { search = searchInput.value; drawRows(); };
-    filters.push(searchInput);
+    searchInput.dataset.active = String(Boolean(search));
+    searchInput.oninput = () => {
+      search = searchInput.value;
+      searchInput.dataset.active = String(Boolean(search));
+      drawRows();
+    };
+    filters.push(h("label", "filter-field filter-search", h("span", "", "Search"), searchInput));
     addFilter("Status", [["Current", "active"], ["Archived", "archived"]], filter, (v) => { filter = v; });
     addFilter("Trigger", [["All triggers", "all"], ["Manual", "manual"], ["Scheduled", "cron"], ["Watching", "watch"]], trigger, (v) => { trigger = v; });
     const table = document.createElement("table");
@@ -163,7 +169,7 @@ export function createTasksView(
     const pane = h("div", "min-h-0 flex-1 overflow-auto", table, none);
     drawRows();
     pane.onscroll = () => { listScroll = pane.scrollTop; };
-    root.replaceChildren(bar(filters, [create]), pane);
+    root.replaceChildren(h("div", "automation-filters task-filters", ...filters), pane);
     pane.scrollTop = listScroll;
   }
 
@@ -286,6 +292,7 @@ export function createTasksView(
     void load();
   });
   return Object.assign(view, {
+    create: createTask,
     refresh(taskId?: string) {
       if (!view.visible) return;
       if (!selectedId || !taskId || selectedId === taskId) void load();

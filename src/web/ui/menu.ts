@@ -36,8 +36,14 @@ export function closeMenu(): void {
   document.removeEventListener("keydown", onKey, true);
   window.removeEventListener("scroll", onScroll, true);
   window.removeEventListener("resize", closeMenu);
-  panel.remove();
+  const closing = panel;
   panel = null;
+  closing.inert = true;
+  closing.dataset.closing = "";
+  // Pending transitions include an interrupted entrance. Cancellation still
+  // removes only this panel, never a replacement opened while it fades out.
+  void Promise.allSettled(closing.getAnimations().map((animation) => animation.finished))
+    .then(() => closing.remove());
 }
 
 /** Where the last panel was placed, and what it was placed against.
@@ -69,15 +75,18 @@ const isSheet = (): boolean => window.innerWidth < 640;
 /** Float arbitrary content under an anchor, clamped to the viewport. */
 export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   closeMenu();
+  // Replacing a menu is one surface changing content, not stacked exits.
+  document.querySelectorAll(".glass-menu[data-closing]").forEach((el) => el.remove());
   const sheet = isSheet();
   panel = h(
     "div",
-    `fixed z-50 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg ${
+    `glass glass-menu fixed z-50 rounded-3xl border border-neutral-200 p-2 ${
       sheet
         ? "inset-x-2 bottom-2 max-h-[70dvh] overflow-y-auto pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[16px]"
         : "min-w-52 max-w-[min(42rem,calc(100vw-1rem))] text-[13px]"
     }`,
   );
+  panel.dataset.presentation = sheet ? "sheet" : "popover";
   panel.append(content);
   // A modal <dialog> paints in the top layer, above anything in the document —
   // so a panel anchored inside one has to live in that dialog, not on body,
@@ -101,7 +110,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
 function menuItem(item: MenuItem): HTMLElement {
   const row = h(
     "button",
-    `flex w-full cursor-pointer items-center gap-2 px-3 text-left hover:bg-neutral-100 active:bg-neutral-100 ${
+    `flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100 ${
       isSheet() ? "py-3" : "py-1.5"
     }`,
     h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : ""),

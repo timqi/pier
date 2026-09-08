@@ -118,6 +118,7 @@ function initSwipe(): void {
   const paint = (shown: number): void => {
     sidebar.style.transition = "none";
     sidebar.style.transform = `translateX(${String(shown - width)}px)`;
+    scrim.style.transition = "none";
     scrim.classList.remove("hidden");
     scrim.style.opacity = String(shown / width);
   };
@@ -127,6 +128,7 @@ function initSwipe(): void {
   const settle = (open: boolean): void => {
     sidebar.style.transition = "";
     sidebar.style.transform = "";
+    scrim.style.transition = "";
     scrim.style.opacity = "";
     if (open) {
       sidebar.dataset.open = "";

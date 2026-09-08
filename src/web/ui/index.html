@@ -55,11 +55,11 @@
     </svg>
   </button>
   <aside id="sidebar" class="flex flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
-    <header class="flex items-center gap-2 px-3 py-2">
+    <header class="flex h-12 flex-none items-center gap-2 px-3">
       <!-- The same mark as the tab and the home-screen icon, so an installed
            Pier looks like the thing you installed. -->
-      <img src="/icon.svg" alt="" width="20" height="20" class="h-5 w-5 flex-none" />
-      <h1 class="text-[15px] font-semibold tracking-tight">Pier</h1>
+      <img src="/icon.svg" alt="" width="20" height="20" class="h-7 w-7 flex-none rounded-lg border border-neutral-200/70 bg-white p-1 shadow-xs" />
+      <h1 class="text-[17px] font-semibold tracking-tight">Pier</h1>
       <!-- A link, not a label: AGPL-3.0 section 13 asks a network service to
            point its users at the source it is running. Beside the title
            because a version is something you look up, not something you find
@@ -76,9 +76,9 @@
     </header>
     <details id="console-section" open class="flex-none border-b border-neutral-200/70">
       <summary class="flex cursor-pointer select-none items-center gap-1 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 hover:bg-neutral-100">
-        <span class="chev">▶</span>Console
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" class="chev h-3 w-3"><path d="m6 4 4 4-4 4" stroke-linecap="round" stroke-linejoin="round" /></svg>Console
       </summary>
-      <ul class="pb-1 text-[13.5px]">
+      <ul class="pb-2 text-[13.5px]">
         <!-- One row for the tasks area: Tasks, Runs and Activity are tabs of
              the Automation page (views.ts), not three sidebar entries. -->
         <li><button type="button" id="open-tasks"
@@ -161,7 +161,7 @@
     <!-- The transcript's own type scale, inherited by rows, chips and markdown. -->
     <!-- data-gallery: the lightbox pages within the container it was opened
          from (see attachments.ts), so transcript and pending strip stay apart. -->
-    <div id="turns" data-gallery class="flex-1 overflow-y-auto pb-4 text-[15px] leading-[1.35]"></div>
+    <div id="turns" data-gallery class="flex-1 overflow-y-auto pb-5 pt-2 text-[15px] leading-[1.55]"></div>
     <!-- Pi's queue primitives are whole-queue (steer / clear), so the actions
          live on the header row and read as "the queue", never per message. -->
     <div id="queue-panel" class="hidden flex-col border-t border-neutral-200 px-3 py-1.5">
@@ -201,8 +201,8 @@
            (18px leading) rather than shrinking the turns pane any further. -->
       <ul id="queue-rows" class="flex max-h-[6rem] flex-col gap-1 overflow-y-auto overscroll-contain"></ul>
     </div>
-    <form id="composer" class="border-t border-neutral-200 px-4 py-2">
-      <div class="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 transition-shadow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
+    <form id="composer" class="flex-none px-4 pb-3 pt-2">
+      <div class="glass rounded-[1.75rem] border border-neutral-200 px-3 py-2.5 transition-shadow focus-within:border-indigo-400">
         <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
         <!-- items-end keeps the icons on the bottom row while the textarea grows upward -->
         <div class="flex items-end gap-1.5">
@@ -235,7 +235,7 @@
     </form>
   </main>
 
-  <dialog id="new-dialog" class="m-auto w-[min(24rem,92vw)] rounded-xl border border-neutral-200 p-4 shadow-xl backdrop:bg-black/20">
+  <dialog id="new-dialog" class="m-auto w-[min(24rem,92vw)] rounded-3xl border border-neutral-200 p-5 shadow-xl backdrop:bg-black/20">
     <form id="new-form" method="dialog" class="flex flex-col gap-3">
       <h3 class="font-semibold">New session</h3>
       <label class="flex flex-col gap-1 text-[13px] text-neutral-600">
@@ -253,7 +253,7 @@
   <!-- Not m-auto: a palette that grows downward as you type should not also
        drift upward to stay centred. Pinned near the top instead, which is
        where the eye already is and where every other ⌘K lives. -->
-  <dialog id="archive-dialog" class="mx-auto mb-auto mt-[12vh] w-[35rem] max-w-[90vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
+  <dialog id="archive-dialog" class="mx-auto mb-auto mt-[12vh] w-[35rem] max-w-[90vw] rounded-3xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
     <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
       <input id="archive-search" type="text" placeholder="Search sessions and Console…"
         class="w-full bg-transparent text-[14px] focus:outline-none" />
@@ -282,7 +282,7 @@
 
   <!-- Text preview of an agent attachment — the Files view's code pane fills
        #file-text; download stays one click away. -->
-  <dialog id="file-dialog" class="m-auto w-[45rem] max-w-[92vw] rounded-xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/40">
+  <dialog id="file-dialog" class="m-auto w-[45rem] max-w-[92vw] rounded-3xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/40">
     <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
       <span id="file-name" class="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-700"></span>
       <a id="file-download" download class="btn flex-none text-[12px] no-underline">Download</a>

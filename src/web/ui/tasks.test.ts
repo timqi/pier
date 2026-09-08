@@ -87,7 +87,11 @@ const openTask = vi.fn<(id?: string) => void>();
 const loadSessions = vi.fn<() => Promise<void>>();
 const settled = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
 const button = (text: string) => walk(root).find((el) => el.tag === "button" && el.text === text);
-async function click(text: string) { expect(button(text), text).toBeDefined(); button(text)!.onclick!(); await settled(); }
+async function click(text: string) {
+  if (text === "New task") tasksView.create();
+  else { expect(button(text), text).toBeDefined(); button(text)!.onclick!(); }
+  await settled();
+}
 const raw = () => walk(root).find((el) => el.tag === "details" && el.text.startsWith("▶Raw record"))!;
 async function change(label: string, value: string) {
   const input = walk(root).find((el) => el.attrs["aria-label"] === label)!;
@@ -109,6 +113,9 @@ beforeEach(async () => {
     winnerRunId: null, callbackState: "delivered", callbackError: null, callbackAttempts: 1, callbackNextAttemptAt: null,
     createdAt: 1, finishedAt: 2 };
   vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
+  vi.stubGlobal("Option", class extends Element {
+    constructor(label: string, value: string) { super("option"); this.append(label); this.value = value; }
+  });
   vi.stubGlobal("window", { confirm: vi.fn(() => true) });
   fetcher = vi.fn(async (url: string) => {
     if (url.startsWith("/api/tasks?")) return Response.json(url.includes("archived") ? [] : [{ ...task, lastRun: run }]);
@@ -275,7 +282,9 @@ describe("Tasks", () => {
         terminal = next;
         return next;
       };
-      try { button(label)!.onclick!(); } finally { Promise.prototype.then = then; }
+      try {
+        if (label === "New task") tasksView.create(); else button(label)!.onclick!();
+      } finally { Promise.prototype.then = then; }
       /* oxlint-enable unicorn/no-thenable */
       const reported = expect(terminal).rejects.toThrow("sessions offline");
       if (move === "refresh") tasksView.show(label === "Edit" ? task.id : undefined);
@@ -397,6 +406,22 @@ describe("Tasks", () => {
 });
 
 describe("Runs", () => {
+  it("keeps an expanded date range and draft input when task choices arrive late", async () => {
+    let release!: (response: Response) => void;
+    fetcher.mockResolvedValueOnce(Response.json(page));
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { release = resolve; }));
+    openRuns({}); await settled();
+    const dates = walk(root).find((el) => el.tag === "details" && el.className === "filter-dates")!;
+    const from = walk(root).find((el) => el.attrs["aria-label"] === "From")!;
+    dates.open = true;
+    from.value = "2026-09-08T10:30";
+    release(Response.json([{ ...task, name: "New options" }])); await settled();
+    expect(walk(root).find((el) => el.attrs["aria-label"] === "From")).toBe(from);
+    expect(from.value).toBe("2026-09-08T10:30");
+    expect(dates.open).toBe(true);
+    expect(walk(root).find((el) => el.attrs["aria-label"] === "Task")?.text).toContain("New options");
+  });
+
   it("shows flat children and attention, preserves filters across keyset pages, toggles probes", async () => {
     run.parentRunId = "parent"; run.pendingDecisionId = "decision"; run.callbackState = "failed"; run.groupCallbackState = "abandoned";
     page.nextCursor = { queuedAt: 1, id: run.id };

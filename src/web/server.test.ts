@@ -817,6 +817,7 @@ describe("workbench server", () => {
     const { app, session } = setup();
     const steps = [
       { kind: "thinking" as const, text: "hmm" },
+      { kind: "progress" as const, text: "Inspecting the file." },
       { kind: "tool" as const, id: "t1", toolName: "read", args: { path: "a.ts" }, output: "file", isError: false, done: true },
     ];
     session.history = async () => [
@@ -830,6 +831,7 @@ describe("workbench server", () => {
     // — args and output — waits until a group is opened.
     expect(snapshot.turns[1]?.steps).toEqual([
       { kind: "thinking", text: "hmm" },
+      { kind: "progress", text: "Inspecting the file." },
       { kind: "tool", id: "t1", toolName: "read", isError: false, done: true },
     ]);
 
@@ -1950,6 +1952,31 @@ describe("workbench server", () => {
     expect(session.calls[1]).toMatch(
       /^prompt:\[operator<web> \d{4}-\d{2}-\d{2} \d{1,2}:\d{2}\]\nfixed$/,
     );
+  });
+
+  it("rejects historical edits and accepts only the latest user message", async () => {
+    const { app, session } = setup();
+    session.history = async () => [
+      { role: "user", text: "first" }, { role: "assistant", text: "reply" },
+      { role: "user", text: "latest" }, { role: "assistant", text: "final" },
+    ];
+    const edit = (index: number) => app.request(`/api/sessions/s1/turns/${index}/edit`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "fixed" }),
+    });
+    expect((await edit(0)).status).toBe(409);
+    expect(session.calls).toEqual([]);
+    expect((await edit(1)).status).toBe(202);
+    expect(session.calls[0]).toBe("rewind:1");
+  });
+
+  it("rechecks idle state after reading the edit target", async () => {
+    const { app, session } = setup();
+    session.history = async () => { session.setState("streaming"); return [{ role: "user", text: "latest" }]; };
+    const res = await app.request("/api/sessions/s1/turns/0/edit", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "fixed" }),
+    });
+    expect(res.status).toBe(409);
+    expect(session.calls).toEqual([]);
   });
 
   it("rejects edits while streaming or with bad input", async () => {

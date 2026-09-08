@@ -189,8 +189,13 @@ describe("toSessionEvents", () => {
       }],
     },
     {
-      name: "message_start for non-user messages is dropped",
+      name: "assistant message_start preserves the boundary between text blocks",
       input: { type: "message_start", message: { role: "assistant", content: "hi" } },
+      expected: [{ type: "text-start" }],
+    },
+    {
+      name: "tool-result message_start is dropped",
+      input: { type: "message_start", message: { role: "toolResult", content: "file" } },
       expected: [],
     },
     {
@@ -199,6 +204,20 @@ describe("toSessionEvents", () => {
       expected: [],
     },
   ];
+
+  it("does not promote tool commentary to a final answer when a call is interrupted", () => {
+    const messages: PiMessage[] = [
+      { role: "user", content: "review" },
+      { role: "assistant", stopReason: "aborted", content: [
+        { type: "text", text: "Reading the file." },
+        { type: "toolCall", id: "a", name: "read", arguments: {} },
+      ] },
+    ];
+    expect(toSessionEvents({ type: "agent_end", messages })).toEqual([{ type: "turn-end", text: "" }]);
+    const turn = toChatTurns(messages)[1]!;
+    expect(turn.text).toBe("");
+    expect(turn.steps?.[0]).toEqual({ kind: "progress", text: "Reading the file." });
+  });
 
   for (const c of cases) {
     it(c.name, () => {
@@ -234,6 +253,72 @@ describe("toChatTurns", () => {
         ],
       },
     ]);
+  });
+
+  it("keeps intermediate text in ordered steps and emits only the final answer", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "review", timestamp: 1000 },
+      { role: "assistant", timestamp: 2000, content: [
+        { type: "thinking", thinking: "inspect" },
+        { type: "text", text: "Checking the first file." },
+        { type: "toolCall", id: "a", name: "read", arguments: { path: "a.ts" } },
+      ] },
+      { role: "toolResult", toolCallId: "a", content: "first file", isError: false },
+      { role: "assistant", timestamp: 3000, content: [
+        { type: "text", text: "Now checking the second file." },
+        { type: "toolCall", id: "b", name: "read", arguments: { path: "b.ts" } },
+      ] },
+      { role: "toolResult", toolCallId: "b", content: "second file", isError: false },
+      { role: "assistant", timestamp: 4000, content: [{ type: "text", text: "Final review." }] },
+    ]);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]?.text).toBe("Final review.");
+    expect(turns[1]?.steps?.map((step) => step.kind)).toEqual(["thinking", "progress", "tool", "progress", "tool"]);
+    expect(turns[1]?.steps?.filter((step) => step.kind === "progress").map((step) => step.text))
+      .toEqual(["Checking the first file.", "Now checking the second file."]);
+    expect(turns[1]?.steps?.filter((step) => step.kind === "tool").map((step) => [step.id, step.output, step.done]))
+      .toEqual([["a", "first file", true], ["b", "second file", true]]);
+    expect(turns[1]?.meta?.completedAt).toBe(4000);
+  });
+
+  it("retains progress without inventing a final answer when tools are interrupted", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "review" },
+      { role: "assistant", content: [
+        { type: "text", text: "Reading the file." },
+        { type: "toolCall", id: "a", name: "read", arguments: {} },
+      ] },
+    ]);
+    expect(turns[1]).toEqual({ role: "assistant", text: "", steps: [
+      { kind: "progress", text: "Reading the file." },
+      { kind: "tool", id: "a", toolName: "read", args: {} },
+    ] });
+  });
+
+  it("folds a separate commentary message into the following tool activity", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "review" },
+      { role: "assistant", content: "Starting the review." },
+      { role: "assistant", content: [{ type: "toolCall", id: "a", name: "read" }] },
+      { role: "toolResult", toolCallId: "a", content: "file" },
+      { role: "assistant", content: "Final review." },
+    ]);
+    expect(turns.map((turn) => turn.text)).toEqual(["review", "Final review."]);
+    expect(turns[1]?.steps?.map((step) => step.kind)).toEqual(["progress", "tool"]);
+    expect(turns[1]?.steps?.[0]?.text).toBe("Starting the review.");
+  });
+
+  it("does not fold a completed answer across a new user message", () => {
+    const turns = toChatTurns([
+      { role: "user", content: "first" },
+      { role: "assistant", content: "First answer." },
+      { role: "user", content: "second" },
+      { role: "assistant", content: [{ type: "text", text: "Checking." }, { type: "toolCall", id: "a", name: "read" }] },
+      { role: "assistant", content: "Second answer." },
+    ]);
+    expect(turns.map((turn) => turn.text)).toEqual(["first", "First answer.", "second", "Second answer."]);
+    expect(turns[1]?.steps).toBeUndefined();
+    expect(turns[3]?.steps?.[0]).toEqual({ kind: "progress", text: "Checking." });
   });
 
   // Kept as a test because it is the reason the `context-compacted` event

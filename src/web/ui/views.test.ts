@@ -7,11 +7,11 @@ const mocks = vi.hoisted(() => {
     if (!el) { el = { textContent: "", replaceChildren: vi.fn(), classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() } }; elements.set(id, el); }
     return el;
   };
-  const view = () => ({ show: vi.fn(), hide: vi.fn(), refresh: vi.fn(), visible: true });
+  const view = () => ({ show: vi.fn(), hide: vi.fn(), create: vi.fn(), refresh: vi.fn(), visible: true });
   return { element, elements, tasks: view(), runs: view(), activity: view(), bar: vi.fn(), pill: vi.fn() };
 });
 vi.mock("./dom.js", () => ({ $: mocks.element, h: vi.fn(), consoleView: vi.fn() }));
-vi.mock("./form.js", () => ({ pill: mocks.pill }));
+vi.mock("./form.js", () => ({ pill: mocks.pill, button: mocks.element }));
 vi.mock("./chat.js", () => ({ turnsPane: mocks.element("turns") }));
 vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
 vi.mock("./session-header.js", () => ({ renderHeader: vi.fn() }));
@@ -69,6 +69,17 @@ it("round-trips run deep links with standard query filters and Back", async () =
   location.hash = "#/runs?taskId=task-a"; views.applyRoute(); await settled();
   expect(mocks.runs.show).toHaveBeenLastCalledWith(undefined, "taskId=task-a");
   views.showRun("child"); await settled(); expect(location.hash).toBe("#/runs/child");
+});
+it("places creation in the Tasks tab strip only on the list route", async () => {
+  views.showConsole("tasks"); await settled();
+  const create = mocks.element("New task");
+  expect(mocks.element("#automation-tabs").replaceChildren.mock.lastCall).toContain(create);
+  create.onclick!();
+  expect(mocks.tasks.create).toHaveBeenCalledOnce();
+  views.showConsole("tasks", "task-a"); await settled();
+  expect(mocks.element("#automation-tabs").replaceChildren.mock.lastCall).not.toContain(create);
+  views.showConsole("runs"); await settled();
+  expect(mocks.element("#automation-tabs").replaceChildren.mock.lastCall).not.toContain(create);
 });
 it("ignores malformed encoded routes without crashing", () => {
   location.hash = "#/runs/%E0%A4%A"; expect(() => views.applyRoute()).not.toThrow();

@@ -6,7 +6,7 @@
 import type { RunPage, TaskDefinition } from "../../tasks/types.js";
 import { coalesce, getJson, refused } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { button, CONTROL, empty, select, toolbar } from "./form.js";
+import { button, CONTROL, empty, select } from "./form.js";
 import { dateTime, openRun, runAttention, runBadge, runDuration, type RunViewState, type TaskRunsDeps } from "./task-runs.js";
 
 export type RunsView = ConsoleView & { refresh(): void };
@@ -21,7 +21,7 @@ export function createRunsView(
   let tasks: TaskDefinition[] = [];
   let drawn = "";
   let pane = h("div", "min-h-0 flex-1 overflow-auto");
-  let controls: HTMLElement = h("div", "");
+  let taskSelect: HTMLSelectElement | undefined;
   const state: RunViewState = { selectedId: null, rawOpen: false, scrollTop: 0, drawn: "" };
   const go = (next: URLSearchParams, id?: string): void => navigate(Object.fromEntries(next), id);
   const onError = (message: string): void => {
@@ -62,55 +62,66 @@ export function createRunsView(
   function drawShell(): void {
     drawn = "";
     pane = h("div", "min-h-0 flex-1 overflow-auto");
+    taskSelect = undefined;
     if (state.selectedId) { root.replaceChildren(pane); return; }
-    controls = drawControls();
-    root.replaceChildren(controls, pane);
+    root.replaceChildren(drawControls(), pane);
+  }
+
+  function taskChoices(): [string, string][] {
+    const options: [string, string][] = tasks.map((task) => [task.name + (task.archived ? " (archived)" : ""), task.id]);
+    const selected = filters.get("taskId");
+    if (selected && !tasks.some((task) => task.id === selected)) options.push([selected, selected]);
+    return [["All tasks", ""], ...options];
   }
 
   // The filter row is the page's toolbar: the Automation strip above names
   // the view, so this row carries only what narrows the list.
   function drawControls(): HTMLElement {
-    const box = toolbar();
-    box.classList.add("text-[12px]", "text-neutral-500");
-    const filter = (label: string, key: string, options: [string, string][]): void => {
+    const box = h("div", "automation-filters run-filters");
+    const filter = (label: string, key: string, options: [string, string][]): HTMLSelectElement => {
       const input = select(options, filters.get(key) ?? "");
-      input.classList.add("!w-auto", "max-w-full", "pr-8");
+      input.dataset.active = String(Boolean(filters.get(key)));
       input.setAttribute("aria-label", label);
       input.onchange = () => change(key, input.value);
-      box.append(input);
+      box.append(h("label", `filter-field ${key === "taskId" ? "filter-wide" : ""}`, h("span", "", label), input));
+      return input;
     };
     filter("State", "state", [["All states", ""], ...["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"].map((v): [string, string] => [v, v])]);
     filter("Source", "source", [["All sources", ""], ...["manual", "agent", "cron", "watch", "task"].map((v): [string, string] => [v, v])]);
-    const taskOptions: [string, string][] = tasks.map((task) => [task.name + (task.archived ? " (archived)" : ""), task.id]);
-    const selectedTask = filters.get("taskId");
-    if (selectedTask && !tasks.some((task) => task.id === selectedTask)) taskOptions.push([selectedTask, selectedTask]);
-    filter("Task", "taskId", [["All tasks", ""], ...taskOptions]);
+    taskSelect = filter("Task", "taskId", taskChoices());
+    const dates = h("details", "filter-dates") as HTMLDetailsElement;
+    const dateCount = Number(filters.has("since")) + Number(filters.has("until"));
+    dates.open = dateCount > 0;
+    dates.append(h("summary", "flex cursor-pointer items-center gap-1.5 py-1 text-[12px] text-neutral-600", h("span", "chev", "▸"), dateCount ? `Date range (${dateCount})` : "Date range"));
+    const dateFields = h("div", "filter-date-fields");
     for (const [label, key] of [["From", "since"], ["Through", "until"]] as const) {
-      const input = h("input", `${CONTROL} !w-auto min-w-0`) as HTMLInputElement;
+      const input = h("input", CONTROL) as HTMLInputElement;
       input.type = "datetime-local"; input.setAttribute("aria-label", label);
       const value = filters.get(key);
       if (value) {
         const date = new Date(Number(value));
         if (Number.isFinite(date.getTime())) input.value = new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
       }
+      input.dataset.active = String(Boolean(input.value));
       input.onchange = () => change(key, input.value ? String(new Date(input.value).getTime()) : "");
-      box.append(h("label", "flex min-w-0 items-center gap-2", label, input));
+      dateFields.append(h("label", "filter-field", h("span", "", label), input));
     }
-    const active = [...filters.keys()].filter((key) => key !== "cursor" && key !== "showUnmatched").length;
+    dates.append(dateFields);
+    const toggle = h("input", "h-4 w-4 flex-none") as HTMLInputElement;
+    toggle.type = "checkbox";
+    toggle.checked = filters.get("showUnmatched") === "true";
+    toggle.onchange = () => change("showUnmatched", toggle.checked ? "true" : "");
+    const visibility = h("label", "flex min-h-10 cursor-pointer items-center gap-2 text-[11.5px] text-neutral-500", toggle, "Show unmatched probes");
+    const active = [...filters.keys()].filter((key) => key !== "cursor").length;
     const reset = button(active ? `Reset filters (${active})` : "Reset filters");
-    reset.classList.add("ml-auto");
+    reset.classList.add("filter-action");
     reset.disabled = !active;
     reset.onclick = () => navigate({});
-    box.append(reset);
+    box.append(dates, h("div", "filter-footer", visibility, reset));
     return box;
   }
 
   function drawPage(page: RunPage): void {
-    const toggle = h("input", "") as HTMLInputElement; toggle.type = "checkbox";
-    toggle.checked = filters.get("showUnmatched") === "true";
-    toggle.onchange = () => change("showUnmatched", toggle.checked ? "true" : "");
-    const visibility = h("label", "flex items-center gap-2 border-b border-neutral-100 bg-neutral-50/60 px-4 py-1.5 text-[11.5px] text-neutral-500", toggle,
-      "Show unmatched probes");
     const list = h("div", "divide-y divide-neutral-100");
     for (const run of page.runs) {
       const row = h("div", "px-4 py-3 text-[12px] transition-colors hover:bg-neutral-50");
@@ -150,7 +161,7 @@ export function createRunsView(
       paging.append(older);
     }
     const scroll = pane.scrollTop;
-    pane.replaceChildren(visibility, list, paging); pane.scrollTop = scroll;
+    pane.replaceChildren(list, paging); pane.scrollTop = scroll;
   }
 
   /** The Task picker's options; redrawn in place when they change, so the page
@@ -160,10 +171,9 @@ export function createRunsView(
     if (!got.ok) return onError(got.error);
     if (JSON.stringify(tasks) === JSON.stringify(got.value)) return;
     tasks = got.value;
-    if (!state.selectedId && controls.isConnected) {
-      const next = drawControls();
-      controls.replaceWith(next);
-      controls = next;
+    if (!state.selectedId && taskSelect?.isConnected) {
+      taskSelect.replaceChildren(...taskChoices().map(([label, value]) => new Option(label, value)));
+      taskSelect.value = filters.get("taskId") ?? "";
     }
   }
 

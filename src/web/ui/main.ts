@@ -258,10 +258,14 @@ function handleEvent(e: SessionEvent): void {
       scrollBottom();
       break;
     }
+    case "text-start":
+      finalizeStreaming();
+      break;
     case "text-delta":
       appendDelta(e.text);
       break;
     case "thinking-delta":
+      finalizeStreaming(); // new reasoning makes the preceding text an update
       activityThinking(e.ts, e.text);
       break;
     case "tool-start":

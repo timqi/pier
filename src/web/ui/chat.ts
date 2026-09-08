@@ -12,9 +12,12 @@ import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
 import { $, agoLabel, copyBtn, externalLinks, h, stampTime, STREAM_PAINT_MS } from "./dom.js";
+import { button } from "./form.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
+  activityProgress,
   clampedBody,
+  discardProgress,
   finishActivity,
   initTurnActivity,
   renderBackgroundRun,
@@ -123,8 +126,8 @@ export function scrollBottom(force = false): void {
   if (follow) turnsPane.scrollTop = turnsPane.scrollHeight;
 }
 
-// --- chat rows (Slack-style full-width) ----------------------------------------------
-// No sender labels: user rows carry an accent bar + tint, agent rows stay plain.
+// --- chat bubbles ------------------------------------------------------------------
+// Direction identifies the speaker; system and error rows keep their status tint.
 
 /** Rows the pane keeps. Nothing ever left it: a workbench open for a day held
  *  every turn, every replayed activity group and every highlighted code block
@@ -159,16 +162,15 @@ function trimRows(): void {
   if (turnsPane.firstElementChild !== trimNotice) turnsPane.prepend(trimNotice);
 }
 
-const ROW_STYLE: Record<string, { row: string; body: string }> = {
-  user: { row: "border-l-indigo-500 bg-indigo-50", body: "text-neutral-900" },
-  assistant: { row: "border-l-transparent", body: "text-neutral-900" },
+const ROW_STYLE = {
+  user: { row: "", body: "text-inherit" },
+  assistant: { row: "", body: "text-neutral-900" },
   error: { row: "border-l-red-400 bg-red-50", body: "text-red-700" },
-  system: { row: "border-l-cyan-500 bg-cyan-50", body: "text-neutral-800" },
+  system: { row: "system-card border-l-cyan-500", body: "text-neutral-500" },
 };
 
-// No rules between rows: tint and accent say who is speaking, the gap only says
-// whether the speaker changed (4px within a run, 6px across one), and the
-// padding is generous — the block breathes, the lines don't.
+// Message direction and material live in CSS; data-kind also keeps edits,
+// history trimming and tool activity attached to the same row.
 export function appendTurn(
   kind: keyof typeof ROW_STYLE,
   text: string,
@@ -176,21 +178,19 @@ export function appendTurn(
   at?: number,
 ): HTMLElement {
   sealActivity();
-  // The steps that just ran are this message's own: they move inside the row
-  // as its caption line. Detaching first also restores sender grouping, which
-  // a group sitting between two agent rows used to break.
+  // Keep the completed work beside its reply, outside the reading bubble.
   const steps = kind === "assistant" ? takeActivityGroup() : null;
-  const s = ROW_STYLE[kind]!;
-  // Only a user row can carry a clock (see stampDue), and only when the gap
-  // rule says the time changed something. An untimed row — an error, a block
-  // still streaming — is skipped rather than stamped `Date.now()`.
+  const s = ROW_STYLE[kind];
+  // Only user messages introduce a clock separator after a conversation gap.
   const stamp = kind === "user" && at !== undefined && stampDue(at) ? at : undefined;
   // Consecutive rows from the same sender read as one block (Slack grouping) —
   // except across a stamp, which is a break in the conversation.
   const grouped = stamp === undefined &&
     (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
-  const row = h("div", `group relative border-l-2 px-5 ${grouped ? "pt-1 pb-2.5" : "mt-1.5 py-2.5"} ${s.row}`);
+  const row = h("div", `group relative ${s.row}`);
   row.dataset.kind = kind;
+  if (grouped) row.dataset.grouped = "";
+  if (!bulk) row.dataset.enter = ""; // History replay must not animate every old message.
   // A user message may end in inbound-file markers (core/inbound-file.ts):
   // the typed text stays a plain bubble, the files render as thumbs/cards
   // below.
@@ -213,14 +213,11 @@ export function appendTurn(
   // from the bubble must not detach the files, or drop who was speaking.
   if (files?.paths.length || named) node.dataset.raw = text;
   if (markdown) renderMarkdown(node, text);
-  // flow-root: the step line floats into the message's first line, and a row
-  // that doesn't contain its float leaks it over whatever comes next while the
-  // text is still empty.
-  if (steps) {
-    row.classList.add("flow-root");
-    row.append(steps);
+  if (at !== undefined) {
+    row.dataset.at = String(at);
+    row.title = stampTime(at);
   }
-  if (caption || stamp !== undefined) row.append(speakerLine(caption, stamp));
+  if (caption) row.append(speakerLine(caption));
   row.append(node);
   const sessionId = deps.sessionId();
   if (files?.paths.length && sessionId) {
@@ -228,38 +225,49 @@ export function appendTurn(
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
   if (kind === "user") {
-    const edit = h("button", "absolute right-2 top-1 hidden h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 group-hover:flex pointer-coarse:flex");
-    edit.title = "Edit — resends from here; this message and later turns leave the context";
+    cancelEdit?.();
+    turnsPane.querySelector(".message-edit")?.remove();
+    const edit = h("button", "message-edit absolute right-full top-1 flex h-8 w-8 items-center justify-center rounded-full");
+    edit.title = "Edit latest message — resends it and replaces the reply";
+    edit.setAttribute("type", "button");
     edit.setAttribute("aria-label", "Edit message");
     edit.innerHTML =
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="m10.7 2.3 3 3L6 13H3v-3l7.7-7.7zM9.3 3.7l3 3"/></svg>';
     edit.onclick = () => startEdit(row, node);
     row.append(edit);
   }
+  if (stamp !== undefined) {
+    const time = h("div", "my-3 text-center text-[11px] text-neutral-400");
+    time.dataset.kind = "time";
+    time.dataset.at = String(stamp);
+    paintTime(time);
+    timeTimer ??= setInterval(paintTimes, 60_000);
+    time.title = stampTime(stamp);
+    turnsPane.append(time);
+  }
+  if (steps) turnsPane.append(steps);
   turnsPane.append(row);
   trimRows();
   scrollBottom();
   return node;
 }
 
-/** The caption above a user message: who (IM only — the mention id on hover is
- *  the one thing the header carries that a name cannot replace) and when. */
-function speakerLine(speaker: Omit<Speaker, "text"> | null, at?: number): HTMLElement {
-  const line = h("div", "mb-1 flex items-baseline gap-2 text-[11.5px] leading-tight");
+/** The caption identifies the IM speaker; clocks sit outside the bubble. */
+function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
+  const line = h("div", "mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11.5px] leading-tight opacity-85");
   const who = speaker?.name ?? speaker?.id;
   if (who) {
-    const label = h("span", "font-semibold text-indigo-700", who);
+    const label = h("span", "font-semibold text-inherit", who);
     if (speaker?.id) label.title = speaker.id;
     line.append(label);
   }
-  if (at !== undefined) line.append(stampEl(at, "font-mono text-[11px] text-indigo-600"));
   return line;
 }
 
 /** Glyph and caption per input kind; the decision is the one that wants a
  *  look, so it alone carries a colour. */
 const INPUT_KIND: Record<string, [glyph: string, label: string, cls: string]> = {
-  "task-delegation": ["\u25b6", "delegated", "text-cyan-700"],
+  "task-delegation": ["\u2197", "delegated", "text-cyan-700"],
   "task-callback": ["\u21a9", "callback", "text-cyan-700"],
   decision: ["?", "decision needed", "text-amber-700"],
 };
@@ -281,14 +289,14 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? ["\u21a9", kindKey.replace("_", " "), "text-cyan-700"];
   sealActivity();
-  const row = runCard(kindKey === "decision" ? "border-l-amber-400 bg-amber-50" : "border-l-cyan-500 bg-cyan-50");
+  const state = origin.kind === "task-callback" ? origin.state : undefined;
+  const row = runCard(state ? STATE_STYLE[state].edge : kindKey === "decision" ? "border-l-amber-400" : "border-l-cyan-500");
   row.dataset.kind = "system";
   const [meta, body] = splitMetaBlock(text);
   // What produced it, not just which run did: the task's own name, the model
   // and the effort, all riding in the origin (core/types.ts) so the card never
   // has to fetch a run to say what it is. A callback also says how the run
   // ended, in the run card's own colours, so the two agree at a glance.
-  const state = origin.kind === "task-callback" ? origin.state : undefined;
   const head = runHead({
     glyph: state ? stateGlyph(state) : h("span", `w-3 flex-none text-center font-bold ${cls}`, glyph),
     label: state ? `${label} \u00b7 ${state}` : label,
@@ -300,7 +308,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
     sessionId: origin.sourceSessionId,
   });
   row.append(head);
-  row.append(...clampedBody(body, origin.kind === "task-delegation"));
+  row.append(...clampedBody(body));
   turnsPane.append(row);
   trimRows();
   scrollBottom();
@@ -311,7 +319,12 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
 // before that message server-side and re-sends the edited text, so the old
 // message stops polluting the context. Later turns are dropped with it.
 
+let cancelEdit: (() => void) | null = null;
+const isLatestUser = (row: HTMLElement): boolean =>
+  row.isConnected && turnsPane.querySelector(".message-edit")?.parentElement === row;
+
 function startEdit(row: HTMLElement, node: HTMLElement): void {
+  if (!isLatestUser(row)) return;
   if (deps.sessionState() !== "idle") {
     appendTurn("error", "can't edit while streaming — stop the turn first");
     return;
@@ -320,40 +333,69 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
   const area = document.createElement("textarea");
   area.value = node.dataset.raw ?? node.textContent ?? ""; // user turns are plain text
   area.className =
-    "block w-full resize-none rounded-md border border-indigo-300 bg-white px-2 py-1 focus:outline-none";
+    "block w-full resize-none rounded-xl border border-indigo-300 bg-white px-3 py-2 text-neutral-900 focus:outline-none";
   // Grow with content like the composer does; same 192px cap (max-h-48).
+  area.setAttribute("aria-label", "Edit latest message");
+  const submit = button("Send edit", true);
+  const dismiss = button("Cancel");
+  const editor = h("div", "message-editor", area, h("div", "mt-2 flex flex-wrap justify-end gap-2", dismiss, submit));
   const grow = (): void => {
     area.style.height = "auto";
     area.style.height = `${Math.min(area.scrollHeight, 192)}px`;
+    submit.disabled = !area.value.trim();
   };
   area.oninput = grow;
+  row.dataset.editing = "";
   node.classList.add("hidden");
-  node.after(area);
+  node.after(editor);
   grow();
   area.focus();
   area.setSelectionRange(area.value.length, area.value.length);
   const cancel = (): void => {
-    area.remove();
+    editor.remove();
     node.classList.remove("hidden");
+    delete row.dataset.editing;
+    cancelEdit = null;
   };
-  area.onkeydown = (ev) => {
+  cancelEdit = cancel;
+  dismiss.onclick = () => {
+    cancel();
+    row.querySelector<HTMLButtonElement>(".message-edit")?.focus({ preventScroll: true });
+  };
+  submit.onclick = () => {
+    const text = area.value.trim();
+    if (text) void submitEdit(row, text);
+  };
+  editor.onkeydown = (ev) => {
     if (ev.isComposing || ev.keyCode === 229) return;
-    if (ev.key === "Escape") cancel();
-    if (ev.key === "Enter" && !ev.shiftKey) {
+    if (ev.key === "Escape") {
       ev.preventDefault();
-      const text = area.value.trim();
-      if (!text) return cancel();
-      void submitEdit(row, text);
+      ev.stopPropagation();
+      dismiss.click();
+    }
+    if (ev.key === "Enter" && !ev.shiftKey && ev.target === area) {
+      ev.preventDefault();
+      submit.click();
     }
   };
 }
 
 async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   const id = deps.sessionId();
-  if (!id) return;
+  if (!id || !isLatestUser(row)) return;
+  if (deps.sessionState() !== "idle") {
+    appendTurn("error", "can't edit while streaming — stop the turn first");
+    return;
+  }
+  cancelEdit?.();
   // The Nth user row on screen is the Nth user turn of history() — plus the
   // ones the trim took off the top, which history() still holds.
-  const index = trimmedUserTurns + [...turnsPane.querySelectorAll('[data-kind="user"]')].indexOf(row);
+  const users = [...turnsPane.querySelectorAll<HTMLElement>('[data-kind="user"]')];
+  const index = trimmedUserTurns + users.indexOf(row);
+  const previousTime = users[users.length - 2]?.dataset.at;
+  lastStampAt = previousTime === undefined ? null : Number(previousTime);
+  const separator = row.previousElementSibling as HTMLElement | null;
+  if (separator?.dataset.kind === "time") separator.remove();
   // Drawn before the round trip: reloading the snapshot instead blanked the
   // pane for the length of a fetch, so the transcript flashed away and came
   // back (principle 7). A rewind is exactly "this row and everything under it
@@ -377,18 +419,26 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
 }
 
 // --- when things happened ---------------------------------------------------------
-// A clock on every row was chrome nobody read, and on hover it did not exist at
-// all on a phone. Two placements instead, and the same rule identity.ts already
-// applies to IM headers: a time is written only where it *changed* something.
-// A rule across the pane was the third placement and said it loudest, so the
-// question "when did this part of the conversation happen" is answered where it
-// is asked — on the message that reopened it.
+// Clocks separate conversations after a gap; precise message times live in
+// hover titles so the reading bubbles carry only their content.
 
 /** A new day, or this much silence, is what makes the clock worth a line. */
 const STAMP_GAP_MS = 10 * 60_000;
 
 /** When the last stamped row happened — a stamp is a diff against it. */
 let lastStampAt: number | null = null;
+let timeTimer: ReturnType<typeof setInterval> | undefined;
+
+function paintTime(el: HTMLElement): void {
+  const at = Number(el.dataset.at);
+  el.textContent = `${stampTime(at).slice(0, 16)} · ${agoLabel(at)}`;
+}
+
+function paintTimes(): void {
+  const times = turnsPane.querySelectorAll<HTMLElement>('[data-kind="time"]');
+  for (const time of times) paintTime(time);
+  if (!times.length) { clearInterval(timeTimer); timeTimer = undefined; }
+}
 
 const sameDay = (a: number, b: number): boolean =>
   new Date(a).toDateString() === new Date(b).toDateString();
@@ -404,47 +454,8 @@ function stampDue(at: number): boolean {
   return prev === null || at - prev >= STAMP_GAP_MS || !sameDay(prev, at);
 }
 
-/** Wall clock and age, in the one full spelling Session info uses for "Last
- *  reply" (dom.ts): one fact on two surfaces gets one wording. The moment rides
- *  on the element, so the ticker repaints every stamp in the pane without a
- *  registry to keep in step with the trim. */
-function stampEl(at: number, cls: string): HTMLElement {
-  const el = h("div", cls);
-  el.dataset.at = String(at);
-  paintStamp(el);
-  stampTimer ??= setInterval(paintStamps, 60_000);
-  return el;
-}
-
-function paintStamp(el: HTMLElement): void {
-  const at = Number(el.dataset.at);
-  el.textContent = `${stampTime(at)} · ${agoLabel(at)}`;
-}
-
-/** The newest assistant turn, and only it, carries its own clock: the answer
- *  you are looking at is the one whose time you wanted. */
-let replyStamp: HTMLElement | null = null;
-
-/** The age half goes stale where it sits, and a reply still claiming "just now"
- *  an hour later is worse than no age at all — so it is repainted, by a ticker
- *  that exists only while a stamp does. */
-let stampTimer: ReturnType<typeof setInterval> | undefined;
-
-function paintStamps(): void {
-  const stamps = turnsPane.querySelectorAll<HTMLElement>("[data-at]");
-  if (!stamps.length) {
-    clearInterval(stampTimer);
-    stampTimer = undefined;
-    return;
-  }
-  for (const el of stamps) paintStamp(el);
-}
-
 function setReplyStamp(node: HTMLElement, meta?: TurnMeta): void {
-  if (!meta) return;
-  replyStamp?.remove();
-  replyStamp = stampEl(meta.completedAt, "mt-1 font-mono text-[11px] text-neutral-400");
-  (node.parentElement ?? node).append(replyStamp);
+  if (meta) (node.parentElement ?? node).title = stampTime(meta.completedAt);
 }
 
 /** Wrap each fenced block so a copy button can sit in its corner without
@@ -592,7 +603,7 @@ function stopStreamPaint(): void {
 /** Append a text-delta to the in-flight streamed block. */
 export function appendDelta(text: string): void {
   if (!streamingEl) {
-    streamingEl = appendTurn("assistant", "");
+    streamingEl = activityProgress(Date.now());
     streamStable = 0;
     streamNodes = 0;
   }
@@ -600,43 +611,53 @@ export function appendDelta(text: string): void {
   paintStreaming();
 }
 
-/** Finalize the in-flight streamed text block (full markdown render). */
-export function finalizeStreaming(offer = false, meta?: TurnMeta): void {
+/** A tool or input boundary confirms this text was an intermediate update. */
+export function finalizeStreaming(): void {
   if (!streamingEl) return;
   const node = streamingEl;
   streamingEl = null;
   stopStreamPaint();
-  renderAssistant(node, node.dataset.raw ?? "", meta, offer);
+  node.classList.remove("md");
+  node.classList.add("whitespace-pre-wrap");
+  node.textContent = node.dataset.raw ?? "";
 }
 
-/** turn-end presentation. `text` is the authoritative full turn text — a
- *  client that joined mid-turn only holds the deltas it happened to see. */
+/** Move the provisional text out of the log once the turn's outcome is known. */
+function takeStreaming(): string | undefined {
+  if (!streamingEl) return undefined;
+  const raw = streamingEl.dataset.raw;
+  discardProgress(streamingEl);
+  streamingEl = null;
+  stopStreamPaint();
+  return raw;
+}
+
+/** turn-end carries the authoritative final answer, including after reconnect. */
 export function completeTurn(text: string | undefined, meta?: TurnMeta): void {
+  if (text === "") finalizeStreaming(); // no final answer: retain provisional text in the log
+  const pending = takeStreaming();
   finishActivity("done");
-  if (streamingEl) {
-    if (text) streamingEl.dataset.raw = text;
-    // meta goes through the finalize, not around it: the clock has to land
-    // after the next-step buttons the same render appends.
-    finalizeStreaming(true, meta);
-    return;
-  }
-  if (text) appendAssistant(text, meta, true);
+  const answer = text ?? pending;
+  if (answer) appendAssistant(answer, meta, true);
 }
 
-/** idle without a turn-end: the run was aborted. */
+/** An interrupted partial answer stays readable instead of disappearing. */
 export function interruptTurn(): void {
+  const partial = takeStreaming();
   finishActivity("interrupted");
-  finalizeStreaming();
+  if (partial) appendAssistant(partial);
 }
 
 /** Reset everything before a session snapshot re-render. */
 export function resetChat(): void {
+  cancelEdit?.();
+  clearInterval(timeTimer);
+  timeTimer = undefined;
   turnsPane.replaceChildren();
   trimmedUserTurns = 0;
   trimmedRows = 0;
   trimNotice = null;
   lastStampAt = null;
-  replyStamp = null;
   streamingEl = null;
   stopStreamPaint();
   resetActivity();
@@ -690,12 +711,8 @@ export function renderSnapshot(
   bulk = true;
   try {
     for (const [i, t] of turns.entries()) {
-      // The in-flight turn is the trailing one, recognisable while streaming by a
-      // tool call without a result or by activity with no answer yet.
-      const live =
-        state === "streaming" &&
-        i === turns.length - 1 &&
-        (!t.text || (t.steps?.some((s) => s.kind === "tool" && !s.done) ?? false));
+      // The last assistant entry of a running snapshot is still provisional.
+      const live = state === "streaming" && i === turns.length - 1 && t.role === "assistant";
       const steps = t.steps;
       if (steps?.length) {
         replayActivity(steps, t.meta?.durationMs, live, i);
@@ -715,7 +732,8 @@ export function renderSnapshot(
         continue;
       }
       // meta is assistant-only (core/types.ts), so plain turns need no hint.
-      if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
+      if (live) appendDelta(t.text);
+      else if (t.role === "assistant") appendAssistant(t.text, t.meta, state === "idle" && i === lastAssistant);
       else appendTurn(t.role, t.text, false, t.at);
     }
     // Whatever is left never appeared in the transcript at all — the bottom is

@@ -464,6 +464,9 @@ export function createServer(
     if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
+    const latest = (await session.history()).filter((turn) => turn.role === "user").length - 1;
+    if (index !== latest) return c.json({ error: "only the latest user message can be edited — refresh and try again" }, 409);
+    if (session.state !== "idle") return c.json({ error: "busy — stop the turn first" }, 409);
     await session.rewindToUserTurn(index);
     // The rewind took the turns after this one out of the context, headers and
     // all; what the model was told about who is speaking went with them.

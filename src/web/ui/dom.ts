@@ -157,7 +157,7 @@ export function detailsRow(cls: string, summaryChildren: HTMLElement[]): { el: H
   const el = document.createElement("details");
   el.className = cls;
   const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
-  summary.append(h("span", "chev", "▶"), ...summaryChildren);
+  summary.append(h("span", "chev", "▸"), ...summaryChildren);
   el.append(summary);
   return { el, summary };
 }

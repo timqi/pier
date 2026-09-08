@@ -10,7 +10,7 @@ import type { ActivityView } from "./activity.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
-import { pill } from "./form.js";
+import { button, pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { distinctCwds, orderSessions, type SessionInfo } from "./sidebar.js";
@@ -79,13 +79,22 @@ const automationTabs = $("#automation-tabs");
 /** The sidebar row a view lights up: the hub's for its tabs, its own otherwise. */
 const sidebarEntry = (name: ConsoleName): ConsoleName => (AUTOMATION.includes(name) ? "tasks" : name);
 
-function syncAutomation(name: ConsoleName | null): void {
+function syncAutomation(name: ConsoleName | null, arg?: string): void {
   const open = name !== null && AUTOMATION.includes(name);
   automationPane.classList.toggle("hidden", !open);
   automationPane.classList.toggle("flex", open);
   if (!open) return;
+  const actions: HTMLElement[] = [];
+  if (name === "tasks" && !arg) {
+    const create = button("New task", true);
+    create.classList.add("ml-auto");
+    create.disabled = !tasksView;
+    create.onclick = () => tasksView?.create();
+    actions.push(create);
+  }
   automationTabs.replaceChildren(
     ...AUTOMATION.map((tab) => pill(CONSOLE_LABELS[tab], tab === name, () => showConsole(tab))),
+    ...actions,
   );
 }
 
@@ -117,7 +126,7 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
   for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === sidebarEntry(name));
-  syncAutomation(name);
+  syncAutomation(name, arg);
   syncBar();
   void openView(name, arg, query, ++openRequest);
 }
@@ -153,6 +162,7 @@ async function openView(name: ConsoleName, arg: string | undefined, query: strin
   // The same view may have been left and reopened with a different argument.
   if (openName !== name || request !== openRequest) return;
   view.show(arg, query);
+  if (name === "tasks") syncAutomation(name, arg);
 }
 
 export const showTasks = (taskId?: string): void => showConsole("tasks", taskId);

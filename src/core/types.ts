@@ -140,6 +140,7 @@ export type SessionEventPayload =
   | { type: "user-message"; text: string }
   | { type: "system-input"; text: string; origin: SystemInputOrigin }
   | { type: "task-status"; run: BackgroundRun }
+  | { type: "text-start" } // a new assistant message; prior text is intermediate
   | { type: "text-delta"; text: string }
   | { type: "thinking-delta"; text: string }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: unknown }
@@ -204,8 +205,8 @@ export const MAX_STEP_OUTPUT = 8_000;
  * `output` is capped at MAX_STEP_OUTPUT.
  */
 export interface ActivityStep {
-  kind: "thinking" | "tool";
-  text?: string; // thinking steps
+  kind: "thinking" | "progress" | "tool";
+  text?: string; // thinking or intermediate assistant text
   id?: string; // tool call id — lets a client resuming mid-turn close the row
   toolName?: string; // tool steps
   args?: unknown;

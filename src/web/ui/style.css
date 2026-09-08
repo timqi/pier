@@ -20,6 +20,30 @@
 
    `--color-black` is deliberately untouched: every remaining use of it is a
    scrim or a backdrop, which still wants to be black over a dark page. */
+/* A cool paper canvas; keep secondary labels readable at the compact UI scale. */
+html {
+  color-scheme: light;
+  --color-neutral-50: oklch(98% 0.004 260);
+  --color-neutral-100: oklch(96% 0.006 260);
+  --color-neutral-200: oklch(91% 0.009 260);
+  --color-neutral-300: oklch(83% 0.012 260);
+  --color-neutral-400: oklch(55% 0.018 260);
+  --color-neutral-500: oklch(49% 0.02 260);
+  --color-neutral-600: oklch(43% 0.022 260);
+  --color-neutral-700: oklch(36% 0.024 260);
+  --color-neutral-800: oklch(29% 0.026 260);
+  --color-neutral-900: oklch(23% 0.028 260);
+  --color-indigo-50: #eef5ff;
+  --color-indigo-100: #deebff;
+  --color-indigo-200: #bfd8ff;
+  --color-indigo-300: #94beff;
+  --color-indigo-400: #5799f5;
+  --color-indigo-500: #1677ed;
+  --color-indigo-600: #0066df;
+  --color-indigo-700: #0054b6;
+  --color-indigo-800: #03448f;
+}
+
 html[data-theme="dark"] {
   color-scheme: dark;
   /* No element paints the page itself — `bg-white` starts at the panes — so
@@ -43,15 +67,15 @@ html[data-theme="dark"] {
      theme", for labels over a scrim or a saturated fill. */
   --color-neutral-950: oklch(97% 0 none);
 
-  --color-indigo-50: oklch(24.5% 0.028 272.314);
-  --color-indigo-100: oklch(32% 0.065 272.788);
-  --color-indigo-200: oklch(40% 0.09 274.039);
-  --color-indigo-300: oklch(50% 0.125 274.713);
-  --color-indigo-400: oklch(62% 0.155 276.935);
-  --color-indigo-500: oklch(68% 0.165 277.117);
-  --color-indigo-600: oklch(70% 0.175 276.966);
-  --color-indigo-700: oklch(80% 0.115 277.023);
-  --color-indigo-800: oklch(86% 0.08 277.366);
+  --color-indigo-50: oklch(24.5% 0.028 255);
+  --color-indigo-100: oklch(32% 0.065 255);
+  --color-indigo-200: oklch(40% 0.09 255);
+  --color-indigo-300: oklch(50% 0.125 255);
+  --color-indigo-400: oklch(62% 0.155 255);
+  --color-indigo-500: oklch(68% 0.165 255);
+  --color-indigo-600: oklch(70% 0.175 255);
+  --color-indigo-700: oklch(80% 0.115 255);
+  --color-indigo-800: oklch(86% 0.08 255);
 
   --color-red-50: oklch(24.5% 0.028 17.38);
   --color-red-100: oklch(32% 0.065 17.717);
@@ -119,6 +143,10 @@ html[data-theme="dark"] {
    named scale (`text-sm`) and this block should shrink, not grow. */
 html {
   font-size: 112.5%; /* 18px base */
+  --glass-surface: color-mix(in oklab, var(--color-white) 82%, transparent);
+  --glass-edge: color-mix(in oklab, var(--color-white) 65%, var(--color-neutral-200));
+  --glass-shadow: 0 8px 28px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.18);
+  --ease-surface: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Panning is all a touch may do to the document: `user-scalable=no`
      (index.html) is the same sentence for engines that honour it, and a
      workbench zoomed by a stray double-tap is a phone stuck off-centre. The
@@ -193,11 +221,22 @@ html {
     z-index: 40;
     width: 19rem;
     transform: translateX(-100%);
-    transition: transform 0.18s ease-out;
-    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+    transition: transform 220ms var(--ease-surface);
+  }
+  #drawer-scrim {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 220ms var(--ease-surface), visibility 220ms;
+  }
+  #drawer-scrim.hidden {
+    display: block;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
   }
   #sidebar[data-open] {
     transform: translateX(0);
+    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
   }
   /* The drawer is a primary surface on a phone, not a rail: the two lists carry
      their own size utilities, so naming them is the only way to scale them up. */
@@ -236,16 +275,267 @@ html {
   }
 }
 
+/* Shared chrome belongs below utilities so local layout and state still win. */
+@layer base {
+  body {
+    background: radial-gradient(ellipse at top left, var(--color-indigo-100), transparent 55%), var(--color-neutral-50);
+  }
+  ::selection { background: var(--color-indigo-100); color: var(--color-indigo-800); }
+  :focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 3px; }
+  input, textarea, select { accent-color: var(--color-indigo-600); }
+  dialog { background: var(--color-white); color: var(--color-neutral-800); }
+  dialog::backdrop { backdrop-filter: blur(3px); }
+  * { scrollbar-width: thin; scrollbar-color: var(--color-neutral-300) transparent; }
+}
+
+/* Navigation shares the same inset shape in the Console and session list. */
+#console-section ul, #session-list { padding-inline: 0.5rem; }
+#console-section li button, #session-list li {
+  border-radius: 0.875rem;
+  margin-block: 0.25rem;
+  transition: background-color 180ms, color 180ms;
+}
+#console-section li button { padding-left: 0.75rem; }
+#session-list li { padding-inline: 0.625rem; }
+#console-section button.bg-indigo-50, #session-list li.bg-indigo-50 {
+  color: var(--color-indigo-700);
+  background-color: var(--color-white);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.06), inset 0 0 0 1px var(--glass-edge);
+}
+#console-section button.bg-indigo-50 svg { color: inherit; }
+/* Glass is reserved for navigation and controls; messages use opaque surfaces. */
+:is(.glass, #sidebar, #mobile-bar, #chat-header,
+  main > section > header:first-child, main > section > div:first-child > header:first-child) {
+  background: var(--glass-surface);
+  border-color: var(--glass-edge);
+  backdrop-filter: blur(20px) saturate(1.35);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+}
+#sidebar { background: color-mix(in oklab, var(--color-neutral-50) 76%, transparent); }
+#rail-toggle { top: 0.625rem; border-radius: 50%; }
+:is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
+  height: 3rem;
+}
+#turns {
+  padding: 1rem max(1rem, calc((100% - 58rem) / 2)) 1.5rem;
+}
+#turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
+  width: fit-content;
+  max-width: 88%;
+  margin-block: 0.875rem;
+  padding: 0.75rem 1rem;
+  border-radius: 1.375rem;
+  overflow-wrap: anywhere;
+}
+#turns > [data-grouped] { margin-top: -0.5rem; }
+#turns > [data-kind="user"] {
+  margin-left: auto;
+  border-bottom-right-radius: 0.375rem;
+  background: var(--color-indigo-50);
+  color: var(--color-neutral-900);
+  box-shadow: inset 0 0 0 1px var(--color-indigo-100);
+}
+#turns > [data-kind="assistant"] {
+  margin-right: auto;
+  border-bottom-left-radius: 0.375rem;
+  background: var(--color-white);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.035), inset 0 0 0 1px var(--color-neutral-200);
+}
+#turns > :is([data-kind="system"], [data-kind="error"]) {
+  border-left-width: 2px;
+  max-width: 100%;
+}
+#turns > :is([data-kind="activity"], [data-kind="background-run"]) {
+  margin-block: 0.75rem;
+  border-radius: 1rem;
+}
+#turns > .system-card { border-left-width: 0; }
+.system-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.75rem;
+  height: 1.25rem;
+  border-left: 3px solid;
+  border-left-color: inherit;
+  border-radius: 99px;
+}
+.system-card {
+  background: color-mix(in oklab, var(--color-white) 45%, transparent);
+}
+.run-label {
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  background: color-mix(in oklab, currentColor 8%, transparent);
+}
+#turns > [data-kind="system"].system-card {
+  width: auto;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+}
+#turns > [data-kind="activity"] {
+  max-width: 88%;
+  margin-bottom: 0;
+}
+#turns > [data-kind="activity"][data-adopted] + [data-kind="assistant"] { margin-top: 0.375rem; }
+#turns > [data-kind="user"]:has(textarea) { width: 88%; }
+.message-edit { color: var(--color-neutral-500); opacity: 0; transition: opacity 160ms; }
+[data-editing] > .message-edit { visibility: hidden; }
+[data-kind="user"]:hover .message-edit, .message-edit:focus-visible { opacity: 0.85; }
+.message-edit:hover { background: var(--color-indigo-100); opacity: 1; }
+@media (hover: none) { .message-edit { opacity: 0.85; } }
+@media (pointer: coarse) { .message-edit { min-width: 44px; min-height: 44px; } }
+#composer { position: relative; z-index: 1; }
+#composer > div {
+  max-width: 58rem;
+  margin-inline: auto;
+}
+#composer > div:focus-within {
+  box-shadow: 0 0 0 3px var(--color-indigo-100), var(--glass-shadow);
+}
+#composer :is(#attach, #send, #stop) {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+}
+.glass { box-shadow: var(--glass-shadow); }
+/* Opacity/transform entrances avoid layout animation; history replay skips them. */
+@keyframes surface-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+#turns > [data-enter] {
+  animation: surface-in 240ms var(--ease-surface);
+}
+/* A transformed modal would rebase fixed menus positioned in viewport space. */
+dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
+.glass-menu {
+  --menu-shift: translateY(-4px) scale(0.97);
+  transform-origin: top center;
+  opacity: 1;
+  transform: none;
+  transition: opacity 180ms var(--ease-surface), transform 220ms var(--ease-surface);
+}
+.glass-menu[data-presentation="sheet"] {
+  --menu-shift: translateY(1.25rem);
+  transform-origin: bottom center;
+}
+.glass-menu[data-closing] {
+  opacity: 0;
+  transform: var(--menu-shift);
+  pointer-events: none;
+  transition-duration: 120ms;
+}
+@starting-style {
+  .glass-menu { opacity: 0; transform: var(--menu-shift); }
+}
+/* Native disclosure state stays authoritative, including keyboard activation.
+   Engines without details-content/interpolate-size retain instant expansion. */
+#turns details::details-content {
+  interpolate-size: allow-keywords;
+  block-size: 0;
+  opacity: 0;
+  overflow: clip;
+  transition: block-size 180ms var(--ease-surface), opacity 180ms,
+    content-visibility 180ms allow-discrete;
+}
+#turns details[open]::details-content { block-size: auto; opacity: 1; }
+:is(.btn, .icon-btn, #composer button) {
+  transition: background-color 180ms, box-shadow 180ms, transform 180ms var(--ease-surface);
+}
+:is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: scale(0.95); }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :is(.glass, #sidebar, #mobile-bar, #chat-header,
+    main > section > header:first-child, main > section > div:first-child > header:first-child) {
+    background: var(--color-white);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--color-neutral-400);
+  }
+}
+
+/* Keep the drawer inside narrow phones, even with the enlarged UI scale. */
+@media (width < 48rem) {
+  #automation-tabs > button { padding-inline: 0.625rem; font-size: 0.75rem; }
+  #sidebar { max-width: calc(100vw - 2.5rem); }
+  #composer { padding-inline: 0.75rem; }
+  #turns { padding-inline: 0.625rem; }
+  #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
+  #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
+  #turns > [data-kind="user"]:has(textarea) { width: 92%; }
+  #composer :is(#attach, #send, #stop) { width: 2.25rem; height: 2.25rem; }
+  #input { font-size: max(16px, 1rem); }
+}
+@keyframes surface-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  #turns > [data-enter], dialog[open]:not(#image-dialog) {
+    animation: surface-fade 120ms ease-out;
+  }
+  .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
+  #sidebar { transition: none; }
+  #drawer-scrim { transition-duration: 120ms; }
+  #turns details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
+  :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: none; }
+}
+
+/* Automation filters keep labels and actions aligned independently of option length. */
+.automation-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 0.75rem;
+  flex: none;
+  max-height: 50dvh;
+  overflow-y: auto;
+  margin: 0.75rem 1rem;
+  padding: 0.875rem;
+  border: 1px solid var(--color-neutral-200);
+  border-radius: 1.25rem;
+  background: color-mix(in oklab, var(--color-white) 75%, transparent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.025);
+}
+.filter-field { display: flex; min-width: 0; flex-direction: column; gap: 0.375rem; }
+.field-label, .filter-field > span { font-size: 0.71875rem; font-weight: 500; color: var(--color-neutral-600); }
+.filter-field > span { padding-inline: 0.25rem; }
+.filter-field > :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  height: 2.5rem;
+  border-radius: 0.875rem;
+  background-color: var(--color-white);
+  text-overflow: ellipsis;
+}
+.filter-field > select { padding-right: 2.25rem; }
+.filter-field > [data-active="true"] {
+  border-color: var(--color-indigo-200);
+  background-color: var(--color-indigo-50);
+  color: var(--color-indigo-700);
+}
+.filter-field > :is(input, select):focus { border-color: var(--color-indigo-400); }
+.filter-footer > .filter-action { min-height: 2.5rem; white-space: nowrap; margin-left: auto; }
+.task-filters > .filter-search, .run-filters > :is(.filter-wide, .filter-dates, .filter-footer) { grid-column: 1 / -1; }
+.filter-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
+.filter-date-fields { display: grid; gap: 0.75rem; padding-top: 0.5rem; }
+@media (width >= 48rem) {
+  .filter-date-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (width >= 64rem) {
+  .task-filters { grid-template-columns: minmax(8rem, 1fr) 8rem 9rem; }
+  .task-filters > .filter-search { grid-column: auto; }
+  .run-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .run-filters > .filter-wide { grid-column: auto; }
+}
+
 /* The only custom classes — each one a string that repeats verbatim across
    modules; everything else is utilities at the call site. */
 @layer components {
   .btn {
-    @apply rounded-md border border-neutral-300 bg-white px-3 py-1 shadow-2xs transition-colors hover:bg-neutral-100 active:bg-neutral-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white;
+    @apply rounded-full border border-neutral-200 bg-white px-4 py-2 font-medium shadow-2xs transition-colors hover:border-neutral-300 hover:bg-neutral-50 active:bg-neutral-100 cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white;
   }
   /* Dark: the indigo ramp flattens upward so accent *text* stays readable, and
      a label over that brighter fill has to go the other way. */
   .btn-primary {
-    @apply border-indigo-600 bg-indigo-600 text-white shadow-indigo-600/20 hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50;
+    @apply border-indigo-600 bg-indigo-600 text-white shadow-indigo-600/20 hover:border-indigo-500 hover:bg-indigo-500 active:bg-indigo-700 dark:text-neutral-50;
   }
   /* The one <select> skin: native chrome off, house chevron on. Sits beside
      whatever size utilities the call site adds; the right padding keeps text
@@ -259,7 +549,7 @@ html {
   }
   /* Sidebar section actions (search / new). */
   .icon-btn {
-    @apply flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700;
+    @apply flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700;
   }
   /* Console tab strip (Settings, Automation). Desktop keeps the view's tabs and its
      right-hand control group on one line; below md the right group takes
@@ -381,13 +671,6 @@ html {
   .md :first-child {
     margin-top: 0;
   }
-  /* A turn's step line floats into the first line of its message
-     (turn-activity.ts). Prose wraps around it, but a block that paints its own
-     background — code, quote, table — would slide underneath, so it starts
-     below instead. */
-  .md > :first-child:not(p, h1, h2, h3, h4, h5, h6) {
-    clear: left;
-  }
   .md :last-child {
     margin-bottom: 0;
   }
@@ -427,7 +710,7 @@ html {
      background is swapped for a faint tint that keeps the page's light weight,
      and inline code loses prose's literal backtick pseudo-elements. */
   .md pre {
-    @apply overflow-x-hidden whitespace-pre-wrap rounded-lg border border-black/[0.06] bg-black/[0.025] px-3 py-2 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
+    @apply overflow-x-hidden whitespace-pre-wrap rounded-xl border border-neutral-200/70 bg-neutral-50 px-4 py-3 text-[13px] dark:border-neutral-200 dark:bg-neutral-100;
     overflow-wrap: anywhere;
     color: var(--color-neutral-800);
   }
