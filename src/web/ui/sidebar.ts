@@ -170,13 +170,13 @@ function sortable(row: HTMLElement, key: string, drop: (target: string, after: b
   };
 }
 
-/** A row action: the hover background needs room around the glyph. */
-const ROW_BTN = "flex-none rounded p-1 leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
+/** A row action: a fixed 20px box, which is the row's own line height, so a
+ *  button appearing on hover never makes its row taller — padding did. */
+const ROW_BTN =
+  "h-5 w-5 flex-none items-center justify-center rounded leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
-/** Row action revealed on hover (resident on touch, which has no hover).
- *  `invisible`, not `hidden`: the button keeps its width, so hovering a row
- *  changes its colour and nothing else moves. */
-const HOVER_BTN = `invisible group-hover:visible pointer-coarse:visible ${ROW_BTN}`;
+/** Row action revealed on hover (resident on touch, which has no hover). */
+const HOVER_BTN = `hidden group-hover:flex pointer-coarse:flex ${ROW_BTN}`;
 
 /**
  * Waiting for *you*, which is narrower than `unread`.
@@ -220,7 +220,7 @@ const PIN_ICON =
 /** Pinned: always on the row, in colour — that is how the top of the list
  *  says which rows are pinned, no divider needed. Otherwise `cls` decides. */
 function pinButton(s: SessionInfo, cls: string): HTMLElement {
-  const pin = h("button", s.pinned ? ROW_BTN : cls);
+  const pin = h("button", s.pinned ? `flex ${ROW_BTN}` : cls);
   pin.innerHTML = PIN_ICON;
   pin.title = s.pinned ? "Unpin" : "Pin to top";
   pin.onclick = (ev) => {
@@ -433,7 +433,7 @@ function paletteRow(t: Target): HTMLElement {
   if (t.session) {
     li.append(
       h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)),
-      pinButton(t.session, ROW_BTN),
+      pinButton(t.session, `flex ${ROW_BTN}`),
     );
   }
   // Hover is its own grey, and it does not move the selection. Driving one
