@@ -386,7 +386,9 @@ html {
 .message-edit:hover { background: var(--color-indigo-100); opacity: 1; }
 @media (hover: none) { .message-edit { opacity: 0.85; } }
 @media (pointer: coarse) { .message-edit { min-width: 44px; min-height: 44px; } }
-#composer { position: relative; z-index: 1; }
+#composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
+/* Center one line against the controls; keep the same last-line alignment as text grows. */
+#input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
 #composer > div {
   max-width: 58rem;
   margin-inline: auto;
@@ -395,8 +397,8 @@ html {
   box-shadow: 0 0 0 3px var(--color-indigo-100), var(--glass-shadow);
 }
 #composer :is(#attach, #send, #stop) {
-  width: 2rem;
-  height: 2rem;
+  width: var(--composer-control-size);
+  height: var(--composer-control-size);
   border-radius: 50%;
 }
 .glass { box-shadow: var(--glass-shadow); }
@@ -459,12 +461,11 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 @media (width < 48rem) {
   #automation-tabs > button { padding-inline: 0.625rem; font-size: 0.75rem; }
   #sidebar { max-width: calc(100vw - 2.5rem); }
-  #composer { padding-inline: 0.75rem; }
+  #composer { --composer-control-size: 2.25rem; padding-inline: 0.75rem; }
   #turns { padding-inline: 0.625rem; }
   #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
   #turns > [data-kind="user"]:has(textarea) { width: 92%; }
-  #composer :is(#attach, #send, #stop) { width: 2.25rem; height: 2.25rem; }
   #input { font-size: max(16px, 1rem); }
 }
 @keyframes surface-fade { from { opacity: 0; } to { opacity: 1; } }
