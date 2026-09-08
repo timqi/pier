@@ -8,7 +8,7 @@ import { normalizeAgentSnapshot } from "./config-sync.js";
 
 let dir: string;
 let store: PiConfigStore;
-const empty = (): AgentConfigSnapshot => ({ files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {} });
+const empty = (): AgentConfigSnapshot => ({ files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {}, defaultModel: null });
 const read = (name: string): string => readFileSync(join(dir, name), "utf8");
 const write = (name: string, content: string): void => writeFileSync(join(dir, name), content);
 const saveModels = (providers: object): void => write("models.json", JSON.stringify({ version: 1, providers }));
@@ -43,15 +43,33 @@ describe("snapshot export", () => {
     expect(read("SYSTEM.md")).toBe("after");
   });
 
-  it("distinguishes missing and empty global files without reading settings or auth", async () => {
+  it("distinguishes missing and empty global files without reading auth", async () => {
     expect(await store.exportSnapshot()).toEqual(empty());
     write("SYSTEM.md", "");
     write("AGENTS.md", "global rules");
-    write("settings.json", "not even JSON");
+    write("settings.json", "   ");
     write("auth.json", "private auth");
     expect(await store.exportSnapshot()).toEqual({
-      files: { "SYSTEM.md": "", "AGENTS.md": "global rules" }, providers: {},
+      files: { "SYSTEM.md": "", "AGENTS.md": "global rules" }, providers: {}, defaultModel: null,
     });
+  });
+
+  it("shares the default model pair and nothing else settings.json holds", async () => {
+    write("settings.json", JSON.stringify({
+      defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "high", shellPath: "/bin/local-zsh",
+    }));
+    expect(await store.exportSnapshot()).toEqual({ ...empty(), defaultModel: { provider: "proxy", id: "m" } });
+  });
+
+  it("fails closed on a settings.json it cannot read a default out of", async () => {
+    write("settings.json", "not even JSON");
+    await expect(store.exportSnapshot()).rejects.toThrow(/settings.json must be valid JSON/);
+    write("settings.json", "[]");
+    await expect(store.exportSnapshot()).rejects.toThrow(/settings.json must be valid JSON/);
+    write("settings.json", JSON.stringify({ defaultModel: "m" }));
+    await expect(store.exportSnapshot()).rejects.toThrow(/defaultProvider and defaultModel together/);
+    write("settings.json", JSON.stringify({ defaultProvider: "proxy", defaultModel: " " }));
+    await expect(store.exportSnapshot()).rejects.toThrow(/model id must be a non-empty trimmed string/);
   });
 
   it("shares metadata at any depth while dropping credentials and endpoints", async () => {
@@ -136,6 +154,21 @@ describe("snapshot validation", () => {
   });
 
   it.each([
+    {}, { provider: "proxy" }, { id: "m" }, { provider: "proxy", id: " " }, { provider: "proxy", id: 1 },
+    { provider: "../escape", id: "m" }, { provider: "proxy", id: "m", thinking: "high" },
+  ])("rejects an invalid default model %#", (value) => {
+    expect(() => normalizeAgentSnapshot({ ...empty(), defaultModel: value })).toThrow();
+  });
+
+  it("keeps a stated default model and distinguishes it from an unstated one", () => {
+    expect(normalizeAgentSnapshot({ ...empty(), defaultModel: { provider: "proxy", id: "m" } }).defaultModel)
+      .toEqual({ provider: "proxy", id: "m" });
+    expect(normalizeAgentSnapshot({ ...empty(), defaultModel: null }).defaultModel).toBeNull();
+    const { files, providers } = empty();
+    expect(normalizeAgentSnapshot({ files, providers })).not.toHaveProperty("defaultModel");
+  });
+
+  it.each([
     {}, { id: " " }, { id: 1 }, { id: "m", name: undefined },
     { id: "m", input: ["text", { apiKey: "secret" }] },
     { id: "m", apiKey: "masked" }, { id: "m", headers: { Authorization: "masked" } },
@@ -161,7 +194,7 @@ describe("snapshot apply", () => {
       modelOverrides: { built: { reasoning: true, headers: { token: "local-override" } } },
       models: [{ id: "m", name: "old", reasoning: true, compat: { supportsStore: true }, ...transport }, { id: "removed" }],
     } });
-    write("settings.json", '{"model":"local-only"}');
+    write("settings.json", '{"shellPath":"local-only"}');
     write("auth.json", '{"apiKey":"local-auth"}');
     await store.applySnapshot({
       files: { "SYSTEM.md": "new system", "AGENTS.md": "new agents" },
@@ -178,8 +211,31 @@ describe("snapshot apply", () => {
     } } });
     expect(read("SYSTEM.md")).toBe("new system");
     expect(read("AGENTS.md")).toBe("new agents");
-    expect(read("settings.json")).toBe('{"model":"local-only"}');
+    expect(read("settings.json")).toBe('{"shellPath":"local-only"}');
     expect(read("auth.json")).toBe('{"apiKey":"local-auth"}');
+  });
+
+  it("imports the default model beside the local settings, and clears it on request", async () => {
+    write("settings.json", JSON.stringify({ shellPath: "/bin/local-zsh", defaultProvider: "old", defaultModel: "old-m" }, null, 2));
+    await store.applySnapshot({ ...empty(), defaultModel: { provider: "proxy", id: "m" } });
+    expect(JSON.parse(read("settings.json"))).toEqual({
+      shellPath: "/bin/local-zsh", defaultProvider: "proxy", defaultModel: "m",
+    });
+    // A source that states nothing leaves the pair as it is; `null` removes it.
+    const { files, providers } = empty();
+    const unchanged = read("settings.json");
+    await store.applySnapshot({ files, providers });
+    expect(read("settings.json")).toBe(unchanged);
+    await store.applySnapshot(empty());
+    expect(JSON.parse(read("settings.json"))).toEqual({ shellPath: "/bin/local-zsh" });
+  });
+
+  it("creates settings.json for an imported default and refuses to read a broken one", async () => {
+    await store.applySnapshot({ ...empty(), defaultModel: { provider: "proxy", id: "m" } });
+    expect(JSON.parse(read("settings.json"))).toEqual({ defaultProvider: "proxy", defaultModel: "m" });
+    write("settings.json", "{broken");
+    await expect(store.applySnapshot(empty())).rejects.toThrow(/settings.json must be valid JSON/);
+    expect(read("settings.json")).toBe("{broken");
   });
 
   it("removes explicitly absent files and catalogs without removing local credentials", async () => {

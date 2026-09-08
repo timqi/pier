@@ -631,6 +631,11 @@ export type SyncProvider = Record<string, unknown>;
 export interface AgentConfigSnapshot {
   files: { "SYSTEM.md": string | null; "AGENTS.md": string | null };
   providers: Record<string, SyncProvider>;
+  /** The model a session starts on when its caller names none — the one field
+   *  of Pi's settings.json that is a deployment decision rather than a machine
+   *  one. `null` is "the source has no default"; absent is a source that
+   *  predates the field, and the local default stands. */
+  defaultModel?: ModelRef | null;
 }
 
 /** Global portable config only; apply holds the config write lock through commit. */

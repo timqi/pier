@@ -1,6 +1,6 @@
 // Credential-blind projection of the portable agent configuration.
 
-import type { AgentConfigSnapshot, SyncProvider } from "../core/types.js";
+import type { AgentConfigSnapshot, ModelRef, SyncProvider } from "../core/types.js";
 
 /** Never leaves the instance, at any depth of a models.json provider: the
  *  credentials, and the endpoint they authenticate against — a sharing link is
@@ -56,19 +56,31 @@ function project(value: unknown, where: string, onPrivate: OnPrivate): unknown {
   }));
 }
 
+/** A provider id that cannot address anything but its own record. */
+function providerId(id: unknown): string {
+  if (typeof id !== "string" || id.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(id) ||
+    ["constructor", "prototype"].includes(id)) {
+    throw new Error("invalid snapshot provider id");
+  }
+  return id;
+}
+
+/** A model id both sides can address — in a catalog or as the default. */
+function modelId(id: unknown): string {
+  if (typeof id !== "string" || !id.trim() || id !== id.trim() || id.length > 100) {
+    throw new Error("model id must be a non-empty trimmed string");
+  }
+  return id;
+}
+
 /** The shape both sides must agree on: a provider id that cannot address
  *  anything but its own record, and a catalog addressable by model id. */
 function portable(id: string, value: unknown, onPrivate: OnPrivate): SyncProvider {
-  if (id.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(id) || ["constructor", "prototype"].includes(id)) {
-    throw new Error("invalid snapshot provider id");
-  }
+  providerId(id);
   const provider = record(project(value, `provider ${id}`, onPrivate), `provider ${id}`);
   const models = provider.models ?? [];
   if (!Array.isArray(models)) throw new Error("models must be an array");
-  const ids = models.map((model) => record(model, "model").id);
-  if (ids.some((modelId) => typeof modelId !== "string" || !modelId.trim() || modelId !== modelId.trim())) {
-    throw new Error("model id must be a non-empty trimmed string");
-  }
+  const ids = models.map((model) => modelId(record(model, "model").id));
   if (new Set(ids).size !== ids.length) throw new Error("duplicate model ids");
   const overrides = provider.modelOverrides ?? {};
   for (const [overrideId, override] of Object.entries(record(overrides, "modelOverrides"))) {
@@ -95,11 +107,20 @@ export function snapshotProviders(providers: Providers = {}): AgentConfigSnapsho
   return shared;
 }
 
+/** A default model names a provider and a model; the provider is not required
+ *  to be in models.json, because Pi's own built-ins never are. */
+function normalizeDefaultModel(raw: unknown): ModelRef | null {
+  if (raw === null) return null;
+  const ref = record(raw, "default model");
+  only(ref, ["provider", "id"], "default model");
+  return { provider: providerId(ref.provider), id: modelId(ref.id) };
+}
+
 /** Strict import boundary: a source that states a private field is refused,
  *  never trusted as a mask over the local one. */
 export function normalizeAgentSnapshot(raw: unknown): AgentConfigSnapshot {
   const snapshot = record(raw, "agent snapshot");
-  only(snapshot, ["files", "providers"], "agent snapshot");
+  only(snapshot, ["files", "providers", "defaultModel"], "agent snapshot");
   const files = record(snapshot.files, "snapshot files");
   only(files, ["SYSTEM.md", "AGENTS.md"], "snapshot files");
   for (const name of ["SYSTEM.md", "AGENTS.md"] as const) {
@@ -114,6 +135,7 @@ export function normalizeAgentSnapshot(raw: unknown): AgentConfigSnapshot {
   return {
     files: { "SYSTEM.md": files["SYSTEM.md"] as string | null, "AGENTS.md": files["AGENTS.md"] as string | null },
     providers,
+    ...(snapshot.defaultModel !== undefined ? { defaultModel: normalizeDefaultModel(snapshot.defaultModel) } : {}),
   };
 }
 

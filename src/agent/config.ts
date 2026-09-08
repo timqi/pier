@@ -15,13 +15,16 @@ import type {
   ConfigResourceKind,
   ConfigScope,
   ConfigStore,
+  ModelRef,
   ProviderApi,
   ProviderSetup,
 } from "../core/types.js";
 
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
-const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json"] as const;
+// settings.json is on the list for one field: the default model. Everything
+// else in it is machine-local and survives an import untouched.
+const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
 const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
 /** Pier owns the Pi runtime dir: config lives in the syncable `~/.pier/pi`
@@ -240,7 +243,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
 
   exportSnapshot(): Promise<AgentConfigSnapshot> {
     return this.#withWrite(async () => {
-      const [system, agents, raw] = await Promise.all(
+      const [system, agents, raw, rawSettings] = await Promise.all(
         SNAPSHOT_FILES.map((name) => readNullable(join(this.agentDir, name))),
       );
       const parsed = raw?.trim() ? parseModels(raw) : {};
@@ -248,6 +251,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       return normalizeAgentSnapshot({
         files: { "SYSTEM.md": system, "AGENTS.md": agents },
         providers: snapshotProviders(parsed.providers),
+        defaultModel: defaultModelRef(rawSettings),
       });
     });
   }
@@ -263,7 +267,13 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       const providers = mergeSnapshotProviders(parsed.providers, incoming.providers);
       const models = JSON.stringify(providers) === JSON.stringify(parsed.providers ?? {})
         ? raw : `${JSON.stringify({ ...parsed, providers }, null, 2)}\n`;
-      const after = [incoming.files["SYSTEM.md"], incoming.files["AGENTS.md"], models];
+      const rawSettings = before[3];
+      // A source that never states a default (an older one) leaves the local
+      // settings.json alone; `null` is a stated "no default" and clears it.
+      const settings = incoming.defaultModel === undefined
+        ? rawSettings
+        : withDefaultModel(rawSettings, incoming.defaultModel);
+      const after = [incoming.files["SYSTEM.md"], incoming.files["AGENTS.md"], models, settings];
       const changes = names.flatMap((name, index) => before[index] === after[index] ? [] : [{
         path: join(this.agentDir, name), before: before[index]!, after: after[index]!,
         temp: join(this.agentDir, `${name}.${process.pid}.${randomUUID()}.tmp`),
@@ -474,19 +484,58 @@ function restoreHeaders(
   }
 }
 
-function parseModels(raw: string): ModelsJson | null {
+/** settings.json is read for one pair and never rewritten wholesale. Malformed
+ *  JSON is refused rather than read as "no default": that would publish, or
+ *  import, a cleared default nobody asked for. */
+function readSettings(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw?.trim()) return {};
+  const parsed = parseObject(raw);
+  if (!parsed) throw new Error("settings.json must be valid JSON before synchronizing configuration");
+  return parsed;
+}
+
+/** Pi writes defaultProvider and defaultModel as a pair; half of one is a hand
+ *  edit that a shared default cannot represent, so it is refused. */
+function defaultModelRef(raw: string | null | undefined): ModelRef | null {
+  const settings = readSettings(raw);
+  const provider = settings.defaultProvider;
+  const id = settings.defaultModel;
+  if (provider === undefined && id === undefined) return null;
+  if (typeof provider !== "string" || typeof id !== "string") {
+    throw new Error("settings.json must name defaultProvider and defaultModel together as strings");
+  }
+  return { provider, id };
+}
+
+/** The incoming default replaces the local pair and nothing else; unchanged
+ *  content returns the original bytes so the import stays a no-op. */
+function withDefaultModel(raw: string | null | undefined, model: ModelRef | null): string | null | undefined {
+  const settings = readSettings(raw);
+  const next = { ...settings };
+  if (model) {
+    next.defaultProvider = model.provider;
+    next.defaultModel = model.id;
+  } else {
+    delete next.defaultProvider;
+    delete next.defaultModel;
+  }
+  return JSON.stringify(next) === JSON.stringify(settings) ? raw : `${JSON.stringify(next, null, 2)}\n`;
+}
+
+const parseObject = (raw: string): Record<string, unknown> | null => {
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-    const providers = (parsed as { providers?: unknown }).providers;
-    if (providers !== undefined) {
-      if (typeof providers !== "object" || providers === null || Array.isArray(providers)) return null;
-      if (Object.values(providers).some((provider) =>
-        typeof provider !== "object" || provider === null || Array.isArray(provider)
-      )) return null;
-    }
-    return parsed as ModelsJson;
+    return asRecord(JSON.parse(raw)) ?? null;
   } catch {
     return null;
   }
+};
+
+function parseModels(raw: string): ModelsJson | null {
+  const parsed = parseObject(raw);
+  if (!parsed) return null;
+  if (parsed.providers !== undefined) {
+    const providers = asRecord(parsed.providers);
+    if (!providers || Object.values(providers).some((provider) => !asRecord(provider))) return null;
+  }
+  return parsed as ModelsJson;
 }
