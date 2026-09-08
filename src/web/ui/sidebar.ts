@@ -318,7 +318,13 @@ function sessionRow(s: SessionInfo): HTMLElement {
     h("div", "ml-auto flex flex-none items-center gap-1", ...channelChip(s), pin, more),
   );
   li.onclick = () => deps.select(s.id);
-  li.title = basename(s.cwd);
+  // The facts the row has no room for, on the native tooltip: where it runs,
+  // when it last moved, and — for an IM session — who it answers.
+  li.title = [
+    s.cwd,
+    `active ${relTime(lastActive(s))} ago · created ${new Date(s.createdAt).toLocaleDateString()}`,
+    ...(s.channel && s.channel !== "web" ? [`answering ${s.channel}`] : []),
+  ].join("\n");
   if (s.pinned) sortable(li, s.id, (id, after) => dropSession(id, s.id, after));
   return li;
 }
