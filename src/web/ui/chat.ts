@@ -213,10 +213,7 @@ export function appendTurn(
   // from the bubble must not detach the files, or drop who was speaking.
   if (files?.paths.length || named) node.dataset.raw = text;
   if (markdown) renderMarkdown(node, text);
-  if (at !== undefined) {
-    row.dataset.at = String(at);
-    row.title = stampTime(at);
-  }
+  if (at !== undefined) setRowTime(row, at);
   if (caption) row.append(speakerLine(caption));
   row.append(node);
   const sessionId = deps.sessionId();
@@ -419,8 +416,8 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
 }
 
 // --- when things happened ---------------------------------------------------------
-// Clocks separate conversations after a gap; precise message times live in
-// hover titles so the reading bubbles carry only their content.
+// Clocks separate conversations after a gap; precise message times live in the
+// row's gutter on hover so the reading bubbles carry only their content.
 
 /** A new day, or this much silence, is what makes the clock worth a line. */
 const STAMP_GAP_MS = 10 * 60_000;
@@ -455,7 +452,16 @@ function stampDue(at: number): boolean {
 }
 
 function setReplyStamp(node: HTMLElement, meta?: TurnMeta): void {
-  if (meta) (node.parentElement ?? node).title = stampTime(meta.completedAt);
+  if (meta) setRowTime(node.parentElement ?? node, meta.completedAt);
+}
+
+/** When this row happened. Drawn beside the bubble on hover (style.css): a
+ *  native `title` floats an opaque box over the message under it, which is the
+ *  one thing a reader hovering a transcript is trying to read. Only the clock
+ *  is shown — the day is on the separator line above it. */
+function setRowTime(row: HTMLElement, at: number): void {
+  row.dataset.at = String(at);
+  row.dataset.time = stampTime(at).slice(11);
 }
 
 /** Wrap each fenced block so a copy button can sit in its corner without

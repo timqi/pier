@@ -386,6 +386,33 @@ html {
 .message-edit:hover { background: var(--color-indigo-100); opacity: 1; }
 @media (hover: none) { .message-edit { opacity: 0.85; } }
 @media (pointer: coarse) { .message-edit { min-width: 44px; min-height: 44px; } }
+/* A row's precise time (chat.ts data-time), in the gutter beside the bubble on
+   hover — a native tooltip covered the message under the one being read. */
+@media (hover: hover) {
+  #turns > [data-time]::after {
+    content: attr(data-time);
+    position: absolute;
+    bottom: 0.5rem;
+    font-size: 10.5px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--color-neutral-400);
+    opacity: 0;
+    transition: opacity 160ms;
+    pointer-events: none;
+  }
+  #turns > [data-kind="user"][data-time]::after { right: calc(100% + 0.5rem); }
+  /* The pencil holds the same gutter on the latest user row. */
+  #turns > [data-kind="user"][data-time]:has(.message-edit)::after { right: calc(100% + 2.5rem); }
+  #turns > [data-kind="assistant"][data-time]::after { left: calc(100% + 0.5rem); }
+  /* Status rows run full width: no gutter, so the time tucks under their edge. */
+  #turns > :is([data-kind="system"], [data-kind="error"])[data-time]::after {
+    right: 0.25rem;
+    bottom: -0.6rem;
+  }
+  #turns > [data-time]:hover::after { opacity: 1; }
+}
 #composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
@@ -466,6 +493,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
   #turns > [data-kind="user"]:has(textarea) { width: 92%; }
+  /* The gutter is the pencil's here; a time in it would scroll the pane sideways. */
+  #turns > [data-time]::after { content: none; }
   #input { font-size: max(16px, 1rem); }
 }
 @keyframes surface-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -528,6 +557,19 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .run-filters > .filter-wide { grid-column: auto; }
 }
 
+/* Zoomed (attachments.ts sets the flag and the pixel size): the stage turns
+   into the scroll box, so panning is the platform's own. Centring has to go
+   with it — a flex item centred in a box it overflows cannot be scrolled back
+   to its left and top edges. Unlayered on purpose: these override the stage's
+   own `overflow-hidden` and the image's `max-h`/`max-w`, and a layered rule
+   loses to a utility however specific it is. */
+#image-stage[data-zoom] {
+  @apply items-start justify-start overflow-auto;
+}
+#image-stage[data-zoom] img {
+  @apply max-h-none max-w-none cursor-zoom-out;
+}
+
 /* The only custom classes — each one a string that repeats verbatim across
    modules; everything else is utilities at the call site. */
 @layer components {
@@ -564,16 +606,6 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
      stay white — which `text-white` no longer means once the palette flips. */
   .lightbox-nav {
     @apply absolute top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white dark:text-neutral-950 hover:bg-black/70;
-  }
-  /* Zoomed (attachments.ts sets the flag and the pixel size): the stage turns
-     into the scroll box, so panning is the platform's own. Centring has to go
-     with it — a flex item centred in a box it overflows cannot be scrolled
-     back to its left and top edges. */
-  #image-stage[data-zoom] {
-    @apply items-start justify-start overflow-auto;
-  }
-  #image-stage[data-zoom] img {
-    @apply max-h-none max-w-none cursor-zoom-out;
   }
   /* Collapsible rows: hide native markers, rotate our chevron on open. */
   summary {
