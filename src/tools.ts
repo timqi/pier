@@ -174,6 +174,17 @@ export function normalizeCustomTools(
   /** Names this instance already answers to that this file cannot see — the
    *  bundled extensions live behind the Pi SDK, so main.ts hands them in. */
   reserved: readonly string[] = [],
+  /**
+   * What a name Pier already manages means. At the route: a refusal, because
+   * the operator is declaring it now and can pick another. Reading a stored
+   * row: `"drop"`, because the catalog grew into that name *after* the row was
+   * written — jq shipped as a bundled tool and turned the operator's own jq
+   * row into a whole setting Pier refused, dropping every *other* tool
+   * declared beside it. The bundled row installs the same binary, so the
+   * entry is redundant rather than wrong. Left in the row on purpose: a Pier
+   * that stops bundling that name finds the declaration still there.
+   */
+  managedName: "reject" | "drop" = "reject",
 ): CustomTool[] | null {
   // Case-insensitively: two names differing only in case are one filename on a
   // case-insensitive filesystem, and one switch whose meaning depends on which
@@ -190,7 +201,10 @@ export function normalizeCustomTools(
     if (typeof name !== "string") return null;
     const cleanName = name.trim();
     if (!TOOL_NAME.test(cleanName)) return null;
-    if (taken.has(cleanName.toLowerCase())) return null;
+    if (taken.has(cleanName.toLowerCase())) {
+      if (managedName === "reject") return null;
+      continue;
+    }
     if (tools.some((tool) => tool.name.toLowerCase() === cleanName.toLowerCase())) return null;
     // The migration: a stored `{name, spec}` is the block it always meant.
     const body = typeof toml === "string"

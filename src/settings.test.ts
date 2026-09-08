@@ -135,6 +135,23 @@ describe("managed tools", () => {
     db.close();
   });
 
+  it("drops a stored tool the catalog has since bundled, and keeps the rest", () => {
+    const db = openDb(":memory:");
+    const store = new SettingsStore(db);
+    // What happened for real: jq was declared by hand, then shipped as a
+    // managed tool. The name collision made get() refuse the whole row, so
+    // eza stopped applying too and nothing but a WARN said why.
+    db.prepare(
+      `INSERT INTO settings (key, value) VALUES ('customTools',
+        '[{"name":"jq","spec":"github:jqlang/jq"},{"name":"eza","toml":"spec = \\"github:eza-community/eza\\""}]')`,
+    ).run();
+    expect(store.get().customTools).toEqual([{ name: "eza", toml: `spec = "github:eza-community/eza"` }]);
+    // Not rewritten: a Pier that stops bundling jq finds the declaration back.
+    expect(String(db.prepare("SELECT value FROM settings WHERE key = 'customTools'").get()?.value))
+      .toContain("jq");
+    db.close();
+  });
+
   it("takes a name it does not know, and refuses anything that is not one", () => {
     expect(normalizeTools([" rtk ", "rtk", "future-tool"])).toEqual(["rtk", "future-tool"]);
     for (const bad of ["rtk", [42], [""], ["x".repeat(65)], Array(33).fill("a")]) {

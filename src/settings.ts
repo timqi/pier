@@ -145,7 +145,14 @@ export class SettingsStore {
       autoUpdate: this.#value("autoUpdate") === "1",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
-      customTools: this.#json("customTools", normalizeCustomTools, "a list of {name, spec}") ?? [],
+      // `"drop"`: a stored row whose name the bundled catalog has since taken
+      // is redundant, not malformed — rejecting the setting over it would take
+      // every other tool declared beside it (see normalizeCustomTools).
+      customTools: this.#json(
+        "customTools",
+        (raw) => normalizeCustomTools(raw, [], "drop"),
+        "a list of {name, spec}",
+      ) ?? [],
     };
   }
 
