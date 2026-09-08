@@ -219,7 +219,17 @@ export interface CallbackFields {
   callbackAttempts: number;
   callbackError: string | null;
   callbackNextAttemptAt: number | null;
+  /** Absent means `followUp`, which is also what every run stored before this
+   *  field existed means — so no migration. */
+  callbackMode?: CallbackMode;
 }
+
+/** How a finished result joins a recipient that is mid-turn. `followUp` waits
+ *  for the turn to end, so a session working for twenty minutes reads its
+ *  results twenty minutes late — batched, undisturbed. `steer` is that trade
+ *  taken the other way, and only the delegating agent knows which it wants,
+ *  so it is chosen per delegation rather than as a policy. */
+export type CallbackMode = "followUp" | "steer";
 
 export const retryDelay = (attempts: number): number =>
   Math.min(60_000, 1000 * 2 ** Math.min(attempts, 6));

@@ -8,7 +8,7 @@ import { logger } from "../log.js";
 import { TaskCallbacks } from "./callbacks.js";
 import { newId } from "./definitions.js";
 import { TaskStore } from "./store.js";
-import type { TaskDefinition, TaskRun } from "./types.js";
+import type { CallbackMode, TaskDefinition, TaskRun } from "./types.js";
 
 const log = logger("tasks");
 
@@ -20,6 +20,7 @@ export interface RunProvenance {
   sourceSessionId?: string | null;
   targetSessionId?: string | null;
   callbackSessionId?: string | null;
+  callbackMode?: CallbackMode;
   background?: boolean;
   sessionMode?: "reuse" | "fresh";
   groupId?: string | null;
@@ -85,6 +86,7 @@ export class TaskRunQueue {
       targetSessionId,
       sessionMode,
       callbackSessionId,
+      ...(provenance.callbackMode === "steer" ? { callbackMode: "steer" as const } : {}),
       background: provenance.background ?? false,
       callbackState: overlapped && callbackSessionId ? "pending" : null,
       callbackAttempts: 0,

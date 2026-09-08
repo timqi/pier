@@ -5,7 +5,7 @@ import { TaskDefinitions, record, requiredString } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import type { TaskDefinition, TaskGroup, TaskResult, TaskRun } from "./types.js";
+import type { CallbackMode, TaskDefinition, TaskGroup, TaskResult, TaskRun } from "./types.js";
 
 // JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
 const strEnum = <const T extends readonly string[]>(...values: T) =>
@@ -25,6 +25,9 @@ export interface RunSummary {
   targetSessionId?: string;
   callbackSessionId?: string;
   callbackState: TaskRun["callbackState"];
+  /** Echoed only when it is not the default: the one confirmation the caller
+   *  gets that its result will interrupt rather than wait. */
+  callbackMode?: TaskRun["callbackMode"];
   pendingDecisionId?: string;
   depth: number;
   queuedAt: number;
@@ -40,6 +43,7 @@ export interface GroupSummary {
   join: TaskGroup["join"];
   state: "running" | "finished";
   callbackState: TaskGroup["callbackState"];
+  callbackMode?: TaskGroup["callbackMode"];
   winnerRunId?: string;
   members: RunSummary[];
 }
@@ -71,6 +75,7 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   targetSessionId: run.targetSessionId,
   callbackSessionId: run.callbackSessionId,
   callbackState: run.callbackState,
+  callbackMode: run.callbackMode ?? null,
   pendingDecisionId,
   depth: run.depth,
   queuedAt: run.queuedAt,
@@ -99,6 +104,7 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMess
   join: group.join,
   state: group.finishedAt ? "finished" : "running",
   callbackState: group.callbackState,
+  callbackMode: group.callbackMode ?? null,
   winnerRunId: group.winnerRunId,
   members: members.map((run) => trimResult(summarize(run, messages.openDecisionId(run.id)))),
 });
@@ -151,7 +157,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
+      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages once your turn ends — don't poll get for them; pass callback 'steer' to have a result interrupt your running turn instead, or 'none' for no callback at all. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
     parameters: Type.Object({
       operation: strEnum(
         "list", "create", "update", "run", "get", "cancel",
@@ -181,7 +187,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       })),
       join: Type.Optional(strEnum("all", "first")),
       input: Type.Optional(Type.Unknown()),
-      callback: Type.Optional(strEnum("origin", "none")),
+      callback: Type.Optional(strEnum("origin", "none", "steer")),
       callback_session_id: Type.Optional(Type.String()),
     }),
     execute,
@@ -210,6 +216,9 @@ export async function handleTaskTool(
     return definitions.update(requiredString(input.task_id, "task_id"), await expandDraft(definitions, input.task, callerSessionId));
   }
   if (input.operation === "run") {
+    // One reading of `callback` for both shapes below: a run and a fan-out
+    // choose the same way, and two readings are two things to keep in step.
+    const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
@@ -229,6 +238,7 @@ export async function handleTaskTool(
         callerSessionId,
         active?.id ?? null,
         input.callback === "none" ? null : callerSessionId,
+        callbackMode,
       );
       return summarizeGroup(group, runs, messages);
     }
@@ -251,6 +261,7 @@ export async function handleTaskTool(
       invokedBySessionId: callerSessionId,
       sourceSessionId: callerSessionId,
       callbackSessionId,
+      callbackMode,
       background: true,
       sessionMode,
     });

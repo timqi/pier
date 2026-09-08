@@ -18,7 +18,7 @@ import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import { TaskStore } from "./store.js";
 import { handleTaskTool } from "./tool.js";
-import type { GroupJoinMode, RunPage, RunQuery, RunView, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { CallbackMode, GroupJoinMode, RunPage, RunQuery, RunView, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -308,9 +308,10 @@ export class TaskService {
     callerSessionId: string,
     parentRunId: string | null,
     callbackSessionId: string | null,
+    callbackMode: CallbackMode,
   ): { group: TaskGroup; runs: TaskRun[] } {
     this.refusePaused(parentRunId);
-    return this.groups.runAll(definitions, join, callerSessionId, parentRunId, callbackSessionId);
+    return this.groups.runAll(definitions, join, callerSessionId, parentRunId, callbackSessionId, callbackMode);
   }
 
   private descendants(run: TaskRun): TaskRun[] {

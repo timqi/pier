@@ -13,7 +13,11 @@ description: Delegate work to Pier subagents with the task tool — one-shot, pa
   prompt's first line. You never file it.
 - **Nothing blocks.** Every operation returns immediately; results, group
   joins and decision replies arrive as system follow-up messages once your
-  turn ends (batched when several are due). Ending your turn is the only wait.
+  turn ends (batched when several are due). Ending your turn is the only wait
+  — never poll `get` in a loop to find out whether a run finished: a long turn
+  of yours delays the callback by exactly its own length, and polling burns a
+  round trip per guess and reads the result twice. If it must reach you
+  mid-turn, delegate it with `callback:"steer"`.
 - The child session survives the run — `resume` continues it with context
   intact. `get` polls: `run_id` (full result), `group_id`, or `task_id` (10
   most recent runs). Lists truncate results at 2000 chars, callbacks at 8000,
@@ -50,7 +54,11 @@ Omit `trigger` in a draft (anything but `manual` errors); a draft's `callback`
 is ignored on runs you fire — the result comes to you — and matters only for
 `create`d schedules. Returns a run summary (`runId`, `taskId`,
 `state:"queued"`, …); `callback:"none"` silences the result,
-`callback_session_id` routes it to another existing session. A summary's
+`callback:"steer"` makes it interrupt your running turn at the next step
+boundary instead of waiting for the turn to end (echoed back as
+`callbackMode`; use it for a result you would otherwise sit and wait for, not
+for work you launch and forget), `callback_session_id` routes it to another
+existing session. A summary's
 `triggerSource` is who fired the run (`agent` / `manual` / `cron` / `watch` /
 `task`); a definition's `trigger` is only its schedule, `manual` meaning
 on-demand — by a human or by you.
@@ -91,7 +99,7 @@ or `session_mode` — and Pier joins the group in core; you never track run ids:
   failure included; the rest are cancelled, their sessions resumable (run ids
   in the callback).
 - Members send no individual callbacks; `callback:"none"` silences the
-  group's. `get`/`cancel` take `group_id` for the whole group. A member that
+  group's and `callback:"steer"` interrupts your turn with it. `get`/`cancel` take `group_id` for the whole group. A member that
   cannot enqueue (limit, missing `cwd`) rolls the group back — nothing runs.
 
 ## Chains

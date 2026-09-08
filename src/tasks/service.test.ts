@@ -495,7 +495,7 @@ describe("callback recovery across database connections", () => {
     });
     const id = kind === "run"
       ? first.service.run(task.id, null, "agent", null, { callbackSessionId: "parent" }).id
-      : first.service.runGroup([task, task], "all", "parent", null, "parent").group.id;
+      : first.service.runGroup([task, task], "all", "parent", null, "parent", "followUp").group.id;
     const record = () => kind === "run" ? first.store.getRun(id)! : first.store.getGroup(id)!;
     await vi.waitFor(() => expect(record().callbackState).toBe("delivered"));
     expect(disk.history()).toHaveLength(1);
@@ -1048,6 +1048,62 @@ describe("task service", () => {
     session.setState("idle");
     await vi.waitFor(() => expect(service.getRun(done.id).callbackState).toBe("delivered"));
     expect(service.getRun(done.id).callbackAttempts).toBe(1);
+    service.stop();
+  });
+
+  it("steers a callback into the running turn only when the delegation asked for it", async () => {
+    // A busy recipient that records what it is handed without ending its turn:
+    // the steer has to land mid-stream, and the follow-up beside it must not.
+    const session = fakeSession();
+    session.systemInput = async (text, origin, mode) => { session.systemInputs.push({ text, origin, mode }); };
+    const { cwd, service } = setup(session);
+    service.start(20);
+    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
+    session.setState("streaming");
+    const waiting = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
+    const urgent = await service.tool({ operation: "run", task_id: task.id, callback: "steer" }, "s1") as RunSummary;
+    expect(urgent.callbackMode).toBe("steer");
+    expect(waiting.callbackMode).toBeUndefined();
+    await service.waitForRun(waiting.runId);
+    await service.waitForRun(urgent.runId);
+
+    // The steer rides the running turn; the default callback keeps waiting for
+    // it to end, and is not batched into the delivery that overtook it.
+    await vi.waitFor(() => expect(service.getRun(urgent.runId).callbackState).toBe("delivered"));
+    expect(session.systemInputs).toHaveLength(1);
+    expect(session.systemInputs[0]).toMatchObject({ mode: "steer" });
+    expect(session.systemInputs[0]!.text).toContain(urgent.runId);
+    expect(session.systemInputs[0]!.text).not.toContain(waiting.runId);
+    expect(service.getRun(waiting.runId)).toMatchObject({ callbackState: "pending", callbackAttempts: 0 });
+
+    session.setState("idle");
+    // The deferred sweep is a second away, not a tick away.
+    await vi.waitFor(() => expect(service.getRun(waiting.runId).callbackState).toBe("delivered"), { timeout: 3000 });
+    expect(session.systemInputs.at(-1)).toMatchObject({ mode: "followUp" });
+    service.stop();
+  });
+
+  it("does not send a steered callback twice while the first one waits in Pi's queue", async () => {
+    // A steer is handed to a running turn, so until that turn drains it the
+    // result is in Pi's memory queue and nowhere in the transcript. Proof by
+    // transcript alone would read that as "never arrived" and send it again.
+    const busy = streamingRecipient("s1");
+    const { cwd, service, store } = setup(busy.session);
+    service.start(20);
+    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
+    const urgent = await service.tool({ operation: "run", task_id: task.id, callback: "steer" }, "s1") as RunSummary;
+    await service.waitForRun(urgent.runId);
+
+    await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
+    // Past the first retry's backoff, which is when the re-send would happen.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(busy.queued).toHaveLength(1);
+    // Waiting on the queue is not an attempt either: one send, one count.
+    expect(store.getRun(urgent.runId)).toMatchObject({ callbackState: "pending", callbackAttempts: 1 });
+
+    busy.drain();
+    await vi.waitFor(() => expect(store.getRun(urgent.runId)?.callbackState).toBe("delivered"), { timeout: 3000 });
+    expect(busy.queued).toHaveLength(0);
     service.stop();
   });
 

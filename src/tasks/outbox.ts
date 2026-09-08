@@ -11,6 +11,11 @@ import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields }
 
 const log = logger("tasks");
 
+/** The records a delivery names, from either side of the seam: a batch names
+ *  every one of them, a group names itself. */
+const callbackIds = (origin: SystemInputOrigin | undefined): string[] =>
+  origin?.kind === "task-callback" ? origin.runIds ?? [origin.runId] : [];
+
 /** What a kind of delivery has to say about itself; the engine owns the rest. */
 export interface Deliverable<T extends CallbackFields> {
   /** Its id, which is also how the recipient's transcript names it. */
@@ -58,22 +63,33 @@ export class Outbox<T extends CallbackFields> {
       if (live.length === 0) return;
       // Waiting for a busy target is not a delivery attempt: counting it would
       // inflate the attempts once per second and skip the failure backoff
-      // straight to its ceiling.
-      if (session.state === "streaming") {
-        for (const record of live) this.defer(record);
-        return;
+      // straight to its ceiling. A record delegated with `steer` is the
+      // exception it asked for — it joins the running turn instead, and the
+      // rest of the batch keeps waiting for the turn to end. But only once:
+      // handed over, a steer sits in Pi's in-memory queue, invisible in the
+      // transcript until the turn drains it, so the queue is the second place
+      // this has to look before deciding nothing arrived (messages.ts:340).
+      const streaming = session.state === "streaming";
+      let sending = live;
+      if (streaming) {
+        const handedOver = await this.queued(session);
+        const steerNow = (record: T): boolean =>
+          record.callbackMode === "steer" && !handedOver.has(this.kind.id(record));
+        sending = live.filter(steerNow);
+        for (const record of live) if (!steerNow(record)) this.defer(record);
+        if (sending.length === 0) return;
       }
-      for (const record of live) this.sent(record);
-      const { text, origin } = this.kind.input(live);
-      log.debug(`callback for ${live.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
+      for (const record of sending) this.sent(record);
+      const { text, origin } = this.kind.input(sending);
+      log.debug(`callback for ${sending.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
       // Not awaited: `systemInput` settles with the recipient's whole turn, and
       // holding the delivery lock that long would keep the proof from ever
       // being read — which is the only thing that marks this delivered.
-      session.systemInput(text, origin, "followUp")
-        .catch((error: unknown) => this.retry(sessionId, live, error));
+      session.systemInput(text, origin, streaming ? "steer" : "followUp")
+        .catch((error: unknown) => this.retry(sessionId, sending, error));
       // Pi records the input as it starts the turn, so the proof is usually
       // here already; the tick sweep is the backstop when it is not.
-      await this.settle(live, session);
+      await this.settle(sending, session);
     } catch (error) {
       this.retry(sessionId, mine, error);
     } finally {
@@ -81,12 +97,21 @@ export class Outbox<T extends CallbackFields> {
     }
   }
 
+  /** Handed over and waiting in the recipient's queue for the running turn to
+   *  drain it — what the transcript cannot answer yet. Empty unless the
+   *  session is streaming: Pi drops the list when the turn ends. */
+  private async queued(session: AgentSession): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (const origin of await session.pendingSystemInputs()) for (const id of callbackIds(origin)) ids.add(id);
+    return ids;
+  }
+
   /** Marks every record the transcript proves; returns the ones it does not. */
   private async settle(records: T[], session: AgentSession): Promise<T[]> {
     const seen = new Set<string>();
     for (const turn of await session.history()) {
-      if (turn.role !== "system" || turn.origin?.kind !== "task-callback") continue;
-      for (const id of turn.origin.runIds ?? [turn.origin.runId]) seen.add(id);
+      if (turn.role !== "system") continue;
+      for (const id of callbackIds(turn.origin)) seen.add(id);
     }
     const unproven: T[] = [];
     for (const stale of records) {

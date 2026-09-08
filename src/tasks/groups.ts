@@ -9,7 +9,7 @@ import { runRef, runResultText } from "./callbacks.js";
 import { newId } from "./definitions.js";
 import { Outbox } from "./outbox.js";
 import { TaskStore } from "./store.js";
-import type { GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
+import type { CallbackMode, GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -57,8 +57,9 @@ export class TaskGroups {
     callerSessionId: string,
     parentRunId: string | null,
     callbackSessionId: string | null,
+    callbackMode: CallbackMode,
   ): { group: TaskGroup; runs: TaskRun[] } {
-    const group = this.create(join, callerSessionId, callbackSessionId);
+    const group = this.create(join, callerSessionId, callbackSessionId, callbackMode);
     const runs: TaskRun[] = [];
     try {
       for (const definition of definitions) {
@@ -83,12 +84,18 @@ export class TaskGroups {
     return this.get(id);
   }
 
-  private create(join: GroupJoinMode, invokedBySessionId: string, callbackSessionId: string | null): TaskGroup {
+  private create(
+    join: GroupJoinMode,
+    invokedBySessionId: string,
+    callbackSessionId: string | null,
+    callbackMode: CallbackMode,
+  ): TaskGroup {
     const group: TaskGroup = {
       id: newId(),
       join,
       invokedBySessionId,
       callbackSessionId,
+      ...(callbackMode === "steer" ? { callbackMode } : {}),
       memberRunIds: [],
       winnerRunId: null,
       callbackState: null,
