@@ -211,17 +211,16 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
 
 /** One pushpin for every surface that pins — Lucide's `pin` (ISC), inlined
  *  like the other icons (index.html); `h` makes HTML elements and an SVG is
- *  not one. State is not a second glyph: a pinned row's pin is resident, an
- *  unpinned row's appears on hover. */
-const PIN_ICON =
-  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>';
+ *  not one. State is the fill: solid when pinned, outline when not. */
+const pinIcon = (pinned: boolean): string =>
+  `<svg viewBox="0 0 24 24" fill="${pinned ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>`;
 
-/** A pinned row's pin is always there — that is how the top of the list says
- *  which rows are pinned, no divider needed; the rail hides the others until
- *  hover, the palette shows them all. */
+/** Hover-only in the rail, like the ⫶ beside it — a resident pin on every
+ *  pinned row was clutter, and the top of the list already says which rows
+ *  are pinned. The palette shows the pin on every row. */
 function pinButton(s: SessionInfo, hover: boolean): HTMLElement {
-  const pin = h("button", hover && !s.pinned ? HOVER_BTN : `flex ${ROW_BTN}`);
-  pin.innerHTML = PIN_ICON;
+  const pin = h("button", hover ? HOVER_BTN : `flex ${ROW_BTN}`);
+  pin.innerHTML = pinIcon(s.pinned);
   pin.title = s.pinned ? "Unpin" : "Pin to top";
   pin.onclick = (ev) => {
     ev.stopPropagation();
