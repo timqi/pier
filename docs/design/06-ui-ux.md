@@ -43,15 +43,17 @@ Menus and popovers take that token set on a solid surface rather than a
 translucent one: chrome is glanced at, but a menu is read — model ids, paths
 and session actions are scanned over whatever scrolls behind them, and the
 transcript coming through them is noise where there should be none.
-On desktop the transcript runs the full pane and the heading and composer dock
-float over it, so rows scroll under the glass and dissolve at the pane's edges
-rather than being cut at a chrome boundary; the pane pads its ends by what
-covers them. Phones keep the heading and composer in flow.
+The transcript runs the full pane and the heading and composer dock float over
+it at every width, so rows scroll under the glass and dissolve at the pane's
+edges rather than being cut at a chrome boundary; the pane pads its ends by what
+covers them. Only which heading floats changes: the mobile top bar below md, the
+chat heading above it, in the same slim inset rounded strip and the same glass —
+and a phone's Console view, which brings its own title strip and scrollers,
+starts below the bar instead of under it.
 The mobile drawer keeps its available width and uses rounded outer corners
-without desktop panel margins. The desktop chat heading uses the same glass
-material in a slim inset rounded strip. Keep the outer page edge neutral and
+without desktop panel margins. Keep the outer page edge neutral and
 match installed-window theme metadata to that canvas in both themes, including
-startup; the mobile heading stays on the solid canvas. Reserve the very pale
+startup. Reserve the very pale
 mist-blue and mint background accents for the lower conversation area so color
 supports reading without tinting the entire workspace.
 Action menus align labels without a reserved selection column; only selectable

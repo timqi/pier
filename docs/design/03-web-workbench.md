@@ -180,9 +180,10 @@ per-turn Activity groups):
   session's state is defaulted client-side; a reload shows real step counts and
   the correct composer buttons.
 - **Chat header**: title, compact model/reasoning/context metadata and the `⋯`
-  session menu. On desktop it uses an 8px inset, rounded glass strip matching the
-  sidebar material, with the collapsed rail handle aligned inside it. The mobile
-  top bar retains the title and session actions on the page's solid canvas color.
+  session menu. It uses an 8px inset, rounded glass strip matching the
+  sidebar material, with the collapsed rail handle aligned inside it on desktop.
+  The mobile top bar takes the same strip — drawer button, title and the same
+  round `⋯` icon button, floating over the transcript that scrolls under it.
 - **Workbench color and installed chrome**: a pale neutral canvas with subtle
   mist-blue and mint gradients confined to the lower conversation area; message
   surfaces remain solid. CSS `--workbench-canvas` is the runtime source for the

@@ -193,6 +193,48 @@ html {
   margin: 0;
 }
 
+/* The transcript runs the full pane and the glass chrome floats over it, so a
+   message slides under the heading and the dock instead of being cut off at
+   their edges — the same on a phone as on a desktop, where only *which*
+   heading floats differs (#mobile-bar below md, #chat-header above it). One
+   column, four rows: the heading pins to the top of row 1, the dock (queue,
+   recovery, composer) owns rows 2–4 by height, and the transcript spans all
+   four, padding its ends by what covers them — the heading's fixed height,
+   and the dock's live one (composer.ts). */
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  /* What the floating heading covers: its 8px top inset plus the 3rem height
+     both of them are (`h-12` on the bar, the height rule below on the rest).
+     Everything that pads by the heading reads it from here — the dock's own
+     footprint is the same idea, measured live into --dock-h by composer.ts. */
+  --head-h: calc(3rem + 8px);
+}
+/* Explicit column on everything: auto-placement would push an overlapping
+   item into an implicit second column rather than stack it. */
+main > * { grid-column: 1; }
+main > section, #turns { grid-row: 1 / -1; }
+:is(#mobile-bar, #chat-header) { grid-row: 1; align-self: start; }
+#queue-panel { grid-row: 2; }
+#recovery-panel { grid-row: 3; }
+#composer { grid-row: 4; }
+:is(#mobile-bar, #chat-header, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
+/* The two panels are cards on the dock, not bars over the transcript: the
+   composer's own width and inset, an edge all round, and the 0.5rem the
+   composer's top padding already leaves between the stack and the input.
+   Attaching them to the pill instead would have to unround its top corners
+   and hide its top border in two more states, for a seam either way. */
+#queue-panel, #recovery-panel {
+  width: calc(100% - 2rem);
+  max-width: 58rem;
+  margin-inline: auto;
+  border: 1px solid var(--glass-edge);
+  border-radius: 1.25rem;
+  box-shadow: var(--glass-shadow);
+}
+#queue-panel:not(.hidden) + #recovery-panel { margin-top: 0.5rem; }
+
 /* Desktop: the rail collapses away and its re-open handle floats in the title
    band, which every view starts with — an h-10 header first in its pane (the
    chat's has an id; Boards' sits inside its scroll wrapper). The padding is
@@ -205,40 +247,6 @@ html {
   body[data-rail="closed"] #sidebar {
     display: none;
   }
-  /* The transcript runs the full pane and the glass chrome floats over it, so
-     a message slides under the heading and the dock instead of being cut off
-     at their edges. One column, three rows: the heading pins to the top of
-     row 1, the dock (queue, recovery, composer) owns rows 2–3 by height, and
-     the transcript spans all three, padding its ends by what covers them —
-     the heading's fixed height, and the dock's live one (composer.ts). */
-  main {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto auto auto;
-  }
-  /* Explicit column on everything: auto-placement would push an overlapping
-     item into an implicit second column rather than stack it. */
-  main > * { grid-column: 1; }
-  main > section, #turns { grid-row: 1 / -1; }
-  #chat-header { grid-row: 1; align-self: start; }
-  #queue-panel { grid-row: 2; }
-  #recovery-panel { grid-row: 3; }
-  #composer { grid-row: 4; }
-  :is(#chat-header, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
-  /* The two panels are cards on the dock, not bars over the transcript: the
-     composer's own width and inset, an edge all round, and the 0.5rem the
-     composer's top padding already leaves between the stack and the input.
-     Attaching them to the pill instead would have to unround its top corners
-     and hide its top border in two more states, for a seam either way. */
-  #queue-panel, #recovery-panel {
-    width: calc(100% - 2rem);
-    max-width: 58rem;
-    margin-inline: auto;
-    border: 1px solid var(--glass-edge);
-    border-radius: 1.25rem;
-    box-shadow: var(--glass-shadow);
-  }
-  #queue-panel:not(.hidden) + #recovery-panel { margin-top: 0.5rem; }
   /* The rail floats above the canvas; the conversation keeps its full pane. */
   #sidebar {
     min-height: 0;
@@ -328,6 +336,12 @@ html {
   main,
   #sidebar {
     padding-top: env(safe-area-inset-top);
+  }
+  /* Only the transcript scrolls under the floating bar. A Console view brings
+     its own title strip and its own scrollers, so it starts below the bar
+     instead — by the bar's footprint, without each view knowing about it. */
+  main > section {
+    padding-top: calc(var(--head-h) + 8px);
   }
 }
 
@@ -419,37 +433,30 @@ main {
   box-shadow: var(--glass-shadow);
 }
 #rail-toggle { top: 0.625rem; border-radius: 50%; }
-#chat-header {
+/* One heading material at both breakpoints: the same slim inset strip in the
+   same glass, whichever of the two the width is showing. */
+#mobile-bar, #chat-header {
   margin: 8px 8px 0;
   border: 1px solid var(--glass-edge);
   border-radius: 18px;
   box-shadow: var(--glass-shadow);
   font-size: 0.9375rem;
 }
-#mobile-bar {
-  background: var(--workbench-canvas);
-  border-color: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
 :is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
   height: 3rem;
 }
+/* The ends are under the floating chrome (grid above), so they pad by what
+   covers them, and rows dissolve into the pane's edges instead of being cut
+   at a chrome boundary. */
 #turns {
-  padding: 1rem max(1rem, calc((100% - 58rem) / 2)) 1.5rem;
-}
-/* Desktop: the ends are under the floating chrome (grid above), so they pad
-   by what covers them, and rows dissolve into the pane's edges instead of
-   showing raw in the margins around it. */
-@media (width >= 48rem) {
-  #turns {
-    padding-top: calc(3rem + 8px + 0.75rem);
-    padding-bottom: calc(var(--dock-h, 4rem) + 0.5rem);
-    /* scrollIntoView aims at the same edge, so a revealed row's top clears
-       the heading instead of landing behind it (chat.ts revealTurn). */
-    scroll-padding-block: calc(3rem + 8px + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
-    mask-image: linear-gradient(to bottom, transparent, black 2.5rem, black calc(100% - 2rem), transparent);
-  }
+  padding:
+    calc(var(--head-h) + 0.75rem)
+    max(1rem, calc((100% - 58rem) / 2))
+    calc(var(--dock-h, 4rem) + 0.5rem);
+  /* scrollIntoView aims at the same edge, so a revealed row's top clears the
+     heading instead of landing behind it (chat.ts revealTurn). */
+  scroll-padding-block: calc(var(--head-h) + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
+  mask-image: linear-gradient(to bottom, transparent, black 2.5rem, black calc(100% - 2rem), transparent);
 }
 #turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
