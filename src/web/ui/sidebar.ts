@@ -133,6 +133,10 @@ const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-ce
  */
 const waitingForYou = (s: SessionInfo): boolean => s.unread;
 
+/** How every surface counting a session's background runs says it: this dot's
+ *  title and the chat header's running chip (session-header.ts). */
+export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
+
 /** Attention dot: green = running, amber = finished and waiting for a look,
  *  sky = idle itself but subagents still in flight. Idle has no mark or slot;
  *  the rail puts marks after the title so its left edge stays aligned. */
@@ -143,7 +147,7 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
       : waitingForYou(s)
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
-          ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
+          ? ["bg-sky-500", runsLabel(s.activeRuns)]
           : null;
   if (!mark) return [];
   const dot = h("span", `h-2 w-2 flex-none rounded-full ${mark[0]}`);

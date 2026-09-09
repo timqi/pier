@@ -8,12 +8,12 @@ import { ArrowLeft, LoaderCircle, X } from "lucide";
 import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
-import { appendTurn } from "./chat.js";
+import { appendTurn, revealActiveRun } from "./chat.js";
 import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel, modalOpen } from "./shortcut.js";
-import { renameSession, type SessionInfo } from "./sidebar.js";
+import { renameSession, runsLabel, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel, TurnMeta } from "../../core/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
@@ -146,12 +146,31 @@ const contextLabel = (u: ContextUsage): string =>
     ? `?/${compact(u.contextWindow)}`
     : `${compact(u.tokens)}/${compact(u.contextWindow)} · ${100 - contextUsed(u.tokens, u)}% left`;
 
-/** Title-row meta: model · reasoning · current context size. */
+/** Title-row meta: background runs · model · reasoning · current context size. */
 function renderSessionMeta(): void {
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
+  // The rail's dot counts the same runs for every session (sidebar.ts); this is
+  // that count for the one on screen, and the way to the card — which sits
+  // where the run was launched and scrolls off as the conversation goes on.
+  const runs = deps.currentSession()?.activeRuns ?? 0;
   const items: HTMLElement[] = [];
+  if (runs > 0) {
+    const chip = h(
+      "button",
+      "flex flex-none cursor-pointer items-center gap-1 rounded bg-sky-50 px-1.5 py-px font-medium text-sky-700 hover:bg-sky-100",
+      icon(LoaderCircle, "spinner h-3 w-3"),
+      `${runs} running`,
+    );
+    chip.title = `${runsLabel(runs)} · show the newest`;
+    chip.onclick = () => {
+      // The count is the server's, the card is this pane's: if the transcript
+      // no longer holds one, say so rather than swallow the click.
+      if (!revealActiveRun()) appendTurn("error", "no run card left in this transcript — reload the session to see it");
+    };
+    items.push(chip);
+  }
   // Opening a session in Pi is a round trip, and during it the meta row has no
   // id and no chips to draw — which reads exactly like a session sitting idle.
   // It says which one it is instead, and the chips replace it on arrival.
@@ -196,12 +215,13 @@ function renderSessionMeta(): void {
   sessionMeta.classList.toggle("flex", items.length > 0);
   // On a phone these chips cost the bar a second line, and model · reasoning ·
   // size is a reading, not something to answer — the bar title opens the info
-  // panel, which carries all three in full. Two of them are worth the line even
-  // there: a session still opening (§5b — the wait would otherwise look like
-  // nothing happening) and a context near full, which is acted on by starting a
-  // new session. The row says which it is holding; style.css shows only this
-  // one below md.
-  sessionMeta.toggleAttribute("data-urgent", (!id && !!pending) || pressure >= CONTEXT_WARN);
+  // panel, which carries all three in full. Three readings are worth the line
+  // even there: a session still opening (§5b — the wait would otherwise look
+  // like nothing happening), a subagent still running, which is the same kind of
+  // nothing, and a context near full, which is acted on by starting a new
+  // session. The row says which it is holding; style.css shows only this one
+  // below md.
+  sessionMeta.toggleAttribute("data-urgent", (!id && !!pending) || runs > 0 || pressure >= CONTEXT_WARN);
 }
 
 /** Read-only details panel: what this session is and how full its context is.

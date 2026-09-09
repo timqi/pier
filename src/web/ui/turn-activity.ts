@@ -189,6 +189,8 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   }
   row.className = cardClass(STATE_STYLE[run.state].edge);
   const active = run.state === "queued" || run.state === "running";
+  // The header's running chip finds its card by this mark (chat.ts).
+  row.toggleAttribute("data-active", active);
   const runUrl = `/api/task-runs/${run.runId}`;
   const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
   const head = runHead({

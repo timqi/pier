@@ -173,8 +173,10 @@ browser keeps no second session order.
   interrupted work stays visible. System input cards: four-line preview,
   type/status chips, expandable.
 - **Task communication**: detached task calls create Background Run rows,
-  updated from `task-status` events. Delegation and callback inputs render as
-  System input rows with Session and Run links, never as user messages.
+  updated from `task-status` events; the header's running chip (`activeRuns`
+  from the session list) reveals the newest one still in flight. Delegation and
+  callback inputs render as System input rows with Session and Run links, never
+  as user messages.
 - **Edit**: latest user message only; Esc cancels, Enter submits, Shift+Enter
   newline; new input cancels a stale editor; the API rejects older or busy
   edits.

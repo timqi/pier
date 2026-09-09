@@ -45,11 +45,13 @@ updates this document.
   full pane and pads its ends by what covers them. A phone's Console view
   starts below the bar. A Console page's head (title, tabs, primary action) is
   that same strip at both widths; on a phone it hides the title and wraps.
-- **Meta chips** (model, reasoning, context, "starting…"): one element hosted
-  by whichever heading is on screen; gone when a Console view takes over.
-  Below md shown only for a session still opening or context ≥ 70%; otherwise
-  the title alone, which opens the info panel. The transcript pads by the row
-  when present. Desktop chips open the model picker; ⋯ reaches the same.
+- **Meta chips** (running runs, model, reasoning, context, "starting…"): one
+  element hosted by whichever heading is on screen; gone when a Console view
+  takes over. Below md shown only for a session still opening, a subagent still
+  running or context ≥ 70%; otherwise the title alone, which opens the info
+  panel. The transcript pads by the row when present. Desktop chips open the
+  model picker; ⋯ reaches the same. The running chip is the rail dot's count for
+  the session on screen and scrolls its newest Background Run card into view.
 - **Dock cards** (queue, recovery): the composer's inset at both widths; on a
   coarse pointer 44px controls grow the header row rather than clipping it.
 - **Rail rows**: title left edges aligned; trailing status marks take space

@@ -153,13 +153,29 @@ const REVEAL_MS = 1200;
 export function revealTurn(role: "user" | "assistant", at: number): boolean {
   const row = turnsPane.querySelector<HTMLElement>(`[data-kind="${role}"][data-at="${at}"]`);
   if (!row) return false;
+  reveal(row);
+  return true;
+}
+
+/** Bring the newest still-running background run into view: what the header's
+ *  running chip points at (session-header.ts), because a card sits where the
+ *  run was launched and scrolls away as the conversation goes on. `false` when
+ *  no card is in the pane — the trim dropped it off the top. */
+export function revealActiveRun(): boolean {
+  const cards = turnsPane.querySelectorAll<HTMLElement>('[data-kind="background-run"][data-active]');
+  const card = cards[cards.length - 1];
+  if (!card) return false;
+  reveal(card);
+  return true;
+}
+
+function reveal(row: HTMLElement): void {
   follow = false; // walking back into history is leaving the tail
   // Centred, unless the row is taller than the pane: a long reply centred
   // opens on its middle, and reading starts at the top.
   row.scrollIntoView({ block: row.offsetHeight > turnsPane.clientHeight ? "start" : "center" });
   row.dataset.reveal = "";
   setTimeout(() => delete row.dataset.reveal, REVEAL_MS);
-  return true;
 }
 
 // --- chat bubbles ------------------------------------------------------------------

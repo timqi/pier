@@ -178,6 +178,9 @@ function commitSessions(rows: SessionInfo[]): void {
   sessions = rows.map((s) => ({ ...s, title: readableTitle(s.title) }));
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderSessions();
+  // The header reads the selected session's row too — its running-runs chip is
+  // this list's `activeRuns`, so a re-list is also a repaint.
+  renderHeader();
   maybeAckRead();
 }
 
