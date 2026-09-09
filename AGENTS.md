@@ -77,6 +77,13 @@ for materials, chat hierarchy, editing, filters, motion and accessibility;
   versions of the same component or parallel bookkeeping for presentation.
 - Treat interaction correctness as part of design: verify overlay hit targets,
   keyboard/touch access, cancellation and replay, not just screenshots.
+- One change covers both widths. A UI change is finished when the phone is
+  finished too — the same materials, the same vocabulary, checked at a narrow
+  viewport as well as a wide one. "Desktop now, mobile later" is how the two
+  drifted into two designs: the flat in-flow mobile bar sat under a floating
+  desktop heading for months, and the ⋯ nobody had sized came with it. Where
+  the phone genuinely needs its own answer (touch targets, the drawer, safe-area
+  insets), say so in the doc — an unstated difference is a bug.
 - Keep both documents current when behavior changes. Report actual browser
   coverage; Chromium emulation is not native Safari/iOS verification.
 
