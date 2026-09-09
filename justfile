@@ -16,3 +16,14 @@ release bump="patch":
     npm version {{bump}}
     git push --follow-tags
     gh run watch --exit-status $(sleep 5 && gh run list --workflow=release.yml -L1 --json databaseId -q '.[0].databaseId')
+
+# Non-blank, non-comment lines per area, tests excluded — the Budgets table in AGENTS.md.
+size:
+    #!/usr/bin/env bash
+    count() { cat "$@" | grep -v '^\s*$' | grep -vcE '^\s*(//|/\*|\*)'; }
+    for a in core channels web agent tasks extensions boards; do
+        printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts'))"
+    done
+    printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -v '\.test\.ts$'))"
+    echo; echo "modules over 500:"
+    for f in $(find src -name '*.ts' -not -name '*.test.ts'); do n=$(count "$f"); [ "$n" -gt 500 ] && echo "  $n $f"; done | sort -rn

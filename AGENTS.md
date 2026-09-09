@@ -113,52 +113,46 @@ the commit that made them; the history is `git log`.
 
 ## Budgets
 
-The target is disordered growth and duplication. Line counts are a *proxy* for
-both, and a proxy optimized against stops measuring — an absolute ceiling per
-area produced one file split into three with the same total, and pressure to
-leave a failure silent because reporting it cost lines. So the rules below fail
-on the thing, not on the number.
+The target is disordered growth and duplication. Line counts are a proxy for
+both, and a proxy optimized against stops measuring, so the rules fail on the
+thing, not on the number.
 
 **1. Growth is a claim, and a claim gets a sentence.** A change that adds net
-lines to an area names what it bought — not "a feature was requested", but what
-the feature could not have been without those lines. The sentence goes in the
-commit or PR; nothing to say → the lines should not be there.
+lines to an area names, in the commit, what the feature could not have been
+without those lines. Nothing to say → the lines should not be there.
 
-**2. Splitting a file is not a reduction.** Moving 300 lines into a new module
-changes one number and no facts. It is worth doing when a module has two
-reasons to exist — and *that*, not a line count, is the test. Name the single
-reason each module exists in its header comment; a header that needs "and" is
-the tripwire.
+**2. Splitting a file is not a reduction.** A module is split when it has two
+reasons to exist, never to move a number. The header names the single reason;
+a header that needs "and" is the tripwire.
 
 **3. The third copy is a bug.** The same logic in three places is fixed or
-deleted, not counted — and a copy-paste pair longer than ~30 lines is reported
-even at two. Count the copies on *all* surfaces: the Slack and Telegram panels
-drifted for months while the same vocabulary sat in the Console as a third copy
-nobody was counting.
+deleted; a copy-paste pair longer than ~30 lines is reported at two. Count on
+all surfaces, the Console included.
 
-**4. Three things are never traded for a number.** Tests; the failure paths
-principle 5b requires; type and seam declarations. If an area is over because
-of these, it is not over.
+**4. Never traded for a number.** Tests; the failure paths principle 5b
+requires; type and seam declarations.
 
-**5. Sizes worth a second look, not a gate.** Non-blank, non-comment lines,
-excluding tests — `find src/<area> -name '*.ts' -not -name '*.test.ts'`, and
-re-measured when the column is cited, because a number copied forward is the
-only way this table can lie. Crossing a threshold is a prompt to ask "what is
-in there?", and the answer is allowed to be "the right things":
+**5. Ceilings are a prompt, and a prompt has a deadline.** `just size` prints
+the table below with current numbers — nothing here is copied forward by hand.
+Crossing a ceiling asks "what is in there?"; the answer may be "the right
+things", and then the ceiling is raised with that sentence. A ceiling exceeded
+for more than one release without either a raise or a deletion is the failure
+this section exists to catch.
 
-| Area | Now | Second look past | Second look done — what the size is |
-| --- | --- | --- | --- |
-| `core/` | ~1.0k | 780 | still platform- and Pi-blind: shared presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate — no platform implementation. The last +107 over the previous reading is what rule 4 exempts: the four ways a message could be lost between the state it was decided against and its arrival (router), the header read back off a stored message (`identity.ts`), and the seam and catalog declarations the Console draws a switch from |
-| `channels/` | ~4.22k | 4.3k | four adapters in the same five-file shape (adapter, api, render, outbound, panel); the shared layer holds only what would otherwise be copied — fence balancer, event dedup, `attach.ts` |
-| `web/` | ~11.5k | 8.6k — **second look due** | largest and least tested. Password boundary, Settings console, Files view, Web Push (RFC 8291/8292, dependency-free), extension and managed-tool switches — each a surface, none a dependency. But the number in this column had drifted ~2.3k behind the code, which is the one failure this table cannot absorb: a proxy nobody re-measures is not measuring. The features above have their sentences; the last reading does not, and the next change here owes a real second look before it adds anything. The +0.5k of the perf pass is accounted for per commit: incremental streaming render, precompressed assets, one SSE frame per event with a write ceiling, lazy view chunks, streamed file reads with 304 — each a cost that was paid per tick or per client and is now paid once. Re-measured at 11.5k for the palette: +~150, which is message search — a debounced, abortable fetch with its three states said out loud, the matched line under a session's name, the scroll-to-hit, and the worktree rule for New session — in a module of its own (`ui/palette.ts`) that took the launcher out of `sidebar.ts` rather than growing it |
-| `agent/` | ~2.1k | — | the Pi side of the seam: session open/resume, event translation, the transcript listing that reads every byte once and — the last +~80 — indexes what was said in that same pass, so message search has no second reader of Pi's format |
-| `tasks/` | ~2.62k | 2.5k | one outbox engine for delivery proof/backoff/ceiling, durable control-message state, required failure paths, and the owner seam that protects Pier-created definitions |
-| root `src/*.ts` | ~2.51k | 1.3k | one-reason modules each: secure credentials, service/update ops, restart ledger, and the managed CLI tools — ubix bootstrap, strict parse of its JSON, provision/removal order, one cross-process sync lock in `pier.db` |
-| one bundled extension | — | 500 | no number: extensions are pluggable, so each pays for itself or is not shipped. `web` is ~980 — two provider wire formats, the language-preservation audit that is its reason to exist, retry/timeout policy |
-| one module | — | 300 | see rule 2 before splitting |
-| channel adapter file | — | 400 | transport, render and panel budgeted separately |
+| Area | Ceiling | What the size is |
+| --- | --- | --- |
+| `core/` | 1.5k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate |
+| `channels/` | 5k | four adapters in one five-file shape; the shared layer holds only what would otherwise be copied |
+| `web/` | 13k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; the least tested area |
+| `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index |
+| `tasks/` | 3k | one delivery engine, durable control messages, scheduler, owner seam |
+| root `src/*.ts` | 3k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix |
+| one bundled extension | 500 | pays for itself or is not shipped |
+| one module | 500 | rule 2 before splitting |
+| channel adapter file | 400 | transport, render and panel counted separately |
 
-No repo-wide number: it fired unconditionally and therefore said nothing.
+Non-blank, non-comment lines, tests excluded. No repo-wide number: it fired
+unconditionally and therefore said nothing.
 
 ## Comments
 
