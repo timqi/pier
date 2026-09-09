@@ -155,6 +155,21 @@ in there?", and the answer is allowed to be "the right things":
 
 No repo-wide number: it fired unconditionally and therefore said nothing.
 
+## Comments
+
+A comment states the *why* the code cannot — a constraint, an invariant, a
+non-obvious consequence — in one or two lines. Nothing else:
+
+- No history. "Used to", "grew out of", "drifted for months", what a bug
+  looked like before the fix: that is `git log`'s job, and a reader of the
+  current code never needs it.
+- No narration of *what* the code does; the code says that.
+- No essays. A block past ~4 lines is a design note that belongs in `docs/`
+  or a file header — and a file header is one paragraph naming the module's
+  single reason to exist (Budgets rule 2), not its biography.
+- Doc comments on exported seams (`core/types.ts`, `channels/types.ts`,
+  `tasks/types.ts`) keep their contract wording; that is declaration, not prose.
+
 ## Bug Prevention
 
 - Strict TypeScript; no `any` at seams. Changing a seam is a design decision.
