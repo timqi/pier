@@ -243,7 +243,7 @@ function renderFileStrip(): void {
 }
 
 function addFile(file: File): void {
-  // A refused file says so (5b) — a picker that swallows picks reads as broken.
+  // A refused file says so (§5) — a picker that swallows picks reads as broken.
   if (pendingFiles.length >= MAX_FILES) {
     appendTurn("error", `attachment limit is ${MAX_FILES} files per message`);
     return;

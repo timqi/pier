@@ -180,7 +180,7 @@ function commitSessions(rows: SessionInfo[]): void {
 
 // Thrown, not swallowed: this runs as `void refreshSessions()` from event
 // handlers, and report.ts is listening for exactly that rejection — a rail
-// that quietly stopped updating is the shape of bug 5b is about.
+// that quietly stopped updating is the shape of bug principle 5 is about.
 const refreshSessions = coalesce(async () => {
   commitSessions(await mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"));
 });
