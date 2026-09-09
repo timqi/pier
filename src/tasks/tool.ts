@@ -99,6 +99,22 @@ const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: str
         : "the result arrives as a callback message once your turn ends; nothing to query",
 });
 
+const SUBAGENT_REDIRECT = "subagents cannot redirect callbacks (callback_session_id)";
+
+/** Who a new run's result goes to — the caller, nobody, or a named session that
+ *  must exist. Shared by `run` and `resume`: a resumed run is a new run. */
+const callbackTarget = async (
+  input: Record<string, unknown>,
+  definitions: TaskDefinitions,
+  callerSessionId: string,
+): Promise<string | null> => {
+  if (input.callback_session_id === undefined) return input.callback === "none" ? null : callerSessionId;
+  if (input.callback === "none") throw new Error("callback none and callback_session_id conflict: pick one delivery target");
+  const target = requiredString(input.callback_session_id, "callback_session_id");
+  if (!(await definitions.sessionExists(target))) throw new Error(`unknown session: ${target}`);
+  return target;
+};
+
 /** A group echoes many results at once, so each is capped; a single-run
  * `recover` stays whole — it is the escape hatch every truncation note points at. */
 const trimResult = (summary: RunSummary): RunSummary => {
@@ -244,7 +260,7 @@ export async function handleTaskTool(
     const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
     // A run's own callback is its parent's link back; a child that could point
     // it elsewhere would strand the supervisor waiting for a result.
-    if (active && input.callback_session_id !== undefined) throw new Error("subagents cannot redirect callbacks (callback_session_id)");
+    if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
@@ -280,12 +296,7 @@ export async function handleTaskTool(
       throw new Error(`unsupported session_mode: ${String(input.session_mode)}`);
     }
     const sessionMode = input.session_mode;
-    let callbackSessionId: string | null = input.callback === "none" ? null : callerSessionId;
-    if (input.callback_session_id !== undefined) {
-      if (callbackSessionId === null) throw new Error("callback none and callback_session_id conflict: pick one delivery target");
-      callbackSessionId = requiredString(input.callback_session_id, "callback_session_id");
-      if (!(await definitions.sessionExists(callbackSessionId))) throw new Error(`unknown session: ${callbackSessionId}`);
-    }
+    const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
     const run = host.run(task.id, input.input, "agent", active?.id ?? null, {
       invokedBySessionId: callerSessionId,
       sourceSessionId: callerSessionId,
@@ -351,13 +362,18 @@ export async function handleTaskTool(
   if (input.operation === "resume") {
     const prior = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(store, callerSessionId, active, prior);
-    const callbackSessionId = input.callback === "none" ? null : callerSessionId;
+    // The resumed run is a new run, so it carries its own callback options,
+    // under the same rule as `run`: a subagent may not redirect them.
+    if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
+    const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
+    const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
     const run = host.resume(prior.id, requiredString(input.message, "message"), {
       invokedBySessionId: callerSessionId,
       callbackSessionId,
+      callbackMode,
       background: true,
     });
-    return receipt(summarize(run, null), callbackSessionId, "followUp", callerSessionId);
+    return receipt(summarize(run, null), callbackSessionId, callbackMode, callerSessionId);
   }
   if (input.operation === "contact") {
     if (!active) throw new Error("contact is only available inside an active Agent run");

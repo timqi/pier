@@ -61,6 +61,8 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], decisions = new Map<stri
     },
     run: (_taskId: string, _input: unknown, _source: string, _parent: null, prov: Partial<TaskRun>) =>
       run("new", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
+    resume: (_id: string, _message: string, prov: Partial<TaskRun>) =>
+      run("resumed", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
   } as unknown as TaskService;
   const definitions = { get: () => task, sessionExists: async () => true } as unknown as TaskDefinitions;
   const messages = { openDecisionId: (runId: string) => decisions.get(runId) ?? null } as unknown as TaskMessenger;
@@ -171,6 +173,27 @@ describe("task tool recover", () => {
       .rejects.toThrow(/callback none and callback_session_id conflict/);
     await expect(top({ operation: "run", task: { action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "Work" }, callback: { type: "session", sessionId: "other" } } }))
       .rejects.toThrow(/inline task draft cannot set callback/);
+  });
+
+  it("resume honours its callback options under the same subagent rule as run", async () => {
+    const tool = rig([run("r1")]);
+    const steer = await tool({ operation: "resume", run_id: "r1", message: "go on", callback: "steer" }) as RunSummary;
+    expect(steer.callbackMode).toBe("steer");
+    expect(steer.next).toMatch(/interrupts your running turn/);
+    const none = await tool({ operation: "resume", run_id: "r1", message: "go on", callback: "none" }) as RunSummary;
+    expect(none.callbackSessionId).toBeUndefined();
+    expect(none.next).toBe("callback none: the result is not delivered to anyone");
+    const remote = await tool({ operation: "resume", run_id: "r1", message: "go on", callback_session_id: "other" }) as RunSummary;
+    expect(remote.callbackSessionId).toBe("other");
+    expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
+
+    // A subagent's own callback is its parent's link back, resume included.
+    const child = rig([
+      run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null }),
+      run("grandchild", { parentRunId: "child", rootRunId: "child", depth: 1 }),
+    ]);
+    await expect(child({ operation: "resume", run_id: "grandchild", message: "go on", callback_session_id: "other" }))
+      .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
   });
 
   it("does not take task_id", async () => {

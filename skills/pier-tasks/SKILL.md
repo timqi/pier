@@ -102,7 +102,9 @@ trees, or only descendants when you are a subagent.
 - `steer`: interrupt a child with corrections.
 - `follow_up`: queue guidance after its current turn.
 - `resume`: terminal run only; same session, new run ID/callback, same depth,
-  message as prompt. Expires its unanswered decision.
+  message as prompt. Expires its unanswered decision. Being a new run, it takes
+  the same `callback` and `callback_session_id` as `run`, under the same rule:
+  a subagent may not redirect them.
 - `cancel`: run or group; cascades to descendants, terminal runs unchanged.
 
 `steer`/`follow_up` require a non-terminal run; undelivered guidance expires when

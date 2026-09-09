@@ -343,7 +343,7 @@ export class TaskService {
   resume(
     id: string,
     message: string,
-    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "background"> = {},
+    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background"> = {},
   ): TaskRun {
     const { run, expired } = this.store.transact(() => ({
       run: this.prepareResume(id, message, provenance),
@@ -357,7 +357,7 @@ export class TaskService {
   private prepareResume(
     id: string,
     message: string,
-    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "background">,
+    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">,
   ): TaskRun {
     this.refusePaused();
     const prior = this.getRun(id);
