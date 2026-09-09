@@ -11,33 +11,26 @@ scheduled tasks, live observability, and static Show pages.
 2. **Bloat is a bug.** Over budget → stop and diagnose before writing more.
    The cause is usually a wrong-layer abstraction or a feature that shouldn't exist.
 3. **Two seams only.** `Channel` (platform ↔ core) and `AgentSession`
-   (core ↔ Pi). Nothing crosses a boundary outside its seam; Pi stays
-   swappable (SDK → RPC later), platform quirks stay out of core.
-4. **Core is platform-blind and Pi-blind.** Only `agent/` and `extensions/`
-   import the Pi SDK — an extension takes an `ExtensionAPI`, so it is Pi-shaped
-   by construction; only `agent/pi.ts` registers one and `core/` never sees the
-   area. Only `channels/` imports platform SDKs.
-5. **One event stream per session.** Web UI, logs, Show pages are all
+   (core ↔ Pi). Only `agent/` and `extensions/` import the Pi SDK; only
+   `channels/` imports platform SDKs; `core/` is blind to both, so Pi stays
+   swappable (SDK → RPC later) and platform quirks stay out of core.
+4. **One event stream per session.** Web UI, logs, Show pages are all
    consumers of it — never parallel bookkeeping.
-5b. **Nothing that happened may look like nothing happening.** Every turn is
-   observable on the surface it came from, including the turns with no content:
-   an empty reply still posts its footer and says which kind of nothing it was
-   (`stayed silent — <reason>` / `no reply`), and every failure is delivered to
-   the conversation, not only to the web timeline. Total silence is
-   indistinguishable from a crash — so "send nothing" is never the answer, and a
-   silent `catch` is a bug even when the fallback works.
+5. **Nothing that happened may look like nothing happening.** Every turn is
+   observable on the surface it came from: an empty reply posts its footer and
+   names which kind of nothing it was (`stayed silent — <reason>` / `no reply`);
+   every failure reaches the conversation, not only the web timeline. A silent
+   `catch` is a bug even when the fallback works.
 6. **No speculative generality.** The third repeat earns an abstraction.
    Show pages stay static HTML (+ SSE reload at most), no runtime.
-7. **Fast by default.** Web interactions must feel instant: optimistic
-   rendering, no blocking fetches on the interaction path, no heavy client
-   runtime. If an action needs a round trip, render first and reconcile from
-   the event stream.
-8. **Minimal dependencies — supply chain is attack surface.** Prefer stdlib,
-   then officially-backed, actively-maintained libraries (platform vendors'
-   SDKs, Pi, well-audited staples) that also reduce our own code. No
-   micro-deps, no transitively-heavy packages; every new runtime dep needs a
-   one-line justification in the PR. Pin versions via the lockfile and review
-   diffs on upgrades.
+7. **Fast by default.** Optimistic rendering, no blocking fetches on the
+   interaction path, no heavy client runtime. If an action needs a round trip,
+   render first and reconcile from the event stream.
+8. **Minimal dependencies — supply chain is attack surface.** Stdlib first,
+   then official platform SDKs, Pi, and well-audited staples that also delete
+   our own code. No micro-deps, no transitively-heavy packages; a new runtime
+   dep carries a one-line justification in its commit. Lockfile pinned, diffs
+   reviewed on upgrade.
 
 ## Architecture
 
@@ -55,67 +48,53 @@ scheduled tasks, live observability, and static Show pages.
   ops (`service.ts`, `update.ts`, `drain.ts`) and the leaves any area may import
   (`paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`); one reason per
   file, named in docs/architecture.md
-- **One writer per instance directory.** Pier's own process is the only thing
-  that writes its Pi session directory — no external `pi` CLI, no second Pier
-  on the same `~/.pier`. So in-process knowledge of what changed may be
-  trusted, and a listing cache does not owe correctness to writers it cannot
-  see; the filesystem scan stays the source of truth for cost reasons, not for
-  arbitration.
+- **One writer per instance directory.** Pier's own process is the only writer
+  of its Pi session directory — no external `pi` CLI, no second Pier on the
+  same `~/.pier` — so in-process knowledge of what changed may be trusted.
 - Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
   Runtime dependencies never go sideways. The browser may import owner-defined
-  HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only; those
-  imports are erased at build and do not let web implement either area.
+  HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only.
 - **Browser-safe core.** `web/ui/` bundles `core/types.ts`, `core/reply.ts`,
-  `core/identity.ts` and `core/inbound-file.ts` at runtime, so those four may
-  not import `node:*` or anything that does; a `core/` module that needs Node
-  (`router.ts`, `inbox.ts`) is never imported from `web/ui/`. Vite fails the
-  build when this is broken, but the build is the last check, not the rule.
+  `core/identity.ts` and `core/inbound-file.ts`, so those four import no
+  `node:*`, directly or transitively; `core/` modules that need Node
+  (`router.ts`, `inbox.ts`) are never imported from `web/ui/`.
 
 ## UI/UX
 
 Before changing browser presentation or interaction, read
-[UI/UX design guidelines](docs/design/06-ui-ux.md). It is the shared contract
-for materials, chat hierarchy, editing, filters, motion and accessibility;
-[Web Workbench](docs/design/03-web-workbench.md) owns the web behavior and wire contract.
+[UI/UX design guidelines](docs/design/06-ui-ux.md) — the contract for
+materials, hierarchy, editing, motion and accessibility — and
+[Web Workbench](docs/design/03-web-workbench.md), which owns the web behavior
+and wire contract. Keep both current when behavior changes.
 
-- Reuse the existing controls, palette and event state; do not grow per-page
-  versions of the same component or parallel bookkeeping for presentation.
-- Treat interaction correctness as part of design: verify overlay hit targets,
+- Reuse the existing controls, palette and event state; no per-page versions
+  of the same component, no parallel bookkeeping for presentation.
+- Interaction correctness is design: verify overlay hit targets,
   keyboard/touch access, cancellation and replay, not just screenshots.
-- One change covers both widths. A UI change is finished when the phone is
-  finished too — the same materials, the same vocabulary, checked at a narrow
-  viewport as well as a wide one. "Desktop now, mobile later" is how the two
-  drifted into two designs: the flat in-flow mobile bar sat under a floating
-  desktop heading for months, and the ⋯ nobody had sized came with it. Where
-  the phone genuinely needs its own answer (touch targets, the drawer, safe-area
-  insets), say so in the doc — an unstated difference is a bug.
-- Keep both documents current when behavior changes. Report actual browser
-  coverage; Chromium emulation is not native Safari/iOS verification.
+- One change covers both widths: a UI change is finished when the phone is
+  finished too, with the same materials and vocabulary. Where the phone needs
+  its own answer (touch targets, the drawer, safe-area insets), the doc says so.
+- Report actual browser coverage; Chromium emulation is not Safari/iOS.
 
 ## Docs
 
-A document holds contracts, facts and commands. The reasoning behind them is
-the commit that made them; the history is `git log`.
+A document holds contracts, facts and commands. The reasoning is the commit
+that made them; the history is `git log`.
 
-- Each file has one reason to exist, named in its first line: `deploy.md` is
-  the operator's runbook, `architecture.md` the map and the seams, `design/*`
-  the behaviour and wire contracts of one area, `skills/*` instructions an
-  agent reads at runtime. A paragraph that does not serve that reason is
-  deleted, not moved.
-- A rule is one sentence. A fact is one bullet. A command is a code block.
-  No "what it replaced", no measured numbers from the incident that settled
-  it, no design justification — if the justification is needed, it is one
-  clause, not a paragraph.
+- One reason per file, named in its first line: `deploy.md` the operator's
+  runbook, `architecture.md` the map and the seams, `design/*` one area's
+  behaviour and wire contract, `skills/*` instructions an agent reads at
+  runtime. A paragraph that does not serve that reason is deleted, not moved.
+- A rule is one sentence, a fact one bullet, a command a code block. No "what
+  it replaced", no incident numbers, no justification longer than a clause.
 - Nothing the code already says: a unit file the installer renders, a type
-  the seam declares, a directory tree `ls` gives. Point at the file instead.
-- Same size test as code: a doc that grows owes a sentence naming what the
-  reader could not do without the new lines.
+  the seam declares, a directory tree `ls` gives. Point at the file.
+- A doc that grows owes the same sentence as code (Budgets rule 1).
 
 ## Budgets
 
-The target is disordered growth and duplication. Line counts are a proxy for
-both, and a proxy optimized against stops measuring, so the rules fail on the
-thing, not on the number.
+The target is disordered growth and duplication; line counts are a proxy, so
+the rules fail on the thing, not on the number.
 
 **1. Growth is a claim, and a claim gets a sentence.** A change that adds net
 lines to an area names, in the commit, what the feature could not have been
@@ -129,15 +108,15 @@ a header that needs "and" is the tripwire.
 deleted; a copy-paste pair longer than ~30 lines is reported at two. Count on
 all surfaces, the Console included.
 
-**4. Never traded for a number.** Tests; the failure paths principle 5b
+**4. Never traded for a number.** Tests; the failure paths principle 5
 requires; type and seam declarations.
 
 **5. Ceilings are a prompt, and a prompt has a deadline.** `just size` prints
-the table below with current numbers — nothing here is copied forward by hand.
-Crossing a ceiling asks "what is in there?"; the answer may be "the right
-things", and then the ceiling is raised with that sentence. A ceiling exceeded
-for more than one release without either a raise or a deletion is the failure
-this section exists to catch.
+the table below with current numbers; nothing is copied forward by hand.
+Crossing a ceiling asks "what is in there?"; if the answer is "the right
+things", the ceiling is raised with that sentence. A ceiling exceeded for more
+than one release without a raise or a deletion is the failure this section
+exists to catch.
 
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
@@ -151,35 +130,31 @@ this section exists to catch.
 | one module | 500 | rule 2 before splitting |
 | channel adapter file | 400 | transport, render and panel counted separately |
 
-Non-blank, non-comment lines, tests excluded. No repo-wide number: it fired
-unconditionally and therefore said nothing.
+Non-blank, non-comment lines, tests excluded. No repo-wide number.
 
 ## Comments
 
 A comment states the *why* the code cannot — a constraint, an invariant, a
 non-obvious consequence — in one or two lines. Nothing else:
 
-- No history. "Used to", "grew out of", "drifted for months", what a bug
-  looked like before the fix: that is `git log`'s job, and a reader of the
-  current code never needs it.
+- No history: what it used to be, what the bug looked like. That is `git log`.
 - No narration of *what* the code does; the code says that.
-- No essays. A block past ~4 lines is a design note that belongs in `docs/`
-  or a file header — and a file header is one paragraph naming the module's
-  single reason to exist (Budgets rule 2), not its biography.
+- No essays. A block past ~4 lines is a design note that belongs in `docs/`;
+  a file header is one paragraph naming the module's single reason to exist.
 - Doc comments on exported seams (`core/types.ts`, `channels/types.ts`,
   `tasks/types.ts`) keep their contract wording; that is declaration, not prose.
 
 ## Bug Prevention
 
+- Green before every commit: `npm run check && npm run lint && npm test`.
 - Strict TypeScript; no `any` at seams. Changing a seam is a design decision.
 - Test the seams: adapter golden tests (mocked clients), core queue/schedule
   units. Hermetic — no real `$HOME`, creds, or network.
 - Validate at boundaries, trust internally; malformed input is logged and
   dropped, never half-handled. No silent `catch`.
-- Deps: official platform SDKs or nothing; SQLite direct, no ORM; no
-  frameworks in core.
+- SQLite direct, no ORM; no frameworks in core.
 - **Never kill by pattern.** No `pkill`/`killall`/`kill` by name or `-f` — this
   repo's own process is `node dist/main.js`, so the match hits production. Kill
-  only a PID you started (`node dist/main.js & pid=$!; trap 'kill $pid' EXIT`),
-  or give the test process a unique marker; the live service is
-  `systemctl --user … pier`, and stopping or restarting it is destructive — ask first.
+  only a PID you started (`node dist/main.js & pid=$!; trap 'kill $pid' EXIT`).
+  The live service is `systemctl --user … pier`; stopping or restarting it is
+  destructive — ask first.
