@@ -322,7 +322,8 @@ main {
 #session-list li { padding-inline: 0.375rem; }
 #session-list .session-open { padding-left: 0.25rem; }
 #session-list :focus-visible { outline-offset: -2px; }
-#session-list li:focus-within .session-more { display: flex; }
+#session-list li:focus-within .session-more,
+#session-list .session-more[aria-expanded="true"] { display: flex; }
 @media (hover: hover) and (pointer: fine) {
   #session-list li:hover .session-more { display: flex; }
 }

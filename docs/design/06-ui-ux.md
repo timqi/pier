@@ -32,6 +32,24 @@ match installed-window theme metadata to that canvas in both themes, including
 startup; the mobile heading stays on the solid canvas. Reserve the very pale
 mist-blue and mint background accents for the lower conversation area so color
 supports reading without tinting the entire workspace.
+Action menus align labels without a reserved selection column; only selectable
+options reserve checkmarks. Group related actions with restrained separators and
+truncate secondary hints. Phone session sheets identify the target session and
+provide a close control. Session details use a solid reading surface, a readable
+title, grouped label/value fields and explicit navigation; reserve monospace for
+technical identifiers and keep directory/ID copy controls reachable on touch.
+Use the shared rem scale: 0.9375rem desktop / 1rem phone action labels with a
+1.5rem line height; session info uses 0.9375rem body text at 1.5 line height,
+1.125rem titles and 0.8125rem supporting text. Keep its desktop width to 26rem,
+use tight field/group spacing and place relative times beside their timestamps
+when space allows. Paths and IDs use 0.875rem
+monospace with room to wrap. Phone sheets have a
+backdrop that dismisses without activating controls underneath.
+Model picker content fills its panel; long session titles truncate within a
+bounded width. Keyboard focus leaving a nonmodal menu dismisses it so its
+navigation keys cannot intercept interaction with background controls.
+Reasoning effort uses an inline disclosure with styled native
+radio choices, visible selection and keyboard focus, avoiding nested overlays.
 A dialog hosting viewport-fixed menus must not use backdrop blur or transform animations:
 these change the menus' containing block and can cause offsets or clipping. Keep menus in
 its top layer, and clip only content that needs clipping. Verify actual overlay hit targets.
