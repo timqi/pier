@@ -137,7 +137,7 @@ export function normalizeCustomTools(
   for (const item of raw) {
     const given = record(item);
     if (!given) return null;
-    const { name, toml, spec } = given;
+    const { name, toml } = given;
     if (typeof name !== "string") return null;
     const cleanName = name.trim();
     if (!TOOL_NAME.test(cleanName)) return null;
@@ -146,13 +146,9 @@ export function normalizeCustomTools(
       continue;
     }
     if (tools.some((tool) => tool.name.toLowerCase() === cleanName.toLowerCase())) return null;
-    // A stored `{name, spec}` row is read as the block it stood for.
-    const body = typeof toml === "string"
-      ? toml.trim()
-      : typeof spec === "string" && spec.trim()
-      ? `spec = ${tomlString(spec.trim())}`
-      : null;
-    if (body === null || !body || body.length > MAX_BODY) return null;
+    if (typeof toml !== "string") return null;
+    const body = toml.trim();
+    if (!body || body.length > MAX_BODY) return null;
     // A section header would take the rest of the file with it.
     if (body.split("\n").some((line) => line.trimStart().startsWith("["))) return null;
     // Tabs and newlines are the only control characters a TOML body needs.

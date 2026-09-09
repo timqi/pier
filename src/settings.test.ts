@@ -128,9 +128,6 @@ describe("managed tools", () => {
     store.setCustomTools([eza]);
     expect(store.setTools(["eza"]).customTools).toEqual([eza]);
     expect(store.setTools([]).customTools).toEqual([eza]);
-    // A row an older Pier wrote is read as the block it stood for, not dropped.
-    db.prepare(`UPDATE settings SET value = '[{"name":"fd2","spec":"github:sharkdp/fd"}]' WHERE key = 'customTools'`).run();
-    expect(store.get().customTools).toEqual([{ name: "fd2", toml: `spec = "github:sharkdp/fd"` }]);
     // A hand-edited row must not take get() down with it.
     db.prepare("UPDATE settings SET value = '[{\"name\":\"eza\"}]' WHERE key = 'customTools'").run();
     expect(store.get().customTools).toEqual([]);
@@ -145,7 +142,7 @@ describe("managed tools", () => {
     // eza stopped applying too and nothing but a WARN said why.
     db.prepare(
       `INSERT INTO settings (key, value) VALUES ('customTools',
-        '[{"name":"jq","spec":"github:jqlang/jq"},{"name":"eza","toml":"spec = \\"github:eza-community/eza\\""}]')`,
+        '[{"name":"jq","toml":"spec = \\"github:jqlang/jq\\""},{"name":"eza","toml":"spec = \\"github:eza-community/eza\\""}]')`,
     ).run();
     expect(store.get().customTools).toEqual([{ name: "eza", toml: `spec = "github:eza-community/eza"` }]);
     // Not rewritten: a Pier that stops bundling jq finds the declaration back.

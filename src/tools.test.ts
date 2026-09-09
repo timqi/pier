@@ -213,16 +213,11 @@ describe("a tool the operator declares", () => {
     expect(normalizeCustomTools([])).toEqual([]);
   });
 
-  it("reads a row an older Pier stored as {name, spec} as the block it meant", () => {
-    // Orphaning those would silently drop a tool the operator is still using.
-    expect(normalizeCustomTools([{ name: "eza", spec: "github:eza-community/eza" }]))
-      .toEqual([{ name: "eza", toml: `spec = "github:eza-community/eza"` }]);
-  });
-
   it("refuses rather than half-storing anything that would rewrite the file", () => {
     for (const bad of [
       "not a list",
       [{ name: "eza" }],
+      [{ name: "eza", spec: "github:eza-community/eza" }],
       [{ name: "eza", toml: 42 }],
       // No spec: a block ubix cannot install anything from.
       [{ name: "eza", toml: `exe = "eza"` }],

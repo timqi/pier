@@ -132,7 +132,7 @@ export class SettingsStore {
       customTools: this.#json(
         "customTools",
         (raw) => normalizeCustomTools(raw, [], "drop"),
-        "a list of {name, spec}",
+        "a list of {name, toml}",
       ) ?? [],
     };
   }
