@@ -31,6 +31,7 @@ function busySession(id: string, queued: string[] = [], hang: "abort" | null = n
 function deps(
   busy: () => { session: AgentSession; key: ConversationKey; sending?: true }[],
   runs: () => number,
+  attached: () => { session: AgentSession; key: ConversationKey }[] = () => busy().filter((b) => !b.sending),
 ): { deps: DrainDeps; ledger: RestartLedger; calls: string[] } {
   const ledger = new RestartLedger(openDb(":memory:"));
   const calls: string[] = [];
@@ -38,7 +39,7 @@ function deps(
     ledger,
     calls,
     deps: {
-      router: { beginDrain: () => calls.push("beginDrain"), busy },
+      router: { beginDrain: () => calls.push("beginDrain"), busy, attachedSessions: attached },
       tasks: { pause: () => calls.push("pause"), activeRunCount: runs },
       ledger,
     },
@@ -51,6 +52,19 @@ describe("drainForRestart", () => {
     await drainForRestart(rig.deps, 1000, 1);
     expect(rig.calls).toEqual(["beginDrain", "pause"]);
     expect(rig.ledger.list()).toEqual([]);
+  });
+
+  it("ledgers an idle attached session's queue — the runtime is its only home", async () => {
+    const idle = busySession("s1", ["first", "second"]);
+    Object.assign(idle.session, { state: "idle" });
+    const key = { channelId: "telegram" as const, conversationId: "42" };
+    const rig = deps(() => [], () => 0, () => [{ session: idle.session, key }]);
+    await drainForRestart(rig.deps, 1000, 1);
+    // Nothing was running: the queue is snapshotted, never aborted.
+    expect(idle.calls).toEqual(["pendingQueue"]);
+    expect(rig.ledger.list()).toEqual([
+      expect.objectContaining({ conversationId: "42", note: expect.stringContaining("> first\n> second") }),
+    ]);
   });
 
   it("waits for a running turn and a task run to settle", async () => {

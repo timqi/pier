@@ -515,6 +515,13 @@ export class Router {
     ];
   }
 
+  /** Every attached session, mid-turn or not — what the drain snapshots: Pi's
+   *  queue lives only in the runtime, so an idle session's queued messages die
+   *  with the process just the same. */
+  attachedSessions(): { session: AgentSession; key: ConversationKey }[] {
+    return [...this.bySession.values()].map(({ session, key }) => ({ session, key }));
+  }
+
   /** Never creates one: a stop or settings command must not open a session. */
   sessionOf(key: ConversationKey): AgentSession | undefined {
     return this.byKey.get(keyOf(key));

@@ -51,6 +51,7 @@ export interface DrainDeps {
   router: {
     beginDrain(): void;
     busy(): { session: AgentSession; key: ConversationKey; sending?: true }[];
+    attachedSessions(): { session: AgentSession; key: ConversationKey }[];
   };
   tasks: { pause(): void; activeRunCount(): number };
   ledger: RestartLedger;
@@ -78,6 +79,7 @@ export async function drainForRestart(
     const runs = tasks.activeRunCount();
     if (busy.length === 0 && runs === 0) {
       log.info("drained — nothing running");
+      await queuesToLedger(router, ledger, new Set(), Date.now() + cleanupBoundMs);
       return;
     }
     const turns = busy.filter((b) => !b.sending);
@@ -97,6 +99,11 @@ export async function drainForRestart(
       const cleanupDeadline = Date.now() + cleanupBoundMs;
       await Promise.all(turns.map(({ session, key }) =>
         abortToLedger(session, key, ledger, cleanupDeadline)));
+      await queuesToLedger(
+        router, ledger,
+        new Set(turns.map(({ session }) => session.id)),
+        cleanupDeadline,
+      );
       return;
     }
     const report = `draining: ${String(turns.length)} turn(s), ${String(sends.length)} reply(ies) sending, ${String(runs)} active task run(s)`;
@@ -136,25 +143,55 @@ async function abortToLedger(
   cleanupDeadline: number,
 ): Promise<void> {
   const remaining = (): number => Math.max(0, cleanupDeadline - Date.now());
+  recordRestartNote(ledger, session, key, await queueSnapshot(session, remaining()));
+  await bounded(session.abort(), remaining(), `abort of session ${session.id}`, undefined);
+}
+
+/** Pi's queue lives only in the runtime, so the exit ends it whether a turn was
+ *  running or not: an attached session nobody was waiting on still owes its
+ *  chat the texts it never got to (§5). `handled` are the aborted turns, whose
+ *  note already carries their queue. */
+async function queuesToLedger(
+  router: DrainDeps["router"],
+  ledger: RestartLedger,
+  handled: Set<string>,
+  cleanupDeadline: number,
+): Promise<void> {
+  await Promise.all(router.attachedSessions()
+    .filter(({ session }) => !handled.has(session.id))
+    .map(async ({ session, key }) => {
+      const pending = await queueSnapshot(session, Math.max(0, cleanupDeadline - Date.now()));
+      if (pending.length) recordRestartNote(ledger, session, key, pending);
+    }));
+}
+
+async function queueSnapshot(session: AgentSession, boundMs: number): Promise<string[]> {
   const queued = await bounded(
-    session.pendingQueue(), remaining(),
+    session.pendingQueue(), boundMs,
     `queue snapshot of session ${session.id}`, { steering: [], followUp: [] },
   );
-  const pending = [...queued.steering, ...queued.followUp];
+  return [...queued.steering, ...queued.followUp];
+}
+
+function recordRestartNote(
+  ledger: RestartLedger,
+  session: AgentSession,
+  key: ConversationKey,
+  pending: string[],
+): void {
   // A web or task key has no chat: the transcript shows the aborted turn, and
   // only a dropped queue would be invisible, so that is logged.
   if (key.channelId === "web" || key.channelId === "task") {
     if (pending.length) {
       log.warn(`session ${session.id}: ${String(pending.length)} queued message(s) dropped by the restart`);
     }
-  } else {
-    const note = [
-      "Pier restarted before this turn finished — the last message may be unanswered.",
-      ...(pending.length ? ["Queued and not delivered:", ...pending.map((text) => `> ${text}`)] : []),
-    ].join("\n");
-    ledger.record({ channelId: key.channelId, conversationId: key.conversationId, note });
+    return;
   }
-  await bounded(session.abort(), remaining(), `abort of session ${session.id}`, undefined);
+  const note = [
+    "Pier restarted before this turn finished — the last message may be unanswered.",
+    ...(pending.length ? ["Queued and not delivered:", ...pending.map((text) => `> ${text}`)] : []),
+  ].join("\n");
+  ledger.record({ channelId: key.channelId, conversationId: key.conversationId, note });
 }
 
 /** Each entry is removed only after confirmed delivery: a duplicate apology is
