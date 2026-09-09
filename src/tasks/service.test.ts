@@ -1292,25 +1292,62 @@ describe("task service", () => {
     }
   });
 
-  it("counts a session wait against the timeout from enqueue", async () => {
+  it("leaves a session wait outside the timeout, which the waiter's own turn arms", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
     const { service, session } = setup(hangingSession("shared"));
     onTestFinished(() => service.stop());
     const task = await service.create({
       name: "serial timeout", trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
-      timeoutSeconds: 5,
+      timeoutSeconds: 3600,
     });
     const first = service.run(task.id, null, "agent");
     await vi.waitFor(() => expect(session.systemInputs).toHaveLength(1));
+    // The waiter's own revision carries the short budget; the run holding the
+    // session keeps the long one.
     await service.update(task.id, { ...task, timeoutSeconds: 1 });
     const waiter = service.run(task.id, null, "agent");
-    await vi.waitFor(() => expect(service.getRun(waiter.id)).toMatchObject({
-      state: "failed", error: "task timed out", startedAt: null,
-    }), { timeout: 2000 });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(service.getRun(waiter.id)).toMatchObject({ state: "queued", startedAt: null, error: null });
     expect(service.getRun(first.id).state).toBe("running");
     expect(session.systemInputs).toHaveLength(1);
     await session.abort();
-    await service.waitForRun(first.id);
+    expect((await service.waitForRun(first.id)).state).toBe("succeeded");
+    await vi.waitFor(() => expect(session.systemInputs).toHaveLength(2));
+    await session.abort();
+    expect(await service.waitForRun(waiter.id)).toMatchObject({ state: "succeeded", error: null });
+  });
+
+  it("starts a run held behind a full slot table long past its timeout", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const { cwd, service, factory } = setup();
+    onTestFinished(() => service.stop());
+    const sessions: ReturnType<typeof hangingSession>[] = [];
+    vi.mocked(factory.create).mockImplementation(async () => {
+      const session = hangingSession(`worker-${sessions.length}`);
+      sessions.push(session);
+      return session;
+    });
+    const agentAction = { type: "agent" as const, session: { mode: "fresh" as const, cwd }, prompt: "Work" };
+    const blocker = await service.create({
+      name: "slot filler", trigger: { type: "manual" }, action: agentAction, timeoutSeconds: 3600,
+    });
+    const impatient = await service.create({
+      name: "queued behind", trigger: { type: "manual" }, action: agentAction, timeoutSeconds: 1,
+    });
+    const filling = Array.from({ length: 6 }, () => service.run(blocker.id, null, "agent"));
+    await vi.waitFor(() => expect(filling.map((run) => service.getRun(run.id).state))
+      .toEqual(Array.from({ length: 6 }, () => "running")));
+    const waiter = service.run(impatient.id, null, "agent");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(service.getRun(waiter.id)).toMatchObject({ state: "queued", startedAt: null, error: null });
+    await sessions[0]!.abort();
+    expect((await service.waitForRun(filling[0]!.id)).state).toBe("succeeded");
+    await vi.waitFor(() => expect(service.getRun(waiter.id).state).toBe("running"));
+    await sessions.at(-1)!.abort();
+    expect(await service.waitForRun(waiter.id)).toMatchObject({ state: "succeeded", error: null });
   });
 
   it("never resolves or starts an agent cancelled immediately after enqueue", async () => {

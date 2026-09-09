@@ -49,23 +49,32 @@ export class TaskExecution {
     this.controllers.set(run.id, controller);
     let timedOut = false;
     let cause: unknown;
-    const timeout = setTimeout(() => {
-      if (controller.signal.aborted) return;
-      timedOut = true;
-      controller.abort();
-    }, run.context.definition.timeoutSeconds * 1000);
-    timeout.unref();
+    let timeout: NodeJS.Timeout | undefined;
+    // The budget is the run's own: waiting for an agent slot or a busy session
+    // (agent.ts) is bounded by cancellation and restart, never by the timeout.
+    const start = (): void => {
+      timeout ??= setTimeout(() => {
+        if (controller.signal.aborted) return;
+        timedOut = true;
+        controller.abort();
+      }, run.context.definition.timeoutSeconds * 1000).unref();
+      if (run.state === "running") return;
+      run.state = "running";
+      run.startedAt = Date.now();
+      this.store.saveRun(run);
+      this.host.changed(run);
+    };
     try {
       const { definition } = run.context;
       if (definition.trigger.type === "watch" && !run.resumedFromRunId) {
-        this.markRunning(run);
+        start();
         run.probe = await runBash(definition.trigger.script, definition.trigger.cwd, run.input, controller.signal);
         run.matched = run.probe.exitCode === 0;
         this.store.saveRun(run);
         if (run.probe.exitCode === 1) run.result = { type: "watch", matched: false };
         else if (run.probe.exitCode !== 0) throw new Error(`watch probe exited ${String(run.probe.exitCode)}`);
       }
-      if (run.matched !== false) run.result = await this.executeAction(run, controller.signal);
+      if (run.matched !== false) run.result = await this.executeAction(run, controller.signal, start);
       controller.signal.throwIfAborted();
       run.state = "succeeded";
       if (definition.trigger.type === "watch" && !run.resumedFromRunId && definition.trigger.mode === "once" && run.matched) {
@@ -106,11 +115,11 @@ export class TaskExecution {
     }
   }
 
-  private async executeAction(run: TaskRun, signal: AbortSignal): Promise<TaskResult> {
+  private async executeAction(run: TaskRun, signal: AbortSignal, start: () => void): Promise<TaskResult> {
     signal.throwIfAborted();
     const action = run.context.definition.action;
     if (action.type === "bash") {
-      this.markRunning(run);
+      start();
       run.context.cwd = action.cwd;
       this.store.saveRun(run);
       const result = await runBash(action.script, action.cwd, run.input, signal);
@@ -122,7 +131,7 @@ export class TaskExecution {
       return output;
     }
     if (action.type === "system") {
-      this.markRunning(run);
+      start();
       const handler = this.definitions.systemAction(action.name, run.context.definition.creator);
       signal.throwIfAborted();
       const text = await handler(signal);
@@ -130,7 +139,7 @@ export class TaskExecution {
       return { type: "system", text };
     }
     if (action.type === "task") {
-      this.markRunning(run);
+      start();
       const child = this.host.runChild(action.taskId, run);
       let rejectWait = (reason?: unknown): void => { void reason; };
       const aborted = new Promise<never>((_, reject) => { rejectWait = reject; });
@@ -148,14 +157,6 @@ export class TaskExecution {
         signal.removeEventListener("abort", onAbort);
       }
     }
-    return this.agent.execute(run, action, signal, () => this.markRunning(run));
-  }
-
-  private markRunning(run: TaskRun): void {
-    if (run.state === "running") return;
-    run.state = "running";
-    run.startedAt = Date.now();
-    this.store.saveRun(run);
-    this.host.changed(run);
+    return this.agent.execute(run, action, signal, start);
   }
 }
