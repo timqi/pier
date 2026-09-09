@@ -157,7 +157,7 @@
         <div class="ml-auto flex items-center gap-0.5 text-amber-700">
           <button type="button" id="queue-steer" title="Send the whole queue now into the running turn" aria-label="Send queue now"
             class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
-            <span data-icon="Send" class="h-3.5 w-3.5"></span>
+            <span data-icon="ArrowUp" class="h-3.5 w-3.5"></span>
           </button>
           <button type="button" id="queue-restart" title="Stop the running turn and send the whole queue as a new prompt" aria-label="Stop and send queue"
             class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md hover:bg-amber-100 active:bg-amber-200">
@@ -188,9 +188,9 @@
             class="hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
             <span data-icon="Square" class="h-3.5 w-3.5"></span>
           </button>
-          <!-- Style + icon double as the state display: indigo plane = send, amber clock = queue -->
+          <!-- Style + icon double as the state display: indigo arrow = send, amber clock = queue -->
           <button type="submit" id="send" title="Send">
-            <span id="send-plane" data-icon="Send" class="h-3.5 w-3.5"></span>
+            <span id="send-arrow" data-icon="ArrowUp" class="h-3.5 w-3.5"></span>
             <span id="send-queue" data-icon="Clock" class="hidden h-3.5 w-3.5"></span>
           </button>
         </div>

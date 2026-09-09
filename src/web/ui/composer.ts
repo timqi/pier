@@ -36,7 +36,7 @@ let deps: ComposerDeps;
 const composer = $<HTMLFormElement>("#composer");
 const input = $<HTMLTextAreaElement>("#input");
 const sendBtn = $<HTMLButtonElement>("#send");
-const sendPlane = $("#send-plane");
+const sendArrow = $("#send-arrow");
 const sendQueue = $("#send-queue");
 const stopBtn = $("#stop");
 const queuePanel = $("#queue-panel");
@@ -126,7 +126,7 @@ export function clearOptimistic(): void {
   optimisticUserTexts = [];
 }
 
-/** The composer buttons ARE the state display: indigo plane when idle
+/** The composer buttons ARE the state display: indigo arrow when idle
  *  (send starts a turn), amber clock + red stop while streaming (send
  *  queues; the queue panel offers Send now / Abort & send). */
 export function updateComposer(): void {
@@ -147,7 +147,7 @@ export function updateComposer(): void {
     ? (starting ? "Starting the session…" : "No session")
     : streaming ? "Queue — delivered when the turn ends" : "Send";
   input.placeholder = starting ? "Starting the session…" : "Message…";
-  sendPlane.classList.toggle("hidden", streaming);
+  sendArrow.classList.toggle("hidden", streaming);
   sendQueue.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("hidden", !streaming);
   stopBtn.classList.toggle("flex", streaming);

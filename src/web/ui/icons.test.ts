@@ -1,7 +1,7 @@
 // Shell hydration must retain the elements cached by composer and lightbox.
 import html from "./index.html?raw";
 import { afterEach, expect, it, vi } from "vitest";
-import { Send } from "lucide";
+import { Plus } from "lucide";
 import { icon, initIcons } from "./icons.js";
 
 class Element {
@@ -28,7 +28,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("renders decorative SVG with a shared stroke and no competing accessible name", () => {
   const { createElementNS } = setup();
-  const svg = icon(Send) as unknown as Element;
+  const svg = icon(Plus) as unknown as Element;
   expect(createElementNS.mock.calls.every(([ns]) => ns === "http://www.w3.org/2000/svg")).toBe(true);
   expect(svg.attrs).toMatchObject({ viewBox: "0 0 24 24", stroke: "currentColor", "stroke-width": "2", "aria-hidden": "true", focusable: "false" });
   expect(svg.children.length).toBeGreaterThan(0);
@@ -53,7 +53,7 @@ it("resolves every HTML slot without replacing cached IDs or hidden classes", ()
     expect(slot.children[0]!.tag).toBe("svg");
   }
   expect(slots.find((s) => s.attrs.id === "send-queue")!.attrs.class).toContain("hidden");
-  expect(slots.find((s) => s.attrs.id === "send-plane")!.attrs.class).not.toContain("hidden");
+  expect(slots.find((s) => s.attrs.id === "send-arrow")!.attrs.class).not.toContain("hidden");
   const background = decodeURIComponent(setProperty.mock.lastCall![1]);
   expect(background).toContain('stroke="#737373"');
   expect(background).toContain('viewBox="0 0 24 24"');
