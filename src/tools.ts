@@ -226,11 +226,11 @@ export function normalizeCustomTools(
 }
 
 /** `~/.pier/tools/…` — install target, generated ubix config, ubix state. */
-export const toolsDir = (...parts: string[]): string => pierPath("tools", ...parts);
+const toolsDir = (...parts: string[]): string => pierPath("tools", ...parts);
 
 /** The one directory that goes on PATH: ubix installs into it, and everything
  *  Pier spawns inherits it. */
-export const toolsBin = (): string => toolsDir("bin");
+const toolsBin = (): string => toolsDir("bin");
 
 /**
  * First on PATH, once, at boot. First rather than last on purpose: a tool

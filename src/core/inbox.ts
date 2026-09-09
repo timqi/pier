@@ -14,7 +14,7 @@ import { pierPath } from "../paths.js";
 import { fileMarker, lostMarker, MAX_INBOUND_BYTES, safeName } from "./inbound-file.js";
 
 /** Where every inbound file lives; the attachment route allowlists this root. */
-export const INBOX_DIR = pierPath("inbox");
+const INBOX_DIR = pierPath("inbox");
 
 /**
  * Write one inbound file and return its absolute path. The timestamp-random

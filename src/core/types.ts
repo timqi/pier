@@ -490,7 +490,7 @@ export interface AgentFactory {
 export type ProviderAuthType = "api_key" | "oauth";
 // Wire-protocol names, not SDK types — but they are pi-ai's spellings, and a
 // non-Pi backend is bound to them by this seam.
-export const PROVIDER_APIS = [
+const PROVIDER_APIS = [
   "openai-completions",
   "openai-responses",
   "anthropic-messages",

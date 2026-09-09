@@ -164,7 +164,7 @@ export function startAutoUpdate(
   return () => clearInterval(timer);
 }
 
-export async function fetchLatestVersion(): Promise<string> {
+async function fetchLatestVersion(): Promise<string> {
   // Plain JSON: the abbreviated-packument content type npm uses for a whole
   // package is a 406 on this endpoint, which answers one version already.
   const res = await fetch(ENDPOINT, {

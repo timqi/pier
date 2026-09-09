@@ -17,7 +17,7 @@ import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 
 export const UNIT_NAME = "pier.service";
-export const UPDATE_UNIT_NAME = "pier-update.service";
+const UPDATE_UNIT_NAME = "pier-update.service";
 
 /** `~/.config/systemd/user/pier.service` — where a user unit belongs. */
 export const unitPath = (home = homedir()): string =>
@@ -176,7 +176,7 @@ ExecStopPost=systemctl --user start ${UNIT_NAME}
  * exists to protect the OS and sshd outside it. Written commented so the
  * operator tuning it can see what each line buys.
  */
-export function renderLimits(): string {
+function renderLimits(): string {
   return `[Service]
 # Soft ceiling: past this the kernel reclaims hard and lets the unit crawl
 # instead of killing anything. This is the one that should bite first.

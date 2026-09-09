@@ -16,7 +16,7 @@ const log = logger("drain");
 
 /** How long running turns may take before they are aborted. Generous: a turn
  *  can be a subagent fan-out, and an abort still persists the partial work. */
-export const DRAIN_DEADLINE_MS = 5 * 60_000;
+const DRAIN_DEADLINE_MS = 5 * 60_000;
 const POLL_MS = 1_000;
 /** Shared cleanup window after the deadline. All sessions use the same clock,
  *  so N hung seams still cost at most this long rather than N times as long. */

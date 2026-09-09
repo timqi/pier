@@ -25,7 +25,7 @@ export const dateTime = (value: number | null): string =>
 export const runDuration = (run: TaskRun): string =>
   run.startedAt === null ? "-" : fmtDuration((run.finishedAt ?? Date.now()) - run.startedAt);
 
-export const runLabel = (run: TaskRun): string =>
+const runLabel = (run: TaskRun): string =>
   run.state === "succeeded" && run.matched === false ? "No match" : run.state;
 
 /** One tint per outcome, so a list of runs reads by colour before by word.

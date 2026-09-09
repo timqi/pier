@@ -91,7 +91,7 @@ export function sourcesFrom(content: unknown[]): Source[] {
 }
 
 /** Only what the search itself returned, in the order it ranked them. */
-export function searchResultsFrom(content: unknown[]): SearchResult[] {
+function searchResultsFrom(content: unknown[]): SearchResult[] {
   const results = new Map<string, SearchResult>();
   for (const block of content) {
     if (!isObject(block) || block.type !== "web_search_tool_result") continue;
@@ -101,7 +101,7 @@ export function searchResultsFrom(content: unknown[]): SearchResult[] {
   return [...results.values()];
 }
 
-export function searchQueriesFrom(content: unknown[]): SearchQuery[] {
+function searchQueriesFrom(content: unknown[]): SearchQuery[] {
   const queries: SearchQuery[] = [];
   for (const block of content) {
     if (!isObject(block) || block.type !== "server_tool_use" || block.name !== "web_search") {

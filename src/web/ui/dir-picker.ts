@@ -198,7 +198,7 @@ const writer =
  * input and fires `onPick`, so an optimistic caller can mark itself dirty
  * without listening to input events.
  */
-export function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
+function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
   const button = btn(
     "Browse…",
     "flex-none cursor-pointer rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-600 hover:bg-neutral-100",

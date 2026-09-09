@@ -32,7 +32,7 @@ import {
 /** A form-submit button name: `cwdgo:<thread root>`. */
 export const CWD_SUBMIT_PREFIX = "cwdgo:";
 /** The form input's field name, the key `form_value` answers under. */
-export const CWD_FIELD = "cwd";
+const CWD_FIELD = "cwd";
 
 export interface LarkPanelDeps extends PanelDeps {
   api: Pick<LarkClient, "replyCard" | "patchCard" | "deleteMessage">;

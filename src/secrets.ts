@@ -201,7 +201,7 @@ function open(key: Buffer, sealed: string, aad: string): Buffer {
 
 /** The real vt CLI. Absent binary or denied approval both surface as the
  *  spawn/exit error — unlock() records it and the operator reads it. */
-export const vtCli: VtClient = {
+const vtCli: VtClient = {
   read: (record) => run("vt", ["read", record]),
   create: async (plaintext) => {
     const out = await run("vt", ["create"], plaintext);

@@ -165,7 +165,7 @@ async function openView(name: ConsoleName, arg: string | undefined, query: strin
   if (name === "tasks") syncAutomation(name, arg);
 }
 
-export const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
+const showTasks = (taskId?: string): void => showConsole("tasks", taskId);
 export const showRuns = (filters: Record<string, string> = {}, id?: string): void =>
   showConsole("runs", id, new URLSearchParams(filters).toString());
 export const showRun = (id: string): void => showRuns({}, id);
