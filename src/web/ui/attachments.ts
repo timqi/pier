@@ -20,6 +20,7 @@ const imageStage = $("#image-stage");
 const imageFull = $<HTMLImageElement>("#image-full");
 const imagePrev = $("#image-prev");
 const imageNext = $("#image-next");
+const imageClose = $("#image-close");
 
 /** The clicked thumbnail's gallery in document order. Read at open time rather
  *  than tracked: what is on screen *is* the gallery, so there is no second
@@ -35,7 +36,7 @@ function step(delta: number): void {
   imageFull.src = gallery[shown]!;
 }
 
-// --- double-tap zoom ---------------------------------------------------------------
+// --- zoom -------------------------------------------------------------------------
 
 const ZOOM = 2.5;
 /** The flag style.css keys the zoomed layout off is also the state — there is
@@ -45,7 +46,9 @@ const zoomed = (): boolean => imageStage.dataset.zoom !== undefined;
 /** Grow the image to a fixed multiple of its fitted size about the tapped
  *  point, and let the stage scroll: panning is then the platform's own (touch
  *  drag, wheel, scrollbars) rather than a drag handler of ours. `at` is a
- *  viewport point — the tap — which stays where it was under the growth. */
+ *  viewport point — the tap — which stays where it was under the growth.
+ *  Pinching is not an option to add here: the workbench turns page zoom off
+ *  (index.html, style.css, main.ts), so a tap is the whole gesture. */
 function zoom(on: boolean, at?: { x: number; y: number }): void {
   if (!on) {
     delete imageStage.dataset.zoom;
@@ -84,30 +87,18 @@ function showImage(clicked: HTMLImageElement): void {
   imageDialog.showModal();
 }
 
-// One tap closes (or leaves the zoom), two zoom about the tap — so the close
-// waits out the double-tap window rather than firing on its first half.
-const DOUBLE_MS = 260;
-let firstTap: number | undefined;
+// A tap on the image magnifies it and a second one fits it again — what the
+// zoom-in cursor has been promising; a tap on the scrim around it closes, as
+// does the ✕ (a phone has no Esc). This was a double-tap-to-zoom with a 260ms
+// window, which is shorter than two deliberate taps: on the surface the
+// gesture is for, "zoom" was read as "close" nearly every time.
 imageStage.onclick = (ev) => {
-  if (firstTap !== undefined) {
-    clearTimeout(firstTap);
-    firstTap = undefined;
-    zoom(!zoomed(), { x: ev.clientX, y: ev.clientY });
-    return;
-  }
-  firstTap = window.setTimeout(() => {
-    firstTap = undefined;
-    if (zoomed()) zoom(false);
-    else imageDialog.close();
-  }, DOUBLE_MS);
+  if (ev.target === imageFull) zoom(!zoomed(), { x: ev.clientX, y: ev.clientY });
+  else imageDialog.close();
 };
-// However it closed — tap, Esc, the backdrop — the next image opens fitted,
-// and a tap still inside its window must not close the one opened after it.
-imageDialog.onclose = () => {
-  clearTimeout(firstTap);
-  firstTap = undefined;
-  zoom(false);
-};
+imageClose.onclick = () => imageDialog.close();
+// However it closed — the ✕, Esc, the scrim — the next image opens fitted.
+imageDialog.onclose = () => zoom(false);
 // The arrows sit outside #image-stage, so paging never reaches the tap handler.
 imagePrev.onclick = () => step(-1);
 imageNext.onclick = () => step(1);

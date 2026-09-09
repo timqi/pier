@@ -300,9 +300,17 @@ per-turn Activity groups):
   strip (removable) above the composer; on send each file is uploaded to
   `POST /api/inbox` and its `[name](file:///…)` marker line joins the message
   text — so the text sent, rendered optimistically and echoed by the
-  `user-message` event are identical. User bubbles strip the marker lines and
-  render them through the same thumbnail/card pipeline as agent attachments
-  (`web/ui/attachments.ts`); images open in the lightbox.
+  `user-message` event are identical. The strip belongs to its session like the
+  draft text does: switching away and back finds it as it was (in memory, so
+  unlike the text it does not survive a reload). User bubbles strip the marker
+  lines and render them through the same thumbnail/card pipeline as agent
+  attachments (`web/ui/attachments.ts`); images open in the lightbox.
+- **Lightbox**: a click on the image magnifies it about that point and a second
+  one fits it again (the workbench itself never zooms, so the tap is the whole
+  gesture — there is no pinch to offer); the scrim beside it, the ✕ and Esc
+  close. ‹ › and ← / → page through the gallery the image was opened from — the
+  transcript or the pending strip, never across the two — and hide when it holds
+  only one image.
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
 

@@ -233,6 +233,10 @@ export function renderQueue(steering: string[], followUp: string[]): void {
 const MAX_FILES = 8;
 
 function renderFileStrip(): void {
+  // Empty is not a value, exactly as an empty draft is a removed key below.
+  const id = deps.sessionId();
+  if (id && pendingFiles.length) pendingBySession.set(id, pendingFiles);
+  else if (id) pendingBySession.delete(id);
   imageStrip.classList.toggle("hidden", pendingFiles.length === 0);
   imageStrip.classList.toggle("flex", pendingFiles.length > 0);
   imageStrip.replaceChildren(
@@ -301,6 +305,16 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
 const draftKey = (id: string): string => `pier.draft.${id}`;
 let draftVersion = 0;
 
+/** The other half of a draft: what is in the pending strip. Per session like
+ *  the text, but in memory — the bytes are base64, and a couple of pasted
+ *  screenshots are past what localStorage will hold. So an attachment staged
+ *  here survives switching sessions (it used to be dropped, which read as the
+ *  paste never having happened) but not a reload, and the draft text says so
+ *  by surviving both. Written from renderFileStrip: every mutation of
+ *  `pendingFiles` already goes through it, so there is one place to keep in
+ *  step instead of five. */
+const pendingBySession = new Map<string, PendingFile[]>();
+
 export function saveDraft(id = deps.sessionId(), text = input.value): void {
   if (!id) return;
   if (text) localStorage.setItem(draftKey(id), text);
@@ -311,7 +325,7 @@ export function restoreDraft(id: string): void {
   ++draftVersion;
   input.value = localStorage.getItem(draftKey(id)) ?? "";
   autosize();
-  pendingFiles = [];
+  pendingFiles = pendingBySession.get(id) ?? [];
   renderFileStrip();
 }
 

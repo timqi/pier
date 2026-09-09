@@ -219,13 +219,14 @@
     </div>
   </dialog>
 
-  <!-- Full-size view of a thumbnail; a single click (or Esc) closes, a double
-       one zooms about the point. The arrows page through the gallery it was
-       opened from, as do ← / →; they hide when there is only one image to look
-       at. The dialog fills the viewport rather than hugging the image, so the
-       arrows sit at the screen's edges and a tall shot and a wide one don't
-       move the control under your thumb; #image-stage is the box a zoomed
-       image scrolls inside (ui/attachments.ts). -->
+  <!-- Full-size view of a thumbnail; a click on the image zooms about the
+       point and a second one fits it again, a click beside it — or the ✕, or
+       Esc — closes. The arrows page through the gallery it was opened from, as
+       do ← / →; they hide when there is only one image to look at. The dialog
+       fills the viewport rather than hugging the image, so the controls sit at
+       the screen's edges and a tall shot and a wide one don't move the one
+       under your thumb; #image-stage is the box a zoomed image scrolls inside
+       (ui/attachments.ts). -->
   <!-- The size is written out, not left to `inset-0`: a dialog is `width:
        fit-content` in the UA sheet, and an inset pair does not stretch a box
        that already has a width — it sized itself to the image and sat in the
@@ -236,9 +237,14 @@
       <img id="image-full" alt="" class="max-h-[92dvh] max-w-[92vw] cursor-zoom-in rounded-xl object-contain" />
     </div>
     <!-- Siblings of the stage, not children of it: the stage is what scrolls
-         when zoomed, and an arrow inside it would scroll away with the image. -->
-    <button type="button" id="image-prev" aria-label="Previous image" class="lightbox-nav left-2"><span data-icon="ChevronLeft" class="h-6 w-6"></span></button>
-    <button type="button" id="image-next" aria-label="Next image" class="lightbox-nav right-2"><span data-icon="ChevronRight" class="h-6 w-6"></span></button>
+         when zoomed, and a control inside it would scroll away with the image.
+         .lightbox-btn is the round scrim button; where each one sits is a
+         utility beside it, so no two of them set the same property. -->
+    <button type="button" id="image-prev" aria-label="Previous image" class="lightbox-btn left-2 top-1/2 -translate-y-1/2"><span data-icon="ChevronLeft" class="h-6 w-6"></span></button>
+    <button type="button" id="image-next" aria-label="Next image" class="lightbox-btn right-2 top-1/2 -translate-y-1/2"><span data-icon="ChevronRight" class="h-6 w-6"></span></button>
+    <!-- The way out on a touch screen: tapping the image now zooms it, and the
+         scrim beside a fitted shot is a 4vw strip — not a thumb's target. -->
+    <button type="button" id="image-close" aria-label="Close" class="lightbox-btn right-2 top-2"><span data-icon="X" class="h-6 w-6"></span></button>
   </dialog>
 
   <!-- Text preview of an agent attachment — the Files view's code pane fills

@@ -168,7 +168,8 @@ html {
   /* Panning is all a touch may do to the document: `user-scalable=no`
      (index.html) is the same sentence for engines that honour it, and a
      workbench zoomed by a stray double-tap is a phone stuck off-centre. The
-     one place a gesture should magnify is the lightbox, below. */
+     one place magnifying is offered is the lightbox, and it is a tap on the
+     image rather than a pinch — the rules here leave no gesture to use. */
   touch-action: pan-x pan-y;
 }
 .text-\[9px\] { font-size: 0.5625rem; }
@@ -828,11 +829,13 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .pagehead {
     @apply flex min-h-12 flex-none flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap px-4 py-2;
   }
-  /* Lightbox paging arrows; the side comes from a `left-2` / `right-2` beside it. */
+  /* The lightbox's own controls — paging arrows and ✕; where each sits is a
+     utility beside it (`left-2 top-1/2 -translate-y-1/2`, `right-2 top-2`), so
+     placement never fights the class. */
   /* The scrim under these stays black in both themes, so the glyph on it has to
      stay white — which `text-white` no longer means once the palette flips. */
-  .lightbox-nav {
-    @apply absolute top-1/2 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white dark:text-neutral-950 hover:bg-black/70;
+  .lightbox-btn {
+    @apply absolute flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white dark:text-neutral-950 hover:bg-black/70;
   }
   /* Collapsible rows: hide native markers, rotate our chevron on open. */
   summary {

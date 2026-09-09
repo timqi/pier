@@ -2,7 +2,7 @@
 import {
   ChevronDown, ChevronLeft, ChevronRight, Clock, Ellipsis, LayoutDashboard,
   ListTodo, Menu, Plus, RotateCw, Search, Send, Settings, Square,
-  Undo2, createElement, type IconNode,
+  Undo2, X, createElement, type IconNode,
 } from "lucide";
 
 /** Labels belong to the control; SVGs never add a second accessible name. */
@@ -14,7 +14,7 @@ export const icon = (node: IconNode, cls = "h-3.5 w-3.5"): SVGElement =>
 export function initIcons(): void {
   const shell: Record<string, IconNode> = {
     ChevronLeft, ChevronRight, Clock, Ellipsis, LayoutDashboard, ListTodo,
-    Menu, Plus, RotateCw, Search, Send, Settings, Square, Undo2,
+    Menu, Plus, RotateCw, Search, Send, Settings, Square, Undo2, X,
   };
   for (const slot of document.querySelectorAll<HTMLElement>("[data-icon]")) {
     const node = shell[slot.dataset.icon!];

@@ -8,8 +8,10 @@ class Element {
   children: Element[] = [];
   onclick: (() => void | Promise<void>) | null = null;
   oninput: (() => void) | null = null;
+  onpaste: ((ev: unknown) => void) | null = null;
   classList = { toggle: vi.fn() };
   focus = vi.fn();
+  setAttribute = vi.fn();
   constructor(readonly text = "") {}
   append(...children: Element[]) { this.children.push(...children); }
   prepend(...children: Element[]) { this.children.unshift(...children); }
@@ -36,6 +38,7 @@ vi.mock("./chat.js", () => ({
   appendTurn: state.appendTurn, followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
 }));
 vi.mock("./attachments.js", () => ({ imageThumb: vi.fn() }));
+vi.mock("./icons.js", () => ({ icon: () => ({}) })); // lucide wants a real document
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
 
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -51,6 +54,12 @@ beforeEach(async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("confirm", () => true);
   vi.stubGlobal("ResizeObserver", class { observe() {} });
+  // A pasted screenshot: the reader hands back a data URL, synchronously here.
+  vi.stubGlobal("FileReader", class {
+    onload: (() => void) | null = null;
+    result = "data:image/png;base64,AAAA";
+    readAsDataURL() { this.onload?.(); }
+  });
   vi.stubGlobal("fetch", state.fetch);
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => drafts.get(key) ?? null,
@@ -318,5 +327,29 @@ describe("queue control failures", () => {
     await settled();
     expect(state.appendTurn).not.toHaveBeenCalled();
     expect(state.reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("pending attachments", () => {
+  const paste = (name: string): void => {
+    state.nodes.get("#input")!.onpaste!({
+      clipboardData: {
+        items: [{ kind: "file", getAsFile: () => ({ name, size: 4, type: "image/png" }) }],
+        getData: () => "",
+      },
+    });
+  };
+  const staged = (): number => state.nodes.get("#image-strip")!.children.length;
+
+  it("leaves a session's staged files where they were when it comes back", () => {
+    paste("shot.png");
+    paste("other.png");
+    expect(staged()).toBe(2);
+    select("b");
+    expect(staged()).toBe(0);
+    paste("b.png");
+    expect(staged()).toBe(1);
+    select("a");
+    expect(staged()).toBe(2);
   });
 });
