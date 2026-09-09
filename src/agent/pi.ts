@@ -93,8 +93,6 @@ const summaryOf = (s: SessionRecord): SessionSummary => ({
   ...(s.title ? { title: s.title } : {}),
 });
 
-type SessionInfos = SessionRecord[];
-
 /** Pi's bash tool has no default timeout, and nobody is watching a scheduled
  *  task. Below the default task-run timeout, so a stuck command comes back as a
  *  tool error instead of killing the run. */
@@ -509,7 +507,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
    *  every cold open. */
   private located = new Map<string, { path: string; cwd: string }>();
   /** Retained for LIST_TTL_MS; one workspace event has three asking surfaces. */
-  private listing?: { at: number; infos: Promise<SessionInfos> };
+  private listing?: { at: number; infos: Promise<SessionRecord[]> };
   private refreshQueue: Promise<void> = Promise.resolve();
   private builtinProviderIds?: Promise<Set<string>>;
 
@@ -839,7 +837,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
    *  evidence a session is gone, and callers read a miss as permission to start
    *  a replacement, so a miss earns a fresh scan. */
   private async locate(sessionId: string): Promise<SessionRecord | undefined> {
-    const find = (infos: SessionInfos) => infos.find((s) => s.id === sessionId);
+    const find = (infos: SessionRecord[]) => infos.find((s) => s.id === sessionId);
     const reused = this.listing;
     return find(await this.listed()) ??
       (reused && this.listing === reused ? find(await this.listed(true)) : undefined);
@@ -854,7 +852,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
    *  notices when that format moves under it. */
   private audited = false;
 
-  private listed(force = false): Promise<SessionInfos> {
+  private listed(force = false): Promise<SessionRecord[]> {
     const now = Date.now();
     if (!force && this.listing && now - this.listing.at < LIST_TTL_MS) return this.listing.infos;
     const infos = this.listings.scan().then((listed) => {
