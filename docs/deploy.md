@@ -198,10 +198,15 @@ Loopback bind; reach it over a tunnel, not a wider bind:
 - `ssh -L 3141:localhost:3141 server`
 - Tailscale, or Cloudflare Tunnel — no open port, TLS terminates outside.
 - A reverse proxy (Caddy, nginx): terminate TLS there, preserve the external
-  `Host` (or pass `X-Forwarded-Host`), pass `X-Forwarded-For`. Pier uses the
-  external host for write-origin checks and counts login failures per forwarded
-  client. The cookie is `Secure` when a loopback proxy reports
-  `X-Forwarded-Proto: https` (ignored from anywhere else).
+  `Host` (or pass `X-Forwarded-Host`), and **set** `X-Forwarded-For` to the
+  client — nginx `proxy_set_header X-Forwarded-For $remote_addr;`, Caddy by
+  default. A proxy that appends to the client's own header lets it pick its
+  throttle bucket; Pier reads the rightmost hop, the one the proxy wrote.
+  Pier uses the external host for write-origin checks and counts login
+  failures per forwarded client. The cookie is `Secure` when a loopback proxy
+  reports `X-Forwarded-Proto: https` (ignored from anywhere else).
+- `ssh -L` sends no such header, so every client through the tunnel shares one
+  throttle bucket.
 
 ## Backups
 

@@ -216,6 +216,26 @@ describe("login", () => {
     expect((await login(a, password, "10.0.0.10")).status).toBe(302);
   });
 
+  it("buckets a forwarded client on the hop the proxy appended", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const proxied = (forwarded: string, pw: string) =>
+      a.request("http://127.0.0.1:3141/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-for": forwarded,
+        },
+        body: new URLSearchParams({ password: pw, next: "/" }),
+      }, { incoming: { socket: { remoteAddress: "127.0.0.1", remotePort: 443, remoteFamily: "IPv4" } } });
+
+    // A client that sent its own X-Forwarded-For gets the proxy's hop appended;
+    // only that last one is the proxy's word, so only it may name the bucket.
+    for (let i = 0; i < 10; i++) expect((await proxied("1.2.3.4, 5.6.7.8", "wrong")).status).toBe(401);
+    expect((await proxied("5.6.7.8", password)).status).toBe(429);
+    expect((await proxied("1.2.3.4", password)).status).toBe(302);
+  });
+
   it("decides on the throttle and the size before it parses anything", async () => {
     const { store: s, password } = store();
     const a = app(s);
