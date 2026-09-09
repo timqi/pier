@@ -1,14 +1,8 @@
-// Every path the Console reaches on disk resolves here: the browse/read/mkdir
-// routes and the session attachments server.ts serves all ask the same
-// question, and asked it several different ways until this file existed.
-//
-// The boundary is the Console password, not a path: an owner past it picks a
-// session's cwd from anywhere under `$HOME`, so anything this process can read
-// is already reachable — which is why the session attachments route (server.ts)
-// takes any absolute file. What `root` confines is a *listing*, so a browse
-// cannot widen itself past the tree the view asked for: `path` resolves under
-// the `root` it was asked with, realpath on both ends, so neither `..` nor a
-// symlink steps outside. Only mkdir writes, and only a name.
+// Every path the Console reaches on disk resolves here. The boundary is the
+// Console password, not a path: an owner past it picks any cwd, so anything
+// this process can read is already reachable. `root` confines a *listing*, with
+// realpath on both ends so neither `..` nor a symlink steps outside. Only mkdir
+// writes, and only a name.
 
 import { mkdir, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -20,13 +14,11 @@ import { guarded } from "./route.js";
 
 const log = logger("web");
 
-/** What a browser is asked to hold at once — the same ceiling for a preview
- *  and for an attachment, because it is the reader's patience, not the route's. */
+/** The reader's patience, so one ceiling for a preview and an attachment. */
 export const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
-/** Types a browser may render as themselves. Everything else is sniffed for
- *  text, and bytes we can't vouch for download instead of rendering — that is
- *  how a file starts executing. */
+/** Everything else is sniffed for text; bytes we can't vouch for download
+ *  instead of rendering, which is how a file starts executing. */
 const RENDERABLE: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -39,9 +31,7 @@ const RENDERABLE: Record<string, string> = {
   ".pdf": "application/pdf",
 };
 
-/** The containment check, and the only way a path becomes a path this reads:
- *  `root` must be an absolute directory, and the returned target is `path`
- *  resolved inside it. Throws — the route wrapper turns that into the answer. */
+/** The containment check, and the only way a path becomes one this reads. */
 export async function scoped(root: string | undefined, path = ""): Promise<string> {
   if (!root || !isAbsolute(root)) throw new Error("not a directory this can read");
   const real = await realpath(root);
@@ -51,16 +41,13 @@ export async function scoped(root: string | undefined, path = ""): Promise<strin
   return target;
 }
 
-/** How bytes leave: the type they may be served as, and whether a browser may
- *  render them in place. `download` forces the attachment disposition — the
- *  chat's Download button, on a file it would otherwise show inline. */
+/** `download` forces the attachment disposition on a file otherwise shown inline. */
 export function fileHeaders(file: string, bytes: Buffer, download = false): Record<string, string> {
   const ext = extname(file).toLowerCase();
   const known = RENDERABLE[ext];
   const text = !known && !bytes.subarray(0, 8192).includes(0);
-  // An <img> renders its source whatever the disposition says, but a tab
-  // navigated straight at an SVG runs the script inside it — same origin, past
-  // the password. So an SVG keeps its type and loses only its own tab.
+  // A tab navigated straight at an SVG runs the script inside it, same
+  // origin, past the password; an <img> ignores the disposition anyway.
   const inline = !download && (text || (known !== undefined && ext !== ".svg"));
   return {
     "content-type": known ?? (text ? "text/plain; charset=utf-8" : "application/octet-stream"),
@@ -69,12 +56,8 @@ export function fileHeaders(file: string, bytes: Buffer, download = false): Reco
 }
 
 export function registerFsRoutes(app: Hono): void {
-  // One listing behind both trees: the Files view walks a project (`root`,
-  // which confines it and is the floor `parent` stops at), the cwd pickers
-  // walk from anywhere (no root, starting at home). Names and which are
-  // directories — never contents, and never `.git`, which is plumbing. What to
-  // leave out of the answer is the caller's business: one tree shows folders
-  // only, the other shows files too.
+  // The Files view walks a project (`root` confines it); the cwd pickers walk
+  // from anywhere. Never contents, and never `.git`.
   guarded(app, "GET", "/api/fs/ls", 404, async (c) => {
     c.header("cache-control", "no-store");
     const asked = c.req.query("path");
@@ -89,7 +72,6 @@ export function registerFsRoutes(app: Hono): void {
     return c.json({ path: dir, parent: dir === top || up === dir ? null : up, entries });
   });
 
-  // File bytes, read-only: the Files view's previews and whole-file reads.
   guarded(app, "GET", "/api/fs/file", 404, async (c) => {
     const file = await scoped(c.req.query("root"), c.req.query("path"));
     const handle = await open(file);
@@ -98,10 +80,8 @@ export function registerFsRoutes(app: Hono): void {
       const info = await handle.stat();
       if (!info.isFile()) throw new Error("not a file");
       if (info.size > MAX_FILE_BYTES) return c.json({ error: "file too large" }, 413);
-      // Size and mtime, not a digest: the view re-reads a file every time it is
-      // clicked again, and a validator the stat above already knows costs
-      // nothing to offer. `no-cache` keeps the answer conditional, so an edited
-      // file is never shown from a browser cache.
+      // `no-cache` keeps the answer conditional, so an edited file is never
+      // shown from a browser cache.
       const tag = `"${info.size.toString(16)}-${info.mtime.getTime().toString(16)}"`;
       const validators = {
         etag: tag,
@@ -109,14 +89,13 @@ export function registerFsRoutes(app: Hono): void {
         "cache-control": "private, no-cache",
       };
       if (c.req.header("if-none-match") === tag) return c.body(null, 304, validators);
-      // Sniff and stream the same open file, so a replacement cannot bypass
-      // the size check or make the headers describe different bytes.
+      // The same open file, so a replacement cannot make the headers describe
+      // different bytes.
       const head = Buffer.alloc(Math.min(8192, info.size));
       await handle.read(head, 0, head.length, 0);
       const bytes = handle.createReadStream({ start: 0 });
       streaming = true;
-      // Past the headers a failure can only truncate the body, so this is the
-      // one place it can still be said at all (§5b).
+      // Past the headers a failure can only truncate the body (§5b).
       bytes.on("error", (err) => log.warn(`serving ${file} stopped mid-stream`, err));
       return c.body(Readable.toWeb(bytes) as ReadableStream, 200, {
         ...fileHeaders(file, head),
@@ -127,8 +106,7 @@ export function registerFsRoutes(app: Hono): void {
     }
   });
 
-  // Create a folder while picking one — a new project usually needs a new
-  // directory. A name, never a path: traversal is rejected, not normalized.
+  // A name, never a path: traversal is rejected, not normalized.
   guarded(app, "POST", "/api/fs/mkdir", 400, async (c) => {
     const body = await c.req.json().catch(() => null);
     const parent = typeof body?.path === "string" ? body.path : "";

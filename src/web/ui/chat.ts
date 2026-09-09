@@ -1,7 +1,5 @@
 // The turns pane: chat rows, markdown, streaming text, system-input rows and
-// inline user-message edit. main.ts owns session state and the event stream;
-// turn-activity.ts owns the Activity groups and background-run cards; this
-// module only renders into #turns through the functions it exports.
+// inline user-message edit. Renders into #turns only.
 
 import { ArrowUpRight, CircleQuestionMark, CornerDownLeft, Pencil, type IconNode } from "lucide";
 import { icon } from "./icons.js";
@@ -65,37 +63,23 @@ export function initChat(d: ChatDeps): void {
 }
 
 // --- scrolling -------------------------------------------------------------------
-// Stick to the bottom only when the user is already there (avibe behavior);
-// force on own sends so the conversation follows the user's action.
 
-/** A whole snapshot is going in: every row and every activity step would
- *  otherwise measure the pane, and reading scrollHeight flushes layout for the
- *  entire transcript — a session with a thousand steps paid that a thousand
- *  times, each flush over a bigger pane. One scroll at the end says the same
- *  thing. */
+/** A whole snapshot is going in: reading scrollHeight per row flushes layout
+ *  for the entire transcript, a thousand times over a growing pane. */
 let bulk = false;
 
 const atBottom = (): boolean =>
   turnsPane.scrollHeight - turnsPane.scrollTop - turnsPane.clientHeight < 80;
 
-/** Tail follow. Being at the bottom is a *state*, not a per-append test, and
- *  it is re-applied from what the pane *does* rather than from the handful of
- *  call sites that remember to ask. Both halves are needed: the pane shrinks
- *  under the queue panel, the composer and the keyboard without a scroll event
- *  to notice it, and it grows after the appends are over — a finished turn is
- *  re-rendered with copy buttons, attachment cards and next-step buttons, an
- *  activity group is sealed into the row, code is highlighted — none of which
- *  goes through scrollBottom, which is why the last lines stayed below the
- *  fold. Released when the user scrolls up, and re-armed when a scroll of
- *  theirs reaches the end again. */
+/** Tail follow is a state re-applied from what the pane does, not a per-append
+ *  test: the pane shrinks under the keyboard and grows after appends (footers,
+ *  buttons, highlighting) with no call site to ask. Released when the user
+ *  scrolls up, re-armed when their scroll reaches the end. */
 let follow = true;
 
-/** Where the pane was at the previous scroll event, so a *direction* can be
- *  told from a position: a pin writes scrollTop too, and by the time that
- *  event is delivered the content it aimed at has usually grown another line —
- *  a finished reply gains its footer and next-step buttons, ~100px. Judging
- *  every scroll event by the bottom alone read that growth as "the user left",
- *  so the tail died on the first completed turn and never came back. */
+/** For telling a direction from a position: a pin writes scrollTop too, and by
+ *  the time that event lands the content has grown (~100px of footer and
+ *  buttons), which judged by the bottom alone reads as "the user left". */
 let lastTop = 0;
 
 turnsPane.addEventListener("scroll", () => {
@@ -146,10 +130,8 @@ export function scrollBottom(force = false): void {
  *  too because reduced motion draws the mark without an animation to end. */
 const REVEAL_MS = 1200;
 
-/** Bring the turn stamped `at` into view and light it for a moment: how a
- *  search hit lands (ui/palette.ts). Rows carry the stamp the hit was indexed
- *  by — a user turn's own, a reply's completion (setRowTime). `false` when no
- *  row has it: compacted away, edited out, or trimmed off the top of the pane. */
+/** How a search hit lands (ui/palette.ts). `false` when no row has the stamp:
+ *  compacted away, edited out, or trimmed off the top. */
 export function revealTurn(role: "user" | "assistant", at: number): boolean {
   const row = turnsPane.querySelector<HTMLElement>(`[data-kind="${role}"][data-at="${at}"]`);
   if (!row) return false;
@@ -181,11 +163,7 @@ function reveal(row: HTMLElement): void {
 // --- chat bubbles ------------------------------------------------------------------
 // Direction identifies the speaker; system and error rows keep their status tint.
 
-/** Rows the pane keeps. Nothing ever left it: a workbench open for a day held
- *  every turn, every replayed activity group and every highlighted code block
- *  of every session it visited. The transcript itself lives on the server, and
- *  the tail is what a chat is read from — so the oldest rows leave, and a
- *  reload (or an edit's rewind) draws the tail again from the snapshot. */
+/** The transcript lives on the server; a reload draws the tail again. */
 const MAX_ROWS = 500;
 
 /** User turns the trim dropped, so the Nth user row *on screen* still names the
@@ -243,22 +221,13 @@ export function appendTurn(
   row.dataset.kind = kind;
   if (grouped) row.dataset.grouped = "";
   if (!bulk) row.dataset.enter = ""; // History replay must not animate every old message.
-  // A user message may end in inbound-file markers (core/inbound-file.ts):
-  // the typed text stays a plain bubble, the files render as thumbs/cards
-  // below.
   const files = kind === "user" ? splitInboundFiles(text) : null;
   const body = files?.text ?? text;
-  // An IM turn carries core/identity.ts's speaker header as its first line.
-  // It is written for the model, and read as body text it buries the message
-  // under a raw platform id — so it becomes the row's caption instead.
+  // The speaker header (core/identity.ts) is written for the model; as body
+  // text it buries the message under a raw platform id.
   const speaker = kind === "user" ? splitSpeaker(body) : null;
   const named = speaker?.id || speaker?.when ? speaker : null;
-  // A Console turn is headed `operator<web>` so a shared session can tell it
-  // from the IM speakers — but here the operator is the reader, and their own
-  // name over every message they typed is noise. The header's clock goes with
-  // it: `stamp` is the row's own, on the same "only where it changed
-  // something" rule identity.ts wrote the header by, and two clocks on one
-  // line spelt two ways is worse than either.
+  // Here the operator is the reader; their own name over every message is noise.
   const caption = named?.id && named.id !== "web" ? named : null;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
   // Editing resends the raw text, markers and header included — stripping them
@@ -320,11 +289,9 @@ const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> 
   decision: [CircleQuestionMark, "decision needed", "text-amber-700"],
 };
 
-/** Every task text (tasks/callbacks.ts, messages.ts, groups.ts, agent.ts) is a
- *  block of `Key: value` lines naming the run, a blank line, then the message.
- *  The head row already says which run, so the block is not drawn; only a
- *  card with no source of its own (a batch, a group) borrows its first line
- *  as a caption. The text itself is untouched — it is what the model saw. */
+/** Every task text opens with `Key: value` lines naming the run, which the
+ *  head row already says; only a card with no source of its own borrows the
+ *  first line as a caption. */
 function splitMetaBlock(text: string): [meta: string | null, body: string] {
   const at = text.indexOf("\n\n");
   if (at < 0) return [null, text];
@@ -341,10 +308,6 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const row = runCard(state ? STATE_STYLE[state].edge : kindKey === "decision" ? "border-l-amber-400" : "border-l-cyan-500");
   row.dataset.kind = "system";
   const [meta, body] = splitMetaBlock(text);
-  // What produced it, not just which run did: the task's own name, the model
-  // and the effort, all riding in the origin (core/types.ts) so the card never
-  // has to fetch a run to say what it is. A callback also says how the run
-  // ended, in the run card's own colours, so the two agree at a glance.
   const head = runHead({
     glyph: state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`),
     label: state ? `${label} \u00b7 ${state}` : label,
@@ -363,9 +326,6 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
 }
 
 // --- edit user message ------------------------------------------------------------
-// Pencil on a user row → inline textarea; Enter rewinds the transcript to just
-// before that message server-side and re-sends the edited text, so the old
-// message stops polluting the context. Later turns are dropped with it.
 
 let cancelEdit: (() => void) | null = null;
 const isLatestUser = (row: HTMLElement): boolean =>
@@ -444,16 +404,12 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   lastStampAt = previousTime === undefined ? null : Number(previousTime);
   const separator = row.previousElementSibling as HTMLElement | null;
   if (separator?.dataset.kind === "time") separator.remove();
-  // Drawn before the round trip: reloading the snapshot instead blanked the
-  // pane for the length of a fetch, so the transcript flashed away and came
-  // back (principle 7). A rewind is exactly "this row and everything under it
-  // leaves", and the re-sent text is an ordinary optimistic user turn.
+  // Drawn before the round trip (principle 7): a rewind is exactly "this row
+  // and everything under it leaves".
   while (row.nextElementSibling) row.nextElementSibling.remove();
   row.remove();
   deps.ownTurn(text);
-  // Timestamped like the composer's optimistic turn: the event this row
-  // reconciles never draws a second one, so a row without it would have no
-  // clock until the next reload.
+  // The reconciling event never draws a second row, so this one needs its clock.
   appendTurn("user", text, false, Date.now());
   scrollBottom(true);
   const res = await sendJson(`/api/sessions/${id}/turns/${index}/edit`, { text });
@@ -467,8 +423,6 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
 }
 
 // --- when things happened ---------------------------------------------------------
-// Clocks separate conversations after a gap; precise message times live in the
-// row's gutter on hover so the reading bubbles carry only their content.
 
 /** A new day, or this much silence, is what makes the clock worth a line. */
 const STAMP_GAP_MS = 10 * 60_000;
@@ -491,11 +445,8 @@ function paintTimes(): void {
 const sameDay = (a: number, b: number): boolean =>
   new Date(a).toDateString() === new Date(b).toDateString();
 
-/** Does this row owe a clock? Only user rows ask: an agent turn happens
- *  *because* of the message above it, so its own time restates one already on
- *  screen, and the last reply carries the reading worth copying anyway. The
- *  first row of a transcript always gets one — "when did this start" is the
- *  question a pane you just opened is asking. */
+/** Only user rows ask: an agent turn's time restates the one above it. The
+ *  first row always gets one. */
 function stampDue(at: number): boolean {
   const prev = lastStampAt;
   lastStampAt = at;
@@ -506,10 +457,8 @@ function setReplyStamp(node: HTMLElement, meta?: TurnMeta): void {
   if (meta) setRowTime(node.parentElement ?? node, meta.completedAt);
 }
 
-/** When this row happened. Drawn beside the bubble on hover (style.css): a
- *  native `title` floats an opaque box over the message under it, which is the
- *  one thing a reader hovering a transcript is trying to read. Only the clock
- *  is shown — the day is on the separator line above it. */
+/** Beside the bubble on hover: a native `title` floats an opaque box over the
+ *  message under it. Only the clock; the day is on the separator above. */
 function setRowTime(row: HTMLElement, at: number): void {
   row.dataset.at = String(at);
   row.dataset.time = stampTime(at).slice(11);
@@ -533,9 +482,8 @@ function addCodeCopy(root: HTMLElement): void {
   }
 }
 
-/** One markdown fragment, sanitized, in a detached box the caller moves into
- *  place. Attachment links are rewritten to the session's files route first:
- *  the sanitizer drops `file:` URLs (rightly), so they'd vanish otherwise. */
+/** Attachment links are rewritten to the files route first: the sanitizer
+ *  drops `file:` URLs. */
 function mdBox(raw: string): HTMLElement {
   const id = deps.sessionId();
   const box = h("div", "");
@@ -556,10 +504,8 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   renderAttachments(node);
 }
 
-/** An assistant turn: markdown bubble, hover meta, and — for the turn that
- *  just ended or the transcript's last assistant turn on replay (`offer`) —
- *  next-step buttons. A mid-turn text block or an older history turn never
- *  offers them: the run has moved on. */
+/** `offer`: next-step buttons only on the turn that just ended or the last
+ *  one on replay; an older turn's run has moved on. */
 function renderAssistant(
   node: HTMLElement,
   raw: string,
@@ -567,9 +513,7 @@ function renderAssistant(
   offer = false,
 ): HTMLElement {
   const { text, suggestions } = splitReply(raw);
-  // A deliberate non-answer still happened, and an empty bubble reads as a
-  // bug. IM surfaces post nothing at all; the workbench says so instead, with
-  // the reason the agent gave, because this is the view the operator debugs in.
+  // An empty bubble reads as a bug; this is the view the operator debugs in.
   if (isSilentReply({ text, suggestions })) renderSilence(node, silentReason(raw));
   else renderMarkdown(node, text);
   if (offer) {
@@ -601,25 +545,11 @@ let streamDirty = false;
 let streamStable = 0;
 let streamNodes = 0;
 
-/**
- * Render what has arrived so far as markdown, re-parsing only the tail past
- * the last closed block boundary — the blocks before it keep the DOM they were
- * rendered into once. Re-rendering the *whole* block every tick made a turn
- * cost O(N²): a long reply passes the paint budget somewhere in its middle and
- * from there the text lags the stream by seconds, which is the one thing a
- * stream must not do.
- *
- * Everything either expensive or stateful still waits for the final paint.
- * Highlighting is the expensive one: it re-tokenizes every fence it is handed
- * and each repaint throws the result away — a 40KB turn measured ~2.9s of hljs
- * against ~0.2s of parsing, i.e. the streaming cost was almost entirely colour
- * nobody had time to read. Copy buttons would be recreated mid-click and
- * attachment cards would refetch their bytes, so they wait too.
- *
- * The suggestions block is stripped from the tail — the only place it can be —
- * so a half-typed `[label]` row doesn't flash as body text before it becomes
- * buttons.
- */
+/** Re-parses only the tail past the last closed block: the whole block every
+ *  tick is O(N²) and lags the stream. Highlighting (a 40KB turn: ~2.9s of hljs
+ *  vs ~0.2s of parsing), copy buttons and attachment cards wait for the final
+ *  paint. The suggestions block is stripped so a half-typed `[label]` row does
+ *  not flash as body text. */
 function paintStreamText(node: HTMLElement): void {
   const raw = node.dataset.raw ?? "";
   while (node.childNodes.length > streamNodes) node.lastChild!.remove();
@@ -721,9 +651,7 @@ export function resetChat(): void {
   resetSuggestions();
 }
 
-/** The pane between selecting a session and its snapshot arriving. An empty
- *  pane there is indistinguishable from an empty session — and a long
- *  transcript keeps it empty long enough to look broken (principle 5b). */
+/** An empty pane while the snapshot loads is indistinguishable from an empty session (§5b). */
 export function chatLoading(on: boolean): void {
   if (!on) {
     turnsPane.querySelector('[data-kind="loading"]')?.remove();
@@ -746,9 +674,8 @@ export function renderSnapshot(
   backgroundRuns: BackgroundRun[],
 ): void {
   chatLoading(false);
-  // Detached run cards are placed where the run entered the conversation, not
-  // at the end of the transcript: a reload must not sweep every card a session
-  // ever launched to the bottom, below turns that came after it.
+  // Run cards are placed where the run entered the conversation, so a reload
+  // does not sweep them all to the bottom.
   const unplacedRuns = new Map(backgroundRuns.map((run) => [run.runId, run]));
   // A card belongs to the turn that was running when its run was queued: the
   // first turn to finish at or after that moment. Same process, same clock.
@@ -773,17 +700,12 @@ export function renderSnapshot(
       const steps = t.steps;
       if (steps?.length) {
         replayActivity(steps, t.meta?.durationMs, live, i);
-        // Placed here, between the steps and the answer, because that is where
-        // the live stream put the card when the run was queued. Anchoring on
-        // the callback instead moved every card down to the end of the
-        // conversation on the next reload.
+        // Between the steps and the answer: where the live stream put the card.
         if (t.meta) placeRuns(queuedBy(t.meta.completedAt));
       }
       if (!t.text) continue;
       if (t.role === "system" && t.origin) {
-        // Launched elsewhere (cron, another session, an IM turn): the callback
-        // that delivered it is the earliest place it can be shown. A batched one
-        // carries every run id it delivers.
+        // Launched elsewhere: the callback is the earliest place it can be shown.
         placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
         appendSystemInput(t.text, t.origin);
         continue;

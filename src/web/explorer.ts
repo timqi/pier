@@ -1,7 +1,5 @@
-// What git knows about a project directory, for the Console's Files view: the
-// refs, commits and worktrees its pickers offer, and the diffs it tones into a
-// file. Every route here runs git and nothing else — reading the directory and
-// the files themselves is web/fs.ts, which also owns the scoping both share.
+// What git knows about a project directory, for the Files view. Every route
+// runs git and nothing else; reading files is web/fs.ts.
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -13,17 +11,15 @@ const run = promisify(execFile);
 
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
-/** A ref never starts with `-`: execFile blocks the shell, this blocks the
- *  argument parser (`--output=…` is a write). Git validates the rest. */
+/** execFile blocks the shell; this blocks the argument parser (`--output=…` is a write). */
 const REF_RE = /^[^-\s][^\s]*$/;
 
-/** git in `root`, output capped — a diff is display data, not an archive. */
+/** Output capped: a diff is display data, not an archive. */
 const git = async (root: string, ...args: string[]): Promise<string> =>
   (await run("git", ["-C", root, ...args], { maxBuffer: MAX_DIFF_BYTES })).stdout;
 
 export function registerExplorerRoutes(app: Hono): void {
-  // Git refs for the diff pickers: current branch, branches+tags, recent
-  // commits. Not a repo → { branch: null }, which the UI renders as "no git".
+  // Not a repo → { branch: null }, which the UI renders as "no git".
   guarded(app, "GET", "/api/explorer/git", 404, async (c) => {
     c.header("cache-control", "no-store");
     const root = await scoped(c.req.query("root"));
@@ -34,19 +30,14 @@ export function registerExplorerRoutes(app: Hono): void {
       // not a repo, or no commits yet
       return c.json({ branch: null, refs: [], commits: [], worktrees: [] });
     }
-    // Three reads of the same repository, none of which is an argument to
-    // another: one wait, not three. The rev-parse above stays alone — it is
-    // the guard that decides whether these three are asked at all.
     const [worktreeList, refList, commitLog] = await Promise.all([
       git(root, "worktree", "list", "--porcelain"),
       git(root, "for-each-ref", "--format=%(refname:short)\t%(subject)", "refs/heads", "refs/tags"),
       // Unit/record separators, because a body is multi-line by nature.
       git(root, "log", "-20", "--format=%h\u001f%at\u001f%an\u001f%ae\u001f%s\u001f%b\u001e"),
     ]);
-    // Every checkout of this repository, from git rather than from the
-    // sessions that happen to live in one: a worktree created ten seconds ago
-    // has no session in it yet, and that is exactly when its files are worth
-    // opening. Detached heads have no `branch` line, so the path stands alone.
+    // From git, not from sessions: a worktree created ten seconds ago has no
+    // session yet. Detached heads have no `branch` line.
     const worktrees = worktreeList
       .split("\n\n")
       .map((block) => {
@@ -73,9 +64,8 @@ export function registerExplorerRoutes(app: Hono): void {
     return c.json({ branch, refs, commits, worktrees });
   });
 
-  // One endpoint, two shapes: without `file` the changed-file list
-  // (name-status), with it that file's unified diff. `head` empty or absent
-  // means the working tree.
+  // Without `file` the changed-file list, with it that file's diff. `head`
+  // empty means the working tree.
   guarded(app, "GET", "/api/explorer/diff", 404, async (c) => {
     c.header("cache-control", "no-store");
     const root = await scoped(c.req.query("root"));
@@ -84,8 +74,7 @@ export function registerExplorerRoutes(app: Hono): void {
     if (!REF_RE.test(base) || (head !== "" && !REF_RE.test(head)))
       return c.json({ error: "invalid ref" }, 400);
     const range = head ? [base, head] : [base];
-    // Context radius for per-file diffs — the UI asks for a huge one to render
-    // the whole file with changes toned inline, not a bare patch.
+    // The UI asks for a huge radius to render the whole file with changes toned inline.
     const context = Math.min(99_999, Math.max(0, Math.trunc(Number(c.req.query("context"))) || 0));
     const file = c.req.query("file");
     if (file === undefined) {

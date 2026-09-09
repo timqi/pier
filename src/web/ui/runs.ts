@@ -1,8 +1,5 @@
-// Console → Runs: every execution across tasks — the filtered, keyset-paged
-// list and, one level in, a run. Filtering and paging are the task API's
-// (`/api/task-runs`); the run detail and its controls are task-runs.ts's,
-// shared with the task page. This file owns the filter set, which *is* the
-// route's query string: every change navigates, so Back walks filters too.
+// Console → Runs: the filtered, keyset-paged list. The filter set *is* the
+// route's query string, so Back walks filters too.
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
 import type { RunPage, TaskDefinition } from "../../tasks/types.js";

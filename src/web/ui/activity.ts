@@ -1,8 +1,5 @@
-// Console → Activity: what is happening right now, and what happened in the
-// last day — the session table and the directed graph of task runs, drawn from
-// one /api/activity snapshot. Its one reason to exist is the picture: which
-// run invoked which, which callback went where, and which agent is waiting on
-// an answer, none of which any single session's timeline can show.
+// Console → Activity: the session table and the directed graph of task runs,
+// from one /api/activity snapshot — the picture no single session's timeline can show.
 
 import { readableTitle } from "../../core/identity.js";
 import type { SessionState } from "../../core/types.js";
@@ -36,17 +33,8 @@ const svg = (name: string, attrs: Record<string, string> = {}): SVGElement => {
 const elapsed = (since: number | null): string =>
   since === null ? "-" : fmtDuration(Date.now() - since);
 
-/**
- * The dependency graph is the one surface that cannot inherit the theme.
- * Everywhere else a colour is a Tailwind utility resolving to a CSS variable,
- * which style.css swaps wholesale in dark; here the colours are SVG
- * presentation attributes, and `var()` in one of those is not something every
- * engine resolves. So the graph carries both palettes and picks at draw time —
- * `pier:theme` (theme.ts) is what makes it draw again.
- *
- * Per-kind card chrome; a session's state overrides it (green = streaming,
- * muted = idle) so the graph answers "who is busy" at a glance.
- */
+/** SVG presentation attributes cannot take `var()` in every engine, so the
+ *  graph carries both palettes and picks at draw time (`pier:theme`). */
 interface Card { fill: string; stroke: string; text: string; dash?: string }
 interface Palette {
   edge: string;
@@ -93,10 +81,8 @@ export function createActivityView(
   let tab: "sessions" | "dependencies" = "sessions";
   let scope: "active" | "recent" = "active";
   let snapshot: ActivitySnapshot = { sessions: [], runs: [], messages: [] };
-  /** The last payload drawn, so an event that changed nothing here draws
-   *  nothing: a redraw threw away the table's scroll position, and a
-   *  replaceChildren() landing between mousedown and mouseup swallows the
-   *  click that was already happening. Cleared wherever the pane is emptied. */
+  /** A redraw throws away the scroll position, and one landing between
+   *  mousedown and mouseup swallows the click. */
   let drawn = "";
 
   const load = coalesce(async () => {

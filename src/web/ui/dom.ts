@@ -42,17 +42,12 @@ export function h(tag: string, cls: string, ...children: (Node | string)[]): HTM
 /** Last path segment — how every surface names a cwd or a file. */
 export const basename = (p: string): string => p.split("/").filter(Boolean).pop() ?? p;
 
-/** A session with no title has had no first message yet — the prompt is what
- *  names it — so what identifies it is where it opens. Shared so the header
- *  and Activity spell it the same way, and so the header can say it while a
- *  session is still being created: the label then stands unchanged until the
- *  first prompt replaces it. */
+/** A session with no title has had no first message yet; the header and
+ *  Activity must spell it the same way. */
 export const untitled = (cwd: string): string => `New session in ${basename(cwd)}`;
 
-/** Local wall clock, sortable and unambiguous: `2026-08-30 19:41:07`. The one
- *  full timestamp — the transcript's last reply and the session info panel are
- *  the same fact on two surfaces, so they may not spell it two ways. Written
- *  out rather than left to a locale, which decides day/month order itself. */
+/** `2026-08-30 19:41:07`: written out rather than left to a locale, which
+ *  decides day/month order itself. */
 export function stampTime(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -99,14 +94,7 @@ export function consoleView(
   };
 }
 
-/**
- * A line of prose with inline markup — `code`, **bold**, [links](url).
- *
- * Setup walkthroughs are *content*, and building them out of `h()` calls and
- * `append()` costs roughly five lines per sentence while making the wording
- * hard to read in the source. `marked` and DOMPurify are already in the bundle
- * for the chat transcript, so prose can just be prose.
- */
+/** `marked` and DOMPurify are already in the bundle, so prose can be prose. */
 export function prose(markdown: string): HTMLElement {
   const el = h("span", "help");
   el.innerHTML = DOMPurify.sanitize(marked.parseInline(markdown, { async: false }));
@@ -114,10 +102,8 @@ export function prose(markdown: string): HTMLElement {
   return el;
 }
 
-/** Every link in rendered markdown leaves in a new tab. The page is a live
- *  session — an in-tab navigation drops the composer draft and the event
- *  stream — so a link the agent wrote is never allowed to take the tab. In-app
- *  hash routes are the exception: those *are* this page. */
+/** An in-tab navigation drops the composer draft and the event stream, so a
+ *  link the agent wrote never takes the tab. Hash routes *are* this page. */
 export function externalLinks(root: HTMLElement): void {
   for (const a of root.querySelectorAll("a")) {
     if ((a.getAttribute("href") ?? "").startsWith("#")) continue;

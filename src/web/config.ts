@@ -1,8 +1,5 @@
-// The agent files a scope is configured by — Pi's own config, skills and
-// extensions — read and written through the ConfigStore, never as paths. A
-// scope is "global" or a project cwd Pi already knows, which is why this is
-// the one filesystem-shaped surface that does not go through web/fs.ts: it
-// never takes a path from the browser at all.
+// The agent files a scope is configured by, through the ConfigStore. Not via
+// web/fs.ts: a scope is "global" or a cwd Pi already knows, never a browser path.
 
 import type { Hono } from "hono";
 import type { AgentFactory, ConfigScope, ConfigStore } from "../core/types.js";
@@ -11,8 +8,7 @@ import { guarded } from "./route.js";
 export interface ConfigRouteDeps {
   factory: AgentFactory;
   config: ConfigStore;
-  /** An agent file is read when a session opens, so a live session still has
-   *  the old one: server.ts recycles the idle ones after every save. */
+  /** An agent file is read when a session opens; idle ones are recycled after a save. */
   onConfigWritten?: () => void;
 }
 
@@ -20,8 +16,7 @@ export function registerConfigRoutes(
   app: Hono,
   { factory, config, onConfigWritten }: ConfigRouteDeps,
 ): void {
-  // Scope comes from the client as "global" or a project cwd; only cwds Pi
-  // already knows (the session list) are accepted — never an arbitrary path.
+  // Only cwds Pi already knows are accepted — never an arbitrary path.
   const parseScope = async (raw: string | undefined): Promise<ConfigScope | null> => {
     if (!raw || raw === "global") return { kind: "global" };
     const known = await factory.list();

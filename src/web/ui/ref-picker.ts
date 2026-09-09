@@ -1,9 +1,5 @@
-// The one dialog that turns a git question into a diff: pick the two ends,
-// get "base ↔ to" back. Two modes cover everything git can name — compare any
-// two points (a point is the working tree, HEAD, a branch tip, a tag or a raw
-// commit), or one commit against its parent (the `c~1 ↔ c` shortcut). Every
-// row carries its commit subject, with the full message as a hover hint.
-// Picks apply live; the panel closes like any other (outside click, Esc).
+// The dialog that turns a git question into a diff: compare any two points, or
+// one commit against its parent.
 
 import { Check, RotateCcw } from "lucide";
 import { icon } from "./icons.js";

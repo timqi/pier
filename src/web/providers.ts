@@ -5,10 +5,8 @@ import { isProviderApi, MODEL_EFFORTS, validateProviderSetup } from "../core/typ
 import type { ModelCapability, ModelEffort, ProviderInfo, ProviderManager, ProviderSetup } from "../core/types.js";
 import { ProviderFlows } from "./provider-flows.js";
 
-/** Unknown JSON into a trimmed, validated ProviderSetup. Shape lives here;
- *  the rules (id charset, endpoint safety, model limits) are the shared
- *  validateProviderSetup in core — web/ cannot import agent/ to reuse its
- *  copy, and must not re-implement them. */
+/** Shape here; the rules are core's validateProviderSetup, since web/ cannot
+ *  import agent/ and must not re-implement them. */
 function setupFrom(raw: unknown): ProviderSetup | null {
   if (typeof raw !== "object" || raw === null) return null;
   const input = raw as Record<string, unknown>;
@@ -47,9 +45,7 @@ function setupFrom(raw: unknown): ProviderSetup | null {
 export function registerProviderRoutes(
   app: Hono,
   providers: ProviderManager,
-  /** A session picks its providers up when it opens, so one that is already
-   *  live cannot use what was just configured: server.ts recycles the idle
-   *  ones after every change of credentials or structure. */
+  /** A session picks its providers up when it opens; idle ones are recycled. */
   onProvidersChanged: () => void = () => {},
 ): void {
   const flows = new ProviderFlows(providers);
@@ -142,10 +138,8 @@ export function registerProviderRoutes(
     }
   });
 
-  // A probe, so nothing is written and nothing is recycled. 200 either way:
-  // "the key is revoked" is a successful answer to "does this work", and only
-  // a request that could not be made at all is a 400 — including one that
-  // names no model, because nothing here picks one for you.
+  // 200 either way: "the key is revoked" is a successful answer to "does this
+  // work". Only a request that could not be made is a 400.
   app.post("/api/providers/:provider/check", async (c) => {
     const body = await c.req.json().catch(() => null) as { model?: unknown } | null;
     const model = typeof body?.model === "string" ? body.model.trim() : "";

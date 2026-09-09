@@ -1,22 +1,8 @@
-// The boundary in front of every HTTP surface: one shared password.
-//
-// Single-account on purpose. Pier has one workspace, so there is nobody to
-// tell apart — an internet-facing deployment needs a *boundary*, not
-// identities. Multiple people using it share the page, and share the password.
-//
-// Nothing to configure before first run: the store generates a password on an
-// empty database, keeps only its scrypt hash, and prints the plaintext once to
-// the log. There is no window where the port is open and unclaimed — the
-// password exists before the listener does — and no env var for an operator to
-// get wrong. Forgot it? Delete the row and restart; a new one is printed.
-//
-// The cookie is "<id>.<token>", and the database keeps the token's SHA-256 —
-// one row per signed-in browser. Two things follow, and both are why this is
-// not the signed expiry it used to be: a copy of pier.db cannot be turned into
-// a session (there is no signing key in it to forge with), and a single
-// browser can be signed out without changing the password everyone shares. A
-// cookie (not a bearer header) because the workbench lives on SSE, and
-// EventSource sends no headers.
+// The boundary in front of every HTTP surface: one shared password, generated
+// before the listener opens and printed once. The cookie is "<id>.<token>" and
+// the database keeps only the token's SHA-256, one row per browser: a copy of
+// pier.db cannot be turned into a session, and one browser can be signed out
+// alone. A cookie, not a bearer header, because EventSource sends no headers.
 
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
@@ -29,17 +15,14 @@ import { logger } from "../log.js";
 const log = logger("auth");
 
 const COOKIE = "pier_session";
-/** How long an idle browser stays signed in. Sliding: a session in daily use
- *  never expires, and a stolen cookie is dead a week after its last use. */
+/** Sliding: a stolen cookie is dead a week after its last use. */
 const TTL_MS = 7 * 24 * 60 * 60_000;
-/** How stale `seen_at` may get before a request writes. Renewal rides on it,
- *  so this is also how coarse "last seen" is — one write per browser per five
- *  minutes instead of one per request. */
+/** One `seen_at` write per browser per five minutes instead of one per request. */
 const TOUCH_MS = 5 * 60_000;
-/** `revoke(ALL)` — not an id any row can have, so it cannot collide with one. */
+/** Not an id any row can have. */
 export const ALL = "*";
 
-/** A signed-in browser as the Console shows it. The token is never in here. */
+/** The token is never in here. */
 export interface Device {
   id: string;
   createdAt: number;
@@ -47,44 +30,29 @@ export interface Device {
   ip: string;
   agent: string;
 }
-/** Failed attempts one client may make before it has to wait out the window. */
 const MAX_FAILURES = 10;
 const WINDOW_MS = 15 * 60_000;
 /** Distinct throttle buckets retained at once; the last is shared overflow. */
 const MAX_FAILURE_CLIENTS = 1024;
 const OVERFLOW_CLIENT = "\0overflow";
-/** Shortest password a human may choose. The generated one is longer; this is
- *  the floor under which the throttle above stops being enough. */
+/** The floor under which the throttle above stops being enough. */
 const MIN_LENGTH = 10;
 // scrypt at Node's defaults (N=16384): ~50ms per attempt, which is the point.
 const KEY_BYTES = 32;
 
-/**
- * Human-readable and unambiguous: no 0/O, 1/l/I, so it survives being read off
- * a terminal and typed into a phone. 15 characters from a 31-symbol alphabet is
- * ~74 bits — this is the only thing between the internet and a shell.
- *
- * `randomInt` rejection-samples. Folding a random byte with `% 31` would have
- * quietly favoured the first eight symbols, which is the kind of bias nothing
- * ever reports.
- */
+/** No 0/O, 1/l/I, so it survives being typed off a terminal into a phone; 15
+ *  of 31 symbols is ~74 bits. `randomInt` rejection-samples — `% 31` on a byte
+ *  would favour the first eight symbols. */
 function generatePassword(): string {
   const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
   const chars = Array.from({ length: 15 }, () => alphabet[randomInt(alphabet.length)]).join("");
   return `${chars.slice(0, 5)}-${chars.slice(5, 10)}-${chars.slice(10)}`;
 }
 
-/**
- * The stored credential: one row, one password, hashed.
- *
- * Generation happens in the constructor because "no password" is not a state
- * Pier may ever serve in — a boot that cannot print the password it just made
- * should fail at boot, not open a door.
- */
+/** Generation happens in the constructor: "no password" is not a state Pier
+ *  may ever serve in. */
 export class AuthStore {
   readonly #db: DatabaseSync;
-  /** Compiled once each: `check()` runs two of these on every request that
-   *  carries a cookie, which is every request the workbench makes. */
   readonly #sql: (sql: string) => StatementSync;
   readonly #revokeListeners = new Set<(id: string) => void>();
 
@@ -97,11 +65,8 @@ export class AuthStore {
       const password = generatePassword();
       const salt = randomBytes(16).toString("hex");
       row = { salt, hash: hash(password, salt), createdAt: Date.now() };
-      // Recovery is "DELETE FROM auth and restart", so this branch is also how
-      // a forgotten password is replaced — and the browsers signed in under the
-      // old one must not walk through it. Their rows go with the credential,
-      // in one transaction: half of this leaves a new password and live old
-      // cookies, which is the state recovery exists to end.
+      // Also the forgotten-password path ("DELETE FROM auth"): browsers signed
+      // in under the old one must not walk through it.
       transact(this.#db, () => {
         this.#sql("INSERT INTO auth(id, salt, hash, created_at) VALUES (1, ?, ?, ?)")
           .run(salt, hash(password, salt), Date.now());
@@ -113,9 +78,7 @@ export class AuthStore {
           `Lost it? "DELETE FROM auth" in the database, then restart.\n`,
       );
     }
-    // Boot is the one moment that comes around on its own. Without it, a
-    // session that expired while Pier was down would sit there notifying a
-    // phone until somebody happened to sign in.
+    // A session that expired while Pier was down must not keep notifying a phone.
     this.sweep();
   }
 
@@ -124,17 +87,12 @@ export class AuthStore {
       .get() as { salt: string; hash: string; createdAt: number } | undefined;
   }
 
-  /** Every signed-in browser at once. Private: the callers that mean it also
-   *  have to tell the listeners, and `revoke(ALL)` is that pair in public. */
+  /** Private: callers must also tell the listeners; `revoke(ALL)` is that pair. */
   #dropSessions(): void {
     this.#sql("DELETE FROM web_sessions").run();
   }
 
-  /** Sessions nobody may use any more, deleted rather than merely refused: a
-   *  row is what a push subscription hangs off, so "expired" has to become
-   *  "gone" without waiting for the browser to come back and be told. Run at
-   *  boot and whenever somebody signs in — the two moments the process has a
-   *  reason to look at this table at all. */
+  /** Deleted, not merely refused: a push subscription hangs off the row. */
   sweep(): void {
     const swept = this.#sql("DELETE FROM web_sessions WHERE seen_at <= ? RETURNING id")
       .all(Date.now() - TTL_MS) as unknown as { id: string }[];
@@ -142,22 +100,15 @@ export class AuthStore {
     if (swept.length) log.info(`swept ${String(swept.length)} expired session(s)`);
   }
 
-  /** Whether this is the password, compared in constant time. */
   verify(password: string): boolean {
     const row = this.#row();
     return row ? sameSecret(hash(password, row.salt), row.hash) : false;
   }
 
-  /**
-   * Replace the password, salt and all — and with it every session, the
-   * caller's own included. That is the point: a password is changed because the
-   * old one may be known, so nothing that was signed in under it stays signed
-   * in. Listeners hear it after the commit, never before.
-   */
+  /** Every session goes too, the caller's included: a password is changed
+   *  because the old one may be known. Listeners hear it after the commit. */
   setPassword(password: string): void {
     const salt = randomBytes(16).toString("hex");
-    // Credential and sessions change together or not at all — a crash between
-    // the two writes is exactly the state "everyone signs in again" denies.
     transact(this.#db, () => {
       this.#sql("UPDATE auth SET salt = ?, hash = ?, created_at = ? WHERE id = 1")
         .run(salt, hash(password, salt), Date.now());
@@ -166,12 +117,10 @@ export class AuthStore {
     this.#revoked(ALL);
   }
 
-  /** Sign a browser in: one row, and the cookie value that opens it. */
   open(ip: string, agent: string): string {
     const now = Date.now();
     this.sweep();
-    // The id names the row and the token proves it: 72 bits is plenty for a
-    // name, and the 256-bit token is the only part that has to resist guessing.
+    // The id names the row; the 256-bit token is the only part that resists guessing.
     const id = randomBytes(9).toString("base64url");
     const token = randomBytes(32).toString("base64url");
     this.#sql(
@@ -181,12 +130,8 @@ export class AuthStore {
     return `${id}.${token}`;
   }
 
-  /**
-   * The row this cookie names, if the token matches and the row is live.
-   * `renewed` says the deadline just moved, which is the caller's cue to send
-   * the browser a cookie with the new Max-Age — the sliding window has to slide
-   * on both sides or the browser drops a cookie the database still honours.
-   */
+  /** `renewed` is the cue to resend the cookie with a new Max-Age: the window
+   *  must slide on both sides or the browser drops a cookie the database honours. */
   check(cookie: string | undefined): { id: string; renewed: boolean } | undefined {
     const [id, token] = (cookie ?? "").split(".");
     if (!id || !token) return undefined;
@@ -194,10 +139,8 @@ export class AuthStore {
       "SELECT token_hash AS tokenHash, seen_at AS seenAt FROM web_sessions WHERE id = ?",
     ).get(id) as { tokenHash: string; seenAt: number } | undefined;
     const now = Date.now();
-    // One clock: last use is the deadline, so there is no second column that
-    // can disagree with it about when this session ends. An expired row is
-    // deleted here rather than left for the next login to sweep — a session
-    // nobody may use must stop being a device Pier notifies at the same moment.
+    // Deleted here, not left for the next sweep: a session nobody may use must
+    // stop being a device Pier notifies at the same moment.
     if (!row) return undefined;
     if (now - row.seenAt >= TTL_MS) {
       this.revoke(id);
@@ -209,16 +152,13 @@ export class AuthStore {
     return { id, renewed: true };
   }
 
-  /** Sign out one browser, or every one of them (`ALL`). Listeners hear the
-   *  same id: a revoked cookie must also close what it opened. */
+  /** Listeners hear the same id: a revoked cookie must also close what it opened. */
   revoke(id: string): void {
     if (id === ALL) this.#dropSessions();
     else this.#sql("DELETE FROM web_sessions WHERE id = ?").run(id);
     this.#revoked(id);
   }
 
-  /** Signed-in browsers, most recently seen first. Never the token — the list
-   *  is shown to whoever is signed in, and it is not a set of credentials. */
   list(): Device[] {
     return this.#sql(
       "SELECT id, created_at AS createdAt, seen_at AS seenAt, ip, agent" +
@@ -226,15 +166,12 @@ export class AuthStore {
     ).all(Date.now() - TTL_MS) as unknown as Device[];
   }
 
-  /** A long-lived authenticated surface closes itself when a cookie is
-   *  revoked. The store and listeners share the process lifetime. */
+  /** A long-lived authenticated surface (SSE) closes itself when its cookie is revoked. */
   onRevoke(listener: (id: string) => void): void {
     this.#revokeListeners.add(listener);
   }
 
-  /** One listener throwing must not cost the next one its notification: the
-   *  row is already gone, so a surface that never hears about it stays open on
-   *  a session that no longer exists. */
+  /** The row is already gone; a surface that never hears stays open on a dead session. */
   #revoked(id: string): void {
     for (const listener of this.#revokeListeners) {
       try {
@@ -249,18 +186,10 @@ export class AuthStore {
 const hash = (password: string, salt: string): string =>
   scryptSync(password, salt, KEY_BYTES).toString("hex");
 
-/** What the database keeps instead of the cookie's token. */
 const digest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
-/**
- * What a logged-out visitor must still reach: the login form, published
- * boards, and the stylesheet those boards link — a published board rendering
- * unstyled for the person it was published to is the same bug as not serving
- * it. Both live under `/p/*` (the stylesheet at `/p/_assets/pier.css`), the
- * single exempt prefix `docs/architecture.md` reserved for this, so the rule
- * is one prefix here and one prefix in anything fronting Pier; `/boards/*`
- * stays behind the boundary.
- */
+/** The login form and `/p/*` — published boards and their stylesheet — are the
+ *  single exempt prefix docs/architecture.md reserves; `/boards/*` stays behind. */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
   if (method !== "GET" && method !== "HEAD") return false;
@@ -273,19 +202,13 @@ function sameSecret(a: string, b: string): boolean {
   return timingSafeEqual(bytes(a), bytes(b));
 }
 
-/**
- * Only a same-origin path may be returned to after login. `//evil.example` is a
- * protocol-relative URL rather than a path, and browsers normalize a backslash
- * to a slash, so `/\evil.example` is the same trick spelled differently — both
- * are what a `startsWith("/")` check alone hands an open redirect to.
- */
+/** `//evil.example` is protocol-relative and browsers normalize `/\evil.example`
+ *  to it; `startsWith("/")` alone is an open redirect. */
 const safeNext = (raw: unknown): string =>
   typeof raw === "string" && /^\/(?![/\\])/.test(raw) ? raw : "/";
 
-// Failed logins per client, in memory: a restart clearing them is fine, since
-// the window is minutes and the point is to make guessing slow, not to keep
-// books. Expired entries are pruned, and fresh identities spill into one
-// overflow bucket once the fixed map cap is reached.
+// In memory: the window is minutes, and the point is to make guessing slow.
+// Fresh identities spill into one overflow bucket once the cap is reached.
 const failures = new Map<string, { count: number; resetAt: number }>();
 
 const loopback = (address: string): boolean =>
@@ -300,8 +223,8 @@ function remoteOf(c: Context): string | undefined {
     : undefined;
 }
 
-/** Trust a forwarded address only from a local reverse proxy. The rightmost
- * hop is the address that proxy appended, not one the client put at the front. */
+/** A forwarded address is trusted only from a local reverse proxy, and only
+ *  the rightmost hop, which that proxy appended. */
 function clientOf(c: Context): string {
   const remote = remoteOf(c);
   if (remote && !loopback(remote)) return remote;
@@ -326,8 +249,7 @@ function noteFailure(client: string): void {
   else failures.set(client, { count: 1, resetAt: Date.now() + WINDOW_MS });
 }
 
-/** Browsers name the source of unsafe requests. Compare hosts rather than
- * schemes because TLS commonly terminates at the reverse proxy. */
+/** Hosts, not schemes: TLS commonly terminates at the reverse proxy. */
 function originMatches(origin: string | undefined, host: string | undefined): boolean {
   if (!origin) return true; // curl and other non-browser clients
   try {
@@ -351,17 +273,13 @@ function sameOrigin(c: Context): boolean {
   );
 }
 
-/** Which row this request's cookie names. The boundary already verified the
- *  token; this reads the id back off the value it accepted. Exported so a
- *  surface that belongs to one browser (its push subscription) names it the
- *  same way, rather than parsing the cookie a second way. */
+/** The boundary already verified the token; exported so a push subscription
+ *  names its browser the same way. */
 export const sessionIdOf = (c: Context): string => (getCookie(c, COOKIE) ?? "").split(".")[0] ?? "";
 
-/** Every route, in one place — no per-route opt-in to forget on the next one. */
 export function requireAuth(store: AuthStore): MiddlewareHandler {
   return async (c, next) => {
-    // On every response, public ones included: the login form is the one page
-    // strangers reach, and it must not be frameable either.
+    // Public responses too: the login form must not be frameable either.
     c.header("x-frame-options", "DENY");
     if (isPublic(c.req.method, c.req.path)) return next();
     const cookie = getCookie(c, COOKIE);
@@ -372,8 +290,6 @@ export function requireAuth(store: AuthStore): MiddlewareHandler {
       return c.json({ error: "forbidden origin" }, 403);
     }
     if (session) {
-      // The database just moved the deadline; the browser is told the same, or
-      // it would drop a cookie that is still good.
       if (session.renewed && cookie) setSessionCookie(c, cookie);
       await next();
       // Cookie-authenticated content must not become public in a shared proxy.
@@ -383,7 +299,6 @@ export function requireAuth(store: AuthStore): MiddlewareHandler {
       return;
     }
     // An API caller gets a status it can act on; a navigation gets the form.
-    // Anything non-GET is a client call too — never a link worth redirecting.
     if (c.req.path.startsWith("/api/") || unsafe) {
       return c.json({ error: "unauthorized" }, 401);
     }
@@ -399,8 +314,7 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     const form = await c.req.parseBody();
     const next = safeNext(form.next);
     if (throttled(client)) {
-      // The one surface strangers can reach: a burst here is the only warning
-      // an operator gets that the port is being knocked on.
+      // A burst here is the only warning an operator gets that the port is being knocked on.
       log.warn(`login throttled for ${client}`);
       return c.html(loginPage(next, "Too many attempts. Wait a few minutes."), 429);
     }
@@ -411,19 +325,17 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     }
     failures.delete(client);
     log.info(`login from ${client}`);
-    // Signing in again replaces this browser's session rather than adding one:
-    // the cookie it is about to drop would otherwise stay valid for a week, as
-    // a row nobody can recognize in the device list. Verified first — the id in
-    // an unverified cookie is a string the caller chose, and `ALL` is one of
-    // the strings they could choose.
+    // Replaces this browser's session rather than adding one. Verified first:
+    // the id in an unverified cookie is a string the caller chose, and `ALL` is
+    // one of them.
     const previous = store.check(getCookie(c, COOKIE));
     if (previous) store.revoke(previous.id);
     setSessionCookie(c, store.open(client, c.req.header("user-agent") ?? ""));
     return c.redirect(next);
   });
 
-  // Re-authenticate before rotating the credential. The global boundary also
-  // requires a live cookie; knowing a password is not permission to call APIs.
+  // Re-authenticates: the boundary requires a live cookie, and knowing a
+  // password is not permission to call APIs.
   app.post("/api/password", async (c) => {
     const client = clientOf(c);
     const body = (await c.req.json().catch(() => null)) as
@@ -441,29 +353,22 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     }
     failures.delete(client);
     store.setPassword(next);
-    // The rotation drops every session row, this caller's included — a password
-    // is changed because the old one may be known, and "everyone signs in
-    // again" is the whole point. Clear the dead cookie; the client sends the
-    // person to the login form with the password they just chose.
+    // The rotation dropped this caller's row too; clear the dead cookie.
     deleteCookie(c, COOKIE, { path: "/" });
     return c.json({ ok: true });
   });
 
-  // Signed-in browsers, so "sign out that one" is something an operator can
-  // see before doing. Not /api/sessions: that is the agent's sessions, and one
-  // vocabulary for two unrelated things is how the wrong one gets ended.
+  // Not /api/sessions: that is the agent's sessions, and one vocabulary for
+  // two unrelated things is how the wrong one gets ended.
   app.get("/api/devices", (c) => {
     const current = sessionIdOf(c);
     return c.json(store.list().map((d) => ({ ...d, current: d.id === current })));
   });
 
-  // Real revocation: the row goes, and the cookie holding its token opens
-  // nothing on the next request. Ending this browser's own session is the same
-  // call, so the client clears the cookie it is about to stop being able to use.
   app.post("/api/devices/:id/signout", (c) => {
     const id = c.req.param("id");
-    // One row per call. Signing everyone out is the password change above,
-    // which is the only thing that also invalidates the password they know.
+    // Signing everyone out is the password change, which also invalidates
+    // the password they know.
     if (id === ALL) return c.json({ error: "not a session id" }, 400);
     store.revoke(id);
     log.info(`signed out session ${id}`);
@@ -471,9 +376,7 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     return c.json({ ok: true });
   });
 
-  // Signs out this browser: the row is deleted, not just the cookie cleared,
-  // so a copy of that cookie taken beforehand is dead too. Behind the boundary
-  // like every write — only a signed-in browser has anything to end.
+  // The row is deleted, not just the cookie cleared, so a copy of that cookie is dead too.
   app.post("/logout", (c) => {
     store.revoke(sessionIdOf(c));
     deleteCookie(c, COOKIE, { path: "/" });
@@ -481,17 +384,14 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
   });
 }
 
-/** The signed-in cookie — set at login, and again whenever the sliding window
- *  moved, which is why it takes the value rather than making one. */
 function setSessionCookie(c: Context, value: string): void {
   setCookie(c, COOKIE, value, {
     path: "/",
     httpOnly: true,
     sameSite: "Lax",
-    // Set only over TLS: a Secure cookie on plain http is dropped, which
-    // would lock out the loopback and SSH-tunnel setups. The forwarded scheme
-    // counts only from a local proxy — anywhere else it is a header the client
-    // wrote, and a stranger must not get to decide this flag.
+    // A Secure cookie on plain http is dropped, locking out loopback and SSH
+    // tunnels. The forwarded scheme counts only from a local proxy: anywhere
+    // else a stranger wrote the header.
     secure: new URL(c.req.url).protocol === "https:" ||
       (c.req.header("x-forwarded-proto")?.split(",").at(-1)?.trim() === "https" &&
         loopback(remoteOf(c) ?? "")),
@@ -499,10 +399,7 @@ function setSessionCookie(c: Context, value: string): void {
   });
 }
 
-/**
- * Self-contained HTML: the login page must render before the workbench bundle
- * is reachable, so it links nothing the boundary would refuse to serve.
- */
+/** Self-contained: it links nothing the boundary would refuse to serve. */
 function loginPage(next: string, error?: string): string {
   const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   return `<!doctype html>

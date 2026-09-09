@@ -1,9 +1,5 @@
-// Workbench frontend orchestrator: session state, selection, and the SSE
-// event streams. Rendering lives in the surface modules — sidebar.ts (the
-// rail), palette.ts (⌘K), chat.ts (turns pane), composer.ts (input, queue
-// panel, attachments), session-header.ts (title + ⋯ menu), views.ts (Console
-// views + routing) — wired here through explicit deps, never imports back.
-// Interaction paths render optimistically and reconcile from the SSE stream.
+// Workbench frontend orchestrator: session state, selection, and the SSE event
+// streams. Surface modules are wired through explicit deps, never imports back.
 
 import "./style.css";
 import { initIcons } from "./icons.js";
@@ -131,11 +127,9 @@ async function createSession(cwd: string): Promise<void> {
   const seq = ++selectionSeq;
   ++loadSeq;
   loading = false;
-  // Opening a session in Pi costs a round trip long enough to look ignored —
-  // the dialog closes and the *previous* session stays on screen. So the pane
-  // becomes the new session's before the POST is sent: skeleton, the title an
-  // untitled session will keep anyway, and no current id — a prompt typed
-  // during the wait must not be sent to the session being left.
+  // The pane becomes the new session's before the POST: a round trip with the
+  // previous session still on screen looks ignored, and a prompt typed during
+  // the wait must not go to the session being left.
   showChat();
   closeDrawer();
   currentId = null;
@@ -191,15 +185,9 @@ const refreshSessions = coalesce(async () => {
   commitSessions(await mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"));
 });
 
-/** Seen = read: the selected session's chat is on screen in a *focused*
- *  window. The ack clears the server-side unread mark, and the resulting
- *  broadcast moves every other client's dot back too. Optimistic locally — the
- *  dot must not stay amber while the user is literally looking at the turn.
- *
- *  Focus, not just visibility: an installed workbench left open behind another
- *  app is still `document.hidden === false` on macOS, so visibility alone
- *  claimed every finished turn had been read and the push that should have
- *  followed (web/push.ts) was suppressed by a window nobody was looking at. */
+/** Focus, not just visibility: an installed workbench behind another app is
+ *  still `document.hidden === false` on macOS, which would ack every turn and
+ *  suppress the push (web/push.ts). */
 function maybeAckRead(): void {
   if (document.hidden || !document.hasFocus() || !isChatVisible()) return;
   const s = sessions.find((x) => x.id === currentId);
@@ -315,10 +303,6 @@ function handleEvent(e: SessionEvent): void {
   }
 }
 
-/**
- * Workspace stream: keeps this client's session list in step with every other
- * client (and with IM traffic). Content still arrives per session.
- */
 function connectWorkspace(): void {
   const src = new EventSource("/api/events");
   // Any (re)connect may follow a gap — re-list instead of replaying.
@@ -367,10 +351,8 @@ function connect(id: string, cursor: string, generation: number): void {
 // --- selection --------------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
-  // The pane opens before anything is fetched. A session named from Activity or
-  // Runs is usually not in the list at all — a task run's own session is not
-  // a row — and the snapshot is what says whether the id exists: its 404
-  // carries the reason (ui/api.ts), so nothing is decided here first.
+  // A session named from Activity or Runs is usually not in the list; the
+  // snapshot's 404 says whether the id exists and why.
   showChat();
   closeDrawer(); // on mobile the drawer is how you got here
   setSessionHash(id);

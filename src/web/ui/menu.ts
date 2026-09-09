@@ -21,22 +21,14 @@ function onOutside(ev: Event): void {
   if (panel && !panel.contains(ev.target as Node) && ev.target !== backdrop) closeMenu();
 }
 
-// Three idioms for the same two moves, and the one definition of them: the
-// arrows; readline's ⌃P/⌃N, for hands that would rather not leave the home
-// row; and ⌃J/⌃K, because ⌃N is a *reserved* chord in Chrome and Firefox on
-// Linux and Windows (and ⌘N on macOS) — it opens a new window and no
-// `preventDefault` can stop it, so "down" needs a key the browser will
-// actually hand over. (⌃P is only print, which is interceptable.) Bare Ctrl
-// only: ⌃⇧N is the browser's incognito window, and claiming a chord someone
-// meant for the browser is worse than not having it.
+// Arrows, readline's ⌃P/⌃N, and ⌃J/⌃K because ⌃N is a reserved chord in
+// Chrome and Firefox (new window, no `preventDefault` can stop it). Bare Ctrl
+// only: ⌃⇧N is the incognito window.
 const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
 const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
 
-/** Whether a panel is on screen. The list keys belong to the topmost overlay,
- *  the way Esc does: a global chord written on one of them (⌃K opens the
- *  palette) has to stand down while a menu is walking on it, or the chord fires
- *  first — it is a capture listener registered at init — and the menu never
- *  sees the key. */
+/** A global chord on a list key (⌃K) must stand down while a menu is walking
+ *  on it: the chord is a capture listener and would fire first. */
 export const menuOpen = (): boolean => panel !== null;
 
 /** Which way this keypress walks a list, if it does. Shared with the palette,
@@ -46,11 +38,8 @@ export function listStep(ev: KeyboardEvent): number | undefined {
   return ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key];
 }
 
-/** Move focus among a list's enabled buttons — by `to` rows, wrapping, or to
- *  an end. From outside the list (the panel itself, a path line above it) the
- *  first step lands on the near end. False when there is nothing to walk, so
- *  the caller can leave the key alone. Exported because a panel that is not a
- *  menu can still be a list: the folder tree walks its own rows with it. */
+/** From outside the list the first step lands on the near end. False when
+ *  there is nothing to walk, so the caller can leave the key alone. */
 export function walkRows(list: HTMLElement, to: number | "first" | "last"): boolean {
   const rows = [...list.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
   if (!rows.length) return false;

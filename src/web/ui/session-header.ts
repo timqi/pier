@@ -1,8 +1,5 @@
-// The selected session's header: its title row, the meta chips (model,
-// reasoning, context usage) and the ⋯ menu — info panel, model and reasoning
-// pickers and starting a session beside it.
-// Owns the model/context state the snapshot reports; main.ts owns which
-// session is selected and feeds state in through init.
+// The selected session's header: title row, meta chips and the ⋯ menu. Owns
+// the model/context state the snapshot reports.
 
 import { ArrowLeft, LoaderCircle, X } from "lucide";
 import { icon } from "./icons.js";
@@ -55,10 +52,7 @@ const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
 const sessionMeta = $("#session-meta");
 
-/** The catalog and the reasoning levels a model offers: both answer a question
- *  about the backend, not about one session, so the first read warms every
- *  later picker. Rendered at once, then reconciled by the read behind it — a
- *  list one session unshifted its own model into is corrected there. */
+/** Backend facts, not session facts, so the first read warms every later picker. */
 let catalog: ModelRef[] | null = null;
 const levelsByModel = new Map<string, ThinkingLevel[]>();
 const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
@@ -213,14 +207,9 @@ function renderSessionMeta(): void {
   sessionMeta.replaceChildren(...children);
   sessionMeta.classList.toggle("hidden", items.length === 0);
   sessionMeta.classList.toggle("flex", items.length > 0);
-  // On a phone these chips cost the bar a second line, and model · reasoning ·
-  // size is a reading, not something to answer — the bar title opens the info
-  // panel, which carries all three in full. Three readings are worth the line
-  // even there: a session still opening (§5b — the wait would otherwise look
-  // like nothing happening), a subagent still running, which is the same kind of
-  // nothing, and a context near full, which is acted on by starting a new
-  // session. The row says which it is holding; style.css shows only this one
-  // below md.
+  // On a phone only three chips are worth a second line: a session still
+  // opening (§5b), a subagent still running, and a context near full, which is
+  // acted on. style.css shows only this one below md.
   sessionMeta.toggleAttribute("data-urgent", (!id && !!pending) || runs > 0 || pressure >= CONTEXT_WARN);
 }
 

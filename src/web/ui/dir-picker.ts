@@ -1,13 +1,6 @@
-// Working-directory picker, shared by every surface that asks for a path: the
-// New-session menu, the IM channel config and the Files view's root chip.
-// Two shared parts: the folder tree, and the menu of paths the
-// surface can already name with the tree one row below it. Where a form owns
-// the path they decorate its text input rather than replacing it, so form
-// semantics (required, validation) stay where they are and typing still works.
-//
-// Inside the panel the path line is an input for the same reason: clicking
-// down from home is the slow way to reach a directory the person can already
-// name.
+// Working-directory picker, shared by every surface that asks for a path. Where
+// a form owns the path it decorates the text input rather than replacing it, so
+// form semantics stay and typing still works.
 
 import { Plus } from "lucide";
 import { icon } from "./icons.js";
@@ -47,12 +40,7 @@ const row = (label: string, cls: string, onSelect: () => void): HTMLElement => {
   return el;
 };
 
-/**
- * "New folder" affordance: a new project usually means a directory that does
- * not exist yet, and sending the user to a terminal for `mkdir` is the kind of
- * gap that makes a picker useless. Resolves to the created path, or null when
- * the user backed out or the server refused.
- */
+/** A new project usually means a directory that does not exist yet. */
 function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLElement {
   const box = h("div", "mt-2 flex-none border-t border-neutral-200 pt-2");
   const start = row("New folder", "text-neutral-500", () => {
@@ -81,11 +69,7 @@ function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLEl
   return box;
 }
 
-/**
- * The folder list itself, anchored under `anchor` and starting at `start`
- * (the user's home when it is not an absolute path). Picking a folder closes
- * the panel and hands the path to `onPick`.
- */
+/** `start` falls back to the user's home when it is not absolute. */
 export function openBrowser(
   anchor: HTMLElement,
   start: string | undefined,
@@ -104,10 +88,8 @@ export function openBrowser(
     const content = h("div", "flex max-h-[60dvh] w-full flex-col sm:w-88");
     const use = btn("Use", "btn btn-primary ml-auto flex-none px-3 py-1 text-[0.8125rem]");
     use.onclick = () => commit(list.path);
-    // The path is typed as often as it is clicked to — a directory nobody has a
-    // session in is several clicks from home and one paste from anywhere — so
-    // the line that names where you are is the line you can edit. Enter takes
-    // it, once the server confirms it is a folder this can read.
+    // A directory nobody has a session in is several clicks from home and one
+    // paste from anywhere.
     const typed = document.createElement("input");
     typed.className = `min-w-0 flex-1 border-0 bg-transparent ${MONO} text-neutral-600 focus:outline-none`;
     typed.value = list.path;
@@ -138,10 +120,8 @@ export function openBrowser(
       use,
     );
     const body = h("div", "min-h-0 flex-1 overflow-y-auto");
-    // The tree is a list too, so it walks on the list keys — the folders only:
-    // "Use" and "New folder" sit beside the list, not in it, and stay Tab's.
-    // Not the menu's own handler (menu.ts), because Home/End belong to the
-    // caret in the path line — only its walk.
+    // Not the menu's own handler (menu.ts): Home/End belong to the caret in
+    // the path line.
     content.onkeydown = (ev) => {
       const step = listStep(ev);
       if (step !== undefined && walkRows(body, step)) ev.preventDefault();
@@ -166,12 +146,7 @@ export interface PathOption {
   hint?: string;
 }
 
-/**
- * The paths a surface can name, then the tree for everything else. Every
- * picker that has candidates shows them the same way — the Files view's
- * worktrees and the New-session menu's projects are the same question — so
- * the menu lives here rather than once per caller.
- */
+/** The paths a surface can name, then the tree for everything else. */
 export function openPathMenu(
   anchor: HTMLElement,
   options: PathOption[],
@@ -201,11 +176,7 @@ const writer =
     onPick?.(path);
   };
 
-/**
- * A "Browse…" button for a path input. Picking a folder writes it into the
- * input and fires `onPick`, so an optimistic caller can mark itself dirty
- * without listening to input events.
- */
+/** Fires `onPick` so a caller can mark itself dirty without listening to input events. */
 function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
   const button = btn(
     "Browse…",

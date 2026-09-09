@@ -1,9 +1,5 @@
-// One run on screen, wherever it was reached from: the detail page with its
-// controls (steer/stop/continue, reply to a decision), result, probe, the
-// definition it ran and its message ledger, plus the compact run list a task
-// page shows. The definition view is shared with the task page, which shows
-// the same record at its current revision. runs.ts and tasks.ts own the
-// surrounding navigation.
+// One run on screen, wherever it was reached from: detail, controls, result and
+// message ledger, plus the compact run list a task page shows.
 
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
@@ -184,10 +180,8 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   ]);
   if (!pane.isConnected || pane.dataset.runRequest !== request || state.selectedId !== id) return;
   if (!got.ok) {
-    // A fan-out group's callback card names the group where a run's names its
-    // run, so this route is reached with a group id too — and the cards already
-    // in a transcript cannot be rewritten, which makes the fallback the only
-    // repair for them. The run error is what surfaces if it is no group either.
+    // A group's callback card names the group where a run's names its run, so
+    // this route is reached with a group id too.
     const group = await getJson<{ group: TaskGroup; members: TaskRun[] }>(`/api/task-groups/${id}`, got.error);
     if (!pane.isConnected || pane.dataset.runRequest !== request || state.selectedId !== id) return;
     state.drawn = "";

@@ -1,10 +1,5 @@
-// Settings → Models: which models this deployment reaches for. The operator's
-// menu — the few models it actually favors, each with one line of intent
-// ("hardest reasoning", "cheap bulk"); agents read it through the task tool's
-// `models` operation, and every picker lists pinned entries first. Empty menu
-// = no advice; everything falls back to the curated catalog. And the one model
-// Pier itself calls: the title model that names a session after its first
-// exchange, off unless picked.
+// Settings → Models: the operator's pinned menu, read by agents through the
+// task tool and listed first in every picker, and the title model Pier itself calls.
 
 import { Plus } from "lucide";
 import { icon } from "./icons.js";
@@ -104,10 +99,8 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     );
   }
 
-  /** Picking is the pinning, level and all: the flat select this replaced
-   *  listed every id in the catalog unsearchable, and a pin has a reasoning
-   *  level from the moment it exists — the picker's own selector sets it, the
-   *  row below edits it. */
+  /** Picking is the pinning, level and all: a pin has a reasoning level from
+   *  the moment it exists. */
   function renderAdder(): void {
     const pickable = catalog.filter((m) => !entries.some((e) => key(e) === key(m)));
     const add = button("Pin model");

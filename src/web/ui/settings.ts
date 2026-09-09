@@ -1,9 +1,6 @@
-// Console → Settings: the one place the instance is configured, one tab per
-// topic. Models (provider auth and the operator's menu — one topic: what the
-// agent runs on), Channels and Agent host their own modules; this file owns
-// the topic strip and the cards small enough to live here (Instance,
-// Security). Storage is not the split — a db row and a Pi file are both
-// "settings" to the person opening this page.
+// Console → Settings: the topic strip and the cards small enough to live here
+// (Instance, Security). Storage is not the split: a db row and a Pi file are
+// both "settings" to the person opening this page.
 
 import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
@@ -154,9 +151,7 @@ export function createSettingsView(
   );
 
   // --- Instance: reload ------------------------------------------------------------
-  // Saving in the Console already recycles sessions. This is for the changes
-  // the Console never saw: an agent that rewrote AGENTS.md, a skill dropped in
-  // over ssh, a Pi config edited in an editor.
+  // For the changes the Console never saw: a file edited over ssh.
 
   const reload = button("Reload", true);
   const reloadStatus = h("span", "text-[11.5px]", "");
@@ -169,10 +164,8 @@ export function createSettingsView(
       reload.disabled = false;
       if (!res.ok) return setStatus(reloadStatus, "failed", await failure(res, "Could not reload"));
       const { recycled, busy } = (await res.json()) as { recycled: number; busy: number };
-      // Both numbers, always: "nothing was live" and "a turn is still holding
-      // the old configuration" look identical otherwise, and the second is the
-      // only reason a change can still fail to show up. Neutral, not green,
-      // while one is — green would claim the change is everywhere.
+      // Both numbers: a turn still holding the old configuration is the only
+      // reason a change can fail to show up. Not green while one is.
       const done = recycled ? `Recycled ${recycled} session(s).` : "No idle session needed it.";
       const held = busy ? ` ${busy} still mid-turn — they take it when the turn ends.` : "";
       setStatus(reloadStatus, busy ? "idle" : "saved", done + held);
@@ -278,20 +271,13 @@ export function createSettingsView(
   );
 
   // --- topic hosts -----------------------------------------------------------------
-  // Simple topics share one scroll wrapper each; Channels and Agent files are
-  // whole modules that manage their own layout, hosted as child console views
-  // and shown/hidden with the tab. No tint of its own: the cards sit on the
-  // workbench canvas the head's strip floats over, which is what the tint used
-  // to stand in for — and a second grey inside the pane read as a block pasted
+  // No tint of its own: a second grey inside the pane reads as a block pasted
   // under the strip.
 
   const wrap = (content: HTMLElement): HTMLElement =>
     h("div", "hidden min-h-0 flex-1 overflow-y-auto", h("div", "px-4 pb-5 pt-1", content));
 
-  // One topic, two halves: the endpoints that can be reached, then the few
-  // models this deployment favors. Configuring auth and then pinning what to
-  // reach for is one sitting, and splitting it made the second half look
-  // optional.
+  // Auth and the pinned menu are one topic: split, the second half looks optional.
   const modelMenu = createModelMenuPane();
   // Same column width and card chrome as the menu below it, or the two halves
   // of one topic read as two pages.
@@ -312,9 +298,7 @@ export function createSettingsView(
   }
 
   // --- Security: master key --------------------------------------------------------
-  // One tab for who gets in and what the credentials are sealed with. Only the
-  // key card re-renders (per status); password and devices are built once, so
-  // the column is written out around whatever the key card currently is.
+  // Only the key card re-renders; password and devices are built once.
 
   const securityColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
   const showKeyCard = (el: HTMLElement): void => securityColumn.replaceChildren(el, pwCard, devicesCard);
@@ -414,10 +398,8 @@ export function createSettingsView(
       body.push(h("div", "flex items-center gap-3", keep, switchBtn, keyStatus));
     }
 
-    // vt's own diagnosis, under the buttons that need it: which config file and
-    // env vt reads, how it routes an approval, whether an agent answers. Only
-    // where it can be the answer — a locked instance, or vt mode that could
-    // lock on the next start. Pier does not edit vt's config; vt owns that.
+    // vt's own diagnosis, only where it can be the answer: a locked instance,
+    // or vt mode that could lock on the next start.
     if (locked || status.mode === "vt") {
       const report = h("pre", "hidden overflow-x-auto rounded-lg bg-neutral-50 p-3 text-[11.5px] leading-snug text-neutral-700");
       const doctor = button("vt doctor");

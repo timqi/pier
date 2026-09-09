@@ -1,10 +1,5 @@
-// Source on screen: numbered gutters, per-line highlighting, diff tones.
-//
-// One renderer for every place the Console shows a file it did not write —
-// the Files view's previews and whole-file diffs, Settings → Agent's read-only
-// skills and extensions, and the chat's attachment preview. It was the Files
-// view's private closure until the second reader arrived with a bare <pre>,
-// which is how a viewer ends up with two spellings of a line of code.
+// Source on screen: numbered gutters, per-line highlighting, diff tones. One
+// renderer for every place the Console shows a file it did not write.
 
 import { h } from "./dom.js";
 import { lineEl } from "./highlight.js";
@@ -61,10 +56,8 @@ export function codePane(rows: CodeRow[], lang: string | null): HTMLElement {
   return box;
 }
 
-/** The line's code cell; a marked row renders as three fragments so the
- *  changed span can carry a deeper tint on top of the row's own. Fragment
- *  highlighting degrades tokens that straddle the mark — per-line hljs is
- *  already an approximation, and the emphasis is worth more. */
+/** Fragment highlighting degrades tokens that straddle a mark; per-line hljs
+ *  is already an approximation, and the emphasis is worth more. */
 function codeSpan(r: CodeRow, hl: string | null): HTMLElement {
   const cls = "min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]";
   if (!r.mark || r.mark[0] >= r.mark[1]) {

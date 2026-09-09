@@ -1,6 +1,5 @@
-// Routes about the Pier instance itself — settings, update availability,
-// layer-1 secrets control, the browser's error reports. Nothing here touches
-// a session; server.ts stays the session/event surface.
+// Routes about the Pier instance itself: settings, updates, secrets control,
+// the browser's error reports. Nothing here touches a session.
 
 import type { Hono } from "hono";
 import type { CatalogBinary, CatalogEntry } from "../core/types.js";
@@ -12,91 +11,68 @@ import {
   normalizePublicUrl,
   type SettingsStore,
 } from "../settings.js";
-// Type-only, and only for the shape the injected validator answers with:
-// erased at build, so web/ still runs nothing from tools.ts (architecture.md).
+// Type-only: erased at build, so web/ runs nothing from tools.ts.
 import type { CustomTool } from "../tools.js";
 import type { ToolsSyncNote } from "./types.js";
 import type { UpdateCheck } from "../update.js";
 
-/** How this instance replaces itself, or `null` where nothing supervises it.
- *  Injected so web/ never learns what systemd is — and so the install never
- *  runs as a child of the request that asked for it. */
+/** Injected so web/ never learns what systemd is, and the install never runs
+ *  as a child of the request that asked for it. */
 export interface UpdateApplier {
   /** `busy`: another handover or a restart already owns the gate. */
   apply(): Promise<"started" | "busy" | "not-installed" | "failed">;
-  /** Why applying would fail today, checked before it is attempted. A stale
-   *  updater is invisible until the update that needed it (§5b). */
+  /** A stale updater is otherwise invisible until the update that needed it (§5b). */
   problem(): string | null;
 }
 
-/** The slice of Secrets the routes need; injectable so tests never touch disk
- *  or spawn vt. Never exposes key material — state, mode and the locked reason
- *  are all a browser may see. */
+/** Never exposes key material: state, mode and the locked reason are all a
+ *  browser may see. */
 export interface SecretsControl {
   readonly state: "locked" | "unlocked";
   readonly mode: SecretsMode | undefined;
   readonly lockedReason: string;
   unlock(): Promise<void>;
   rotateKek(mode?: SecretsMode): Promise<void>;
-  /** vt's own read-only report — config sources and reachability, no values. */
+  /** vt's own read-only report, no values. */
   doctor(): Promise<string>;
 }
 
-/** A rule that failed inside the transaction — its own class so the route can
- *  tell it from a real fault. 400 when the request named something this Pier
- *  does not have, 409 when it collided with the state as it stands. */
+/** A rule that failed inside the transaction, distinct from a real fault: 400
+ *  for a name this Pier does not have, 409 for a collision with current state. */
 class Refusal extends Error {
   constructor(message: string, readonly status: 400 | 409) {
     super(message);
   }
 }
 
-/** One name added to or removed from a stored set, order preserved. */
 const withName = (current: readonly string[], { name, on }: { name: string; on: boolean }): string[] =>
   on ? [...new Set([...current, name])] : current.filter((each) => each !== name);
 
-/** Client reports per minute, for the whole server: a browser bug can fire in
- *  a loop, and the journal is shared with everything else Pier says. */
+/** A browser bug can fire in a loop, and the journal is shared. */
 const CLIENT_LOG_PER_MINUTE = 60;
 
 export function registerInstanceRoutes(
   app: Hono,
   deps: {
     settings: SettingsStore;
-    /** Whether a newer Pier exists; answered from cache, refreshed in the
-     *  background. */
     updates: UpdateCheck;
-    /** `null` when no service manager owns this process: the Console then says
-     *  so instead of offering a button that cannot work. */
+    /** `null` when no service manager owns this process. */
     updater?: UpdateApplier | null;
     secrets: SecretsControl;
-    /** Everything with a switch — bundled extensions and managed binaries in
-     *  one list — plus the task whose runs install the binaries. Handed over
-     *  as data by main.ts: the catalog is code that imports the Pi SDK and
-     *  spawns ubix, and web/ may do neither. Absent in tests that do not care;
-     *  the Console then shows no switches. */
+    /** Handed over as data by main.ts: the catalog imports the Pi SDK and
+     *  spawns ubix, and web/ may do neither. */
     catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-    /** Every name this Pier can ever switch: the bundled extensions and the
-     *  tools it manages. Code, not state — which is why a switch is validated
-     *  against these and not against the catalog, whose custom half the same
-     *  request may be rewriting. Absent means no switches, and every `on` is
-     *  refused. */
+    /** Code, not state: a switch is validated against these, not against the
+     *  catalog, whose custom half the same request may be rewriting. */
     names?: { extensions: readonly string[]; tools: readonly string[] };
-    /** Ran after the tool set was written. Answers with what became of the
-     *  install — started, waiting behind a sync already running, or refused
-     *  with a reason — because the switch that was just flipped is where that
-     *  belongs, not only the journal (§5b). It reads the stored set itself:
-     *  passing it in would be a second copy of what was just written. */
+    /** What became of the install belongs on the switch, not only in the
+     *  journal (§5b). Reads the stored set itself. */
     onToolsChanged?: () => Promise<ToolsSyncNote | null>;
-    /** What a custom tool may be. Injected because the rule lives with the
-     *  installer (src/tools.ts) and web/ may not import it; main.ts also folds
-     *  in the names the bundled catalog already owns. */
+    /** The rule lives with the installer (src/tools.ts), which web/ may not import. */
     validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
-    /** Ran after a successful unlock; main.ts starts the channels it held
-     *  back. A callback because web/ must not import channels/. */
+    /** A callback because web/ must not import channels/. */
     onUnlocked?: () => void;
-    /** The public URL rides in the prompt a session is opened with, so a live
-     *  session still quotes the old one: server.ts recycles the idle ones. */
+    /** The public URL rides in the prompt a session opens with; idle ones are recycled. */
     onSettingsChanged?: () => void;
   },
 ): void {
@@ -113,14 +89,11 @@ export function registerInstanceRoutes(
     validateCustomTools,
   } = deps;
   const updateLog = logger("update");
-  // How long POST /api/update may hold its response open. A busy Pier drains
-  // first, which can take minutes, and a response held that long dies at every
-  // proxy on the way (principle 7): past this cap the answer is "draining".
+  // A busy Pier drains first, which can take minutes, and a response held that
+  // long dies at every proxy: past this cap the answer is "draining".
   const APPLY_REPLY_CAP_MS = 10_000;
 
-  // The browser's half of the log. A workbench that threw after the response
-  // left the server is otherwise invisible here (ui/report.ts) — this is the
-  // one route whose entire purpose is to make it visible.
+  // A workbench that threw after the response left is otherwise invisible here.
   const clientLog = logger("client");
   let reports: number[] = [];
   app.post("/api/client-log", async (c) => {
@@ -140,8 +113,7 @@ export function registerInstanceRoutes(
       typeof value === "string" ? value.slice(0, max) : "";
     const where = cap(body.view, 120);
     const stack = cap(body.stack, 2000);
-    // One line, ua included: "only on iOS" is the answer half these questions
-    // have, and the report is the only place it exists.
+    // ua included: "only on iOS" is the answer half these questions have.
     clientLog.warn(
       `${cap(body.message, 500)} [${where || "/"}] ${cap(c.req.header("user-agent"), 160)}` +
         (stack ? `\n${stack}` : ""),
@@ -149,42 +121,32 @@ export function registerInstanceRoutes(
     return c.body(null, 204);
   });
 
-  // Instance settings. The password lives behind its own route (web/auth.ts):
-  // it is a credential, and changing it takes the old one.
-  // The catalog rides along: one round trip for the whole page, and the
-  // switches cannot disagree with the setting they are drawn from. One shape
-  // for both the read and the write, or the page reconciles two answers.
+  // The catalog rides along so the switches cannot disagree with the setting
+  // they are drawn from. One shape for read and write.
   const instanceSettings = async () => {
     const shown = await catalog?.();
     return {
       ...settings.get(),
       catalog: shown?.entries ?? [],
-      /** Where the runs are: the install and every daily update is one task's
-       *  history, not a second status surface this route invented. */
+      /** The install and every daily update is one task's history. */
       toolsTaskId: shown?.toolsTaskId ?? null,
     };
   };
 
   app.get("/api/settings", async (c) => c.json(await instanceSettings()));
 
-  // What the version badge reads: the two versions, whether this instance can
-  // do anything about the gap, and whether it is allowed to do it unattended.
-  // `statusNow` so a browser opened seconds after a restart is told the truth
-  // rather than "no idea yet".
+  // `statusNow` so a browser opened seconds after a restart is told the truth.
   app.get("/api/update", async (c) =>
     c.json({
       ...(await updates.statusNow()),
       canApply: updater !== null,
       autoUpdate: settings.get().autoUpdate,
-      // Reported whether or not an update is pending: the repair is the same,
-      // and finding out at the next restart is finding out too late.
+      // Whether or not an update is pending: the next restart is too late.
       problem: updater?.problem() ?? null,
     }));
 
-  // Applying. Nothing is installed here: the work is handed to the service
-  // manager's own oneshot unit, which backs the database up and installs while
-  // Pier still runs, then stops it and starts the new version — an npm child of
-  // this process would be killed by the very restart it is performing.
+  // Handed to the service manager's oneshot unit: an npm child of this
+  // process would be killed by the very restart it is performing.
   app.post("/api/update", async (c) => {
     if (!updater) {
       return c.json({ error: "no service manager owns this Pier — update it with: pier update" }, 409);
@@ -207,8 +169,7 @@ export function registerInstanceRoutes(
       new Promise<"draining">((resolve) => setTimeout(resolve, APPLY_REPLY_CAP_MS, "draining").unref()),
     ]);
     if (started === "draining") {
-      // The handover keeps running behind this response; if it fails later,
-      // main.ts's takeWorkAgain reports it and reopens the gate (§5b).
+      // If the handover fails later, main.ts reports it and reopens the gate (§5b).
       updateLog.info(`updating to ${latest} on the Console's request — waiting for running work to finish`);
       return c.json({ started: true, draining: true, latest }, 202);
     }
@@ -227,12 +188,8 @@ export function registerInstanceRoutes(
     return c.json({ started: true, latest });
   });
 
-  // Partial on purpose: each surface sends only the setting it edits, and a
-  // malformed field is rejected before anything is written.
-  //
-  // A switch sends a *delta* (`tool`/`extension`), not the list it computed:
-  // two quick clicks each carry a list built from what the page knew a moment
-  // ago, so the second silently drops the first.
+  // Partial: each surface sends only what it edits. A switch sends a delta,
+  // not a list: two quick clicks each carrying a list would drop one.
   app.put("/api/settings", async (c) => {
     const body = await c.req.json().catch(() => null) as
       | {
@@ -253,9 +210,8 @@ export function registerInstanceRoutes(
         error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, extension or tool required",
       }, 400);
     }
-    // Everything is validated before anything is written, and everything is
-    // written in one transaction: a request carrying a new custom tool *and*
-    // the switch that turns it on must not leave one of the two stored.
+    // One transaction: a new custom tool and the switch that turns it on must
+    // not leave one of the two stored.
     const writes: (() => void)[] = [];
     const refuse = (error: string) => c.json({ error }, 400);
     if (body?.publicUrl !== undefined) {
@@ -280,9 +236,8 @@ export function registerInstanceRoutes(
       if (typeof autoUpdate !== "boolean") return refuse("autoUpdate must be a boolean");
       writes.push(() => settings.setAutoUpdate(autoUpdate));
     }
-    /** The blocks this request declares, or null when it does not touch them.
-     *  Adding a tool is declaring it *and* switching it on, so a name declared
-     *  here is switchable in the same write. */
+    /** Null when the request does not touch them; a name declared here is
+     *  switchable in the same write. */
     let declared: CustomTool[] | null = null;
     if (body?.customTools !== undefined) {
       const validated = validateCustomTools?.(body.customTools) ??
@@ -292,8 +247,7 @@ export function registerInstanceRoutes(
       const custom = validated.tools;
       writes.push(() => settings.setCustomTools(custom));
     }
-    /** A single switch, applied to the set as it is *now* rather than to the
-     *  list the browser had. Returns the name, or the refusal. */
+    /** Applied to the set as it is now, not the list the browser had. */
     const delta = (raw: unknown): { name: string; on: boolean } | string => {
       const given = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
       const name = typeof given?.name === "string" ? given.name.trim() : "";
@@ -307,8 +261,6 @@ export function registerInstanceRoutes(
       extensionOne = one;
       writes.push(() => settings.setExtensions(withName(settings.get().extensions, one)));
     }
-    // Whether the enabled set moved, for the install below. The delta itself
-    // is resolved inside the transaction, against the set as it was stored.
     let toolsChanged = false;
     let toolOne: { name: string; on: boolean } | null = null;
     if (body?.tool !== undefined) {
@@ -319,10 +271,7 @@ export function registerInstanceRoutes(
       writes.push(() => settings.setTools(withName(settings.get().tools, one)));
     }
 
-    // What ubix says about the blocks this request would undeclare. Asked out
-    // here because answering it spawns a subprocess, and a transaction may not
-    // wait on one; the *sets* below are read inside the transaction, where
-    // nothing can move them.
+    // Asked outside the transaction: it spawns a subprocess.
     const dropping = declared !== null &&
       settings.get().customTools.some((tool) => !declared?.some((kept) => kept.name === tool.name));
     const shown = dropping ? await catalog?.() : undefined;
@@ -331,20 +280,10 @@ export function registerInstanceRoutes(
       return entry?.source === "binary" ? entry.binary : null;
     };
 
-    /**
-     * The rules that are about *sets*, applied inside the transaction against
-     * the settings as they are at that instant. Outside it they are a
-     * time-of-check: a request dropping a declaration and another switching
-     * that tool on both passed, and left an enabled tool nothing declares.
-     *
-     * What may be switched on comes from `names`, which is code and cannot
-     * change while this runs, plus what this request declares. What may be
-     * undeclared is the second rule: a block is the only thing that can
-     * uninstall its binary, so it may not go while the tool is on, installed,
-     * broken, or while ubix's answer about it could not be read. Switching a
-     * name *off* is never refused — that is the repair, and it is the first
-     * half of removing one.
-     */
+    /** Inside the transaction, or two requests both pass and leave an enabled
+     *  tool nothing declares. A block is the only thing that can uninstall its
+     *  binary, so it may not go while the tool is on, installed or broken;
+     *  switching off is never refused, being the first half of removing one. */
     const check = (): void => {
       const current = settings.get();
       const after = (declared ?? current.customTools).map((tool) => tool.name);
@@ -374,23 +313,19 @@ export function registerInstanceRoutes(
         for (const write of writes) write();
       });
     } catch (err) {
-      // Nothing was written: the transaction rolled back with it.
       if (err instanceof Refusal) return c.json({ error: err.message }, err.status);
       throw err;
     }
-    // Stored first, then acted on: the switch shows what was written even when
-    // the install cannot start — and then says why, here, rather than leaving
-    // "saved" as the last thing anyone was told.
+    // Stored first: the switch shows what was written even when the install
+    // cannot start, and then says why.
     const note = toolsChanged ? await onToolsChanged?.() : null;
-    // The URL and the extension set are both read when a session opens; the
-    // model menu is read per picker call, so it needs no recycle.
+    // Read when a session opens; the model menu is read per picker call.
     if (body?.publicUrl !== undefined || body?.extension !== undefined) onSettingsChanged?.();
     return c.json({ ...(await instanceSettings()), ...(note ? { toolsSync: note } : {}) });
   });
 
-  // Layer-1 key status and control (Console → Settings → Security). The GET
-  // is what a locked instance shows; unlock is how it recovers without a
-  // restart, and rotate is the only way to change how the KEK is protected.
+  // Layer-1 key status and control; unlock is how a locked instance recovers
+  // without a restart.
   const secretsStatus = () => ({
     state: secrets.state,
     mode: secrets.mode ?? null,
@@ -409,9 +344,7 @@ export function registerInstanceRoutes(
     return c.json(secretsStatus());
   });
 
-  // Why vt cannot hand the key over is vt's answer, not Pier's: config
-  // sources, routing, whether an agent is listening. Read-only and safe while
-  // locked — without it "locked" is one error string and no way to repair it.
+  // Safe while locked; without it "locked" is one error string and no way to repair.
   app.get("/api/secrets/doctor", async (c) => {
     try {
       return c.json({ report: await secrets.doctor() });

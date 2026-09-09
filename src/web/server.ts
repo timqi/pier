@@ -55,22 +55,18 @@ async function queueResponse(action: () => Promise<unknown>, status: 200 | 202 =
   }
 }
 
-/** A transcript without the bytes nobody has asked to see yet. A step's `args`
- *  and `output` are ~90% of a long session's snapshot and sit inside a
- *  collapsed group; the client fetches one turn's worth when it is opened. */
+/** A step's `args` and `output` are ~90% of a long session's snapshot and sit
+ *  in a collapsed group; the client fetches one turn's worth when opened. */
 const slim = (turn: ChatTurn): ChatTurn =>
   turn.steps
     ? { ...turn, steps: turn.steps.map(({ args: _args, output: _output, ...step }) => step) }
     : turn;
 
-/** What goes in front of `Pier` in the tab: `$PIER_TITLE`, then the machine.
- *  The label leads because a tab is narrow and "which instance is this" is the
- *  question it has to answer before the browser truncates — `staging - g1`. */
+/** `$PIER_TITLE`, then the machine: the label leads because a tab is narrow
+ *  and "which instance" must survive truncation. */
 export const tabPrefix = (title: string | undefined, host: string): string =>
   [title?.trim(), host.trim()].filter(Boolean).join(" - ").slice(0, 60);
 
-/** `<title>staging - g1 - Pier</title>`. Nothing to say, or a shell that does
- *  not say `Pier`: leave it exactly as built. */
 export const withTabPrefix = (html: string, prefix: string): string =>
   prefix
     ? html.replace(
@@ -83,8 +79,6 @@ export interface WebDeps {
   factory: AgentFactory;
   router: Router;
   hub: EventHub;
-  /** The rail's working set, and the sessions whose last finished turn nobody
-   *  viewed. */
   sessions: SessionStateStore;
   config: ConfigStore;
   providers: ProviderManager;
@@ -94,38 +88,28 @@ export interface WebDeps {
   names?: { extensions: readonly string[]; tools: readonly string[] };
   onToolsChanged?: () => Promise<ToolsSyncNote | null>;
   validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
-  /** Whether a newer Pier exists; answered from cache, refreshed in the
-   *  background. */
   updates: UpdateCheck;
-  /** How this instance applies one; `null`/absent where nothing supervises it. */
+  /** `null`/absent where nothing supervises this instance. */
   updater?: UpdateApplier | null;
   secrets: SecretsControl;
-  /** Ran after a successful unlock; main.ts starts the channels it held back.
-   *  A callback because web/ must not import channels/. */
+  /** A callback because web/ must not import channels/. */
   onUnlocked?: () => void;
-  /** `pier reload`, defined by main.ts because half of it is the adapters:
-   *  re-read their configuration, let the sessions go, answer how many. */
+  /** `pier reload`, defined by main.ts because half of it is the adapters. */
   reload?: () => Promise<number>;
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
-  /** The same runs, counted per session in one query — what a list needs. */
   activeBackgroundRunCounts?: () => Map<string, number>;
-  /** Sessions a task run created for itself: subagents, cron and manual runs.
-   *  Not the operator's conversations, so the list leaves them out; they stay
-   *  reachable by id from the Runs and Activity views. */
+  /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
-  /** The IM channel that durably owns a session, absent for everything else.
-   *  Injected because the mapping lives in channels/. Not push.ts's question:
-   *  that one asks which conversation produced *this* turn and is answered
-   *  from the live router, so a chat session prompted from the workbench
-   *  answers "web" there and its owning channel here. */
+  /** The IM channel that durably owns a session. Not push.ts's question, which
+   *  is answered from the live router: a chat session prompted from the
+   *  workbench answers "web" there and its owning channel here. */
   channelOf?: (sessionId: string) => string | undefined;
 }
 
 const HEARTBEAT_MS = 15_000;
-/** A reader that stopped reading must not queue frames without bound. Past
- *  this much frame text in flight the stream is dropped with a line in the
- *  log; EventSource reconnects and replays from its Last-Event-ID. */
+/** Past this much frame text in flight the stream is dropped; EventSource
+ *  reconnects and replays from its Last-Event-ID. */
 const SSE_HIGH_WATER = 4 * 1024 * 1024;
 // Canonical base64 only: Buffer.from(.., "base64") happily "decodes" garbage.
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -156,8 +140,7 @@ export function createServer(
 ): Hono {
   const app = new Hono();
   const epoch = randomUUID();
-  // One frame shared by synchronous fan-out to every watching tab. The epoch
-  // and wire encoding stay here; core only stamps transport-blind events.
+  // One frame shared by synchronous fan-out to every watching tab.
   let lastEvent: SessionEvent | null = null;
   let lastFrame = "";
   const sseFrame = (e: SessionEvent): string => {
@@ -168,19 +151,11 @@ export function createServer(
     return lastFrame;
   };
 
-  // A finished turn marks its session unread until some client reports it was
-  // seen (session selected + tab visible → POST read below). Server-side so
-  // every client shows the same attention state. Streaming → idle is the
-  // trigger — same transition the client notification uses — and it needs a
-  // start we witnessed, so a session that boots idle stays untouched.
-  //
-  // Only for the workbench's own sessions: an IM turn was already delivered to
-  // the chat it came from and a subagent's to its supervisor by callback, so no
-  // look here is owed for either — and none could clear the mark either, since
-  // the ack needs the session on screen. Marked anyway, they were a flag that
-  // only ever accumulated, and every reader had to subtract them again. The two
-  // facts are the ones the list already draws a row from (`present` below): no
-  // durable conversation row, and not a session a run made for itself.
+  // Server-side so every client shows the same attention state; it needs a
+  // start we witnessed, so a session that boots idle stays untouched. Only the
+  // workbench's own sessions: an IM turn or a subagent's was delivered
+  // elsewhere, and nothing could ever clear the mark (the ack needs the session
+  // on screen).
   const workbenchOwn = (id: string): boolean =>
     (channelOf?.(id) ?? "web") === "web" && !(taskSessions?.().has(id) ?? false);
   const runningNow = new Set<string>();
@@ -196,26 +171,18 @@ export function createServer(
     hub.emitWorkspace({ type: "sessions-changed" });
   });
 
-  /** Background runs still in flight, per launching session. One query for a
-   *  whole list: asking row by row loaded every run object of every session to
-   *  draw one dot each. */
+  /** One query for a whole list, not one per row. */
   const activeRuns = (): Map<string, number> => activeBackgroundRunCounts?.() ?? new Map();
 
-  /** The web channel's session for `id` — every session route resolves here. */
   const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id });
 
-  // Sessions created here that Pi doesn't list yet — it persists a session
-  // only once the first assistant message lands. Merged into the list below
-  // so every client sees a new session immediately; dropped once Pi lists it.
+  // Pi persists a session only once the first assistant message lands; until
+  // then the rail lists it from here.
   const nascent = new Map<string, { cwd: string; createdAt: number }>();
 
-  /** `ensure`, plus ghost cleanup. A session created and never messaged does
-   *  not survive a restart or an eviction (Pi persisted nothing), but while
-   *  this process lives it is in `nascent` and therefore in the rail — left
-   *  alone, clicking it 404s forever. The load path is where a ghost is
-   *  discovered, so it is where the entry and its row are dropped and every
-   *  rail told; the 404 then says what happened instead of looking like a
-   *  crash (§5b). */
+  /** A session created and never messaged does not survive an eviction (Pi
+   *  persisted nothing) but is still in `nascent`; left alone, clicking it 404s
+   *  forever. Dropped here, and the 404 says what happened (§5b). */
   const ensureLoadable = async (id: string): Promise<AgentSession> => {
     try {
       return await ensure(id);
@@ -230,24 +197,18 @@ export function createServer(
     }
   };
 
-  // A listing stats every session file and parses whatever grew — milliseconds
-  // warm, one scan cold. Concurrent consumers share it, whatever the factory
-  // behind the seam retains of its own; nothing here is cached past the last
-  // of them.
+  // Concurrent consumers share one scan; nothing is cached past the last of them.
   let listing: Promise<SessionSummary[]> | undefined;
   const listSessions = (): Promise<SessionSummary[]> =>
     listing ??= factory.list().finally(() => {
       listing = undefined;
     });
 
-  /** Every session the rail may show: what Pi has written, plus the ones
-   *  created here that it has not persisted yet, minus the ones task runs
-   *  made for themselves. */
   const allSessions = async (): Promise<SessionSummary[]> => {
     const sessions = await listSessions();
     for (const s of sessions) nascent.delete(s.id);
-    // A session created but never prompted would otherwise be listed forever —
-    // and, since creation ranks it, hold a working-set slot forever too.
+    // A session created but never prompted would otherwise hold a working-set
+    // slot forever.
     for (const [id, n] of nascent) {
       if (Date.now() - n.createdAt > 86_400_000) {
         nascent.delete(id);
@@ -261,10 +222,8 @@ export function createServer(
     ];
   };
 
-  // One session as every list renders it: the summary, what the workbench
-  // decided about it, and what is true of it right now. `rank` is the place in
-  // the rail's working set, when it has one; `modified` rides along for the
-  // row's tooltip, and orders nothing.
+  // `rank` is the place in the rail's working set; `modified` is for the
+  // row's tooltip and orders nothing.
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>) => ({
     ...s,
     ...(own?.rank === undefined ? {} : { rank: own.rank }),
@@ -298,28 +257,22 @@ export function createServer(
 
   app.post("/api/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    // A session always starts in its project directory — never in pier's own.
+    // Never in pier's own directory.
     if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
-    // The seam records the real path (agent/pi.ts), and the row below stands in
-    // for a listing until Pi persists the session — up to a day for one never
-    // prompted. Resolved here too, or that row is the one place a directory
-    // reached through a symlink still looks like a project of its own.
+    // Resolved like the seam does (agent/pi.ts), or the nascent row is the one
+    // place a symlinked directory still looks like a project of its own.
     const cwd = await realpath(body.cwd).catch(() => body.cwd as string);
     const session = await factory.create({ cwd });
     const createdAt = Date.now();
     nascent.set(session.id, { cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
-    // Created is as good as spoken to: the person who clicked New is about to
-    // type into it, and a row born below the working set would jump on the
-    // first message. Ghosts give the slot back (`ensureLoadable`, the expiry
-    // above).
+    // Created is as good as spoken to: a row born below the working set would
+    // jump on the first message.
     state.promote(session.id);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
 
-  // Seen = read: a client with the session selected and the tab visible acks
-  // here; the broadcast moves every other client's dot back to idle.
   app.post("/api/sessions/:id/read", (c) => {
     const id = c.req.param("id");
     if (state.unread(id)) {
@@ -329,14 +282,11 @@ export function createServer(
     return c.json({ ok: true });
   });
 
-  // The two responses big enough to matter: a transcript, and one turn's tool
-  // detail. Scoped to these routes on purpose — compressing the SSE streams
-  // would sit on events until the encoder's buffer filled.
+  // Only these two: compressing the SSE streams would sit on events until the
+  // encoder's buffer filled.
   app.use("/api/sessions/:id/history", compress());
   app.use("/api/sessions/:id/turns/:index/steps", compress());
 
-  // Snapshot: everything a fresh client needs before it starts consuming
-  // deltas from SSE — transcript, live state, pending queue, model.
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
     const session = await ensureLoadable(id);
@@ -372,21 +322,15 @@ export function createServer(
     if (!Number.isInteger(index) || index < 0) return c.json({ error: "index required" }, 400);
     const turn = (await (await ensure(c.req.param("id"))).history())[index];
     if (!turn) return c.json({ error: `no turn at index ${index}` }, 404);
-    // Already capped at MAX_STEP_OUTPUT by the transcript rebuild: this route
-    // hands back what a surface shows, not the untruncated tool result.
     return c.json({ steps: turn.steps ?? [] });
   });
 
-  // Attachments, both directions: the agent links a file it produced, the chat
-  // renders a file the user sent. Read-only, and any readable file — the
-  // boundary here is the Console password (web/fs.ts), not the session's cwd:
-  // a cwd is chosen by whoever creates the session, so confining to it stopped
-  // nothing and left a report the agent wrote elsewhere as a dead card.
+  // Any readable file: the boundary is the Console password (web/fs.ts), not
+  // the session's cwd, which is chosen by whoever creates the session.
   guarded(app, "GET", "/api/sessions/:id/files", 400, async (c) => {
     const raw = c.req.query("path");
     if (!raw) return c.json({ error: "path required" }, 400);
-    // Absolute only: a link into a session's files is written by the agent or
-    // by Pier, and neither of them writes a path relative to anything.
+    // Absolute only: neither the agent nor Pier writes a relative link.
     const file = isAbsolute(raw) ? await realpath(raw).catch(() => null) : null;
     const info = file ? await stat(file).catch(() => null) : null;
     if (!file || !info?.isFile()) return c.json({ error: "no such file" }, 404);
@@ -398,9 +342,7 @@ export function createServer(
     });
   });
 
-  // Composer attachments: bytes land in the inbox, the message carries the
-  // path as a `[name](file:///…)` line the client builds itself — upload
-  // first, so the text it sends (and optimistically renders) is final.
+  // Upload first, so the text the client sends and optimistically renders is final.
   guarded(app, "POST", "/api/inbox", 400, async (c) => {
     const body = await c.req.json().catch(() => null);
     if (
@@ -419,8 +361,7 @@ export function createServer(
     return c.json({ path: await saveInbound("web", name, body.mimeType, bytes) });
   });
 
-  // Backend model catalog, no session needed: surfaces that configure what a
-  // *future* session launches with (IM chats) have none to ask.
+  // No session needed: surfaces configuring a *future* session have none to ask.
   app.get("/api/models", async (c) => {
     try {
       return c.json(await factory.availableModels());
@@ -473,10 +414,8 @@ export function createServer(
     const { sessionId } = await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
-      // Named, not anonymous: a session reached from a group chat as well as
-      // from here attributes an unheaded message to whoever spoke last
-      // (core/identity.ts), which is the operator's own words in someone
-      // else's mouth.
+      // Named: in a session also reached from a group chat, an unheaded message
+      // is attributed to whoever spoke last (core/identity.ts).
       sender: { id: "web", name: "operator" },
       text: body.text,
       mode,
@@ -484,9 +423,7 @@ export function createServer(
     return c.json({ sessionId }, 202);
   });
 
-  // Edit a user turn: rewind the transcript to just before it, then re-send
-  // the edited text as a fresh dispatch. Pi keeps the old branch in the
-  // session file but out of context — the "deleted" message stops polluting.
+  // Edit a user turn: rewind to just before it, then re-dispatch the edited text.
   guarded(app, "POST", "/api/sessions/:id/turns/:index/edit", 400, async (c) => {
     const id = c.req.param("id");
     const index = Number(c.req.param("index"));
@@ -494,8 +431,7 @@ export function createServer(
     if (!Number.isInteger(index) || index < 0 || typeof body?.text !== "string" || !body.text.trim()) {
       return c.json({ error: "index and text required" }, 400);
     }
-    // Asked before touching anything: the dispatch below would be refused by
-    // the drain gate, and by then the transcript is already rewound.
+    // Before touching anything: a refused dispatch must not cost a rewound transcript.
     if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
@@ -503,8 +439,7 @@ export function createServer(
     if (index !== latest) return c.json({ error: "only the latest user message can be edited — refresh and try again" }, 409);
     if (session.state !== "idle") return c.json({ error: "busy — stop the turn first" }, 409);
     await session.rewindToUserTurn(index);
-    // The rewind took the turns after this one out of the context, headers and
-    // all; what the model was told about who is speaking went with them.
+    // The rewind took the speaker headers out of the context too.
     router.forgetSender(id);
     await router.dispatch({
       key: { channelId: "web", conversationId: id },
@@ -516,9 +451,7 @@ export function createServer(
     return c.json({ ok: true }, 202);
   });
 
-  // Promote queued messages: "steer" delivers them into the running turn,
-  // "restart" aborts the turn and sends them as a fresh prompt. Core owns
-  // exclusion and retains originals through the asynchronous handoff.
+  // Core owns exclusion and retains originals through the asynchronous handoff.
   guarded(app, "POST", "/api/sessions/:id/queue/deliver", 404, async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
@@ -529,7 +462,6 @@ export function createServer(
     return queueResponse(async () => ({ submitted: await router.deliverQueue(id, mode) }), 202);
   });
 
-  // Recall: drop all pending queued messages and hand them back (composer restore).
   guarded(app, "POST", "/api/sessions/:id/queue/recall", 404, async (c) => {
     const id = c.req.param("id");
     return queueResponse(async () => {
@@ -545,38 +477,27 @@ export function createServer(
     }),
   );
 
-  // Shrink the context on demand: Pi summarizes the older transcript away and
-  // the session continues from the summary. Refused while streaming, like the
-  // edit route above and for the same reason — Pi's own compaction aborts a
-  // running turn to do it, and losing a turn is not what the button offered.
-  // The result is not in this response: it arrives on the session's stream as
-  // `context-compacted` (agent/events.ts), which is also the only place the
-  // automatic compaction can be seen.
+  // Refused while streaming: Pi's compaction aborts a running turn, and losing
+  // one is not what the button offered. The result arrives on the stream as
+  // `context-compacted`.
   guarded(app, "POST", "/api/sessions/:id/compact", 404, async (c) => {
     const session = await ensure(c.req.param("id"));
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-    // The check above is a courtesy, not the lock: two clicks pass it on the
-    // same tick, so the seam refuses the second one (agent/pi.ts) and its
-    // refusal keeps the status this route already uses for "not now" — a 404
-    // from `guarded` would have read as "no such session".
+    // The check above is not the lock: two clicks pass it on the same tick, and
+    // the seam's refusal must keep the "not now" status, not read as "no such session".
     return await session.compact().then(
       () => c.json({ ok: true }, 202),
       (err: unknown) => c.json({ error: String(err) }, 409),
     );
   });
 
-  // A name, so a title is what you called it instead of the first 80
-  // characters you happened to type. Not refused while streaming: a rename has
-  // nothing to do with the turn running, and the transcript takes an append.
+  // Not refused while streaming: a rename has nothing to do with the turn running.
   guarded(app, "POST", "/api/sessions/:id/rename", 404, async (c) => {
     const body = await c.req.json().catch(() => null);
     if (typeof body?.name !== "string") return c.json({ error: "name required" }, 400);
     const id = c.req.param("id");
     await (await ensure(id)).rename(body.name.trim().slice(0, SESSION_TITLE_MAX));
-    // Nothing to write and nothing to report: the name went into the
-    // transcript, which is what every list reads. The event is how the
-    // surfaces learn to re-read it, and the seam dropped its retained scan on
-    // the way out so the re-read sees the new name.
+    // The transcript is the answer; the event tells surfaces to re-read it.
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
   });
@@ -587,8 +508,7 @@ export function createServer(
     return c.json({ ok: true }, 202);
   });
 
-  // Workspace stream: one per client, keeps every session list in sync
-  // (created/promoted → re-list, run state → patch) without polling.
+  // One per client; keeps every session list in sync without polling.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       // A write to a torn-down stream must not become an unhandled rejection.
@@ -627,14 +547,11 @@ export function createServer(
           .catch((err: unknown) => log.warn(`event write for ${id} failed: ${String(err)}`))
           .finally(() => (queued -= frame.length));
       };
-      // Subscribe before the replay write can wait on its reader: an event that
-      // arrives while that write is backpressured must queue behind it, not fall
-      // between replay() and subscribe(). Both snapshots happen synchronously,
-      // so live writes cannot overtake the replay write.
+      // Subscribe before the replay write can wait on its reader, or an event
+      // arriving during backpressure falls between replay() and subscribe().
       const unsubscribe = hub.subscribe(id, (e) => send(sseFrame(e)));
       stream.onAbort(unsubscribe);
-      // One write for the whole replay: a reconnect after a busy turn used to
-      // cost an await per event before the client saw any of them.
+      // One write for the whole replay, not an await per event.
       const missed = hub.replay(id, lastId);
       if (missed.length) await stream.write(missed.map(sseFrame).join(""));
       // Heartbeat keeps proxies from closing the stream; loop ends on abort.
@@ -645,14 +562,10 @@ export function createServer(
     });
   });
 
-  // Provider credentials, the agent files and the surface prompt are read when
-  // a session *opens*: a live one keeps what it opened with, so a Console save
-  // would otherwise reach nothing until the idle sweep got around to it half an
-  // hour later. Letting the idle sessions go is what `pier reload` does — the
-  // next message re-opens them with the configuration just written. Watched
-  // included, unlike the background sweep: the session open in the tab that
-  // just saved is the likeliest one to need it. A turn in flight is still never
-  // interrupted; it picks the change up at its next natural eviction.
+  // Credentials, agent files and the surface prompt are read when a session
+  // opens, so a Console save recycles idle sessions — watched included, since
+  // the tab that just saved is the likeliest to need it. A turn in flight is
+  // never interrupted.
   const recycle = (what: string): void => {
     void router.evictIdle(0, Date.now(), { includeWatched: true })
       .then((n) => {
@@ -661,12 +574,8 @@ export function createServer(
       .catch((err: unknown) => log.error(`recycling sessions after ${what} failed`, err));
   };
 
-  // `pier reload` on a button. The callbacks below already recycle when the
-  // Console is what changed the configuration; an agent editing AGENTS.md or a
-  // file edited over ssh has nothing to trigger them, and this is that trigger.
-  // `busy` is reported rather than waited on: a streaming session is never
-  // interrupted (core/router.ts evictIdle), so that count is the honest answer
-  // to "why is my change not live yet".
+  // `pier reload` on a button, for a file edited outside the Console. `busy`
+  // is the honest answer to "why is my change not live yet".
   app.post("/api/reload", async (c) => {
     try {
       const recycled = (await reload?.()) ?? 0;
@@ -695,36 +604,26 @@ export function createServer(
   registerFsRoutes(app);
   registerExplorerRoutes(app);
 
-  // serveStatic resolves `root` against the *working directory*, and an
-  // installed Pier is started from wherever the operator happens to be. The
-  // bundle sits beside this module in both trees — src/web/public when tsx
-  // runs the source, dist/web/public in a build — so the path is derived from
-  // the module and handed over as the relative form the option wants.
+  // serveStatic resolves `root` against the working directory, and an installed
+  // Pier is started from wherever the operator happens to be.
   const bundle = fileURLToPath(new URL("./public", import.meta.url));
 
-  // The tab says which instance this is (`staging - g1 - Pier`): an operator
-  // keeps a workbench open per environment and they are otherwise identical,
-  // and mistaking the test one for production is the mistake worth a few lines.
-  // Both facts are known only at runtime, so they are patched into the shell
-  // here rather than built in — and served behind the auth guard, so a stranger
-  // at /login learns neither. Read once: neither can change under a process.
+  // The tab says which instance this is: mistaking staging for production is
+  // the mistake worth a few lines. Behind the auth guard, so a stranger at
+  // /login learns neither fact.
   const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
   let shell: string | null = null;
-  // The one file the precompressed siblings below cannot cover: this route
-  // answers from the patched string, not from disk, and it is re-fetched on
-  // every navigation because it may not be cached. Exact path, like the two
-  // API routes above — never the SSE streams.
+  // Answers from the patched string, not from disk, so the precompressed
+  // siblings below cannot cover it. Exact path: never the SSE streams.
   app.use("/", compress());
   app.get("/", async (c, next) => {
-    // A release replaces hashed assets. Revalidate the shell on every
-    // navigation so a cached index cannot name bundles that no longer exist.
+    // A cached index must not name bundles a release has replaced.
     c.header("cache-control", "private, no-cache");
     if (shell === null) {
       try {
         shell = withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix);
       } catch (err) {
-        // A workbench that will not load is not worth a nicer tab: hand the
-        // request back to the static handler, which answers as it always did.
+        // A workbench that will not load is not worth a nicer tab.
         log.warn(`shell unreadable, serving it unpatched: ${String(err)}`);
         return next();
       }
@@ -732,28 +631,21 @@ export function createServer(
     return c.html(shell);
   });
 
-  // Same reasoning as the shell above, for the one asset that is not hashed:
-  // an installed app keeps its worker until the script it re-fetches differs,
-  // so a cached copy is a released fix that never ships.
+  // The one unhashed asset: an installed app keeps its worker until the
+  // re-fetched script differs, so a cached copy is a fix that never ships.
   app.get("/sw.js", async (c, next) => {
     c.header("cache-control", "private, no-cache");
     await next();
   });
-  // Hashed bundles never change under their name — a release writes new names,
-  // and the shell above is what re-points at them. Without this they carry only
-  // the auth layer's bare `private`, so a browser revalidates each one before it
-  // may reuse it: a round trip per bundle on a remote instance, every time the
-  // workbench is opened.
+  // Hashed bundles never change under their name; without this the auth
+  // layer's bare `private` costs a revalidation round trip per bundle per open.
   app.get("/assets/*", async (c, next) => {
     c.header("cache-control", "private, max-age=31536000, immutable");
     await next();
   });
-  // `precompressed` looks for a `.br`/`.gz` sibling of the file it is about to
-  // serve and hands that over when the request accepts the encoding; the build
-  // writes them (vite.config.ts). Without it the 325 kB bundle and the 87 kB
-  // stylesheet go out verbatim.
-  // serveStatic only sets Vary when it selects a sibling. Identity must carry
-  // it too, or a cache can reuse that response for a later Brotli request.
+  // The build writes `.br`/`.gz` siblings (vite.config.ts). serveStatic sets
+  // Vary only when it selects one; identity must carry it too, or a cache can
+  // reuse that response for a later Brotli request.
   app.use("/*", async (c, next) => {
     await next();
     c.header("Vary", "Accept-Encoding");

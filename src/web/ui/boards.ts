@@ -1,7 +1,5 @@
-// Console → Boards view: one table of the static pages agents wrote, and the
-// one decision a human owns (publish). Everything else about a board — title,
-// description, session links, content — belongs to the agent that wrote it, so
-// this view reads /api/boards and writes only `public`.
+// Console → Boards: one table of the pages agents wrote, and the one decision a
+// human owns (publish). Everything else belongs to the agent; this writes only `public`.
 
 import { failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, copyBtn, h, relTime, type ConsoleView } from "./dom.js";
@@ -26,16 +24,12 @@ const boardPath = (board: Board): string =>
 
 export function createBoardsView(root: HTMLElement, openSession: (id: string) => void): ConsoleView {
   let boards: Board[] = [];
-  /**
-   * The last write that did not take. A view that silently re-renders the old
-   * state is indistinguishable from one where the click never landed.
-   */
+  /** A view that silently re-renders the old state is indistinguishable from
+   *  one where the click never landed. */
   let problem = "";
 
-  // max-md:hidden: the title is all this head carries, and below md the top bar
-  // already says "Boards" — the strip would be an empty band under it.
-  // top-[-8px] is the strip's own inset, so once it sticks it sits flush
-  // against the scrollport instead of leaving 8px of cards sliding past above.
+  // max-md:hidden: below md the top bar already says "Boards". top-[-8px] is
+  // the strip's own inset, so it sticks flush against the scrollport.
   const header = h("header", "pagehead sticky top-[-8px] z-30 max-md:hidden", pageTitle("Boards"));
   const pane = h("div", "px-4 pb-5 pt-1");
   root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, pane));

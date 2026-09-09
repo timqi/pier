@@ -2,10 +2,7 @@
 // write, the sentence a failure shows, the scheduling of a re-read. Nine
 // modules had grown their own copy of the method/headers/body triple.
 
-/**
- * One list request in flight at a time; anything asked for during one runs
- * after it, so a burst of workspace events costs two fetches, not twenty.
- */
+/** A burst of workspace events costs two fetches, not twenty. */
 export function coalesce(load: () => Promise<void>): () => Promise<void> {
   let inflight: Promise<void> | undefined;
   let dirty = false;
@@ -43,16 +40,8 @@ export async function failure(res: Response, fallback: string): Promise<string> 
 /** What a read got: the value, or the sentence to show for not having it. */
 export type Fetched<T> = { ok: true; value: T } | { ok: false; error: string };
 
-/**
- * GET something this instance answers as JSON.
- *
- * The write side was consolidated long ago and the read side was not, so a
- * dozen views had their own `fetch` → `res.ok` → `json()` — agreeing on the
- * happy path and differing on the two that matter: a refusal whose body
- * carries the server's own sentence (thrown away by most of them, leaving
- * `(500)`), and a request that never answered, which rejected into a `void`
- * call and showed nothing at all (§5b).
- */
+/** A refusal keeps the server's own sentence, and a request that never
+ *  answered is a result, not a rejection into a `void` call (§5b). */
 export async function getJson<T>(
   url: string,
   fallback: string,
@@ -72,13 +61,8 @@ export async function getJson<T>(
   }
 }
 
-/**
- * The same read for a caller that is already inside a `try` — a view whose
- * failure path is one `catch` around several steps, not a branch per step.
- * Exists so "throw the sentence" is written once: it had four copies within a
- * day of `getJson` landing, and a copy that throws the `Response` instead of
- * the sentence is how `[object Object]` reaches a pane.
- */
+/** For a caller already inside a `try`. Throws the sentence, never the
+ *  `Response`, which is how `[object Object]` reaches a pane. */
 export async function mustGetJson<T>(
   url: string,
   fallback: string,
@@ -89,13 +73,8 @@ export async function mustGetJson<T>(
   return got.value;
 }
 
-/**
- * A bodiless POST or DELETE — stop a run, delete a board, retry a task — where
- * the only answer worth having is the sentence for a refusal. Three views had
- * the same try/fetch/failure/catch around it, and two of them had left the
- * catch out, so a request that never answered surfaced as an "unhandled
- * rejection" line in the chat pane instead of in the pane that was clicked.
- */
+/** A bodiless POST or DELETE where the only answer worth having is the
+ *  sentence for a refusal; never rejects. */
 export async function refused(
   url: string,
   method: "POST" | "DELETE",

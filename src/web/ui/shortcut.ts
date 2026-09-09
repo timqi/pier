@@ -1,25 +1,18 @@
-// One reason: a keyboard shortcut and the hint that teaches it are the same
-// fact. A chord nobody is told about is a chord nobody presses, so registering
-// one here is also what gives its button the hover card naming it — there is
-// no way to add the binding and forget the affordance.
-//
-// The native `title` tooltip cannot show a key cap and waits a second before
-// it appears, which is exactly the wrong shape for "this button has a
-// shortcut" — so a control that gets a chord loses its title to this card.
+// A keyboard shortcut and the hint that teaches it are the same fact: there is
+// no way to add the binding and forget the affordance. The native `title`
+// cannot show a key cap and waits a second, so a control with a chord loses
+// its title to this card.
 
 import { h } from "./dom.js";
 
-// userAgent, not the deprecated navigator.platform. Only the label depends on
-// it; both modifiers are accepted below, because a Linux browser on a Mac
-// keyboard is a real thing and refusing it buys nothing.
+// Only the label depends on it; both modifiers are accepted, because a Linux
+// browser on a Mac keyboard is a real thing.
 const APPLE = /Mac|iP(?:hone|ad|od)/.test(navigator.userAgent);
 const MOD = APPLE ? "⌘" : "Ctrl+";
 const SHIFT = APPLE ? "⇧" : "Shift+";
 
-// A key spec is `"k"`, `"shift+o"` or `"meta+b"`: Shift is opt-in per binding,
-// because every unshifted letter worth having is either taken or the browser's.
-// `meta+` narrows the modifier to ⌘ alone — Ctrl+B is the backward motion every
-// text field on a Unix desktop has, and a chord may not take that away.
+// `"k"`, `"shift+o"` or `"meta+b"`. `meta+` narrows to ⌘ alone: Ctrl+B is the
+// backward motion every Unix text field has.
 const parse = (spec: string): { key: string; shift: boolean; meta: boolean } => {
   const meta = spec.startsWith("meta+");
   const rest = meta ? spec.slice(5) : spec;
@@ -35,9 +28,8 @@ export function chordLabel(spec: string): string {
   return `${meta ? "⌘" : MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
 }
 
-/** A modal dialog is a mode: a chord acting underneath it would leave it
- *  floating over a view it was never opened from, so every binding here and
- *  the callers that pass `unless` stand down on the same claim. */
+/** A chord acting under a modal would leave it floating over a view it was
+ *  never opened from. */
 export const modalOpen = (): boolean => document.querySelector("dialog[open]") !== null;
 
 /** What Shift turns a bracket into on a US layout — the only non-letter keys
@@ -65,33 +57,23 @@ function hint(el: HTMLElement, label: string, chord: string): void {
     card = h("div", CARD, label, h("kbd", "rounded bg-white/15 px-1 py-px font-sans text-[10.5px]", chord));
     document.body.append(card);
     const r = el.getBoundingClientRect();
-    // Below the anchor, or above it when the viewport has no room — clamping
-    // into the viewport instead would drop the card *onto* the control it
-    // names, and for the composer that is over the text being typed.
+    // Above when there is no room below: clamping would drop the card onto the
+    // control it names.
     const below = r.bottom + 6;
     const fits = below + card.offsetHeight + 8 <= window.innerHeight;
     card.style.top = `${fits ? below : Math.max(8, r.top - card.offsetHeight - 6)}px`;
     card.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - card.offsetWidth - 8))}px`;
-    // A hand that moved to the keyboard is no longer hovering, but the mouse it
-    // left behind still is: without this the card outlives its welcome by as
-    // long as the pointer happens to rest there.
+    // A hand that moved to the keyboard is no longer hovering, but the mouse
+    // it left behind still is.
     document.addEventListener("keydown", hide, true);
   });
   el.addEventListener("pointerleave", hide);
   el.addEventListener("pointerdown", hide); // the card would sit over what the click opens
 }
 
-/**
- * Bind mod+`key` to `run`, and tell `el` to say so on hover.
- *
- * Capture phase, and `preventDefault` before anything else sees it: ⌘K is the
- * browser's own search bar in Firefox, and a composer with focus must not
- * swallow the chord either.
- *
- * `unless` is how a surface already on screen takes the chord back — the
- * palette walks its own list with ⌘K/⌃K once it is open, and Esc is what
- * closes it. Checked before `preventDefault`, so the claim is real.
- */
+/** Capture phase and `preventDefault` first: ⌘K is Firefox's search bar, and a
+ *  focused composer must not swallow the chord. `unless` is how an open
+ *  surface takes the chord back, checked before `preventDefault`. */
 export function shortcut(
   el: HTMLElement,
   key: string,
@@ -103,16 +85,9 @@ export function shortcut(
   chord(key, run, unless);
 }
 
-/**
- * Esc, for the one action urgent enough to want no modifier: stopping a
- * running turn.
- *
- * Not a chord, and deliberately not capture phase — Esc already means "close
- * the topmost thing", and every overlay here consumes it on the way down
- * (menu.ts, a modal <dialog>). Bubbling last is what makes this the meaning
- * Esc has when nothing is layered above. `when` is the rest of that claim:
- * the action has to be live, or the key stays the browser's.
- */
+/** Not capture phase: every overlay consumes Esc on the way down, and bubbling
+ *  last makes this its meaning when nothing is layered above. `when`: the
+ *  action has to be live, or the key stays the browser's. */
 export function escapeKey(
   el: HTMLElement,
   label: string,
@@ -132,19 +107,9 @@ export function escapeKey(
 // A letter typed into one of these is text, never a command.
 const TYPING = "input, textarea, select, [contenteditable]";
 
-/**
- * A bare letter, for a view that owns the keyboard while it is open — stepping
- * through a diff's changes in the Files view.
- *
- * No modifier is available here: ⌘N/⌘P are the browser's new window and print,
- * and ↑/↓ are the scrolling the reader still needs. `when` is the entire claim
- * to an unmodified key — the view has to be on screen with something to step
- * through — and a focused text field or an open dialog keeps the letter
- * regardless. `keys` may carry aliases (`["n", "j"]`); the first is the one the
- * hover card teaches.
- *
- * Never unbound, so call it once per action from an init path.
- */
+/** A bare letter: ⌘N/⌘P are the browser's and ↑/↓ are the reader's scrolling.
+ *  `when` is the entire claim; a focused text field or an open dialog keeps the
+ *  letter regardless. Never unbound, so call once per action from an init path. */
 export function letterKey(
   el: HTMLElement,
   keys: [string, ...string[]],
@@ -165,14 +130,8 @@ export function letterKey(
   });
 }
 
-/**
- * The binding without the hover card — for an action whose affordance is a
- * menu row carrying `chordLabel(key)`, where a card on the ⋯ button that
- * opens it would name the wrong control (and a second chord on that button
- * would stack a second card on top of the first).
- *
- * Never unbound, so call it once per action from an init path.
- */
+/** Without the hover card, for an action whose affordance is a menu row: a
+ *  card on the ⋯ button would name the wrong control. Never unbound. */
 export function chord(spec: string, run: () => void, unless?: () => boolean): void {
   const { key, shift, meta } = parse(spec);
   // A shifted bracket arrives as the character Shift makes of it (`{`), and a

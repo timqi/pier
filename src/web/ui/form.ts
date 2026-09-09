@@ -1,31 +1,17 @@
 // The Console's form vocabulary: one card, one field, one of each control.
-//
-// Channels and Tasks each grew their own set — two `field`s with different
-// chrome, two input styles — so the two tabs did not look like the same
-// product. Lark makes it three surfaces, which is where a shared layer stops
-// being speculative, so this absorbs both rather than sitting beside them.
-//
-// Every control here is uncontrolled and callback-driven: the caller owns the
-// state and calls its own render. Nothing in this file knows what a channel or
-// a task is.
+// Every control is uncontrolled and callback-driven; nothing here knows what a
+// channel or a task is.
 
 import { CircleQuestionMark } from "lucide";
 import { icon } from "./icons.js";
 import { h, prose } from "./dom.js";
 
-/**
- * A button wearing the house chrome. `.btn`/`.btn-primary` are the only custom
- * classes style.css declares, which makes them the Console's button, so this is
- * what a button should be unless it is not button-shaped.
- */
+/** `.btn`/`.btn-primary` are the only custom classes style.css declares. */
 export const button = (label: string, primary = false): HTMLButtonElement =>
   btn(label, `${primary ? "btn btn-primary" : "btn"} text-[12.5px]`);
 
-/**
- * A `<button>` with classes of your own — for the things that are clickable but
- * not buttons: tabs, menu rows, inline links, the help badge. Reach for
- * `button()` first; bespoke chrome is how the Console drifted apart before.
- */
+/** For the clickable things that are not buttons: tabs, menu rows, inline
+ *  links. Reach for `button()` first. */
 export const btn = (label: string, cls = ""): HTMLButtonElement => {
   const el = h("button", cls, label) as HTMLButtonElement;
   el.type = "button";
@@ -37,18 +23,13 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
 export const pageTitle = (label: string): HTMLElement =>
   h("span", "mr-1 flex-none font-medium max-md:hidden", label);
 
-/** The row under a Console view's head: a breadcrumb, a segmented switch, with
- * actions pushed right by `ml-auto`. Wraps below md so the right-hand group
- * gets its own line. On the canvas it draws no rule of its own — the panel
- * below is its edge; as a list card's first row it is that card's header, and
- * style.css gives it the divider there. */
+/** Draws no rule of its own on the canvas; as a card's first row style.css
+ *  gives it the divider. */
 export const toolbar = (...children: (HTMLElement | SVGElement | string)[]): HTMLElement =>
   h("div", "toolbar flex min-h-10 flex-none flex-wrap items-center gap-2 px-4 py-2", ...children);
 
-/** A segmented switch — a few exclusive choices inside a toolbar (a task
- * page's Runs/Definition, Activity's table/graph and its time scope). Smaller
- * than a pill strip on purpose: it sits under one, and two rows of the same
- * chrome would read as two levels of the same navigation. */
+/** Smaller than a pill strip: it sits under one, and two rows of the same
+ *  chrome would read as two levels of one navigation. */
 export function segmented<K extends string>(options: [string, K][], value: K, onChange: (key: K) => void): HTMLElement {
   const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-full bg-neutral-100 p-1");
   for (const [label, key] of options) {
@@ -107,11 +88,6 @@ export interface FieldOptions {
   help?: HTMLElement;
 }
 
-/**
- * A labelled control. One chrome for the whole Console: Tasks used to render a
- * plain `<label>` and Channels a micro-caps header, which is most of why the
- * two tabs read as different apps.
- */
 export function field(label: string, control: HTMLElement, opts: FieldOptions = {}): HTMLElement {
   const box = h("div", "flex flex-col gap-1.5");
   const head = h("div", "flex items-center gap-1.5", h("span", "field-label", label));
@@ -195,12 +171,7 @@ export function toggle(
   return row;
 }
 
-/**
- * What a write is doing, in one spelling. Config, Channels and Settings had
- * each grown their own tone table — three greens for the same "saved".
- * Channels wraps its own chrome (spinner, ✓, Retry, fade) around these states
- * and takes the tone alone.
- */
+/** One spelling for every surface's write state. */
 export type SaveState = "idle" | "saving" | "saved" | "failed";
 
 export const STATUS_TONE: Record<SaveState, string> = {
@@ -232,14 +203,8 @@ export const empty = (text: string): HTMLElement =>
     text,
   );
 
-/**
- * Help bubble that survives the trip to it: the badge and the bubble are one
- * hover group, and the gap between them is the bubble's own transparent
- * padding, so crossing it never leaves the group. Clicking pins it open —
- * a five-step walkthrough is not something to read against a timer.
- *
- * Steps are markdown; a step that carries a control passes a node instead.
- */
+/** The gap between badge and bubble is the bubble's own transparent padding,
+ *  so crossing it never leaves the hover group. Clicking pins it open. */
 export function helpBadge(
   title: string,
   steps: (string | HTMLElement)[],

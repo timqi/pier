@@ -7,21 +7,9 @@ import { icon } from "./icons.js";
 import { copyBtn } from "./dom.js";
 import { button, helpBadge, withControl } from "./form.js";
 
-/**
- * Everything Pier's Slack adapter needs, as an app manifest.
- *
- * This is the copy-paste path: Slack's "From an app manifest" flow sets every
- * scope, every event subscription, Socket Mode and interactivity in one go, so
- * nobody has to tick eighteen checkboxes across four pages and discover the
- * missing one from a runtime error.
- *
- * Least privilege, and each entry is here because a specific call needs it:
- *  - no `app_mentions:read` — the `app_mention` event duplicates
- *    `message.channels` with its own event_id, so the adapter ignores it and
- *    the scope would be dead weight.
- *  - no `reactions:read` — receipts only ever add and remove, never read.
- *  - no `commands` — commands are bare words, not slash commands.
- */
+/** Slack's "From an app manifest" flow sets every scope, event and Socket Mode
+ *  in one go. Least privilege: no `app_mentions:read` (the adapter ignores
+ *  `app_mention`), no `reactions:read` (receipts never read), no `commands`. */
 const SLACK_MANIFEST = {
   display_information: {
     name: "Pier",
@@ -44,11 +32,9 @@ const SLACK_MANIFEST = {
         "groups:read",
         "im:history", // DMs, where binding happens
         "im:write",
-        // Group DMs, which the adapter treats as DMs. `mpim:read` is for the
-        // one path that cannot shortcut: a button click carries no
-        // channel_type, and an mpim id is not `D`-prefixed, so resolving its
-        // kind needs conversations.info. (No `im:read`: a `D` id is a DM by
-        // construction, so a 1:1 DM never needs the lookup.)
+        // `mpim:read`: a button click carries no channel_type and an mpim id is
+        // not `D`-prefixed, so its kind needs conversations.info. No `im:read`:
+        // a `D` id is a DM by construction.
         "mpim:history",
         "mpim:read",
         "mpim:write",
@@ -76,11 +62,7 @@ const slackManifestUrl = (): string =>
     encodeURIComponent(JSON.stringify(SLACK_MANIFEST))
   }`;
 
-/**
- * How to get a Telegram bot token, and the two BotFather switches people
- * always miss. Privacy mode is the single most common reason a bot looks dead
- * in a group, so it is called out rather than buried.
- */
+/** Privacy mode is the single most common reason a bot looks dead in a group. */
 export const telegramTokenHelp = (): HTMLElement =>
   helpBadge("Getting a bot token", [
     "Open [@BotFather](https://t.me/BotFather) in Telegram.",
@@ -90,11 +72,8 @@ export const telegramTokenHelp = (): HTMLElement =>
     "Send `/setjoingroups` → `Enable`, then add the bot to your group or forum.",
   ]);
 
-/**
- * Turning a group into a forum is done in Telegram, not here, and the step
- * everyone misses is the bot's Manage Topics right — without it every topic
- * creation fails and Pier quietly keeps answering in General.
- */
+/** Without the bot's Manage Topics right every topic creation fails and Pier
+ *  quietly keeps answering in General. */
 export const topicModeHelp = (align: "left" | "right" = "left"): HTMLElement =>
   helpBadge("Enabling topics on a group", [
     "In Telegram open the group → `Edit` → turn on `Topics`. Owner only; group size no longer matters.",
@@ -104,10 +83,7 @@ export const topicModeHelp = (align: "left" | "right" = "left"): HTMLElement =>
     "After that, a message in General opens its own topic with its own session. A reply, or anything starting with `/`, stays where it was sent.",
   ], align);
 
-/**
- * Slack setup is a manifest, not a checklist: the button hands Slack every
- * scope and event at once, so the prose covers only what a manifest cannot do.
- */
+/** The prose covers only what a manifest cannot do. */
 export function slackTokenHelp(): HTMLElement {
   const openApp = button("Create Slack app", true);
   openApp.append(icon(ExternalLink));
@@ -129,11 +105,7 @@ export function slackTokenHelp(): HTMLElement {
   ]);
 }
 
-/**
- * What "Agent access" grants. Worth spelling out: it is the one switch that
- * lets a session reach outward into the workspace rather than only answer what
- * was sent to it.
- */
+/** The one switch that lets a session reach outward rather than only answer. */
 export const slackAgentToolHelp = (): HTMLElement =>
   helpBadge("What agent access allows", [
     "Gives agent sessions a `slack` tool: read a channel's history for a time range, read one thread, and post, edit or delete a message.",
@@ -144,10 +116,7 @@ export const slackAgentToolHelp = (): HTMLElement =>
     "The tool is only given to sessions opened while Slack is connected and this is on, so an unused tool costs no context. A session opened earlier keeps it, and a call made after you switch it off is refused with the reason.",
   ]);
 
-/**
- * Threads are not optional on Slack, so this explains the behaviour instead of
- * offering a switch. Said once here rather than implied by a missing toggle.
- */
+/** Threads are not optional on Slack, so an explanation stands where a switch would. */
 export const slackThreadHelp = (align: "left" | "right" = "left"): HTMLElement =>
   helpBadge("How Slack threads work here", [
     "Pier never posts in a channel's main flow. A message in the channel is answered in *its own thread*; a message in a thread is answered in that thread.",
@@ -157,11 +126,8 @@ export const slackThreadHelp = (align: "left" | "right" = "left"): HTMLElement =
     "Commands are bare words after a mention: `@bot settings`, `@bot stop`, `@bot bind <code>`. Slack's client swallows an unregistered `/command` before it ever reaches an app.",
   ], align);
 
-/**
- * Lark setup is a checklist, not a manifest — Feishu has no create-from-config
- * URL — and it fails *late*: permissions and event subscriptions only take
- * effect after a version is published, which is the step everyone misses.
- */
+/** Feishu has no create-from-config URL, and permissions only take effect
+ *  after a version is published — the step everyone misses. */
 export const larkTokenHelp = (): HTMLElement =>
   helpBadge("Creating a Feishu app", [
     "On [open.feishu.cn](https://open.feishu.cn/app) create a 企业自建应用 (custom app). `Credentials & Basic Info` shows the App ID (`cli_…`) and App Secret — paste both here.",
@@ -172,10 +138,7 @@ export const larkTokenHelp = (): HTMLElement =>
     "Add the bot to a group (群设置 → 群机器人), or DM it directly.",
   ]);
 
-/**
- * Threads are not optional on Lark either: replies go `reply_in_thread`, so
- * the toggle is replaced by the explanation, exactly like Slack.
- */
+/** Threads are not optional on Lark either. */
 export const larkThreadHelp = (align: "left" | "right" = "left"): HTMLElement =>
   helpBadge("How Lark topics work here", [
     "Pier never posts in a chat's main flow. A message in the chat is answered in *its own topic* (话题); a message inside a topic is answered there.",

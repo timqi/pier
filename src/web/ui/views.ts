@@ -1,10 +1,5 @@
-// Chat ↔ Console switching and the hash router. Owns the Console views
-// (Automation — which hosts Tasks, Runs and Activity as tabs — Boards, and
-// Settings — which hosts Providers, Models, Channels and Agent files as
-// tabs), which chat elements hide while one is
-// open, and the address bar's copy of "where am I" — so refresh, bookmarks
-// and back/forward land where the user was. main.ts owns sessions and
-// selection and feeds them in through init.
+// Chat ↔ Console switching and the hash router: the Console views, which chat
+// elements hide while one is open, and the address bar's copy of "where am I".
 
 import type { ActivityView } from "./activity.js";
 import { turnsPane } from "./chat.js";
@@ -132,11 +127,8 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   void openView(name, arg, query, ++openRequest);
 }
 
-/** A view's module loads the first time it opens — the Console is five pages
- *  the chat waited for at boot. Everything the route implies has already
- *  happened above, so a slow chunk shows an empty pane rather than a stale
- *  one; a chunk that will not load says so where the view would have been,
- *  because a Console that opens onto nothing is a Console that looks broken. */
+/** A view's module loads on first open. A chunk that will not load says so
+ *  where the view would have been (§5b). */
 async function openView(name: ConsoleName, arg: string | undefined, query: string | undefined, request: number): Promise<void> {
   let view = views.get(name);
   if (!view) {
@@ -210,10 +202,8 @@ export function showChat(): void {
   deps.maybeAckRead(); // the selected session's turns just came (back) on screen
 }
 
-// --- routing (the hash is the address bar's copy of "where am I") ---------------------
-// Every view is addressable — a session's chat, each Console view, one task
-// or run inside it, a run filter set as `?k=v`. Hash, not path: the static
-// file server stays a static file server.
+// --- routing -----------------------------------------------------------------------
+// Hash, not path: the static file server stays a static file server.
 
 type Route = { kind: "session"; id: string } | { kind: "console"; name: ConsoleName; arg?: string; query?: string };
 

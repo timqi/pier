@@ -1,7 +1,5 @@
-// The left rail: one flat list of every session Pi lists, the working set on
-// top, and the New-session menu. main.ts owns the session list; this module
-// renders it and reports interactions back. The ⌘K palette (ui/palette.ts)
-// borrows the rail's order, dots and menu rather than keeping its own.
+// The left rail: one flat list of every session, the working set on top, and
+// the New-session menu. The palette borrows its order, dots and menu.
 
 import { Ellipsis } from "lucide";
 import { icon } from "./icons.js";
@@ -20,9 +18,7 @@ export interface SessionInfo {
   id: string;
   cwd: string;
   createdAt: number;
-  /** When the transcript was last written — the row's tooltip, and nothing
-   *  else: it moved with every background turn, so it orders nothing. Absent
-   *  from a session Pi has not persisted yet. */
+  /** The row's tooltip only: it moves with every background turn, so it orders nothing. */
   modified?: number;
   title?: string;
   state: SessionState;
@@ -53,12 +49,8 @@ const sessionList = $("#session-list");
 const newBtn = $("#new-session");
 
 // --- order -------------------------------------------------------------------------
-// Two runs of one list, and neither of them moves on its own. On top, the
-// working set the server maintains: a session enters it at the front when a
-// human speaks to it, members hold their places until one is pushed out of the
-// last slot (web/session-state.ts). Below it, everything else by birth, which
-// never changes at all. Nothing here reads `modified` — ordering by it is what
-// made the rail jump under the pointer.
+// The server's working set on top (web/session-state.ts), everything else by
+// birth. Nothing reads `modified`: ordering by it makes the rail jump under the pointer.
 
 /** Rows on the screen before "Load more" is asked for. */
 export const PAGE = 20;
@@ -83,9 +75,8 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
   return { rows, hidden: list.length - rows.length };
 }
 
-/** The session `by` rows from the current one in the rail's order, hidden rows
- *  included, wrapping at either end; the first row when nothing is selected.
- *  Nothing to move to — an empty rail, or a rail of one — is `undefined`. */
+/** Hidden rows included, wrapping at either end; `undefined` when there is
+ *  nothing to move to. */
 export function neighbor(list: SessionInfo[], currentId: string | null, by: number): string | undefined {
   const { top, rest } = orderSessions(list);
   const order = [...top, ...rest];
@@ -104,13 +95,9 @@ const RECENT_CWDS = 8;
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
 
-/** Where a new session is offered: the distinct directories less the
- *  worktrees. `wt` puts a branch's checkout beside its repository as
- *  `<repo>.<branch>`, so a directory whose name is a sibling's name plus a
- *  dotted suffix is a branch of that sibling — an agent was sent there for one
- *  task, and the next conversation about the project belongs in the project.
- *  Known from the list alone: a session in the repository is what makes its
- *  worktrees recognizable, and a worktree with no such sibling stays. */
+/** The distinct directories less the worktrees: `wt` puts a checkout beside its
+ *  repository as `<repo>.<branch>`, and the next conversation about a project
+ *  belongs in the project. A worktree with no such sibling stays. */
 export function projectCwds(list: SessionInfo[]): string[] {
   const all = distinctCwds(list);
   const known = new Set(all);
@@ -124,22 +111,15 @@ export function projectCwds(list: SessionInfo[]): string[] {
 /** Actions take space only while revealed; touch keeps the current row's reachable. */
 const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
-/**
- * Waiting for *you*: a finished turn nobody has looked at. The server marks
- * only the sessions this workbench is the reader of (web/server.ts) — a
- * subagent's turn was addressed to its supervisor and delivered by callback,
- * an IM session's to the chat it came from — so the flag is the whole rule
- * here. Named once, for the dot and the two badges standing in for it.
- */
+/** The server marks only the sessions this workbench is the reader of
+ *  (web/server.ts), so the flag is the whole rule here. */
 const waitingForYou = (s: SessionInfo): boolean => s.unread;
 
-/** How every surface counting a session's background runs says it: this dot's
- *  title and the chat header's running chip (session-header.ts). */
+/** One wording for the dot's title and the chat header's running chip. */
 export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
 
-/** Attention dot: green = running, amber = finished and waiting for a look,
- *  sky = idle itself but subagents still in flight. Idle has no mark or slot;
- *  the rail puts marks after the title so its left edge stays aligned. */
+/** Green = running, amber = waiting for a look, sky = subagents in flight.
+ *  Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   const mark: [string, string] | null =
     s.state === "streaming"
@@ -157,16 +137,8 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
 
 // --- row actions ---------------------------------------------------------------------
 
-/** Give the session a name. The transcript is where it lands, so it is the
- *  title on every surface and after every restart — including the IM panels,
- *  which read the same listing.
- *
- *  `prompt` is the idiom already in use for a one-line answer (ui/api.ts):
- *  a dialog of our own would be the third place this page asks for a string.
- *
- *  Drawn before the write and taken back if it fails; what a successful write
- *  settles on comes back as a `sessions-changed` re-read, like every other
- *  change to a session. */
+/** Drawn before the write and taken back if it fails; what a successful write
+ *  settles on comes back as a `sessions-changed` re-read. */
 export async function renameSession(s: SessionInfo): Promise<void> {
   const typed = window.prompt("Session name — empty resets it to the first message", s.title ?? "");
   if (typed === null) return; // cancelled, which is not the same as cleared
@@ -176,9 +148,8 @@ export async function renameSession(s: SessionInfo): Promise<void> {
     renderSessions();
     deps.onTitleChanged();
   };
-  // A cleared name shows as untitled for the moment between here and the
-  // re-read: the title it falls back to is derived from a transcript, and this
-  // page has none.
+  // A cleared name shows as untitled until the re-read: the fallback title is
+  // derived from a transcript this page has not got.
   draw(typed.trim() || undefined);
   if (!(await sendJson(`/api/sessions/${s.id}/rename`, { name: typed })).ok) draw(previous);
 }
@@ -186,11 +157,8 @@ export async function renameSession(s: SessionInfo): Promise<void> {
 /** A readable channel initial without a box on every IM row. */
 const CHIP = "flex-none text-xs font-medium uppercase leading-5 text-neutral-500";
 
-/** Which conversation a session answers, when it is not this workbench. Typing
- *  into a Slack thread's session sends to the people in that thread, and the
- *  row is the last place to notice — but `web` is nearly every row, so saying
- *  it would be the constant that means nothing. One letter: the row has no
- *  room for a word, and the row's tooltip carries the name. */
+/** Typing into a Slack thread's session sends to the people in that thread.
+ *  `web` is nearly every row, so it is not said; one letter, name in the tooltip. */
 const channelChip = (s: SessionInfo): HTMLElement[] =>
   s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
 
@@ -228,13 +196,8 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
   return li;
 }
 
-/** The render model as one string — every field of a row the rail or the
- *  palette draws, plus which row is selected and how many rows are asked for.
- *  Same short-circuit the Activity view uses (ui/activity.ts): a rebuild
- *  replaces every node, so it drops the hover the pointer is on, and one
- *  landing between a mousedown and its mouseup swallows the click that was
- *  already happening — and ~12 call sites reach here on state events that
- *  changed none of this. */
+/** Short-circuit (as in ui/activity.ts): a rebuild replaces every node, and
+ *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string => `${deps.currentId() ?? ""}\n${shown}\n${JSON.stringify(deps.sessions())}`;
 
 let drawn = "";
@@ -247,10 +210,7 @@ export function renderSessions(): void {
   if (key === drawn) return;
   drawn = key;
   const sessions = deps.sessions();
-  // The one place the dots are painted, so also the one place the two surfaces
-  // that stand in for them off screen are counted: the badge on the sidebar
-  // toggle (ui/shell.ts) and the installed app's icon. Both count what carries
-  // a dot and nothing else.
+  // The badge on the sidebar toggle and the app icon count exactly what carries a dot.
   const waiting = sessions.filter(waitingForYou);
   setAttention(waiting.length);
   setUnreadBadge(waiting.length);
@@ -292,12 +252,8 @@ export function renderSessions(): void {
 
 // --- New session -------------------------------------------------------------------------
 
-/** The new session nearly always belongs to a directory the rail already
- *  shows, so the button opens straight onto those — the current one ticked,
- *  the rest newest first — with the folder tree (which also takes a typed
- *  path) one row below. Picking creates: no form, no second click. Exported
- *  for the palette's "New session in…" row, which is this control by another
- *  route. */
+/** Picking creates: no form, no second click. Exported for the palette's
+ *  "New session in…" row. */
 export function openNewSession(): void {
   if (newBtn.getAttribute("aria-expanded") === "true") return closeMenu();
   const current = deps.sessions().find((s) => s.id === deps.currentId())?.cwd;
@@ -313,15 +269,10 @@ export function openNewSession(): void {
 export function initSidebar(d: SidebarDeps): void {
   deps = d;
   newBtn.onclick = openNewSession;
-  // ⇧O, not ⇧N: ⌘⇧N / ⌘⇧T are the browser's own windows and cannot be
-  // taken back — ⇧O is what the chat apps settled on for the same action.
-  // Stands down under a modal, like the rail's other chords: the palette is
-  // in the top layer, so a menu anchored on this button would open *behind*
-  // it — invisible, and unreachable by the keys meant to walk it.
+  // ⇧O, not ⇧N: ⌘⇧N is the browser's. Stands down under a modal: the palette
+  // is in the top layer, so this menu would open behind it.
   shortcut(newBtn, "shift+o", "New session", openNewSession, modalOpen);
-  // ⌘⇧[ / ⌘⇧] walk the rail in the order it is drawn — the tab-switching
-  // chord, applied to sessions. No button carries it: the rail itself is the
-  // affordance.
+  // The tab-switching chord, applied to sessions; the rail itself is the affordance.
   const step = (by: number): void => {
     const next = neighbor(deps.sessions(), deps.currentId(), by);
     if (next) deps.select(next);

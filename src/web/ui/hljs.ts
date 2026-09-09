@@ -1,7 +1,5 @@
 // The hljs instance: core plus the curated language set (the full bundle is
-// ~1MB). Its own module because it is its own chunk — highlight.ts reaches it
-// with a dynamic import, so a page that shows no code never downloads a
-// highlighter.
+// ~1MB). Its own chunk, so a page that shows no code never downloads it.
 
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";

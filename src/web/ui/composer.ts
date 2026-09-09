@@ -56,25 +56,15 @@ let pendingFiles: PendingFile[] = [];
 // the same turn isn't drawn twice.
 let optimisticUserTexts: string[] = [];
 
-/**
- * Keep the app inside what the keyboard leaves visible, and tell style.css
- * that it is up.
- *
- * iOS neither shrinks the layout viewport for the keyboard nor drops
- * `env(safe-area-inset-bottom)` behind it: it scrolls the page instead, and
- * keeps reporting the home indicator's inset. That is three symptoms — a blank
- * strip above the keyboard's accessory bar, a top bar scrolled off screen, and
- * a composer sometimes left under the keyboard — and the visual viewport is
- * the only thing that knows the real numbers.
- */
+/** iOS neither shrinks the layout viewport for the keyboard nor drops
+ *  `env(safe-area-inset-bottom)` behind it; the visual viewport is the only
+ *  thing that knows the real numbers. */
 function trackKeyboard(): void {
   const vv = window.visualViewport;
   if (!vv) return;
   const sync = (): void => {
-    // Not `> 0`: the layout viewport is a pixel or two off on its own, and the
-    // accessory bar alone is ~44px — no keyboard is anywhere near this short.
-    // A pinch-zoom shrinks the visual viewport too, and pinning the body to
-    // that would collapse the app into a corner of the screen.
+    // Not `> 0`: the accessory bar alone is ~44px. A pinch-zoom shrinks the
+    // visual viewport too, and pinning the body to that would collapse the app.
     const up = vv.scale <= 1.05 && window.innerHeight - vv.height - vv.offsetTop > 80;
     if (up) document.body.dataset.kb = "";
     else delete document.body.dataset.kb;
@@ -87,13 +77,9 @@ function trackKeyboard(): void {
   vv.addEventListener("scroll", sync);
 }
 
-/** The dock (queue, recovery, composer) floats over the transcript at every
- *  width (style.css), so the pane pads its tail by the dock's live height — the
- *  textarea grows and the queue comes and goes, and CSS cannot read either.
- *  Observed as border-box, because a content-box round is not delivered when
- *  only padding changes: the composer's bottom padding is the home-indicator
- *  inset, dropped and paid back on every keyboard (the `data-kb` rule in
- *  style.css), and a measurement 34px short left the last row under the pill. */
+/** The dock floats over the transcript, so the pane pads its tail by the dock's
+ *  live height. Border-box: a content-box round is not delivered when only
+ *  padding changes, and the home-indicator inset is padding. */
 function trackDock(): void {
   const main = composer.parentElement!;
   const parts = [queuePanel, recoveryPanel, composer];
@@ -126,9 +112,7 @@ export function clearOptimistic(): void {
   optimisticUserTexts = [];
 }
 
-/** The composer buttons ARE the state display: indigo arrow when idle
- *  (send starts a turn), amber clock + red stop while streaming (send
- *  queues; the queue panel offers Send now / Abort & send). */
+/** The composer buttons are the state display. */
 export function updateComposer(): void {
   const streaming = deps.sessionState() === "streaming";
   // No id, nothing to send to: send() would drop the prompt on the floor, so
@@ -216,10 +200,6 @@ export function renderQueue(steering: string[], followUp: string[]): void {
   syncQueuePanel();
   queueRows.replaceChildren(
     ...rows.map((r) => {
-      // A queued message keeps the shape it was typed in — the composer takes
-      // multi-line input, so the row wraps and grows instead of truncating; the
-      // list scrolls past ~5 lines (see #queue-rows) so the panel can't push
-      // the composer off screen.
       const li = h("li", "flex items-start gap-2 text-[13px] leading-[18px]");
       // Only "steer" earns a badge: it deviates from the panel's own label,
       // which already says these messages are queued.
@@ -285,11 +265,8 @@ function addFile(file: File): void {
   reader.readAsDataURL(file);
 }
 
-/**
- * Upload files to the inbox and return their marker lines — built with the
- * shared grammar (core/inbound-file.ts), so the text we send and render
- * optimistically is exactly the text every other surface will see.
- */
+/** Marker lines built with the shared grammar (core/inbound-file.ts), so the
+ *  optimistic render is exactly what every other surface will see. */
 async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
   const markers: string[] = [];
   for (const f of files) {
@@ -302,21 +279,14 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
 }
 
 // --- composer drafts -------------------------------------------------------------------
-// One draft per session, in localStorage only: switching sessions must not
-// carry text (or attachments) into the wrong conversation, and an unsent draft
-// is the client's business, never the agent's.
+// Per session, in localStorage only: an unsent draft is never the agent's business.
 
 const draftKey = (id: string): string => `pier.draft.${id}`;
 let draftVersion = 0;
 
-/** The other half of a draft: what is in the pending strip. Per session like
- *  the text, but in memory — the bytes are base64, and a couple of pasted
- *  screenshots are past what localStorage will hold. So an attachment staged
- *  here survives switching sessions (it used to be dropped, which read as the
- *  paste never having happened) but not a reload, and the draft text says so
- *  by surviving both. Written from renderFileStrip: every mutation of
- *  `pendingFiles` already goes through it, so there is one place to keep in
- *  step instead of five. */
+/** In memory, not localStorage: a couple of pasted screenshots are past what
+ *  it will hold. Survives switching sessions, not a reload. Written from
+ *  renderFileStrip, which every mutation of `pendingFiles` goes through. */
 const pendingBySession = new Map<string, PendingFile[]>();
 
 export function saveDraft(id = deps.sessionId(), text = input.value): void {
@@ -333,13 +303,9 @@ export function restoreDraft(id: string): void {
   renderFileStrip();
 }
 
-/** Single-line by default; grows with content, icons stay on the bottom row.
- *
- *  Runs on every keystroke, and the transcript is `flex-1` above it: a height
- *  it writes is a height the pane loses. Measuring needs the reset either way,
- *  but a height that *changed* re-pins the tail in the same frame. Left to the
- *  ResizeObserver, the pin landed a frame later and the last message visibly
- *  bounced once per wrap, which with an IME is once per candidate. */
+/** A changed height re-pins the tail in the same frame: left to the
+ *  ResizeObserver it lands a frame later, and the last message bounces once
+ *  per wrap — with an IME, once per candidate. */
 function autosize(): void {
   const was = input.style.height;
   input.style.height = "auto";
@@ -392,9 +358,8 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     const startsTurn = deps.sessionState() === "idle" && mode === "auto";
     if (startsTurn) deps.setState("streaming");
     else updateComposer();
-    // Optimistic: a fresh prompt (or a steer) reads as a user turn; only a
-    // message sent into an existing run waits for the queue-state snapshot.
-    // appendTurn renders the marker lines as attachment thumbs/cards itself.
+    // Optimistic; only a message sent into an existing run waits for the
+    // queue-state snapshot.
     if (startsTurn || mode === "steer") {
       markOptimisticUser(text);
       appendTurn("user", text, false, Date.now());
@@ -488,14 +453,9 @@ export function initComposer(d: ComposerDeps): void {
     ev.preventDefault();
     void send("auto");
   };
-  // Reading the transcript, then writing: "/" is where Slack, GitHub and
-  // Discord put this, and it needs no modifier because a key pressed outside a
-  // text field is not text. The composer is its own affordance — the hover
-  // card over it names the key. Only with the chat on screen.
+  // "/" is where Slack, GitHub and Discord put this.
   letterKey(input, ["/"], "Write a message", focusInput, deps.chatVisible);
-  // Focusing the composer at the end of the transcript means the user is
-  // watching the tail: follow it from here on, and keep it in view when the
-  // keyboard, the growing input or the queue panel takes the room away.
+  // Focusing the composer means the user is watching the tail.
   input.onfocus = followTail;
   input.oninput = () => {
     autosize();

@@ -1,7 +1,6 @@
 // What a turn did besides speak: the per-turn Activity group (thinking + tool
-// steps, live and replayed) and the detached background-run cards, both
-// rendered into #turns between chat rows. chat.ts owns the rows themselves and
-// calls seal/finish/reset here so a group closes when the transcript moves on.
+// steps) and the detached background-run cards, rendered into #turns between
+// chat rows.
 
 import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
@@ -11,12 +10,8 @@ import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
 import type { ActivityStep, BackgroundRun, ModelRef } from "../../core/types.js";
 
-/**
- * The bits of the turns pane this module writes into. Handed over at init
- * rather than imported: chat.ts already imports this module, and importing it
- * back made the two a runtime cycle — one concern in two files pretending to
- * be a layering. `ChatDeps` above is a type import, which is erased.
- */
+/** Handed over at init rather than imported: chat.ts imports this module, and
+ *  importing it back is a runtime cycle. */
 export interface TurnsPane {
   el: HTMLElement;
   /** Append a chat row; this module only ever needs the error kind. */
@@ -36,11 +31,8 @@ export function initTurnActivity(d: ChatDeps, pane: TurnsPane): void {
 }
 
 // --- the run head ---------------------------------------------------------------------
-// Every card that names a run — the detached run card here, the delegation,
-// callback and subagent-message cards in chat.ts — says the same things in
-// the same places: glyph, kind, task name on the left; model, effort, run and
-// session ids on the right. Three cards spelling "which run, where" three
-// ways was the bug this section exists to prevent.
+// Every card that names a run, here and in chat.ts, says the same things in
+// the same places.
 
 const shortId = (id: string): string => id.slice(0, 8);
 
@@ -105,10 +97,8 @@ export function clampedBody(text: string): HTMLElement[] {
 export function runHead(o: RunHead): HTMLElement {
   const head = h("div", "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500", o.glyph);
   head.append(h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
-  // `basis-0`, not just `min-w-0`: a subagent's name is its whole prompt line,
-  // and a wrapping flex row breaks *before* it shrinks an item — which pushed
-  // the ids and controls onto a second line for the long ones. Zero-basis, the
-  // name takes what is left and truncates there, so the head is one line.
+  // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
+  // subagent's name is its whole prompt line.
   if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
   const meta = h("div", "ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "flex-none", o.note));
@@ -122,10 +112,8 @@ export function runHead(o: RunHead): HTMLElement {
     effort.title = "Reasoning effort";
     meta.append(effort);
   }
-  // The ids carry no word: a mono 8-char id in the run's own grey opens the
-  // run, in indigo the session — the colour boards.ts already spends on a
-  // session chip. What each one is stays in its tooltip, where a reader who
-  // does not know the convention yet looks anyway.
+  // Grey opens the run, indigo the session (boards.ts's session-chip colour);
+  // what each is stays in its tooltip.
   const run = h("button", "flex-none hover:underline", shortId(o.runId));
   run.title = `Run ${o.runId}`;
   run.onclick = () => deps.showRun(o.runId);
@@ -164,21 +152,15 @@ const backgroundRows = new Map<string, HTMLElement>();
  *  reader who expanded it must not watch it snap shut when the run moves on. */
 const promptBodies = new WeakMap<HTMLElement, HTMLElement[]>();
 
-/**
- * Stopping a run reports here, because a control that fails silently is the
- * worst of both worlds: the run did not change and the chat says nothing,
- * which is indistinguishable from a dropped connection.
- */
+/** A control that fails silently is indistinguishable from a dropped connection. */
 async function post(url: string, fallback: string): Promise<void> {
   const error = await refused(url, "POST", fallback);
   if (error) turns.append("error", error);
 }
 
 export function renderBackgroundRun(run: BackgroundRun): void {
-  // Rows leave the pane without telling us: an edit rewinds the transcript, the
-  // trim (chat.ts) drops the oldest. A card that went with them is drawn again
-  // rather than updated where nobody can see it — and none of them may be held
-  // here after the pane let go, or this map is where the trimmed DOM survives.
+  // Rows leave the pane without telling us (rewind, trim); a card held here
+  // after the pane let go is where the trimmed DOM survives.
   for (const [id, el] of backgroundRows) if (!el.isConnected) backgroundRows.delete(id);
   let row = backgroundRows.get(run.runId);
   if (!row) {
@@ -202,9 +184,8 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     runId: run.runId,
     sessionId: run.targetSessionId,
   });
-  // Stop is the card's only control: anything with a message in it — steering
-  // the run, continuing it, answering its decision — is typed in this session,
-  // which is the session that delegated the run and can say so to its agent.
+  // Stop is the only control: anything with a message in it is typed in this
+  // session, which delegated the run.
   const controls = h("div", "flex flex-none items-center gap-2 text-[11px] font-semibold text-neutral-700");
   if (active) {
     const cancel = h("button", "hover:underline", "Stop");
@@ -227,9 +208,6 @@ export function renderBackgroundRun(run: BackgroundRun): void {
 }
 
 // --- activity group ------------------------------------------------------------------
-// One collapsible bubble per turn collects thinking + tool activity
-// (avibe's AgentActivityGroup: status icon + chevron, steps, duration,
-// each step itself an expandable details row).
 
 type ActivityStatus = "running" | "done" | "failed" | "interrupted";
 
@@ -255,10 +233,8 @@ interface Activity {
 let activity: Activity | null = null; // the live (running) group
 
 // --- the thinking row -----------------------------------------------------------------
-// Thinking arrives token by token, so it is painted on the stream's cadence
-// like the reply text is (ui/chat.ts): the per-delta path read the whole tail
-// back off the DOM, re-sliced it to 4000 chars and re-split it into lines,
-// once per token, for a row most turns never open.
+// Painted on the stream's cadence like the reply text: per token it would
+// re-read and re-split the whole tail for a row most turns never open.
 
 /** `text` is everything the row has been handed, painted or not. */
 interface Thinking {
@@ -296,9 +272,7 @@ function paintThinking(): void {
   }, STREAM_PAINT_MS);
 }
 
-/** A row stops receiving text at the turn's end, at the next thinking row and
- *  at a reset. What is on screen then has to be all of it, so every one of
- *  those paints what the last tick still held. */
+/** Each place a row stops receiving text paints what the last tick still held. */
 function flushThinking(): void {
   if (thinkTimer) clearTimeout(thinkTimer);
   thinkTimer = null;
@@ -306,9 +280,7 @@ function flushThinking(): void {
   thinkDirty = false;
 }
 
-/** Every tool row of a group, in the order they ran — what a later detail fetch
- *  writes into. Keyed by the group element so it is collected with it: a
- *  transcript reload drops thousands of these and must not leak them. */
+/** Keyed by the group element so a transcript reload collects them with it. */
 interface DetailRow {
   tool: string;
   call: string;
@@ -323,13 +295,9 @@ const rowsOf = (group: HTMLDetailsElement): DetailRow[] => {
   return rows;
 };
 
-/**
- * Close the live group because a chat row is going in below it. A group is
- * rendered where it opened, so once anything else follows it on screen the
- * steps that come next belong to a *new* group underneath — appending them to
- * this one would show work happening above the answer it came after. A group
- * still waiting on a tool result stays open, so that tool-end can land.
- */
+/** A chat row is going in below: later steps belong to a new group underneath,
+ *  or work shows above the answer it came after. A group still waiting on a
+ *  tool result stays open for that tool-end. */
 export function sealActivity(): void {
   if (activity && !activity.toolRows.size) finishActivity("done");
 }
@@ -346,10 +314,6 @@ export function resetActivity(): void {
   backgroundRows.clear();
 }
 
-/**
- * Hand the pending group to the assistant row about to be appended, which is
- * the message those steps produced.
- */
 export function takeActivityGroup(): HTMLElement | null {
   const el = lastGroup;
   // A group still collecting steps stays put: what it is about to receive
@@ -437,13 +401,8 @@ export function discardProgress(node: HTMLElement): void {
   }
 }
 
-/**
- * What a group is opened for is its newest step — the one running, or the last
- * one that ran — so opening lands at the bottom of the list instead of at a
- * step from a minute ago, and a still-running group keeps following the tail.
- * Scrolling off the bottom is the reader saying they want to stay where they
- * are, and stops the following until they come back down.
- */
+/** Opening lands on the newest step and a running group follows the tail;
+ *  scrolling off the bottom stops the following until they come back down. */
 function tailFollow(el: HTMLDetailsElement, rowsEl: HTMLElement): void {
   rowsEl.dataset.follow = "1";
   rowsEl.addEventListener("scroll", () => {
@@ -457,9 +416,8 @@ function tailFollow(el: HTMLDetailsElement, rowsEl: HTMLElement): void {
   });
 }
 
-/** Follow the newest step, if the group is showing one and nobody scrolled
- *  away. Skipped on replay and while closed — reading scrollHeight flushes
- *  layout for the whole transcript, once per step, for nothing on screen. */
+/** Skipped on replay and while closed: reading scrollHeight flushes layout for
+ *  the whole transcript, once per step, for nothing on screen. */
 function tailSteps(a: Activity): void {
   if (turns.bulk() || !a.el.open || !a.rowsEl.dataset.follow) return;
   a.rowsEl.scrollTop = a.rowsEl.scrollHeight;
@@ -503,10 +461,8 @@ export function noteTurnError(): void {
   if (activity) activity.sawError = true;
 }
 
-/** The args, on one line, as much of it as the summary shows. Sliced before
- *  the collapse so a 200KB `write` argument isn't regex-scanned for 100
- *  characters — and shared with the detail fill below, so replayed and live
- *  rows cannot spell the same line two ways. */
+/** Sliced before the collapse so a 200KB `write` argument isn't regex-scanned
+ *  for 100 characters. */
 function argsPreview(argsText: string): string {
   const short = argsText.slice(0, 400).replace(/\s+/g, " ");
   return short.length > 100 ? short.slice(0, 100) + "…" : short;
@@ -579,11 +535,8 @@ export function activityThinking(ts: number, text: string): void {
   paintThinking();
 }
 
-/**
- * Rebuild a finished turn's Activity group from the snapshot, through the same
- * functions the live stream drives — so a reload shows the real step count and
- * duration instead of restarting at zero.
- */
+/** Through the same functions the live stream drives, so a reload shows the
+ *  same step count and duration. */
 let replaySeq = 0;
 
 export function replayActivity(
@@ -623,8 +576,7 @@ export function replayActivity(
 }
 
 /** Args and output are ~90% of a transcript and live behind this very toggle,
- *  so they travel per opened group instead of per page load. One request for
- *  the whole group: a curious click must not become one round trip per step. */
+ *  so they travel per opened group, one request for the whole group. */
 function onFirstOpen(group: HTMLDetailsElement, turnIndex: number): void {
   const load = (): void => {
     if (!group.open) return;
@@ -637,21 +589,16 @@ function onFirstOpen(group: HTMLDetailsElement, turnIndex: number): void {
 async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise<void> {
   const sessionId = deps.sessionId();
   const rows = rowsOf(group);
-  // A group can also hold steps the live stream delivered in full: those keep
-  // their place in the pairing below, but nothing here writes over them — not
-  // a position match, not an error.
+  // Steps the live stream delivered in full keep their place but are never overwritten.
   const fillable = new Set(rows.filter((row) => !row.argsPre.textContent));
   const say = (text: string): void => {
     for (const row of fillable) row.argsPre.textContent = text;
   };
-  // The session may have been evicted since the snapshot, and then this fetch
-  // waits on a full transcript reopen. An empty pane would read as a tool that
-  // did nothing.
+  // An evicted session makes this fetch wait on a full reopen; an empty pane
+  // would read as a tool that did nothing.
   say("loading…");
   if (!sessionId) return say("no session");
-  // Silence here reads as "this tool did nothing", which is a lie about the
-  // one thing the user opened the group to see — so a refusal and a fetch that
-  // never answered both end up in the pane.
+  // A refusal and a fetch that never answered both end up in the pane (§5b).
   const got = await getJson<{ steps: ActivityStep[] }>(
     `/api/sessions/${sessionId}/turns/${turnIndex}/steps`,
     "could not load these steps",
@@ -662,11 +609,8 @@ async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise
   for (const [i, row] of rows.entries()) {
     if (!fillable.has(row)) continue;
     const step = tools[i];
-    // Position pairs the two lists; identity only confirms it. An edit or a
-    // compaction can rewind the transcript under a snapshot, and then this
-    // index names a different turn — whose output must not be shown here as if
-    // it were this tool's. The transcript is also the source of both sides, so
-    // a step with no id of its own is checked by name (`replay-N` is ours).
+    // Position pairs, identity confirms: a rewind under the snapshot makes this
+    // index name a different turn, whose output must not show as this tool's.
     const matches = step && (step.id ? step.id === row.call : step.toolName === row.tool);
     if (!matches) {
       row.argsPre.textContent = "detail no longer available — reload the session";

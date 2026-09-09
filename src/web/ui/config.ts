@@ -1,9 +1,6 @@
 // Settings → Agent: one list of everything a session is made of, and one pane
-// to act on whichever item is selected — an agent file to edit, a skill or an
-// extension to read, a bundled extension to switch on. Three kinds of item,
-// one reason to exist: pick a thing on the left, do the one thing it affords on
-// the right. Scope comes from the session list (global + each project cwd);
-// bundled switches are instance-wide, so they appear under Global only.
+// to act on the selected item. Bundled switches are instance-wide, so they
+// appear under Global only.
 
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
@@ -56,16 +53,8 @@ interface SaveOutcome {
   text: string;
 }
 
-/**
- * The one write behind every switch and every custom-tool edit here, and the
- * one place a write that never landed becomes something to show.
- *
- * A dropped connection or an answer that is not JSON used to reject into the
- * click handler: the switch stayed visually flipped, Add and Remove stayed
- * disabled, and the screen said nothing at all (§5b). Either one is a failed
- * outcome now, and `answer` is absent — so the caller redraws from the state
- * the server last confirmed instead of from what the click assumed.
- */
+/** A write that never landed is a failed outcome with `answer` absent, so the
+ *  caller redraws from the state the server last confirmed (§5b). */
 export async function writeSettings(
   body: Record<string, unknown>,
   saved: string,
@@ -85,9 +74,7 @@ export async function writeSettings(
     // a state it never got back.
     return { outcome: { state: "failed", text: `Saved, but the answer could not be read: ${String(err)}` } };
   }
-  // Stored — and then what actually became of it. "Saved" while a sync it has
-  // to queue behind is still running is how three switches turned into one
-  // installed tool with nothing anywhere saying so.
+  // "Saved" is not what became of it while a sync is still queued.
   if (answer.toolsSync?.state === "refused") {
     return { outcome: { state: "failed", text: `Saved, but nothing will install it: ${answer.toolsSync.reason}` }, answer };
   }
@@ -100,18 +87,9 @@ export async function writeSettings(
   return { outcome: { state: "saved", text: saved }, answer };
 }
 
-/**
- * Removing a tool the operator declared, in the only order that cannot orphan
- * a binary: switch it off first, so the next sync uninstalls it, and drop the
- * declaration second. The other order deleted the row while the tool was still
- * on the PATH — with nothing left declaring it, nothing could remove it and no
- * row could say so.
- *
- * *When* the block may go is not decided here. That rule is the server's
- * (web/instance.ts refuses while the tool is on, installed, broken or
- * unreadable), and a copy of it in the browser would be a second answer to
- * one question — the pane shows the server's sentence instead.
- */
+/** Switch off first, so the next sync uninstalls the binary; drop the
+ *  declaration second, or nothing is left that can remove it. When the block
+ *  may go is the server's rule (web/instance.ts); the pane shows its sentence. */
 export function removalStep(
   entry: CatalogEntry,
   customTools: readonly { name: string; toml: string }[],
@@ -178,10 +156,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   const scopeBox = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
   scopeBox.append(h("span", "field-label", "Scope"), scopeSelect);
 
-  // No header of its own: embedded under Settings → Agent files, whose strip
-  // already names it.
-  // Two panels on the canvas rather than one sheet split by a rule: the list of
-  // what a session is made of, and the one thing the selected item affords.
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1.5");
   const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:max-h-48 max-md:w-full`);
   nav.append(scopeBox, navList);
@@ -221,10 +195,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     toolsTaskId = body.toolsTaskId;
   }
 
-  /** Write, then redraw from the state the server confirmed — so a switch
-   *  never shows something nobody stored, and the reason rides with the
-   *  redraw. A write that never landed answers with no state at all, and the
-   *  lists stay as they were. */
+  /** Redraws from the state the server confirmed, so a switch never shows
+   *  something nobody stored. */
   async function save(body: Record<string, unknown>, saved: string): Promise<SaveOutcome> {
     const { outcome, answer } = await writeSettings(body, saved);
     if (answer) {
@@ -234,10 +206,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return outcome;
   }
 
-  /** One switch as a delta, never as the list this page computed: two quick
-   *  clicks would each send a list built a moment ago, and the second would
-   *  drop the first. Which set it lands in follows from `source` — installed
-   *  by Pier, or loaded from inside it. */
+  /** A delta, never the list this page computed: two quick clicks would each
+   *  send a list built a moment ago. */
   function switchBody(name: string, checked: boolean): Record<string, unknown> {
     const one = { name, on: checked };
     return catalog.find((e) => e.name === name)?.source === "binary" ? { tool: one } : { extension: one };
@@ -504,12 +474,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         save.disabled = false;
       }
     };
-    // An agent file is read more often than it is written, so it opens in the
-    // viewer every other file surface uses (code.ts) — gutter, highlighting,
-    // wrapping — and Edit swaps in the textarea. What the viewer renders is
-    // the editor's own text, so switching back never hides an unsaved line;
-    // highlighting the textarea itself would take a second renderer aligned to
-    // it pixel for pixel, which is the thing code.ts exists to prevent.
+    // Opens in the shared viewer (code.ts); Edit swaps in the textarea. The
+    // viewer renders the editor's own text, so switching back never hides an
+    // unsaved line.
     const edit = h("button", "btn text-[12.5px]", "Edit") as HTMLButtonElement;
     const view = h("button", "btn text-[12.5px]", "View") as HTMLButtonElement;
     const actions = (...rest: HTMLElement[]): HTMLElement =>
@@ -551,9 +518,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return link;
   }
 
-  /** Who actually does the installing. Named and linked because the block
-   *  below is written in someone else's config language: a body that ubix
-   *  rejects is only debuggable against ubix's own documentation. */
+  /** A body ubix rejects is only debuggable against ubix's own documentation. */
   const ubixLink = (): HTMLElement => {
     const link = h("a", "text-indigo-600 hover:underline", "ubix") as HTMLAnchorElement;
     link.href = "https://github.com/timqi/ubix";
@@ -571,11 +536,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return `${spec} — ${version ?? "unknown version"} at ${path ?? "an unknown path"}`;
   }
 
-  /**
-   * The switch, and the things it cannot be understood without: when it takes
-   * effect, who wins against a copy of your own, and — for an extension that
-   * ships as a command — which binary it is and where the install ran.
-   */
   function openBundled(name: string, note?: SaveOutcome): void {
     paneRequest++;
     const ext = catalog.find((e) => e.name === name && e.kind === "extension");
@@ -596,9 +556,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         "div",
         "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
         h("p", "max-w-2xl text-[13px] leading-relaxed text-neutral-600", ext.summary),
-        // What the switch actually adds, and what each tool needs to work:
-        // "which providers" has no single answer for a whole extension, and
-        // finding out from a failed turn is finding out too late.
+        // "Which providers" has no single answer for a whole extension.
         h(
           "dl",
           "flex max-w-2xl flex-col gap-1.5",
@@ -646,9 +604,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
     const tools = toolEntries();
-    // Every binary that is on, not only the ones in this pane: rtk is switched
-    // by the same set from its own pane, and rewriting the set without it
-    // would uninstall it behind the operator's back.
+    // Every binary that is on: rtk is switched by the same set from its own pane.
 
     const runs = taskLink("the update task");
 
@@ -789,9 +745,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     if (request !== paneRequest) return;
     const { content } = got.value;
-    // The Files view's renderer, not a second one: same gutter, same
-    // highlighting, same wrapping — a skill or an extension is source code,
-    // and it was reading as a wall of grey <pre>.
     const lang = await langFor(name); // first file of the session waits for hljs
     if (request !== paneRequest) return;
     pane.replaceChildren(

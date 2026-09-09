@@ -1,10 +1,6 @@
-// One reason: how the sidebar yields space, and therefore what has to stand in
-// for it while it is gone. Below md it becomes a drawer (the slide is CSS in
-// style.css) with a compact top bar standing in for the chat header; at md and
-// up it collapses to a slim handle column instead — body[data-rail="closed"],
-// persisted, styled in style.css. The attention badge below is the same
-// sentence for the session list: the toggle carries what the list would have
-// shown.
+// How the sidebar yields space, and what stands in for it while it is gone:
+// a drawer below md, a slim handle column above (body[data-rail="closed"]),
+// and the attention badge carrying what the list would have shown.
 
 import { $, h } from "./dom.js";
 import { shortcut } from "./shortcut.js";
@@ -59,12 +55,8 @@ function toggleDrawer(): void {
 const drawerMedia = window.matchMedia("(width < 48rem)");
 const isDrawer = (): boolean => drawerMedia.matches;
 
-/** The meta chips (model · reasoning · context, and the "starting…" a session
- *  opening has to say) belong to whichever heading is on screen. One element,
- *  moved — session-header.ts keeps rendering into it, so the phone shows the
- *  same object rather than a second copy of the same chips. In the bar it takes
- *  a line of its own under the title (style.css); in the chat heading it goes
- *  back where it was written, before the ⋯. */
+/** One element, moved between headings: session-header.ts keeps rendering
+ *  into it, so the phone shows the same chips rather than a second copy. */
 function hostMeta(): void {
   if (isDrawer()) $("#mobile-bar").append(meta);
   else $("#chat-menu").before(meta);
@@ -82,12 +74,9 @@ function syncDrawer(): void {
 }
 
 // --- attention ----------------------------------------------------------------------
-// With the rail collapsed — and on a phone, always — the amber dots in the
-// session list are off screen, and a turn that finished in another session then
-// looks exactly like nothing happening (§5b). Only the actionable half of what
-// those dots say: a session merely *running* elsewhere is nothing to answer,
-// and a badge that pulses all day is one nobody reads. Which sessions is one
-// click away in the list itself — the badge answers whether, not which.
+// With the rail off screen a finished turn looks like nothing happening (§5b).
+// Only the actionable half: a badge that pulses for every running session is
+// one nobody reads.
 
 /** The two ways back to the sidebar — one per breakpoint, so only ever one of
  *  them is on screen. Badging the door is the whole design: no new element,
@@ -124,17 +113,9 @@ const COMMIT = 0.35;
 /** Slop before a touch is a drag rather than a tap or the start of a scroll. */
 const SLOP = 8;
 
-/**
- * The drawer follows the finger.
- *
- * Swiping in from the left edge is what a phone user tries first, and until
- * now iOS answered it: in a standalone PWA that edge is the system's back
- * gesture, so what slid in was its snapshot of the previous history entry — a
- * drawer that was open in a page we already left — and letting go sprang it
- * back. Taking the touch (preventDefault on the first one in the strip) is the
- * only way to have the gesture, and having it is the point: the 40px button in
- * the corner was the sole way in.
- */
+/** In a standalone PWA the left edge is iOS's back gesture, which slides in a
+ *  snapshot of the previous history entry; preventDefault on the first touch
+ *  in the strip is the only way to have the swipe. */
 function initSwipe(): void {
   let from = -1; // touch x where the gesture started; -1 = not ours
   let fromY = 0;

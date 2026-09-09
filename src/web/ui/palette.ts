@@ -1,9 +1,5 @@
-// The ⌘K launcher: what is running, what is recent, what can be opened — and,
-// for a query, which session it was said in. The answer is always a session
-// (or a place to go); a matched message is the reason a session is listed,
-// shown under its name, not a result of its own. main.ts owns the session
-// list and the selection; sidebar.ts owns the rail and lends its order, dots
-// and New-session menu; this module owns the dialog.
+// The ⌘K launcher. The answer is always a session (or a place to go); a
+// matched message is the reason a session is listed, not a result of its own.
 
 import { FolderPlus, LayoutDashboard, ListTodo, MessageSquare, Settings, type IconNode } from "lucide";
 import { getJson } from "./api.js";
@@ -73,9 +69,8 @@ const SESSIONS = 8;
 const DEBOUNCE_MS = 80;
 
 // --- the search itself -------------------------------------------------------------------
-// What is local answers on the keystroke; the sessions the server finds by
-// content join the same list when it answers. One request in flight: the next
-// keystroke aborts it.
+// Local answers on the keystroke; the server's join when it answers. One
+// request in flight: the next keystroke aborts it.
 
 type Answer = { hits: SearchHit[] } | { error: string };
 
@@ -136,14 +131,8 @@ function snippet(text: string): HTMLElement {
   return line;
 }
 
-/** The rem scale the design doc gives desktop action rows: 0.9375rem labels
- *  on a 1.5 line, 0.8125rem supporting text, 0.75rem marks. The detail sits
- *  beside the label the way Spotlight sets a subtitle — read as one phrase,
- *  "Optimize SKILL.md · pier" — and gives way entirely before the label
- *  loses a letter: the label does not shrink, only clips at the row's width
- *  less the few characters the detail keeps for its own ellipsis — a stray
- *  letter of a directory name reads as a typo. Only the time is pinned to the
- *  right edge. */
+/** The detail gives way entirely before the label loses a letter: a stray
+ *  letter of a directory name reads as a typo. */
 const PHRASE = "flex min-w-0 flex-1 items-baseline gap-2";
 const LABEL = "shrink-0 truncate";
 const DETAIL = "min-w-[2.5em] truncate text-[0.8125rem] text-neutral-400";
@@ -173,13 +162,8 @@ function paletteRow(t: Target): HTMLElement {
     ));
   }
   li.append(body);
-  // Hover is its own grey, and it does not move the selection. Driving one
-  // highlight from both pointer and keyboard meant the browser could aim it:
-  // after a layout change it re-runs hit-testing and delivers a mouse move at
-  // the position the pointer already had, so opening ⌘K with the mouse resting
-  // anywhere over the list fired `mouseenter` there and Enter no longer opened
-  // the first row. What the keyboard selected is now only ever moved by the
-  // keyboard; the pointer opens what it clicks.
+  // Hover does not move the selection: after a layout change the browser
+  // re-runs hit-testing and fires `mouseenter` under a resting pointer.
   li.onclick = t.open;
   return li;
 }
@@ -200,10 +184,8 @@ function note(text: string, title?: string): HTMLElement {
 
 // --- sections ------------------------------------------------------------------------------
 
-/** The chat a session answers is both searchable and shown, by its full name
- *  here — the palette has room the rail's chip does not, and "telegram" is
- *  what someone types. Empty for the workbench's own sessions, which is most
- *  of them: `web` in every detail line would only push the cwd out. */
+/** Empty for the workbench's own sessions: `web` in every line would only push
+ *  the cwd out. */
 const chatOf = (s: SessionInfo): string => (s.channel && s.channel !== "web" ? s.channel : "");
 
 function render(): void {
@@ -249,10 +231,8 @@ function render(): void {
     );
   } else {
     const dirs = projectCwds(sessions).filter((cwd) => hit(basename(cwd))).slice(0, NEW_IN);
-    // One list of sessions: those the query names come first, in the rail's
-    // order; those it was said in follow, best hit first, each carrying the
-    // line that put it there. The server's part is appended as it arrives —
-    // and until it does, or when it cannot, the list says so in its place.
+    // Named sessions first in the rail's order, then the server's hits as they
+    // arrive; until then, or when it cannot, the list says so in its place.
     const named = ordered.filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`)).slice(0, SESSIONS);
     const shown = new Set(named.map((s) => s.id));
     const found: (Target | HTMLElement)[] = named.map(sessionRow);
@@ -325,11 +305,8 @@ export function initPalette(d: PaletteDeps): void {
   deps = d;
   const search = $("#open-palette");
   search.onclick = toggle;
-  // Once the palette is open the chord belongs to its list (⌃K walks up), so
-  // the global binding stands down; Esc is what a <dialog> closes on anyway.
-  // An anchored menu takes it back for the same reason: its rows walk on ⌃K
-  // too, and the palette opening on top of them is the answer to a keypress
-  // that was meant for the list already on screen.
+  // Open, the chord belongs to the list (⌃K walks up); an anchored menu's
+  // rows walk on ⌃K too.
   shortcut(search, "k", "Search sessions, messages and Console", toggle, () => dialog.open || menuOpen());
   // The dialog is its own backdrop's hit target: a click that lands on the
   // element itself, not on a descendant, landed outside the panel.

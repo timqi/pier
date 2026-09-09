@@ -1,17 +1,12 @@
-// Syntax highlighting — chat code blocks and Files-view previews. Which
-// languages, and the tokenizer itself, are ui/hljs.ts: ~70 kB of the bundle
-// that only a page showing code needs, so it is fetched on the first highlight
-// rather than at boot. Highlighting already waits for a turn's final paint
-// (ui/chat.ts), so the two callers that produce colour await this arrival.
+// Syntax highlighting. The tokenizer is ui/hljs.ts, ~70 kB only a page showing
+// code needs, so it is fetched on the first highlight rather than at boot.
 import type { HLJSApi } from "highlight.js";
 
 let hljs: HLJSApi | undefined;
 let loading: Promise<HLJSApi | undefined> | undefined;
 
-/** The highlighter, on first use — one fetch however many callers race for it.
- *  A chunk that will not load is plain text and a line in the console, not a
- *  pane stuck on "loading": every caller below reads `undefined` as "no
- *  language", which is what an unregistered language already meant. */
+/** One fetch however many callers race. A chunk that will not load is plain
+ *  text, not a pane stuck on "loading": `undefined` reads as "no language". */
 function highlighter(): Promise<HLJSApi | undefined> {
   loading ??= import("./hljs.js").then(
     (mod) => (hljs = mod.default),
@@ -23,12 +18,8 @@ function highlighter(): Promise<HLJSApi | undefined> {
   return loading;
 }
 
-/**
- * Tokenize fenced blocks in already-rendered markdown. Only fences that named a
- * language we registered are touched — no auto-detection, which guesses wrong
- * on short snippets. Safe after DOMPurify: the input is the node's plain text
- * and hljs escapes its output, so the only new markup is its own token spans.
- */
+/** No auto-detection, which guesses wrong on short snippets. Safe after
+ *  DOMPurify: hljs escapes its output. */
 export async function highlightCode(root: HTMLElement): Promise<void> {
   const hl = await highlighter();
   if (!hl) return;
@@ -57,10 +48,8 @@ export async function langFor(filename: string): Promise<string | null> {
   return hl?.getLanguage(lang) ? lang : null;
 }
 
-/** One highlighted source line, for the Files view's numbered panes. Per-line
- *  tokenizing loses multi-line constructs (block comments) — acceptable for a
- *  viewer, and it keeps diff-toned lines highlightable independently. Same
- *  safety story as above: hljs escapes its output. */
+/** Per-line tokenizing loses multi-line constructs (block comments), which
+ *  keeps diff-toned lines highlightable independently. */
 export function lineEl(text: string, lang: string | null): HTMLElement {
   const el = document.createElement("span");
   // `lang` came from langFor(), which only answers once hljs is here.

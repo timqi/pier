@@ -1,10 +1,5 @@
-// Console → Files view: read-only browsing of a project directory. One tree,
-// one viewer: the tree badges every file the working tree (or a chosen ref)
-// drifted from the base ref — main by default — and a changed file opens as
-// the whole file, syntax-highlighted, with added/removed lines toned inline,
-// never a bare patch. Unchanged files preview as themselves (code with line
-// numbers, images, PDFs). A viewer, not an editor: every read is scoped
-// server-side to the root it was asked under, and nothing here writes.
+// Console → Files view: read-only browsing of a project directory, with a
+// changed file shown whole and its changes toned inline, never a bare patch.
 
 import { ArrowDown, ArrowUp, FoldVertical, Funnel, GitBranch, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
@@ -37,9 +32,7 @@ const MAX_AUTO_EXPAND = 30;
 
 type Segment = { start: number; end: number; tone: "add" | "del" | "mixed" };
 
-/** What a session was last looking at here. Browser-local, like every other
- *  view preference: it is where *this* workbench left off, and the answer is
- *  worth nothing to another one. */
+/** Browser-local: where *this* workbench left off. */
 type Prefs = { cwd: string; base: string; head: string };
 const PREFS_KEY = "pier.filesPrefs";
 const MAX_REMEMBERED = 50; // one entry per session; the oldest fall off
@@ -143,9 +136,7 @@ export function createExplorerView(
     return n;
   };
 
-  /** fs listing + phantom rows for deleted paths, so every change stays
-   *  reachable even when nothing is left on disk to click. The changed-only
-   *  filter is applied here — one place decides what a directory shows. */
+  /** Phantom rows for deleted paths, so every change stays reachable. */
   function rowsFor(path: string, entries: Entry[]): HTMLElement[] {
     const names = new Set(entries.map((e) => e.name));
     const prefix = path ? `${path}/` : "";
@@ -263,10 +254,7 @@ export function createExplorerView(
     return title;
   }
 
-  /** Character-level emphasis: pair the i-th removed line of a change site
-   *  with its i-th added line, trim the common prefix and suffix, and mark
-   *  what is left. No common edge means the line was rewritten — the row
-   *  tone already says that, so no mark. */
+  /** No common edge means the line was rewritten, which the row tone already says. */
   function markIntraline(rows: CodeRow[]): void {
     let i = 0;
     while (i < rows.length) {
@@ -414,14 +402,8 @@ export function createExplorerView(
   const rowsLabel = (rowEls: HTMLElement[], i: number): string =>
     rowEls[i]?.querySelector("span")?.textContent?.trim() || String(i + 1);
 
-  /**
-   * ↑/↓ stepping through change sites, wrapping at the ends — with P/N (or
-   * K/J) on the keys, since walking a diff is the whole point of the view.
-   *
-   * Built once and refilled per file rather than rebuilt with the title: a
-   * bare-letter binding is never unbound, so a nav per rendered diff would
-   * stack one more listener for every file opened.
-   */
+  /** Built once and refilled per file: a bare-letter binding is never unbound,
+   *  so a nav per diff would stack a listener per file opened. */
   function createDiffNav(): { el: HTMLElement; set: (segs: Segment[], rowEls: HTMLElement[]) => void } {
     let segs: Segment[] = [];
     let rowEls: HTMLElement[] = [];
@@ -620,11 +602,8 @@ export function createExplorerView(
     const cwdChip = chip(cwd || "Choose a folder…", "neutral");
     cwdChip.className += " max-w-72";
     cwdChip.title = "Switch folder";
-    // Every checkout of the repository on screen, and nothing else. Parallel
-    // work means hopping between worktrees of one project, which is worth a
-    // click; a list of every directory the instance has ever had a session in
-    // is a list of places this view is not about. Those are one "Browse…"
-    // away, and that panel takes a typed path.
+    // Every checkout of this repository, and nothing else; other directories
+    // are one "Browse…" away.
     cwdChip.onclick = () =>
       openPathMenu(
         cwdChip,
@@ -645,10 +624,7 @@ export function createExplorerView(
     );
   }
 
-  /** Refs, commits and the branch move under the view — a commit made in a
-   *  terminal is invisible here and nothing pushes it — so re-read them
-   *  whenever the answer is about to be shown (re-entering the view) or used
-   *  (opening the diff picker). Errors land where load()'s git failure does. */
+  /** A commit made in a terminal is invisible here and nothing pushes it. */
   async function refreshGit(): Promise<void> {
     if (!cwd) return;
     try {
@@ -695,11 +671,8 @@ export function createExplorerView(
   return consoleView(root, (arg) => {
     const s = session();
     const id = s?.id ?? "";
-    // Any absolute path is addressable.
-    // A stale or relative argument falls back to what this session last
-    // browsed, then to its own project directory. No first-project fallback:
-    // landing in somebody else's repository is worse than the empty chip that
-    // asks which folder you meant.
+    // No first-project fallback: landing in somebody else's repository is
+    // worse than the empty chip that asks which folder you meant.
     const next = arg?.startsWith("/")
       ? arg
       : (id === sessionKey ? cwd : "") || readPrefs(id)?.cwd || s?.cwd || "";
@@ -714,11 +687,8 @@ export function createExplorerView(
     cwd = next;
     void load();
   }, () => {
-    // A whole file's diff is thousands of rows, each a handful of highlighted
-    // spans, and hiding the view only flips a class — the largest DOM in the
-    // workbench sat there for the life of the page. Re-entering re-reads git and
-    // re-renders the selected file anyway (applyRefs), so nothing is lost; the
-    // placeholder is what an empty viewer must never be (principle 5b).
+    // The largest DOM in the workbench; hiding the view only flips a class.
+    // Re-entering re-renders anyway.
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
     viewer.replaceChildren(note("Select a file."));

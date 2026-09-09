@@ -1,14 +1,7 @@
 // What this browser does to behave like an installed app: the service worker,
-// the Web Push subscription behind one toggle, the install prompt and the icon
-// badge. One module because they are one thing to the person using them — and
-// because each is invisible from the inside when it is missing.
-//
-// That is the whole design constraint here. A permission granted to a Safari
-// tab instead of the installed app, a subscription the browser silently
-// expired, an instance reachable only over http: all three look like "nothing
-// happened". So this module never shows a control it cannot honour — it says
-// which of them is true, and offers a test notification for the only question
-// that matters ("did it actually arrive?").
+// the push subscription, the install prompt and the icon badge. Each is
+// invisible from the inside when missing, so this module never shows a control
+// it cannot honour and offers a test notification for "did it actually arrive?".
 
 import { failure, mustGetJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
@@ -105,10 +98,9 @@ async function subscribe(reg: ServiceWorkerRegistration): Promise<PushSubscripti
   const existing = await reg.pushManager.getSubscription();
   if (existing) {
     if (sameKey(existing.options.applicationServerKey, key)) return existing;
-    // This instance signs with a different key than the one this subscription
-    // was made for (a restored database, a reinstall). Nothing can ever be
+    // Signed with a different key (a restored database): nothing can be
     // delivered to it again, and the browser refuses a second subscription
-    // until it is gone — which is a toggle that silently never works.
+    // until it is gone.
     await existing.unsubscribe();
   }
   return reg.pushManager.subscribe({
@@ -124,10 +116,6 @@ async function tellServer(sub: PushSubscription): Promise<Response> {
   return sendJson("/api/push/subscribe", { ...sub.toJSON(), label: deviceLabel() });
 }
 
-/**
- * Register the worker, and — if this browser already asked to be notified —
- * make sure the server still knows how to reach it.
- */
 export async function initPush(): Promise<void> {
   watchInstallability();
   const reg = await register();
@@ -143,11 +131,9 @@ export async function initPush(): Promise<void> {
 }
 
 // --- installing ------------------------------------------------------------------
-// Chrome and Edge hand the install prompt to the page instead of showing it:
-// the event fires once, early, and is the only way to offer installing from
-// inside the app. Safari fires nothing — on iOS the Add-to-Home-Screen sentence
-// in the card below is the whole story, and it is the one platform where
-// installing is not cosmetic (no installed app, no notifications).
+// Chrome and Edge hand the install prompt to the page, once, early. Safari
+// fires nothing, and iOS is the one platform where installing is not cosmetic
+// (no installed app, no notifications).
 
 /** The part of Chrome's `beforeinstallprompt` this uses. Not in lib.dom. */
 interface InstallPromptEvent extends Event {
@@ -181,10 +167,6 @@ export function setUnreadBadge(count: number): void {
   void (count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.())?.catch(() => {});
 }
 
-/**
- * Settings → Instance: one toggle, one test button, and a sentence saying
- * exactly which state this browser is in.
- */
 export function createNotificationsCard(): HTMLElement {
   const status = h("span", "text-[11.5px]", "");
   const test = button("Send a test notification");

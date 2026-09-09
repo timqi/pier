@@ -209,12 +209,8 @@ export interface LaunchChoice {
   thinking: ThinkingLevel | null;
 }
 
-/**
- * Model + reasoning for the sessions a surface launches, reusing the chat
- * composer's picker: same grouping, same search, same pinned model+reasoning
- * combos. "Pi default" means passing neither, so a new session starts on
- * whatever the project and Pi would have chosen.
- */
+/** "Pi default" means passing neither, so a new session starts on whatever
+ *  the project and Pi would have chosen. */
 export function launchField(
   label: string,
   choice: LaunchChoice,

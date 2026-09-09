@@ -1,7 +1,5 @@
-// Getting a provider to work: endpoint/model structure, authentication, and the
-// one request that proves the three of them agree. Rendered as a card in
-// Settings → Models, above the operator's menu; the head below is `form.ts`'s
-// card head, hand-built only because this pane owns a button in it.
+// Getting a provider to work: endpoint/model structure, authentication, and
+// the one request that proves the three of them agree.
 
 import type {
   ModelEffort,
@@ -100,14 +98,9 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
       ),
     );
 
-  /**
-   * "Configured" is a stored credential, not a working one. One real request is
-   * the only thing that can tell the difference — and both halves of it are
-   * shown, because a refusal only means something next to what provoked it, and
-   * anything between Pier and the provider can rewrite either one.
-   *
-   * Answers rather than draws: the row it belongs to owns its own elements.
-   */
+  /** "Configured" is a stored credential, not a working one; both halves of
+   *  the probe are shown because a refusal means something only next to what
+   *  provoked it. */
   const probe = async (id: string, model: string): Promise<ProviderCheck | string> => {
     try {
       const res = await sendJson(`/api/providers/${encodeURIComponent(id)}/check`, { model });

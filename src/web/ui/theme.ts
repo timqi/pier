@@ -1,7 +1,5 @@
-// Which palette the workbench paints in. The palette itself is CSS — style.css
-// redefines Tailwind's colour variables under [data-theme="dark"] — so this
-// module owns only the choice: remembered per browser, following the system
-// until told otherwise, and re-applied when either changes.
+// Which palette the workbench paints in; the palette itself is style.css's
+// [data-theme="dark"]. Remembered per browser, following the system until told otherwise.
 
 import { Monitor, Moon, Sun, type IconNode } from "lucide";
 import { icon } from "./icons.js";

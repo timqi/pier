@@ -1,6 +1,4 @@
-// Settings → Channels tab: one tab per IM platform, and everything that
-// platform needs on that one tab — token, global defaults, bound users,
-// discovered chats with their per-chat overrides. A pure consumer of
+// Settings → Channels: one tab per IM platform, a pure consumer of
 // /api/channels/:platform.
 
 import { Check, LoaderCircle, TriangleAlert } from "lucide";
@@ -46,19 +44,11 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   let config: ChannelConfig | null = null;
   let models: ModelRef[] = [];
 
-  // Embedded under Settings → Channels, so the platform switch is the only
-  // chrome this view owns — and a segmented one, not a second pill strip: the
-  // page's head already draws that level, and two rows of the same chrome read
-  // as two levels of the same navigation. It keeps the head's material and
-  // stays sticky in its own scroll container: a config page long enough to
-  // scroll still names the platform being edited, the save status rides the
-  // strip, and the glass is what the rows passing under it need.
+  // Segmented, not a second pill strip: two rows of the same chrome read as
+  // two levels of one navigation. Sticky, so a long page still names the
+  // platform being edited.
   const statusBox = h("div", "ml-auto flex items-center gap-1.5 text-[11.5px]");
-  // Hugs its controls and centres over the cards: a second full-width band
-  // under the page's head would say "another page", and what is on it is one
-  // switch and a status line. top-[-8px] is the strip's own inset, so once it
-  // sticks it sits flush against the scrollport instead of leaving 8px of
-  // cards sliding past above it.
+  // top-[-8px] is the strip's own inset, so it sticks flush against the scrollport.
   const tabs = h("div", "pagehead pagehead-hug sticky top-[-8px] z-30", statusBox);
   const pane = h("div", "px-4 pb-5 pt-4");
   root.append(h("div", "min-h-0 flex-1 overflow-y-auto", tabs, pane));
@@ -80,11 +70,8 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   }
 
   // --- autosave ----------------------------------------------------------------
-  // Every control writes straight into `config` and asks for a save. Text
-  // fields are debounced so a keystroke is not a request; switches and picks
-  // land on the next tick. Saves are serialized and coalesced — `config` is
-  // mutated in place, so a save that waits for the one in flight sends the
-  // latest state, and two rapid edits collapse into one PUT.
+  // Saves are serialized and coalesced: `config` is mutated in place, so a
+  // save that waited sends the latest state.
   const SAVE_DEBOUNCE_MS = 500;
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let saving = false;
@@ -123,13 +110,8 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     queueSave();
   };
 
-  /**
-   * Send one document. The platform travels with it: a save deferred behind an
-   * in-flight one must not land on whichever tab the user opened meanwhile.
-   * The config object is shared and mutable on purpose — a deferred save picks
-   * up every edit made while it waited, which is what collapses a burst of
-   * switch flips into a single request.
-   */
+  /** The platform travels with the save: one deferred behind an in-flight save
+   *  must not land on whichever tab was opened meanwhile. */
   async function send(target: { platform: ChannelPlatform; config: ChannelConfig }): Promise<void> {
     saving = true;
     showStatus("saving");

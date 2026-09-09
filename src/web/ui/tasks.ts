@@ -1,7 +1,4 @@
-// Console → Tasks view: the task list with its filters, and one task's detail
-// page (definition tab + actions). The recent-runs pane lives in task-runs.ts,
-// a run itself in the Runs view, and the create/edit dialog in task-editor.ts;
-// this file owns navigation and state.
+// Console → Tasks: the task list with its filters, and one task's detail page.
 
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
@@ -37,11 +34,8 @@ export function createTasksView(
   const runsScroll = { top: 0 };
   let detailRequest = 0;
   let listScroll = 0;
-  /** Filter plus payload of the last list drawn — the Activity view's guard
-   *  (activity.ts), for the same reason: most workspace events change nothing
-   *  here, and replacing the table anyway loses its scroll position and the
-   *  click that was mid-press. Filter included because two filters can answer
-   *  with the same rows, and the pressed tab is drawn by this list. */
+  /** The Activity view's guard: replacing the table loses its scroll position
+   *  and a mid-press click. Filter included: two filters can answer the same rows. */
   let drawn = "";
 
   const loadList = coalesce(async () => {

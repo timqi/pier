@@ -1,9 +1,6 @@
 // Images and file attachments in a chat bubble: the lightbox, the thumbnail
-// strip, and agent attachments. The agent links a file it produced as
-// `[label](file:///abs/path)`; the link is rewritten to the session's files
-// route before sanitizing (DOMPurify drops `file:` URLs, and rightly so), then
-// the rendered node is upgraded: images become thumbnails, everything else an
-// attachment card with preview + download.
+// strip, and agent attachments. A `file://` link is rewritten to the files route
+// before sanitizing (DOMPurify drops `file:` URLs), then upgraded to a thumbnail or card.
 
 import { Download, Eye } from "lucide";
 import { icon } from "./icons.js";
@@ -43,12 +40,8 @@ const ZOOM = 2.5;
  *  no second copy of it to fall out of step. */
 const zoomed = (): boolean => imageStage.dataset.zoom !== undefined;
 
-/** Grow the image to a fixed multiple of its fitted size about the tapped
- *  point; the stage becomes the scroll box, so where you are in the image is
- *  its scroll offset and nothing else has to remember it. `at` is a viewport
- *  point — the tap — which stays where it was under the growth.
- *  Pinching is not an option to add here: the workbench turns page zoom off
- *  (index.html, style.css, main.ts), so a tap is the whole gesture. */
+/** The stage becomes the scroll box, so the position is its scroll offset.
+ *  Pinching is not available: the workbench turns page zoom off. */
 function zoom(on: boolean, at?: { x: number; y: number }): void {
   if (!on) {
     delete imageStage.dataset.zoom;
@@ -87,17 +80,10 @@ function showImage(clicked: HTMLImageElement): void {
   imageDialog.showModal();
 }
 
-// A tap on the image magnifies it and a second one fits it again — what the
-// zoom-in cursor has been promising; a tap on the scrim around it closes, as
-// does the ✕ (a phone has no Esc). This was a double-tap-to-zoom with a 260ms
-// window, which is shorter than two deliberate taps: on the surface the
-// gesture is for, "zoom" was read as "close" nearly every time.
-// Dragging a zoomed image. The stage is a scroll box, so a *touch* could
-// already pan it — a mouse could not: an overflow box has no drag-to-scroll,
-// and the scrollbars are the one handle a lightbox has no room to show. Pointer
-// events, so finger and mouse take one path (style.css hands us the touch as
-// well, with `touch-action: none` while zoomed); the capture keeps the drag
-// alive when the pointer leaves the image, or the window.
+// Single tap zooms (a double-tap window is shorter than two deliberate taps);
+// the ✕ exists because a phone has no Esc. Dragging: a mouse has no
+// drag-to-scroll on an overflow box, so pointer events take finger and mouse
+// down one path; the capture keeps the drag alive past the image's edge.
 const SLOP = 4; // a click from a shaky hand is still a click
 let from: { x: number; y: number; left: number; top: number } | undefined;
 let panned = false;
@@ -217,14 +203,8 @@ const previewNote = (msg: string, tone = "text-neutral-500"): HTMLElement =>
  *  closed must not land on the one now shown. */
 let previewSeq = 0;
 
-/**
- * Any text file, as itself: the Files view's numbered, highlighted pane
- * (ui/code.ts), so a `.diff`, a `.ts` or a `.md` reads here the way it reads
- * there. What counts as text is not an extension list but the type the server
- * served the bytes as — it sniffs (web/fs.ts), and bytes it won't vouch for
- * are a download, not a pane full of mojibake. An SVG comes back as itself and
- * is shown as its markup: a card on purpose, never rendered.
- */
+/** Text is whatever the server served the bytes as (it sniffs, web/fs.ts).
+ *  An SVG is shown as its markup, never rendered. */
 async function preview(url: string, name: string): Promise<void> {
   const seq = ++previewSeq;
   fileName.textContent = name;
@@ -296,12 +276,7 @@ function card(url: string, name: string): HTMLElement {
   return wrap;
 }
 
-/**
- * Attachments get a row of their own under the prose: a block containing
- * nothing but attachments becomes the strip, and attachments written into a
- * sentence are lifted into a strip right after it. Either way a set of them
- * packs across the row and wraps, rather than trailing the text one per line.
- */
+/** A set of attachments packs across a row rather than trailing the text one per line. */
 function groupAttachments(placed: HTMLElement[]): void {
   const blocks = new Set<HTMLElement>();
   for (const node of placed) if (node.parentElement) blocks.add(node.parentElement);
@@ -320,10 +295,7 @@ function groupAttachments(placed: HTMLElement[]): void {
   }
 }
 
-/**
- * Upgrade every attachment node of a rendered markdown bubble in place. Called
- * after sanitizing, so only URLs the rewrite produced are touched.
- */
+/** After sanitizing, so only URLs the rewrite produced are touched. */
 export function renderAttachments(root: HTMLElement): void {
   const placed: HTMLElement[] = [];
   for (const img of root.querySelectorAll("img")) {

@@ -1,17 +1,10 @@
-// The Web Push wire format, and only that: RFC 8291 message encryption
-// (ECDH P-256 → HKDF → one aes128gcm record) and RFC 8292 VAPID
-// authorization. Who is notified, and why, is push.ts.
-//
-// Written on node:crypto instead of pulled in: the whole format is one ECDH,
-// two HKDFs, one AES-GCM record and a JWT, and every step of it has a
-// published test vector (webpush.test.ts runs the RFC's). A dependency here
-// would be new transitive code inside the process that holds the operator's
-// provider keys, buying ~120 lines (principle 8).
+// The Web Push wire format: RFC 8291 message encryption (ECDH P-256 → HKDF →
+// one aes128gcm record) and RFC 8292 VAPID. On node:crypto rather than a
+// dependency: every step has a published test vector, and a dependency here is
+// transitive code inside the process holding the provider keys (principle 8).
 
 import { createCipheriv, createECDH, createPrivateKey, hkdfSync, randomBytes, sign } from "node:crypto";
 
-/** A subscription as the browser hands it over: where to POST, and the two
- *  keys the receiving service worker will decrypt with. */
 export interface PushTarget {
   endpoint: string;
   /** UA public key, uncompressed P-256 point, base64url (65 bytes). */
@@ -20,8 +13,7 @@ export interface PushTarget {
   auth: string;
 }
 
-/** The instance's VAPID identity — a P-256 key pair, base64url. The public
- *  half is also what a browser subscribes with, so it is not a secret. */
+/** P-256 key pair, base64url; the public half is what a browser subscribes with. */
 export interface VapidKeys {
   publicKey: string;
   privateKey: string;
@@ -31,8 +23,7 @@ export interface VapidKeys {
  *  octets of body. Header (86) + padding (1) + GCM tag (16) leaves this. */
 export const MAX_PUSH_PLAINTEXT = 3993;
 const RECORD_SIZE = 4096;
-/** VAPID token lifetime. Apple refuses anything past 24h; half a day is well
- *  inside every push service's limit and still outlives a slow retry. */
+/** Apple refuses anything past 24h. */
 const TOKEN_TTL_S = 12 * 60 * 60;
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -54,13 +45,8 @@ export function generateVapidKeys(): VapidKeys {
   };
 }
 
-/**
- * Encrypt one push message for `target` (RFC 8291 §3.4, RFC 8188 header).
- *
- * `salt` and `serverKey` are injectable for exactly one reason: the RFC's
- * worked example is the only way to prove this implementation is right, and it
- * fixes both. Nothing else may pass them — a reused salt is a broken cipher.
- */
+/** RFC 8291 §3.4, RFC 8188 header. `salt` and `serverKey` are injectable only
+ *  for the RFC's worked example; a reused salt is a broken cipher. */
 export function encryptPush(
   plaintext: string | Buffer,
   target: PushTarget,
@@ -99,9 +85,7 @@ export function encryptPush(
   return Buffer.concat([header, asPublic, sealed]);
 }
 
-/** The `Authorization` a push service checks before it accepts anything: a
- *  short-lived ES256 JWT bound to the service's own origin, plus the public
- *  key the subscription was created with (RFC 8292 §3). */
+/** RFC 8292 §3: an ES256 JWT bound to the service's origin, plus the public key. */
 export function vapidAuthorization(
   endpoint: string,
   keys: VapidKeys,
@@ -132,16 +116,14 @@ export function vapidAuthorization(
   return `vapid t=${token}.${b64(signature)}, k=${keys.publicKey}`;
 }
 
-/** What the push service said. `status: 0` is "the request never got an
- *  answer" — kept distinct from a rejection so a caller never prunes a
- *  subscription because the network was down. */
+/** `status: 0` is "no answer", distinct from a rejection so a caller never
+ *  prunes a subscription because the network was down. */
 export interface PushResult {
   status: number;
   error?: string;
 }
 
-/** POST one encrypted message. Never throws: every outcome is a result the
- *  caller can log or act on. */
+/** Never throws: every outcome is a result the caller can log or act on. */
 export async function sendPush(
   target: PushTarget,
   payload: string,
@@ -170,8 +152,7 @@ export async function sendPush(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (res.ok) return { status: res.status };
-    // The service's own sentence is the only thing that explains a 400 from
-    // Apple or a 403 from FCM; without it the operator sees a bare number.
+    // The service's own sentence is the only thing that explains a 400 from Apple.
     const said = (await res.text().catch(() => "")).slice(0, 200);
     return { status: res.status, error: said || res.statusText };
   } catch (err) {
