@@ -42,7 +42,7 @@ export function openTaskEditor(deps: TaskEditorDeps, task?: TaskDefinition): voi
   const name = input(task?.name ?? "");
   name.required = true;
   const description = input(task?.description ?? "");
-  const timeout = input(String(task?.timeoutSeconds ?? 900), "number");
+  const timeout = input(String(task?.timeoutSeconds ?? 3600), "number");
   timeout.min = "1";
   timeout.max = "86400";
   const triggerType = select([["Manual", "manual"], ["Scheduled", "cron"], ["Watch", "watch"]], task?.trigger.type ?? "manual");

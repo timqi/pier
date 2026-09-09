@@ -49,10 +49,11 @@ policy (`manual` means on demand).
 - Stored role: `run` with `task_id` and optional `input`;
   `session_mode:"fresh"` overrides a stored reuse policy. Archived tasks refuse.
 
-Use a `task` draft for `timeoutSeconds` or reuse:
+`timeoutSeconds` also works in the shorthand and in a `tasks[]` entry; use a
+`task` draft for reuse:
 
 ```json
-{"operation":"run","task":{"timeoutSeconds":3600,"action":{"type":"agent","session":{"mode":"reuse","sessionId":"..."},"prompt":"Check the result"}}}
+{"operation":"run","task":{"timeoutSeconds":7200,"action":{"type":"agent","session":{"mode":"reuse","sessionId":"..."},"prompt":"Check the result"}}}
 ```
 
 Inline drafts may omit `trigger`; only `manual` is allowed. Their nested
@@ -61,8 +62,8 @@ matter for saved schedules (below).
 
 ## Groups and chains
 
-`tasks[]` needs 2+ entries: prompt strings, `{prompt,cwd?,launch?,name?}`, full
-drafts, or `{task_id}`. Do not combine it with `task`, `task_id` or `session_mode`.
+`tasks[]` needs 2+ entries: prompt strings,
+`{prompt,cwd?,launch?,name?,timeoutSeconds?}`, full drafts, or `{task_id}`. Do not combine it with `task`, `task_id` or `session_mode`.
 
 ```json
 {"operation":"run","tasks":["Review correctness","Review test gaps"],"join":"all"}
@@ -158,7 +159,8 @@ which scheduled runs lack.
   children are separate roots and do not count toward that limit.
 - 6 Agent runs execute instance-wide; others queue without error. A queued run
   waits **unbounded**, ended only by cancellation or a restart.
-- Default timeout 900s; `timeoutSeconds:1–86400` in draft form only. It starts
-  when the run does, not at enqueue, and reports `failed / task timed out`.
+- Default timeout 3600s; `timeoutSeconds:1–86400` in a draft, the `prompt`
+  shorthand or a `tasks[]` entry. It starts when the run does, not at enqueue,
+  and reports `failed / task timed out`.
 - Restart marks queued/running runs `interrupted`; callbacks still apply.
   During drain, new roots are refused: retry after restart.

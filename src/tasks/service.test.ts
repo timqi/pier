@@ -1649,6 +1649,30 @@ describe("task service", () => {
       .rejects.toThrow("no working directory");
   });
 
+  it("takes timeoutSeconds from the prompt shorthand, defaulting to an hour", async () => {
+    const { service } = setup();
+    const long = await service.tool({ operation: "run", prompt: "Slow work", timeoutSeconds: 7200 }, "s1") as RunSummary;
+    expect(service.get(long.taskId).timeoutSeconds).toBe(7200);
+    const plain = await service.tool({ operation: "run", prompt: "Ordinary work" }, "s1") as RunSummary;
+    expect(service.get(plain.taskId).timeoutSeconds).toBe(3600);
+    // Same boundary as the draft form, not a second range.
+    await expect(service.tool({ operation: "run", prompt: "x", timeoutSeconds: 86_401 }, "s1"))
+      .rejects.toThrow("timeoutSeconds must be between 1 and 86400");
+  });
+
+  it("takes timeoutSeconds from a tasks[] entry", async () => {
+    const { service } = setup();
+    const group = await service.tool({
+      operation: "run",
+      tasks: [{ prompt: "patient member", timeoutSeconds: 7200 }, "default member"],
+    }, "s1") as GroupSummary;
+    expect(group.members.map((m) => service.get(m.taskId).timeoutSeconds)).toEqual([7200, 3600]);
+    await expect(service.tool({
+      operation: "run",
+      tasks: [{ prompt: "x", timeoutSeconds: 0 }, "y"],
+    }, "s1")).rejects.toThrow("timeoutSeconds must be between 1 and 86400");
+  });
+
   it("defaults a trigger-less create to manual but keeps update strict", async () => {
     const { cwd, service } = setup();
     const { trigger: _trigger, ...noTrigger } = bashDraft(cwd, "echo untriggered");

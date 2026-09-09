@@ -184,7 +184,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages once your turn ends — there is no status query; pass callback 'steer' to have a result interrupt your running turn instead, or 'none' for no callback at all. recover (run_id or group_id, plus a reason) re-reads a finished result after its callback has settled — for truncated text or lost context, never to check progress. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
+      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name/timeoutSeconds — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages once your turn ends — there is no status query; pass callback 'steer' to have a result interrupt your running turn instead, or 'none' for no callback at all. recover (run_id or group_id, plus a reason) re-reads a finished result after its callback has settled — for truncated text or lost context, never to check progress. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
     parameters: Type.Object({
       operation: strEnum(
         "list", "create", "update", "run", "recover", "cancel",
@@ -201,12 +201,13 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       cwd: Type.Optional(Type.String()),
       launch: Type.Optional(LaunchSchema),
       name: Type.Optional(Type.String()),
+      timeoutSeconds: Type.Optional(Type.Number({ description: "1–86400; defaults to 3600." })),
       task: Type.Optional(DraftSchema),
       // Spelled out, the draft schema costs more tokens per session than the
       // rest of this contract; `parseDraft` validates either shape.
       tasks: Type.Optional(Type.Unsafe<unknown[]>({
         type: "array",
-        description: "2+ entries, each a prompt string, {prompt, cwd?, launch?, name?}, a task draft shaped exactly like `task`, or {task_id}.",
+        description: "2+ entries, each a prompt string, {prompt, cwd?, launch?, name?, timeoutSeconds?}, a task draft shaped exactly like `task`, or {task_id}.",
         items: { type: "object" },
       })),
       join: Type.Optional(strEnum("all", "first")),
@@ -369,10 +370,10 @@ export async function handleTaskTool(
 
 /** A single run's draft: the top-level shorthand (`prompt` …) or `task`, never both. */
 function inlineDraft(input: Record<string, unknown>): Record<string, unknown> | undefined {
-  const { prompt, cwd, launch, name } = input;
+  const { prompt, cwd, launch, name, timeoutSeconds } = input;
   if (prompt === undefined) return record(input.task) ?? undefined;
   if (input.task !== undefined) throw new Error("use either prompt or task");
-  return { prompt, cwd, launch, name };
+  return { prompt, cwd, launch, name, timeoutSeconds };
 }
 
 /** A label for the Console, not an identifier. */

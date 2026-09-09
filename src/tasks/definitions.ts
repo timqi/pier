@@ -23,7 +23,9 @@ import type {
   TaskTrigger,
 } from "./types.js";
 
-const DEFAULT_TIMEOUT = 900;
+// An agent run that implements, tests and commits one concern takes 15–60
+// minutes; the default is the runaway ceiling, not the pace of normal work.
+const DEFAULT_TIMEOUT = 3600;
 const MIN_WATCH_SECONDS = 5;
 
 /** Crockford's base32, lowercased: i, l, o and u are gone, and one case
