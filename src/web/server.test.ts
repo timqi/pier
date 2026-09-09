@@ -608,6 +608,8 @@ describe("workbench server", () => {
 
   it("reloads channels, recycles idle sessions and counts the ones mid-turn", async () => {
     const { app, session, router, reload } = setup();
+    // The fixture's standing queue would pin it (core/router.ts); a real idle one is empty.
+    session.pendingQueue = async () => ({ steering: [], followUp: [] });
     router.attach({ channelId: "web", conversationId: "s1" }, session);
     const busy = fakeSession("s2");
     busy.setState("streaming");
@@ -2341,8 +2343,9 @@ describe("workbench server", () => {
 });
 
 describe("configuration reaching live sessions", () => {
-  /** Attached, idle, watched by nobody — the state the recycle is about. */
+  /** Attached, idle, nothing queued, watched by nobody — the state the recycle is about. */
   const attached = (router: Router, session: AgentSession) => {
+    session.pendingQueue = async () => ({ steering: [], followUp: [] });
     router.attach({ channelId: "web", conversationId: "s1" }, session);
     expect(router.stateOf("s1")).toBe("idle");
   };

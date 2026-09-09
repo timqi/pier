@@ -370,6 +370,17 @@ describe("idle eviction", () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it("keeps a session whose queue still holds messages — Pi's queue dies with the runtime", async () => {
+    await router.ensure(KEY);
+    // What /stop leaves behind: an idle session, its steer still parked.
+    fake.setQueue({ steering: ["and one more thing"] });
+    // The config reload's recycle sweep is the same loop, so it holds too.
+    expect(await router.evictIdle(0, Date.now() + 1, { includeWatched: true })).toBe(0);
+    expect(fake.calls).toEqual([]);
+    await router.recallQueue("s1");
+    expect(await router.evictIdle(0, Date.now() + 1)).toBe(1);
+  });
+
   it("takes a watched session when the caller says the configuration changed", async () => {
     await router.ensure(KEY);
     hub.subscribe("s1", () => {});

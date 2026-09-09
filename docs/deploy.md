@@ -115,9 +115,10 @@ All three signal the installed service.
   recorded and posted by the next process; post-deadline cleanup has one shared
   10-second bound.
 - `pier reload`: reloads channel adapters, evicts idle unwatched sessions;
-  streaming or watched sessions stay until normal eviction. Console → Settings
-  → Instance → **Reload** is the same, also takes the asking tab's session
-  (unless mid-turn), and answers `recycled` / `busy`.
+  streaming or watched sessions, and sessions still holding queued messages,
+  stay until normal eviction. Console → Settings → Instance → **Reload** is
+  the same, also takes the asking tab's session (unless mid-turn or holding a
+  queue), and answers `recycled` / `busy`.
 - `pier tools sync`: converges the tools switched on in Console → Settings into
   `~/.pier/tools/bin` (first on every session's PATH); one sync at a time per
   machine.

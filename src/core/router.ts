@@ -141,7 +141,8 @@ export class Router {
    *  (channels/conversations.ts) resumes the same transcript on the next message.
    *  `includeWatched` is for config a session reads only at open: the session
    *  most likely to need it is the one open in the tab that changed it. A
-   *  streaming turn is never evicted. */
+   *  streaming turn is never evicted, nor a session holding queued messages:
+   *  Pi's queue lives only in the runtime, so disposing it would drop them. */
   async evictIdle(
     ttlMs = IDLE_TTL_MS,
     now = Date.now(),
@@ -151,10 +152,12 @@ export class Router {
     // Snapshot: the loop awaits dispose(), and the map may change meanwhile.
     // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, attached] of [...this.bySession]) {
-      if (attached.session.state === "streaming") continue;
       if (this.queueOperations.has(id) || this.recoveries.get(id)?.some((b) => b.status === "submitting")) continue;
       if (!includeWatched && this.hub.hasSubscribers(id)) continue;
       if (now - attached.activeAt < ttlMs) continue;
+      const queued = await attached.session.pendingQueue();
+      // State read after the await: a dispatch may have landed meanwhile.
+      if (attached.session.state === "streaming" || queued.steering.length || queued.followUp.length) continue;
       this.bySession.delete(id);
       this.forgetKeys(attached.session);
       attached.unsubscribe();
