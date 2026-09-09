@@ -7,7 +7,7 @@
        workbench zoomed by a stray gesture has no visible way back — said again
        as `touch-action` (style.css) for the engines that ignore this pair. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#f7f9f8" />
+  <meta name="theme-color" content="#f1f4f3" />
   <!-- Ahead of the stylesheet, because a workbench that flashes white and then
        goes dark reads as a bug. This is the only place "system" is resolved
        before the bundle exists; theme.ts owns the choice from there on. -->
@@ -19,7 +19,7 @@
       : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     document.documentElement.dataset.theme = mode;
     // Before CSS loads, mirror its canvas token so installed chrome never flashes.
-    document.querySelector('meta[name="theme-color"]').content = mode === "dark" ? "#181c1f" : "#f7f9f8";
+    document.querySelector('meta[name="theme-color"]').content = mode === "dark" ? "#14171a" : "#f1f4f3";
   </script>
   <!-- Installed as a home-screen app: standalone window, own icon. The
        manifest shares the workbench's cookie boundary. -->

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import html from "./index.html?raw";
 import manifestText from "./public/manifest.webmanifest?raw";
 
-const canvases = ["#f7f9f8", "#181c1f"];
+const canvases = ["#f1f4f3", "#14171a"];
 const boot = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
 const ui = vi.hoisted(() => ({
   root: { dataset: {} as Record<string, string> },

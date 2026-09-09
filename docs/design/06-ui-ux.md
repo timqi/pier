@@ -25,6 +25,10 @@ clarify layering. Coordinate corner radii with nesting rather than imposing one 
 Reuse the shared palette, controls, menus, and time labels instead of inventing page-specific styles.
 The desktop sidebar uses one inset floating panel with restrained glass, border
 and shadow; its rows stay flat, with selection expressed through tint and weight.
+Floating chrome lifts off the canvas the macOS way: a canvas one step darker
+than the panel, a neutral translucent hairline (light in dark mode), a top-edge
+highlight, and a two-part shadow — wide ambient plus tight contact — shared by
+sidebar, chat heading and composer through one token set.
 The mobile drawer keeps its available width and uses rounded outer corners
 without desktop panel margins. The desktop chat heading uses the same glass
 material in a slim inset rounded strip. Keep the outer page edge neutral and

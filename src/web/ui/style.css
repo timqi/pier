@@ -23,9 +23,17 @@
 /* A cool paper canvas; keep secondary labels readable at the compact UI scale. */
 html {
   color-scheme: light;
-  --workbench-canvas: #f7f9f8;
-  --workbench-mist: #edf5f6;
-  --workbench-mint: #eef6f1;
+  --workbench-canvas: #f1f4f3;
+  --workbench-mist: #e6f1f3;
+  --workbench-mint: #e8f3ed;
+  /* Floating chrome (rail, chat heading, composer): a neutral hairline the
+     canvas shows through, a top-edge highlight, and a two-part shadow — one
+     wide ambient, one tight contact — which is what reads as lifted rather
+     than drawn on. Dark swaps the hairline for a light one, since a shadow
+     alone disappears against a dark canvas. */
+  --float-edge: rgb(16 24 40 / 0.08);
+  --float-highlight: inset 0 1px 0 rgb(255 255 255 / 0.7);
+  --float-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -8px rgb(16 24 40 / 0.14);
   --color-neutral-50: oklch(98% 0.004 260);
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
@@ -49,9 +57,12 @@ html {
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  --workbench-canvas: #181c1f;
-  --workbench-mist: #202b30;
-  --workbench-mint: #202c28;
+  --workbench-canvas: #14171a;
+  --workbench-mist: #1d282d;
+  --workbench-mint: #1d2925;
+  --float-edge: rgb(255 255 255 / 0.09);
+  --float-highlight: inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.55);
   background-color: var(--workbench-canvas);
 
   /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
@@ -147,9 +158,9 @@ html[data-theme="dark"] {
    named scale (`text-sm`) and this block should shrink, not grow. */
 html {
   font-size: 112.5%; /* 18px base */
-  --glass-surface: color-mix(in oklab, var(--color-white) 82%, transparent);
-  --glass-edge: color-mix(in oklab, var(--color-white) 65%, var(--color-neutral-200));
-  --glass-shadow: 0 8px 28px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.18);
+  --glass-surface: color-mix(in oklab, var(--color-white) 72%, transparent);
+  --glass-edge: var(--float-edge);
+  --glass-shadow: var(--float-shadow), var(--float-highlight);
   --ease-surface: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Panning is all a touch may do to the document: `user-scalable=no`
      (index.html) is the same sentence for engines that honour it, and a
@@ -197,7 +208,7 @@ html {
     margin: 8px;
     border: 1px solid var(--glass-edge);
     border-radius: 20px;
-    box-shadow: 0 6px 20px rgb(0 0 0 / 0.07);
+    box-shadow: var(--glass-shadow);
   }
   /* Keep the handle inside the inset panel's title band. */
   #rail-toggle {
@@ -256,7 +267,7 @@ html {
   }
   #sidebar[data-open] {
     transform: translateX(0);
-    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18), var(--float-highlight);
   }
   /* Pull-to-refresh would reload the workbench mid-turn; the transcript pane
      keeps its own scroll chaining. */
@@ -347,14 +358,15 @@ main {
   main > section > header:first-child, main > section > div:first-child > header:first-child) {
   background: var(--glass-surface);
   border-color: var(--glass-edge);
-  backdrop-filter: blur(20px) saturate(1.35);
-  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
 }
 #rail-toggle { top: 0.625rem; border-radius: 50%; }
 #chat-header {
   margin: 8px 8px 0;
   border: 1px solid var(--glass-edge);
   border-radius: 18px;
+  box-shadow: var(--glass-shadow);
   font-size: 0.9375rem;
 }
 #mobile-bar {
@@ -531,6 +543,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     border-color: var(--color-neutral-400);
+    box-shadow: none;
   }
 }
 
