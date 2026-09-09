@@ -381,6 +381,19 @@ describe("idle eviction", () => {
     expect(await router.evictIdle(0, Date.now() + 1)).toBe(1);
   });
 
+  it("keeps a session that accepted a message while the sweep was reading its queue", async () => {
+    await router.ensure(KEY);
+    // The dispatch lands inside the sweep's await, in the same millisecond as
+    // the TTL check; the reload's recycle sweep is this loop too.
+    const sweep = router.evictIdle(0, Date.now(), { includeWatched: true });
+    const dispatch = router.dispatch({ key: KEY, senderId: "u1", text: "accepted during sweep", mode: "auto" });
+    expect(await sweep).toBe(0);
+    await dispatch;
+    expect(fake.calls).toEqual(["prompt"]);
+    expect(router.sessionOf(KEY)).toBe(fake.session);
+    expect(router.stateOf("s1")).toBe("idle");
+  });
+
   it("takes a watched session when the caller says the configuration changed", async () => {
     await router.ensure(KEY);
     hub.subscribe("s1", () => {});

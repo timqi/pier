@@ -66,6 +66,9 @@ interface Attached {
   stateSince: number;
   /** What eviction ages; distinct from stateSince, which the UI reads as "idle since". */
   activeAt: number;
+  /** Bumped with activeAt; the sweep compares it across its await, where a
+   *  clock cannot tell a same-millisecond dispatch from none. */
+  touched: number;
   /** So eviction stops listening instead of leaking the closure that holds the session. */
   unsubscribe: () => void;
 }
@@ -155,8 +158,12 @@ export class Router {
       if (this.queueOperations.has(id) || this.recoveries.get(id)?.some((b) => b.status === "submitting")) continue;
       if (!includeWatched && this.hub.hasSubscribers(id)) continue;
       if (now - attached.activeAt < ttlMs) continue;
+      const touched = attached.touched;
       const queued = await attached.session.pendingQueue();
-      // State read after the await: a dispatch may have landed meanwhile.
+      // Everything re-read after the await: a dispatch, a queue operation or a
+      // replacement may have landed meanwhile, and a prompt already accepted
+      // must not run against a disposed session.
+      if (this.bySession.get(id) !== attached || attached.touched !== touched || this.queueOperations.has(id)) continue;
       if (attached.session.state === "streaming" || queued.steering.length || queued.followUp.length) continue;
       this.bySession.delete(id);
       this.forgetKeys(attached.session);
@@ -234,12 +241,14 @@ export class Router {
       key,
       stateSince: Date.now(),
       activeAt: Date.now(),
+      touched: 0,
       unsubscribe: session.subscribe((payload) => {
         const key = attached.key;
         this.hub.emit(session.id, payload);
         if (payload.type === "state") {
           // Every turn passes here, so it also proves liveness to the sweeper.
           attached.stateSince = attached.activeAt = Date.now();
+          attached.touched += 1;
           this.hub.emitWorkspace({
             type: "session-state",
             sessionId: session.id,
@@ -587,6 +596,7 @@ export class Router {
     const attached = this.bySession.get(session.id);
     if (!attached) return session;
     attached.activeAt = Date.now();
+    attached.touched += 1;
     if (!isAlias(key) || isAlias(attached.key)) attached.key = key;
     return session;
   }
