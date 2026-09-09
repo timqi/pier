@@ -106,8 +106,10 @@ per-turn Activity groups):
   sessions by creation time. Human input promotes a session into the working
   set; background activity does not reorder rows under the pointer. State dots,
   titles and session actions share the existing listing and event state. More
-  sessions remain available through pagination and the search palette. The New
-  session directory picker offers the listing's distinct directories. A labeled
+  sessions remain available through pagination and the search palette. New
+  session opens a menu on its button, not a dialog: the listing's recent
+  distinct directories (current one ticked, at most eight) then Browse…, and
+  picking one creates the session. A labeled
   New session button and a separate magnifier button share one row below the
   brand. New session uses the primary blue fill; Search uses a muted neutral
   fill with a contrasting icon. Search keeps its accessible name

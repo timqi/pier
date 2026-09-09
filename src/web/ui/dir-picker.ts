@@ -1,9 +1,9 @@
 // Working-directory picker, shared by every surface that asks for a path: the
-// new-session dialog, the IM channel config and the Files view's root chip.
+// New-session menu, the IM channel config and the Files view's root chip.
 // Two shared parts: the folder tree, and the menu of paths the
-// surface can already name with the tree one row below it. Both decorate an
-// existing text input rather than replacing it, so form semantics (required,
-// validation) stay where they are and typing a path still works.
+// surface can already name with the tree one row below it. Where a form owns
+// the path they decorate its text input rather than replacing it, so form
+// semantics (required, validation) stay where they are and typing still works.
 //
 // Inside the panel the path line is an input for the same reason: clicking
 // down from home is the slow way to reach a directory the person can already
@@ -55,7 +55,7 @@ function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLEl
     const error = h("p", "hidden px-3 pb-1 text-[11.5px] text-red-600");
     input.onkeydown = async (ev) => {
       // Escape is handled by the panel itself (menu.ts). Enter must not reach
-      // the enclosing form — in the New session dialog that would submit it.
+      // an enclosing form (the channel config's), which would submit it.
       if (ev.key !== "Enter") return;
       ev.preventDefault();
       const res = await sendJson("/api/fs/mkdir", { path: parent, name: input.value });
@@ -108,7 +108,7 @@ export function openBrowser(
     const error = h("p", "hidden flex-none px-3 pb-1 text-[11.5px] text-red-600");
     typed.onkeydown = async (ev) => {
       // Escape belongs to the panel (menu.ts). Enter must not reach an
-      // enclosing form — in the New session dialog that would submit it.
+      // enclosing form (the channel config's), which would submit it.
       if (ev.key !== "Enter") return;
       ev.preventDefault();
       ev.stopPropagation();
@@ -152,7 +152,7 @@ export interface PathOption {
 /**
  * The paths a surface can name, then the tree for everything else. Every
  * picker that has candidates shows them the same way — the Files view's
- * worktrees and the New-session dialog's projects are the same question — so
+ * worktrees and the New-session menu's projects are the same question — so
  * the menu lives here rather than once per caller.
  */
 export function openPathMenu(
@@ -197,28 +197,6 @@ export function browseButton(input: HTMLInputElement, onPick?: (path: string) =>
   // Start where the field points, falling back to the user's home directory.
   button.onclick = () => openBrowser(button, input.value.trim() || undefined, writer(input, onPick));
   return button;
-}
-
-/**
- * The field *is* the button: clicking it offers the folders this surface knows
- * (`options`, read at click time — they move while the form is open) with the
- * tree one row below, and typing dismisses that, because someone naming a path
- * is not choosing one. It wears the house `.select` skin for the same reason a
- * <select> does — a field that opens a list says so with the same chevron
- * everywhere — while staying an input you can type into.
- */
-export function pathTrigger(input: HTMLInputElement, options: () => PathOption[]): void {
-  const take = writer(input);
-  const open = (): void => {
-    const start = input.value.trim() || undefined;
-    const candidates = options();
-    if (candidates.length) return openPathMenu(input, candidates, start, take);
-    openBrowser(input, start, take);
-  };
-  input.classList.add("select");
-  input.title = "Pick a project folder, or type a path";
-  input.onclick = open;
-  input.addEventListener("input", () => closeMenu());
 }
 
 /** Input + Browse button as one row, for surfaces building fields in code. */

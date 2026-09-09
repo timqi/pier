@@ -1,12 +1,13 @@
 // The left rail: one flat list of every session Pi lists, the working set on
 // top, the search palette that reaches everything (⌘K), and the New-session
-// dialog.
+// menu.
 // main.ts owns the session list; this module renders it and reports
 // interactions back.
 
 import { sendJson } from "./api.js";
-import { pathTrigger, type PathOption } from "./dir-picker.js";
+import { openPathMenu } from "./dir-picker.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
+import { closeMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { setAttention } from "./shell.js";
 import { shortcut } from "./shortcut.js";
@@ -54,7 +55,6 @@ const archiveDialog = $<HTMLDialogElement>("#archive-dialog");
 const archiveList = $("#archive-list");
 const archiveSearch = $<HTMLInputElement>("#archive-search");
 const archiveCount = $("#archive-count");
-const newDialog = $<HTMLDialogElement>("#new-dialog");
 
 // --- order -------------------------------------------------------------------------
 // Two runs of one list, and neither of them moves on its own. On top, the
@@ -87,7 +87,11 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
   return { rows, hidden: list.length - rows.length };
 }
 
-/** Distinct directories, newest session first: what the New-session picker
+/** How many the New-session menu lists before "Browse…": a menu is scanned,
+ *  not scrolled, and the project you want is almost always a recent one. */
+const RECENT_CWDS = 8;
+
+/** Distinct directories, newest session first: what the New-session menu
  *  and the Settings scope list offer. */
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
@@ -419,28 +423,22 @@ function toggleArchive(): void {
 
 export function initSidebar(d: SidebarDeps): void {
   deps = d;
-  // The new session nearly always belongs to a directory the rail already
-  // shows, so the field itself offers those, with the folder tree under them;
-  // typing a path still works.
-  pathTrigger($<HTMLInputElement>("#new-cwd"), (): PathOption[] => distinctCwds(deps.sessions()).map((path) => ({ path })));
   const newBtn = $("#new-session");
-  // Prefilled with wherever you are: the next session almost always belongs to
-  // the project on screen, and the text is selected so typing another path
-  // still costs one keystroke.
+  // The new session nearly always belongs to a directory the rail already
+  // shows, so the button opens straight onto those — the current one ticked,
+  // the rest newest first — with the folder tree (which also takes a typed
+  // path) one row below. Picking creates: no form, no second click.
   const openNew = (): void => {
-    const cwd = deps.sessions().find((s) => s.id === deps.currentId())?.cwd ?? "";
-    const input = $<HTMLInputElement>("#new-cwd");
-    input.value = cwd;
-    newDialog.showModal();
-    input.select();
+    if (newBtn.getAttribute("aria-expanded") === "true") return closeMenu();
+    const current = deps.sessions().find((s) => s.id === deps.currentId())?.cwd;
+    const recent = distinctCwds(deps.sessions()).slice(0, RECENT_CWDS);
+    if (current && !recent.includes(current)) recent.unshift(current);
+    openPathMenu(newBtn, recent.map((path) => ({ path, hint: basename(path) })), current, deps.createSession);
   };
   newBtn.onclick = openNew;
   // ⇧O, not ⇧N: ⌘⇧N / ⌘⇧T are the browser's own windows and cannot be
   // taken back — ⇧O is what the chat apps settled on for the same action.
-  shortcut(newBtn, "shift+o", "New session", openNew, () => newDialog.open);
-  $("#new-cancel").onclick = () => newDialog.close();
-  $<HTMLFormElement>("#new-form").onsubmit = () =>
-    void deps.createSession($<HTMLInputElement>("#new-cwd").value.trim());
+  shortcut(newBtn, "shift+o", "New session", openNew);
   const search = $("#open-archive");
   search.onclick = toggleArchive;
   // Once the palette is open the chord belongs to its list (⌃K walks up), so

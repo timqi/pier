@@ -101,7 +101,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   panel.append(content);
   // A modal <dialog> paints in the top layer, above anything in the document —
   // so a panel anchored inside one has to live in that dialog, not on body,
-  // or no z-index can bring it in front (the folder picker in New session).
+  // or no z-index can bring it in front.
   const host = anchor.closest("dialog[open]") ?? document.body;
   if (sheet) {
     backdrop = h("div", "fixed inset-0 z-50 bg-black/15");
