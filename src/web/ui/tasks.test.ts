@@ -26,6 +26,7 @@ class Element {
     for (const child of children) if (child instanceof Element) child.parent = this;
     this.children.push(...children);
   }
+  appendChild(child: Element) { this.append(child); return child; }
   replaceChildren(...children: (Element | string)[]) {
     for (const child of this.children) if (child instanceof Element) child.parent = null;
     this.children = []; this.append(...children);
@@ -92,7 +93,7 @@ async function click(text: string) {
   else { expect(button(text), text).toBeDefined(); button(text)!.onclick!(); }
   await settled();
 }
-const raw = () => walk(root).find((el) => el.tag === "details" && el.text.startsWith("▶Raw record"))!;
+const raw = () => walk(root).find((el) => el.tag === "details" && el.text.startsWith("Raw record"))!;
 async function change(label: string, value: string) {
   const input = walk(root).find((el) => el.attrs["aria-label"] === label)!;
   input.value = value; input.onchange!(); await settled();
@@ -112,7 +113,10 @@ beforeEach(async () => {
   group = { id: "group-a", join: "all", invokedBySessionId: "s1", callbackSessionId: "s1", memberRunIds: [run.id, "run-c"],
     winnerRunId: null, callbackState: "delivered", callbackError: null, callbackAttempts: 1, callbackNextAttemptAt: null,
     createdAt: 1, finishedAt: 2 };
-  vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
+  vi.stubGlobal("document", {
+    createElement: (tag: string) => new Element(tag),
+    createElementNS: (_ns: string, tag: string) => new Element(tag),
+  });
   vi.stubGlobal("Option", class extends Element {
     constructor(label: string, value: string) { super("option"); this.append(label); this.value = value; }
   });

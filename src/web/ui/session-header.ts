@@ -4,6 +4,8 @@
 // Owns the model/context state the snapshot reports; main.ts owns which
 // session is selected and feeds state in through init.
 
+import { ArrowLeft, LoaderCircle, X } from "lucide";
+import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
@@ -149,7 +151,7 @@ function renderSessionMeta(): void {
     items.push(h(
       "span",
       "flex flex-none items-center gap-1.5 text-neutral-500",
-      h("span", "spinner"),
+      icon(LoaderCircle, "spinner"),
       "starting…",
     ));
   }
@@ -208,7 +210,7 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
     rows.push(at === null ? ["Last reply", "—"] : ["Last reply", stampTime(at), agoLabel(at)]);
   }
   const panel = h("div", "w-[min(26rem,calc(100vw-2rem))] max-sm:w-full rounded-xl bg-white px-3 py-3 font-sans text-[15px] leading-normal");
-  const close = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", "×");
+  const close = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", icon(X));
   close.setAttribute("aria-label", "Close session info");
   close.onclick = closeMenu;
   const heading = h("div", "sticky top-0 z-10 flex items-start gap-2 bg-white pb-2",
@@ -216,7 +218,7 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
       h("div", "text-sm font-medium text-neutral-500", "Session info"),
       h("h2", "mt-1 [overflow-wrap:anywhere] text-lg leading-7 font-semibold text-neutral-900", s.title ?? untitled(s.cwd))), close);
   if (fromMenu) {
-    const back = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", "←");
+    const back = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", icon(ArrowLeft));
     back.setAttribute("aria-label", "Back to session actions");
     back.onclick = () => sessionMenu(anchor, s);
     heading.prepend(back);
@@ -245,10 +247,10 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
   const loading = h("div", "px-3 py-3 text-[15px] text-neutral-500", "Loading models…");
   const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full", loading);
   if (session) {
-    const back = h("button", "icon-btn h-11 w-11", "←");
+    const back = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
     back.setAttribute("aria-label", "Back to session actions");
     back.onclick = () => sessionMenu(anchor, session);
-    const close = h("button", "icon-btn h-11 w-11", "×");
+    const close = h("button", "icon-btn h-11 w-11", icon(X));
     close.setAttribute("aria-label", "Close model picker");
     close.onclick = closeMenu;
     const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", session.title ?? untitled(session.cwd));

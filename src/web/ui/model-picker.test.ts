@@ -21,6 +21,7 @@ class Element {
   oninput: (() => void) | null = null;
   constructor(readonly tag: string) {}
   append(...children: (Element | string)[]) { this.children.push(...children); }
+  appendChild(child: Element) { this.append(child); return child; }
   replaceChildren(...children: (Element | string)[]) { this.children = children; }
   setAttribute = vi.fn();
   focus = vi.fn();
@@ -39,7 +40,10 @@ function choose(root: Element, level: string): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
+  vi.stubGlobal("document", {
+    createElement: (tag: string) => new Element(tag),
+    createElementNS: (_ns: string, tag: string) => new Element(tag),
+  });
   // Neither cryptographic UUIDs nor browser storage are needed by this control.
   vi.stubGlobal("crypto", {});
   vi.stubGlobal("localStorage", { getItem: () => { throw new Error("obsolete favorites read"); } });

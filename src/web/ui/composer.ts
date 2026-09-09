@@ -2,6 +2,8 @@
 // the pending queue panel. Owns the optimistic user-turn ledger that main.ts
 // reconciles against `user-message` events.
 
+import { X } from "lucide";
+import { icon } from "./icons.js";
 import { failure, sendJson } from "./api.js";
 import { $, copyBtn, h } from "./dom.js";
 import { appendTurn, followTail, scrollBottom, turnsPane } from "./chat.js";
@@ -225,7 +227,9 @@ function renderFileStrip(): void {
       const body = f.mimeType.startsWith("image/")
         ? imageThumb(`data:${f.mimeType};base64,${f.data}`)
         : h("span", "flex h-16 max-w-40 items-center truncate rounded-md border border-neutral-200 bg-neutral-50 px-2 text-[12px] text-neutral-700", f.name ?? "file");
-      const remove = h("button", "absolute -right-1.5 -top-1.5 h-4 w-4 cursor-pointer rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", "×");
+      const remove = h("button", "absolute -right-1.5 -top-1.5 flex h-4 w-4 cursor-pointer items-center justify-center rounded-full bg-neutral-700 text-[10px] leading-none text-white hover:bg-red-600", icon(X, "h-3 w-3"));
+      remove.setAttribute("type", "button");
+      remove.setAttribute("aria-label", `Remove ${f.name ?? "attachment"}`);
       remove.onclick = () => {
         pendingFiles.splice(i, 1);
         renderFileStrip();

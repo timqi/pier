@@ -3,6 +3,8 @@
 // turn-activity.ts owns the Activity groups and background-run cards; this
 // module only renders into #turns through the functions it exports.
 
+import { ArrowUpRight, CircleQuestionMark, CornerDownLeft, Pencil, type IconNode } from "lucide";
+import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
@@ -228,8 +230,7 @@ export function appendTurn(
     edit.title = "Edit latest message — resends it and replaces the reply";
     edit.setAttribute("type", "button");
     edit.setAttribute("aria-label", "Edit message");
-    edit.innerHTML =
-      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="m10.7 2.3 3 3L6 13H3v-3l7.7-7.7zM9.3 3.7l3 3"/></svg>';
+    edit.append(icon(Pencil));
     edit.onclick = () => startEdit(row, node);
     row.append(edit);
   }
@@ -263,10 +264,10 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
 
 /** Glyph and caption per input kind; the decision is the one that wants a
  *  look, so it alone carries a colour. */
-const INPUT_KIND: Record<string, [glyph: string, label: string, cls: string]> = {
-  "task-delegation": ["\u2197", "delegated", "text-cyan-700"],
-  "task-callback": ["\u21a9", "callback", "text-cyan-700"],
-  decision: ["?", "decision needed", "text-amber-700"],
+const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> = {
+  "task-delegation": [ArrowUpRight, "delegated", "text-cyan-700"],
+  "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
+  decision: [CircleQuestionMark, "decision needed", "text-amber-700"],
 };
 
 /** Every task text (tasks/callbacks.ts, messages.ts, groups.ts, agent.ts) is a
@@ -284,7 +285,7 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
 
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
-  const [glyph, label, cls] = INPUT_KIND[kindKey] ?? ["\u21a9", kindKey.replace("_", " "), "text-cyan-700"];
+  const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
   sealActivity();
   const state = origin.kind === "task-callback" ? origin.state : undefined;
   const row = runCard(state ? STATE_STYLE[state].edge : kindKey === "decision" ? "border-l-amber-400" : "border-l-cyan-500");
@@ -295,7 +296,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   // has to fetch a run to say what it is. A callback also says how the run
   // ended, in the run card's own colours, so the two agree at a glance.
   const head = runHead({
-    glyph: state ? stateGlyph(state) : h("span", `w-3 flex-none text-center font-bold ${cls}`, glyph),
+    glyph: state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`),
     label: state ? `${label} \u00b7 ${state}` : label,
     labelCls: state ? STATE_STYLE[state].label : cls,
     ...(origin.source

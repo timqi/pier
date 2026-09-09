@@ -3,6 +3,8 @@
 // (`/api/task-runs`); the run detail and its controls are task-runs.ts's,
 // shared with the task page. This file owns the filter set, which *is* the
 // route's query string: every change navigates, so Back walks filters too.
+import { ChevronRight } from "lucide";
+import { icon } from "./icons.js";
 import type { RunPage, TaskDefinition } from "../../tasks/types.js";
 import { coalesce, getJson, refused } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
@@ -92,7 +94,7 @@ export function createRunsView(
     const dates = h("details", "filter-dates") as HTMLDetailsElement;
     const dateCount = Number(filters.has("since")) + Number(filters.has("until"));
     dates.open = dateCount > 0;
-    dates.append(h("summary", "flex cursor-pointer items-center gap-1.5 py-1 text-[12px] text-neutral-600", h("span", "chev", "▸"), dateCount ? `Date range (${dateCount})` : "Date range"));
+    dates.append(h("summary", "flex cursor-pointer items-center gap-1.5 py-1 text-[12px] text-neutral-600", icon(ChevronRight, "chev h-3 w-3"), dateCount ? `Date range (${dateCount})` : "Date range"));
     const dateFields = h("div", "filter-date-fields");
     for (const [label, key] of [["From", "since"], ["Through", "until"]] as const) {
       const input = h("input", CONTROL) as HTMLInputElement;

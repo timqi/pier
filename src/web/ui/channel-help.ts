@@ -2,6 +2,8 @@
 // help bubble's walkthrough prose. Pure content with no view state, kept apart
 // so channels.ts is the settings page and this file is what it explains.
 
+import { ExternalLink } from "lucide";
+import { icon } from "./icons.js";
 import { copyBtn } from "./dom.js";
 import { button, helpBadge, withControl } from "./form.js";
 
@@ -107,7 +109,9 @@ export const topicModeHelp = (align: "left" | "right" = "left"): HTMLElement =>
  * scope and event at once, so the prose covers only what a manifest cannot do.
  */
 export function slackTokenHelp(): HTMLElement {
-  const openApp = button("Create Slack app ↗", true);
+  const openApp = button("Create Slack app", true);
+  openApp.append(icon(ExternalLink));
+  openApp.classList.add("inline-flex", "items-center", "gap-1.5");
   openApp.classList.add("mt-1", "w-fit");
   openApp.onclick = () => window.open(slackManifestUrl(), "_blank", "noreferrer");
   const copyManifest = copyBtn("btn w-fit text-[12.5px]", () => JSON.stringify(SLACK_MANIFEST, null, 2));

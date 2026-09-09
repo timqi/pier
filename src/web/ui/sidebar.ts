@@ -4,6 +4,8 @@
 // main.ts owns the session list; this module renders it and reports
 // interactions back.
 
+import { Ellipsis } from "lucide";
+import { icon } from "./icons.js";
 import { sendJson } from "./api.js";
 import { openPathMenu } from "./dir-picker.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
@@ -169,7 +171,7 @@ const CHIP = "flex-none text-xs font-medium uppercase leading-5 text-neutral-500
 const channelChip = (s: SessionInfo): HTMLElement[] =>
   s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
 
-function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, "\u22ef")): HTMLElement {
+function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis))): HTMLElement {
   const active = s.id === deps.currentId();
   const li = h(
     "li",

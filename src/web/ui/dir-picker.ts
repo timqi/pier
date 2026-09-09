@@ -9,6 +9,8 @@
 // down from home is the slow way to reach a directory the person can already
 // name.
 
+import { Plus } from "lucide";
+import { icon } from "./icons.js";
 import { getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn } from "./form.js";
@@ -53,7 +55,7 @@ const row = (label: string, cls: string, onSelect: () => void): HTMLElement => {
  */
 function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLElement {
   const box = h("div", "mt-2 flex-none border-t border-neutral-200 pt-2");
-  const start = row("+ New folder", "text-neutral-500", () => {
+  const start = row("New folder", "text-neutral-500", () => {
     const input = document.createElement("input");
     input.className = `w-full rounded-xl border-0 bg-neutral-100 px-3 py-2 ${MONO} focus:outline-none`;
     input.placeholder = "folder-name";
@@ -74,6 +76,7 @@ function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLEl
     box.replaceChildren(input, error);
     input.focus();
   });
+  start.prepend(icon(Plus));
   box.append(start);
   return box;
 }

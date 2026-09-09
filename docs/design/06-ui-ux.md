@@ -109,6 +109,13 @@ Keep one source of truth: existing snapshots, events, activity types, and status
 Presentation must not introduce parallel records. Extend shared primitives, remove obsolete
 styles, and consolidate repeated logic without speculative abstractions or new frameworks.
 Use native controls and semantics, readable contrast, visible focus, and generous touch targets.
+Workbench control, disclosure and status icons use Lucide's 24-unit viewBox and 2-unit
+rounded strokes, with `currentColor`; use named imports through `ui/icons.ts`, never
+hand-drawn SVG or Unicode substitutes. Default icons are 0.875rem, compact disclosures
+and status marks 0.75rem; icon size must not shrink the surrounding hit target. Decorative
+SVGs are hidden from assistive technology; the control retains its text or accessible
+label, and selected/loading/error states keep their existing state and text. The Pier
+brand, data graphics, keyboard shortcut notation and symbols in actual content stay intact.
 Account for safe areas and software keyboards; content panels own scrolling, and wide content
 must not force the whole conversation to scroll horizontally. Navigation titles
 keep their left edge aligned. Trailing status marks occupy space only when

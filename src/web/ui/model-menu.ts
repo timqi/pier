@@ -4,6 +4,8 @@
 // operation, and every picker lists pinned entries first. Empty menu = no
 // advice; everything falls back to the curated catalog.
 
+import { Plus } from "lucide";
+import { icon } from "./icons.js";
 import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { failure, getJson, sendJson } from "./api.js";
@@ -94,8 +96,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     const picker = select(pickable.map((m): [string, string] => [key(m), key(m)]), pickable[0] ? key(pickable[0]) : "");
     picker.classList.replace("w-full", "flex-1");
     picker.classList.add("min-w-0");
-    const add = button("＋ Pin model");
-    add.classList.add("flex-none", "whitespace-nowrap");
+    const add = button("Pin model");
+    add.prepend(icon(Plus));
+    add.classList.add("inline-flex", "items-center", "gap-1.5", "flex-none", "whitespace-nowrap");
     add.disabled = pickable.length === 0;
     add.onclick = () => {
       const picked = pickable.find((m) => key(m) === picker.value);

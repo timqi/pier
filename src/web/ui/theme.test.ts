@@ -8,8 +8,9 @@ const boot = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
 const ui = vi.hoisted(() => ({
   root: { dataset: {} as Record<string, string> },
   meta: { content: "", setAttribute(_key: string, value: string) { this.content = value; } },
-  button: { onclick: null as (() => void) | null, title: "", innerHTML: "" },
+  button: { onclick: null as (() => void) | null, title: "", replaceChildren: vi.fn(), setAttribute: vi.fn() },
 }));
+vi.mock("./icons.js", () => ({ icon: vi.fn() }));
 vi.mock("./dom.js", () => ({ $: (selector: string) => selector === "#theme-toggle" ? ui.button : ui.meta }));
 
 let stored: string | null;

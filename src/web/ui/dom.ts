@@ -1,5 +1,7 @@
 // The DOM helpers every UI module shares. Nothing else belongs here.
 
+import { ChevronRight } from "lucide";
+import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
@@ -153,11 +155,11 @@ export function copyBtn(cls: string, text: () => string): HTMLElement {
 }
 
 /** Chevron + summary skeleton shared by activity groups and project nodes. */
-export function detailsRow(cls: string, summaryChildren: HTMLElement[]): { el: HTMLDetailsElement; summary: HTMLElement } {
+export function detailsRow(cls: string, summaryChildren: (HTMLElement | SVGElement)[]): { el: HTMLDetailsElement; summary: HTMLElement } {
   const el = document.createElement("details");
   el.className = cls;
   const summary = h("summary", "flex cursor-pointer select-none items-center gap-1.5");
-  summary.append(h("span", "chev", "▸"), ...summaryChildren);
+  summary.append(icon(ChevronRight, "chev h-3 w-3"), ...summaryChildren);
   el.append(summary);
   return { el, summary };
 }

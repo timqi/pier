@@ -1,6 +1,8 @@
 // Anchored popover: one open at a time, closed by outside pointerdown, Esc,
 // scroll or resize. Used by the session context menu and the model picker.
 
+import { Check, X } from "lucide";
+import { icon } from "./icons.js";
 import { h } from "./dom.js";
 
 export interface MenuItem {
@@ -138,7 +140,7 @@ function menuItem(item: MenuItem): HTMLElement {
     `flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100 ${
       isSheet() ? "min-h-12 py-3" : "min-h-10 py-2"
     }`,
-    ...(item.checked === undefined ? [] : [h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : "")]),
+    ...(item.checked === undefined ? [] : [icon(Check, `h-3 w-3 text-indigo-600 ${item.checked ? "" : "invisible"}`)]),
     h("span", "min-w-0 truncate", item.label),
   );
   if (item.hint) {
@@ -154,7 +156,7 @@ function menuItem(item: MenuItem): HTMLElement {
 export function openMenu(anchor: HTMLElement, items: MenuItem[], title?: string): void {
   const content = h("div", "");
   if (title && isSheet()) {
-    const close = h("button", "icon-btn h-11 w-11", "×");
+    const close = h("button", "icon-btn h-11 w-11", icon(X));
     close.setAttribute("aria-label", "Close session actions");
     close.onclick = closeMenu;
     content.append(h("div", "flex items-center gap-3 border-b border-neutral-200 px-3 pb-1 mb-1",

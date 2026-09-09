@@ -6,6 +6,7 @@
 // Interaction paths render optimistically and reconcile from the SSE stream.
 
 import "./style.css";
+import { initIcons } from "./icons.js";
 // One formatter from core, at runtime: how a token count is spelled is the
 // same question on every surface (session-header.ts asks it too).
 import { compact as tokens } from "../../core/reply.js";
@@ -430,6 +431,7 @@ async function loadSession(id: string): Promise<void> {
 // login page and not a per-caller error message, and anything that throws on
 // the way reaches the server's log instead of only the browser console.
 initReport();
+initIcons();
 guardFetch();
 initTheme();
 

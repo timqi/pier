@@ -2,6 +2,8 @@
 // wraps it. A standalone component because model choice shows up outside chat
 // too (IM chat defaults, scheduled tasks).
 
+import { Check, ChevronRight } from "lucide";
+import { icon } from "./icons.js";
 import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { mustGetJson } from "./api.js";
@@ -53,7 +55,7 @@ function modelRow(opts: {
   const pick = h(
     "button",
     "flex w-full min-w-0 cursor-pointer items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-100",
-    h("span", "w-3 flex-none text-indigo-600", opts.checked ? "\u2713" : ""),
+    icon(Check, `h-3 w-3 text-indigo-600 ${opts.checked ? "" : "invisible"}`),
     h("span", "truncate", opts.label),
   );
   if (opts.hint) pick.append(h("span", "ml-auto flex-none text-[11.5px] text-neutral-400", opts.hint));
@@ -85,7 +87,7 @@ export function modelPicker({
     const reasoning = document.createElement("details");
     const selected = h("span", "ml-auto font-medium text-indigo-700", thinkingLabel(level));
     const summary = h("summary", "flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-3 text-sm text-neutral-700 hover:bg-neutral-100 [&::-webkit-details-marker]:hidden",
-      h("span", "font-medium", "Reasoning effort"), selected, h("span", "chev text-neutral-400", "\u25b6\ufe0e"));
+      h("span", "font-medium", "Reasoning effort"), selected, icon(ChevronRight, "chev h-3 w-3 text-neutral-400"));
     const choices = h("fieldset", "grid grid-cols-2 gap-1 rounded-xl bg-neutral-50 p-1");
     choices.append(h("legend", "sr-only", "Reasoning effort"));
     const name = `reasoning-${++reasoningGroup}`;
@@ -168,7 +170,7 @@ export function modelPicker({
       const summary = h(
         "summary",
         "flex cursor-pointer select-none items-center gap-1.5 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400 hover:bg-neutral-100",
-        h("span", "chev", "\u25b6"),
+        icon(ChevronRight, "chev h-3 w-3"),
         h("span", "truncate", provider),
         h("span", "ml-auto flex-none normal-case text-neutral-300", String(list.length)),
       );
