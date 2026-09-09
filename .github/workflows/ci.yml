@@ -23,6 +23,8 @@ jobs:
       # ci, not install: the lockfile is the dependency review (AGENTS.md 8),
       # so a run that quietly resolved something else proves nothing.
       - run: npm ci
+      # high fails the run; moderates only show in the log, so a transitive one nobody can fix does not block main.
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run check
       - run: npm run lint
       - run: npm test
