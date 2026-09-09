@@ -24,7 +24,7 @@ const BUSY_TIMEOUT_MS = 5_000;
 const MIGRATIONS: readonly string[] = [
   // 1 — the 0.0.1 schema.
   `
-  -- The single credential in front of every HTTP surface (web/auth.ts).
+  -- The single credential in front of every HTTP surface.
   CREATE TABLE auth (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     salt TEXT NOT NULL,
@@ -32,15 +32,13 @@ const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL
   );
 
-  -- Instance facts that are neither a credential nor per-session; one row per
-  -- setting, so the next setting is not the next table.
+  -- Instance facts that are neither a credential nor per-session.
   CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
 
-  -- Workbench bookkeeping: pinned = listed under Projects, unread = a turn
-  -- finished that no client has acknowledged.
+  -- Workbench bookkeeping; unread = a turn finished that no client acknowledged.
   CREATE TABLE session_state (
     session_id TEXT PRIMARY KEY,
     pinned INTEGER NOT NULL DEFAULT 0,
@@ -73,8 +71,8 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (platform, chat_id, message_id)
   );
 
-  -- Scheduled work. The row keeps its whole JSON document; the columns beside
-  -- it are only what a query filters or orders by.
+  -- Scheduled work: the JSON is the document, the columns beside it are only
+  -- what a query filters or orders by.
   CREATE TABLE tasks (
     id TEXT PRIMARY KEY,
     updated_at INTEGER NOT NULL,
@@ -105,10 +103,9 @@ const MIGRATIONS: readonly string[] = [
     json TEXT NOT NULL
   );
   `,
-  // 2 — provider credentials move from <agentDir>/auth.json into the database.
+  // 2 — provider credentials.
   `
   -- One row per provider (key = provider id), value sealed by secrets.ts.
-  -- Owned by agent/credentials.ts.
   CREATE TABLE credentials (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -116,8 +113,7 @@ const MIGRATIONS: readonly string[] = [
   `,
   // 3 — what a restart's drain deadline cut off, told to the chat at next boot.
   `
-  -- Written only when a graceful restart aborts a still-running turn; the next
-  -- boot delivers each row and clears it once delivered. Owned by drain.ts.
+  -- Turns a graceful restart cut off; each row is delivered at next boot, then cleared.
   CREATE TABLE restart_ledger (
     id INTEGER PRIMARY KEY,
     channel_id TEXT NOT NULL,
@@ -132,10 +128,9 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE session_state ADD COLUMN title TEXT;
   ALTER TABLE session_state ADD COLUMN created_at INTEGER;
   `,
-  // 5 — the workbench can reach a browser that is not open (web/push.ts).
+  // 5 — Web Push.
   `
-  -- One row per browser that asked to be notified, exactly as the Push API
-  -- described it; a dead endpoint is deleted when its service says so.
+  -- One row per browser that asked to be notified, as the Push API described it.
   CREATE TABLE push_subscriptions (
     endpoint TEXT PRIMARY KEY,
     p256dh TEXT NOT NULL,
@@ -144,8 +139,8 @@ const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL
   );
 
-  -- This instance's VAPID identity: one key pair, minted on first use. Every
-  -- subscription above is bound to it, so it is never rotated on its own.
+  -- This instance's VAPID key pair; every subscription is bound to it, so it
+  -- is never rotated on its own.
   CREATE TABLE push_identity (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     public_key TEXT NOT NULL,
@@ -153,21 +148,16 @@ const MIGRATIONS: readonly string[] = [
     created_at INTEGER NOT NULL
   );
   `,
-  // 6 — Projects keeps the order the workbench was put in, by hand.
+  // 6 — manual order in the rail.
   `
-  -- Manual order, both nullable: a row nobody has dragged sorts on top of the
-  -- list it belongs to, so a fresh database needs no backfill. sort places a
-  -- session inside its project; project_sort places the project, carried on
-  -- every one of its rows because a project is a cwd, not a table.
+  -- NULL sorts on top, so a fresh database needs no backfill.
   ALTER TABLE session_state ADD COLUMN sort INTEGER;
   ALTER TABLE session_state ADD COLUMN project_sort INTEGER;
   `,
-  // 7 — the session listing, so a transcript is read once (agent/listing.ts).
+  // 7 — the session listing, so a transcript is read once.
   `
-  -- One row per session file. (size, mtime) is what makes the row usable
-  -- without opening the file; parsed_bytes is where reading resumes when it
-  -- grew, and is always a line boundary. Derived from disk and disposable: a
-  -- deleted row costs one re-read, never a fact.
+  -- One row per session file, derived from disk and disposable. A row whose
+  -- (size, mtime) match is trusted unopened; parsed_bytes is where reading resumes, always a line boundary.
   CREATE TABLE session_index (
     path TEXT PRIMARY KEY,
     id TEXT NOT NULL,
@@ -180,73 +170,39 @@ const MIGRATIONS: readonly string[] = [
     parsed_bytes INTEGER NOT NULL
   );
   `,
-  // 8 — Projects holds a working set: what is warm, plus what is kept.
+  // 8 — working-set lease columns (dropped again in 9 and 11).
   `
-  -- Membership was permanent, so every throwaway session stayed in the rail
-  -- until someone removed it by hand. last_active is the lease: the end of a
-  -- turn renews it, and web/session-state.ts stops listing a row that ran out.
-  -- kept opts one row out of expiry entirely — what the pin control now means.
   ALTER TABLE session_state ADD COLUMN kept INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE session_state ADD COLUMN last_active INTEGER;
-  -- Left NULL on purpose: the honest value is when the transcript was last
-  -- written, which only a listing knows. web/server.ts pays one for a database
-  -- carrying rows without it, the same gate the pin backfill already uses, so
-  -- the first rail after an upgrade is dated by use and not by creation.
   `,
-  // 9 — the summary a transcript already carries is read, not mirrored.
+  // 9 — drop the columns that mirrored the transcript.
   `
-  -- Dropped rather than left unread: a column nobody writes still answers when
-  -- somebody selects it, and the next reader has no way to tell a stale title
-  -- from a current one. The pre-migration backup beside the database is the
-  -- way back, not a row of fossils. cwd stays — it is the key a project's
-  -- manual place is stamped on, and it never changes for a session.
   ALTER TABLE session_state DROP COLUMN title;
   ALTER TABLE session_state DROP COLUMN created_at;
   ALTER TABLE session_state DROP COLUMN last_active;
   `,
-  // 10 — taking a session into Projects is itself an act, and it is dated.
+  // 10 — pinned_at (dropped again in 11).
   `
-  -- When a hand last put this session in Projects (pin, or a keep toggle).
-  -- Not the mirror migration 9 removed: last_active was a copy of a fact the
-  -- transcript owns, while this one exists nowhere else — pinning a cold
-  -- session back is a statement that it is warm again, and without a record of
-  -- *when* it was made the row is dropped by the same read that drew it.
-  -- NULL for every row that predates this: never pinned within a lease.
   ALTER TABLE session_state ADD COLUMN pinned_at INTEGER;
   `,
-  // 11 — Projects holds what a hand put there, for as long as the hand says.
+  // 11 — the lease is gone, so both of its columns are.
   `
-  -- The lease is gone, so both of its columns are. It expired nothing: a row
-  -- it dropped kept its transcript, its place and its ownership, and one more
-  -- turn brought it back — so what it actually did was hide rows nobody asked
-  -- it to hide, and kept existed only to opt out of that. On the instance this
-  -- was decided on, the lease had never dropped a row: 20 pinned sessions,
-  -- none past seven days, one kept. Removing a row from Projects is the ✓ on
-  -- the row, and it stays the only way out.
   ALTER TABLE session_state DROP COLUMN kept;
   ALTER TABLE session_state DROP COLUMN pinned_at;
   `,
-  // 12 — one row is how two processes take turns (src/tools.ts).
+  // 12 — the cross-process tools sync lock.
   `
-  -- The tools sync, held across processes: the token says who holds it, the
-  -- heartbeat says they are still alive. Both processes already open this
-  -- database, and BEGIN IMMEDIATE is real mutual exclusion — a lock file with
-  -- a pid in it is neither, which is what this replaces. One row, because
-  -- there is one thing to serialize; the second lock can bring its own table
-  -- and its own reason for existing.
+  -- One row: token says who holds the lock, heartbeat_at says they are still alive.
   CREATE TABLE tools_sync_lock (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     token TEXT NOT NULL,
     heartbeat_at INTEGER NOT NULL
   );
   `,
-  // 13 — a signed-in browser can be signed out on its own (web/auth.ts).
+  // 13 — web sessions.
   `
-  -- One row per signed-in browser. The cookie carries "<id>.<token>" and only
-  -- the token's SHA-256 is stored, so a copy of this database cannot be turned
-  -- into a session — and deleting a row is what revocation is. seen_at is the
-  -- whole lifetime: the session ends one TTL after it, so there is no second
-  -- column that can disagree about when.
+  -- One row per signed-in browser; only the cookie token's SHA-256 is stored,
+  -- deleting a row is revocation, and the session ends one TTL after seen_at.
   CREATE TABLE web_sessions (
     id TEXT PRIMARY KEY,
     token_hash TEXT NOT NULL,
@@ -256,15 +212,9 @@ const MIGRATIONS: readonly string[] = [
     agent TEXT NOT NULL
   );
   `,
-  // 14 — signing a browser out also stops notifying it (web/push.ts).
+  // 14 — a push subscription belongs to the web session that made it.
   `
-  -- A subscription belongs to the web session that made it, and dies with it:
-  -- the cascade is the rule, so no code has to remember to run it — revoking a
-  -- session, changing the password and recovering it all reach here for free.
-  -- Rebuilt rather than altered because a foreign key cannot be added to an
-  -- existing table; nothing is carried over, since migration 13 invalidated
-  -- every cookie and each of these rows belongs to a browser that is now
-  -- signed out. A browser re-subscribes on its next load.
+  -- Rebuilt: a foreign key cannot be added to an existing table.
   DROP TABLE push_subscriptions;
   CREATE TABLE push_subscriptions (
     endpoint TEXT PRIMARY KEY,
@@ -275,23 +225,14 @@ const MIGRATIONS: readonly string[] = [
     session_id TEXT NOT NULL REFERENCES web_sessions(id) ON DELETE CASCADE
   );
   `,
-  // 15 — the scheduler's tick stops reading the rows it cannot deliver.
+  // 15 — indexes for the scheduler's once-a-second sweep.
   `
-  -- Once a second, tasks/ asks for the runs whose callback is still owed and
-  -- the messages whose injection has not landed. Both are a handful of rows
-  -- filtered on one low-cardinality column, and without an index both are a
-  -- full scan of a table that only grows — the sweep got slower with every
-  -- run that finished cleanly and can never match again.
   CREATE INDEX task_runs_callback_state ON task_runs(callback_state);
   CREATE INDEX task_messages_state ON task_messages(state);
   `,
-  // 16 — the same tick stops parsing every task document to find none due.
+  // 16 — an indexable next-due value, with the JSON still the only record.
   `
-  -- When a task is next due is the one field the scheduler asks about once a
-  -- second, and it lived only inside the JSON: answering meant reading and
-  -- parsing every definition, due or not. A generated column keeps the JSON
-  -- as the only record while giving the query planner a value it can index; a
-  -- disabled or archived task has no next run, so NULLs stay out of the index.
+  -- A disabled or archived task has no next run, so NULLs stay out of the index.
   ALTER TABLE tasks ADD COLUMN next_run_at INTEGER
     GENERATED ALWAYS AS (json_extract(json, '$.nextRunAt')) VIRTUAL;
   CREATE INDEX tasks_due ON tasks(next_run_at) WHERE next_run_at IS NOT NULL;
@@ -302,68 +243,38 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX task_runs_visible_time ON task_runs(queued_at DESC, id DESC)
     WHERE NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0);
   `,
-  // 18 — opening a session lists every run it delegated, not the last hour's.
+  // 18 — runs by delegating session.
   `
-  -- The run cards are the messages a session sent, so the transcript wants
-  -- all of them: the query is by the delegating session, which lived only in
-  -- the JSON — without this every session open was a full scan of task_runs.
   CREATE INDEX task_runs_invoked_by ON task_runs(json_extract(json, '$.invokedBySessionId'), queued_at DESC);
   `,
-  // 19 — the rail is one flat list, and pinned means "stuck to the top".
+  // 19 — pinned now means "stuck to the top"; nobody put a historical session there.
   `
-  -- pinned used to mean "listed under Projects", and every session created in
-  -- the workbench was. Now it means on top of the list, and nobody put a
-  -- historical session there: kept as-is, every web session ever made would
-  -- land in the pinned section. project_sort stays as a column nothing reads
-  -- — a SQLite column drop rewrites the table for a NULL nobody pays for.
   UPDATE session_state SET pinned = 0;
   `,
-  // 20 — the top of the rail is maintained, not arranged: no pin, no drag.
+  // 20 — sort becomes the rank in the working set the rail keeps on top; pinned goes.
   `
-  -- sort was the place a hand dragged a pinned row to; it is now the rank in
-  -- the working set the rail keeps on top, which a session enters by being
-  -- spoken to and leaves by being pushed out of the last slot. The pinned rows
-  -- are that set's first members — they are what somebody was working on — in
-  -- the order they were arranged in; never-dragged ones sorted first, so -1 is
-  -- the rank that keeps them there.
+  -- Pinned rows seed the set at rank -1, capped at the set's size (8).
   UPDATE session_state SET sort = -1 WHERE pinned = 1 AND sort IS NULL;
   UPDATE session_state SET sort = NULL WHERE pinned = 0;
-  -- The set has a size (web/session-state.ts); more pins than that is a list
-  -- the promotion rule would never have built.
   UPDATE session_state SET sort = NULL WHERE session_id IN (
     SELECT session_id FROM session_state WHERE sort IS NOT NULL
     ORDER BY sort, session_id LIMIT -1 OFFSET 8
   );
   ALTER TABLE session_state DROP COLUMN pinned;
   `,
-  // 21 — unread is the workbench's own attention, so it is only its own rows.
+  // 21 — unread is only written for web sessions now; clear the marks nobody could ack.
   `
-  -- The flag was written for every session whose turn ended, including the
-  -- ones no browser is the reader of: an IM session answers its chat, a run's
-  -- session answers its supervisor. Both are now skipped at the write
-  -- (web/server.ts), and neither could ever be acked — that needs the session
-  -- on screen — so the rows they left would stay set forever. On the instance
-  -- this was decided on, 195 of 196 marks were those. Cleared wholesale rather
-  -- than by owner: the one real row is a turn from before an upgrade nobody
-  -- was watching for, and a false amber dot costs less than the join.
   UPDATE session_state SET unread = 0;
   `,
-  // 22 — the palette finds what was said, not only what a session is called.
+  // 22 — message search.
   `
-  -- One row per user message and per assistant reply, keyed by the transcript
-  -- it came from so a file that is rewritten or gone drops its rows in one
-  -- statement (agent/listing.ts). Trigram tokens: a substring match with no
-  -- word segmentation, which CJK text has none of and a path or an identifier
-  -- in a prompt has too much of. Steps stay out — tool calls, their output,
-  -- thinking are the bulk of a transcript and nobody searches for what ran.
+  -- One row per user message and assistant reply, keyed by transcript path.
+  -- Trigram: substring match with no word segmentation, which CJK text has none of.
   CREATE VIRTUAL TABLE session_fts USING fts5(
     text, session_id UNINDEXED, path UNINDEXED, role UNINDEXED, at UNINDEXED,
     tokenize = 'trigram'
   );
-  -- Derived and disposable (migration 7): every row goes, so the next scan
-  -- reads every transcript from its first byte and fills the table above.
-  -- Resetting parsed_bytes alone would not — a row whose (size, mtime) still
-  -- match is trusted without opening the file.
+  -- Every row goes so the next scan re-reads each transcript and fills the table above.
   DELETE FROM session_index;
   `,
 ];
