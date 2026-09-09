@@ -12,7 +12,9 @@ import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/t
 import { thinkingLabel } from "../../core/reply.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
-import { button, card, empty, field, input, select, setStatus } from "./form.js";
+import { btn, button, card, CONTROL, empty, field, input, select, setStatus } from "./form.js";
+import { closeMenu, openPanel } from "./menu.js";
+import { modelPicker } from "./model-picker.js";
 
 interface MenuEntry extends ModelRef {
   thinking?: ThinkingLevel;
@@ -20,6 +22,9 @@ interface MenuEntry extends ModelRef {
 }
 
 const key = (m: ModelRef): string => `${m.provider}/${m.id}`;
+
+/** What no title model means, on the trigger and on the row that clears it. */
+const TITLE_OFF = "Off — the first message is the title";
 
 /** The intents that keep coming up — offered in the note's dropdown so "what
  * do I write here" has answers to pick from, not just a blank line. */
@@ -115,21 +120,26 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     adder.replaceChildren(picker, add);
   }
 
-  /** One select, written on change — no save button: a model picked here has
-   *  no second field to fill in and nothing to be dirty against. */
+  /** The chat composer's picker, written on pick — no save button: a model
+   *  chosen here has no second field to fill in and nothing to be dirty
+   *  against. No reasoning level either; a title is one short request. */
   function renderTitleModel(): void {
-    // The stored model stays selectable when the catalog no longer lists it:
-    // the row must say what is set, and the failing call says the rest.
+    // The stored model stays listed when the catalog no longer has it: the row
+    // must say what is set, and the failing call says the rest.
     const stored = titleModel;
     const options = stored && !catalog.some((m) => key(m) === key(stored)) ? [stored, ...catalog] : catalog;
-    const picker = select(
-      [["off — the first message is the title", ""], ...options.map((m): [string, string] => [key(m), key(m)])],
-      stored ? key(stored) : "",
+    // A dropdown trigger that must read as the controls above it, so it wears
+    // the shared control skin rather than a copy of it.
+    const open = btn(
+      stored ? stored.id : TITLE_OFF,
+      `${CONTROL} flex min-w-0 flex-1 cursor-pointer items-center truncate text-left hover:bg-neutral-50 ${
+        stored ? "text-neutral-700" : "text-neutral-400"
+      }`,
     );
-    picker.classList.replace("w-full", "flex-1");
-    picker.classList.add("min-w-0");
-    picker.onchange = () => {
-      const picked = options.find((m) => key(m) === picker.value) ?? null;
+    if (stored) open.title = key(stored);
+
+    const save = (picked: ModelRef | null): void => {
+      closeMenu();
       void (async () => {
         setStatus(titleStatus, "saving", "saving…");
         const res = await sendJson("/api/settings", { titleModel: picked && { provider: picked.provider, id: picked.id } }, "PUT");
@@ -139,9 +149,28 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         }
         titleModel = ((await res.json()) as { titleModel?: ModelRef }).titleModel;
         setStatus(titleStatus, "saved", titleModel ? "Saved — names the next new session after its first reply." : "Off.");
+        renderTitleModel();
       })();
     };
-    titleBox.replaceChildren(picker, titleStatus);
+
+    open.onclick = () => {
+      const panel = modelPicker({
+        models: options,
+        current: stored,
+        // No levels, so the picker draws no reasoning selector and neither of
+        // these two is ever read.
+        thinkingLevel: "medium",
+        thinkingLevels: [],
+        onThinkingPick: () => {},
+        onPick: (model) => save(model),
+      });
+      const off = btn(TITLE_OFF, "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
+      off.onclick = () => save(null);
+      const wrap = h("div", "flex flex-col");
+      wrap.append(panel, h("div", "border-t border-neutral-200"), off);
+      openPanel(open, wrap);
+    };
+    titleBox.replaceChildren(open, titleStatus);
   }
 
   function render(): void {
