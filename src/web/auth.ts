@@ -291,34 +291,44 @@ function sameOrigin(c: Context): boolean {
  *  names its browser the same way. */
 export const sessionIdOf = (c: Context): string => (getCookie(c, COOKIE) ?? "").split(".")[0] ?? "";
 
+/** Stamped on the response the route actually returned: a route that hands
+ *  back a native `Response` (`Response.json`, `queueResponse`) replaces `c.res`
+ *  and loses anything set on the context before it. Absent-only, so a board
+ *  keeps the headers it chose (boards/boards.ts). */
+function sealBoundary(c: Context): void {
+  // Public responses too: the login form must not be frameable either, and a
+  // served file must not be sniffed into a type its content-type denies.
+  if (!c.res.headers.has("x-frame-options")) c.header("x-frame-options", "DENY");
+  if (!c.res.headers.has("x-content-type-options")) c.header("x-content-type-options", "nosniff");
+}
+
 export function requireAuth(store: AuthStore): MiddlewareHandler {
   return async (c, next) => {
-    // Public responses too: the login form must not be frameable either, and a
-    // served file must not be sniffed into a type its content-type denies.
-    c.header("x-frame-options", "DENY");
-    c.header("x-content-type-options", "nosniff");
-    if (isPublic(c.req.method, c.req.path)) return next();
+    if (isPublic(c.req.method, c.req.path)) {
+      await next();
+      sealBoundary(c);
+      return;
+    }
     const cookie = getCookie(c, COOKIE);
     const session = store.check(cookie);
     const unsafe = c.req.method !== "GET" && c.req.method !== "HEAD";
     if (session && unsafe && !sameOrigin(c)) {
       log.warn(`blocked ${c.req.method} ${c.req.path} from origin ${c.req.header("origin")}`);
-      return c.json({ error: "forbidden origin" }, 403);
-    }
-    if (session) {
+      c.res = c.json({ error: "forbidden origin" }, 403);
+    } else if (session) {
       if (session.renewed && cookie) setSessionCookie(c, cookie);
       await next();
       // Cookie-authenticated content must not become public in a shared proxy.
       if (!c.res.headers.has("cache-control")) {
         c.header("cache-control", c.req.path.startsWith("/api/") ? "private, no-store" : "private");
       }
-      return;
+    } else if (c.req.path.startsWith("/api/") || unsafe) {
+      // An API caller gets a status it can act on; a navigation gets the form.
+      c.res = c.json({ error: "unauthorized" }, 401);
+    } else {
+      c.res = c.redirect(`/login?next=${encodeURIComponent(c.req.path)}`);
     }
-    // An API caller gets a status it can act on; a navigation gets the form.
-    if (c.req.path.startsWith("/api/") || unsafe) {
-      return c.json({ error: "unauthorized" }, 401);
-    }
-    return c.redirect(`/login?next=${encodeURIComponent(c.req.path)}`);
+    sealBoundary(c);
   };
 }
 

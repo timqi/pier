@@ -35,7 +35,16 @@ function app(s: AuthStore): Hono {
   a.get("/", (c) => c.text("workbench"));
   a.get("/api/sessions", (c) => c.json([]));
   a.post("/api/sessions", (c) => c.json({ ok: true }));
-  a.get("/p/report/", (c) => c.text("published"));
+  // What queueResponse (server.ts) returns: a native Response, built without
+  // the context the boundary set its headers on.
+  a.post("/api/native", () => Response.json({ ok: true }));
+  // A published board answers with its own headers, as boards/boards.ts does.
+  a.get("/p/report/", (c) =>
+    c.body("published", 200, {
+      "content-type": "text/html; charset=utf-8",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "sandbox allow-scripts",
+    }));
   a.all("/p/report/", (c) => c.text("published write"));
   a.get("/p/_assets/pier.css", (c) => c.text("css"));
   a.all("/p/_assets/pier.css", (c) => c.text("css write"));
@@ -101,6 +110,21 @@ describe("requireAuth", () => {
     expect(form.status).toBe(200);
     expect(form.headers.get("x-frame-options")).toBe("DENY");
     expect(form.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  // Pre-setting them on the context is not enough: the route's own Response
+  // object is the one that gets sent.
+  it("stamps the boundary headers on a natively returned Response", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    const res = await a.request("/api/native", { method: "POST", headers: { cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    // A published board sets its own nosniff (boards/boards.ts); one value, not two.
+    const board = await a.request("/p/report/");
+    expect(board.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("refuses a write without redirecting it", async () => {
