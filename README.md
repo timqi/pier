@@ -2,17 +2,16 @@
 
 A self-hosted workspace for coding agents. Pier puts a web workbench and your
 IM channels in front of [Pi](https://github.com/earendil-works/pi) sessions:
-you talk to the same agent from a browser, from Slack, Telegram or Lark, steer a
-running turn, schedule tasks, watch what every session is doing, and publish a
-static page when something is worth showing.
+talk to the same agent from a browser, Slack, Telegram or Lark, steer a running
+turn, schedule tasks, watch every session, and publish a static page when
+something is worth showing.
 
 One instance, one account, your own machine. The agent runs shell commands in
-directories you name, so Pier is meant for a machine you own and a boundary you
-control — not for a shared host.
+directories you name — meant for a machine you own, not a shared host.
 
-**Status: pre-release.** The version is `0.0.x` and the database schema is
-versioned from `0.0.1` on — earlier databases are not migrated. Read
-`docs/deploy.md` before putting it anywhere reachable.
+**Status: pre-release.** The version is `0.0.x`; the database schema is
+versioned from `0.0.1` on. Read `docs/deploy.md` before putting it anywhere
+reachable.
 
 ## Requirements
 
@@ -35,75 +34,47 @@ It listens on `127.0.0.1:3141` (`PORT`, `HOST`) and keeps everything under
 session transcripts (`~/.pier/pi`, unless `PI_CODING_AGENT_DIR` says
 otherwise).
 
-**The first start generates a password and prints it once.** Every HTTP surface
-is behind it — there is no default password and no unclaimed window. Lost it?
-`sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'` and restart; a new one is printed.
-
-Open `http://localhost:3141`, sign in, then:
-
-- **Console → Settings** — everything the instance is configured with, one
-  tab per topic: Models (API-key/OAuth logins, and the menu of favored models
-  agents are advised with), Agent (Pi configuration, skills, extensions),
-  Channels (Slack Socket-Mode or Telegram bot tokens; chats are discovered
-  when the bot first sees traffic, gated by the mention/bind rules you set),
-  plus the public URL, password and master key
-- **New session** — pick a directory; that is where the agent's shell runs
+**The first start generates a password and prints it once.** Lost it?
+`sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'` and restart. Open
+`http://localhost:3141`, sign in; **Console → Settings** configures Models,
+Agent, Channels, the public URL, password and master key; **New session** picks
+the directory the agent's shell runs in.
 
 ## Configure Pi
 
-Pier gives Pi a dedicated agent directory instead of changing your normal Pi
-installation. By default it is `$PIER_HOME/pi` (`~/.pier/pi`). Set
-`PI_CODING_AGENT_DIR` before starting Pier to use another directory, including
-an existing Pi setup:
+Pier gives Pi its own agent directory, `$PIER_HOME/pi` by default; set
+`PI_CODING_AGENT_DIR` to use another, including an existing Pi setup:
 
 ```sh
 PI_CODING_AGENT_DIR="$HOME/.pi/agent" pier serve
 ```
 
-Pier exports that variable for the SDK, so anything it starts inherits it — an
-agent's shell included. A second Pier launched from there with its
-own `PIER_HOME` derives its own agent directory rather than adopting the first
-one's; setting `PI_CODING_AGENT_DIR` again on that command line still wins.
+Pier exports that variable, so anything it starts inherits it. A second Pier
+launched from there with its own `PIER_HOME` derives its own agent directory
+unless `PI_CODING_AGENT_DIR` is set again on that command line.
 
-Console → Settings is the normal setup path:
+Console → Settings:
 
-- **Models** configures built-in or custom endpoints and API-key/OAuth login,
-  then pins the few models this deployment favors. Stored credentials are
-  sealed in Pier's SQLite database; they are not written back to `models.json`.
-  **Test** sends one real request on a model you pick and shows both halves of
-  it — the body as the provider received it, and what came back — so a wrong
-  base URL, a revoked key, a gateway rewriting the request or a model the
-  endpoint never had says so here instead of in a session.
-- **Agent** edits `SYSTEM.md`, `AGENTS.md`, `settings.json`, and advanced
-  `models.json` structure in the Pi agent directory — globally, or per project
-  scope, where it also shows that project's `.pi/skills` and `.pi/extensions`
-  resources. Changes apply when a session next opens; saving here recycles the
-  idle ones for you, and **Settings → Instance → Reload** does it for files
-  something else changed — an agent, or an editor on the box.
-  The same tab lists the extensions Pier ships with, under Global — they live
-  inside the package, so there is nothing to install and an update never
-  touches your own `extensions` directory, and if an extension of yours
-  already registers the same tool, Pier's copy stands down. `web` is the one
-  shipped today: the public web through the provider's own hosted web tools —
-  `web_search` on an authenticated Anthropic or OpenAI model, `web_fetch` on an
-  Anthropic one (OpenAI hosts no fetch tool), and no other key or service. The
-  page says which tools a switch adds and what each needs before you flip it.
-  Below it, the same tab switches on the command-line tools Pier manages —
-  `rtk`, `rg`, `fd`, `wt`, `jq`, or a tool of your own written as a
-  [ubix](https://github.com/timqi/ubix) block. A switch installs the binary
-  into `~/.pier/tools/bin`, which is first on the PATH every session and task
-  inherits, and a task you can read keeps them current.
+- **Models** — endpoints, API-key/OAuth login, pinned models. Credentials are
+  sealed in Pier's SQLite database, never written back to `models.json`.
+  **Test** sends one real request and shows the body as sent and the reply.
+- **Agent** — edits `SYSTEM.md`, `AGENTS.md`, `settings.json` and the
+  `models.json` structure, globally or per project scope (with that project's
+  `.pi/skills` and `.pi/extensions` listed). Changes apply when a session next
+  opens; saving recycles idle sessions; **Settings → Instance → Reload** does
+  the same for files changed elsewhere. Also here: the bundled extensions
+  (`web`: `web_search` on Anthropic or OpenAI, `web_fetch` on Anthropic; a
+  copy of yours registering the same tool makes Pier's stand down) and the
+  managed CLI tools (`rtk`, `rg`, `fd`, `wt`, `jq`, or your own as a
+  [ubix](https://github.com/timqi/ubix) block), installed into
+  `~/.pier/tools/bin`, first on every session's PATH.
 
-On first credential access, Pier imports an existing `auth.json` into its sealed
-store and renames the source to `auth.json.imported`. Literal provider keys left
-in `models.json` are moved the same way, with the original retained as
-`models.json.imported`. Use Providers for new secrets; the advanced editor will
-not accept plaintext keys or header values.
-
-Provider environment variables supported by Pi are inherited from the Pier
-process. A service installed with `pier service install` does not inherit your
-interactive shell, so put non-secret Pi environment settings in a systemd unit
-override; for API keys, prefer the sealed Providers UI.
+On first credential access an existing `auth.json` is imported into the sealed
+store and renamed `auth.json.imported`; literal keys in `models.json` likewise
+(`models.json.imported`). The editor rejects plaintext keys or header values.
+Pi's provider environment variables are inherited from the Pier process; a
+systemd service does not inherit your shell, so put non-secret settings in a
+unit override and API keys in the Providers UI.
 
 ## Run it as a service
 
@@ -118,33 +89,11 @@ pier update              # latest release, then hard-stop/restart the service
 pier tools sync          # install/update the managed CLI tools by hand
 ```
 
-`pier restart` refuses new work, waits up to five minutes for active turns and
-Task runs, then restarts; if its deadline aborts an IM turn, the next process
-tells that conversation. `pier reload` stays in-process: adapters re-read their
-configuration and idle, unwatched sessions reopen on their next message.
-Streaming or watched sessions keep running and pick changes up after eviction.
-Both commands target the installed systemd service. `pier update` is still a
-hard stop because its separate updater replaces the installed code; let active
-work finish before starting it.
-
-Linux only, because it is systemd. It writes `~/.config/systemd/user/pier.service`
-with the absolute path of the node you installed with (systemd's PATH would not
-find a version-managed one), a memory drop-in it never rewrites afterwards, and
-turns on linger so scheduled tasks survive your logout. Install also records the
-exact npm executable in a separate updater unit. Re-run `pier service install
---force` after changing the service settings or its Node/npm installation; this
-rewrites both units and restarts Pier. On macOS run `pier serve` in a terminal,
-or under whatever supervisor you already use — `pier` on its own only prints
-the usage.
-
-`systemctl --user cat pier` shows the units with their comments; `docs/deploy.md`
-is what they do not say: how to size the memory limits, how updates work (and
-why the updater is a second unit), how to read the first-run password out of
-the journal, and what to back up.
-
-Exposing it needs two things: a reverse proxy or tunnel that terminates TLS
-(Pier binds the loopback and expects `X-Forwarded-For`/`-Proto`), and the
-understanding that whoever gets past the password gets a shell.
+Linux only (systemd); on macOS run `pier serve` under your own supervisor.
+`docs/deploy.md` is the runbook: units, memory limits, updates and rollback,
+the first-run password, remote access, backups. Expose it only behind a
+TLS-terminating proxy or tunnel (`X-Forwarded-For`/`-Proto`) — whoever gets
+past the password gets a shell.
 
 ## Develop
 
@@ -158,40 +107,23 @@ npm run lint      # oxlint
 npm test          # vitest
 ```
 
-- `AGENTS.md` — the principles this codebase is held to, and the budgets that
-  say when a change is too big. Read it before writing code here.
+- `AGENTS.md` — the principles and budgets this codebase is held to
 - `docs/architecture.md` — the seams, the areas, and what is deliberately absent
-- `docs/design/` — one document per subsystem, written before it was built
+- `docs/design/` — one document per subsystem
 
 ## Releases
 
-Pier asks `registry.npmjs.org` at boot and every 30 minutes, and the version
-beside the title turns into `v0.0.1 → 0.0.2` when a release is out. Clicking it
-opens the panel: the source link, **Update now**, and **Update automatically**.
+Pier asks `registry.npmjs.org` at boot and every 30 minutes; the footer version
+becomes `v0.0.1 → 0.0.2` when a release is out and opens a panel: source link,
+**Update now**, **Update automatically** (idle instance only). Both drain first
+and hand the install to the updater unit; off systemd the panel says `pier
+update`. The updater writes `~/.pier/db/backups/pier.db.release-<version>.bak`
+(the release being replaced; three kept) first. Schema upgrades are one-way;
+`docs/deploy.md` has the rollback.
 
-Nothing here installs anything itself — the work is handed to the second
-systemd unit written at install time, because an npm running as a child of the
-process being restarted would be killed by that restart. Off systemd there is
-nothing to hand it to, so the panel says `pier update` instead.
-
-`pier update` typed in a terminal hard-stops the service. The Console and the
-automatic path both **drain first** — new work refused, running turns given
-time to finish, whatever the deadline still had to cut off written to the chat
-it belonged to — and only then hand over. The automatic path additionally waits
-for an idle instance: no turn streaming, no task run in flight.
-
-Either way the updater writes `~/.pier/db/backups/pier.db.release-<version>.bak`
-before npm touches the package — named for the release being replaced, which is
-the one to reinstall beside it; the three newest are kept. Then it updates the
-npm installation recorded when the service was installed, and starts Pier again.
-
-`main` is the only development line. `just release [patch|minor|major]` runs the
-checks, writes the tag and pushes it; the tag builds and publishes to npm and as
-a GitHub Release. The version in the web footer is the one from `package.json`
-— so the number on screen always names a commit.
-Schema upgrades are one-way: a database migrated by a newer Pier is refused by
-an older one. The release backup above is the way back; `docs/deploy.md` has the
-restore procedure and the additional snapshots taken before schema migrations.
+`main` is the only development line. `just release [patch|minor|major]` checks,
+tags and pushes; the tag builds and publishes to npm and a GitHub Release. The
+footer version is `package.json`'s.
 
 ## License
 

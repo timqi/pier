@@ -42,40 +42,36 @@ asked for a public or shareable board *in this request*; otherwise leave it
 `false` and say the board is private. Never publish personal data or anything
 the user has not seen.
 
-The published address is `/p/<slug>-<token>/`, not `/p/<slug>/`, so a public
-board's URL cannot be guessed from its name. `token` is a fifth manifest field
-you write next to `"public": true` — eight hex characters from
-`openssl rand -hex 4`, never invented in your head, never reused between
+The published address is `/p/<slug>-<token>/`, not `/p/<slug>/`. `token` is a
+fifth manifest field you write next to `"public": true` — eight hex characters
+from `openssl rand -hex 4`, never invented in your head, never reused between
 boards. Leave it out and Pier mints one on the first request, but then the link
-is only visible in the Console, so write it yourself and you can hand it over
-in the same message.
+is only visible in the Console, so write it yourself and hand it over in the
+same message. A board that already has a token keeps it: the link may be out
+there.
 
-Asked to make an existing board public? Set `"public": true` and a fresh
-`token` in `board.json`, then reply with the `/p/<slug>-<token>/` link — that is
-the whole answer. Already has a token? Keep it: the link may be out there. No
-verification step, no narrating the edit, no restating what the page holds.
+Asked to make an existing board public? Set `"public": true` (and a `token` if
+none) in `board.json`, then reply with the `/p/<slug>-<token>/` link — that is
+the whole answer. No verification step, no narrating the edit.
 
-The message announcing the board carries **one bare URL** — paste the address
-itself, never `[title](url)`: link labels get mangled or truncated on some chat
-surfaces, and the title is already on the page. No filesystem paths either —
-`…/boards/<slug>/board.json` means nothing to the reader.
-`<pier>/AGENTS.md` gives you the address, so there is nothing to look up:
+The message announcing the board carries **one bare URL** — the address
+itself, never `[title](url)` (labels get mangled on some chat surfaces), and no
+filesystem paths. `<pier>/AGENTS.md` gives you the address:
 
 | The user asked for | Send |
 | --- | --- |
 | a board, nothing about sharing | `https://pier.example.com/boards/weekly-digest/` — behind the Pier password; Console → Boards makes it public |
 | a **public** board | `https://pier.example.com/p/weekly-digest-3f9ac128/` — no password; the suffix is the manifest's `token`, copied verbatim |
 
-Never both: the pair invites pasting the password-free URL of a board that was
-never meant to leave the workspace, and `/p/<slug>-<token>/` 404s unless the manifest
-says `"public": true`. No address configured? Give the path, say Console →
-Settings turns it into a link, and never guess a host.
+Never both — `/p/<slug>-<token>/` 404s unless the manifest says `"public":
+true`. No address configured? Give the path, say Console → Settings turns it
+into a link, and never guess a host.
 
 ## Writing the page
 
-A board is a **presentation**, not a text file: someone opens it to get an
-answer fast. Link the shipped stylesheet and write plain semantic HTML — no
-build, no npm, no framework:
+A board is a **presentation**: someone opens it to get an answer fast. Link the
+shipped stylesheet and write plain semantic HTML — no build, no npm, no
+framework:
 
 ```html
 <!doctype html>
@@ -164,8 +160,7 @@ that print open are free. On top of that:
 | `.muted` | secondary text: dates, deltas, units, scope |
 
 Need something it lacks? A `<style>` block or your own CSS file inside `site/`
-is normal, and so is a custom colour or a hand-written layout when the content
-calls for one.
+is normal.
 
 ## Pick the form from the content
 
@@ -220,10 +215,9 @@ what makes it read as signal.
 
 ## If a board needs a build
 
-Pier ships no toolchain and the default is no build. If one is genuinely needed
-(a bundled charting library, a component layout), you own it: keep sources
-outside `site/` (e.g. `<board>/src/`), emit into `site/`, and write a
-`<board>/README.md` a future session can follow cold — install command, build
-command, output path, where the data came from. Never leave `site/`
-inconsistent with its sources; on an existing board look for that README first
-and rebuild, because hand-patching `site/` is lost on the next build.
+Pier ships no toolchain and the default is no build. If one is genuinely needed,
+you own it: keep sources outside `site/` (e.g. `<board>/src/`), emit into
+`site/`, and write a `<board>/README.md` a future session can follow cold —
+install command, build command, output path, where the data came from. Never
+leave `site/` inconsistent with its sources; on an existing board look for that
+README first and rebuild — hand-patching `site/` is lost on the next build.

@@ -6,15 +6,15 @@ description: How Pier itself works — durable sessions, what survives a restart
 # How Pier works
 
 Pier is the workspace this session runs in: agent sessions behind chat
-surfaces — a web workbench and IM channels (Slack and Telegram today) — plus
-scheduled tasks, subagents and boards. Answer questions about it from the
-facts below. If the answer is not here, say you do not know how this instance
-is configured rather than guessing: the Console (Pier's admin web UI) is the
-operator's source of truth.
+surfaces — a web workbench and IM channels (Slack, Telegram, Lark) — plus
+scheduled tasks, subagents and boards. Answer from the facts below. If the
+answer is not here, say you do not know how this instance is configured rather
+than guessing: the Console (Pier's admin web UI) is the operator's source of
+truth.
 
 ## Sessions and persistence
 
-- One durable session per conversation: a web chat, a Slack thread, a
+- One durable session per conversation: a web chat, a Slack or Lark thread, a
   Telegram chat or topic. The mapping survives restarts — the next message
   lands in the same transcript with its context intact.
 - Idle sessions leave memory but keep their transcript; they resume
@@ -61,8 +61,8 @@ operator's source of truth.
 
 ## What a turn looks like from outside
 
-- Telegram and Slack put a 👀 on the message that started a turn and take it
-  off when the turn settles; a restart and a periodic sweep clear stragglers.
+- IM channels put a 👀 (Lark: "OnIt") on the message that started a turn and
+  take it off when the turn settles; a restart and a periodic sweep clear stragglers.
   A 👀 that never clears means the turn died, not that you are still thinking.
 - Every finished reply carries its cost: elapsed time and the context size at
   completion (`1m14s · 32K tok`) — a running total, not this turn's spend. IM
@@ -96,16 +96,16 @@ operator's source of truth.
 
 ## Service restart, reload and update
 
-- `pier restart` is the graceful systemd path: it refuses new work, waits up to
-  five minutes for active turns and Task runs, then restarts. If the deadline
-  aborts an IM turn, the next process tells that conversation.
-- `pier reload` stays in-process: channel adapters re-read configuration and
-  idle, unwatched sessions reopen with current agent files on their next
-  message. Streaming or watched sessions are not interrupted.
-- `pier update` is deliberately different: the separate updater hard-stops the
-  service, backs up the database, replaces the package, and starts it again.
-  It can interrupt active work. All three are operator shell commands for an
-  installed Linux systemd service, not tools available to the agent.
+- `pier restart`: refuses new work, waits up to five minutes for active turns
+  and Task runs, then restarts. If the deadline aborts an IM turn, the next
+  process tells that conversation.
+- `pier reload`: channel adapters re-read configuration and idle, unwatched
+  sessions reopen with current agent files on their next message. Streaming or
+  watched sessions are not interrupted.
+- `pier update`: the separate updater hard-stops the service, backs up the
+  database, replaces the package, and starts it again. It can interrupt active
+  work. All three are operator shell commands for an installed Linux systemd
+  service, not tools available to the agent.
 
 ## Only the Console can change
 
