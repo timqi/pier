@@ -713,10 +713,15 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     const runtime = await this.refreshedRuntime();
     const resolved = runtime.getModel(model.provider, model.id);
     if (!resolved) throw new Error(`title model ${model.provider}/${model.id} is not in the catalog`);
+    // The least reasoning the model does, said explicitly: unset means the
+    // provider's default, which on a reasoning model is not "none" (gpt-5:
+    // medium) and spends the whole output cap thinking about a title. Anthropic
+    // is the exception — its default is thinking off, and any level turns it on.
+    const reasoning = resolved.reasoning && resolved.api !== "anthropic-messages" ? "minimal" : undefined;
     const answer = await runtime.completeSimple(
       resolved,
       { messages: [{ role: "user", content: titleRequest(first, reply), timestamp: Date.now() }] },
-      { maxTokens: TITLE_MAX_TOKENS, signal: AbortSignal.timeout(TITLE_TIMEOUT_MS) },
+      { maxTokens: TITLE_MAX_TOKENS, reasoning, signal: AbortSignal.timeout(TITLE_TIMEOUT_MS) },
     );
     const title = titleFromAnswer(textOfAnswer(answer as PiMessage));
     if (!title) throw new Error(`${model.provider}/${model.id} answered with no title`);
