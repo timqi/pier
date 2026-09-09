@@ -14,7 +14,7 @@ import { icon } from "./icons.js";
 import { getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn } from "./form.js";
-import { closeMenu, openMenu, openPanel } from "./menu.js";
+import { closeMenu, listStep, openMenu, openPanel, walkRows } from "./menu.js";
 
 interface Listing {
   path: string;
@@ -138,6 +138,14 @@ export function openBrowser(
       use,
     );
     const body = h("div", "min-h-0 flex-1 overflow-y-auto");
+    // The tree is a list too, so it walks on the list keys — the folders only:
+    // "Use" and "New folder" sit beside the list, not in it, and stay Tab's.
+    // Not the menu's own handler (menu.ts), because Home/End belong to the
+    // caret in the path line — only its walk.
+    content.onkeydown = (ev) => {
+      const step = listStep(ev);
+      if (step !== undefined && walkRows(body, step)) ev.preventDefault();
+    };
     if (list.parent) body.append(row("../", `${MONO} text-neutral-500`, () => void open(list.parent!)));
     const names = folders(list);
     for (const name of names) {

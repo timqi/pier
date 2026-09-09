@@ -32,6 +32,13 @@ function onOutside(ev: Event): void {
 const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
 const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
 
+/** Whether a panel is on screen. The list keys belong to the topmost overlay,
+ *  the way Esc does: a global chord written on one of them (⌃K opens the
+ *  palette) has to stand down while a menu is walking on it, or the chord fires
+ *  first — it is a capture listener registered at init — and the menu never
+ *  sees the key. */
+export const menuOpen = (): boolean => panel !== null;
+
 /** Which way this keypress walks a list, if it does. Shared with the palette,
  *  so the menu and the palette answer to the same keys. */
 export function listStep(ev: KeyboardEvent): number | undefined {
@@ -39,18 +46,29 @@ export function listStep(ev: KeyboardEvent): number | undefined {
   return ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key];
 }
 
+/** Move focus among a list's enabled buttons — by `to` rows, wrapping, or to
+ *  an end. From outside the list (the panel itself, a path line above it) the
+ *  first step lands on the near end. False when there is nothing to walk, so
+ *  the caller can leave the key alone. Exported because a panel that is not a
+ *  menu can still be a list: the folder tree walks its own rows with it. */
+export function walkRows(list: HTMLElement, to: number | "first" | "last"): boolean {
+  const rows = [...list.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+  if (!rows.length) return false;
+  const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const next = to === "first" ? 0 : to === "last" ? rows.length - 1
+    : index < 0 ? (to > 0 ? 0 : rows.length - 1)
+    : (index + to + rows.length) % rows.length;
+  rows[next]?.focus();
+  return true;
+}
+
 function onKey(ev: KeyboardEvent): void {
-  const step = listStep(ev);
-  if (panel?.dataset.menu === "true" && (step !== undefined || ev.key === "Home" || ev.key === "End")) {
-    const rows = [...panel.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
-    if (!rows.length) return;
-    const index = rows.indexOf(document.activeElement as HTMLButtonElement);
-    const next = ev.key === "Home" ? 0 : ev.key === "End" ? rows.length - 1
-      : index < 0 ? (step === 1 ? 0 : rows.length - 1)
-      : (index + (step ?? 0) + rows.length) % rows.length;
-    ev.preventDefault();
-    rows[next]?.focus();
-    return;
+  if (panel?.dataset.menu === "true") {
+    const to = ev.key === "Home" ? "first" : ev.key === "End" ? "last" : listStep(ev);
+    if (to !== undefined && walkRows(panel, to)) {
+      ev.preventDefault();
+      return;
+    }
   }
   if (ev.key !== "Escape") return;
   // The topmost overlay consumes Escape: a panel anchored inside a modal

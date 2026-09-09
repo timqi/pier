@@ -125,7 +125,12 @@ per-turn Activity groups):
   session opens a menu on its button, not a dialog: the listing's recent
   distinct directories (current one ticked, at most eight) then Browse…, and
   picking one creates the session, and the menu walks by keyboard like every
-  other one (⌘⇧O opens it). Worktrees are left out — a `<repo>.<branch>`
+  other one (⌘⇧O opens it, and — like the rail's other chords — stands down
+  while a modal is up, where the menu would open behind the top layer). Browse…
+  walks on the same keys: focus starts on the editable path line, from which ↓
+  is the first folder and ↑ the last, ↵ descends, and Home/End stay the caret's
+  because that line is typed into. Use and New folder sit beside the list, not
+  in it, and remain Tab's. Worktrees are left out — a `<repo>.<branch>`
   directory whose `<repo>` sibling is also listed is a branch checkout, not a
   project — here and in the palette's Actions alike. The comparison is between
   resolved paths: every listed directory is reported through `realpath` (with
@@ -204,7 +209,12 @@ per-turn Activity groups):
   reachable and visible while focused or open. Menus focus a control on open,
   support arrow / ⌃N ⌃P / ⌃J ⌃K / Home / End navigation — the palette's keys,
   from the palette's own `listStep` — and return focus when dismissed from
-  inside. Session actions have no reserved checkmark column and are grouped as
+  inside. An open menu owns those keys the way the topmost overlay owns Esc:
+  the global ⌘K/⌃K binding stands down while one is up, or it would open the
+  palette on top of the list the keypress was meant for. ⌘N/⌘P are not among
+  them anywhere — the browser takes ⌘N (and ⌃N on Linux/Windows) before the
+  page sees it, which is what ⌃J/⌃K are the answer to. Session actions have no
+  reserved checkmark column and are grouped as
   Rename / Session info, New session here / Browse files, Model & reasoning.
   Model and directory hints truncate; model loading is immediate and a cancelled
   load cannot reopen the panel. Manual compaction remains an API capability.

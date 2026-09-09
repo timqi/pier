@@ -311,7 +311,10 @@ export function initSidebar(d: SidebarDeps): void {
   newBtn.onclick = openNewSession;
   // ⇧O, not ⇧N: ⌘⇧N / ⌘⇧T are the browser's own windows and cannot be
   // taken back — ⇧O is what the chat apps settled on for the same action.
-  shortcut(newBtn, "shift+o", "New session", openNewSession);
+  // Stands down under a modal, like the rail's other chords: the palette is
+  // in the top layer, so a menu anchored on this button would open *behind*
+  // it — invisible, and unreachable by the keys meant to walk it.
+  shortcut(newBtn, "shift+o", "New session", openNewSession, modalOpen);
   // ⌘⇧[ / ⌘⇧] walk the rail in the order it is drawn — the tab-switching
   // chord, applied to sessions. No button carries it: the rail itself is the
   // affordance.

@@ -10,7 +10,7 @@ import { getJson } from "./api.js";
 import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
-import { listStep } from "./menu.js";
+import { listStep, menuOpen } from "./menu.js";
 import { openNewSession, orderSessions, projectCwds, stateDot, type SessionInfo } from "./sidebar.js";
 import { shortcut } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
@@ -327,7 +327,10 @@ export function initPalette(d: PaletteDeps): void {
   search.onclick = toggle;
   // Once the palette is open the chord belongs to its list (⌃K walks up), so
   // the global binding stands down; Esc is what a <dialog> closes on anyway.
-  shortcut(search, "k", "Search sessions, messages and Console", toggle, () => dialog.open);
+  // An anchored menu takes it back for the same reason: its rows walk on ⌃K
+  // too, and the palette opening on top of them is the answer to a keypress
+  // that was meant for the list already on screen.
+  shortcut(search, "k", "Search sessions, messages and Console", toggle, () => dialog.open || menuOpen());
   // The dialog is its own backdrop's hit target: a click that lands on the
   // element itself, not on a descendant, landed outside the panel.
   dialog.onclick = (ev) => {
