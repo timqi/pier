@@ -249,7 +249,10 @@ export function launchField(
         closeMenu();
         onChange({ model, thinking: thinking ?? choice.thinking });
       },
-      onThinkingPick: (thinking) => onChange({ ...choice, thinking }),
+      onThinkingPick: (thinking) => {
+        choice = { ...choice, thinking };
+        onChange(choice);
+      },
     });
     const clear = btn("Pi default", "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
     clear.onclick = () => {

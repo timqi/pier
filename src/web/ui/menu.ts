@@ -25,6 +25,7 @@ function onKey(ev: KeyboardEvent): void {
     if (!rows.length) return;
     const index = rows.indexOf(document.activeElement as HTMLButtonElement);
     const next = ev.key === "Home" ? 0 : ev.key === "End" ? rows.length - 1
+      : index < 0 ? (ev.key === "ArrowDown" ? 0 : rows.length - 1)
       : (index + (ev.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
     ev.preventDefault();
     rows[next]?.focus();
@@ -46,6 +47,7 @@ function onScroll(ev: Event): void {
 export function closeMenu(): void {
   if (!panel) return;
   document.removeEventListener("pointerdown", onOutside, true);
+  document.removeEventListener("focusin", onOutside, true);
   document.removeEventListener("keydown", onKey, true);
   window.removeEventListener("scroll", onScroll, true);
   window.removeEventListener("resize", closeMenu);
@@ -124,6 +126,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   (panel.querySelector<HTMLElement>("button, input, select, [tabindex='0']") ?? panel).focus({ preventScroll: true });
   // Safe to bind now: the pointerdown that opened this already fired.
   document.addEventListener("pointerdown", onOutside, true);
+  document.addEventListener("focusin", onOutside, true);
   document.addEventListener("keydown", onKey, true);
   window.addEventListener("scroll", onScroll, true);
   window.addEventListener("resize", closeMenu);
@@ -136,10 +139,10 @@ function menuItem(item: MenuItem): HTMLElement {
       isSheet() ? "min-h-12 py-3" : "min-h-10 py-2"
     }`,
     ...(item.checked === undefined ? [] : [h("span", "flex-none w-3 text-indigo-600", item.checked ? "\u2713" : "")]),
-    h("span", "min-w-0 max-w-full flex-none truncate", item.label),
+    h("span", "min-w-0 truncate", item.label),
   );
   if (item.hint) {
-    const hint = h("span", "ml-auto max-w-28 truncate text-[13px] text-neutral-500", item.hint);
+    const hint = h("span", "ml-auto max-w-28 shrink-[999] truncate text-[13px] text-neutral-500", item.hint);
     hint.title = item.hint;
     row.append(hint);
   }

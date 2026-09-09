@@ -121,7 +121,7 @@ per-turn Activity groups):
 - **Chat header**: title, compact model/reasoning/context metadata and the `⋯`
   session menu. The mobile top bar retains the title and session actions.
 - **Session menu** (`menu.ts`): one anchored popover primitive, one open at a
-  time, closed by outside pointerdown / Esc / page scroll (scrolling *inside*
+  time, closed by outside pointerdown / focus leaving / Esc / page scroll (scrolling *inside*
   the panel does not close it). Below 640px it becomes a bottom sheet with the
   session title and an explicit close button; its backdrop consumes the dismissal
   click so background controls do not activate. Rail actions remain keyboard

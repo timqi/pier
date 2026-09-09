@@ -224,10 +224,10 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
   panel.append(heading);
   const fields = h("dl", "");
   for (const [label, value, note] of rows) {
-    const mono = ["Directory", "Session"].includes(label);
-    const shown = h("dd", `min-w-0 flex items-start gap-2 text-neutral-700 ${mono ? "font-mono text-sm leading-6" : ""}`,
+    const identifier = label === "Directory" || label === "Session";
+    const shown = h("dd", `min-w-0 flex items-start gap-2 text-neutral-700 ${identifier ? "font-mono text-sm leading-6" : ""}`,
       h("span", "min-w-0 flex-1 [overflow-wrap:anywhere]", value));
-    if (label === "Directory" || label === "Session") {
+    if (identifier) {
       const copy = copyBtn("min-h-11 min-w-11 sm:min-h-8 shrink-0 cursor-pointer rounded-lg px-2 py-1 text-[13px] font-sans text-neutral-500 hover:bg-neutral-100 focus-visible:outline-2", () => value);
       copy.setAttribute("aria-label", `Copy ${label.toLowerCase()}`);
       shown.append(copy);
