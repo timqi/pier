@@ -30,6 +30,10 @@ than the panel, a neutral translucent hairline (light in dark mode), a top-edge
 highlight, and a two-part shadow — wide ambient plus tight contact — shared by
 sidebar, chat heading and menus through one glass token set; the composer and
 the open drawer, which sit over content, take the same set one step raised.
+On desktop the transcript runs the full pane and the heading and composer dock
+float over it, so rows scroll under the glass and dissolve at the pane's edges
+rather than being cut at a chrome boundary; the pane pads its ends by what
+covers them. Phones keep the heading and composer in flow.
 The mobile drawer keeps its available width and uses rounded outer corners
 without desktop panel margins. The desktop chat heading uses the same glass
 material in a slim inset rounded strip. Keep the outer page edge neutral and

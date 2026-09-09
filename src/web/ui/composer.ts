@@ -43,6 +43,7 @@ const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
 const queueLabel = $("#queue-label");
 const recoveryPanel = h("div", "hidden max-h-48 overflow-y-auto border-t border-neutral-200 px-3 py-1.5 text-[13px]");
+recoveryPanel.id = "recovery-panel";
 queuePanel.after(recoveryPanel);
 const imageStrip = $("#image-strip");
 const attachInput = $<HTMLInputElement>("#attach-input");
@@ -84,6 +85,20 @@ function trackKeyboard(): void {
   // The keyboard arrives as a resize, the scroll under it as an offset change.
   vv.addEventListener("resize", sync);
   vv.addEventListener("scroll", sync);
+}
+
+/** On desktop the dock (queue, recovery, composer) floats over the transcript
+ *  (style.css), so the pane pads its tail by the dock's live height — the
+ *  textarea grows and the queue comes and goes, and CSS cannot read either. */
+function trackDock(): void {
+  const main = composer.parentElement!;
+  const parts = [queuePanel, recoveryPanel, composer];
+  const sync = (): void => {
+    const height = parts.reduce((sum, el) => sum + el.offsetHeight, 0);
+    main.style.setProperty("--dock-h", `${String(height)}px`);
+  };
+  const ro = new ResizeObserver(sync);
+  for (const el of parts) ro.observe(el);
 }
 
 export function focusInput(): void {
@@ -438,6 +453,7 @@ async function recallQueue(): Promise<void> {
 export function initComposer(d: ComposerDeps): void {
   deps = d;
   trackKeyboard();
+  trackDock();
   const abort = (): void => {
     const id = deps.sessionId();
     if (id) void fetch(`/api/sessions/${id}/abort`, { method: "POST" });

@@ -163,7 +163,7 @@ html[data-theme="dark"] {
    named scale (`text-sm`) and this block should shrink, not grow. */
 html {
   font-size: 112.5%; /* 18px base */
-  --glass-surface: color-mix(in oklab, var(--color-white) 72%, transparent);
+  --glass-surface: color-mix(in oklab, var(--color-white) 80%, transparent);
   --ease-surface: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Panning is all a touch may do to the document: `user-scalable=no`
      (index.html) is the same sentence for engines that honour it, and a
@@ -204,6 +204,37 @@ html {
   }
   body[data-rail="closed"] #sidebar {
     display: none;
+  }
+  /* The transcript runs the full pane and the glass chrome floats over it, so
+     a message slides under the heading and the dock instead of being cut off
+     at their edges. One column, three rows: the heading pins to the top of
+     row 1, the dock (queue, recovery, composer) owns rows 2–3 by height, and
+     the transcript spans all three, padding its ends by what covers them —
+     the heading's fixed height, and the dock's live one (composer.ts). */
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto auto;
+  }
+  /* Explicit column on everything: auto-placement would push an overlapping
+     item into an implicit second column rather than stack it. */
+  main > * { grid-column: 1; }
+  main > section, #turns { grid-row: 1 / -1; }
+  #chat-header { grid-row: 1; align-self: start; }
+  #queue-panel { grid-row: 2; }
+  #recovery-panel { grid-row: 3; }
+  #composer { grid-row: 4; }
+  :is(#chat-header, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
+  /* The two panels take the composer's footprint when they show: same glass,
+     same width, rounded onto the top of the composer rather than a full-width
+     bar over the transcript. */
+  #queue-panel, #recovery-panel {
+    width: 100%;
+    max-width: 58rem;
+    margin-inline: auto;
+    border: 1px solid var(--glass-edge);
+    border-bottom: 0;
+    border-radius: 1rem 1rem 0 0;
   }
   /* The rail floats above the canvas; the conversation keeps its full pane. */
   #sidebar {
@@ -357,7 +388,7 @@ main {
 }
 #console-section button.bg-indigo-50 [data-icon] { color: inherit; }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
-:is(.glass, #sidebar, #mobile-bar, #chat-header,
+:is(.glass, #sidebar, #mobile-bar, #chat-header, #queue-panel, #recovery-panel,
   main > section > header:first-child, main > section > div:first-child > header:first-child) {
   background: var(--glass-surface);
   border-color: var(--glass-edge);
@@ -383,6 +414,16 @@ main {
 }
 #turns {
   padding: 1rem max(1rem, calc((100% - 58rem) / 2)) 1.5rem;
+}
+/* Desktop: the ends are under the floating chrome (grid above), so they pad
+   by what covers them, and rows dissolve into the pane's edges instead of
+   showing raw in the margins around it. */
+@media (width >= 48rem) {
+  #turns {
+    padding-top: calc(3rem + 8px + 0.75rem);
+    padding-bottom: calc(var(--dock-h, 4rem) + 0.5rem);
+    mask-image: linear-gradient(to bottom, transparent, black 2.5rem, black calc(100% - 2rem), transparent);
+  }
 }
 #turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
@@ -542,7 +583,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: scale(0.95); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.glass, #sidebar, #mobile-bar, #chat-header,
+  :is(.glass, #sidebar, #mobile-bar, #chat-header, #queue-panel, #recovery-panel,
     main > section > header:first-child, main > section > div:first-child > header:first-child) {
     background: var(--color-white);
     backdrop-filter: none;

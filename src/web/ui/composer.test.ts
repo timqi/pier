@@ -50,6 +50,7 @@ beforeEach(async () => {
   vi.stubGlobal("document", { activeElement: null });
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("confirm", () => true);
+  vi.stubGlobal("ResizeObserver", class { observe() {} });
   vi.stubGlobal("fetch", state.fetch);
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => drafts.get(key) ?? null,
