@@ -11,7 +11,9 @@ import type { TaskMessenger } from "./messages.js";
 import type { TaskStore } from "./store.js";
 import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
 
-const MAX_ACTIVE_AGENTS = 4;
+// Agent runs are I/O-bound: the cap is there for API pressure and runaway
+// fan-out, not for this machine's CPU.
+const MAX_ACTIVE_AGENTS = 6;
 const log = logger("tasks");
 
 /** Every session gets the chat-surface contract, task runs included, so the

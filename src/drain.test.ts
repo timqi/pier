@@ -274,9 +274,9 @@ const processScript = `
       const source = session("source");
       source.state = "streaming";
       router.attach({ channelId: "slack", conversationId: "source-thread" }, source);
-      // Four slots total: the root plus three members run, the fourth member
+      // Six slots total: the root plus five members run, the sixth member
       // is durably queued. The unfinished join must be evaluated at next boot.
-      tasks.runGroup([task, task, task, task], "all", "parent", null, "parent");
+      tasks.runGroup([task, task, task, task, task, task], "all", "parent", null, "parent");
     }
     const beginDrain = once(process, "message");
     await send({ phase: "ready", rootId: root.id });
@@ -390,7 +390,7 @@ describe("restart process boundaries", () => {
     const second = restartProcess(dir, "recover-fail");
     const recovered = await second.phase("recovered");
     expect(await second.exited).toEqual({ code: 0, signal: null });
-    expect(recovered.runs).toEqual(Array.from({ length: 5 }, () => expect.objectContaining({ state: "interrupted" })));
+    expect(recovered.runs).toEqual(Array.from({ length: 7 }, () => expect.objectContaining({ state: "interrupted" })));
     expect(recovered.inputs).toHaveLength(2); // root callback plus one group, never member callbacks
     expect(recovered.notes).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "parent-thread", text: expect.stringContaining("state: interrupted") }),

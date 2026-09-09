@@ -156,7 +156,7 @@ which scheduled runs lack.
 - Depth 0–2: three levels of nesting below the invoking session; a fourth
   level errors. Each root allows 16 descendant runs (depth ≥1, resumes included). Your direct
   children are separate roots and do not count toward that limit.
-- 4 Agent runs execute instance-wide; others queue without error. Timeout
+- 6 Agent runs execute instance-wide; others queue without error. Timeout
   starts **at enqueue**, so a run can time out before starting.
 - Default timeout 900s; `timeoutSeconds:1–86400` in draft form only. Timeout
   reports `failed / task timed out`.

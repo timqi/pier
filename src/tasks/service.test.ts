@@ -1194,7 +1194,7 @@ describe("task service", () => {
     { sameRoot: false, cancelQueued: false },
     { sameRoot: true, cancelQueued: true },
     { sameRoot: false, cancelQueued: true },
-  ])("keeps four agent slots across roots: $sameRoot, queued cancellation: $cancelQueued", async ({ sameRoot, cancelQueued }) => {
+  ])("keeps six agent slots across roots: $sameRoot, queued cancellation: $cancelQueued", async ({ sameRoot, cancelQueued }) => {
     const { cwd, service, factory } = setup();
     onTestFinished(() => service.stop());
     const sessions: ReturnType<typeof hangingSession>[] = [];
@@ -1208,21 +1208,21 @@ describe("task service", () => {
       trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" },
     });
-    const runs = Array.from({ length: 5 }, () => service.run(task.id, null, "agent", null,
+    const runs = Array.from({ length: 7 }, () => service.run(task.id, null, "agent", null,
       sameRoot ? { rootRunId: "shared-root" } : {}));
-    expect(new Set(runs.map((run) => run.rootRunId)).size).toBe(sameRoot ? 1 : 5);
-    await vi.waitFor(() => expect(runs.slice(0, 4).map((run) => service.getRun(run.id).state))
-      .toEqual(["running", "running", "running", "running"]));
-    expect(factory.create).toHaveBeenCalledTimes(4);
-    expect(service.getRun(runs[4]!.id)).toMatchObject({ state: "queued", startedAt: null, targetSessionId: null });
+    expect(new Set(runs.map((run) => run.rootRunId)).size).toBe(sameRoot ? 1 : 7);
+    await vi.waitFor(() => expect(runs.slice(0, 6).map((run) => service.getRun(run.id).state))
+      .toEqual(Array.from({ length: 6 }, () => "running")));
+    expect(factory.create).toHaveBeenCalledTimes(6);
+    expect(service.getRun(runs[6]!.id)).toMatchObject({ state: "queued", startedAt: null, targetSessionId: null });
 
-    let waiting = runs[4]!;
+    let waiting = runs[6]!;
     if (cancelQueued) {
       service.cancel(waiting.id);
       expect(await service.waitForRun(waiting.id)).toMatchObject({ state: "cancelled", startedAt: null, targetSessionId: null });
       waiting = service.run(task.id, null, "agent", null, sameRoot ? { rootRunId: "shared-root" } : {});
       runs.push(waiting);
-      expect(factory.create).toHaveBeenCalledTimes(4);
+      expect(factory.create).toHaveBeenCalledTimes(6);
       expect(service.getRun(waiting.id)).toMatchObject({ state: "queued", startedAt: null, targetSessionId: null });
     }
 
@@ -1230,23 +1230,23 @@ describe("task service", () => {
     await sessions[0]!.abort();
     expect((await service.waitForRun(runs[0]!.id)).state).toBe("succeeded");
     await vi.waitFor(() => expect(service.getRun(waiting.id).state).toBe("running"));
-    expect(factory.create).toHaveBeenCalledTimes(5);
-    expect(runs.filter((run) => service.getRun(run.id).state === "running")).toHaveLength(4);
+    expect(factory.create).toHaveBeenCalledTimes(7);
+    expect(runs.filter((run) => service.getRun(run.id).state === "running")).toHaveLength(6);
     await Promise.all(sessions.slice(1).map((session) => session.abort()));
     const done = await Promise.all(runs.map((run) => service.waitForRun(run.id)));
     expect(done.map((run) => run.state)).toEqual(cancelQueued
-      ? ["succeeded", "succeeded", "succeeded", "succeeded", "cancelled", "succeeded"]
-      : ["succeeded", "succeeded", "succeeded", "succeeded", "succeeded"]);
+      ? [...Array.from({ length: 6 }, () => "succeeded"), "cancelled", "succeeded"]
+      : Array.from({ length: 7 }, () => "succeeded"));
   });
 
-  it("leaves slots available to a fresh run behind four runs reusing one session", async () => {
+  it("leaves slots available to a fresh run behind six runs reusing one session", async () => {
     const { cwd, service, session, factory } = setup(hangingSession("shared"));
     onTestFinished(() => service.stop());
     const reuse = await service.create({
       name: "reuse", trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
     });
-    const runs = Array.from({ length: 4 }, () => service.run(reuse.id, null, "agent"));
+    const runs = Array.from({ length: 6 }, () => service.run(reuse.id, null, "agent"));
     await vi.waitFor(() => expect(session.systemInputs).toHaveLength(1));
     vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("independent"));
     const fresh = await service.create({
@@ -1255,7 +1255,8 @@ describe("task service", () => {
     });
     const independent = service.run(fresh.id);
     await vi.waitFor(() => expect(service.getRun(independent.id).state).toBe("succeeded"));
-    expect(runs.map((run) => service.getRun(run.id).state)).toEqual(["running", "queued", "queued", "queued"]);
+    expect(runs.map((run) => service.getRun(run.id).state))
+      .toEqual(["running", ...Array.from({ length: 5 }, () => "queued")]);
     for (const run of runs) {
       await vi.waitFor(() => expect(service.getRun(run.id).state).toBe("running"));
       await session.abort();
