@@ -109,6 +109,10 @@ declare const __PIER_VERSION__: string; // injected by vite.config.ts
 // --- state ---------------------------------------------------------------------
 
 let sessions: SessionInfo[] = [];
+// The selected session when it is not a row — a task run's own, opened from
+// Runs or Activity. Fetched by id so the header can name it and its info panel
+// can be opened like any other session's.
+let detached: SessionInfo | null = null;
 let selectionSeq = 0;
 let loadSeq = 0;
 let loading = false;
@@ -199,7 +203,18 @@ function maybeAckRead(): void {
 
 /** The selected session's persisted summary, when it exists. */
 function currentSession(): SessionInfo | undefined {
-  return sessions.find((s) => s.id === currentId);
+  return sessions.find((s) => s.id === currentId)
+    ?? (detached && detached.id === currentId ? detached : undefined);
+}
+
+/** Summary of a selected session the listing does not carry. */
+async function loadDetached(id: string): Promise<void> {
+  const got = await getJson<SessionInfo>(`/api/sessions/${id}`, "failed to load session");
+  // A 404 here is a session that is genuinely gone; the snapshot load says so
+  // in the transcript, and the header keeps naming it by its id.
+  if (currentId !== id || !got.ok) return;
+  detached = { ...got.value, title: readableTitle(got.value.title) };
+  renderHeader();
 }
 
 /** First prompt titles the session optimistically — the server list, which
@@ -362,6 +377,8 @@ async function select(id: string): Promise<void> {
   starting = false;
   saveDraft(); // the outgoing session keeps its unsent text
   currentId = id;
+  detached = null;
+  if (!sessions.some((s) => s.id === id)) void loadDetached(id);
   currentState = sessions.find((s) => s.id === id)?.state ?? "idle";
   restoreDraft(id);
   renderSessions();

@@ -11,6 +11,7 @@ surface owns its routes and is mounted beside it.
 | Route | Behavior |
 | ----- | -------- |
 | `GET /api/sessions` | `AgentFactory.list()` joined with live router state, unread flags and working-set `rank`; `modified` is metadata, not the rail's ordering key |
+| `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing, and the header that opened it from Runs names it and fills its info panel from here; 404 if unknown |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |

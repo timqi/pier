@@ -246,6 +246,17 @@ export function createServer(
     return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active)));
   });
 
+  // One session by id, the listing's filters aside: a task run's own session is
+  // never a row (allSessions), and the pane that opened it from Runs still has
+  // a header to name and a session info panel to fill.
+  app.get("/api/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    const n = nascent.get(id);
+    const summary = n ? { id, ...n } : (await listSessions()).find((s) => s.id === id);
+    if (!summary) return c.json({ error: `no session ${id}` }, 404);
+    return c.json(present(summary, state.flags().get(id), activeRuns()));
+  });
+
   // What was said, across every session: the palette's Messages section. The
   // factory owns the index and the ranking; an empty query is an empty answer,
   // not a listing of everything.

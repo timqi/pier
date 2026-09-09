@@ -5,6 +5,7 @@ import type { ChatTurn } from "../../core/types.js";
 
 const h = vi.hoisted(() => ({
   sidebar: null as unknown as Parameters<typeof import("./sidebar.js").initSidebar>[0],
+  header: null as unknown as Parameters<typeof import("./session-header.js").initHeader>[0],
   composer: null as unknown as Parameters<typeof import("./composer.js").initComposer>[0],
   history: vi.fn<(url: string) => Promise<Response>>(),
   create: vi.fn<() => Promise<Response>>(),
@@ -31,7 +32,7 @@ vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
 vi.mock("./palette.js", () => ({ initPalette: vi.fn() }));
 vi.mock("./report.js", () => ({ initReport: vi.fn() }));
 vi.mock("./session-header.js", () => ({
-  initHeader: vi.fn(), noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),
+  initHeader: (deps: typeof h.header) => { h.header = deps; }, noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),
   sessionInfo: vi.fn(), sessionMenu: vi.fn(), setHeaderPending: vi.fn(), setHeaderState: vi.fn(),
 }));
 vi.mock("./shell.js", () => ({ closeDrawer: vi.fn(), initShell: vi.fn() }));
@@ -92,6 +93,13 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
     if (url === "/api/sessions" && init?.method === "POST") return h.create();
+    const one = /^\/api\/sessions\/([^/]+)$/.exec(url);
+    if (one && !init?.method) {
+      const id = one[1] as string;
+      return Promise.resolve(id === "gone"
+        ? Response.json({ error: "no session" }, { status: 404 })
+        : Response.json({ id, cwd: "/run", createdAt: 2, state: "idle" }));
+    }
     return Promise.resolve(Response.json(rows));
   }));
   await import("./main.js");
@@ -111,6 +119,21 @@ describe("session loads", () => {
     expect(h.renderRecovery).toHaveBeenLastCalledWith([], true);
     latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 2, ts: 1, type: "queue-recovery", batches: [], uncertain: false }) });
     expect(h.renderRecovery).toHaveBeenLastCalledWith([], false);
+  });
+
+  // Opened from Runs or Activity: a task run's own session is never a row, and
+  // the header would otherwise have nothing to name or to open its info panel on.
+  it("fetches the summary of a selected session the listing does not carry", async () => {
+    h.history.mockImplementation(() => Promise.resolve(snapshot("loaded")));
+    h.sidebar.select("run-1");
+    await settled();
+    expect(h.header.currentSession()).toMatchObject({ id: "run-1", cwd: "/run" });
+    h.sidebar.select("a");
+    await settled();
+    expect(h.header.currentSession()).toMatchObject({ id: "a", cwd: "/test" });
+    h.sidebar.select("gone");
+    await settled();
+    expect(h.header.currentSession()).toBeUndefined();
   });
 
   it("reselecting during a load or on a healthy stream keeps the current generation", async () => {

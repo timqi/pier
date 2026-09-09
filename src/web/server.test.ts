@@ -497,6 +497,12 @@ describe("workbench server", () => {
     store.saveRun(run("borrowed", { sessionMode: "reuse", targetSessionId: "s1", context: { definition: task, sessionId: "s1" } }));
     const rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows.map((row) => row.id)).toEqual(["s1"]);
+    // Not a row, but a header and an info panel of its own: the by-id route
+    // presents it like any other session.
+    const res = await app.request("/api/sessions/child");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "child", cwd: "/tmp", createdAt: 2, state: "idle" });
+    expect((await app.request("/api/sessions/gone")).status).toBe(404);
   });
 
   // The badge counts "web" rows only (ui/sidebar.ts): an IM turn is delivered
