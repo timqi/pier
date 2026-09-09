@@ -225,17 +225,20 @@ html {
   #recovery-panel { grid-row: 3; }
   #composer { grid-row: 4; }
   :is(#chat-header, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
-  /* The two panels take the composer's footprint when they show: same glass,
-     same width, rounded onto the top of the composer rather than a full-width
-     bar over the transcript. */
+  /* The two panels are cards on the dock, not bars over the transcript: the
+     composer's own width and inset, an edge all round, and the 0.5rem the
+     composer's top padding already leaves between the stack and the input.
+     Attaching them to the pill instead would have to unround its top corners
+     and hide its top border in two more states, for a seam either way. */
   #queue-panel, #recovery-panel {
-    width: 100%;
+    width: calc(100% - 2rem);
     max-width: 58rem;
     margin-inline: auto;
     border: 1px solid var(--glass-edge);
-    border-bottom: 0;
-    border-radius: 1rem 1rem 0 0;
+    border-radius: 1.25rem;
+    box-shadow: var(--glass-shadow);
   }
+  #queue-panel:not(.hidden) + #recovery-panel { margin-top: 0.5rem; }
   /* The rail floats above the canvas; the conversation keeps its full pane. */
   #sidebar {
     min-height: 0;
@@ -388,12 +391,20 @@ main {
 }
 #console-section button.bg-indigo-50 [data-icon] { color: inherit; }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
-:is(.glass, #sidebar, #mobile-bar, #chat-header, #queue-panel, #recovery-panel,
+:is(.glass, #sidebar, #mobile-bar, #chat-header,
   main > section > header:first-child, main > section > div:first-child > header:first-child) {
   background: var(--glass-surface);
   border-color: var(--glass-edge);
   backdrop-filter: blur(28px) saturate(1.4);
   -webkit-backdrop-filter: blur(28px) saturate(1.4);
+}
+/* The queue is the composer's overflow, not a second composer: the wash is the
+   amber the send button, the label and the queue actions already carry. Solid,
+   for the reason a menu is — these are messages, and a transcript coming
+   through the text you are about to send is noise. */
+#queue-panel, #recovery-panel {
+  background: color-mix(in oklab, var(--color-amber-50) 55%, var(--color-white));
+  border-color: var(--glass-edge);
 }
 /* Chrome is glanced at, a menu is read: model ids, paths and session actions
    are scanned over whatever is scrolling behind them, and a transcript coming

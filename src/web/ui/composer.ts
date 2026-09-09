@@ -42,7 +42,7 @@ const stopBtn = $("#stop");
 const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
 const queueLabel = $("#queue-label");
-const recoveryPanel = h("div", "hidden max-h-48 overflow-y-auto border-t border-neutral-200 px-3 py-1.5 text-[13px]");
+const recoveryPanel = h("div", "hidden max-h-48 overflow-y-auto border-t border-neutral-200 px-4 py-2 text-[13px]");
 recoveryPanel.id = "recovery-panel";
 queuePanel.after(recoveryPanel);
 const imageStrip = $("#image-strip");
