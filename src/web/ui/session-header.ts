@@ -55,6 +55,14 @@ const chatTitle = $("#chat-title");
 const chatMenu = $("#chat-menu");
 const sessionMeta = $("#session-meta");
 
+/** The catalog and the reasoning levels a model offers: both answer a question
+ *  about the backend, not about one session, so the first read warms every
+ *  later picker. Rendered at once, then reconciled by the read behind it — a
+ *  list one session unshifted its own model into is corrected there. */
+let catalog: ModelRef[] | null = null;
+const levelsByModel = new Map<string, ThinkingLevel[]>();
+const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
+
 /** Model + context usage of the *current* session (from its snapshot). */
 let currentModel: ModelRef | null = null;
 let currentContext: ContextUsage | null = null;
@@ -242,6 +250,9 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
 async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo): Promise<void> {
   const loading = h("div", "px-3 py-3 text-[15px] text-neutral-500", "Loading models…");
   const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full", loading);
+  // What the panel is showing right now — the placeholder, then the picker the
+  // cache drew, then the picker the read reconciled.
+  let shown: HTMLElement = loading;
   if (session) {
     const back = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
     back.setAttribute("aria-label", "Back to session actions");
@@ -255,7 +266,33 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
   }
   openPanel(anchor, content);
   // Closing or replacing the panel cancels presentation of an in-flight read.
-  const visible = (): boolean => loading.isConnected && !loading.closest("[inert]");
+  const visible = (): boolean => shown.isConnected && !shown.closest("[inert]");
+  // A reconcile that changes nothing must not redraw: it would drop the search
+  // the user typed and collapse the group they just opened.
+  let drawn = "";
+  const draw = (models: ModelRef[], level: ThinkingLevel, levels: ThinkingLevel[]): void => {
+    const state = JSON.stringify([models, level, levels]);
+    if (state === drawn) return;
+    drawn = state;
+    const picker = modelPicker({
+      models,
+      current: id === deps.currentId() ? currentModel : null,
+      thinkingLevel: level,
+      thinkingLevels: levels,
+      onPick: (m, thinking) => {
+        closeMenu();
+        void applyModel(id, m, thinking);
+      },
+      onThinkingPick: (picked) => void setThinkingLevel(id, picked),
+    });
+    shown.replaceWith(picker);
+    shown = picker;
+    openPanel(anchor, content);
+  };
+  // Only the current session's model and level are known here, so only its
+  // picker opens on the cache; another session's still waits for the read.
+  const warm = id === deps.currentId() && currentModel ? levelsByModel.get(modelKey(currentModel)) : undefined;
+  if (catalog && warm && currentThinking) draw(catalog, currentThinking, warm);
   try {
     const [models, thinking] = await Promise.all([
       mustGetJson<ModelRef[]>(`/api/sessions/${id}/models`, "Could not load models"),
@@ -264,23 +301,15 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
         "Could not read the reasoning level",
       ),
     ]);
+    catalog = models;
+    if (id === deps.currentId() && currentModel) levelsByModel.set(modelKey(currentModel), thinking.levels);
     if (!visible()) return;
-    loading.replaceWith(
-      modelPicker({
-        models,
-        current: id === deps.currentId() ? currentModel : null,
-        thinkingLevel: thinking.level,
-        thinkingLevels: thinking.levels,
-        onPick: (m, thinking) => {
-          closeMenu();
-          void applyModel(id, m, thinking);
-        },
-        onThinkingPick: (level) => void setThinkingLevel(id, level),
-      }),
-    );
-    openPanel(anchor, content);
+    draw(models, thinking.level, thinking.levels);
   } catch (err) {
-    if (visible()) {
+    // A cached picker is on screen and may be out of date, so the failure goes
+    // to the transcript rather than replacing a list the user can still use.
+    if (drawn) appendTurn("error", `model options are stale: ${String(err)}`);
+    else if (visible()) {
       loading.textContent = `Could not load models: ${String(err)}`;
       loading.setAttribute("role", "alert");
     } else {
