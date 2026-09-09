@@ -23,6 +23,9 @@
 /* A cool paper canvas; keep secondary labels readable at the compact UI scale. */
 html {
   color-scheme: light;
+  --workbench-canvas: #f7f9f8;
+  --workbench-mist: #edf5f6;
+  --workbench-mint: #eef6f1;
   --color-neutral-50: oklch(98% 0.004 260);
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
@@ -46,9 +49,10 @@ html {
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  /* No element paints the page itself — `bg-white` starts at the panes — so
-     without this the canvas would be whatever the UA picks for a dark scheme. */
-  background-color: var(--color-white);
+  --workbench-canvas: #181c1f;
+  --workbench-mist: #202b30;
+  --workbench-mint: #202c28;
+  background-color: var(--workbench-canvas);
 
   /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
      rail), 100–300 the chrome over it; 400 and up is type. */
@@ -187,12 +191,27 @@ html {
   body[data-rail="closed"] #sidebar {
     display: none;
   }
-  /* Open: the rail's top-right corner (14.5rem column − button − gutter). */
+  /* The rail floats above the canvas; the conversation keeps its full pane. */
+  #sidebar {
+    min-height: 0;
+    margin: 8px;
+    border: 1px solid var(--glass-edge);
+    border-radius: 20px;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.07);
+  }
+  /* Keep the handle inside the inset panel's title band. */
   #rail-toggle {
-    left: 12.375rem;
+    left: calc(12.375rem - 8px);
+  }
+  body:not([data-rail="closed"]) #rail-toggle {
+    top: calc(0.625rem + 8px);
   }
   body[data-rail="closed"] #rail-toggle {
     left: 0.375rem;
+  }
+  body[data-rail="closed"]:has(#chat-header:not(.hidden)) #rail-toggle {
+    left: calc(0.375rem + 8px);
+    top: calc(0.625rem + 8px);
   }
   body[data-rail="closed"] #rail-toggle svg {
     transform: rotate(180deg);
@@ -220,6 +239,7 @@ html {
     left: 0;
     z-index: 40;
     width: 19rem;
+    border-radius: 0 20px 20px 0;
     transform: translateX(-100%);
     transition: transform 220ms var(--ease-surface);
   }
@@ -237,13 +257,6 @@ html {
   #sidebar[data-open] {
     transform: translateX(0);
     box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
-  }
-  /* The drawer is a primary surface on a phone, not a rail: the two lists carry
-     their own size utilities, so naming them is the only way to scale them up. */
-  #sidebar,
-  #console-section ul,
-  #session-list {
-    font-size: 0.9375rem;
   }
   /* Pull-to-refresh would reload the workbench mid-turn; the transcript pane
      keeps its own scroll chaining. */
@@ -268,17 +281,12 @@ html {
   #sidebar {
     padding-top: env(safe-area-inset-top);
   }
-  /* Thumb-sized rows in the drawer; the desktop rail stays compact. */
-  #session-list li,
-  #console-section li button {
-    padding-block: 0.5rem;
-  }
 }
 
 /* Shared chrome belongs below utilities so local layout and state still win. */
 @layer base {
   body {
-    background: radial-gradient(ellipse at top left, var(--color-indigo-100), transparent 55%), var(--color-neutral-50);
+    background: var(--workbench-canvas);
   }
   ::selection { background: var(--color-indigo-100); color: var(--color-indigo-800); }
   :focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 3px; }
@@ -288,19 +296,50 @@ html {
   * { scrollbar-width: thin; scrollbar-color: var(--color-neutral-300) transparent; }
 }
 
+/* Quiet color at the foot of the conversation; the top edge matches PWA chrome. */
+main {
+  background:
+    radial-gradient(ellipse 80% 65% at 100% 100%, var(--workbench-mist), transparent 75%),
+    radial-gradient(ellipse 70% 65% at 0% 100%, var(--workbench-mint), transparent 75%);
+}
+/* Desktop keeps a 36px navigation rhythm; the drawer retains touch targets. */
+#sidebar { font-size: 0.875rem; line-height: 1.4; }
+#sidebar :is(.session-open, #new-session, #open-archive), #console-section li button {
+  min-height: 2rem;
+  padding-block: 0.25rem;
+}
+@media (width < 48rem) {
+  #sidebar { font-size: 0.9375rem; line-height: 1.5; }
+}
 /* Navigation shares the same inset shape in the Console and session list. */
 #console-section ul, #session-list { padding-inline: 0.5rem; }
 #console-section li button, #session-list li {
-  border-radius: 0.875rem;
-  margin-block: 0.25rem;
+  border-radius: 0.625rem;
+  margin-block: 0.125rem;
   transition: background-color 180ms, color 180ms;
 }
 #console-section li button { padding-left: 0.75rem; }
-#session-list li { padding-inline: 0.625rem; }
+#session-list li { padding-inline: 0.375rem; }
+#session-list .session-open { padding-left: 0.25rem; }
+#session-list :focus-visible { outline-offset: -2px; }
+#session-list li:focus-within .session-more,
+#session-list .session-more[aria-expanded="true"] { display: flex; }
+@media (hover: hover) and (pointer: fine) {
+  #session-list li:hover .session-more { display: flex; }
+}
+@media (hover: none), (pointer: coarse) {
+  #session-list li:has([aria-current="page"]) .session-more { display: flex; }
+}
+@media (pointer: coarse), (width < 48rem) {
+  #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-archive),
+  #console-section :is(summary, li button) { min-height: 44px; }
+  #sidebar :is(.session-more, .icon-btn, #open-archive) { min-width: 44px; }
+}
 #console-section button.bg-indigo-50, #session-list li.bg-indigo-50 {
   color: var(--color-indigo-700);
-  background-color: var(--color-white);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.06), inset 0 0 0 1px var(--glass-edge);
+  font-weight: 500;
+  background-color: var(--color-indigo-100);
+  box-shadow: none;
 }
 #console-section button.bg-indigo-50 [data-icon] { color: inherit; }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
@@ -311,8 +350,19 @@ html {
   backdrop-filter: blur(20px) saturate(1.35);
   -webkit-backdrop-filter: blur(20px) saturate(1.35);
 }
-#sidebar { background: color-mix(in oklab, var(--color-neutral-50) 76%, transparent); }
 #rail-toggle { top: 0.625rem; border-radius: 50%; }
+#chat-header {
+  margin: 8px 8px 0;
+  border: 1px solid var(--glass-edge);
+  border-radius: 18px;
+  font-size: 0.9375rem;
+}
+#mobile-bar {
+  background: var(--workbench-canvas);
+  border-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 :is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
   height: 3rem;
 }
@@ -591,7 +641,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     background-position: right 0.5rem center;
     background-size: 0.9rem;
   }
-  /* Sidebar section actions (search / new). */
+  /* Compact icon-only controls, including the theme switch. */
   .icon-btn {
     @apply flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700;
   }

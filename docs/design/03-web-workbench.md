@@ -107,7 +107,32 @@ per-turn Activity groups):
   set; background activity does not reorder rows under the pointer. State dots,
   titles and session actions share the existing listing and event state. More
   sessions remain available through pagination and the search palette. The New
-  session directory picker offers the listing's distinct directories.
+  session directory picker offers the listing's distinct directories. A labeled
+  New session button and a separate magnifier button share one row below the
+  brand. New session uses the primary blue fill; Search uses a muted neutral
+  fill with a contrasting icon. Search keeps its accessible name
+  and the existing shortcut hover hint. Status dots appear after the title only
+  when needed; idle sessions reclaim their width. Title left edges stay aligned,
+  while status and action changes may alter trailing truncation. Action buttons
+  take no space until desktop hover or keyboard focus reveals them. On touch,
+  the current session keeps its action visible; other rows reclaim that width.
+  List refreshes retain
+  the focused session control, and Load more focuses the first added session.
+  An expanded menu keeps its trigger visible and reuses that button across list
+  refreshes so closing the menu can restore focus. Pagination also retains focus
+  on refresh, falling back to a remaining session when Load more disappears.
+  The mobile drawer removes hidden controls from the tab order, contains focus
+  while open, and restores the visible drawer or desktop rail toggle on dismissal
+  or a breakpoint change; Escape dismisses it before
+  reaching the conversation's stop shortcut. Touch controls have 44px minimum
+  targets. On desktop, the sidebar floats in an 8px inset panel with a 20px
+  radius, a glass surface, a thin border and a soft shadow. Its system sans-serif
+  type is 0.875rem with 1.4 line height and 2rem minimum rows (about 16/22/36px
+  at the default scale). Compact section and action spacing leaves room for
+  sessions. The mobile drawer stays full-height without exterior margins,
+  rounds its outer corners, and keeps 0.9375rem type with 1.5 leading. Section
+  labels use sentence case; selected rows use medium weight and a flat blue
+  tint, and channel initials retain readable secondary contrast.
 - **Search palette** (search icon, ⌘K): sessions searchable by title, directory
   and channel, under Running / Recent / Sessions, plus Console destinations.
   Working-set rank and unread state belong to `web/session-state.ts`; the
@@ -119,7 +144,16 @@ per-turn Activity groups):
   session's state is defaulted client-side; a reload shows real step counts and
   the correct composer buttons.
 - **Chat header**: title, compact model/reasoning/context metadata and the `⋯`
-  session menu. The mobile top bar retains the title and session actions.
+  session menu. On desktop it uses an 8px inset, rounded glass strip matching the
+  sidebar material, with the collapsed rail handle aligned inside it. The mobile
+  top bar retains the title and session actions on the page's solid canvas color.
+- **Workbench color and installed chrome**: a pale neutral canvas with subtle
+  mist-blue and mint gradients confined to the lower conversation area; message
+  surfaces remain solid. CSS `--workbench-canvas` is the runtime source for the
+  page edge and `theme-color` metadata. The pre-bundle script mirrors its light
+  and dark values for startup, follows the system when storage is unavailable,
+  and the manifest uses the light value for its launch fallback. Native window
+  chrome remains browser/OS controlled; these values request a matching tint.
 - **Session menu** (`menu.ts`): one anchored popover primitive, one open at a
   time, closed by outside pointerdown / focus leaving / Esc / page scroll (scrolling *inside*
   the panel does not close it). Below 640px it becomes a bottom sheet with the

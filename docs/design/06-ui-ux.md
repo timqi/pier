@@ -23,6 +23,15 @@ Use solid surfaces for replies, modal forms, search dialogs, and file previews.
 Reserve glass, subtle borders, and shadows for navigation and floating controls where they
 clarify layering. Coordinate corner radii with nesting rather than imposing one radius everywhere.
 Reuse the shared palette, controls, menus, and time labels instead of inventing page-specific styles.
+The desktop sidebar uses one inset floating panel with restrained glass, border
+and shadow; its rows stay flat, with selection expressed through tint and weight.
+The mobile drawer keeps its available width and uses rounded outer corners
+without desktop panel margins. The desktop chat heading uses the same glass
+material in a slim inset rounded strip. Keep the outer page edge neutral and
+match installed-window theme metadata to that canvas in both themes, including
+startup; the mobile heading stays on the solid canvas. Reserve the very pale
+mist-blue and mint background accents for the lower conversation area so color
+supports reading without tinting the entire workspace.
 Action menus align labels without a reserved selection column; only selectable
 options reserve checkmarks. Group related actions with restrained separators and
 truncate secondary hints. Phone session sheets identify the target session and
@@ -108,7 +117,21 @@ SVGs are hidden from assistive technology; the control retains its text or acces
 label, and selected/loading/error states keep their existing state and text. The Pier
 brand, data graphics, keyboard shortcut notation and symbols in actual content stay intact.
 Account for safe areas and software keyboards; content panels own scrolling, and wide content
-must not force the whole conversation to scroll horizontally.
+must not force the whole conversation to scroll horizontally. Navigation titles
+keep their left edge aligned. Trailing status marks occupy space only when
+present; actions also reclaim their width when hidden. Hover and keyboard focus
+reveal desktop row actions; touch keeps the current session's action visible.
+Titles may truncate earlier while these controls appear, but their left edge
+stays aligned. The labeled New session action and a distinct magnifier share a
+row: New session has the primary blue fill and Search a muted neutral fill with
+contrasting icon. Search retains an accessible name and
+shortcut hint. Row actions remain
+reachable by keyboard and touch, with 44px minimum touch targets. A closed mobile
+drawer is inert; an open drawer owns keyboard focus, supports Escape, and returns
+focus on dismissal. Sidebar type uses the system sans-serif stack, sentence-case
+section labels and medium-weight selection. Desktop rows use a denser reading
+rhythm than the touch drawer; keep section gaps restrained, titles on one line
+and sessions in their own scrolling list.
 
 Validate the behavior affected by a change: normal use, failure, cancellation, interruption,
 loading, and reconnection. Exercise keyboard, pointer, touch, narrow and wide viewports,

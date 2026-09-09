@@ -94,13 +94,8 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
 
-/** A row action: a fixed 20px box, which is the row's own line height, so a
- *  button appearing on hover never makes its row taller — padding did. */
-const ROW_BTN =
-  "h-5 w-5 flex-none items-center justify-center rounded leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
-
-/** Row action revealed on hover (resident on touch, which has no hover). */
-const HOVER_BTN = `flex opacity-0 group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 pointer-coarse:opacity-100 ${ROW_BTN}`;
+/** Actions take space only while revealed; touch keeps the current row's reachable. */
+const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
 /**
  * Waiting for *you*, which is narrower than `unread`.
@@ -116,9 +111,8 @@ const HOVER_BTN = `flex opacity-0 group-hover:opacity-100 focus:opacity-100 aria
 const waitingForYou = (s: SessionInfo): boolean => s.unread && s.channel === "web";
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
- *  sky = idle itself but subagents still in flight. Idle is nothing at all —
- *  no slot either, so the title gets the width; a row that says something is
- *  allowed to stand out by being indented. */
+ *  sky = idle itself but subagents still in flight. Idle has no mark or slot;
+ *  the rail puts marks after the title so its left edge stays aligned. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   const mark: [string, string] | null =
     s.state === "streaming"
@@ -162,9 +156,8 @@ export async function renameSession(s: SessionInfo): Promise<void> {
   if (!(await sendJson(`/api/sessions/${s.id}/rename`, { name: typed })).ok) draw(previous);
 }
 
-/** One faint letter, no box: on an instance that mostly talks through Slack
- *  the chip is on most rows, and a boxed constant is noise. */
-const CHIP = "flex-none font-mono text-[10px] uppercase leading-[15px] text-neutral-300";
+/** A readable channel initial without a box on every IM row. */
+const CHIP = "flex-none text-xs font-medium uppercase leading-5 text-neutral-500";
 
 /** Which conversation a session answers, when it is not this workbench. Typing
  *  into a Slack thread's session sends to the people in that thread, and the
@@ -174,30 +167,30 @@ const CHIP = "flex-none font-mono text-[10px] uppercase leading-[15px] text-neut
 const channelChip = (s: SessionInfo): HTMLElement[] =>
   s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
 
-function sessionRow(s: SessionInfo): HTMLElement {
+function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis))): HTMLElement {
   const active = s.id === deps.currentId();
   const li = h(
     "li",
-    `group flex cursor-pointer items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100 ${
+    `flex items-center gap-1 hover:bg-neutral-100 ${
       active ? "bg-indigo-50 hover:bg-indigo-50" : ""
     }`,
   );
-  // Touch has no hover, so a hover-revealed control there is unreachable —
-  // pointer-coarse makes it resident instead.
-  const more = h("button", HOVER_BTN, icon(Ellipsis));
+  more.setAttribute("type", "button");
+  more.setAttribute("aria-label", `Session actions: ${s.title ?? "untitled"}`);
   more.title = "Session actions";
   more.onclick = (ev) => {
     ev.stopPropagation();
     deps.sessionMenu(more, s);
   };
-  li.append(
+  const open = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
+    h("span", "min-w-0 flex-1 truncate", s.title ?? "untitled"),
     ...stateDot(s),
-    // Not the header's `untitled(cwd)`: the row's title attribute already
-    // names the directory, and the long form would truncate to "New session i…".
-    h("span", "truncate", s.title ?? "untitled"),
-    h("div", "ml-auto flex flex-none items-center gap-1", ...channelChip(s), more),
   );
-  li.onclick = () => deps.select(s.id);
+  open.setAttribute("type", "button");
+  if (active) open.setAttribute("aria-current", "page");
+  open.onclick = () => deps.select(s.id);
+  li.dataset.sessionId = s.id;
+  li.append(open, ...channelChip(s), more);
   // The facts the row has no room for, on the native tooltip: where it runs,
   // when it last moved, and — for an IM session — who it answers.
   li.title = [
@@ -235,20 +228,38 @@ export function renderSessions(): void {
   setAttention(waiting.length);
   setUnreadBadge(waiting.length);
   const { rows, hidden } = pageOf(sessions, shown);
-  const nodes: HTMLElement[] = rows.map(sessionRow);
+  // Keep an open menu's trigger alive across refreshes so Escape can return focus.
+  const expanded = sessionList.querySelector<HTMLElement>(".session-more[aria-expanded='true']");
+  const expandedId = expanded?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  const nodes: HTMLElement[] = rows.map((s) => sessionRow(s, s.id === expandedId ? expanded! : undefined));
   if (hidden > 0) {
-    const more = h("li", "cursor-pointer px-3 py-1.5 text-[12.5px] text-neutral-400 hover:bg-neutral-100", `Load more (${hidden})`);
+    const more = h("button", "session-open w-full cursor-pointer rounded-lg text-left text-sm text-neutral-500", `Load more (${hidden})`);
+    more.id = "session-load-more";
+    more.setAttribute("type", "button");
     more.onclick = () => {
       shown += PAGE;
       renderSessions();
+      sessionList.querySelectorAll<HTMLElement>(".session-open")[rows.length]?.focus();
     };
-    nodes.push(more);
+    nodes.push(h("li", "hover:bg-neutral-100", more));
   }
+  const focused = document.activeElement;
+  const focusId = focused?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  const focusAction = focused?.classList.contains("session-more") ? ".session-more" : ".session-open";
   sessionList.replaceChildren(
     ...(nodes.length
       ? [h("ul", "pb-1", ...nodes)]
-      : [h("p", "px-3 py-2 text-[12.5px] leading-snug text-neutral-400", "No sessions yet — create one.")]),
+      : [h("p", "px-3 py-2 text-sm leading-normal text-neutral-500", "No sessions yet — create one.")]),
   );
+  if (focusId) {
+    const row = [...sessionList.querySelectorAll<HTMLElement>("[data-session-id]")].find((el) => el.dataset.sessionId === focusId);
+    // Focus the row first: its action is hidden until :focus-within reveals it.
+    row?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
+    if (focusAction === ".session-more") row?.querySelector<HTMLElement>(focusAction)?.focus({ preventScroll: true });
+  } else if (focused?.id === "session-load-more") {
+    (sessionList.querySelector<HTMLElement>("#session-load-more") ?? sessionList.querySelector<HTMLElement>(".session-open") ?? $("#new-session"))
+      .focus({ preventScroll: true });
+  }
   if (archiveDialog.open) renderArchive();
 }
 
