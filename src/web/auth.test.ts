@@ -215,6 +215,31 @@ describe("login", () => {
     // The window is per client: another address is unaffected.
     expect((await login(a, password, "10.0.0.10")).status).toBe(302);
   });
+
+  it("decides on the throttle and the size before it parses anything", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const post = (body: BodyInit, headers: Record<string, string>) =>
+      a.request("/login", { method: "POST", headers, body });
+    const form = { "content-type": "application/x-www-form-urlencoded" };
+    const body = new URLSearchParams({ password: "x".repeat(8192), next: "/" }).toString();
+    // The length a real client sends; `app.request` adds none on its own.
+    const huge = { ...form, "content-length": String(body.length) };
+
+    // Neither the size nor a wrong type is a password guess: nothing to parse,
+    // and the failure count is untouched.
+    expect((await post(body, { ...huge, "x-forwarded-for": "10.0.0.30" })).status).toBe(413);
+    expect((await post("{}", { "content-type": "application/json", "x-forwarded-for": "10.0.0.30" })).status)
+      .toBe(400);
+    expect((await login(a, password, "10.0.0.30")).status).toBe(302);
+
+    // A throttled client is answered before the body is read at all.
+    const client = "10.0.0.31";
+    for (let i = 0; i < 10; i++) expect((await login(a, "wrong", client)).status).toBe(401);
+    const blocked = await post(body, { ...huge, "x-forwarded-for": client });
+    expect(blocked.status).toBe(429);
+    expect(await blocked.text()).toContain("Too many attempts.");
+  });
 });
 
 describe("changing the password", () => {

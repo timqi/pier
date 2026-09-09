@@ -37,6 +37,8 @@ const MAX_FAILURE_CLIENTS = 1024;
 const OVERFLOW_CLIENT = "\0overflow";
 /** The floor under which the throttle above stops being enough. */
 const MIN_LENGTH = 10;
+/** A password and a path fit; a stranger may not ask for more parsing than that. */
+const MAX_LOGIN_BODY = 4096;
 // scrypt at Node's defaults (N=16384): ~50ms per attempt, which is the point.
 const KEY_BYTES = 32;
 
@@ -318,13 +320,21 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
 
   app.post("/login", async (c) => {
     const client = clientOf(c);
-    const form = await c.req.parseBody();
-    const next = safeNext(form.next);
+    // Before the body is touched: parsing is work, and this is the one write a
+    // stranger may reach. The remembered destination is a casualty of that.
     if (throttled(client)) {
       // A burst here is the only warning an operator gets that the port is being knocked on.
       log.warn(`login throttled for ${client}`);
-      return c.html(loginPage(next, "Too many attempts. Wait a few minutes."), 429);
+      return c.html(loginPage("/", "Too many attempts. Wait a few minutes."), 429);
     }
+    if (!c.req.header("content-type")?.startsWith("application/x-www-form-urlencoded")) {
+      return c.text("expected the sign-in form", 400);
+    }
+    if (Number(c.req.header("content-length") ?? 0) > MAX_LOGIN_BODY) {
+      return c.text("sign-in body too large", 413);
+    }
+    const form = await c.req.parseBody();
+    const next = safeNext(form.next);
     if (!store.verify(typeof form.password === "string" ? form.password : "")) {
       noteFailure(client);
       log.warn(`wrong password from ${client}`);
