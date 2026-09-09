@@ -1,21 +1,29 @@
 // What a parent and a child say to each other while a run is going. Every
 // message is a durable row before it is a delivery: either end may be mid-turn
 // or gone, and an undelivered message is retried, expired and said, never
-// dropped (§5).
+// dropped (§5). Delivery itself belongs to outbox.ts.
 
-import type { AgentSession, SystemInputOrigin } from "../core/types.js";
+import type { SystemInputOrigin } from "../core/types.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
-import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
 import { newId } from "./definitions.js";
+import { Outbox } from "./outbox.js";
 import type { TaskStore } from "./store.js";
-import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
-import { isTerminal, MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable } from "./types.js";
-
-const log = logger("tasks");
+import type { CallbackFields, TaskMessage, TaskMessageKind, TaskMessageState, TaskRun } from "./types.js";
+import { isTerminal } from "./types.js";
 
 const MAX_MESSAGE_LENGTH = 16 * 1024;
+
+/** A message under the engine's column names; `save` writes them back. */
+interface Carried extends CallbackFields {
+  message: TaskMessage;
+}
+
+/** `answered` is a delivery that was read; `expired` is one given up on. */
+const ENGINE_STATE: Record<TaskMessageState, CallbackFields["callbackState"]> = {
+  pending: "pending", failed: "failed", delivered: "delivered", answered: "delivered", expired: "abandoned",
+};
 
 function bounded(content: string): string {
   const text = content.trim();
@@ -25,16 +33,50 @@ function bounded(content: string): string {
 }
 
 export class TaskMessenger {
+  private readonly outbox: Outbox<Carried>;
+
   constructor(
     private readonly store: TaskStore,
-    private readonly router: Router,
+    router: Router,
     private readonly hub: EventHub,
     /** Prepares a continuation; it starts only after the reply commits. */
     private readonly prepareResume: (runId: string, prompt: string, fromSessionId: string) => TaskRun,
     /** Reports a delivery nobody can complete (service.ts owns the surfaces). */
     private readonly unreachable: (sessionId: string, what: string, why: string) => void,
     private readonly startRun: (run: TaskRun) => void,
-  ) {}
+  ) {
+    this.outbox = new Outbox<Carried>(router, {
+      id: ({ message }) => message.id,
+      reload: (id) => {
+        const message = this.store.getMessage(id);
+        return message && this.carry(message);
+      },
+      save: ({ message, callbackState, callbackAttempts, callbackError, callbackNextAttemptAt }) => {
+        message.attempts = callbackAttempts;
+        message.error = callbackError;
+        message.nextAttemptAt = callbackNextAttemptAt;
+        if (callbackState === "delivered") {
+          message.state = "delivered";
+          message.deliveredAt = Date.now();
+        } else if (callbackState === "abandoned") {
+          message.state = "expired";
+          message.answeredAt = Date.now();
+        } else message.state = callbackState ?? "pending";
+        this.store.saveMessage(message);
+      },
+      changed: ({ message }) => this.changed(message),
+      input: (records) => {
+        const message = records[0]!.message;
+        const run = this.store.getRun(message.runId);
+        if (!run) throw new Error(`unknown task run: ${message.runId}`);
+        return { text: this.format(message, run), origin: this.origin(message, run) };
+      },
+      abandoned: ({ message }, _sessionId, why) => this.told(message, why),
+      // A follow-up joins the recipient's queue now: the run it guides may end
+      // with the turn it would otherwise wait out.
+      queues: true,
+    });
+  }
 
   expirePending(): void {
     for (const message of this.store.expirePendingMessages()) this.changed(message);
@@ -77,7 +119,7 @@ export class TaskMessenger {
   ): Promise<TaskMessage> {
     const message = this.create(run, kind, fromSessionId, run.targetSessionId ?? "", content, null);
     this.changed(message);
-    if (run.targetSessionId) this.deliver(message, run, run.targetSessionId);
+    if (run.targetSessionId) this.deliver(message, run.targetSessionId);
     return this.require(message.id);
   }
 
@@ -85,13 +127,12 @@ export class TaskMessenger {
     if (!run.targetSessionId) return;
     for (const message of this.store.listMessages(run.id)) {
       if (message.state !== "pending" || (message.kind !== "steer" && message.kind !== "follow_up")) continue;
-      this.deliver(message, run, run.targetSessionId);
+      this.deliver(message, run.targetSessionId);
     }
   }
 
-  /** Injection is fire-and-forget, so this sweep is what closes a failed one.
-   * `inject` dedupes on the recipient transcript, so a retry cannot double
-   * deliver. Controls aimed at a finished run are dead and expire here. */
+  /** Delivery is fire-and-forget, so this sweep is what closes a failed one.
+   * Controls aimed at a finished run are dead and expire here. */
   retryUndelivered(now = Date.now()): void {
     for (const { message, run } of this.store.listUndeliveredMessages()) {
       if (!run) continue;
@@ -108,7 +149,7 @@ export class TaskMessenger {
       // run owns. The continuation's `startedAt` is the proof instead.
       if (message.kind === "reply" && isTerminal(run.state)) {
         const resumed = message.resumeRunId ? this.store.getRun(message.resumeRunId) : undefined;
-        if (resumed?.startedAt) this.confirmed(message.id);
+        if (resumed?.startedAt) this.delivered(message);
         else if (!resumed) this.abandon(message, `continuation ${message.resumeRunId ?? "(none)"} is gone`);
         else if (isTerminal(resumed.state)) {
           // Never started and never will: said now, not four minutes later at
@@ -120,7 +161,7 @@ export class TaskMessenger {
       }
       if ((message.nextAttemptAt ?? 0) > now) continue;
       const target = message.toSessionId || run.targetSessionId;
-      if (target) this.deliver(message, run, target);
+      if (target) this.deliver(message, target);
     }
   }
 
@@ -139,7 +180,7 @@ export class TaskMessenger {
     }
     const message = this.create(run, reason, fromSessionId, run.invokedBySessionId, content, null);
     this.changed(message);
-    this.deliver(message, run, run.invokedBySessionId);
+    this.deliver(message, run.invokedBySessionId);
     return this.require(message.id);
   }
 
@@ -177,7 +218,7 @@ export class TaskMessenger {
     this.changed(question);
     this.changed(reply);
     if (continuation) this.startRun(continuation);
-    else if (run.targetSessionId) this.deliver(reply, run, run.targetSessionId);
+    else if (run.targetSessionId) this.deliver(reply, run.targetSessionId);
     return this.require(reply.id);
   }
 
@@ -209,26 +250,30 @@ export class TaskMessenger {
     return message;
   }
 
-  /** Never awaits the recipient: `systemInput` settles with the turn it
-   *  triggers, which would block a child on its supervisor's whole turn.
-   *  `delivered` is written by `confirmed`, against the one proof that survives
-   *  an abort or a restart: the message in the recipient's transcript. */
-  private deliver(candidate: TaskMessage, run: TaskRun, targetSessionId: string): void {
-    const message = this.require(candidate.id);
-    if (message.state !== "pending" && message.state !== "failed") return;
-    if (message.toSessionId !== targetSessionId) message.toSessionId = targetSessionId;
-    message.state = "pending";
-    message.error = null;
-    this.store.saveMessage(message);
-    this.changed(message);
-    void this.inject(message, run, targetSessionId, this.mode(message))
-      .catch((error: unknown) => log.error(`message ${message.id} delivery collapsed`, error));
+  /** A control created before its run had a session is aimed once it has one. */
+  private deliver(message: TaskMessage, targetSessionId: string): void {
+    if (message.toSessionId !== targetSessionId) {
+      message.toSessionId = targetSessionId;
+      this.store.saveMessage(message);
+    }
+    void this.outbox.deliver(targetSessionId, [this.carry(message)]);
   }
 
-  /** The one place a message becomes delivered. */
-  private confirmed(id: string): void {
-    const message = this.store.getMessage(id);
-    if (!message || message.state !== "pending") return;
+  private carry(message: TaskMessage): Carried {
+    return {
+      message,
+      callbackState: ENGINE_STATE[message.state],
+      callbackAttempts: message.attempts,
+      callbackError: message.error,
+      callbackNextAttemptAt: message.nextAttemptAt,
+      // Steer whatever someone is blocked on: a follow-up lands only once the
+      // recipient runs out of tool calls. Progress is a follow-up because nobody waits.
+      ...(message.kind === "follow_up" || message.kind === "progress" ? {} : { callbackMode: "steer" as const }),
+    };
+  }
+
+  /** Proven by something other than the recipient's transcript. */
+  private delivered(message: TaskMessage): void {
     message.state = "delivered";
     message.deliveredAt = Date.now();
     message.error = null;
@@ -237,31 +282,6 @@ export class TaskMessenger {
     this.changed(message);
   }
 
-  /** Waiting is not a failed attempt; the ceiling is for deliveries that failed. */
-  private defer(id: string): void {
-    const message = this.store.getMessage(id);
-    if (!message || message.state !== "pending") return;
-    message.nextAttemptAt = Date.now() + 1000;
-    this.store.saveMessage(message);
-  }
-
-  /** A recipient that never records the message must not be re-sent once a
-   *  second forever. False: the ceiling was reached and the message expired. */
-  private spend(id: string): boolean {
-    const message = this.store.getMessage(id);
-    if (!message || message.state !== "pending") return false;
-    message.attempts += 1;
-    message.nextAttemptAt = Date.now() + retryDelay(message.attempts);
-    if (message.attempts > MAX_DELIVERY_ATTEMPTS) {
-      this.abandon(message, undeliverable(message.attempts - 1, message.error));
-      return false;
-    }
-    this.store.saveMessage(message);
-    return true;
-  }
-
-  /** Both ends are told, and an expired decision stops suppressing its run's
-   *  completion callback, which `execution.ts` decided once and never revisits. */
   private abandon(message: TaskMessage, why: string): void {
     message.state = "expired";
     message.error = why;
@@ -269,6 +289,12 @@ export class TaskMessenger {
     message.nextAttemptAt = null;
     this.store.saveMessage(message);
     this.changed(message);
+    this.told(message, why);
+  }
+
+  /** Both ends are told, and an expired decision stops suppressing its run's
+   *  completion callback, which `execution.ts` decided once and never revisits. */
+  private told(message: TaskMessage, why: string): void {
     this.unreachable(message.toSessionId, `a ${message.kind} from run ${message.runId}`, why);
     if (message.fromSessionId && message.fromSessionId !== message.toSessionId) {
       this.unreachable(message.fromSessionId, `your ${message.kind} on run ${message.runId}`, why);
@@ -279,66 +305,6 @@ export class TaskMessenger {
       run.callbackState = "pending"; // the tick sweep delivers it
       this.store.saveRun(run);
     }
-  }
-
-  /** Steer whatever someone is blocked on: a follow-up lands only once the
-   *  recipient runs out of tool calls. Progress is a follow-up because nobody waits. */
-  private mode(message: TaskMessage): "steer" | "follow_up" {
-    return message.kind === "follow_up" || message.kind === "progress" ? "follow_up" : "steer";
-  }
-
-  private failed(id: string, error: unknown, spent: boolean): void {
-    const message = this.store.getMessage(id);
-    // A late rejection must not undo a delivery a newer attempt proved.
-    if (message?.state !== "pending") return;
-    log.warn(`${message.kind} ${id} to session ${message.toSessionId} failed`, error);
-    message.state = "failed";
-    message.error = String(error);
-    // An unresolvable target dies before the send every time, and would retry forever.
-    if (!spent) message.attempts += 1;
-    message.nextAttemptAt = Date.now() + retryDelay(message.attempts);
-    this.store.saveMessage(message);
-    this.changed(message);
-    if (message.attempts > MAX_DELIVERY_ATTEMPTS) {
-      this.abandon(message, undeliverable(message.attempts - 1, message.error));
-    }
-  }
-
-  /** The dedupe on a retry and the proof of delivery are the same transcript
-   *  read. Owns its own failure, so an attempt is counted exactly once. */
-  private async inject(
-    message: TaskMessage,
-    run: TaskRun,
-    targetSessionId: string,
-    mode: "steer" | "follow_up",
-  ): Promise<void> {
-    let spent = false;
-    try {
-      const session = await this.router.ensure({ channelId: "task", conversationId: targetSessionId });
-      const recorded = async (): Promise<boolean> =>
-        (await session.history()).some((turn) =>
-          turn.role === "system" && turn.origin?.kind === "task-message" && turn.origin.messageId === message.id);
-      if (await recorded()) return this.confirmed(message.id);
-      // Waiting in the recipient's queue: not recorded yet, and sending again
-      // would deliver the same guidance twice. Costs no attempt.
-      if (await this.queued(session, message.id)) return this.defer(message.id);
-      spent = this.spend(message.id);
-      if (!spent) return;
-      await session.systemInput(
-        this.format(message, run),
-        this.origin(message, run),
-        mode === "follow_up" ? "followUp" : mode,
-      );
-      if (await recorded()) this.confirmed(message.id);
-    } catch (error) {
-      this.failed(message.id, error, spent);
-    }
-  }
-
-  /** The transcript answers "landed"; this answers "handed over and waiting". */
-  private async queued(session: AgentSession, id: string): Promise<boolean> {
-    return (await session.pendingSystemInputs()).some((origin) =>
-      origin.kind === "task-message" && origin.messageId === id);
   }
 
   private format(message: TaskMessage, run: TaskRun): string {

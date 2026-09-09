@@ -56,8 +56,8 @@ export class TaskCallbacks {
           ...(runs.length === 1 ? { source: runSource(runs[0]!), state: runs[0]!.state } : {}),
         },
       }),
-      describe: (run) => `the result of "${run.context.definition.name}"`,
-    }, unreachable);
+      abandoned: (run, sessionId, why) => unreachable(sessionId, `the result of "${run.context.definition.name}"`, why),
+    });
   }
 
   target(callback: TaskCallback, origin: string | null): string | null {

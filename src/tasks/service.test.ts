@@ -1019,16 +1019,18 @@ describe("task service", () => {
     expect(message.state).toBe("pending");
 
     // The hand-off spent attempt 1; each sweep past the backoff spends the
-    // next, and the one past the ceiling gives up.
+    // next, and the one past the ceiling gives up without sending.
     await vi.waitFor(() => expect(store.getMessage(message.id)?.attempts).toBe(1));
-    for (let i = 1; i <= MAX_DELIVERY_ATTEMPTS; i++) {
+    for (let i = 1; i < MAX_DELIVERY_ATTEMPTS; i++) {
       messenger.retryUndelivered(now + i * 600_000);
       await vi.waitFor(() => expect(store.getMessage(message.id)?.attempts).toBe(i + 1));
     }
-    expect(store.getMessage(message.id)).toMatchObject({
+    messenger.retryUndelivered(now + MAX_DELIVERY_ATTEMPTS * 600_000);
+    await vi.waitFor(() => expect(store.getMessage(message.id)).toMatchObject({
       state: "expired",
+      attempts: MAX_DELIVERY_ATTEMPTS,
       error: expect.stringContaining("undeliverable"),
-    });
+    }));
     // Both ends: the session that was owed it, and the sender waiting on it.
     expect(told).toHaveLength(2);
     expect(told[0]).toContain("target|a steer from run live");

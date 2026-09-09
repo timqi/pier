@@ -1,5 +1,5 @@
 // One delivery engine for everything that reaches a session as a system input:
-// run callbacks and group callbacks.
+// run callbacks, group callbacks and run messages.
 
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
 import type { Router } from "../core/router.js";
@@ -9,9 +9,12 @@ import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields }
 const log = logger("tasks");
 
 /** The records a delivery names, from either side of the seam: a batch names
- *  every one of them, a group names itself. */
-const callbackIds = (origin: SystemInputOrigin | undefined): string[] =>
-  origin?.kind === "task-callback" ? origin.runIds ?? [origin.runId] : [];
+ *  every one of them, a group names itself, a message names its id. */
+const recordIds = (origin: SystemInputOrigin | undefined): string[] => {
+  if (origin?.kind === "task-callback") return origin.runIds ?? [origin.runId];
+  if (origin?.kind === "task-message") return [origin.messageId];
+  return [];
+};
 
 /** What a kind of delivery has to say about itself; the engine owns the rest. */
 export interface Deliverable<T extends CallbackFields> {
@@ -22,19 +25,17 @@ export interface Deliverable<T extends CallbackFields> {
   changed(record: T): void;
   /** What the recipient reads, and the origin that identifies it afterwards. */
   input(records: T[]): { text: string; origin: SystemInputOrigin };
-  /** Named when giving up, e.g. `the result of "review-web"`. */
-  describe(record: T): string;
+  /** Reports a delivery nobody can complete; the record already says so. */
+  abandoned(record: T, sessionId: string, why: string): void;
+  /** A follow-up to a busy recipient waits for idle so a batch stays one turn;
+   *  a kind that never batches joins Pi's queue at once instead. */
+  queues?: true;
 }
 
 export class Outbox<T extends CallbackFields> {
   private readonly delivering = new Set<string>();
 
-  constructor(
-    private readonly router: Router,
-    private readonly kind: Deliverable<T>,
-    /** Reports a delivery nobody can complete (service.ts owns the surfaces). */
-    private readonly unreachable: (sessionId: string, what: string, why: string) => void,
-  ) {}
+  constructor(private readonly router: Router, private readonly kind: Deliverable<T>) {}
 
   /** One model turn drains the batch instead of one per record. `delivered` is
    *  written only against the input visible in the recipient's transcript: Pi's
@@ -52,17 +53,16 @@ export class Outbox<T extends CallbackFields> {
       // given up on for having spent its last attempt landing it.
       const live = unproven.filter((record) => !this.spent(record, sessionId));
       if (live.length === 0) return;
+      let sending = live;
       // Waiting for a busy target is not an attempt, or the ceiling arrives in
       // seconds. A `steer` record joins the running turn instead, but only once:
       // handed over, it sits in Pi's in-memory queue, invisible in the transcript.
-      const streaming = session.state === "streaming";
-      let sending = live;
-      if (streaming) {
+      if (session.state === "streaming") {
         const handedOver = await this.queued(session);
-        const steerNow = (record: T): boolean =>
-          record.callbackMode === "steer" && !handedOver.has(this.kind.id(record));
-        sending = live.filter(steerNow);
-        for (const record of live) if (!steerNow(record)) this.defer(record);
+        const sendNow = (record: T): boolean =>
+          (record.callbackMode === "steer" || this.kind.queues === true) && !handedOver.has(this.kind.id(record));
+        sending = live.filter(sendNow);
+        for (const record of live) if (!sendNow(record)) this.defer(record);
         if (sending.length === 0) return;
       }
       for (const record of sending) {
@@ -70,9 +70,10 @@ export class Outbox<T extends CallbackFields> {
         counted.add(this.kind.id(record));
       }
       const { text, origin } = this.kind.input(sending);
+      const mode = sending.every((record) => record.callbackMode === "steer") ? "steer" : "followUp";
       log.debug(`callback for ${sending.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
       // Not awaited: `systemInput` settles with the recipient's whole turn.
-      session.systemInput(text, origin, streaming ? "steer" : "followUp")
+      session.systemInput(text, origin, mode)
         .catch((error: unknown) => this.retry(sessionId, sending, error, counted));
       // Pi records the input as it starts the turn; the tick sweep is the backstop.
       await this.settle(sending, session);
@@ -86,7 +87,7 @@ export class Outbox<T extends CallbackFields> {
   /** What the transcript cannot answer yet; empty unless the session is streaming. */
   private async queued(session: AgentSession): Promise<Set<string>> {
     const ids = new Set<string>();
-    for (const origin of await session.pendingSystemInputs()) for (const id of callbackIds(origin)) ids.add(id);
+    for (const origin of await session.pendingSystemInputs()) for (const id of recordIds(origin)) ids.add(id);
     return ids;
   }
 
@@ -95,7 +96,7 @@ export class Outbox<T extends CallbackFields> {
     const seen = new Set<string>();
     for (const turn of await session.history()) {
       if (turn.role !== "system") continue;
-      for (const id of callbackIds(turn.origin)) seen.add(id);
+      for (const id of recordIds(turn.origin)) seen.add(id);
     }
     const unproven: T[] = [];
     for (const stale of records) {
@@ -127,7 +128,7 @@ export class Outbox<T extends CallbackFields> {
       record.callbackError = undeliverable(record.callbackAttempts, record.callbackError);
       record.callbackNextAttemptAt = null;
       this.write(record);
-      this.unreachable(sessionId, this.kind.describe(record), record.callbackError);
+      this.kind.abandoned(record, sessionId, record.callbackError);
     }
     return true;
   }
