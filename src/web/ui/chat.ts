@@ -86,11 +86,25 @@ const atBottom = (): boolean =>
  *  re-rendered with copy buttons, attachment cards and next-step buttons, an
  *  activity group is sealed into the row, code is highlighted — none of which
  *  goes through scrollBottom, which is why the last lines stayed below the
- *  fold. Released the moment the user scrolls away themselves. */
+ *  fold. Released when the user scrolls up, and re-armed when a scroll of
+ *  theirs reaches the end again. */
 let follow = true;
 
+/** Where the pane was at the previous scroll event, so a *direction* can be
+ *  told from a position: a pin writes scrollTop too, and by the time that
+ *  event is delivered the content it aimed at has usually grown another line —
+ *  a finished reply gains its footer and next-step buttons, ~100px. Judging
+ *  every scroll event by the bottom alone read that growth as "the user left",
+ *  so the tail died on the first completed turn and never came back. */
+let lastTop = 0;
+
 turnsPane.addEventListener("scroll", () => {
-  if (!bulk) follow = atBottom();
+  const top = turnsPane.scrollTop;
+  // A few pixels of slack: a pin lands on a fractional offset, and rounding
+  // must not pass for a drag upward.
+  const up = top < lastTop - 4;
+  lastTop = top;
+  if (!bulk && (up || atBottom())) follow = atBottom();
 }, { passive: true });
 
 /** At most one re-pin per frame: a streaming block mutates every ~80ms and
