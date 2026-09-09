@@ -281,7 +281,7 @@ export class Router {
           const channel = this.channels.get(key.channelId);
           if (channel) {
             const reply = splitReply(payload.text, payload.meta);
-            this.deliver(key, () => channel.send(key.conversationId, reply))
+            this.deliver(session, key, () => channel.send(key.conversationId, reply))
               .catch((err: unknown) => {
                 this.report(session.id, key, `outbound to ${key.channelId} failed: ${String(err)}`);
               });
@@ -294,21 +294,24 @@ export class Router {
 
   /** An adapter's send is several platform calls (chunks, then attachments),
    *  so two answers left to overlap interleave in the chat. Per conversation:
-   *  a slow chat may not hold up another. */
-  private readonly delivering = new Map<string, Promise<void>>();
+   *  a slow chat may not hold up another. Also what `busy` counts as still
+   *  sending: a finished turn is not delivered until the adapter says so. */
+  private readonly delivering = new Map<string, {
+    session: AgentSession; key: ConversationKey; settled: Promise<void>;
+  }>();
 
-  private deliver(key: ConversationKey, send: () => Promise<void>): Promise<void> {
+  private deliver(session: AgentSession, key: ConversationKey, send: () => Promise<void>): Promise<void> {
     const id = keyOf(key);
-    const pending = this.delivering.get(id);
+    const pending = this.delivering.get(id)?.settled;
     // The async wrapper turns a synchronous throw into this reply's rejection.
     const done = pending ? pending.then(send) : (async () => send())();
     // A rejection is the caller's to report; inherited, it would fail every
     // later reply to this conversation.
     const settled = done.catch(() => {});
-    this.delivering.set(id, settled);
+    this.delivering.set(id, { session, key, settled });
     // Only the tail clears the slot — a newer reply owns it by then.
     void settled.then(() => {
-      if (this.delivering.get(id) === settled) this.delivering.delete(id);
+      if (this.delivering.get(id)?.settled === settled) this.delivering.delete(id);
     });
     return done;
   }
@@ -496,12 +499,17 @@ export class Router {
     throw new Error(message);
   }
 
-  /** Attached sessions still mid-turn — what the drain waits on, and what its
-   *  deadline snapshots into the ledger. */
-  busy(): { session: AgentSession; key: ConversationKey }[] {
-    return [...this.bySession.values()]
-      .filter((attached) => attached.session.state === "streaming")
-      .map((attached) => ({ session: attached.session, key: attached.key }));
+  /** Attached sessions still mid-turn, and conversations whose answer is still
+   *  going out (`sending`) — what the drain waits on, and what its deadline
+   *  writes into the ledger. */
+  busy(): { session: AgentSession; key: ConversationKey; sending?: true }[] {
+    return [
+      ...[...this.bySession.values()]
+        .filter((attached) => attached.session.state === "streaming")
+        .map((attached) => ({ session: attached.session, key: attached.key })),
+      ...[...this.delivering.values()]
+        .map(({ session, key }) => ({ session, key, sending: true as const })),
+    ];
   }
 
   /** Never creates one: a stop or settings command must not open a session. */

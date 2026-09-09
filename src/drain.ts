@@ -50,7 +50,7 @@ export class RestartLedger {
 export interface DrainDeps {
   router: {
     beginDrain(): void;
-    busy(): { session: AgentSession; key: ConversationKey }[];
+    busy(): { session: AgentSession; key: ConversationKey; sending?: true }[];
   };
   tasks: { pause(): void; activeRunCount(): number };
   ledger: RestartLedger;
@@ -80,17 +80,26 @@ export async function drainForRestart(
       log.info("drained — nothing running");
       return;
     }
+    const turns = busy.filter((b) => !b.sending);
+    const sends = busy.filter((b) => b.sending);
     if (Date.now() >= deadline) {
       log.warn(
-        `drain deadline after ${String(Math.round(deadlineMs / 1000))}s — aborting ${String(busy.length)} turn(s); ` +
-        `${String(runs)} task run(s) will be marked interrupted at boot`,
+        `drain deadline after ${String(Math.round(deadlineMs / 1000))}s — aborting ${String(turns.length)} turn(s), ` +
+        `${String(sends.length)} reply(ies) still sending; ${String(runs)} task run(s) will be marked interrupted at boot`,
       );
+      // A send cannot be aborted, only owned up to: the exit will cut it off.
+      for (const { key } of sends) {
+        ledger.record({
+          channelId: key.channelId, conversationId: key.conversationId,
+          note: "Pier restarted while sending the last answer — it may have arrived incomplete; the session transcript has all of it.",
+        });
+      }
       const cleanupDeadline = Date.now() + cleanupBoundMs;
-      await Promise.all(busy.map(({ session, key }) =>
+      await Promise.all(turns.map(({ session, key }) =>
         abortToLedger(session, key, ledger, cleanupDeadline)));
       return;
     }
-    const report = `draining: ${String(busy.length)} turn(s), ${String(runs)} active task run(s)`;
+    const report = `draining: ${String(turns.length)} turn(s), ${String(sends.length)} reply(ies) sending, ${String(runs)} active task run(s)`;
     if (report !== lastReport) log.info((lastReport = report));
   }
 }

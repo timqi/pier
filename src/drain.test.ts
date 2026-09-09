@@ -29,7 +29,7 @@ function busySession(id: string, queued: string[] = [], hang: "abort" | null = n
 }
 
 function deps(
-  busy: () => { session: AgentSession; key: ConversationKey }[],
+  busy: () => { session: AgentSession; key: ConversationKey; sending?: true }[],
   runs: () => number,
 ): { deps: DrainDeps; ledger: RestartLedger; calls: string[] } {
   const ledger = new RestartLedger(openDb(":memory:"));
@@ -79,6 +79,24 @@ describe("drainForRestart", () => {
     expect(entries[0]).toMatchObject({ channelId: "telegram", conversationId: "42" });
     expect(entries[0]!.note).toContain("restarted before this turn finished");
     expect(entries[0]!.note).toContain("queued question");
+  });
+
+  it("waits for an answer still going out, and owns up to one the deadline cuts off", async () => {
+    const idle = busySession("s1");
+    Object.assign(idle.session, { state: "idle" });
+    const sending = { session: idle.session, key: { channelId: "slack", conversationId: "C1:t1" }, sending: true as const };
+    let polls = 0;
+    const rig = deps(() => (polls++ < 2 ? [sending] : []), () => 0);
+    await drainForRestart(rig.deps, 5000, 1);
+    expect(polls).toBeGreaterThan(2); // not "nothing running" on the first poll
+    expect(rig.ledger.list()).toEqual([]);
+    const late = deps(() => [sending], () => 0);
+    await drainForRestart(late.deps, 0, 1);
+    // Nothing to abort: the turn is over, only its delivery is in doubt.
+    expect(idle.calls).toEqual([]);
+    expect(late.ledger.list()).toEqual([
+      expect.objectContaining({ conversationId: "C1:t1", note: expect.stringContaining("may have arrived incomplete") }),
+    ]);
   });
 
   it("deadline aborts a web turn without a ledger entry — its transcript shows it", async () => {

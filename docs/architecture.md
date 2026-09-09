@@ -60,8 +60,8 @@ src/
                switch, which bundled extensions are on)
   update.ts    whether a newer release exists and when this instance may become
                it; the install is handed to service.ts's unit
-  drain.ts     graceful restart: finish running turns, ledger what the deadline
-               cut off for the next boot to deliver
+  drain.ts     graceful restart: finish running turns and outbound sends,
+               ledger what the deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
   tools.ts     managed CLI binaries via ubix (install, update, PATH); `rtk` is
                an extension shipped as one; a custom tool is the body of its

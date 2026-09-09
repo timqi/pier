@@ -513,6 +513,18 @@ describe("drain", () => {
     Object.assign(fake.session, { state: "streaming" });
     expect(router.busy()).toEqual([{ session: fake.session, key: KEY }]);
   });
+
+  it("busy() counts an answer the adapter has not finished sending", async () => {
+    let release = (): void => {};
+    tg.channel.send = () => new Promise((resolve) => { release = resolve; });
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "done" });
+    // The turn is over and the session idle, but the chat has nothing yet.
+    expect(router.busy()).toEqual([{ session: fake.session, key: KEY, sending: true }]);
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(router.busy()).toEqual([]);
+  });
 });
 
 /** One macrotask: long enough for the promotion's clear-then-prompt to land. */
