@@ -443,7 +443,7 @@ describe("opening a session", () => {
 });
 
 describe("drain", () => {
-  it("refuses a dispatch, telling both the chat and the caller (§5b)", async () => {
+  it("refuses a dispatch, telling both the chat and the caller (§5)", async () => {
     router.beginDrain();
     await expect(
       router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" }),
@@ -499,7 +499,7 @@ describe("a queue with no turn left to drain it", () => {
   // `decide` reads the session state once. A steer chosen against a turn that
   // ends before the call lands stays in Pi's queue, and the next turn — which
   // may never come — is the first thing that would read it. On IM that is
-  // indistinguishable from the message never having arrived (§5b).
+  // indistinguishable from the message never having arrived (§5).
   it("promotes it into a turn of its own", async () => {
     await router.ensure(KEY);
     fake.setQueue({ steering: ["one"], followUp: ["two"] });
@@ -555,7 +555,7 @@ describe("a queue with no turn left to drain it", () => {
     expect(fake.prompts).toEqual([]);
   });
 
-  it("tells the conversation when a drain refuses the promotion (§5b)", async () => {
+  it("tells the conversation when a drain refuses the promotion (§5)", async () => {
     await router.ensure(KEY);
     router.beginDrain();
     fake.setQueue({ steering: ["the thing I typed"] });

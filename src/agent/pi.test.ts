@@ -300,7 +300,7 @@ describe("a system input handed to a streaming session", () => {
     await s.systemInput("guidance", origin, "followUp");
     fake.pi.isStreaming = false;
     // Idle means drained, aborted or cleared — never "still on its way": a
-    // sender told otherwise waits on it forever (§5b).
+    // sender told otherwise waits on it forever (§5).
     expect(await s.pendingSystemInputs()).toEqual([]);
   });
 

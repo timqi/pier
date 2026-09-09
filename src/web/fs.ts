@@ -95,7 +95,7 @@ export function registerFsRoutes(app: Hono): void {
       await handle.read(head, 0, head.length, 0);
       const bytes = handle.createReadStream({ start: 0 });
       streaming = true;
-      // Past the headers a failure can only truncate the body (§5b).
+      // Past the headers a failure can only truncate the body (§5).
       bytes.on("error", (err) => log.warn(`serving ${file} stopped mid-stream`, err));
       return c.body(Readable.toWeb(bytes) as ReadableStream, 200, {
         ...fileHeaders(file, head),

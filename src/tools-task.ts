@@ -1,6 +1,6 @@
 // A tools switch becomes exactly one run of the one task Pier owns. Beside
 // tools.ts because tools.ts may not import tasks/; the task's run history is
-// the tools status surface (§5b).
+// the tools status surface (§5).
 
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";

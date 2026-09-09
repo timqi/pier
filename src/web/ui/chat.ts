@@ -651,7 +651,7 @@ export function resetChat(): void {
   resetSuggestions();
 }
 
-/** An empty pane while the snapshot loads is indistinguishable from an empty session (§5b). */
+/** An empty pane while the snapshot loads is indistinguishable from an empty session (§5). */
 export function chatLoading(on: boolean): void {
   if (!on) {
     turnsPane.querySelector('[data-kind="loading"]')?.remove();

@@ -1512,7 +1512,7 @@ describe("task service", () => {
     rig.service.cancel(reply.resumeRunId!);
 
     // Nothing will ever carry the text now, so the sweep says so rather than
-    // retrying to a ceiling four minutes away — on both ends (§5b).
+    // retrying to a ceiling four minutes away — on both ends (§5).
     await vi.waitFor(() => expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id))
       .toMatchObject({ state: "expired", error: expect.stringContaining(reply.resumeRunId!) }));
     for (const [, sink] of errors) {
@@ -1814,7 +1814,7 @@ describe("task service", () => {
     const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     const run = await service.waitForRun(queued.runId);
     // "succeeded" with "no reply" is the same answer as an agent that chose to
-    // stay silent — the caller cannot tell an outage from a decision (§5b).
+    // stay silent — the caller cannot tell an outage from a decision (§5).
     expect(run.state).toBe("failed");
     expect(run.error).toContain("Upstream service overloaded");
     expect(run.result).toBeNull();

@@ -74,7 +74,7 @@ export interface InboundAttachment {
 }
 
 /** Each attachment becomes a marker line; a failed or oversized one becomes a
- *  lost-marker line, never silence (§5b). The size gate runs before the fetch. */
+ *  lost-marker line, never silence (§5). The size gate runs before the fetch. */
 export async function saveInboundAll(
   channelId: string,
   files: InboundAttachment[],

@@ -83,7 +83,7 @@ export async function callNativeTool(
   options: NativeToolOptions,
   signal?: AbortSignal,
   /** Progress for the surface the call came from: a hosted search is tens of
-   *  seconds of nothing otherwise (§5b). */
+   *  seconds of nothing otherwise (§5). */
   note?: (text: string) => void,
 ): Promise<NativeToolResponse> {
   const tool: JsonObject = {

@@ -314,7 +314,7 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       ];
     case "compaction_end": {
       // The only trace compaction leaves: `toChatTurns` renders nothing for the
-      // summary message (§5b).
+      // summary message (§5).
       const r = e.result;
       if (r && typeof r.tokensBefore === "number") {
         return [{

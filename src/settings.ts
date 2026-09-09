@@ -137,7 +137,7 @@ export class SettingsStore {
     };
   }
 
-  /** A malformed row is named, not silently served as the empty value (§5b). */
+  /** A malformed row is named, not silently served as the empty value (§5). */
   #json<T>(key: string, normalize: (raw: unknown) => T | null, expected: string): T | null {
     const raw = this.#value(key);
     if (!raw) return null;

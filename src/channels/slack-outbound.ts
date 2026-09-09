@@ -34,7 +34,7 @@ export class SlackOutbound {
     const text = spoken.trim();
     const footer = reply.meta ? footerText(reply.meta) : "";
     const row = actions(reply.suggestions);
-    // An empty turn still posts its footer and says which kind of nothing (§5b).
+    // An empty turn still posts its footer and says which kind of nothing (§5).
     const quiet = isSilentReply(reply)
       ? `_${quietLabel(reply.silence && escapeMrkdwn(reply.silence))}_`
       : "";

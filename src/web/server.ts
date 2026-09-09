@@ -181,7 +181,7 @@ export function createServer(
 
   /** A session created and never messaged does not survive an eviction (Pi
    *  persisted nothing) but is still in `nascent`; left alone, clicking it 404s
-   *  forever. Dropped here, and the 404 says what happened (§5b). */
+   *  forever. Dropped here, and the 404 says what happened (§5). */
   const ensureLoadable = async (id: string): Promise<AgentSession> => {
     try {
       return await ensure(id);

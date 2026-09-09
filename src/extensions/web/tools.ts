@@ -170,7 +170,7 @@ export const webSearch = defineTool({
             : "";
       // A briefing that stopped at the output ceiling reads exactly like a
       // finished one; the caller decides whether to ask again, but only if it
-      // is told (§5b).
+      // is told (§5).
       const cut = outcome.truncated
         ? "Warning: the briefing hit the search model's output limit and stops mid-sentence."
         : "";

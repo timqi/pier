@@ -598,7 +598,7 @@ async function fillDetail(group: HTMLDetailsElement, turnIndex: number): Promise
   // would read as a tool that did nothing.
   say("loading…");
   if (!sessionId) return say("no session");
-  // A refusal and a fetch that never answered both end up in the pane (§5b).
+  // A refusal and a fetch that never answered both end up in the pane (§5).
   const got = await getJson<{ steps: ActivityStep[] }>(
     `/api/sessions/${sessionId}/turns/${turnIndex}/steps`,
     "could not load these steps",

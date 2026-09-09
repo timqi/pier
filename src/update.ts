@@ -121,7 +121,7 @@ export function startAutoUpdate(
     handingOver = true;
     try {
       const started = await auto.apply();
-      // §5b: an update that never happens must not look like one never wanted.
+      // §5: an update that never happens must not look like one never wanted.
       if (started === "busy") log.info("auto-update: a handover or restart is already in progress");
       else if (started !== "started") log.error(`auto-update could not start: ${started}`);
     } catch (err) {

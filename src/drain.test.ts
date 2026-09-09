@@ -1,6 +1,6 @@
 // The drain's promises: nothing new starts, everything running gets its
 // window, and what the deadline cuts off reaches the chat at the next boot —
-// never silently (§5b).
+// never silently (§5).
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

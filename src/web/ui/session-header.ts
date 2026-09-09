@@ -208,7 +208,7 @@ function renderSessionMeta(): void {
   sessionMeta.classList.toggle("hidden", items.length === 0);
   sessionMeta.classList.toggle("flex", items.length > 0);
   // On a phone only three chips are worth a second line: a session still
-  // opening (§5b), a subagent still running, and a context near full, which is
+  // opening (§5), a subagent still running, and a context near full, which is
   // acted on. style.css shows only this one below md.
   sessionMeta.toggleAttribute("data-urgent", (!id && !!pending) || runs > 0 || pressure >= CONTEXT_WARN);
 }

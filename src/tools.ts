@@ -359,7 +359,7 @@ const record = (value: unknown): Record<string, unknown> | null =>
 const UBIX_SCHEMA = 1;
 
 /** The one reader of ubix JSON. Anything not exactly as expected throws: a
- *  field parsed as `null` would draw an installed tool as absent (§5b). */
+ *  field parsed as `null` would draw an installed tool as absent (§5). */
 export function parseUbixJson(stdout: string): UbixToolState[] {
   let doc: unknown;
   try {
@@ -648,7 +648,7 @@ export class ManagedTools {
   }
 
   /** Never throws: a page that 500s says less than a row saying why its
-   *  version is unknown (§5b). */
+   *  version is unknown (§5). */
   async status(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<CatalogEntry[]> {
     const base = rows(custom).map((tool): CatalogEntry => ({
       source: "binary",
@@ -665,7 +665,7 @@ export class ManagedTools {
     try {
       states = await this.#listedTools();
     } catch (err) {
-      // A row drawn as "not installed" because a read failed is the lie §5b is about.
+      // A row drawn as "not installed" because a read failed is the lie §5 is about.
       const error = err instanceof Error ? err.message : String(err);
       return base.map((entry) => withBinary(entry, { error }));
     }
@@ -810,7 +810,7 @@ function expectedSha256(checksums: string, file: string): string {
   throw new Error(`checksums.txt names no ${file} — refusing to install an unverified binary`);
 }
 
-/** One line per tool, failures included (§5b). */
+/** One line per tool, failures included (§5). */
 function summarize(entries: readonly ToolSyncEntry[]): string {
   if (!entries.length) return "no tools switched on";
   return entries

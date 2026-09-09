@@ -210,7 +210,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     const text = finish();
     // An IM turn was already delivered to its chat. Read now, not in the
     // timer: this is the state that produced the turn. Every outcome is logged:
-    // "why did my phone stay quiet" is the only question this is asked (§5b).
+    // "why did my phone stay quiet" is the only question this is asked (§5).
     const channel = channelOf(e.sessionId);
     if (channel !== "web") {
       log.debug(`no push for ${e.sessionId}: answering ${channel ?? "nothing"}, not the workbench`);

@@ -175,7 +175,7 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
 };
 
 /** Pi loads a bundled extension and its on-disk twin both, leaving two tools
- *  of one name; the copy the user put there wins, and the journal says so (§5b). */
+ *  of one name; the copy the user put there wins, and the journal says so (§5). */
 export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsResult => {
   const inline = (ext: Extension): boolean => ext.path.startsWith("<inline:");
   const onDisk = new Set(
@@ -224,7 +224,7 @@ export class PiSession implements AgentSession {
   ) {}
 
   /** A turn started after Pi's dispose runs for real and lands nowhere — no
-   *  transcript, no event, a promise that resolves. Refusing makes it a failure (§5b). */
+   *  transcript, no event, a promise that resolves. Refusing makes it a failure (§5). */
   private disposed = false;
 
   private live(): void {
@@ -306,7 +306,7 @@ export class PiSession implements AgentSession {
   async pendingSystemInputs(): Promise<SystemInputOrigin[]> {
     // Pi drains its queue before the turn ends; anything still listed on an
     // idle session was aborted, and calling it queued would leave its sender
-    // waiting forever (§5b).
+    // waiting forever (§5).
     if (!this.pi.isStreaming) this.queuedInputs.length = 0;
     return [...this.queuedInputs];
   }
@@ -379,7 +379,7 @@ export class PiSession implements AgentSession {
     // The wait above is long enough for a dispose to land.
     this.live();
     // A turn may have started since the caller read the state. Bare, Pi throws
-    // "already processing" and the message is gone (§5b); queued, it is the
+    // "already processing" and the message is gone (§5); queued, it is the
     // same "delivered when idle" core/queue.ts picks for a mid-turn message.
     return this.pi.prompt(text, { streamingBehavior: "followUp" });
   }
@@ -444,7 +444,7 @@ export class PiSession implements AgentSession {
   private titleDecided = false;
 
   /** A failure is announced too: a title that silently stayed the prompt looks
-   *  like the setting did nothing (§5b). */
+   *  like the setting did nothing (§5). */
   private autoTitle(reply: string, fn: (e: SessionEventPayload) => void): void {
     if (this.titleDecided) return;
     const suggest = this.suggestTitle();

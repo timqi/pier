@@ -21,7 +21,7 @@ import type { UpdateCheck } from "../update.js";
 export interface UpdateApplier {
   /** `busy`: another handover or a restart already owns the gate. */
   apply(): Promise<"started" | "busy" | "not-installed" | "failed">;
-  /** A stale updater is otherwise invisible until the update that needed it (§5b). */
+  /** A stale updater is otherwise invisible until the update that needed it (§5). */
   problem(): string | null;
 }
 
@@ -66,7 +66,7 @@ export function registerInstanceRoutes(
      *  catalog, whose custom half the same request may be rewriting. */
     names?: { extensions: readonly string[]; tools: readonly string[] };
     /** What became of the install belongs on the switch, not only in the
-     *  journal (§5b). Reads the stored set itself. */
+     *  journal (§5). Reads the stored set itself. */
     onToolsChanged?: () => Promise<ToolsSyncNote | null>;
     /** The rule lives with the installer (src/tools.ts), which web/ may not import. */
     validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
@@ -169,7 +169,7 @@ export function registerInstanceRoutes(
       new Promise<"draining">((resolve) => setTimeout(resolve, APPLY_REPLY_CAP_MS, "draining").unref()),
     ]);
     if (started === "draining") {
-      // If the handover fails later, main.ts reports it and reopens the gate (§5b).
+      // If the handover fails later, main.ts reports it and reopens the gate (§5).
       updateLog.info(`updating to ${latest} on the Console's request — waiting for running work to finish`);
       return c.json({ started: true, draining: true, latest }, 202);
     }

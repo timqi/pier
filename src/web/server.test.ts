@@ -1715,7 +1715,7 @@ describe("workbench server", () => {
     expect(((await res.json()) as { report: string }).report).toContain("no agent listening");
     expect(secrets.calls).toEqual(["doctor"]);
 
-    // An absent binary is a diagnosis too, and must reach the page (§5b).
+    // An absent binary is a diagnosis too, and must reach the page (§5).
     const broken = setup("/tmp", fakeSecrets({ doctorError: "spawn vt ENOENT" }));
     const failed = await broken.app.request("/api/secrets/doctor");
     expect(failed.status).toBe(500);

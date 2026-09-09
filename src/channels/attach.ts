@@ -47,7 +47,7 @@ export function splitAttachments(markdown: string): { text: string; paths: strin
 }
 
 /** Returns the line the conversation still owes: an attachment that never
- *  arrived must not look like one never mentioned (§5b). "" when all landed. */
+ *  arrived must not look like one never mentioned (§5). "" when all landed. */
 export async function sendAttachments(
   paths: string[],
   upload: (file: Attachment) => Promise<void>,

@@ -74,7 +74,7 @@ function syncDrawer(): void {
 }
 
 // --- attention ----------------------------------------------------------------------
-// With the rail off screen a finished turn looks like nothing happening (§5b).
+// With the rail off screen a finished turn looks like nothing happening (§5).
 // Only the actionable half: a badge that pulses for every running session is
 // one nobody reads.
 

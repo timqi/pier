@@ -79,7 +79,7 @@ export class AgentTaskRunner {
         this.store.saveRun(run);
         let text = "";
         // How it ended, too: a provider outage ends with an empty reply, which
-        // would otherwise report as a turn that chose to say nothing (§5b).
+        // would otherwise report as a turn that chose to say nothing (§5).
         let failure: string | undefined;
         const unsubscribe = session.subscribe((event) => {
           if (event.type === "turn-end") {
@@ -120,7 +120,7 @@ export class AgentTaskRunner {
             text = [...history].reverse().find((turn) => turn.role === "assistant")?.text ?? "";
           }
           // The result is read by a supervisor, never a chat renderer: buttons
-          // are dropped, and an empty turn names which kind of nothing (§5b).
+          // are dropped, and an empty turn names which kind of nothing (§5).
           const reply = splitReply(text);
           return { type: "agent", text: reply.text || quietLabel(reply.silence), sessionId: session.id };
         } finally {

@@ -38,7 +38,7 @@ const declaredTool = (
 
 describe("a settings write that did not land", () => {
   // The bug this test exists for: the switch stayed visually flipped, Add and
-  // Remove stayed disabled, and nothing at all appeared on screen (§5b).
+  // Remove stayed disabled, and nothing at all appeared on screen (§5).
   it("is a failed outcome with no state to redraw from, not a rejection", async () => {
     globalThis.fetch = () => Promise.reject(new Error("Failed to fetch"));
     const { outcome, answer } = await writeSettings({ tool: { name: "rg", on: true } }, "Saved.");

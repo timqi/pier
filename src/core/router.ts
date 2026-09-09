@@ -107,7 +107,7 @@ export class Router {
     this.spokenTo = listener;
   }
 
-  /** A failure reaches the chat as well as the hub (§5b): on IM, silence is
+  /** A failure reaches the chat as well as the hub (§5): on IM, silence is
    *  indistinguishable from a crash. `notify`, not `send`, so it is never
    *  mistaken for an assistant turn. */
   private report(sessionId: string, key: ConversationKey, message: string): void {
@@ -255,7 +255,7 @@ export class Router {
       }
       // A steer chosen against a turn that ended before the call landed sits in
       // Pi's queue until some later turn — on IM, a message that never arrived
-      // (§5b). A non-empty queue on an idle session is exactly that case.
+      // (§5). A non-empty queue on an idle session is exactly that case.
       if (payload.type === "queue-state" && (payload.steering.length || payload.followUp.length)) {
         this.promoteQueued(session);
       }
@@ -478,7 +478,7 @@ export class Router {
     return this.draining;
   }
 
-  /** Told to the chat directly (§5b): an adapter's dispatch catch only logs. */
+  /** Told to the chat directly (§5): an adapter's dispatch catch only logs. */
   private refuseDraining(key: ConversationKey): void {
     const message = "Pier is restarting — this message was not taken; send it again in a moment.";
     this.channels.get(key.channelId)

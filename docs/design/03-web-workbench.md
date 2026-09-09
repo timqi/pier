@@ -26,7 +26,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5b), automatic ones included |
+| `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5), automatic ones included |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. |
@@ -64,7 +64,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 - `webpush.ts` is the wire format — RFC 8291 `aes128gcm` and RFC 8292 VAPID on
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the
-  push service's answer (principle 5b).
+  push service's answer (principle 5).
 - `sw.js` caches nothing; its one `fetch` handler is a navigation fallback.
 - One VAPID key pair per instance, minted on first use, never rotated on its
   own.
@@ -246,6 +246,6 @@ browser keeps no second session order.
   bundled `marked`/DOMPurify).
 - A turn that says nothing still renders `Stayed silent — <reason>`; missing
   replies and failures never look like blank content or deliberate silence
-  (principle 5b).
+  (principle 5).
 - `overflow-hidden` on a card clips any popover inside it. The document never
   scrolls; every scrollable region is an inner pane with sticky headers.

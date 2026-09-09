@@ -1,5 +1,5 @@
 // Client-side failures, which the server's log cannot see: shown in the chat
-// pane (§5b) and POSTed back so `journalctl -t pier | grep client:` has them.
+// pane (§5) and POSTed back so `journalctl -t pier | grep client:` has them.
 
 import { appendTurn } from "./chat.js";
 

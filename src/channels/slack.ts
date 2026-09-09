@@ -244,7 +244,7 @@ export class SlackChannel implements Channel {
     const files = [...(event.files ?? []), ...shares.flatMap(sharedFiles)];
     if (!raw && !files.length && !shares.length) {
       // An opted-in subtype with nothing readable is a shape this adapter did
-      // not recognize, not an empty message (§5b).
+      // not recognize, not an empty message (§5).
       if (event.subtype) this.log(`${event.subtype} with nothing readable in it, dropped`);
       return;
     }
@@ -337,7 +337,7 @@ export class SlackChannel implements Channel {
 
     const text = offeredLabel(message.blocks, actionId);
     if (text === undefined) {
-      // The person clicked and would otherwise see nothing happen (§5b).
+      // The person clicked and would otherwise see nothing happen (§5).
       this.log(`unknown action ${actionId} in channel ${channel}`);
       await this.api.postMessage({ channel, thread_ts: threadTs, text: STALE_OPTION })
         .catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
@@ -480,7 +480,7 @@ export class SlackChannel implements Channel {
   }
 
   /** Through the slack tool's own read, so paging and dedup exist once. A read
-   *  that fails or comes back cut says so in the prompt (§5b). */
+   *  that fails or comes back cut says so in the prompt (§5). */
   private async sharedThread(
     channel: string,
     ts: string,

@@ -390,7 +390,7 @@ export class TelegramChannel implements Channel {
     // A local file link is dead in Telegram: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
-    // An empty turn still posts its footer and says which kind of nothing (§5b).
+    // An empty turn still posts its footer and says which kind of nothing (§5).
     const buttons = keyboard(reply.suggestions);
     const quiet = isSilentReply(reply)
       ? `<i>${quietLabel(reply.silence && escapeHtml(reply.silence))}</i>`

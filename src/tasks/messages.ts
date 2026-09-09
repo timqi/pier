@@ -1,7 +1,7 @@
 // What a parent and a child say to each other while a run is going. Every
 // message is a durable row before it is a delivery: either end may be mid-turn
 // or gone, and an undelivered message is retried, expired and said, never
-// dropped (§5b).
+// dropped (§5).
 
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
 import type { EventHub } from "../core/hub.js";

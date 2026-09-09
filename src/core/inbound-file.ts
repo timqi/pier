@@ -31,7 +31,7 @@ export const fileMarker = (path: string): string =>
     encodeURI(path).replace(/\(/g, "%28").replace(/\)/g, "%29")
   })`;
 
-/** A failed download must not look like no attachment (§5b). Plain text, not a
+/** A failed download must not look like no attachment (§5). Plain text, not a
  *  link, so every surface renders the words; used in both directions. */
 export const lostMarker = (name: string, reason: string): string =>
   `[attachment lost: ${name} — ${reason}]`;

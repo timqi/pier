@@ -1,5 +1,5 @@
 // A graceful restart: refuse new work, let running turns finish, and write
-// down what the deadline cut off so the next boot can tell the chats (§5b).
+// down what the deadline cut off so the next boot can tell the chats (§5).
 // Everything else durable already survives a restart.
 
 import type { DatabaseSync } from "node:sqlite";

@@ -183,7 +183,7 @@ export function createSettingsView(
   const devicesBody = h("div", "flex flex-col gap-2");
   const devicesStatus = h("span", "text-[11.5px]", "");
   /** One sign-out call, and the sentence when it did not happen — a refusal
-   *  and a dead network both have to reach the page (§5b), and the two buttons
+   *  and a dead network both have to reach the page (§5), and the two buttons
    *  below would otherwise each have their own idea of that. */
   async function endSession(url: string, failed: string): Promise<boolean> {
     setStatus(devicesStatus, "saving", "signing out…");

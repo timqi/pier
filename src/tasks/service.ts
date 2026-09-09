@@ -411,7 +411,7 @@ export class TaskService {
   }
 
   /** Retrying forever costs the same silence as dropping, so it stops and says
-   *  so on the log, the record and the recipient's event stream (§5b). */
+   *  so on the log, the record and the recipient's event stream (§5). */
   private unreachable(sessionId: string, what: string, why: string): void {
     log.error(`gave up delivering ${what} to session ${sessionId}: ${why}`);
     this.router.reportTo(sessionId, `${what} could not be delivered — ${why}`);

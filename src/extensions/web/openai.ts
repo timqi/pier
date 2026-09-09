@@ -71,7 +71,7 @@ export async function webSearchViaResponses(
   prompt: string,
   options: WebSearchOptions,
   signal?: AbortSignal,
-  /** Progress for the surface the call came from (§5b). */
+  /** Progress for the surface the call came from (§5). */
   note?: (text: string) => void,
 ): Promise<SearchOutcome> {
   const tool: JsonObject = { type: "web_search" };

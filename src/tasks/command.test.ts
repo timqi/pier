@@ -21,7 +21,7 @@ describe("runBash", () => {
   it("settles a script that exits without reading stdin", async () => {
     // The pipe is written whether or not anyone is holding the other end; an
     // EPIPE from that write is an `error` event on the stream, and unhandled
-    // that is main.ts exiting the process (§5b in the worst possible place).
+    // that is main.ts exiting the process (§5 in the worst possible place).
     const result = await run("exit 7");
     expect(result.exitCode).toBe(7);
     expect(result.stderr).toBe("");

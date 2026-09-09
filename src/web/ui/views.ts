@@ -128,7 +128,7 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
 }
 
 /** A view's module loads on first open. A chunk that will not load says so
- *  where the view would have been (§5b). */
+ *  where the view would have been (§5). */
 async function openView(name: ConsoleName, arg: string | undefined, query: string | undefined, request: number): Promise<void> {
   let view = views.get(name);
   if (!view) {

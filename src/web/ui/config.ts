@@ -54,7 +54,7 @@ interface SaveOutcome {
 }
 
 /** A write that never landed is a failed outcome with `answer` absent, so the
- *  caller redraws from the state the server last confirmed (§5b). */
+ *  caller redraws from the state the server last confirmed (§5). */
 export async function writeSettings(
   body: Record<string, unknown>,
   saved: string,

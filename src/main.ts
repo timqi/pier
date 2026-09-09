@@ -61,7 +61,7 @@ prependPath(process.env);
 // A schema that cannot be migrated must stop the process before a port is open.
 const db = pierDb();
 
-// A setting that silently stops being read is a §5b violation.
+// A setting that silently stops being read is a §5 violation.
 for (const stale of ["settings.json", "pins.json", "unread.json"]) {
   if (existsSync(pierPath(stale))) {
     log.warn(`${pierPath(stale)} is no longer read — its value lives in pier.db now; re-enter it in the Console and delete the file`);
@@ -208,7 +208,7 @@ const takeWorkAgain = (why: string): void => {
   if (draining || shuttingDown) return;
   router.endDrain();
   tasks.unpause();
-  // Turns the drain deadline-aborted must not wait for a restart days away (§5b).
+  // Turns the drain deadline-aborted must not wait for a restart days away (§5).
   void deliverLedger(restartLedger, (entry) =>
     channels.notify(entry.channelId, entry.conversationId, entry.note))
     .catch((err: unknown) => log.error("restart-note delivery failed", err));

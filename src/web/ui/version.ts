@@ -46,7 +46,7 @@ function panel(): HTMLElement {
   const actions = h("div", "flex items-center gap-2 px-3 py-1.5");
   box.append(
     line(available ? `Pier ${latest} is out` : `Pier ${current}`, "px-3 py-1 text-[12.5px] font-medium text-neutral-700"),
-    // Not silence (§5b): "no news" and "we could not ask" are different
+    // Not silence (§5): "no news" and "we could not ask" are different
     // facts, and only one of them means you might be out of date.
     line(available ? `You are running ${current}.`
       : latest === null ? "The registry could not be reached, so this may not be the latest." : "This is the latest release."),

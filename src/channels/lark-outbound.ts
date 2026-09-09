@@ -31,7 +31,7 @@ export class LarkOutbound {
     private readonly log: (message: string) => void,
   ) {}
 
-  /** An empty turn still posts its footer and says which kind of nothing (§5b).
+  /** An empty turn still posts its footer and says which kind of nothing (§5).
    *  The footer folds into the last chunk's element (a second element renders
    *  a blank gap); only a bodiless turn gets the standalone one. */
   async reply(root: string, reply: AgentReply): Promise<void> {

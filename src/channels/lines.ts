@@ -13,6 +13,6 @@ export const STOPPED = "\u23f9 Stopped.";
 /** Echoed because a bot cannot post as the user. */
 export const picked = (label: string): string => `\u25b8 ${label}`;
 
-/** Said in the chat: the person clicked and would otherwise see nothing happen (§5b). */
+/** Said in the chat: the person clicked and would otherwise see nothing happen (§5). */
 export const STALE_OPTION =
   "⚠ That option is no longer available — please type the choice instead.";
