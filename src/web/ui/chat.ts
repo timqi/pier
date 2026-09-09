@@ -451,10 +451,6 @@ function stampDue(at: number): boolean {
   return prev === null || at - prev >= STAMP_GAP_MS || !sameDay(prev, at);
 }
 
-function setReplyStamp(node: HTMLElement, meta?: TurnMeta): void {
-  if (meta) setRowTime(node.parentElement ?? node, meta.completedAt);
-}
-
 /** Beside the bubble on hover: a native `title` floats an opaque box over the
  *  message under it. Only the clock; the day is on the separator above. */
 function setRowTime(row: HTMLElement, at: number): void {
@@ -518,7 +514,7 @@ function renderAssistant(
     renderSuggestions(node.parentElement ?? node, suggestions, (label) => deps.send("auto", label));
   }
   // Last, so the clock reads under the whole turn — buttons included.
-  setReplyStamp(node, meta);
+  if (meta) setRowTime(node.parentElement ?? node, meta.completedAt);
   return node;
 }
 
