@@ -302,7 +302,7 @@ html {
   background-color: var(--color-white);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.06), inset 0 0 0 1px var(--glass-edge);
 }
-#console-section button.bg-indigo-50 svg { color: inherit; }
+#console-section button.bg-indigo-50 [data-icon] { color: inherit; }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
 :is(.glass, #sidebar, #mobile-bar, #chat-header,
   main > section > header:first-child, main > section > div:first-child > header:first-child) {

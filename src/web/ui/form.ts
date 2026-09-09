@@ -235,7 +235,7 @@ export function helpBadge(
   const wrap = h("span", "group relative inline-flex");
   const badgeEl = btn(
     "",
-    "flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-neutral-300 text-[9px] font-bold text-neutral-400 transition-colors group-hover:border-indigo-400 group-hover:text-indigo-500",
+    "flex h-4 w-4 cursor-help items-center justify-center text-neutral-400 transition-colors group-hover:text-indigo-500",
   );
   badgeEl.append(icon(CircleQuestionMark, "h-full w-full"));
   badgeEl.setAttribute("aria-label", title);
@@ -267,7 +267,6 @@ export function helpBadge(
     const pinned = bubble.classList.contains("hidden");
     bubble.classList.toggle("hidden", !pinned);
     bubble.classList.toggle("block", pinned);
-    badgeEl.classList.toggle("border-indigo-400", pinned);
     badgeEl.classList.toggle("text-indigo-500", pinned);
   };
   wrap.append(badgeEl, bubble);
