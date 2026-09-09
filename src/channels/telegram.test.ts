@@ -295,6 +295,19 @@ describe("gating", () => {
     expect(inbound).toHaveLength(1);
   });
 
+  it("lets a stranger's DM write nothing, and discovers a bound sender's", async () => {
+    // Anyone can open a DM, so a stranger may not add a row an operator then
+    // has to read past — a group, which someone had to add the bot to, still does.
+    await feed(message({ chat: DM, text: "hi" }));
+    expect(store.get("telegram").chats).toEqual([]);
+    await feed(message({ chat: GROUP, text: "hello there" }));
+    expect(store.chat("telegram", "-100")).toMatchObject({ name: "Ops", kind: "group" });
+
+    store.redeemBindCode("telegram", store.issueBindCode("telegram").code, { id: "42", name: "Q" });
+    await feed(message({ chat: DM, text: "hi" }));
+    expect(store.chat("telegram", "42")).toMatchObject({ name: "Q", kind: "dm" });
+  });
+
   it("hints once, not once per message — a stranger must not get an echo", async () => {
     await feed(message({ chat: DM, text: "one" }));
     await feed({ update_id: 9, message: { message_id: 11, chat: DM, from: { id: 42 }, text: "two" } });

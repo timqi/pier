@@ -178,7 +178,9 @@ export class TelegramChannel implements Channel {
     const isDm = msg.chat.type === "private";
     const kind: ChatKind = isDm ? "dm" : msg.chat.is_forum ? "forum" : "group";
     const name = msg.chat.title ?? [msg.from.first_name, msg.from.last_name].filter(Boolean).join(" ");
-    this.deps.store.discoverChat("telegram", { id: chatId, name: name || chatId, kind });
+    if (this.gate.mayDiscover({ isDm, userId: String(msg.from.id) })) {
+      this.deps.store.discoverChat("telegram", { id: chatId, name: name || chatId, kind });
+    }
 
     const text = this.stripMention(raw);
     const command = parseCommand(text);

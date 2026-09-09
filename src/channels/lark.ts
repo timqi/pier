@@ -187,7 +187,7 @@ export class LarkChannel implements Channel {
     if (!raw && !attachments.length && !mentioned) return;
 
     const isDm = msg.chatType === "p2p";
-    if (!this.discovered.has(msg.chatId)) {
+    if (!this.discovered.has(msg.chatId) && this.gate.mayDiscover({ isDm, userId: senderId })) {
       this.discovered.add(msg.chatId);
       const name = isDm
         ? `DM · ${await this.userName(senderId)}`

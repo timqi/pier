@@ -251,7 +251,7 @@ export class SlackChannel implements Channel {
 
     const { kind } = await this.directory.channel(this.api, channel, event);
     const isDm = kind === "dm";
-    if (!this.discovered.has(channel)) {
+    if (!this.discovered.has(channel) && this.gate.mayDiscover({ isDm, userId: event.user })) {
       this.discovered.add(channel);
       const name = await this.nameOf(channel, event);
       this.deps.store.discoverChat("slack", { id: channel, name, kind });

@@ -1,5 +1,6 @@
-// The two inbound decisions every adapter makes identically: may this message
-// through, and may this stranger be told how to bind.
+// The inbound decisions every adapter makes identically: may this message
+// through, may this chat be remembered, and may this stranger be told how to
+// bind.
 
 import { type ChannelStore, gate } from "./config.js";
 import type { ChannelPlatform } from "./types.js";
@@ -39,6 +40,13 @@ export class Gatekeeper {
     if (verdict === "allow") return true;
     this.log(`dropped ${what} in ${this.noun} ${chatId}: ${verdict}`);
     return false;
+  }
+
+  /** A group the bot was added to is something an operator must see, but a DM
+   *  from a stranger may not write a row (or make the bot look its sender up):
+   *  anyone can start one. */
+  mayDiscover(req: { isDm: boolean; userId: string }): boolean {
+    return !req.isDm || this.store.isBound(this.platform, req.userId);
   }
 
   /** A bot that answers every stranger is an echo amplifier. The map is fed by

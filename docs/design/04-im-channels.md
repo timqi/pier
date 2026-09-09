@@ -161,7 +161,9 @@ launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
 - **DMs are bind-only**: `if (isDm) return bound || bindRequest`. The two flags
   are group settings.
 - Group denials are silent; DM denials say how to bind, throttled per sender.
-- Chats are discovered from inbound traffic and arrive enabled behind the gates.
+- Chats are discovered from inbound traffic and arrive enabled behind the
+  gates — groups always, a DM only from a bound sender (`gate.mayDiscover()`),
+  so a stranger's DM writes no row.
 - **Bind**: a Console-issued single-use code with a TTL, redeemed by `/bind
   <code>` in a DM; bind requests pass the bind gate.
 
@@ -178,7 +180,8 @@ argument count (`stop`/`settings` none, `bind` one); anything longer is prose.
 1. Normalize to `InboundMessage`, `mode: "steer"`.
 2. Detect *addressing* (mention entity, reply-to-bot, targeted slash command)
    before stripping it; strip a leading mention.
-3. `discoverChat()`, then `gate()`. Log every drop with its verdict.
+3. `gate.mayDiscover()` → `discoverChat()`, then `gate.admit()`. Log every drop
+   with its verdict.
 4. Download attachments **after** the gate.
 5. One promise chain per chat, concurrency across chats; bound the active
    chains; advance the platform's ack cursor only for accepted updates.
