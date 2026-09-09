@@ -286,6 +286,7 @@ function setup(
     // Derived from the same list, like the real seam: a fake that answers the
     // two independently can agree with nothing.
     find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
+    search: vi.fn(async () => []),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
@@ -415,6 +416,20 @@ describe("workbench server", () => {
     expect(await res.json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: expect.any(Number), state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
+  });
+
+  // The factory owns the index; the route trims, and asks nothing for nothing.
+  it("searches what was said through the factory, and answers an empty query without asking", async () => {
+    const { app, factory } = setup();
+    const hit = { sessionId: "s1", role: "user" as const, at: 5, snippet: "fix the \u0001parser\u0002" };
+    vi.mocked(factory.search).mockResolvedValue([hit]);
+    const res = await app.request("/api/search?q=%20parser%20");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ hits: [hit] });
+    expect(factory.search).toHaveBeenCalledExactlyOnceWith("parser");
+    expect(await (await app.request("/api/search?q=%20")).json()).toEqual({ hits: [] });
+    expect(await (await app.request("/api/search")).json()).toEqual({ hits: [] });
+    expect(factory.search).toHaveBeenCalledTimes(1);
   });
 
   // The dot is a number, so the list asks for the numbers once: a finished run
@@ -619,6 +634,7 @@ describe("workbench server", () => {
       resume: vi.fn(async () => session),
       list: vi.fn(async () => listed),
       find: vi.fn(async (id: string) => listed.find((s) => s.id === id)),
+      search: vi.fn(async () => []),
     };
     const hub = new EventHub();
     const app = createServer({

@@ -17,7 +17,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 function rig() {
   const db = openDb(":memory:");
   const unused = async (): Promise<never> => { throw new Error("Agent must not run for configuration sync"); };
-  const factory: AgentFactory = { create: unused, resume: unused, list: async () => [], find: async () => undefined, availableModels: async () => [] };
+  const factory: AgentFactory = { create: unused, resume: unused, list: async () => [], find: async () => undefined, availableModels: async () => [], search: async () => [] };
   const hub = new EventHub(); const router = new Router(hub, unused);
   const settings = new SettingsStore(db);
   let agent: AgentConfigSnapshot = { files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {} };

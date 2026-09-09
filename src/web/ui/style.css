@@ -352,7 +352,7 @@ main {
 }
 /* Desktop keeps a 36px navigation rhythm; the drawer retains touch targets. */
 #sidebar { font-size: 0.875rem; line-height: 1.4; }
-#sidebar :is(.session-open, #new-session, #open-archive), #console-section li button {
+#sidebar :is(.session-open, #new-session, #open-palette), #console-section li button {
   min-height: 2rem;
   padding-block: 0.25rem;
 }
@@ -379,11 +379,12 @@ main {
   #session-list li:has([aria-current="page"]) .session-more { display: flex; }
 }
 @media (pointer: coarse), (width < 48rem) {
-  #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-archive),
+  #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-palette),
   #console-section :is(summary, li button) { min-height: 44px; }
-  #sidebar :is(.session-more, .icon-btn, #open-archive) { min-width: 44px; }
+  #sidebar :is(.session-more, .icon-btn, #open-palette) { min-width: 44px; }
 }
-#console-section button.bg-indigo-50, #session-list li.bg-indigo-50 {
+/* One selection vocabulary: the rail's rows, the Console's, and the palette's. */
+#console-section button.bg-indigo-50, #session-list li.bg-indigo-50, .palette-row.bg-indigo-50 {
   color: var(--color-indigo-700);
   font-weight: 500;
   background-color: var(--color-indigo-100);
@@ -444,6 +445,9 @@ main {
   #turns {
     padding-top: calc(3rem + 8px + 0.75rem);
     padding-bottom: calc(var(--dock-h, 4rem) + 0.5rem);
+    /* scrollIntoView aims at the same edge, so a revealed row's top clears
+       the heading instead of landing behind it (chat.ts revealTurn). */
+    scroll-padding-block: calc(3rem + 8px + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
     mask-image: linear-gradient(to bottom, transparent, black 2.5rem, black calc(100% - 2rem), transparent);
   }
 }
@@ -569,6 +573,28 @@ main {
 }
 /* A transformed modal would rebase fixed menus positioned in viewport space. */
 dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
+/* The ⌘K palette: a solid panel with the floating chrome's edge and raised
+   shadow. Rows are flat pills — hover is its own grey and never moves the
+   keyboard's selection (palette.ts), which is the indigo tint plus weight. */
+#palette {
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-shadow-raised);
+}
+.palette-row { transition: background-color 120ms; }
+.palette-row:not(.bg-indigo-50):hover { background-color: var(--color-neutral-100); }
+/* The tile takes the selection's ink and a deeper tint, so the selected row is
+   one object rather than a grey square on a blue pill. */
+.palette-row.bg-indigo-50 > span:first-child {
+  background-color: color-mix(in oklab, var(--color-indigo-500) 18%, transparent);
+  color: inherit;
+}
+@media (pointer: coarse) { .palette-row { min-height: 44px; } }
+/* Where a search hit landed: a ring that fades, on the row and only there. */
+@keyframes turn-reveal {
+  from { outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
+  to { outline: 3px solid transparent; outline-offset: 3px; }
+}
+#turns > [data-reveal] { animation: turn-reveal 1.2s ease-out; }
 .glass-menu {
   --menu-shift: translateY(-4px) scale(0.97);
   transform-origin: top center;
@@ -633,6 +659,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #turns > [data-enter], dialog[open]:not(#image-dialog) {
     animation: surface-fade 120ms ease-out;
   }
+  /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
+  #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
   .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
   #sidebar { transition: none; }
   #drawer-scrim { transition-duration: 120ms; }

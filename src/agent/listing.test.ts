@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { splitSpeaker } from "../core/identity.js";
 import { openDb } from "../db.js";
 import { IndexedListing, type SessionRecord } from "./listing.js";
 
@@ -134,14 +135,40 @@ describe("the on-disk index", () => {
 
   const header = (id: string, cwd: string, at = "2026-01-01T00:00:00.000Z") =>
     JSON.stringify({ type: "session", version: 3, id, timestamp: at, cwd });
-  const user = (text: string) =>
+  const user = (text: string, at = 60_000) =>
     JSON.stringify({
       type: "message",
       id: "m1",
       parentId: null,
       timestamp: "2026-01-01T00:01:00.000Z",
-      message: { role: "user", content: [{ type: "text", text }] },
+      message: { role: "user", content: [{ type: "text", text }], timestamp: at },
     });
+  /** A reply; with `tool` set, one that is still working (a toolCall part). */
+  const assistant = (text: string, at = 61_000, tool = false) =>
+    JSON.stringify({
+      type: "message",
+      id: "a1",
+      parentId: "m1",
+      timestamp: "2026-01-01T00:01:01.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "pondering the parser" },
+          { type: "text", text },
+          ...(tool ? [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }] : []),
+        ],
+        timestamp: at,
+      },
+    });
+  const toolResult = (text: string) =>
+    JSON.stringify({
+      type: "message",
+      id: "r1",
+      parentId: "a1",
+      timestamp: "2026-01-01T00:01:02.000Z",
+      message: { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text }] },
+    });
+  const fts = () => db.prepare("SELECT session_id, role, at, text FROM session_fts ORDER BY at").all();
   const rename = (name: string) =>
     JSON.stringify({ type: "session_info", id: "n1", parentId: "m1", name });
 
@@ -157,7 +184,8 @@ describe("the on-disk index", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "pier-listing-"));
     db = openDb(":memory:");
-    listing = new IndexedListing(dir, db);
+    // Wired the way main.ts wires it: the header rule is core's.
+    listing = new IndexedListing(dir, db, (text) => splitSpeaker(text).text);
   });
 
   afterEach(() => {
@@ -280,5 +308,72 @@ describe("the on-disk index", () => {
 
   it("survives an empty sessions directory that does not exist yet", async () => {
     expect(await new IndexedListing(join(dir, "nope"), db).scan()).toEqual([]);
+  });
+
+  // --- what was said ---------------------------------------------------------------
+
+  it("indexes what was said — prompts and replies, not steps, and not the speaker header", async () => {
+    await write("--p--", "s1", [
+      header("s1", "/p"),
+      user("[operator<web> 2026-01-01 00:01]\nfix the parser"),
+      assistant("Let me look at the parser.", 61_000, true),
+      toolResult("parser.ts: 120 lines"),
+      assistant("The parser is fixed.", 62_000),
+    ]);
+    // The title keeps the header; the surfaces strip it themselves.
+    expect((await listing.scan())[0]?.title).toBe("[operator<web> 2026-01-01 00:01]\nfix the parser");
+    expect(fts()).toEqual([
+      { session_id: "s1", role: "user", at: 60_000, text: "fix the parser" },
+      { session_id: "s1", role: "assistant", at: 62_000, text: "The parser is fixed." },
+    ]);
+  });
+
+  it("appends what a grown file says, and drops what a rewritten one said", async () => {
+    const path = await write("--p--", "s1", [header("s1", "/p"), user("first pass")]);
+    await listing.scan();
+    await fs.appendFile(path, `${assistant("done", 61_000)}\n`);
+    await listing.scan();
+    expect(fts().map((r) => (r as { text: string }).text)).toEqual(["first pass", "done"]);
+    // Rewritten from the start: the old rows are the old file's, not this one's.
+    await fs.writeFile(path, [header("s1", "/p"), user("second pass", 70_000)].map((l) => `${l}\n`).join(""));
+    await listing.scan();
+    expect(fts().map((r) => (r as { text: string }).text)).toEqual(["second pass"]);
+    await fs.rm(path);
+    await listing.scan();
+    expect(fts()).toEqual([]);
+  });
+
+  it("finds a phrase by trigram, ranked, one hit per session with the match marked", async () => {
+    await write("--p--", "s1", [
+      header("s1", "/p"),
+      user("please fix the Parser today", 60_000),
+      assistant("parser fixed — the parser now parses", 61_000),
+    ]);
+    await write("--q--", "s2", [header("s2", "/q"), user("unrelated", 62_000), assistant("a parser", 63_000)]);
+    await listing.scan();
+    const hits = listing.search("parser");
+    expect(hits.map((h) => h.sessionId).sort()).toEqual(["s1", "s2"]);
+    expect(hits).toHaveLength(2); // never two rows for one session
+    const s1 = hits.find((h) => h.sessionId === "s1");
+    expect(s1?.snippet).toContain("\u0001parser\u0002");
+    expect(s1?.at).toBe(61_000); // the reply that says it twice outranks the prompt
+    // Case folds, and a phrase is a phrase: FTS syntax in the query is text.
+    expect(listing.search("the parser")).toHaveLength(1);
+    expect(listing.search('fix "OR" nothing')).toEqual([]);
+    expect(listing.search("parser", 1)).toHaveLength(1);
+  });
+
+  it("finds a two-character CJK query by substring, newest first, marked the same way", async () => {
+    await write("--p--", "s1", [header("s1", "/p"), user("修复解析器的问题", 60_000)]);
+    await write("--q--", "s2", [header("s2", "/q"), user("解析失败了", 70_000), assistant("已经修好", 71_000)]);
+    await listing.scan();
+    expect(listing.search("解析")).toEqual([
+      { sessionId: "s2", role: "user", at: 70_000, snippet: "\u0001解析\u0002失败了" },
+      { sessionId: "s1", role: "user", at: 60_000, snippet: "修复\u0001解析\u0002器的问题" },
+    ]);
+    // Three characters is a phrase again.
+    expect(listing.search("解析器").map((h) => h.sessionId)).toEqual(["s1"]);
+    // LIKE's wildcards are characters here, not patterns.
+    expect(listing.search("%")).toEqual([]);
   });
 });

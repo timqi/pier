@@ -1,6 +1,6 @@
 // Workbench frontend orchestrator: session state, selection, and the SSE
-// event streams. Rendering lives in the surface modules — sidebar.ts
-// (projects + dialogs), chat.ts (turns pane), composer.ts (input, queue
+// event streams. Rendering lives in the surface modules — sidebar.ts (the
+// rail), palette.ts (⌘K), chat.ts (turns pane), composer.ts (input, queue
 // panel, attachments), session-header.ts (title + ⋯ menu), views.ts (Console
 // views + routing) — wired here through explicit deps, never imports back.
 // Interaction paths render optimistically and reconcile from the SSE stream.
@@ -41,6 +41,7 @@ import {
   updateComposer,
 } from "./composer.js";
 import { initPush } from "./notifications.js";
+import { initPalette } from "./palette.js";
 import { initReport } from "./report.js";
 import {
   initHeader,
@@ -472,13 +473,19 @@ initShell({
 });
 initSidebar({
   sessions: () => sessions,
-  loadSessions: refreshSessions,
   currentId: () => currentId,
   select: (id) => void select(id),
   sessionMenu,
   createSession,
-  openConsole: showConsole,
   onTitleChanged: renderHeader,
+});
+initPalette({
+  sessions: () => sessions,
+  loadSessions: refreshSessions,
+  currentId: () => currentId,
+  select,
+  createSession,
+  openConsole: showConsole,
 });
 initHeader({
   currentId: () => currentId,

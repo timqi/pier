@@ -288,6 +288,14 @@ export function createServer(
     return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active)));
   });
 
+  // What was said, across every session: the palette's Messages section. The
+  // factory owns the index and the ranking; an empty query is an empty answer,
+  // not a listing of everything.
+  app.get("/api/search", async (c) => {
+    const q = (c.req.query("q") ?? "").trim();
+    return c.json({ hits: q ? await factory.search(q) : [] });
+  });
+
   app.post("/api/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     // A session always starts in its project directory — never in pier's own.

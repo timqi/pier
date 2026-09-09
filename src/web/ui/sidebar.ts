@@ -1,16 +1,16 @@
 // The left rail: one flat list of every session Pi lists, the working set on
-// top, the search palette that reaches everything (⌘K), and the New-session
-// menu.
-// main.ts owns the session list; this module renders it and reports
-// interactions back.
+// top, and the New-session menu. main.ts owns the session list; this module
+// renders it and reports interactions back. The ⌘K palette (ui/palette.ts)
+// borrows the rail's order, dots and menu rather than keeping its own.
 
 import { Ellipsis } from "lucide";
 import { icon } from "./icons.js";
 import { sendJson } from "./api.js";
 import { openBrowser, openPathMenu } from "./dir-picker.js";
-import { $, basename, h, relTime, untitled } from "./dom.js";
+import { $, basename, h, relTime } from "./dom.js";
 import { closeMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
+import { refreshPalette } from "./palette.js";
 import { setAttention } from "./shell.js";
 import { chord, modalOpen, shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
@@ -39,13 +39,10 @@ export interface SessionInfo {
 /** Everything the sidebar needs from the orchestrator (main.ts). */
 export interface SidebarDeps {
   sessions: () => SessionInfo[];
-  loadSessions: () => Promise<void>;
   currentId: () => string | null;
   select: (id: string) => void;
   sessionMenu: (anchor: HTMLElement, s: SessionInfo) => void;
   createSession: (cwd: string) => Promise<void>;
-  /** Open a Console view by name — the palette lists them beside sessions. */
-  openConsole: (name: "tasks" | "runs" | "activity" | "boards" | "settings") => void;
   /** The selected session's title changed — the chat header draws it too. */
   onTitleChanged: () => void;
 }
@@ -53,10 +50,7 @@ export interface SidebarDeps {
 let deps: SidebarDeps;
 
 const sessionList = $("#session-list");
-const archiveDialog = $<HTMLDialogElement>("#archive-dialog");
-const archiveList = $("#archive-list");
-const archiveSearch = $<HTMLInputElement>("#archive-search");
-const archiveCount = $("#archive-count");
+const newBtn = $("#new-session");
 
 // --- order -------------------------------------------------------------------------
 // Two runs of one list, and neither of them moves on its own. On top, the
@@ -105,10 +99,27 @@ export function neighbor(list: SessionInfo[], currentId: string | null, by: numb
  *  not scrolled, and the project you want is almost always a recent one. */
 const RECENT_CWDS = 8;
 
-/** Distinct directories, newest session first: what the New-session menu
- *  and the Settings scope list offer. */
+/** Distinct directories, newest session first: what the Settings scope list
+ *  offers, and the ground `projectCwds` picks from. */
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
+
+/** Where a new session is offered: the distinct directories less the
+ *  worktrees. `wt` puts a branch's checkout beside its repository as
+ *  `<repo>.<branch>`, so a directory whose name is a sibling's name plus a
+ *  dotted suffix is a branch of that sibling — an agent was sent there for one
+ *  task, and the next conversation about the project belongs in the project.
+ *  Known from the list alone: a session in the repository is what makes its
+ *  worktrees recognizable, and a worktree with no such sibling stays. */
+export function projectCwds(list: SessionInfo[]): string[] {
+  const all = distinctCwds(list);
+  const known = new Set(all);
+  return all.filter((cwd) => {
+    const slash = cwd.lastIndexOf("/");
+    const dot = cwd.indexOf(".", slash + 2); // not a leading dot: `.pier` is a name
+    return dot < 0 || !known.has(cwd.slice(0, dot));
+  });
+}
 
 /** Actions take space only while revealed; touch keeps the current row's reachable. */
 const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
@@ -272,185 +283,35 @@ export function renderSessions(): void {
     (sessionList.querySelector<HTMLElement>("#session-load-more") ?? sessionList.querySelector<HTMLElement>(".session-open") ?? $("#new-session"))
       .focus({ preventScroll: true });
   }
-  if (archiveDialog.open) renderArchive();
+  refreshPalette(); // it draws the same rows, from the same list
 }
 
-// --- the search palette (⌘K): every session, plus the Console -----------------------
-// Ordering is the feature. What is running now, then the rail's own order —
-// with the cwd on the row.
+// --- New session -------------------------------------------------------------------------
 
-/** One thing the palette can open. `session` is what makes a row a session
- *  row: the state dot and its age hang off it. */
-interface Target {
-  label: string;
-  detail: string;
-  open: () => void;
-  session?: SessionInfo;
-}
-
-// Searchable by what they are called *and* by what is inside them: "password"
-// and "channel" are how someone looks for Settings.
-const CONSOLE_TARGETS: { name: "tasks" | "runs" | "activity" | "boards" | "settings"; label: string; detail: string }[] = [
-  { name: "tasks", label: "Tasks", detail: "Automation — task definitions and schedules" },
-  { name: "runs", label: "Runs", detail: "Automation — executions, subagents, decisions and callbacks" },
-  { name: "activity", label: "Activity", detail: "Automation — sessions and relationships" },
-  { name: "boards", label: "Boards", detail: "Console — the static pages Pier publishes" },
-  { name: "settings", label: "Settings", detail: "Console — models and providers, agent files and extensions, channels, password, sign out, security" },
-];
-
-/** Rebuilt on every render; the index is what ↑/↓ and Enter address. */
-let rows: { el: HTMLElement; open: () => void }[] = [];
-let active = 0;
-
-// Three idioms for the same two moves. The arrows; readline's ⌃P/⌃N, for hands
-// that would rather not leave the home row; and ⌃J/⌃K, because ⌃N is a
-// *reserved* chord in Chrome and Firefox on Linux and Windows — it opens a new
-// window and no `preventDefault` can stop it, so "down" needs a key the browser
-// will actually hand over. (⌃P is only print, which is interceptable.)
-const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
-const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
-
-function setActive(index: number): void {
-  if (!rows.length) return;
-  active = (index + rows.length) % rows.length;
-  for (const [i, { el }] of rows.entries()) {
-    el.classList.toggle("bg-indigo-100", i === active);
-    el.classList.toggle("border-indigo-500", i === active);
-  }
-  rows[active]?.el.scrollIntoView({ block: "nearest" });
-}
-
-function paletteRow(t: Target): HTMLElement {
-  // The transparent bar is always there so gaining it costs no reflow.
-  const li = h(
-    "li",
-    "flex cursor-pointer items-center gap-2 border-l-2 border-transparent px-3 py-1.5 hover:bg-neutral-100",
-  );
-  if (t.session) li.append(...stateDot(t.session));
-  li.append(
-    h("span", "min-w-0 flex-1 truncate", t.label),
-    h("span", "max-w-[45%] flex-none truncate text-[11.5px] text-neutral-400", t.detail),
-  );
-  if (t.session) {
-    li.append(h("span", "flex-none text-[11px] text-neutral-400", relTime(t.session.createdAt)));
-  }
-  // Hover is its own grey, and it does not move the selection. Driving one
-  // highlight from both pointer and keyboard meant the browser could aim it:
-  // after a layout change it re-runs hit-testing and delivers a mouse move at
-  // the position the pointer already had, so opening ⌘K with the mouse resting
-  // anywhere over the list fired `mouseenter` there and Enter no longer opened
-  // the first row. What the keyboard selected is now only ever moved by the
-  // keyboard; the pointer opens what it clicks.
-  li.onclick = t.open;
-  return li;
-}
-
-const sectionHead = (title: string): HTMLElement =>
-  h(
-    "li",
-    "px-3 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400",
-    title,
-  );
-
-function renderArchive(): void {
-  const q = archiveSearch.value.trim().toLowerCase();
-  const hit = (text: string): boolean => !q || text.toLowerCase().includes(q);
-  const open = (run: () => void) => () => {
-    archiveDialog.close();
-    run();
-  };
-  // The chat a session answers is both searchable and shown, by its full name
-  // here — the palette has room the rail's chip does not, and "telegram" is
-  // what someone types. Empty for the workbench's own sessions, which is most
-  // of them: `web` in every detail line would only push the cwd out.
-  const chatOf = (s: SessionInfo): string => (s.channel && s.channel !== "web" ? s.channel : "");
-  const matched = deps.sessions().filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`));
-  const byAge = (a: SessionInfo, b: SessionInfo): number => b.createdAt - a.createdAt;
-  const target = (s: SessionInfo): Target => ({
-    label: s.title ?? untitled(s.cwd),
-    detail: [basename(s.cwd), chatOf(s)].filter(Boolean).join(" · "),
-    open: open(() => deps.select(s.id)),
-    session: s,
-  });
-  const streaming = matched.filter((s) => s.state === "streaming");
-  const idle = orderSessions(matched.filter((s) => s.state !== "streaming"));
-
-  const consoleSection: [string, Target[]] = [
-    "Console",
-    CONSOLE_TARGETS.filter((t) => hit(`${t.label} ${t.detail}`)).map(({ name, label, detail }) => ({
-      label,
-      detail,
-      open: open(() => deps.openConsole(name)),
-    })),
-  ];
-  const sections: [string, Target[]][] = [
-    ["Running", streaming.sort(byAge).map(target)],
-    ["Recent", idle.top.map(target)],
-    ["Sessions", idle.rest.map(target)],
-  ];
-  // A query is a question about everything, so the Console answers it up top;
-  // an empty box is the session list it has always been, with the Console
-  // parked at the bottom where it stays discoverable.
-  if (q) sections.unshift(consoleSection);
-  else sections.push(consoleSection);
-
-  rows = [];
-  const nodes: HTMLElement[] = [];
-  for (const [title, targets] of sections) {
-    if (!targets.length) continue;
-    nodes.push(sectionHead(title));
-    for (const t of targets) {
-      const el = paletteRow(t);
-      rows.push({ el, open: t.open });
-      nodes.push(el);
-    }
-  }
-  archiveList.replaceChildren(
-    ...(nodes.length
-      ? nodes
-      : [h("li", "px-3 py-3 text-[13px] text-neutral-400", "Nothing matches.")]),
-  );
-  archiveCount.textContent = String(rows.length);
-  // Held, not reset: a session going streaming re-renders this list, and
-  // moving the highlight out from under a pressed Enter is a misfire.
-  setActive(active);
-}
-
-/** Same control from the button and from ⌘K, so the chord also dismisses it. */
-function toggleArchive(): void {
-  if (archiveDialog.open) return archiveDialog.close();
-  archiveSearch.value = "";
-  active = 0;
-  renderArchive();
-  archiveDialog.showModal();
-  archiveSearch.focus();
-  void deps.loadSessions().then(() => {
-    if (archiveDialog.open) renderArchive();
-  });
+/** The new session nearly always belongs to a directory the rail already
+ *  shows, so the button opens straight onto those — the current one ticked,
+ *  the rest newest first — with the folder tree (which also takes a typed
+ *  path) one row below. Picking creates: no form, no second click. Exported
+ *  for the palette's "New session in…" row, which is this control by another
+ *  route. */
+export function openNewSession(): void {
+  if (newBtn.getAttribute("aria-expanded") === "true") return closeMenu();
+  const current = deps.sessions().find((s) => s.id === deps.currentId())?.cwd;
+  const recent = projectCwds(deps.sessions()).slice(0, RECENT_CWDS);
+  if (current && !recent.includes(current)) recent.unshift(current);
+  // Nothing to choose from yet (a fresh instance): straight to the tree.
+  if (!recent.length) return openBrowser(newBtn, undefined, deps.createSession);
+  openPathMenu(newBtn, recent.map((path) => ({ path, hint: basename(path) })), current, deps.createSession);
 }
 
 // --- wiring ----------------------------------------------------------------------------
 
 export function initSidebar(d: SidebarDeps): void {
   deps = d;
-  const newBtn = $("#new-session");
-  // The new session nearly always belongs to a directory the rail already
-  // shows, so the button opens straight onto those — the current one ticked,
-  // the rest newest first — with the folder tree (which also takes a typed
-  // path) one row below. Picking creates: no form, no second click.
-  const openNew = (): void => {
-    if (newBtn.getAttribute("aria-expanded") === "true") return closeMenu();
-    const current = deps.sessions().find((s) => s.id === deps.currentId())?.cwd;
-    const recent = distinctCwds(deps.sessions()).slice(0, RECENT_CWDS);
-    if (current && !recent.includes(current)) recent.unshift(current);
-    // Nothing to choose from yet (a fresh instance): straight to the tree.
-    if (!recent.length) return openBrowser(newBtn, undefined, deps.createSession);
-    openPathMenu(newBtn, recent.map((path) => ({ path, hint: basename(path) })), current, deps.createSession);
-  };
-  newBtn.onclick = openNew;
+  newBtn.onclick = openNewSession;
   // ⇧O, not ⇧N: ⌘⇧N / ⌘⇧T are the browser's own windows and cannot be
   // taken back — ⇧O is what the chat apps settled on for the same action.
-  shortcut(newBtn, "shift+o", "New session", openNew);
+  shortcut(newBtn, "shift+o", "New session", openNewSession);
   // ⌘⇧[ / ⌘⇧] walk the rail in the order it is drawn — the tab-switching
   // chord, applied to sessions. No button carries it: the rail itself is the
   // affordance.
@@ -460,32 +321,4 @@ export function initSidebar(d: SidebarDeps): void {
   };
   chord("shift+[", () => step(-1), modalOpen);
   chord("shift+]", () => step(1), modalOpen);
-  const search = $("#open-archive");
-  search.onclick = toggleArchive;
-  // Once the palette is open the chord belongs to its list (⌃K walks up), so
-  // the global binding stands down; Esc is what a <dialog> closes on anyway.
-  shortcut(search, "k", "Search sessions and Console", toggleArchive, () => archiveDialog.open);
-  $("#archive-close").onclick = () => archiveDialog.close();
-  archiveSearch.oninput = () => {
-    active = 0; // a new query is a new list; the old position means nothing
-    renderArchive();
-  };
-  // The input keeps focus while the list is walked — typing must never mean
-  // "start over because you moved".
-  archiveSearch.onkeydown = (ev) => {
-    // Bare Ctrl only: ⌃⇧N is the browser's incognito window, and claiming a
-    // chord someone meant for the browser is worse than not having it.
-    const step = ev.altKey || ev.metaKey || ev.shiftKey || !ev.key // no `key`: synthetic event
-      ? undefined
-      : (ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key]);
-    if (step !== undefined) {
-      ev.preventDefault();
-      setActive(active + step);
-      return;
-    }
-    if (ev.key === "Enter" && !ev.ctrlKey) {
-      ev.preventDefault();
-      rows[active]?.open();
-    }
-  };
 }

@@ -128,6 +128,26 @@ export function scrollBottom(force = false): void {
   if (follow) turnsPane.scrollTop = turnsPane.scrollHeight;
 }
 
+/** How long a revealed row stays lit — the CSS animation's length, kept here
+ *  too because reduced motion draws the mark without an animation to end. */
+const REVEAL_MS = 1200;
+
+/** Bring the turn stamped `at` into view and light it for a moment: how a
+ *  search hit lands (ui/palette.ts). Rows carry the stamp the hit was indexed
+ *  by — a user turn's own, a reply's completion (setRowTime). `false` when no
+ *  row has it: compacted away, edited out, or trimmed off the top of the pane. */
+export function revealTurn(role: "user" | "assistant", at: number): boolean {
+  const row = turnsPane.querySelector<HTMLElement>(`[data-kind="${role}"][data-at="${at}"]`);
+  if (!row) return false;
+  follow = false; // walking back into history is leaving the tail
+  // Centred, unless the row is taller than the pane: a long reply centred
+  // opens on its middle, and reading starts at the top.
+  row.scrollIntoView({ block: row.offsetHeight > turnsPane.clientHeight ? "start" : "center" });
+  row.dataset.reveal = "";
+  setTimeout(() => delete row.dataset.reveal, REVEAL_MS);
+  return true;
+}
+
 // --- chat bubbles ------------------------------------------------------------------
 // Direction identifies the speaker; system and error rows keep their status tint.
 

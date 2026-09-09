@@ -9,6 +9,7 @@ import { normalizeAgentSnapshot } from "./agent/config-sync.js";
 import { ConfigSync } from "./config-sync.js";
 import { configSyncTask } from "./config-sync-task.js";
 import { CredentialStore } from "./agent/credentials.js";
+import { IndexedListing } from "./agent/listing.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
@@ -21,6 +22,7 @@ import { SlackDirectory } from "./channels/slack-directory.js";
 import { handleSlackTool, slackToolAvailable, slackToolSpec } from "./channels/slack-tool.js";
 import { parseConversation as parseSlackConversation } from "./channels/slack.js";
 import { EventHub } from "./core/hub.js";
+import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
 import { bundledInfo } from "./extensions/index.js";
@@ -152,6 +154,9 @@ const factory = new PiAgentFactory(
   () => settings.get().extensions,
   // The title model, if the operator picked one; read when a first turn ends.
   () => settings.get().titleModel,
+  // The search index reads Pi's transcripts, which carry the speaker header
+  // core wrote for the model; this is where the two areas meet.
+  new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {

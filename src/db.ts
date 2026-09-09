@@ -367,6 +367,24 @@ const MIGRATIONS: readonly string[] = [
   -- was watching for, and a false amber dot costs less than the join.
   UPDATE session_state SET unread = 0;
   `,
+  // 22 — the palette finds what was said, not only what a session is called.
+  `
+  -- One row per user message and per assistant reply, keyed by the transcript
+  -- it came from so a file that is rewritten or gone drops its rows in one
+  -- statement (agent/listing.ts). Trigram tokens: a substring match with no
+  -- word segmentation, which CJK text has none of and a path or an identifier
+  -- in a prompt has too much of. Steps stay out — tool calls, their output,
+  -- thinking are the bulk of a transcript and nobody searches for what ran.
+  CREATE VIRTUAL TABLE session_fts USING fts5(
+    text, session_id UNINDEXED, path UNINDEXED, role UNINDEXED, at UNINDEXED,
+    tokenize = 'trigram'
+  );
+  -- Derived and disposable (migration 7): every row goes, so the next scan
+  -- reads every transcript from its first byte and fills the table above.
+  -- Resetting parsed_bytes alone would not — a row whose (size, mtime) still
+  -- match is trusted without opening the file.
+  DELETE FROM session_index;
+  `,
 ];
 
 /**

@@ -79,7 +79,7 @@
         class="btn btn-primary flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap px-3">
         <span data-icon="Plus" aria-hidden="true" class="h-3.5 w-3.5"></span> New session
       </button>
-      <button type="button" id="open-archive" aria-label="Search sessions and Console"
+      <button type="button" id="open-palette" aria-label="Search sessions, messages and Console"
         class="btn flex h-8 w-8 flex-none items-center justify-center bg-neutral-100 p-0 text-neutral-600 hover:bg-neutral-200 active:bg-neutral-300">
         <span data-icon="Search" class="h-5 w-5 flex-none"></span>
         <span class="sr-only">Search</span>
@@ -199,15 +199,23 @@
 
   <!-- Not m-auto: a palette that grows downward as you type should not also
        drift upward to stay centred. Pinned near the top instead, which is
-       where the eye already is and where every other ⌘K lives. -->
-  <dialog id="archive-dialog" class="mx-auto mb-auto mt-[12vh] w-[35rem] max-w-[90vw] rounded-3xl border border-neutral-200 p-0 shadow-xl backdrop:bg-black/20">
-    <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2">
-      <input id="archive-search" type="text" placeholder="Search sessions and Console…"
-        class="w-full bg-transparent text-[14px] focus:outline-none" />
-      <span id="archive-count" class="flex-none rounded bg-neutral-100 px-1.5 text-[11px] text-neutral-500"></span>
-      <button type="button" id="archive-close" class="btn flex-none text-[12px]">Close</button>
+       where the eye already is and where every other ⌘K lives. A solid
+       surface (docs/design/06-ui-ux.md): glass is for chrome, and this is
+       something you read. The edge and shadow tokens are set in style.css;
+       a click on the backdrop lands on the dialog element itself and closes
+       it (palette.ts). -->
+  <dialog id="palette" class="mx-auto mb-auto mt-[12vh] w-[36rem] max-w-[92vw] rounded-3xl border p-0 backdrop:bg-black/25">
+    <div class="flex h-[3.25rem] items-center gap-3 border-b border-neutral-200/70 px-4">
+      <span data-icon="Search" aria-hidden="true" class="h-[1.125rem] w-[1.125rem] flex-none text-neutral-400"></span>
+      <input id="palette-input" type="text" placeholder="Search sessions, messages and Console…" autocomplete="off" spellcheck="false"
+        class="min-w-0 flex-1 bg-transparent text-[1.0625rem] leading-6 placeholder:text-neutral-400 focus:outline-none" />
+      <kbd class="flex-none rounded-md border border-neutral-200 px-1.5 font-sans text-[0.6875rem] leading-5 text-neutral-500">esc</kbd>
     </div>
-    <ul id="archive-list" class="max-h-[60vh] overflow-y-auto py-1 text-[13.5px]"></ul>
+    <ul id="palette-list" role="listbox" aria-label="Results" class="max-h-[60vh] overflow-y-auto px-2 pb-2 text-[0.9375rem]"></ul>
+    <div class="flex items-center justify-between border-t border-neutral-200/70 px-4 py-1.5 text-[0.75rem] leading-4 text-neutral-500">
+      <span>↑↓ navigate · ↵ open</span>
+      <span id="palette-count"></span>
+    </div>
   </dialog>
 
   <!-- Full-size view of a thumbnail; a single click (or Esc) closes, a double

@@ -30,6 +30,7 @@ import type {
   ProviderInfo,
   ProviderManager,
   ProviderSetup,
+  SearchHit,
   SessionEventPayload,
   SessionState,
   SessionSummary,
@@ -981,5 +982,13 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   async list(): Promise<SessionSummary[]> {
     return (await this.listed()).map(summaryOf);
+  }
+
+  /** After a listing, so a transcript that grew since the last one is indexed
+   *  before it is asked about; the listing owns the index. One that cannot
+   *  search — a test's — has nothing to say. */
+  async search(query: string): Promise<SearchHit[]> {
+    await this.listed();
+    return this.listings.search?.(query) ?? [];
   }
 }

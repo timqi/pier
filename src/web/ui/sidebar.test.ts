@@ -6,6 +6,7 @@ vi.mock("./api.js", () => ({ sendJson: vi.fn() }));
 vi.mock("./dir-picker.js", () => ({ openBrowser: vi.fn(), openPathMenu: vi.fn() }));
 vi.mock("./menu.js", () => ({ closeMenu: vi.fn() }));
 vi.mock("./notifications.js", () => ({ setUnreadBadge: vi.fn() }));
+vi.mock("./palette.js", () => ({ refreshPalette: vi.fn() }));
 vi.mock("./shell.js", () => ({ setAttention: vi.fn() }));
 vi.mock("./shortcut.js", () => ({ shortcut: vi.fn(), chord: vi.fn() }));
 let sidebar: typeof import("./sidebar.js");
@@ -58,6 +59,16 @@ it("offers each directory once, newest session first", () => {
     row("b", { cwd: "/y", createdAt: 3 }),
     row("c", { cwd: "/x", createdAt: 2 }),
   ])).toEqual(["/y", "/x"]);
+});
+
+it("offers a project but not its worktrees, and keeps a dotted name with no such sibling", () => {
+  expect(sidebar.projectCwds([
+    row("a", { cwd: "/code/pier.palette-search", createdAt: 4 }),
+    row("b", { cwd: "/code/pier", createdAt: 3 }),
+    row("c", { cwd: "/code/pier.stable", createdAt: 2 }),
+    row("d", { cwd: "/code/site.v2", createdAt: 1 }), // no /code/site here: a name, not a branch
+    row("e", { cwd: "/home/me/.pier", createdAt: 0 }), // a leading dot names a directory
+  ])).toEqual(["/code/pier", "/code/site.v2", "/home/me/.pier"]);
 });
 
 // An idle session has no mark or reserved slot in the rail.

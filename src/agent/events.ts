@@ -59,7 +59,10 @@ export interface PiEvent {
   willRetry?: boolean;
 }
 
-const hasToolCalls = (message: PiMessage | undefined): boolean =>
+/** An assistant message that calls a tool is work in progress, not a reply —
+ *  the rule `toChatTurns` rebuilds a transcript by, and agent/listing.ts
+ *  indexes one by. */
+export const hasToolCalls = (message: PiMessage | undefined): boolean =>
   Array.isArray(message?.content) && message.content.some((part) => part.type === "toolCall");
 
 export function textOf(content: string | TextPart[] | undefined): string {

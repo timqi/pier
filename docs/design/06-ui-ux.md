@@ -20,6 +20,15 @@ Keep light and dark themes coherent, with visible focus and status conveyed beyo
 ## Content, Controls, and Materials
 
 Use solid surfaces for replies, modal forms, search dialogs, and file previews.
+The search palette is one: a solid panel with the floating chrome's edge and
+raised shadow, flat rows whose keyboard selection is a tinted pill with medium
+weight (no edge bar), sentence-case section labels, and a match marked by ink
+and weight rather than a highlighter. Its rows use the desktop action scale:
+0.9375rem labels in 2.5rem rows (44px on touch), each opening on a 1.75rem
+Lucide tile that says what kind of thing it opens and gives the row its edge
+— no rules between rows or groups, space and small heavy grey heads alone; the
+detail sits beside the label as a 0.8125rem subtitle that gives way before the
+label does; 0.75rem marks; the input is 1.0625rem in a 3.25rem band.
 Reserve glass, subtle borders, and shadows for navigation and floating controls where they
 clarify layering. Coordinate corner radii with nesting rather than imposing one radius everywhere.
 Reuse the shared palette, controls, menus, and time labels instead of inventing page-specific styles.

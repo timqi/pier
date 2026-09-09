@@ -461,6 +461,17 @@ export interface SessionSummary {
   modified?: number;
 }
 
+/** One place a search found its query: the best-ranked message of a session,
+ *  with the match delimited by \u0001…\u0002 inside `snippet` so a surface can
+ *  mark it without searching again. `at` names the turn — `ChatTurn.at` for a
+ *  user turn, `meta.completedAt` for a reply. */
+export interface SearchHit {
+  sessionId: string;
+  role: "user" | "assistant";
+  at: number;
+  snippet: string;
+}
+
 export interface AgentFactory {
   /**
    * Models with configured auth, independent of any session. Session-scoped
@@ -485,6 +496,10 @@ export interface AgentFactory {
    * not evidence that a session does not exist.
    */
   find(sessionId: string): Promise<SessionSummary | undefined>;
+  /** Sessions by what was said in them — user messages and replies, never
+   *  steps — at most one hit per session, best first. How the text is indexed
+   *  is the backend's business; core sees the hits. */
+  search(query: string): Promise<SearchHit[]>;
 }
 
 export type ProviderAuthType = "api_key" | "oauth";

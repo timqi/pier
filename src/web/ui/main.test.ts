@@ -28,6 +28,7 @@ vi.mock("./composer.js", () => ({
   renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), updateComposer: vi.fn(),
 }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
+vi.mock("./palette.js", () => ({ initPalette: vi.fn() }));
 vi.mock("./report.js", () => ({ initReport: vi.fn() }));
 vi.mock("./session-header.js", () => ({
   initHeader: vi.fn(), noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),

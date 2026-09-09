@@ -124,7 +124,9 @@ per-turn Activity groups):
   sessions remain available through pagination and the search palette. New
   session opens a menu on its button, not a dialog: the listing's recent
   distinct directories (current one ticked, at most eight) then Browse…, and
-  picking one creates the session. A labeled
+  picking one creates the session. Worktrees are left out — a `<repo>.<branch>`
+  directory whose `<repo>` sibling is also listed is a branch checkout, not a
+  project — here and in the palette's Actions alike. A labeled
   New session button and a separate magnifier button share one row below the
   brand. New session uses the primary blue fill; Search uses a muted neutral
   fill with a contrasting icon. Search keeps its accessible name
@@ -150,10 +152,27 @@ per-turn Activity groups):
   rounds its outer corners, and keeps 0.9375rem type with 1.5 leading. Section
   labels use sentence case; selected rows use medium weight and a flat blue
   tint, and channel initials retain readable secondary contrast.
-- **Search palette** (search icon, ⌘K): sessions searchable by title, directory
-  and channel, under Running / Recent / Sessions, plus Console destinations.
-  Working-set rank and unread state belong to `web/session-state.ts`; the
-  browser does not maintain a second session order or summary store.
+- **Search palette** (search icon, ⌘K): a launcher, not a list. Empty, it
+  shows Running, the first seven of the rail's order as Recent, Actions (New
+  session in the current directory; New session in…, which hands over to the
+  rail's directory menu) and the Console destinations. Typed into, it shows
+  Actions (matching directories to start in, Console entries) and one Sessions
+  list: those matched by title, directory or channel from the list already in
+  hand, then those matched by what was said in them — `GET /api/search?q=`
+  over user messages and replies, never steps, indexed by `agent/listing.ts`
+  in the same pass that lists sessions, one hit per session — each carrying
+  the matched line under its name. A result is always a session; the message
+  is why it is there. Local rows render on the keystroke; the server is asked
+  after an 80ms pause with the previous request aborted, and the list says
+  `Searching messages…`, `No sessions match` or `Message search unavailable`
+  (reason on hover) in that place rather than nothing. Opening a
+  content hit selects the session and, once the transcript is on screen, scrolls to
+  the turn stamped with the hit's time and rings it briefly; a turn no longer
+  there (compacted, edited, trimmed) just opens the session. ↑↓ / ⌃N ⌃P /
+  ⌃J ⌃K walk, ↵ opens, Esc or a click on the backdrop closes; hover never
+  moves the keyboard's selection. Working-set rank and unread state belong to
+  `web/session-state.ts`; the browser does not maintain a second session order
+  or summary store.
 - **Snapshot then deltas**: the stream carries deltas only, so a fresh client
   starts from `/history` — transcript (including each assistant turn's `steps`,
   thinking/progress/tool activity rebuilt from the Pi transcript), run `state` and

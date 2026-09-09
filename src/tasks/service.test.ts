@@ -136,6 +136,7 @@ function setup(session = fakeSession(), instance?: ConstructorParameters<typeof 
     // Derived from the same list, like the real seam: a fake that answers the
     // two independently can agree with nothing.
     find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
+    search: vi.fn(async () => []),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume(session.id));
@@ -176,6 +177,7 @@ function supervised() {
     resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
     list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
     find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
+    search: vi.fn(async () => []),
   };
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
@@ -396,6 +398,7 @@ describe("callback recovery across database connections", () => {
         },
         list: async () => [{ id: parent.id, cwd: home, createdAt: 1 }],
         find: async (id) => id === parent.id ? { id, cwd: home, createdAt: 1 } : undefined,
+        search: async () => [],
       };
       const hub = new EventHub();
       const router = new Router(hub, (key) => factory.resume(key.conversationId));
