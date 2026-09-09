@@ -4,7 +4,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
@@ -180,10 +180,18 @@ const interaction = (over: Partial<SlackInteraction>): SlackEnvelope => ({
   payload: { type: "block_actions", user: { id: "U42" }, trigger_id: "TRIG", ...over },
 });
 
+/** Wait for the handlers the adapter has in flight, reaching for its chains
+ *  because a fixed sleep is a race: saving a file share's bytes is real I/O
+ *  with no upper bound on a loaded machine. */
+async function settled(): Promise<void> {
+  const chains = (channel as unknown as { chains: { size: number } }).chains;
+  await vi.waitFor(() => expect(chains.size).toBe(0), { interval: 1, timeout: 5_000 });
+}
+
 /** Push envelopes and let the per-channel chains drain. */
 async function feed(...envelopes: SlackEnvelope[]): Promise<void> {
   for (const env of envelopes) client.emit(env);
-  await new Promise((r) => setTimeout(r, 20));
+  await settled();
 }
 
 /** Open the channel gates and bind the test sender (a DM is bind-only). */
@@ -1162,7 +1170,7 @@ describe("receipts", () => {
     await channel.send("C100/1799.000100", { text: "previous turn", suggestions: [] });
     expect(client.reactions).toEqual([]);
     releaseName("Q");
-    await new Promise((r) => setTimeout(r, 10));
+    await settled();
     expect(client.reactions).toEqual([{ channel: "C100", ts: "1799.000100", name: "eyes", add: true }]);
     expect(inbound.at(-1)!.text).toBe("next");
   });
