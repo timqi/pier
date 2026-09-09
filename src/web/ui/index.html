@@ -7,17 +7,19 @@
        workbench zoomed by a stray gesture has no visible way back — said again
        as `touch-action` (style.css) for the engines that ignore this pair. -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#fafafa" />
+  <meta name="theme-color" content="#f7f9f8" />
   <!-- Ahead of the stylesheet, because a workbench that flashes white and then
        goes dark reads as a bug. This is the only place "system" is resolved
        before the bundle exists; theme.ts owns the choice from there on. -->
   <script>
-    try {
-      var t = localStorage.getItem("pier.theme");
-      document.documentElement.dataset.theme =
-        t === "light" || t === "dark" ? t
-          : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    } catch (e) { /* storage denied (private mode, blocked cookies): light it is */ }
+    var t;
+    try { t = localStorage.getItem("pier.theme"); }
+    catch (e) { /* storage denied: follow the system for this visit */ }
+    var mode = t === "light" || t === "dark" ? t
+      : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = mode;
+    // Before CSS loads, mirror its canvas token so installed chrome never flashes.
+    document.querySelector('meta[name="theme-color"]').content = mode === "dark" ? "#181c1f" : "#f7f9f8";
   </script>
   <!-- Installed as a home-screen app: standalone window, own icon. The
        manifest shares the workbench's cookie boundary. -->
@@ -74,17 +76,17 @@
       <button type="button" id="theme-toggle" aria-label="Theme"
         class="icon-btn text-[13px]"></button>
     </header>
-    <div class="flex flex-none flex-col gap-0.5 px-3 pb-1">
+    <div class="flex flex-none items-center gap-1.5 px-3 pb-1">
       <button type="button" id="new-session" aria-label="New session"
-        class="btn btn-primary flex w-full items-center justify-center gap-2">
+        class="btn btn-primary flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap px-3">
         <span aria-hidden="true">＋</span> New session
       </button>
       <button type="button" id="open-archive" aria-label="Search sessions and Console"
-        class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-neutral-500 hover:bg-neutral-100">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" class="h-3.5 w-3.5 flex-none">
+        class="icon-btn h-8 w-8">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" class="h-5 w-5 flex-none">
           <circle cx="7" cy="7" r="4.25" /><path d="M10.2 10.2 14 14" stroke-linecap="round" />
         </svg>
-        Search <kbd id="search-shortcut" class="ml-auto hidden text-xs md:block"></kbd>
+        <span class="sr-only">Search</span>
       </button>
     </div>
     <details id="console-section" open class="flex-none border-b border-neutral-200/70">

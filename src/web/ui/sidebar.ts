@@ -9,7 +9,7 @@ import { pathTrigger, type PathOption } from "./dir-picker.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { setUnreadBadge } from "./notifications.js";
 import { setAttention } from "./shell.js";
-import { chordLabel, shortcut } from "./shortcut.js";
+import { shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
@@ -434,7 +434,7 @@ export function initSidebar(d: SidebarDeps): void {
   $<HTMLFormElement>("#new-form").onsubmit = () =>
     void deps.createSession($<HTMLInputElement>("#new-cwd").value.trim());
   const search = $("#open-archive");
-  $("#search-shortcut").textContent = chordLabel("k");
+  search.onclick = toggleArchive;
   search.onclick = toggleArchive;
   // Once the palette is open the chord belongs to its list (⌃K walks up), so
   // the global binding stands down; Esc is what a <dialog> closes on anyway.

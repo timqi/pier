@@ -39,9 +39,9 @@ const resolved = (): "light" | "dark" => {
 function apply(): void {
   const mode = resolved();
   document.documentElement.dataset.theme = mode;
-  // Not reachable from CSS: this is the tab strip, the installed window's
-  // chrome and the iOS status-bar strip the page paints under.
-  $('meta[name="theme-color"]').setAttribute("content", mode === "dark" ? "#1c1c1c" : "#fafafa");
+  // Installed window chrome follows the same canvas as the page's outer edge.
+  const canvas = getComputedStyle(document.documentElement).getPropertyValue("--workbench-canvas").trim();
+  $('meta[name="theme-color"]').setAttribute("content", canvas);
   // The Activity graph paints with SVG attributes, which cannot carry var().
   window.dispatchEvent(new Event("pier:theme"));
 }

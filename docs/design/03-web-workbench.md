@@ -108,8 +108,9 @@ per-turn Activity groups):
   titles and session actions share the existing listing and event state. More
   sessions remain available through pagination and the search palette. The New
   session directory picker offers the listing's distinct directories. A labeled
-  New session button and Search entry sit below the brand; the desktop search
-  entry shows the platform shortcut. Status dots appear after the title only
+  New session button and a separate magnifier button share one row below the
+  brand. Search keeps its accessible name and the existing shortcut hover hint.
+  Status dots appear after the title only
   when needed; idle sessions reclaim their width. Title left edges stay aligned,
   while status changes may alter the trailing truncation. Action buttons retain
   their space on hover, appear on keyboard focus and remain visible on touch;
@@ -137,7 +138,16 @@ per-turn Activity groups):
   session's state is defaulted client-side; a reload shows real step counts and
   the correct composer buttons.
 - **Chat header**: title, compact model/reasoning/context metadata and the `⋯`
-  session menu. The mobile top bar retains the title and session actions.
+  session menu. On desktop it uses an 8px inset, rounded glass strip matching the
+  sidebar material, with the collapsed rail handle aligned inside it. The mobile
+  top bar retains the title and session actions on the page's solid canvas color.
+- **Workbench color and installed chrome**: a pale neutral canvas with subtle
+  mist-blue and mint gradients confined to the lower conversation area; message
+  surfaces remain solid. CSS `--workbench-canvas` is the runtime source for the
+  page edge and `theme-color` metadata. The pre-bundle script mirrors its light
+  and dark values for startup, follows the system when storage is unavailable,
+  and the manifest uses the light value for its launch fallback. Native window
+  chrome remains browser/OS controlled; these values request a matching tint.
 - **Session menu** (`menu.ts`): one anchored popover primitive, one open at a
   time, closed by outside pointerdown / Esc / page scroll (scrolling *inside*
   the panel does not close it). Opened from the chat header and from rail

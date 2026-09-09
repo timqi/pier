@@ -26,7 +26,12 @@ Reuse the shared palette, controls, menus, and time labels instead of inventing 
 The desktop sidebar uses one inset floating panel with restrained glass, border
 and shadow; its rows stay flat, with selection expressed through tint and weight.
 The mobile drawer keeps its available width and uses rounded outer corners
-without desktop panel margins.
+without desktop panel margins. The desktop chat heading uses the same glass
+material in a slim inset rounded strip. Keep the outer page edge neutral and
+match installed-window theme metadata to that canvas in both themes, including
+startup; the mobile heading stays on the solid canvas. Reserve the very pale
+mist-blue and mint background accents for the lower conversation area so color
+supports reading without tinting the entire workspace.
 A dialog hosting viewport-fixed menus must not use backdrop blur or transform animations:
 these change the menus' containing block and can cause offsets or clipping. Keep menus in
 its top layer, and clip only content that needs clipping. Verify actual overlay hit targets.
@@ -90,7 +95,8 @@ Account for safe areas and software keyboards; content panels own scrolling, and
 must not force the whole conversation to scroll horizontally. Navigation titles
 keep their left edge aligned. Trailing status marks occupy space only when
 present; hover actions reserve their width so pointer movement never changes
-truncation. Primary sidebar actions have visible labels; row actions remain
+truncation. The labeled New session action and a distinct magnifier share a row;
+Search retains an accessible name and shortcut hint. Row actions remain
 reachable by keyboard and touch, with 44px minimum touch targets. A closed mobile
 drawer is inert; an open drawer owns keyboard focus, supports Escape, and returns
 focus on dismissal. Sidebar type uses the system sans-serif stack, sentence-case

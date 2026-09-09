@@ -23,6 +23,9 @@
 /* A cool paper canvas; keep secondary labels readable at the compact UI scale. */
 html {
   color-scheme: light;
+  --workbench-canvas: #f7f9f8;
+  --workbench-mist: #edf5f6;
+  --workbench-mint: #eef6f1;
   --color-neutral-50: oklch(98% 0.004 260);
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
@@ -46,9 +49,10 @@ html {
 
 html[data-theme="dark"] {
   color-scheme: dark;
-  /* No element paints the page itself — `bg-white` starts at the panes — so
-     without this the canvas would be whatever the UA picks for a dark scheme. */
-  background-color: var(--color-white);
+  --workbench-canvas: #181c1f;
+  --workbench-mist: #202b30;
+  --workbench-mint: #202c28;
+  background-color: var(--workbench-canvas);
 
   /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
      rail), 100–300 the chrome over it; 400 and up is type. */
@@ -205,6 +209,10 @@ html {
   body[data-rail="closed"] #rail-toggle {
     left: 0.375rem;
   }
+  body[data-rail="closed"]:has(#chat-header:not(.hidden)) #rail-toggle {
+    left: calc(0.375rem + 8px);
+    top: calc(0.625rem + 8px);
+  }
   body[data-rail="closed"] #rail-toggle svg {
     transform: rotate(180deg);
   }
@@ -278,7 +286,7 @@ html {
 /* Shared chrome belongs below utilities so local layout and state still win. */
 @layer base {
   body {
-    background: radial-gradient(ellipse at top left, var(--color-indigo-100), transparent 55%), var(--color-neutral-50);
+    background: var(--workbench-canvas);
   }
   ::selection { background: var(--color-indigo-100); color: var(--color-indigo-800); }
   :focus-visible { outline: 2px solid var(--color-indigo-500); outline-offset: 3px; }
@@ -288,6 +296,12 @@ html {
   * { scrollbar-width: thin; scrollbar-color: var(--color-neutral-300) transparent; }
 }
 
+/* Quiet color at the foot of the conversation; the top edge matches PWA chrome. */
+main {
+  background:
+    radial-gradient(ellipse 80% 65% at 100% 100%, var(--workbench-mist), transparent 75%),
+    radial-gradient(ellipse 70% 65% at 0% 100%, var(--workbench-mint), transparent 75%);
+}
 /* Desktop keeps a 36px navigation rhythm; the drawer retains touch targets. */
 #sidebar { font-size: 0.875rem; line-height: 1.4; }
 #sidebar :is(.session-open, #new-session, #open-archive), #console-section li button {
@@ -332,8 +346,19 @@ html {
   backdrop-filter: blur(20px) saturate(1.35);
   -webkit-backdrop-filter: blur(20px) saturate(1.35);
 }
-#sidebar { background: color-mix(in oklab, var(--color-neutral-50) 76%, transparent); }
 #rail-toggle { top: 0.625rem; border-radius: 50%; }
+#chat-header {
+  margin: 8px 8px 0;
+  border: 1px solid var(--glass-edge);
+  border-radius: 18px;
+  font-size: 0.9375rem;
+}
+#mobile-bar {
+  background: var(--workbench-canvas);
+  border-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 :is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
   height: 3rem;
 }
