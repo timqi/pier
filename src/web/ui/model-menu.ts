@@ -26,6 +26,26 @@ const key = (m: ModelRef): string => `${m.provider}/${m.id}`;
 /** What no title model means, on the trigger and on the row that clears it. */
 const TITLE_OFF = "Off — the first message is the title";
 
+/** The shared picker with its reasoning selector switched off: both rows here
+ *  choose a model and nothing else — what a pin advises is the row's own field,
+ *  and a title is one short request. */
+function modelOnly(
+  models: ModelRef[],
+  current: ModelRef | null | undefined,
+  onPick: (model: ModelRef) => void,
+): HTMLElement {
+  return modelPicker({
+    models,
+    current,
+    // No levels, so the picker draws no reasoning selector and neither of these
+    // two is ever read.
+    thinkingLevel: "medium",
+    thinkingLevels: [],
+    onThinkingPick: () => {},
+    onPick,
+  });
+}
+
 /** The intents that keep coming up — offered in the note's dropdown so "what
  * do I write here" has answers to pick from, not just a blank line. */
 const NOTE_PRESETS = [
@@ -101,23 +121,23 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     );
   }
 
+  /** Picking is the pinning: the flat select this replaced listed every id in
+   *  the catalog unsearchable, which is the one place left that made the
+   *  operator scroll to find a model the rest of the app lets them type. */
   function renderAdder(): void {
     const pickable = catalog.filter((m) => !entries.some((e) => key(e) === key(m)));
-    const picker = select(pickable.map((m): [string, string] => [key(m), key(m)]), pickable[0] ? key(pickable[0]) : "");
-    picker.classList.replace("w-full", "flex-1");
-    picker.classList.add("min-w-0");
     const add = button("Pin model");
     add.prepend(icon(Plus));
     add.classList.add("inline-flex", "items-center", "gap-1.5", "flex-none", "whitespace-nowrap");
     add.disabled = pickable.length === 0;
-    add.onclick = () => {
-      const picked = pickable.find((m) => key(m) === picker.value);
-      if (!picked) return;
-      entries.push({ ...picked });
-      markDirty();
-      render();
-    };
-    adder.replaceChildren(picker, add);
+    add.onclick = () =>
+      openPanel(add, modelOnly(pickable, null, (model) => {
+        closeMenu();
+        entries.push({ provider: model.provider, id: model.id });
+        markDirty();
+        render();
+      }));
+    adder.replaceChildren(add);
   }
 
   /** The chat composer's picker, written on pick — no save button: a model
@@ -154,16 +174,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     };
 
     open.onclick = () => {
-      const panel = modelPicker({
-        models: options,
-        current: stored,
-        // No levels, so the picker draws no reasoning selector and neither of
-        // these two is ever read.
-        thinkingLevel: "medium",
-        thinkingLevels: [],
-        onThinkingPick: () => {},
-        onPick: (model) => save(model),
-      });
+      const panel = modelOnly(options, stored, save);
       const off = btn(TITLE_OFF, "w-full cursor-pointer px-3 py-1.5 text-left text-[12.5px] text-neutral-500 hover:bg-neutral-100");
       off.onclick = () => save(null);
       const wrap = h("div", "flex flex-col");
