@@ -1,21 +1,10 @@
 import type { ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { isObject } from "./json.js";
 
-/**
- * Turns a call into an authenticated request target on one of the hosted web
- * backends.
- *
- * Why this file exists at all — why not `ctx.modelRegistry.complete()`, which
- * already knows every provider's URL and auth: because a hosted server tool is
- * not a tool in Pi's sense. `web_search_20250305` is a *provider* feature,
- * declared in the request body and executed inside the provider's own turn;
- * nothing in the SDK's tool abstraction can express it, so reaching it means
- * speaking Messages or Responses ourselves. The cost is this file: an endpoint
- * derived from a base URL, and auth headers assembled from what the registry
- * resolved. That is also where a non-standard gateway breaks first — if a proxy
- * serves Messages at a path that is not `<base>/v1/messages`, `endpoint()`
- * below guesses wrong, and the fix belongs here rather than in the tools.
- */
+/** Not `ctx.modelRegistry.complete()`: a hosted server tool is a *provider*
+ *  feature declared in the request body, which Pi's tool abstraction cannot
+ *  express, so Messages/Responses are spoken here. A gateway serving Messages
+ *  off `<base>/v1/messages` breaks in `endpoint()` first. */
 
 // Taken from the registry rather than imported from pi-ai: the model type is
 // whatever the SDK we are loaded by hands out, and Pier does not depend on
@@ -45,15 +34,8 @@ const DEFAULT_MODEL: Record<Backend, string> = {
 /** The one escape hatch: an endpoint that has neither default model. */
 const CONFIGURED_MODEL = process.env.PIER_WEB_MODEL?.trim();
 
-/**
- * Candidates for a backend, best first: the configured tool model, the
- * backend's cheap default, then the session's own model when it happens to be
- * on the right API. Every one of those is a model somebody named — there is
- * deliberately no "any other model on this API" step, because the model a
- * search runs on decides its cost, its refusals and its results, and picking
- * an unnamed one on the user's behalf is how a search ends up on whatever
- * unreleased id a gateway happened to list first.
- */
+/** Every candidate is a model somebody named; no "any other model on this API"
+ *  step, or a search ends up on whatever unreleased id a gateway listed first. */
 function candidates(ctx: ExtensionContext, backend: Backend): RegistryModel[] {
   const api = BACKEND_API[backend];
   const registry = ctx.modelRegistry;
@@ -115,10 +97,8 @@ async function target(
   if (!hasAuthHeader(headers)) throw new Error(`No ${backend} authentication resolved`);
 
   const limit = typeof model.maxTokens === "number" && model.maxTokens > 0 ? model.maxTokens : 4096;
-  // Responses spends reasoning tokens out of `max_output_tokens` too, so the
-  // same budget buys a fraction of the prose there — a reasoning model can burn
-  // the lot and return an empty answer. The caller asks for what it wants to
-  // read; this is the one place that knows which wire it goes out on.
+  // Responses spends reasoning tokens out of `max_output_tokens` too; a
+  // reasoning model can burn the lot and return an empty answer.
   const wanted = backend === "openai" ? outputTokens * 2 : outputTokens;
   return {
     backend,
@@ -129,11 +109,7 @@ async function target(
   };
 }
 
-/**
- * `capable` narrows the backends that can serve the call — web_fetch is an
- * Anthropic-only server tool, so it passes ["anthropic"]. `requested` is the
- * caller's explicit choice; without one both are tried in order.
- */
+/** `capable`: web_fetch is an Anthropic-only server tool. */
 export async function resolveTarget(
   ctx: ExtensionContext,
   outputTokens: number,

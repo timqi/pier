@@ -1,8 +1,5 @@
-// The two tools as the model sees them: web_search and web_fetch — their
-// parameters, which backend answers a call, and what comes back when one
-// cannot. Every parameter is context the model pays for on every turn, so the
-// surface is deliberately small; the wire formats behind it are anthropic.ts
-// and openai.ts, and the answer's shape is content.ts.
+// The two tools as the model sees them. Every parameter is context the model
+// pays for on every turn, so the surface is deliberately small.
 
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -31,30 +28,14 @@ const SEARCH_RESULTS = 8;
 /** `mode: "full"` is "the document", not "the transcript's whole budget". */
 const FULL_MAX_CHARS = 60_000;
 
-/**
- * What we pay the search model to generate. It has to cover the whole assistant
- * turn — the search calls it makes plus the briefing it writes — and it must
- * not be the binding constraint: `DEFAULT_CONTEXT_CHARS` is what we are willing
- * to hand back (6k characters, which is ~1.5k English tokens and ~4k Chinese
- * ones), so a budget below that only produces briefings that stop mid-sentence.
- * It used to be 900, half the smaller of those, and then 2k, which is the same
- * bug in Chinese: it covered the English reading of 6k characters and cut every
- * CJK briefing at the point this comment claimed was fixed. So the budget is
- * the *larger* reading plus room for the search calls themselves. Output tokens
- * are not the cost here either — a hosted search is worth an order of magnitude
- * more than the prose about it — and a truncated answer is paid for twice.
- */
+/** Must cover the CJK reading of `DEFAULT_CONTEXT_CHARS` (6k chars ≈ 4k
+ *  Chinese tokens, ~1.5k English) plus the search calls, or briefings stop
+ *  mid-sentence. A hosted search costs an order of magnitude more than the prose. */
 const SEARCH_TOKENS = 4_500;
 
-/**
- * Same rule for a fetch, and one dial for it: `mode` says how much of the page
- * matters, so it decides all three sizes — what the provider fetches, what the
- * model may generate, and how much of the digest reaches the caller. They were
- * two tool parameters (`max_context_chars`, `max_content_tokens`) that only
- * ever restated the mode, and every parameter is read by the model on every
- * turn. `full` returns the document itself, so its digest budget is an
- * acknowledgement — generation nobody reads.
- */
+/** One dial: `mode` decides all three sizes, since separate parameters only
+ *  ever restated it. `full` returns the document, so its digest budget is an
+ *  acknowledgement nobody reads. */
 const FETCH_LIMITS = {
   concise: { fetch: 10_000, generate: 1_200, digest: 6_000 },
   thorough: { fetch: 25_000, generate: 3_500, digest: 12_000 },
@@ -72,14 +53,8 @@ function clampText(text: string, maxChars: number): string {
   return `${text.slice(0, maxChars).trimEnd()}\n\n[truncated ${text.length - maxChars} characters]`;
 }
 
-/**
- * One ceiling for the whole tool call. The per-request timeout in http.ts is
- * not one: three attempts, times up to three continuation rounds, times a
- * language-audit retry, is tens of minutes — and Pi puts no timeout of its own
- * on a custom tool, so that is a turn held open with nothing to show. An
- * aborted caller signal already stops the retry loop, so this is the only
- * thing needed to bound it.
- */
+/** The per-request timeout is not a ceiling: attempts × continuation rounds ×
+ *  the audit retry is tens of minutes, and Pi puts no timeout on a custom tool. */
 const CALL_CEILING_MS = 90_000;
 const ceiling = (signal?: AbortSignal): AbortSignal => {
   const own = AbortSignal.timeout(CALL_CEILING_MS);
@@ -124,11 +99,6 @@ async function runSearch(run: SearchRun): Promise<SearchOutcome> {
   return searchOutcomeFrom(result.content, result.model, target.backend, result);
 }
 
-// Every parameter here is read by the model on every turn it might search, so
-// each one is a standing cost. `max_uses` and `max_results` were knobs nobody
-// turned: the first did nothing on the OpenAI backend and had to say so out
-// loud in its own results, and the second only sliced a list the caller can
-// read the whole of.
 export const webSearch = defineTool({
   name: "web_search",
   label: "Web Search",
@@ -170,11 +140,8 @@ export const webSearch = defineTool({
       const wantedLanguage = languageLabel(params.query);
       const strayed = (o: SearchOutcome): string[] =>
         o.queries.filter((q) => !preservesLanguage(params.query, q.query)).map((q) => q.query);
-      // The prompt pins the first query verbatim, so auditing only that one
-      // audits the query that cannot fail. `preserve` promised every search
-      // stays in the language, so it audits all of them; auto and expand buy
-      // English supplements on purpose, so there the first query still decides
-      // and the strays are named in `details` instead of warned about.
+      // `preserve` promised every search stays in the language; auto and expand
+      // buy English supplements on purpose, so there only the first query decides.
       const inLanguage = (o: SearchOutcome, auditAll: boolean): boolean =>
         auditAll
           ? o.queries.length > 0 && strayed(o).length === 0
@@ -314,12 +281,9 @@ export const webFetch = defineTool({
         : document.text
           ? clampText(document.text, limits.digest)
           : "Fetch completed.";
-      // `full` means the document, not the digest — but not without a ceiling:
-      // max_content_tokens is the model's to choose and reaches 100k, which is
-      // a transcript nobody can read and a context nobody can afford. The whole
-      // copy is on disk either way, and the note below points at it. A question
-      // is still answered, above the document; "OK" is not, it is the receipt
-      // for a digest we asked it not to write.
+      // `full` still has a ceiling: 100k tokens is a context nobody can afford,
+      // and the whole copy is on disk. "OK" is the receipt for a digest we
+      // asked it not to write, not an answer.
       const output = mode !== "full" ? distilled : [
         question && answer ? clampText(answer, FETCH_LIMITS.concise.digest) : "",
         document.text ? clampText(document.text, limits.digest) : "",
@@ -364,17 +328,9 @@ function parsePublicUrl(value: string): URL {
   return url;
 }
 
-/**
- * Throwing is the only way to report a failed tool call: Pi's agent loop marks
- * the result an error when `execute` throws and ignores an `isError` field in a
- * returned result (`agent-loop.js`: `return { result, isError: false }`). These
- * tools used to return one, so every refusal they reported — a bad URL, a dead
- * endpoint, a hosted tool that never ran — was recorded as a success with an
- * apology in it.
- *
- * Our own ceiling also looks like a cancellation from the outside; say which one
- * it was, or the caller reads "aborted" and cannot tell whether it did that.
- */
+/** Throwing is the only way to report a failed tool call: Pi ignores an
+ *  `isError` field in a returned result (`agent-loop.js`). Our own ceiling
+ *  looks like a cancellation from outside, so say which one it was. */
 function fail(error: unknown, until?: AbortSignal, caller?: AbortSignal): never {
   const message = error instanceof Error ? error.message : String(error);
   const gaveUp = until?.aborted && !caller?.aborted;

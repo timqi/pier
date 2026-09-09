@@ -52,14 +52,8 @@ const findCode = (value: unknown): string | undefined => {
   return typeof value.error_code === "string" ? value.error_code : findCode(value.content);
 };
 
-/**
- * Every server-tool failure in the turn. A list, not the first one, and not a
- * throw: these arrive per invocation — the third search can fail while the
- * first two are in the transcript and the briefing is written from them. This
- * used to abort the whole call on any of them, which threw away a good answer
- * over `max_uses_exceeded`, a code we provoke ourselves by budgeting the
- * searches the prompt then asks for.
- */
+/** A list, not a throw: the third search can fail (`max_uses_exceeded`, which
+ *  our own budget provokes) while the briefing is written from the first two. */
 function toolErrors(content: unknown[]): string[] {
   const codes: string[] = [];
   for (const block of content) {

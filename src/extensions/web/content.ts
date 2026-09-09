@@ -1,8 +1,5 @@
-// What a provider's answer becomes on the way to the model: sources, results,
-// the queries actually searched, usage, and the text of a fetched document.
-// One shape for both backends, so a tool renders its answer once instead of
-// per wire format — anthropic.ts and openai.ts parse into these, and nothing
-// past this file knows which one replied.
+// What a provider's answer becomes on the way to the model: one shape for both
+// backends, so nothing past this file knows which one replied.
 
 import { isObject } from "./json.js";
 import { languageLabel } from "./language.js";
@@ -17,13 +14,8 @@ export interface SearchResult extends Source {
   pageAge?: string;
 }
 
-/**
- * The one reader of a cited page, wherever it turns up: an Anthropic search
- * result, a citation on a text block, a fetch result, an OpenAI action source.
- * All four spell it `{url, title?}` (OpenAI sometimes as a bare string), all
- * four had their own copy of this, and they disagreed about the fallback
- * title. Keyed by url; the first real title wins over a url used as one.
- */
+/** The one reader of a cited page: `{url, title?}`, or a bare string from
+ *  OpenAI. Keyed by url; the first real title wins over a url used as one. */
 export function putSource(into: Map<string, SearchResult>, value: unknown): void {
   const url = typeof value === "string"
     ? value

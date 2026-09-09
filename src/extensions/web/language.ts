@@ -1,8 +1,6 @@
-// The language-preservation policy in words: what the model is told to search
-// in, and how to tell afterwards whether it did. This is the reason the
-// extension exists at all — a hosted search that quietly translates a Chinese
-// query answers a question nobody asked — so the policy is one file, and the
-// audit that checks it reads from the same one.
+// The language-preservation policy: what the model is told to search in, and
+// the audit that checks it read from the same file. A hosted search that
+// quietly translates a Chinese query answers a question nobody asked.
 
 export type LanguageMode = "auto" | "preserve" | "expand";
 
@@ -24,23 +22,15 @@ export function searchPrompt(query: string, mode: LanguageMode): string {
   ].join("\n");
 }
 
-/**
- * The audit rule: the backend must stay in the query's language. Verbatim echo is
- * not the test — OpenAI's hosted search always composes its own wording, and
- * demanding an exact match there would buy a second search on every call.
- */
+/** Verbatim echo is not the test: OpenAI's hosted search always composes its
+ *  own wording, and an exact match would buy a second search on every call. */
 export function preservesLanguage(query: string, searched: string | undefined): boolean {
   return searched !== undefined && languageLabel(searched) === languageLabel(query);
 }
 
-/**
- * A script, not a language, and named as loosely as the audit needs: it only
- * has to tell "the backend stayed where the query was" from "it translated".
- * Kana before Han, because Japanese is mostly Han characters and the reverse
- * order labelled 「東京 の天気」 Chinese in the warning it printed. Kanji-only
- * Japanese is still indistinguishable from Chinese here, and no ordering fixes
- * that — it needs a dictionary, which this is deliberately not.
- */
+/** A script, not a language. Kana before Han: Japanese is mostly Han
+ *  characters. Kanji-only Japanese stays indistinguishable from Chinese; that
+ *  needs a dictionary, which this is deliberately not. */
 export function languageLabel(text: string): string {
   if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(text)) return "Japanese";
   if (/\p{Script=Han}/u.test(text)) return "Chinese";

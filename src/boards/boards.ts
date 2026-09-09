@@ -1,13 +1,7 @@
-// Boards: a folder of static files an agent writes to present something at a
-// stable URL. The filesystem is the source of truth — boards are derived by
-// scanning $PIER_HOME/boards, never registered. See docs/design/05-boards.md.
-//
-// Only <board>/site is reachable over HTTP: sources, README and the manifest
-// itself stay off the wire, so a public board leaks nothing about how it was
-// made. `/boards/*` is authenticated; `/p/*` additionally requires the
-// manifest's `public` flag and runs as sandboxed active content — and is the
-// only password-free prefix, stylesheet included, so one firewall rule covers
-// everything a logged-out reader may fetch.
+// Boards: static pages an agent writes, derived by scanning $PIER_HOME/boards,
+// never registered (docs/design/05-boards.md). Only <board>/site is reachable
+// over HTTP, so a public board leaks nothing about how it was made. `/p/*` is
+// the only password-free prefix, stylesheet included, and runs sandboxed.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
@@ -22,11 +16,8 @@ export const defaultBoardsDir = (): string => pierPath("boards");
  *  pattern excludes from every scan — one rename is the whole delete path. */
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-/** A published board is addressed by `<slug>-<token>`: the slug alone is a
- *  guessable word, so without the 32 bits after it `/p/` could be walked with
- *  a dictionary. Minted the first time a manifest is seen public, by whichever
- *  path published it — the Console's toggle or an agent editing board.json —
- *  so a board cannot be public and enumerable at the same time. */
+/** Without the 32 bits after the slug, `/p/` could be walked with a dictionary.
+ *  Minted the first time a manifest is seen public, by whichever path did it. */
 const TOKEN = /^[a-f0-9]{8}$/;
 const mintToken = (): string => randomBytes(4).toString("hex");
 
@@ -63,10 +54,9 @@ const TYPES: Record<string, string> = {
   ".csv": "text/plain; charset=utf-8",
 };
 
-// Board HTML is active content on the workbench origin. Scripts stay available
-// for self-contained pages, but the response sandbox removes forms, frames,
-// popups and network access. Public pages omit same-origin too, so their scripts
-// receive an opaque origin and cannot inherit an operator's authority.
+// Active content on the workbench origin: the sandbox removes forms, frames,
+// popups and network. Public pages omit same-origin too, so their scripts
+// cannot inherit an operator's authority.
 const CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
   "script-src 'self' 'unsafe-inline'; connect-src 'none'; frame-src 'none'; " +
@@ -78,14 +68,9 @@ const PUBLIC_CSP = `sandbox allow-scripts; ${CSP}`;
 /** Malformed boards are reported once, not on every scan. */
 const warned = new Set<string>();
 
-/** The one choke point where a slug becomes a path, so the slug is validated
- *  here and nowhere else: an unvalidated `../../etc` would read outside the
- *  boards dir, and a NUL byte would throw instead of 404. Unknown fields get
- *  defaults, a broken file is skipped whole, and extra keys are the agent's
- *  business — they survive a write. The one manifest this writes back is a
- *  public board that arrived without a token: minting is the same decision as
- *  reading `public`, and doing it anywhere else leaves the agent's own publish
- *  path — editing `board.json` — with no URL. */
+/** The one place a slug becomes a path, so it is validated here (`../../etc`,
+ *  NUL). Extra keys survive a write. The one write-back is minting a token for
+ *  a public board that arrived without one, so the agent's own publish path has a URL. */
 async function readManifest(
   dir: string,
   slug: string,

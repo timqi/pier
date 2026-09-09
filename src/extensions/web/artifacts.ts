@@ -52,11 +52,8 @@ export async function saveArtifact(
 ): Promise<string> {
   await mkdir(ARTIFACT_DIR, { recursive: true, mode: 0o700 });
   const host = url.hostname.replace(/[^a-zA-Z0-9.-]+/g, "-").slice(0, 80) || "page";
-  // The URL alone is not the file's identity: a page fetched again is a
-  // different document, and keying on the URL overwrote the copy an older
-  // transcript's `artifactPath` still points at — the one promise this file
-  // makes. Content decides, so a refetch that changed writes a new file and one
-  // that did not costs nothing.
+  // Content in the key: keying on the URL alone would overwrite the copy an
+  // older transcript's `artifactPath` still points at.
   const path = join(ARTIFACT_DIR, `${host}-${digest(url.toString())}-${digest(text)}.md`);
   const temporary = `${path}.${randomUUID()}.tmp`;
   const header = [

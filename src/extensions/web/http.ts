@@ -37,12 +37,8 @@ function retryDelay(response: Response | undefined, attempt: number): number {
   return Math.round(500 * 2 ** attempt * (0.5 + Math.random()));
 }
 
-/**
- * Interruptible, because the backoff is inside the caller's deadline: a
- * `retry-after` sleep of up to 20s followed by a whole further request is how a
- * 90-second ceiling turned into two minutes. Rejects on abort; the caller
- * reports the failure that caused the backoff, which is the useful half.
- */
+/** Interruptible: the backoff is inside the caller's deadline, and a 20s
+ *  `retry-after` plus another request would overrun a 90-second ceiling. */
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
