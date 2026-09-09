@@ -169,18 +169,22 @@ export class TaskDefinitions {
   async update(id: string, raw: unknown, by?: string): Promise<TaskDefinition> {
     const old = this.get(id);
     this.assertOwner(old, by, "edited");
-    if (old.archived) throw new Error("archived tasks cannot be edited");
     const draft = await this.parseDraft(raw, ownerOf(old) ? by : undefined);
+    // Validation awaits, so the record read above is a guess by now: archive()
+    // or another edit may have landed, and the spread below would restore it.
+    const current = this.get(id);
+    if (current.archived) throw new Error("archived tasks cannot be edited");
+    if (current.revision !== old.revision) throw new Error("task was edited while this draft was validated");
     const now = Date.now();
     const task: TaskDefinition = {
-      ...old,
+      ...current,
       name: draft.name,
       description: draft.description ?? "",
-      enabled: draft.enabled ?? old.enabled,
-      revision: old.revision + 1,
+      enabled: draft.enabled ?? current.enabled,
+      revision: current.revision + 1,
       trigger: draft.trigger,
       action: draft.action,
-      callback: draft.callback ?? old.callback,
+      callback: draft.callback ?? current.callback,
       timeoutSeconds: draft.timeoutSeconds ?? DEFAULT_TIMEOUT,
       nextRunAt: null,
       updatedAt: now,

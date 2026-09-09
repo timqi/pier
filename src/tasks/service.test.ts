@@ -2281,6 +2281,16 @@ describe("task admission and delivery regressions", () => {
     expect(store.getMessage(question.id)?.state).toBe("expired");
   });
 
+  it("refuses an edit archived while its draft was still being validated", async () => {
+    const { cwd, service } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    // Parked on the draft's directory check; archiving lands before it returns.
+    const edit = service.update(task.id, bashDraft(cwd, "echo edited"));
+    service.archive(task.id);
+    await expect(edit).rejects.toThrow("archived tasks cannot be edited");
+    expect(service.get(task.id)).toMatchObject({ archived: true, enabled: false, nextRunAt: null, revision: 1 });
+  });
+
   it.each(["reject", "throw", "proof"] as const)("charges one callback attempt when delivery fails after send: %s", async (failure) => {
     const { cwd, service, store, router, session } = setup();
     const task = await service.create(bashDraft(cwd, "true"));
