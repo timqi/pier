@@ -260,6 +260,36 @@ describe("login", () => {
     expect(blocked.status).toBe(429);
     expect(await blocked.text()).toContain("Too many attempts.");
   });
+
+  // A chunked request declares no `content-length`, so the read is the only
+  // bound left — and a correct password behind the padding must not be found.
+  it("cuts off a streamed body past the cap instead of parsing it", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const payload = new TextEncoder()
+      .encode(new URLSearchParams({ password, next: "/", padding: "x".repeat(1024 * 1024) }).toString());
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(payload.slice(sent, sent + 1024));
+        sent += 1024;
+        if (sent >= payload.byteLength) controller.close();
+      },
+    });
+    const res = await a.request("/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "10.0.0.40" },
+      body,
+      duplex: "half",
+    } as RequestInit);
+    expect(res.status).toBe(413);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    // Cancelled at the cap, not drained and then judged.
+    expect(sent).toBeLessThan(8192);
+
+    // Not a password guess: the same client's real sign-in still works.
+    expect((await login(a, password, "10.0.0.40")).status).toBe(302);
+  });
 });
 
 describe("changing the password", () => {

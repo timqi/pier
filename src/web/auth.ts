@@ -10,6 +10,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { pierDb, statements, transact } from "../db.js";
+import { readCapped } from "../core/inbox.js";
 import { logger } from "../log.js";
 
 const log = logger("auth");
@@ -336,12 +337,18 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     if (!c.req.header("content-type")?.startsWith("application/x-www-form-urlencoded")) {
       return c.text("expected the sign-in form", 400);
     }
-    if (Number(c.req.header("content-length") ?? 0) > MAX_LOGIN_BODY) {
+    // The read is the bound, not `content-length`: a chunked request declares
+    // no length, and a parser handed the whole stream is the work being denied.
+    let body: Uint8Array;
+    try {
+      body = await readCapped(c.req.raw.body, MAX_LOGIN_BODY);
+    } catch (err) {
+      log.warn(`sign-in body refused from ${client}: ${String(err)}`);
       return c.text("sign-in body too large", 413);
     }
-    const form = await c.req.parseBody();
-    const next = safeNext(form.next);
-    if (!store.verify(typeof form.password === "string" ? form.password : "")) {
+    const form = new URLSearchParams(new TextDecoder().decode(body));
+    const next = safeNext(form.get("next"));
+    if (!store.verify(form.get("password") ?? "")) {
       noteFailure(client);
       log.warn(`wrong password from ${client}`);
       return c.html(loginPage(next, "Wrong password."), 401);
