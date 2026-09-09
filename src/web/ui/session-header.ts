@@ -207,11 +207,11 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
     const at = lastReplyAt;
     rows.push(at === null ? ["Last reply", "—"] : ["Last reply", stampTime(at), agoLabel(at)]);
   }
-  const panel = h("div", "w-[min(30rem,calc(100vw-2rem))] max-sm:w-full rounded-xl bg-white px-4 py-4 font-sans text-[15px] leading-[1.6]");
+  const panel = h("div", "w-[min(26rem,calc(100vw-2rem))] max-sm:w-full rounded-xl bg-white px-3 py-3 font-sans text-[15px] leading-normal");
   const close = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", "×");
   close.setAttribute("aria-label", "Close session info");
   close.onclick = closeMenu;
-  const heading = h("div", "sticky top-0 z-10 flex items-start gap-2 bg-white pb-3",
+  const heading = h("div", "sticky top-0 z-10 flex items-start gap-2 bg-white pb-2",
     h("div", "min-w-0 flex-1",
       h("div", "text-sm font-medium text-neutral-500", "Session info"),
       h("h2", "mt-1 [overflow-wrap:anywhere] text-lg leading-7 font-semibold text-neutral-900", s.title ?? untitled(s.cwd))), close);
@@ -232,9 +232,9 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
       copy.setAttribute("aria-label", `Copy ${label.toLowerCase()}`);
       shown.append(copy);
     }
-    if (note) shown.firstElementChild?.append(h("span", "mt-1 block font-sans text-[13px] leading-5 text-neutral-500", note));
+    if (note) shown.firstElementChild?.append(h("span", "ml-2 inline-block font-sans text-[13px] leading-5 text-neutral-500", note));
     const boundary = label === "Model" || label === "Created";
-    fields.append(h("div", `grid gap-1.5 py-3 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-4 ${boundary ? "mt-3 border-t border-neutral-200 pt-4" : ""}`,
+    fields.append(h("div", `grid gap-1 py-1.5 sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-3 ${boundary ? "mt-2 border-t border-neutral-200 pt-2.5" : ""}`,
       h("dt", "text-[15px] text-neutral-500", label === "Session" ? "Session ID" : label), shown));
   }
   panel.append(fields);
@@ -352,20 +352,20 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       onSelect: () => sessionInfo(anchor, s, true),
     },
     {
-      label: "Browse files",
-      separatorBefore: true,
-      hint: current ? chordLabel(FILES_KEY) : "",
-      onSelect: () => {
-        closeMenu();
-        deps.openFiles(current ? undefined : s.cwd);
-      },
-    },
-    {
       label: "New session here",
+      separatorBefore: true,
       hint: basename(s.cwd),
       onSelect: () => {
         closeMenu();
         deps.createSession(s.cwd);
+      },
+    },
+    {
+      label: "Browse files",
+      hint: current ? chordLabel(FILES_KEY) : "",
+      onSelect: () => {
+        closeMenu();
+        deps.openFiles(current ? undefined : s.cwd);
       },
     },
     {

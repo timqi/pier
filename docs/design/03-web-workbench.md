@@ -128,7 +128,7 @@ per-turn Activity groups):
   reachable and visible while focused or open. Menus focus a control on open,
   support arrow / Home / End navigation, and return focus when dismissed from
   inside. Session actions have no reserved checkmark column and are grouped as
-  Rename / Session info, Browse files / New session here, Model & reasoning.
+  Rename / Session info, New session here / Browse files, Model & reasoning.
   Model and directory hints truncate; model loading is immediate and a cancelled
   load cannot reopen the panel. Manual compaction remains an API capability.
   Session info has a solid reading surface, title, close button and a return

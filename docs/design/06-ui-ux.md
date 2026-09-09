@@ -30,8 +30,10 @@ provide a close control. Session details use a solid reading surface, a readable
 title, grouped label/value fields and explicit navigation; reserve monospace for
 technical identifiers and keep directory/ID copy controls reachable on touch.
 Use the shared rem scale: 0.9375rem desktop / 1rem phone action labels with a
-1.5rem line height; session info uses 0.9375rem body text at 1.6 line height,
-1.125rem titles and 0.8125rem supporting text. Paths and IDs use 0.875rem
+1.5rem line height; session info uses 0.9375rem body text at 1.5 line height,
+1.125rem titles and 0.8125rem supporting text. Keep its desktop width to 26rem,
+use tight field/group spacing and place relative times beside their timestamps
+when space allows. Paths and IDs use 0.875rem
 monospace with room to wrap. Phone sheets have a
 backdrop that dismisses without activating controls underneath.
 A dialog hosting viewport-fixed menus must not use backdrop blur or transform animations:
