@@ -89,7 +89,11 @@ function trackKeyboard(): void {
 
 /** The dock (queue, recovery, composer) floats over the transcript at every
  *  width (style.css), so the pane pads its tail by the dock's live height — the
- *  textarea grows and the queue comes and goes, and CSS cannot read either. */
+ *  textarea grows and the queue comes and goes, and CSS cannot read either.
+ *  Observed as border-box, because a content-box round is not delivered when
+ *  only padding changes: the composer's bottom padding is the home-indicator
+ *  inset, dropped and paid back on every keyboard (the `data-kb` rule in
+ *  style.css), and a measurement 34px short left the last row under the pill. */
 function trackDock(): void {
   const main = composer.parentElement!;
   const parts = [queuePanel, recoveryPanel, composer];
@@ -98,7 +102,7 @@ function trackDock(): void {
     main.style.setProperty("--dock-h", `${String(height)}px`);
   };
   const ro = new ResizeObserver(sync);
-  for (const el of parts) ro.observe(el);
+  for (const el of parts) ro.observe(el, { box: "border-box" });
 }
 
 export function focusInput(): void {

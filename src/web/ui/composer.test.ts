@@ -23,6 +23,7 @@ class Element {
 const state = vi.hoisted(() => ({
   nodes: new Map<string, Element>(), created: [] as Element[],
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
+  observed: [] as (ResizeObserverOptions | undefined)[],
 }));
 vi.mock("./dom.js", () => ({
   $: (selector: string) => {
@@ -47,13 +48,15 @@ let drafts: Map<string, string>;
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
-  state.nodes.clear(); state.created = []; state.id = "a"; state.visible = true;
+  state.nodes.clear(); state.created = []; state.id = "a"; state.visible = true; state.observed = [];
   drafts = new Map();
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { activeElement: null });
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("confirm", () => true);
-  vi.stubGlobal("ResizeObserver", class { observe() {} });
+  vi.stubGlobal("ResizeObserver", class {
+    observe(_el: unknown, options?: ResizeObserverOptions) { state.observed.push(options); }
+  });
   // A pasted screenshot: the reader hands back a data URL, synchronously here.
   vi.stubGlobal("FileReader", class {
     onload: (() => void) | null = null;
@@ -115,6 +118,15 @@ async function recallPending(stage: "fetch" | "body") {
     await settled();
   };
 }
+
+// A content-box round is not delivered for a padding-only change, and the
+// composer's bottom padding is the home-indicator inset the keyboard drops and
+// pays back — measured that way, --dock-h stayed 34px short and the last
+// transcript row sat under the input pill.
+it("measures the dock's parts as border-box", () => {
+  expect(state.observed.length).toBe(3);
+  expect(state.observed).toEqual(state.observed.map(() => ({ box: "border-box" })));
+});
 
 describe("queue recall drafts", () => {
   it.each(["fetch", "body"] as const)("returns delayed %s messages to A without touching B", async (stage) => {
