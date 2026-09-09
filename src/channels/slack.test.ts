@@ -838,11 +838,13 @@ describe("outbound", () => {
     // Total silence is indistinguishable from a crash, so an empty turn still
     // posts one muted line. A deliberate silence names its reason; a turn that
     // simply produced nothing says so.
+    // The turn began when that message arrived and ran 3s: `meta` is also what
+    // scopes the clear to this turn's own receipts (receipts.ts `settle`).
     await channel.send("C100/1704.000100", {
       text: "",
       suggestions: [],
       silence: "two humans talking",
-      meta: { completedAt: Date.now(), durationMs: 3000, tokens: 7900 },
+      meta: { completedAt: Date.now() + 3000, durationMs: 3000, tokens: 7900 },
     });
     const line = JSON.stringify(client.sent.at(-1)!.blocks);
     expect(line).toContain("stayed silent");

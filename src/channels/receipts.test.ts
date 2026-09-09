@@ -22,6 +22,26 @@ const receipt = (conversationId: string, messageId: string) => ({
   messageId,
 });
 
+/** A ledger and a `Receipts` over it whose platform double records only the
+ *  messages it cleared — which receipt came off is what settling is about. */
+const recording = () => {
+  const ledger = new ReceiptLedger("telegram", db);
+  const cleared: string[] = [];
+  const receipts = new Receipts(
+    {
+      setReaction: (_chatId, messageId, emoji) => {
+        if (!emoji) cleared.push(messageId);
+        return Promise.resolve();
+      },
+    },
+    ledger,
+    () => {},
+    "eyes",
+    60_000,
+  );
+  return { receipts, cleared };
+};
+
 describe("receipt ledger", () => {
   it("claims a conversation's receipts exactly once", () => {
     const ledger = new ReceiptLedger("telegram", db);
@@ -111,6 +131,31 @@ describe("receipt ledger", () => {
     release();
     await settled;
     expect(calls).toEqual(["apply:1", "apply:2", "clear:1", "clear:2"]);
+  });
+
+  it("settles the ending turn's messages, not the next turn's", async () => {
+    // A run ends one turn per answer, so a message queued mid-turn is still
+    // owed one and keeps its 👀.
+    const { receipts, cleared } = recording();
+    receipts.mark("-100", "-100", "asked");
+    const started = Date.now() + 1; // the turn picked "asked" up
+    await new Promise((r) => setTimeout(r, 5));
+    receipts.mark("-100", "-100", "queued"); // arrived while that turn ran
+    await receipts.settle("-100", { completedAt: started + 500, durationMs: 500, tokens: 1 });
+    expect(cleared).toEqual(["asked"]);
+    // The queued message's own turn ends next, and takes its receipt with it.
+    await receipts.settle("-100", { completedAt: Date.now() + 10, durationMs: 1, tokens: 1 });
+    expect(cleared).toEqual(["asked", "queued"]);
+  });
+
+  it("clears everything when there is no turn to scope by", async () => {
+    // The refusal paths (a conversation id with no thread) have no meta, and
+    // the stale sweep is the only other thing that would ever clear these.
+    const { receipts, cleared } = recording();
+    receipts.mark("-100", "-100", "1");
+    receipts.mark("-100", "-100", "2");
+    await receipts.settle("-100");
+    expect(cleared).toEqual(["1", "2"]);
   });
 
   it("survives a restart and keeps platforms apart", () => {

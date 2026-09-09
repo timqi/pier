@@ -445,10 +445,12 @@ describe("reaction receipts", () => {
     await feed(message({ chat: DM, text: "one" }));
     // Total silence is indistinguishable from a crash, so an empty turn still
     // posts one muted line saying which kind of nothing it was.
+    // The turn began when that message arrived and ran 3s: `meta` is also what
+    // scopes the clear to this turn's own receipts (receipts.ts `settle`).
     await channel.send("42", {
       text: "",
       suggestions: [],
-      meta: { completedAt: Date.now(), durationMs: 3000, tokens: 7900 },
+      meta: { completedAt: Date.now() + 3000, durationMs: 3000, tokens: 7900 },
     });
     expect(client.sent.at(-1)!.text).toContain("no reply");
     expect(client.reactions.at(-1)).toEqual({ chatId: "42", messageId: 10, emoji: null });

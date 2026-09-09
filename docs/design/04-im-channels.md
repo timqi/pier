@@ -457,6 +457,11 @@ message forever. So:
 
 - Book the receipt **synchronously, before dispatching** the message. A turn
   that settles instantly must not clear a receipt that is not recorded yet.
+- Clear only what the ending turn was working on: pass `reply.meta` to
+  `settle`/`settleAfter`, which scopes the claim to receipts booked by the time
+  that turn began. One Pi run can end several turns — a message queued mid-turn
+  is drained and answered inside the same run — and taking the emoji off a
+  message the agent has not reached yet reads as an answer that never comes.
 - Await the in-flight "add" before issuing the "clear". Clearing a reaction the
   platform has not applied yet leaves it up permanently.
 - On `start()`, clear every receipt on the books — none can belong to this

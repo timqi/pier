@@ -334,9 +334,11 @@ export class Router {
         );
         const channel = this.channels.get(key.channelId);
         if (channel) {
-          channel.send(key.conversationId, splitReply(payload.text, payload.meta)).catch((err) => {
-            this.report(session.id, key, `outbound to ${key.channelId} failed: ${String(err)}`);
-          });
+          const reply = splitReply(payload.text, payload.meta);
+          this.deliver(key, () => channel.send(key.conversationId, reply))
+            .catch((err: unknown) => {
+              this.report(session.id, key, `outbound to ${key.channelId} failed: ${String(err)}`);
+            });
         }
       }
     });
@@ -347,6 +349,32 @@ export class Router {
       activeAt: Date.now(),
       unsubscribe,
     });
+  }
+
+  /** The reply being delivered to a conversation, if any. A run ends one turn
+   *  per answer (agent/events.ts) and an adapter's send is several platform
+   *  calls — chunks, then attachments — so two answers left to overlap
+   *  interleave in the chat. Keyed per conversation: a slow chat may not hold
+   *  up another. */
+  private readonly delivering = new Map<string, Promise<void>>();
+
+  private deliver(key: ConversationKey, send: () => Promise<void>): Promise<void> {
+    const id = keyOf(key);
+    const pending = this.delivering.get(id);
+    // Started right here when the conversation is free — the common case must
+    // not wait a tick for the queue the rare one needs. The wrapper is what
+    // turns a synchronous throw into this reply's rejection.
+    const done = pending ? pending.then(send) : (async () => send())();
+    // What the next reply waits on is this one's outcome minus its failure: a
+    // rejection is the caller's to report, and inherited it would fail every
+    // later reply to this conversation as well.
+    const settled = done.catch(() => {});
+    this.delivering.set(id, settled);
+    // Only the tail clears the slot — a newer reply owns it by then.
+    void settled.then(() => {
+      if (this.delivering.get(id) === settled) this.delivering.delete(id);
+    });
+    return done;
   }
 
   private readonly queueOperations = new Set<string>();

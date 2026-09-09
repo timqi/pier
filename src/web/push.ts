@@ -232,8 +232,13 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     if (e.state === "streaming") {
       if (watching.has(e.sessionId)) return;
       let text = "";
+      // The last turn that *said* something, not simply the last one: a run
+      // ends one turn per answer (agent/events.ts) and the phone still gets one
+      // notification for the run, so a silence or a failure after the answer
+      // would replace it with "Turn finished." — which reads as the answer
+      // having gone missing.
       const stop = hub.subscribe(e.sessionId, (ev) => {
-        if (ev.type === "turn-end") text = ev.text;
+        if (ev.type === "turn-end") text = ev.text || text;
       });
       watching.set(e.sessionId, () => {
         stop();

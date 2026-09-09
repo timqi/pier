@@ -333,6 +333,31 @@ describe("the finished-turn trigger", () => {
     });
   });
 
+  it("previews the last turn that said something, not the silence after it", async () => {
+    // One run can end several turns — Pi drains a message queued mid-turn — and
+    // the phone gets one notification for the run. A silent turn or a failure
+    // after the answer would replace it with "Turn finished.", which reads as
+    // the answer having gone missing.
+    const { app, hub, sent, cookie } = setup(6_000);
+    const sub = await subscribe(app, cookie);
+    hub.emitWorkspace({ type: "session-state", sessionId: "s1", state: "streaming" });
+    hub.emit("s1", { type: "turn-end", text: "the answer" });
+    hub.emit("s1", { type: "turn-end", text: "" });
+    hub.emitWorkspace({ type: "session-state", sessionId: "s1", state: "idle" });
+    await vi.advanceTimersByTimeAsync(6_000);
+    const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
+    expect(payload.body).toBe("the answer");
+  });
+
+  it("still says a turn that only stayed silent finished", async () => {
+    const { app, hub, sent, cookie } = setup(6_000);
+    const sub = await subscribe(app, cookie);
+    finishTurn(hub, "");
+    await vi.advanceTimersByTimeAsync(6_000);
+    const payload = JSON.parse(decryptPush(sent[0]!.body, sub)) as PushPayload;
+    expect(payload.body).toBe("Turn finished.");
+  });
+
   it("names the session without the speaker header its title carries", async () => {
     // The header is the model's (core/identity.ts). Left on, every session
     // opened from the workbench announces itself on a lock screen as

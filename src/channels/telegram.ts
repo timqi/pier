@@ -478,7 +478,8 @@ export class TelegramChannel implements Channel {
     const body = ((text ? toTelegramHtml(text) : quiet) + turnFooter(reply.meta)) ||
       (buttons ? "…" : "");
     // settleAfter: a 👀 left up because the reply failed would sit there until
-    // the stale sweep, looking like the agent is still working.
+    // the stale sweep, looking like the agent is still working. The meta scopes
+    // it to this turn's own messages (receipts.ts `settle`).
     await this.receipts.settleAfter(conversation, async () => {
       if (body.trim()) {
         const parts = chunk(body);
@@ -508,7 +509,7 @@ export class TelegramChannel implements Channel {
           parse_mode: "HTML",
         });
       }
-    });
+    }, reply.meta);
   }
 
   /**

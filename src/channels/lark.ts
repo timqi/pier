@@ -539,8 +539,9 @@ export class LarkChannel implements Channel {
       return;
     }
     // settleAfter: the turn ended either way, and a 👀 left up because the
-    // reply failed to send looks like work until the stale sweep.
-    await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply));
+    // reply failed to send looks like work until the stale sweep. The meta
+    // scopes it to this turn's own messages (receipts.ts `settle`).
+    await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply), reply.meta);
   }
 
   /**

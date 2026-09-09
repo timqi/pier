@@ -159,6 +159,59 @@ describe("channel fan-out", () => {
     expect(tg.notes).toEqual([["-100/7", { text: "line one\nline two", origin: ORIGIN }]]);
   });
 
+  it("delivers one reply at a time per conversation", async () => {
+    // One run can end two turns — Pi drains a message queued mid-turn — and an
+    // adapter's send is several platform calls (chunks, then attachments).
+    // Overlapping them interleaves two answers in the chat.
+    const started: string[] = [];
+    const finished: string[] = [];
+    const gates: (() => void)[] = [];
+    router.registerChannel({
+      id: "telegram",
+      start: () => Promise.resolve(),
+      send: async (_conversationId, reply) => {
+        started.push(reply.text);
+        await new Promise<void>((r) => gates.push(r));
+        finished.push(reply.text);
+      },
+      notify: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+    });
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "first" });
+    fake.emit({ type: "turn-end", text: "second" });
+    expect(started).toEqual(["first"]);
+    gates[0]!();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(started).toEqual(["first", "second"]);
+    expect(finished).toEqual(["first"]);
+    gates[1]!();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(finished).toEqual(["first", "second"]);
+  });
+
+  it("reports a failed reply without failing the next one", async () => {
+    const sent: string[] = [];
+    const errors: string[] = [];
+    hub.subscribe("s1", (e) => { if (e.type === "error") errors.push(e.message); });
+    router.registerChannel({
+      id: "telegram",
+      start: () => Promise.resolve(),
+      send: (_conversationId, reply) => {
+        sent.push(reply.text);
+        return reply.text === "first" ? Promise.reject(new Error("429")) : Promise.resolve();
+      },
+      notify: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+    });
+    await router.ensure(KEY);
+    fake.emit({ type: "turn-end", text: "first" });
+    fake.emit({ type: "turn-end", text: "second" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual(["first", "second"]);
+    expect(errors).toEqual(["outbound to telegram failed: Error: 429"]);
+  });
+
   it("keeps deltas and thinking off IM entirely", async () => {
     await router.ensure(KEY);
     fake.emit({ type: "text-delta", text: "par" });

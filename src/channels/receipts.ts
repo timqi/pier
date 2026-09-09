@@ -9,6 +9,7 @@
 // own stragglers on a timer.
 
 import type { DatabaseSync } from "node:sqlite";
+import type { TurnMeta } from "../core/types.js";
 import { pierDb } from "../db.js";
 import type { ChannelPlatform } from "./types.js";
 
@@ -67,14 +68,17 @@ export class ReceiptLedger {
     `).run(this.platform, receipt.conversationId, receipt.chatId, receipt.messageId, Date.now());
   }
 
-  /** Claim a conversation's receipts: returned once, then gone. */
-  take(conversationId: string): Receipt[] {
+  /** Claim a conversation's receipts: returned once, then gone. `bookedBy`
+   *  claims only what was on the books by then — see `Receipts.settle`. */
+  take(conversationId: string, bookedBy?: number): Receipt[] {
+    const scope = bookedBy === undefined ? "" : " AND created_at <= ?";
+    const args = bookedBy === undefined ? [] : [bookedBy];
     const rows = this.db.prepare(`
       SELECT conversation_id, chat_id, message_id FROM receipts
-      WHERE platform = ? AND conversation_id = ?
-    `).all(this.platform, conversationId) as unknown as ReceiptRow[];
-    this.db.prepare("DELETE FROM receipts WHERE platform = ? AND conversation_id = ?")
-      .run(this.platform, conversationId);
+      WHERE platform = ? AND conversation_id = ?${scope}
+    `).all(this.platform, conversationId, ...args) as unknown as ReceiptRow[];
+    this.db.prepare(`DELETE FROM receipts WHERE platform = ? AND conversation_id = ?${scope}`)
+      .run(this.platform, conversationId, ...args);
     return rows.map(toReceipt);
   }
 
@@ -131,9 +135,18 @@ export class Receipts {
     this.ledger.add({ conversationId, chatId, messageId });
   }
 
-  /** The turn this conversation was running has ended. */
-  settle(conversationId: string): Promise<void> {
-    return this.clear(this.ledger.take(conversationId));
+  /**
+   * The turn this conversation was running has ended, and the messages *that*
+   * turn was working on lose their 👀 — a run ends one turn per answer
+   * (agent/events.ts), so a message queued mid-turn is still owed one, and
+   * clearing its emoji here reads as an answer that never comes. `meta` says
+   * when the ending turn began; a receipt booked after that belongs to the
+   * next one. No meta clears everything: the refusal paths have no turn to
+   * scope by, and the stale sweep is the other backstop.
+   */
+  settle(conversationId: string, meta?: TurnMeta): Promise<void> {
+    const began = meta && meta.completedAt - meta.durationMs;
+    return this.clear(this.ledger.take(conversationId, began));
   }
 
   /**
@@ -143,11 +156,15 @@ export class Receipts {
    * adapters' send() before landing here; the error still propagates, because
    * a failed delivery is the router's to report.
    */
-  async settleAfter(conversationId: string, deliver: () => Promise<void>): Promise<void> {
+  async settleAfter(
+    conversationId: string,
+    deliver: () => Promise<void>,
+    meta?: TurnMeta,
+  ): Promise<void> {
     try {
       await deliver();
     } finally {
-      await this.settle(conversationId);
+      await this.settle(conversationId, meta);
     }
   }
 

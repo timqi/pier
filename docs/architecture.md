@@ -159,7 +159,11 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   plus next-step labels (`core/reply.ts` parses the agent's trailing `---\n[a] |
   [b]` block once); every surface renders them as buttons that send the label.
   `send` is called on **every** turn-end, empty text included — that is the
-  turn-settled signal an adapter retires per-turn UI on. `notify` carries a
+  turn-settled signal an adapter retires per-turn UI on. A turn ends per
+  *answer*, not per Pi run: Pi drains a message queued mid-turn inside the same
+  run, so `agent/events.ts` ends the turn on the assistant message that stopped
+  with nothing left to run (`turn_end`), and leaves `agent_end` the ways a run
+  ends without an answer — error, abort, truncation Pi will retry. `notify` carries a
   persisted `system-input` (delegation, task callback, supervisor message) or a
   service/error note such as restart recovery to the same conversation: a turn
   the chat never saw being asked for otherwise reads as the agent talking to
@@ -239,7 +243,9 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   whose session Pi no longer has is dropped and re-created, never retried
   forever.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
-  to the owning channel. IM surfaces get turn granularity; only the web
+  to the owning channel, one reply at a time per conversation — an adapter's
+  send is several platform calls, and a run that ends two turns must not
+  interleave two answers in the chat. IM surfaces get turn granularity; only the web
   workbench gets deltas. Reasoning and tool events never leave core for an IM
   surface: the Telegram adapter reacts 👀 on each message that entered the turn
   and clears them all when it settles. The pending set is durable

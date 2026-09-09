@@ -119,6 +119,14 @@ function inputSource(value: unknown): SystemInputSource | undefined {
   };
 }
 
+/** The assistant message that *is* a reply: nothing left to run, and the model
+ *  stopped of its own accord. `length`, `aborted` and `error` are Pi's to
+ *  recover from — a truncated answer is compacted and asked again without a new
+ *  user message — so they stay on the `agent_end` path they have always taken,
+ *  and a stopReason Pi never stamped stays there too. */
+const isAnswer = (m: PiMessage | undefined): boolean =>
+  m?.role === "assistant" && m.stopReason === "stop" && !hasToolCalls(m);
+
 function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined {
   if (!messages) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -264,6 +272,13 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
   switch (e.type) {
     case "agent_start":
       return [{ type: "state", state: "streaming" }, { type: "turn-start" }];
+    // A turn ends where Pi says an answer landed, one per assistant message —
+    // not per run. Pi's agent loop drains a queued follow-up *inside* the run
+    // (`getFollowUpMessages` → `continue`) and emits a single agent_end for all
+    // of it, so a run that answered twice used to deliver only its last answer:
+    // no bubble, no message to the chat, no push for the first one (§5b).
+    case "turn_end":
+      return isAnswer(e.message) ? [{ type: "turn-end", text: textOf(e.message?.content) }] : [];
     case "agent_end": {
       // Pi retries a retryable provider error itself and emits one agent_end
       // per attempt. Only the last one ends the turn: translating the others
@@ -271,6 +286,10 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       // recovering from, and an `idle` the session is not in.
       if (e.willRetry) return [];
       const final = lastAssistant(e.messages);
+      // An answer ended its own turn above; ending it again here posts the
+      // reply twice. What is left is every way a run ends *without* one: a tool
+      // call cut short, an error, an abort, a model that never spoke.
+      if (isAnswer(final)) return [];
       // A turn can end without the model ever answering. Carried twice on
       // purpose: on turn-end because it is *how this turn ended*, which is what
       // a task run settles on (tasks/agent.ts), and as the error event that is
@@ -301,10 +320,17 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       if (!m) return [];
       if (m.role === "assistant") return [{ type: "text-start" }];
       const origin = systemOrigin(m);
+      if (!origin && m.role !== "user") return [];
+      // An input entering the context opens a turn, whichever way it got in: the
+      // prompt that started the run — already announced by `agent_start`, and
+      // opening the same turn twice says nothing new — and the message Pi drains
+      // *mid-run*, whose turn `agent_start` will never announce. It rides on the
+      // message rather than on its text, because an attachment with no caption
+      // is still a turn somebody is waiting on.
+      const out: SessionEventPayload[] = [{ type: "turn-start" }];
       const text = textOf(m.content);
-      if (origin) return text ? [{ type: "system-input", text, origin }] : [];
-      if (m.role !== "user") return [];
-      return text ? [{ type: "user-message", text }] : [];
+      if (text) out.push(origin ? { type: "system-input", text, origin } : { type: "user-message", text });
+      return out;
     }
     case "message_update": {
       const ame = e.assistantMessageEvent;

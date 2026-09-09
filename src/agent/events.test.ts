@@ -28,6 +28,59 @@ describe("toSessionEvents", () => {
       expected: [{ type: "turn-end", text: "hello world" }],
     },
     {
+      // The turn boundary a run with a drained follow-up has, and the only one
+      // its first answer will ever get.
+      name: "turn_end with an answer → turn-end",
+      input: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] },
+      },
+      expected: [{ type: "turn-end", text: "done" }],
+    },
+    {
+      name: "turn_end on a tool call is work in progress, not an answer",
+      input: {
+        type: "turn_end",
+        message: {
+          role: "assistant",
+          stopReason: "toolUse",
+          content: [{ type: "text", text: "reading" }, { type: "toolCall", id: "a", name: "read" }],
+        },
+      },
+      expected: [],
+    },
+    {
+      // Both stay on the agent_end path: an error may be Pi's to retry, and a
+      // truncated answer is compacted and asked again with no new user message
+      // — published here, the partial would arrive before the real one.
+      name: "turn_end with a failed message leaves the turn to agent_end",
+      input: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "boom", content: [] },
+      },
+      expected: [],
+    },
+    {
+      name: "turn_end on a truncated answer leaves the turn to agent_end",
+      input: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "length", content: [{ type: "text", text: "half" }] },
+      },
+      expected: [],
+    },
+    {
+      // The answer ended its own turn; ending it again posts the reply twice.
+      name: "agent_end after an answer ends nothing a second time",
+      input: {
+        type: "agent_end",
+        messages: [
+          { role: "user", content: "hi" },
+          { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] },
+        ],
+      },
+      expected: [],
+    },
+    {
       // Pi's own "the run-active flag is now false", and the only thing idle
       // rides on.
       name: "agent_settled → idle",
@@ -136,9 +189,18 @@ describe("toSessionEvents", () => {
       expected: [{ type: "queue-state", steering: [], followUp: [] }],
     },
     {
-      name: "message_start with a user message → user-message (queued delivery)",
+      // The turn-start is what a message drained *mid-run* has: Pi's own
+      // agent_start announced the turn the run began with, and never this one.
+      name: "message_start with a user message → turn-start + user-message (queued delivery)",
       input: { type: "message_start", message: { role: "user", content: "do it" } },
-      expected: [{ type: "user-message", text: "do it" }],
+      expected: [{ type: "turn-start" }, { type: "user-message", text: "do it" }],
+    },
+    {
+      // An image with no caption is still somebody's turn: the message opens it
+      // even though there is no text to show for it.
+      name: "message_start with a text-less user message still opens a turn",
+      input: { type: "message_start", message: { role: "user", content: [{ type: "image" }] } },
+      expected: [{ type: "turn-start" }],
     },
     {
       name: "message_start with a Pier custom message preserves provenance",
@@ -151,7 +213,7 @@ describe("toSessionEvents", () => {
           details: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: "s1" },
         },
       },
-      expected: [{
+      expected: [{ type: "turn-start" }, {
         type: "system-input",
         text: "delegated work",
         origin: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: "s1" },
@@ -175,7 +237,7 @@ describe("toSessionEvents", () => {
           },
         },
       },
-      expected: [{
+      expected: [{ type: "turn-start" }, {
         type: "system-input",
         text: "change direction",
         origin: {
@@ -204,6 +266,38 @@ describe("toSessionEvents", () => {
       expected: [],
     },
   ];
+
+  it("ends a turn per answer when Pi drains a queued message inside one run", () => {
+    const first: PiMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "first answer" }],
+    };
+    const second: PiMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "second answer" }],
+    };
+    // Pi's order for a follow-up queued mid-turn: it is drained *inside* the
+    // run, so the whole exchange has one agent_start and one agent_end.
+    const run: PiEvent[] = [
+      { type: "agent_start" },
+      { type: "message_start", message: { role: "user", content: "question one" } },
+      { type: "turn_end", message: first },
+      { type: "message_start", message: { role: "user", content: "question two" } },
+      { type: "turn_end", message: second },
+      { type: "agent_end", messages: [first, second] },
+      { type: "agent_settled" },
+    ];
+    const out = run.flatMap((e) => toSessionEvents(e));
+    expect(out.filter((p) => p.type === "turn-end")).toEqual([
+      { type: "turn-end", text: "first answer" },
+      { type: "turn-end", text: "second answer" },
+    ]);
+    // And the second question opened a turn of its own, which agent_start did
+    // not announce and the web client's abort handling reads.
+    expect(out.filter((p) => p.type === "turn-start")).toHaveLength(3);
+  });
 
   it("does not promote tool commentary to a final answer when a call is interrupted", () => {
     const messages: PiMessage[] = [
