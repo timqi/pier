@@ -21,6 +21,9 @@ export interface ModelPickerProps {
   onThinkingPick: (level: ThinkingLevel) => void;
 }
 
+// Radio names only need to distinguish picker instances within this page.
+let reasoningGroup = 0;
+
 const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
 
 // Starred model+reasoning pairs, pinned above the provider groups so the combos
@@ -132,7 +135,7 @@ export function modelPicker({
       h("span", "font-medium", "Reasoning effort"), selected, h("span", "chev text-neutral-400", "\u25b6\ufe0e"));
     const choices = h("fieldset", "grid grid-cols-2 gap-1 rounded-xl bg-neutral-50 p-1");
     choices.append(h("legend", "sr-only", "Reasoning effort"));
-    const name = `reasoning-${crypto.randomUUID()}`;
+    const name = `reasoning-${++reasoningGroup}`;
     for (const l of thinkingLevels) {
       const radio = document.createElement("input");
       radio.type = "radio";
