@@ -355,6 +355,18 @@ const MIGRATIONS: readonly string[] = [
   );
   ALTER TABLE session_state DROP COLUMN pinned;
   `,
+  // 21 — unread is the workbench's own attention, so it is only its own rows.
+  `
+  -- The flag was written for every session whose turn ended, including the
+  -- ones no browser is the reader of: an IM session answers its chat, a run's
+  -- session answers its supervisor. Both are now skipped at the write
+  -- (web/server.ts), and neither could ever be acked — that needs the session
+  -- on screen — so the rows they left would stay set forever. On the instance
+  -- this was decided on, 195 of 196 marks were those. Cleared wholesale rather
+  -- than by owner: the one real row is a turn from before an upgrade nobody
+  -- was watching for, and a false amber dot costs less than the join.
+  UPDATE session_state SET unread = 0;
+  `,
 ];
 
 /**

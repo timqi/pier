@@ -114,17 +114,13 @@ export const distinctCwds = (list: SessionInfo[]): string[] =>
 const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
 /**
- * Waiting for *you*, which is narrower than `unread`.
- *
- * The server marks every session whose turn ends, and most of those have no
- * reader here: a subagent's turn was addressed to its supervisor and delivered
- * by callback, an IM session's to the chat it came from. Nothing ever clears
- * them either — an ack needs the session selected — so drawn as-is they are
- * permanently amber, which is a mark nobody reads. Only the workbench's own
- * sessions carry the dot. Said once, for the dot and the two badges standing
- * in for it.
+ * Waiting for *you*: a finished turn nobody has looked at. The server marks
+ * only the sessions this workbench is the reader of (web/server.ts) — a
+ * subagent's turn was addressed to its supervisor and delivered by callback,
+ * an IM session's to the chat it came from — so the flag is the whole rule
+ * here. Named once, for the dot and the two badges standing in for it.
  */
-const waitingForYou = (s: SessionInfo): boolean => s.unread && s.channel === "web";
+const waitingForYou = (s: SessionInfo): boolean => s.unread;
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
  *  sky = idle itself but subagents still in flight. Idle has no mark or slot;

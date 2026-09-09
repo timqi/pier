@@ -37,6 +37,15 @@ catch, not the line count.
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
 
+- **Unread is this workbench's own attention.** `streaming → idle` marks the
+  session unread, but only the sessions a browser here is the reader of: an IM
+  turn was delivered to the chat it came from and a run's to its supervisor by
+  callback, and neither could ever be acked — the ack needs the session on
+  screen. The two facts are the ones a rail row already carries: no durable
+  conversation row (`conversations.channelOf`), and not a session a task run
+  made for itself. Decided at the write, so the dot, the two badges and Web
+  Push read one flag instead of each subtracting the same rows again.
+
 The other route owners, each a file with one reason to exist — the routes
 themselves live there and are not mirrored here:
 `auth.ts` (the password boundary ahead of everything, `/login`, `/logout`,

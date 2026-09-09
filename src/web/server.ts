@@ -173,6 +173,16 @@ export function createServer(
   // every client shows the same attention state. Streaming → idle is the
   // trigger — same transition the client notification uses — and it needs a
   // start we witnessed, so a session that boots idle stays untouched.
+  //
+  // Only for the workbench's own sessions: an IM turn was already delivered to
+  // the chat it came from and a subagent's to its supervisor by callback, so no
+  // look here is owed for either — and none could clear the mark either, since
+  // the ack needs the session on screen. Marked anyway, they were a flag that
+  // only ever accumulated, and every reader had to subtract them again. The two
+  // facts are the ones the list already draws a row from (`present` below): no
+  // durable conversation row, and not a session a run made for itself.
+  const workbenchOwn = (id: string): boolean =>
+    (channelOf?.(id) ?? "web") === "web" && !(taskSessions?.().has(id) ?? false);
   const runningNow = new Set<string>();
   hub.subscribeWorkspace((e) => {
     if (e.type !== "session-state") return;
@@ -181,6 +191,7 @@ export function createServer(
       return;
     }
     if (!runningNow.delete(e.sessionId)) return;
+    if (!workbenchOwn(e.sessionId)) return;
     state.setUnread(e.sessionId, true);
     hub.emitWorkspace({ type: "sessions-changed" });
   });

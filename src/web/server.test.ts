@@ -547,6 +547,44 @@ describe("workbench server", () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
+  // The turn was delivered to a chat or to a supervisor, and no browser is its
+  // reader: a mark here would be one nothing could clear.
+  it("leaves the turns it is not the reader of unmarked", async () => {
+    const { db, hub, router, state, imOwners, tasks } = setup();
+    imOwners.set("im", "slack");
+    const task = await tasks.create({
+      name: "delegate",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "work" },
+    });
+    new TaskStore(db).saveRun({
+      id: "made-one", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      rootRunId: "made-one", depth: 0, resumedFromRunId: null, triggerSource: "agent",
+      invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: "child",
+      sessionMode: "fresh", callbackSessionId: null, background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+      state: "succeeded", input: null, context: { definition: task, sessionId: "child" }, probe: null,
+      matched: null, result: null, error: null, skipReason: null,
+      queuedAt: 1, startedAt: 1, finishedAt: 2,
+    });
+
+    // Attached before the subscription: reaching a session promotes it, and
+    // that broadcast is not the one under test.
+    const sessions = ["im", "child"].map((id) => {
+      const own = fakeSession(id);
+      router.attach({ channelId: "web", conversationId: id }, own);
+      return own;
+    });
+    const changed = vi.fn();
+    hub.subscribeWorkspace(changed);
+    for (const own of sessions) {
+      own.emit({ type: "state", state: "streaming" });
+      own.emit({ type: "state", state: "idle" });
+      expect(state.unread(own.id)).toBe(false);
+    }
+    expect(changed).not.toHaveBeenCalledWith({ type: "sessions-changed" });
+  });
+
   it("reloads channels, recycles idle sessions and counts the ones mid-turn", async () => {
     const { app, session, router, reload } = setup();
     router.attach({ channelId: "web", conversationId: "s1" }, session);

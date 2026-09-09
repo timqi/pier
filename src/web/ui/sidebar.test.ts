@@ -65,9 +65,9 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   const dot = (over: Partial<Row>) => sidebar.stateDot(row("x", over))[0] as unknown as { cls: string; title: string } | undefined;
   expect(dot({})).toBeUndefined();
   expect(dot({ state: "streaming" })?.cls).toContain("bg-green-500");
+  // The server marks only the sessions this workbench reads (web/server.ts),
+  // so the flag alone is the dot — a turn that answered Slack never carries it.
   expect(dot({ unread: true })?.cls).toContain("bg-amber-500");
-  // Unread, but answering Slack: that turn was delivered where it came from.
-  expect(dot({ unread: true, channel: "slack" })).toBeUndefined();
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
 });
 

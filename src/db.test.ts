@@ -45,7 +45,7 @@ const UNDO_20 = "ALTER TABLE session_state ADD COLUMN pinned INTEGER NOT NULL DE
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(20);
+    expect(version(db)).toBe(21);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -90,7 +90,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(20);
+    expect(version(second)).toBe(21);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -103,7 +103,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 20/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 21/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -289,7 +289,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(20);
+    expect(version(db)).toBe(21);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -320,7 +320,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(20);
+    expect(version(db)).toBe(21);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -354,7 +354,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(20);
+    expect(version(db)).toBe(21);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -383,7 +383,8 @@ describe("openDb", () => {
     // Wound back to 18: every web session ever created carried pinned = 1,
     // because that was membership in Projects. 19 reset that, and 20 read
     // whatever was still pinned as the working set — so these two, unpinned by
-    // 19, keep their unread marks and hold no slot.
+    // 19, hold no slot. The marks are gone because 21 clears every one of
+    // them; what this test is about is the pins.
     const before = openDb(path);
     before.exec(
       UNDO_20 +
@@ -393,11 +394,34 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(20);
+    expect(version(db)).toBe(21);
     expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
       .toEqual([
-        { session_id: "s1", unread: 1, sort: null },
+        { session_id: "s1", unread: 0, sort: null },
         { session_id: "s2", unread: 0, sort: null },
+      ]);
+    db.close();
+  });
+
+  // Every mark a database carries was written under the old rule — for IM and
+  // task sessions too, which nothing here can ever ack. Cleared once, so what
+  // is left is only what the workbench marks for itself (web/server.ts).
+  it("clears the marks a database made before unread meant the workbench's own", () => {
+    const path = dbPath();
+    const before = openDb(path);
+    before.exec(
+      "INSERT INTO session_state(session_id, unread, sort) VALUES ('im', 1, NULL), ('own', 1, 0);" +
+        " PRAGMA user_version = 20",
+    );
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(21);
+    // The row itself stays: its place in the working set is not a mark.
+    expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
+      .toEqual([
+        { session_id: "im", unread: 0, sort: null },
+        { session_id: "own", unread: 0, sort: 0 },
       ]);
     db.close();
   });
@@ -423,15 +447,16 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(20);
+    expect(version(db)).toBe(21);
     expect(
       db.prepare("SELECT session_id FROM session_state WHERE sort IS NOT NULL ORDER BY sort, session_id")
         .all().map((row) => (row as unknown as { session_id: string }).session_id),
     ).toEqual(["never-dragged", "dragged-first", "dragged-second", "p0", "p1", "p2", "p3", "p4"]);
-    // The ninth pin and the stale place are gone; the unread marks are not.
+    // The ninth pin and the stale place are gone — and so is every mark, which
+    // is 21's doing and has its own test.
     expect(db.prepare("SELECT sort FROM session_state WHERE session_id = 'p5'").get()).toEqual({ sort: null });
     expect(db.prepare("SELECT sort, unread FROM session_state WHERE session_id = 'unpinned'").get())
-      .toEqual({ sort: null, unread: 1 });
+      .toEqual({ sort: null, unread: 0 });
     db.close();
   });
 
