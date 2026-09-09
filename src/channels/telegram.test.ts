@@ -4,7 +4,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
@@ -29,6 +29,9 @@ class FakeClient implements TelegramClient {
   readonly reactions: { chatId: string | number; messageId: number; emoji: string | null }[] = [];
   readonly topics: { chatId: string | number; name: string }[] = [];
   queue: TgUpdate[] = [];
+  /** Updates handed to the adapter, so a test can wait for its own batch to
+   *  have been picked up rather than for the queue to merely look empty. */
+  delivered = 0;
   nextTopicId = 77;
   closed = false;
 
@@ -46,6 +49,7 @@ class FakeClient implements TelegramClient {
       if (this.queue.length) {
         const batch = this.queue;
         this.queue = [];
+        this.delivered += batch.length;
         return batch;
       }
       await new Promise((r) => setTimeout(r, 1));
@@ -125,11 +129,30 @@ let control: ChannelControl & {
   model?: ModelRef;
 };
 
-/** Feed one update batch and wait for the poll loop to drain it. */
-async function feed(...updates: TgUpdate[]): Promise<void> {
+/** Wait for the handlers the adapter has in flight, reaching for its chains
+ *  because a fixed sleep is a race: saving an attachment's bytes is real I/O
+ *  with no upper bound on a loaded machine. */
+async function settled(): Promise<void> {
+  const chains = (channel as unknown as { chains: { size: number } }).chains;
+  await vi.waitFor(() => expect(chains.size).toBe(0), { interval: 1, timeout: 5_000 });
+}
+
+/** Queue one batch and wait for the poll loop to pick it up. The adapter
+ *  registers a chain in the same turn getUpdates resolves in, so this is the
+ *  barrier that makes a later `chains` reading mean something. */
+async function deliver(...updates: TgUpdate[]): Promise<void> {
+  const target = client.delivered + updates.length;
   client.queue = updates;
-  for (let i = 0; i < 200 && client.queue.length; i++) await new Promise((r) => setTimeout(r, 1));
-  await new Promise((r) => setTimeout(r, 10));
+  await vi.waitFor(() => expect(client.delivered).toBeGreaterThanOrEqual(target), {
+    interval: 1,
+    timeout: 5_000,
+  });
+}
+
+/** Feed one update batch and let the per-chat chains drain. */
+async function feed(...updates: TgUpdate[]): Promise<void> {
+  await deliver(...updates);
+  await settled();
 }
 
 /**
@@ -642,11 +665,14 @@ describe("outbound", () => {
 });
 
 describe("update concurrency", () => {
-  /** Park the photo download so one chat's handling is measurably slow. */
+  /** Park the photo download so one chat's handling is measurably slow. It
+   *  still records the attempt, which is how a test knows the handler got as
+   *  far as the download rather than guessing that it must have. */
   function slowPhotos(): () => void {
     let release = (): void => {};
-    client.downloadFile = () =>
+    client.downloadFile = (fileId) =>
       new Promise((resolve) => {
+        client.downloaded.push(fileId);
         release = () => resolve({ bytes: new TextEncoder().encode("fo"), name: "a.jpg" });
       });
     return () => release();
@@ -658,10 +684,13 @@ describe("update concurrency", () => {
 
   it("a stalled chat does not hold up another one", async () => {
     const release = slowPhotos();
-    await feed(
+    // Not feed(): the parked download keeps the DM's chain open for the whole
+    // test, so waiting for every chain to drain would wait forever.
+    await deliver(
       { update_id: 1, message: { message_id: 1, chat: DM, from: { id: 42 }, photo: [{ file_id: "a" }] } },
       { update_id: 2, message: { message_id: 2, chat: GROUP, from: { id: 43 }, text: "unblocked" } },
     );
+    await settle(() => inbound.length === 1);
     expect(inbound.map((m) => m.text)).toEqual(["unblocked"]);
     release();
     await settle(() => inbound.length === 2);
@@ -670,10 +699,13 @@ describe("update concurrency", () => {
 
   it("keeps one chat's messages in arrival order", async () => {
     const release = slowPhotos();
-    await feed(
+    await deliver(
       { update_id: 1, message: { message_id: 1, chat: DM, from: { id: 42 }, caption: "first", photo: [{ file_id: "a" }] } },
       { update_id: 2, message: { message_id: 2, chat: DM, from: { id: 42 }, text: "second" } },
     );
+    // Both are dispatched once the first handler has reached the parked
+    // download — the point where "second" could overtake it if the chain let it.
+    await settle(() => client.downloaded.length === 1);
     // "second" must not overtake the slow "first": a steer that arrives out of
     // order would interrupt a turn its predecessor never started.
     expect(inbound).toEqual([]);

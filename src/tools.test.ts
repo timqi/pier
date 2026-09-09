@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openDb } from "./db.js";
 import {
   coalescedSync,
@@ -469,26 +469,36 @@ describe("two syncs at once", () => {
     // is what two processes have.
     const dbPath = join(root, "pier.db");
     const options = { root, exec, fetch: () => Promise.reject(new Error("the network is not open in tests")) };
-    const first = new ManagedTools({ ...options, db: () => openDb(dbPath) }).sync(on("rg"));
-    while (!seen.length) await new Promise((resolve) => setTimeout(resolve, 10));
-    const second = new ManagedTools({ ...options, db: () => openDb(dbPath) }).sync(on("fd"));
+    // Both syncs and the lock they contend for live in this process, so the
+    // clock is one this test owns: "the second one did not run yet" is then a
+    // fact about elapsed lock polls, not about how loaded the machine is.
+    vi.useFakeTimers();
+    try {
+      const first = new ManagedTools({ ...options, db: () => openDb(dbPath) }).sync(on("rg"));
+      await vi.waitFor(() => expect(seen).toHaveLength(1));
+      const second = new ManagedTools({ ...options, db: () => openDb(dbPath) }).sync(on("fd"));
 
-    // Long enough that an unserialized second sync would have written its
-    // config and launched its own ubix by now.
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(seen).toHaveLength(1);
-    // What the first run's ubix reads while it runs is still the first run's.
-    expect(config(root)).toContain("[tools.rg]");
-    expect(config(root)).not.toContain("[tools.fd]");
+      // Long enough that an unserialized second sync would have written its
+      // config and launched its own ubix by now.
+      await vi.advanceTimersByTimeAsync(600);
+      expect(seen).toHaveLength(1);
+      // What the first run's ubix reads while it runs is still the first run's.
+      expect(config(root)).toContain("[tools.rg]");
+      expect(config(root)).not.toContain("[tools.fd]");
 
-    release();
-    await first;
-    await second;
-    expect(seen).toHaveLength(2);
-    expect(seen[1]).toContain("[tools.fd]");
-    expect(seen[1]).not.toContain("[tools.rg]");
-    // Nothing left holding it.
-    expect(openDb(dbPath).prepare("SELECT count(*) AS n FROM tools_sync_lock").get()).toEqual({ n: 0 });
+      release();
+      // Past the waiter's next poll of the row the first run just gave up.
+      await vi.advanceTimersByTimeAsync(600);
+      await first;
+      await second;
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).toContain("[tools.fd]");
+      expect(seen[1]).not.toContain("[tools.rg]");
+      // Nothing left holding it.
+      expect(openDb(dbPath).prepare("SELECT count(*) AS n FROM tools_sync_lock").get()).toEqual({ n: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -553,8 +563,12 @@ describe("the sync lock", () => {
           env: { ...process.env, PIER_LOG: "silent", LOCK_DB: dbPath, LOCK_LOG: log, WHO: who, HOLD_MS: String(holdMs) },
           stdio: ["ignore", "ignore", "pipe"],
         }),
+      /** The stepper's starting gun. */
+      go: join(dir, "go"),
       /** A holder that works in fenced steps, the way a sync does: it asks the
-       *  lock whether it is still the holder before each one. */
+       *  lock whether it is still the holder before each one. It does no step
+       *  before `go` exists, so the pause that stages a takeover cannot arrive
+       *  a step too late on a loaded machine. */
       stepper: (who: string) =>
         spawn(process.execPath, [
           "--import",
@@ -562,23 +576,24 @@ describe("the sync lock", () => {
           "--input-type=module",
           "-e",
           `
-          import { appendFileSync } from "node:fs";
+          import { appendFileSync, existsSync } from "node:fs";
           import { SyncLock } from ${JSON.stringify(toolsUrl)};
           import { openDb } from ${JSON.stringify(dbUrl)};
           const mark = (what) => appendFileSync(process.env.LOCK_LOG, what + " " + process.env.WHO + " " + Date.now() + "\\n");
           await new SyncLock(openDb(process.env.LOCK_DB), { heartbeatMs: 50, staleMs: 3_000, pollMs: 20 })
             .run(async (fence) => {
               mark("in");
+              while (!existsSync(process.env.GO_FILE)) await new Promise((resolve) => setTimeout(resolve, 10));
               for (const step of ["one", "two", "three"]) {
-                await new Promise((resolve) => setTimeout(resolve, 80));
                 fence();
                 mark(step);
+                await new Promise((resolve) => setTimeout(resolve, 10));
               }
               mark("out");
             });
           `,
         ], {
-          env: { ...process.env, PIER_LOG: "silent", LOCK_DB: dbPath, LOCK_LOG: log, WHO: who },
+          env: { ...process.env, PIER_LOG: "silent", LOCK_DB: dbPath, LOCK_LOG: log, WHO: who, GO_FILE: join(dir, "go") },
           stdio: ["ignore", "ignore", "pipe"],
         }),
     };
@@ -626,16 +641,21 @@ describe("the sync lock", () => {
     const m = machine();
     const dead = m.child("dead", 0);
     await until(() => m.turns().some((t) => t.what === "in"));
-    const before = m.db().prepare("SELECT token FROM tools_sync_lock").get() as { token: string };
     dead.kill("SIGKILL"); // a pid this test started, and only that one
     await new Promise((resolve) => dead.once("close", resolve));
+    // Read after it is gone: this is its last heartbeat, and staleness is
+    // measured from that beat — not from when this test got around to asking,
+    // which under load is an unknown amount of the window already spent.
+    const before = m.db().prepare("SELECT token, heartbeat_at FROM tools_sync_lock").get() as {
+      token: string;
+      heartbeat_at: number;
+    };
 
     const mine = new SyncLock(m.db(), { heartbeatMs: 50, staleMs: 400, pollMs: 20 });
-    const started = Date.now();
     await mine.run(async () => {
       // Only once the dead holder's heartbeat aged out — never on the strength
       // of "its process is gone", which no other machine can even ask.
-      expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+      expect(Date.now() - before.heartbeat_at).toBeGreaterThanOrEqual(400);
       const now = m.db().prepare("SELECT token FROM tools_sync_lock").get() as { token: string };
       expect(now.token).not.toBe(before.token);
     });
@@ -649,15 +669,24 @@ describe("the sync lock", () => {
     const m = machine();
     const timing = { heartbeatMs: 20, staleMs: 300, pollMs: 10 };
     const order: string[] = [];
-    const long = new SyncLock(m.db(), timing).run(async () => {
-      order.push("long in");
-      await new Promise((resolve) => setTimeout(resolve, 900)); // three stale windows
-      order.push("long out");
-    });
-    await until(() => order.length === 1);
-    await new SyncLock(m.db(), timing).run(async () => order.push("waiter in"));
-    await long;
-    expect(order).toEqual(["long in", "long out", "waiter in"]);
+    // Holder, waiter and the staleness judgement are all in this process, so a
+    // clock this test drives makes "three stale windows" exact and instant.
+    vi.useFakeTimers();
+    try {
+      const long = new SyncLock(m.db(), timing).run(async () => {
+        order.push("long in");
+        await new Promise((resolve) => setTimeout(resolve, 900)); // three stale windows
+        order.push("long out");
+      });
+      expect(order).toEqual(["long in"]); // acquired on the first try, no poll to wait for
+      const waiter = new SyncLock(m.db(), timing).run(async () => order.push("waiter in"));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await long;
+      await waiter;
+      expect(order).toEqual(["long in", "long out", "waiter in"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lets exactly one of two waiters in at a time, and never deletes the other's row", async () => {
@@ -672,9 +701,16 @@ describe("the sync lock", () => {
         m.mark("out", who);
       });
     };
-    const first = hold("first");
-    await until(() => m.turns().length === 1);
-    await Promise.all([first, hold("second"), hold("third")]);
+    vi.useFakeTimers();
+    try {
+      const first = hold("first");
+      expect(m.turns()).toHaveLength(1); // acquired on the first try, no poll to wait for
+      const all = Promise.all([first, hold("second"), hold("third")]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await all;
+    } finally {
+      vi.useRealTimers();
+    }
     const turns = m.turns();
     expect(turns).toHaveLength(6);
     expect(neverOverlapped(turns)).toBe(true);
@@ -696,15 +732,21 @@ describe("the sync lock", () => {
     child.kill("SIGSTOP"); // a pid this test started — paused, so it beats no more
 
     let held = false;
+    let woken = (): void => {};
+    const ran = new Promise<void>((resolve) => (woken = resolve));
     const taker = new SyncLock(m.db(), { heartbeatMs: 20, staleMs: 200, pollMs: 10 }).run(async () => {
       held = true;
       m.mark("in", "taker");
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // Hold until the woken holder has had its turn and exited: the fact this
+      // test is about, rather than a duration hoped to outlast it.
+      await ran;
       m.mark("out", "taker");
     });
     await until(() => held);
+    writeFileSync(m.go, ""); // its first step is now unblocked — and fenced
     child.kill("SIGCONT");
     const code = await new Promise((resolve) => child.once("close", resolve));
+    woken();
     await taker;
 
     // It failed, and it said why — an outcome, not a line in a log under work

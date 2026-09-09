@@ -1153,8 +1153,12 @@ describe("receipts", () => {
     receipts.add({ conversationId: "C100/1.1", chatId: "C100", messageId: "5.5" });
     const reborn = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
     await reborn.start(() => {});
-    await new Promise((r) => setTimeout(r, 10));
-    expect(client.reactions).toEqual([{ channel: "C100", ts: "5.5", name: "eyes", add: false }]);
+    // The startup sweep is a detached promise: wait for what it does, not for
+    // however long a loaded machine needs to get around to it.
+    await vi.waitFor(
+      () => expect(client.reactions).toEqual([{ channel: "C100", ts: "5.5", name: "eyes", add: false }]),
+      { interval: 1, timeout: 5_000 },
+    );
     await reborn.stop();
   });
 
@@ -1162,14 +1166,16 @@ describe("receipts", () => {
     openGates();
     // Park the lookup so the message sits in the window where the old code
     // had already marked its receipt.
-    let releaseName: (v: string) => void = () => {};
+    let releaseName: ((v: string) => void) | null = null;
     client.userName = () => new Promise((r) => (releaseName = r));
     client.emit(message({ text: "next", ts: "1799.000100" }));
-    await new Promise((r) => setTimeout(r, 10));
+    // The window opens when the handler enters the parked lookup, which is the
+    // fact to wait for; feed() cannot be used, the chain stays open until then.
+    await vi.waitFor(() => expect(releaseName).not.toBeNull(), { interval: 1, timeout: 5_000 });
     // A previous turn settles now: nothing may be on the books yet.
     await channel.send("C100/1799.000100", { text: "previous turn", suggestions: [] });
     expect(client.reactions).toEqual([]);
-    releaseName("Q");
+    releaseName!("Q");
     await settled();
     expect(client.reactions).toEqual([{ channel: "C100", ts: "1799.000100", name: "eyes", add: true }]);
     expect(inbound.at(-1)!.text).toBe("next");
