@@ -7,7 +7,7 @@
 import { Ellipsis } from "lucide";
 import { icon } from "./icons.js";
 import { sendJson } from "./api.js";
-import { openPathMenu } from "./dir-picker.js";
+import { openBrowser, openPathMenu } from "./dir-picker.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { closeMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
@@ -435,6 +435,8 @@ export function initSidebar(d: SidebarDeps): void {
     const current = deps.sessions().find((s) => s.id === deps.currentId())?.cwd;
     const recent = distinctCwds(deps.sessions()).slice(0, RECENT_CWDS);
     if (current && !recent.includes(current)) recent.unshift(current);
+    // Nothing to choose from yet (a fresh instance): straight to the tree.
+    if (!recent.length) return openBrowser(newBtn, undefined, deps.createSession);
     openPathMenu(newBtn, recent.map((path) => ({ path, hint: basename(path) })), current, deps.createSession);
   };
   newBtn.onclick = openNew;

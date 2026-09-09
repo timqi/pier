@@ -3,7 +3,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("./dom.js", () => ({ $: () => ({}), basename: vi.fn(), h: (_tag: string, cls: string) => ({ cls }), relTime: vi.fn(), untitled: vi.fn() }));
 vi.mock("./api.js", () => ({ sendJson: vi.fn() }));
-vi.mock("./dir-picker.js", () => ({ openPathMenu: vi.fn() }));
+vi.mock("./dir-picker.js", () => ({ openBrowser: vi.fn(), openPathMenu: vi.fn() }));
 vi.mock("./menu.js", () => ({ closeMenu: vi.fn() }));
 vi.mock("./notifications.js", () => ({ setUnreadBadge: vi.fn() }));
 vi.mock("./shell.js", () => ({ setAttention: vi.fn() }));
