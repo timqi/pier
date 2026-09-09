@@ -145,9 +145,8 @@ function renderSessionMeta(): void {
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
-  // The rail's dot counts the same runs for every session (sidebar.ts); this is
-  // that count for the one on screen, and the way to the card — which sits
-  // where the run was launched and scrolls off as the conversation goes on.
+  // The rail's dot count (sidebar.ts) for the session on screen, plus the way
+  // to a card that has scrolled off.
   const runs = deps.currentSession()?.activeRuns ?? 0;
   const items: HTMLElement[] = [];
   if (runs > 0) {

@@ -139,10 +139,8 @@ export function revealTurn(role: "user" | "assistant", at: number): boolean {
   return true;
 }
 
-/** Bring the newest still-running background run into view: what the header's
- *  running chip points at (session-header.ts), because a card sits where the
- *  run was launched and scrolls away as the conversation goes on. `false` when
- *  no card is in the pane — the trim dropped it off the top. */
+/** Scroll the newest running-run card into view for the header's chip
+ *  (session-header.ts). `false` when the trim dropped every card. */
 export function revealActiveRun(): boolean {
   const cards = turnsPane.querySelectorAll<HTMLElement>('[data-kind="background-run"][data-active]');
   const card = cards[cards.length - 1];
