@@ -137,9 +137,10 @@ rewrites both units and restarts Pier. On macOS run `pier serve` in a terminal,
 or under whatever supervisor you already use — `pier` on its own only prints
 the usage.
 
-`docs/deploy.md` is the same thing written out by hand, plus what the memory
-limits mean, how updates work (and why the updater is a second unit), how to
-read the first-run password out of the journal, and what to back up.
+`systemctl --user cat pier` shows the units with their comments; `docs/deploy.md`
+is what they do not say: how to size the memory limits, how updates work (and
+why the updater is a second unit), how to read the first-run password out of
+the journal, and what to back up.
 
 Exposing it needs two things: a reverse proxy or tunnel that terminates TLS
 (Pier binds the loopback and expects `X-Forwarded-For`/`-Proto`), and the

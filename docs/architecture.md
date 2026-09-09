@@ -271,98 +271,36 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   Agent errors surface as `error` events, never as thrown exceptions across
   a seam.
 
-## Open Questions
+## Decisions
 
-- `ChatKind`'s `"forum"` member is a Telegram word sitting in the
-  platform-blind config contract (`channels/types.ts`), and Slack confirmed it
-  does not generalize — the adapter reports every channel as `"group"` because
-  a Slack channel is *always* threaded, so `"forum"` would be either always or
-  never right. `topicMode` turned out not to generalize either: it is a real
-  switch on Telegram and a constant on Slack and Lark, which both show "Thread
-  mode: always on" instead. The third data point (Lark) landed on Slack's side
-  — `reply_in_thread` works everywhere, so the adapter reports `"group"` and
-  ignores the flag. The shape is now clear: `"forum"` and `topicMode` are
-  Telegram facts living in shared types, and the eventual fix is an adapter
-  capability ("threads per request") rather than a stored flag. Not renamed
-  yet — it is a stored-config migration, worth doing when the contract next
-  changes for its own reasons.
+One line each; the reasoning is in the commit that made it.
 
-## Decisions Log
-
-- One shared password guards every HTTP surface (`web/auth.ts`): a single
-  middleware ahead of all routes, a scrypt hash generated on first boot and
-  printed once, and a cookie naming a row in `web_sessions` — one per signed-in
-  browser, holding only the SHA-256 of the cookie's token, so a copy of
-  `pier.db` cannot be turned into a session and any single browser can be
-  signed out. Single-account on purpose —
-  Pier has one workspace, so a boundary is what an exposed instance needs, not
-  identities. `/p/*` — published boards and the stylesheet they link — is the
-  only exemption, so
-  a board's `public` flag is a real boundary and not just a data state.
-- Remote access and deployment: the loopback bind is the posture, reached over
-  an SSH tunnel, a private network or a reverse proxy. `pier service install`
-  writes the documented service and updater units. Version checks are read-only;
-  an explicit `pier update` runs backup, package install and restart in the
-  updater's cgroup, never from a timer.
-- Pi **SDK** over RPC; seam kept RPC-compatible (no Pi types leak out of `agent/`).
-- Standalone program, not a Pi extension; Pier registers custom tools into
-  the sessions it creates (task tool, step 4).
-- Bundled extensions (`src/extensions/`) ship *inside* the package and load as
-  Pi inline factories — nothing is ever copied into `<agentDir>/extensions`.
-  A copy on disk has an owner problem: an update either clobbers the edits
-  someone made to it or skips them forever. Two rules keep it honest: the
-  Console's switch is an instance setting read when a session opens (so it
-  reaches sessions exactly like an edited agent file, and saving recycles the
-  idle ones), and a bundled extension stands down when an extension on disk
-  already registers one of its tools — the user's copy wins and the journal
-  says which one answered. Pier is not an extension manager: installing
-  third-party extensions stays Pi's job, and this list is only what Pier
-  ships.
-- Web workbench before IM channels (fastest loop for steering/observability).
-- Boards (avibe's "Show pages", renamed): a board is a *directory* under
-  `$PIER_HOME/boards`, derived by scanning like sessions are — no table, no
-  store. Only `<board>/site/` is served; sources, README and manifest stay off
-  the wire. Many-to-many with sessions and independent of their lifecycle.
-  Hand-written static HTML against one shipped classless stylesheet: Pier ships
-  no board toolchain and no framework, and a board that needs a build owns it.
-  Design: `docs/design/05-boards.md`.
-- Persistence: Pi session files own transcripts; one SQLite database owns
-  everything else — Task definitions, immutable Run snapshots, callback outbox
-  state, the bounded Subagent control/supervisor message ledger, one config row
-  per IM channel, the chat → session map, pending reaction receipts, the
-  password hash, instance settings and per-session workbench flags. One
-  connection, opened by `db.ts` before any store exists, because `user_version`
-  is one number per database: the schema is an append-only list of migrations
-  applied in a single transaction, upgrades only, and a database from a newer
-  Pier is refused rather than half-served. A store owns its queries, never its
-  own tables or its own handle. Nothing is stored in a JSON file that a
-  restart-safe row can hold.
-- IM chats are discovered, not registered: Telegram has no "list my chats"
-  API, so a chat appears in the Console after the bot first sees traffic in
-  it. New chats arrive enabled; the mention and bind gates are what keep them
-  harmless until an operator configures them.
-- Telegram over raw Bot API long polling, not a bot framework and not
-  webhooks: the surface Pier needs is HTTP + JSON, and webhooks would add an
-  inbound public-HTTP requirement to a local process.
-- Frontend build: Vite + Tailwind (static CSS, zero runtime). Adopted early by
-  explicit decision instead of the original no-bundler plan; still no UI
-  framework until componentization is needed.
-- Subagent is an Agent Task run in a fresh or reused persisted Session; there
-  is no second scheduler, Agent Profile store, broker, or event stream. A
-  third mode, `fork`, copied the caller's transcript into the child and was
-  removed: it cost a whole transcript (31k tokens in the run that settled it)
-  to carry a paragraph of decisions, and what it carried was the caller's
-  superseded turns as much as its conclusions. Context travels as a written
-  handoff in the prompt. Runs stored before the removal keep `sessionMode:
-  "fork"`, and the runner refuses them by name rather than guess a directory.
-- No project concept: the rail is a flat list of sessions, and a directory is
-  chosen once, when a session is created. The new-session dialog suggests the
-  distinct cwds of the list; a grouping by repository existed and was removed
-  as noise the order below did better.
-- The rail's order never moves on its own. On top is a working set of five,
-  which a session enters at the front when a human speaks to it and only when
-  it is not in the set already — members hold their places until one is pushed
-  out of the last slot; below it, every other session by birth. Pinning and
-  drag-ordering were what this replaced, and "most recently active" is what
-  they were both compensating for: it moved a row for every background turn.
-  web/session-state.ts owns the set, core/router.ts reports who was spoken to.
+- One shared password guards every HTTP surface (`web/auth.ts`); `/p/*` is the
+  only exemption, so a board's `public` flag is a real boundary. Single-account
+  on purpose: Pier has one workspace.
+- Loopback bind, reached over a tunnel or reverse proxy. Updates run in the
+  updater's own cgroup, never from a timer (`docs/deploy.md`).
+- Pi **SDK** over RPC; the seam stays RPC-compatible (no Pi types leave `agent/`).
+- Standalone program, not a Pi extension. Bundled extensions load as inline
+  factories, never copied to disk, and stand down when a copy on disk registers
+  the same tools. Pier is not an extension manager.
+- Boards are directories under `$PIER_HOME/boards`, found by scanning; only
+  `site/` is served; static HTML against one shipped stylesheet, no toolchain.
+- Pi session files own transcripts; one SQLite database owns everything else.
+  One connection opened by `db.ts`; append-only migrations in one transaction,
+  upgrades only, a newer database is refused. A store owns its queries, never
+  its tables or its handle. Nothing restart-relevant lives in a JSON file.
+- IM chats are discovered from traffic, not registered; new chats arrive
+  enabled behind the mention and bind gates.
+- Telegram over raw Bot API long polling: no framework, no webhooks.
+- Vite + Tailwind, static CSS, zero runtime, no UI framework.
+- A subagent is a Task run in a fresh or reused session; context travels as a
+  written handoff in the prompt. `fork` (copying the caller's transcript) was
+  removed; stored runs with `sessionMode: "fork"` are refused by name.
+- No project concept: a flat rail, a directory chosen once at creation.
+- The rail never reorders itself: a working set of five on top, entered when a
+  human speaks to a session; everything else by birth (`web/session-state.ts`).
+- Known debt: `ChatKind` `"forum"` and `topicMode` (`channels/types.ts`) are
+  Telegram facts in the shared config contract — Slack and Lark report
+  `"group"` and ignore the flag. The fix is an adapter capability, taken when
+  the stored contract next migrates for its own reasons.

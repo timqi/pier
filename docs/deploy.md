@@ -17,9 +17,9 @@ pier service install
 journalctl --user -u pier -e     # the password, printed once
 ```
 
-That writes the unit below, enables linger, and starts the service. The rest of
-this page is what it wrote and why — read it before widening the bind, and when
-you want the unit to say something different.
+That writes the units, enables linger, and starts the service. Each line the
+installer writes carries its own comment — `systemctl --user cat pier` is the
+reference; this page is what the units do not say.
 
 ## Prerequisites
 
@@ -41,58 +41,14 @@ configuration, and drives sessions in your own directories. Running it as root
 or as a dedicated system user means an agent that cannot touch the files you
 wanted it to work on.
 
-`~/.config/systemd/user/pier.service` — what `pier service install` generates,
-with your absolute Node and package paths filled in:
-
-```ini
-[Unit]
-Description=Pier — agent workspace
-Documentation=https://github.com/timqi/pier
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=%h
-# Absolute paths on purpose: systemd starts with a minimal PATH, so a node
-# installed by nvm/fnm/asdf is not on it — the installer fills in the node
-# that installed Pier and the globally installed entry point.
-ExecStart="/absolute/path/to/node" "/absolute/npm/prefix/lib/node_modules/@timqi/pier/dist/main.js"
-# Inherited by every command a turn runs: on systemd's bare PATH an agent asked
-# to run npm or node would be told they do not exist. The installer records the
-# PATH of the shell that ran it — that shell is your login one — with the node
-# above first and the standard directories as a floor. Installed a new tool
-# since? Re-run install --force, or add your own drop-in.
-Environment="PATH=/absolute/path/to/node/bin:/your/shell/PATH:/usr/local/bin:/usr/bin:/bin"
-# Loopback by default. Put a reverse proxy in front before widening this —
-# whoever reaches this port can drive an agent that runs a shell.
-Environment="HOST=127.0.0.1"
-Environment="PORT=3141"
-Restart=always
-RestartSec=2
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=pier
-
-[Install]
-WantedBy=default.target
-```
-
-`--pier-home` adds a quoted `PIER_HOME` environment line. Paths with spaces and
-literal systemd `%` specifiers are escaped. `pier service install` also writes an
-updater unit containing the exact npm executable currently on `PATH`. Re-run with
-`--force` after changing service settings or the Node/npm installation; it
-rewrites both units and restarts the running service. The limits drop-in remains
-operator-owned and is never overwritten.
-
-Enable it, and tell logind to keep your user manager alive after you log out —
-without lingering, every scheduled task stops when your SSH session ends:
-
-```sh
-loginctl enable-linger "$USER"
-systemctl --user daemon-reload
-systemctl --user enable --now pier
-```
+`~/.config/systemd/user/pier.service` records the absolute node and entry point
+that installed Pier (systemd's PATH would not find a version-managed one), the
+`PATH` of the shell that ran the install so commands a turn runs find the same
+tools, and a loopback bind. `--pier-home` adds `PIER_HOME`. Installed a new tool
+since? Re-run `pier service install --force`, which rewrites both units and
+restarts the service; the limits drop-in below is operator-owned and never
+overwritten. Without linger every scheduled task stops when your SSH session
+ends — the installer enables it and says so if it could not.
 
 ## Memory limits
 
@@ -109,38 +65,13 @@ systemctl show "user@$(id -u).service" -p DelegateControllers
 # DelegateControllers=cpu memory pids   ← memory listed means these work
 ```
 
-`~/.config/systemd/user/pier.service.d/limits.conf` — a drop-in, so the unit
-above stays about what Pier is and this file is about what it may consume:
-
-The limit is on the **whole unit**: `node`, every Pi subagent, and every
-command a turn ran, added together — plus the page cache those processes
-touched, which is why the soft ceiling should be the one that bites. So size it
-as a share of the machine, not as "how much should Pier need". Percentages are
-relative to installed physical memory, which also keeps this file portable:
-
-```ini
-[Service]
-# Soft ceiling: past this the kernel reclaims hard and lets the unit crawl
-# instead of killing anything. This is the one that should bite first.
-MemoryHigh=60%
-# Hard ceiling: the kernel OOM-kills *inside this cgroup*. The number exists to
-# protect everything outside it — the OS, sshd, your other services — so what
-# it should leave behind is a few GB for them, not a small share for Pier.
-MemoryMax=75%
-# Swapping an agent is worse than failing it — the machine stops responding
-# long before the limit is reached.
-MemorySwapMax=0
-# A runaway command an agent ran can fork as well as allocate.
-TasksMax=512
-# The unit's own processes are the preferred victims if the *machine* still
-# runs out, e.g. before these limits are tuned. Works with no cgroup limit at
-# all, which makes it the cheapest half of this file.
-OOMScoreAdjust=200
-# A child being OOM-killed must not take the service with it: the turn that
-# ran it fails, Pier keeps serving. (Delegated units default to this; set
-# explicitly because the default depends on system configuration.)
-OOMPolicy=continue
-```
+The installer writes `~/.config/systemd/user/pier.service.d/limits.conf` once
+(`MemoryHigh=60%`, `MemoryMax=75%`, no swap, `TasksMax=512`, `OOMPolicy=continue`,
+each line commented) and never touches it again. The limit is on the **whole
+unit**: `node`, every Pi subagent, and every command a turn ran, added together
+— plus the page cache those processes touched, which is why the soft ceiling
+should be the one that bites. So size it as a share of the machine, not as "how
+much should Pier need".
 
 On a dedicated 4–8 GB VPS those percentages land around 2.5–6 GB, which is
 roughly what one agent doing ordinary work needs. On a big shared box, prefer
@@ -308,17 +239,10 @@ package — `<version>` being the Pier that is being replaced, i.e. the release 
 reinstall if that copy is ever restored. This happens for every release,
 including releases with no schema change.
 
-Both of those steps run while Pier is still serving: the snapshot is taken
-through a read-only connection, so it is consistent on a live database, and npm
-writes into the global prefix rather than into the running process. Only the
-stop and the start that follow them are downtime — a second or two instead of
-the ten to twenty an install takes. A backup or install that fails therefore
-never stops anything; the failure is in the updater's journal and the running
-Pier keeps serving the version it already loaded. (For those seconds the live
-process is running code whose files on disk have already been replaced: a
-browser left open on the old page can see a lazily loaded asset 404 until it
-reloads. On the drained paths nothing else is running by then; `pier update`
-does not drain, which is the same reason to let active work finish first.)
+Backup and install run while Pier is still serving; only the stop and start
+are downtime. A backup or install that fails never stops anything — the failure
+is in the updater's journal (`journalctl --user -u pier-update`) and the running
+Pier keeps serving the version it already loaded.
 
 ### Automatic updates
 
@@ -371,40 +295,15 @@ in `pier.service`'s cgroup, so an update script spawned by Pier dies halfway
 through — sometimes after unpacking and before restarting, which is the one
 outcome worse than not updating.
 
-So installation writes a second unit and `pier update` starts it after recording
-the running service's effective `PIER_HOME` in a runtime drop-in. That includes
-an operator environment override, so the updater cannot back up one database and
-migrate another. `~/.config/systemd/user/pier-update.service`:
+So installation writes a second unit, `pier-update.service` (backup, `npm
+install -g`, stop, and `ExecStopPost` start — `systemctl --user cat pier-update`
+shows it), and `pier update` starts it after recording the running service's
+effective `PIER_HOME` in a runtime drop-in, so the updater cannot back up one
+database and migrate another. Starting the unit directly skips that step and is
+unsupported.
 
-```ini
-[Unit]
-Description=Update Pier to the latest published version
-
-[Service]
-Type=oneshot
-# npm's dependencies run postinstall scripts as `sh -c node …`, which needs a
-# node on PATH — the absolute one below only answers npm's own shebang. Same
-# recorded PATH as pier.service, and recorded rather than sourced from a login
-# shell at run time: a dotfile must not get to decide which node npm uses.
-Environment="PATH=/path/to/node/bin:/your/shell/PATH:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/path/to/node /path/to/pier/dist/cli.js backup
-ExecStart=/path/to/node /recorded/path/to/npm install -g @timqi/pier@latest
-# Last: everything above it runs with Pier still up, so the stop is the downtime.
-ExecStart=systemctl --user stop pier.service
-ExecStopPost=systemctl --user start pier.service
-```
-
-`pier update` triggers that unit with a call that survives Pier's restart because
-the work happens in a different cgroup. Starting the unit directly is unsupported:
-the command first records the effective database home used by the running service.
-
-Deliberately **not** a `systemd.timer`. An unattended update is a machine that
-rewrites its own code from the network while holding your API keys, and its hard
-stop interrupts whatever session was mid-turn. Pier notices a newer release
-and says so in the workbench footer; starting the update stays a decision someone
-makes. The updater's `ExecStopPost` is what brings the service back: after a
-successful stop, and — as a no-op, since nothing was stopped — after a backup or
-install that failed.
+Not a `systemd.timer`: the only thing that starts an update is Pier itself,
+either on request or under the automatic switch above, so it can drain first.
 
 ## Remote access
 
