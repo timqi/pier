@@ -34,6 +34,9 @@ html {
   --float-edge: rgb(16 24 40 / 0.08);
   --float-highlight: inset 0 1px 0 rgb(255 255 255 / 0.7);
   --float-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -8px rgb(16 24 40 / 0.14);
+  /* The composer is the one control sitting on the coloured gradient, so it
+     lifts a step higher than the chrome above it. */
+  --float-shadow-raised: 0 1px 2px rgb(16 24 40 / 0.08), 0 6px 18px -2px rgb(16 24 40 / 0.12), 0 18px 40px -8px rgb(16 24 40 / 0.2);
   --color-neutral-50: oklch(98% 0.004 260);
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
@@ -63,6 +66,7 @@ html[data-theme="dark"] {
   --float-edge: rgb(255 255 255 / 0.09);
   --float-highlight: inset 0 1px 0 rgb(255 255 255 / 0.07);
   --float-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.55);
+  --float-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5), 0 6px 18px -2px rgb(0 0 0 / 0.45), 0 18px 44px -8px rgb(0 0 0 / 0.65);
   background-color: var(--workbench-canvas);
 
   /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
@@ -481,9 +485,10 @@ main {
 #composer > div {
   max-width: 58rem;
   margin-inline: auto;
+  box-shadow: var(--float-shadow-raised), var(--float-highlight);
 }
 #composer > div:focus-within {
-  box-shadow: 0 0 0 3px var(--color-indigo-100), var(--glass-shadow);
+  box-shadow: 0 0 0 3px var(--color-indigo-100), var(--float-shadow-raised), var(--float-highlight);
 }
 #composer :is(#attach, #send, #stop) {
   width: var(--composer-control-size);
