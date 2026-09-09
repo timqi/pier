@@ -214,8 +214,10 @@ One line each; the reasoning is in the commit that made it.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
 - **One writer per instance directory**, enforced before the database opens:
-  `$PIER_HOME/pier.lock`, created `O_EXCL` with the pid in it, held for the
-  process's lifetime, taken over only when that pid is gone (`lock.ts`). A
+  `$PIER_HOME/pier.lock`, a pid file hard-linked into place from a private
+  file so it is never seen empty, held for the process's lifetime, taken over
+  only when that pid is gone — moved aside, never unlinked in place, and only
+  by the process that read it (`lock.ts`). A
   second `pier serve` names the holder and exits 1 whatever port it was given;
   the other commands claim nothing, since they run while Pier is up.
 - Pi session files own transcripts; one SQLite database owns everything else.
