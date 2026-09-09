@@ -136,7 +136,9 @@ per-turn Activity groups):
   groups use label/value columns on desktop and stacked fields on phones;
   only directory and ID have copy buttons. Snapshot-only details appear for the
   selected session. `model-picker.ts` is the
-  standalone grouped-by-provider list, groups collapsed except the one holding
+  standalone grouped-by-provider list, with the Settings-managed Pinned
+  model/reasoning combinations first and no browser-local favorites. Provider
+  groups are collapsed except the one holding
   the current model — separate because model choice will also be needed outside
   chat (scheduled tasks). The session model panel caps its desktop content at
   24rem and truncates its title; the picker fills the available width. Reasoning
