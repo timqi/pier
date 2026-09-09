@@ -2104,6 +2104,38 @@ describe("task service", () => {
     }
   });
 
+  it("keeps the remaining due tasks when one occurrence cannot be enqueued", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:59.000Z"));
+      const { service, store, session } = setup();
+      const cron = (name: string) => ({
+        name,
+        trigger: { type: "cron", expression: "* * * * *", timezone: "UTC" },
+        action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "tick" },
+      });
+      const broken = await service.create(cron("broken"));
+      const healthy = await service.create(cron("healthy"));
+      const save = store.saveRun.bind(store);
+      vi.spyOn(store, "saveRun").mockImplementation((run) => {
+        if (run.taskId === broken.id) throw new Error("fixture run insert failed");
+        save(run);
+      });
+      const due = Date.parse("2026-01-01T00:01:00.000Z");
+      service.start(1000);
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+      expect(service.listRuns(healthy.id)).toHaveLength(1);
+      expect(service.listRuns(broken.id)).toEqual([]);
+      // The failed insert rolled its advance back, so the occurrence is retried.
+      expect(service.get(broken.id).nextRunAt).toBe(due);
+      expect(service.get(healthy.id).nextRunAt).toBe(due + 60_000);
+      service.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });
 
 describe("task admission and delivery regressions", () => {

@@ -223,17 +223,17 @@ export class TaskDefinitions {
       this.store.saveTask(task);
     }
   }
-  claimDue(now: number): TaskDefinition[] {
-    const due: TaskDefinition[] = [];
-    // The store narrows by index; the JSON is still the record, so its fields decide.
-    for (const task of this.store.listDueTasks(now)) {
-      if (!task.enabled || task.archived || task.nextRunAt === null || task.nextRunAt > now) continue;
-      task.nextRunAt = nextRunAt(task.trigger, now);
-      this.store.saveTask(task);
-      due.push(task);
-    }
-    if (due.length) this.changed();
-    return due;
+  /** The store narrows by index; the JSON is still the record, so its fields decide. */
+  due(now: number): TaskDefinition[] {
+    return this.store.listDueTasks(now)
+      .filter((task) => task.enabled && !task.archived && task.nextRunAt !== null && task.nextRunAt <= now);
+  }
+
+  /** Committed with the run this occurrence queues: a failed enqueue rolls the
+   *  advance back, so the occurrence stays due instead of being skipped. */
+  advance(task: TaskDefinition, now: number): void {
+    task.nextRunAt = nextRunAt(task.trigger, now);
+    this.store.saveTask(task);
   }
   async sessionExists(sessionId: string): Promise<boolean> {
     return this.router.stateOf(sessionId) !== undefined ||

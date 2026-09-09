@@ -398,8 +398,17 @@ export class TaskService {
     try {
       const now = Date.now();
       this.sweep("schedule", () => {
-        for (const task of this.definitions.claimDue(now)) {
-          this.run(task.id, null, task.trigger.type === "watch" ? "watch" : "cron");
+        // Per task: one enqueue that throws must not spend the other due tasks'
+        // occurrence, and its own stays due for the next tick.
+        for (const task of this.definitions.due(now)) {
+          this.sweep(`schedule ${task.name}`, () => {
+            const run = this.store.transact(() => {
+              this.definitions.advance(task, now);
+              return this.prepareRun(task.id, null, task.trigger.type === "watch" ? "watch" : "cron", null, {});
+            });
+            this.hub.emitWorkspace({ type: "tasks-changed" });
+            this.runs.start(run);
+          });
         }
       });
       this.sweep("run callbacks", () => this.callbacks.recover(now));
