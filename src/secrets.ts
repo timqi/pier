@@ -1,19 +1,9 @@
-// Layer-1 secret encryption: the credentials Pier must read by itself
-// (channel tokens, provider API keys, OAuth tokens) are stored as ciphertext
-// and pass through here. Two keys, standard envelope: a KEK from
-// `~/.pier/master.key` wraps a DEK, and only the DEK touches data — so
-// rotating the KEK rewrites one file and zero data rows. The KEK is either a
-// `vt://` record (decrypted through vt, one approval per process start) or a
-// raw key in the file (the no-vt fallback — same at-rest level as the
-// plaintext files it replaces, and the mode is the operator's explicit
-// choice, never a silent downgrade).
-//
-// Both keys live in `master.key` (JSON: kek, wrapped dek, dek id), not the
-// database: rotation is then a single atomic rename, with no crash window
-// where the file holds the new KEK and the database a DEK wrapped by the old
-// one. Layer 2 — secrets needing per-use approval — never passes through
-// here: those stay `vt://` strings Pier cannot read, and the agent runs vt
-// itself.
+// Layer-1 secret encryption for the credentials Pier must read by itself.
+// Standard envelope: a KEK from `master.key` (a `vt://` record, or a raw key in
+// file mode — the operator's explicit choice) wraps a DEK, and only the DEK
+// touches data, so rotating the KEK rewrites one file and zero rows. Both keys
+// live in that one file so rotation is a single atomic rename. Layer 2
+// (per-use approval) never passes here: the agent runs vt itself.
 
 import { spawn } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -32,8 +22,7 @@ export interface VtClient {
   read(record: string): Promise<string>;
   /** `vt create` — plaintext on stdin, the `vt://` record back. */
   create(plaintext: string): Promise<string>;
-  /** `vt doctor` — read-only: which config vt uses, how it routes, whether an
-   *  agent answers. Values are reported as lengths, never plaintext. */
+  /** `vt doctor` — read-only; values are reported as lengths, never plaintext. */
   doctor(): Promise<string>;
 }
 
@@ -66,28 +55,21 @@ export class Secrets {
     return this.#file ? (this.#file.kek.startsWith("vt://") ? "vt" : "file") : undefined;
   }
 
-  /** Why decrypt is refused right now — "" once unlocked. Shown in the
-   *  Console's Security tab, which is where a refused unlock gets repaired. */
   get lockedReason(): string {
     return this.#lockedReason;
   }
 
-  /**
-   * Load master.key — created on first boot, file mode, so an unattended
-   * start needs no ceremony; vt mode is entered later via rotate. Throws on a
-   * failed vt approval or a corrupt file, and remembers why: the process must
-   * keep serving (web is how the operator unlocks or repairs), but every
-   * refused decrypt names the reason instead of pretending to be empty.
-   */
+  /** Created on first boot in file mode, so an unattended start needs no
+   *  ceremony. Throws and remembers why: the process must keep serving (web is
+   *  how the operator repairs), and every refused decrypt names the reason. */
   async unlock(): Promise<void> {
     try {
       let raw: string;
       try {
         raw = readFileSync(this.path, "utf8");
       } catch (err) {
-        // Only a missing file means first boot. Any other read error (EACCES,
-        // EISDIR…) must not fall through to #create(), which would rename a
-        // fresh key over the existing one and destroy every sealed credential.
+        // Only ENOENT is first boot: any other error falling through to
+        // #create() would rename a fresh key over the existing one.
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         this.#file = this.#create();
         log.info(`created ${this.path} (file mode)`);
@@ -122,12 +104,8 @@ export class Secrets {
     return open(dek, rest.join(":"), `v1:${dekId}`).toString("utf8");
   }
 
-  /**
-   * New KEK, same DEK: every stored envelope stays valid. `mode` switches how
-   * the new KEK is protected (entering vt mode runs `vt create`, one
-   * approval); omitted, the current mode is kept. The rewrapped file lands by
-   * atomic rename — a crash leaves either the old working file or the new one.
-   */
+  /** New KEK, same DEK: every stored envelope stays valid. Omitted `mode`
+   *  keeps the current one. */
   async rotateKek(mode: SecretsMode = this.mode ?? "file"): Promise<void> {
     const { file } = this.#unlocked();
     const kek = randomBytes(KEY_BYTES);
@@ -144,17 +122,11 @@ export class Secrets {
     log.info(`KEK rotated (${mode} mode, dek ${file.dekId} unchanged)`);
   }
 
-  /**
-   * What vt says about itself. A refused or impossible unlock is almost never
-   * Pier's fault — missing binary, no agent listening, config pointing
-   * elsewhere — and `lockedReason` only carries the last error. Read-only, so
-   * it is safe to run while locked; vt's own report is the repair instruction.
-   */
+  /** Read-only, safe while locked; vt's own report is the repair instruction. */
   doctor(): Promise<string> {
     return this.vt.doctor();
   }
 
-  /** First boot: random KEK and DEK, file mode. */
   #create(): KeyFile {
     const kek = randomBytes(KEY_BYTES);
     const dekId = randomBytes(4).toString("hex");
@@ -199,8 +171,6 @@ function open(key: Buffer, sealed: string, aad: string): Buffer {
   return Buffer.concat([decipher.update(ct), decipher.final()]);
 }
 
-/** The real vt CLI. Absent binary or denied approval both surface as the
- *  spawn/exit error — unlock() records it and the operator reads it. */
 const vtCli: VtClient = {
   read: (record) => run("vt", ["read", record]),
   create: async (plaintext) => {
@@ -209,8 +179,7 @@ const vtCli: VtClient = {
     if (!record) throw new Error("vt create printed no vt:// record");
     return record;
   },
-  // Bounded: doctor probes an agent socket and a worker over the network, and
-  // a hung probe would leave the Console waiting on a diagnosis forever.
+  // doctor probes over the network; a hung probe would hang the Console.
   doctor: () => run("vt", ["doctor"], undefined, 15_000),
 };
 

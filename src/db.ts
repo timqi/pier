@@ -1,16 +1,7 @@
-// The one connection, and the one place the schema is written down.
-//
-// Every store used to open `pier.db` for itself and create its own tables with
-// `CREATE TABLE IF NOT EXISTS`. That works exactly once: it can add a table but
-// never change one, so the first column an upgrade needed would have left every
-// existing instance with a schema nothing could repair. `user_version` is a
-// single number per *database*, not per table, which is why the schema cannot
-// stay spread across five modules — and five connections to one file is also
-// five writers competing for the same lock.
-//
-// So: one connection, one ordered list of migrations, applied in one
-// transaction before any store exists. A store receives the handle and owns
-// only its queries.
+// The one connection, and the one place the schema is written down: one ordered
+// list of migrations, applied in one transaction before any store exists.
+// `user_version` is per database, not per table, so the schema cannot be
+// spread across modules.
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -20,26 +11,16 @@ import { PIER_DB } from "./paths.js";
 
 const log = logger("db");
 
-/** Snapshots to keep *of each kind*. Three is two upgrades of regret plus one:
- *  they are full copies of the database, and the one that matters is the
- *  newest. Counted per kind because the two kinds answer different questions —
- *  a run of releases must not evict the pre-migration copies. */
+/** Per kind, because full copies are large and a run of releases must not
+ *  evict the pre-migration copies. */
 const KEEP_BACKUPS = 3;
 
-/** How long a second process may wait for the write lock before failing. Two
- *  Pier processes on one PIER_HOME contend exactly once — at boot, when both
- *  want to migrate — and failing instantly there turns a restart race into a
- *  crash loop. */
+/** Two Pier processes on one PIER_HOME contend at boot, when both want to
+ *  migrate; failing instantly turns a restart race into a crash loop. */
 const BUSY_TIMEOUT_MS = 5_000;
 
-/**
- * Append-only, never edited: index + 1 is the `user_version` a database is at
- * once that entry has run. An entry that shipped is history — fix a mistake
- * with the next one, because somebody's database already ran the old one.
- *
- * Migration 1 is the whole schema as of 0.0.1 and assumes nothing before it:
- * pre-release databases are not upgraded, they are deleted.
- */
+/** Append-only, never edited: index + 1 is the `user_version` after that entry.
+ *  Fix a mistake with the next one — somebody's database already ran the old one. */
 const MIGRATIONS: readonly string[] = [
   // 1 — the 0.0.1 schema.
   `
@@ -387,14 +368,8 @@ const MIGRATIONS: readonly string[] = [
   `,
 ];
 
-/**
- * Several writes as one, or none. `BEGIN IMMEDIATE` because every writer here
- * competes with another Pier process on the same file: taking the write lock
- * up front turns a race into a wait, where deferred would turn it into
- * SQLITE_BUSY halfway through. The rollback is the reason this is shared —
- * three modules had written the same seven lines, and a `catch` that forgets
- * to roll back leaves the connection in a transaction forever.
- */
+/** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another
+ *  Pier process into a wait, where deferred would be SQLITE_BUSY halfway through. */
 export function transact<T>(db: DatabaseSync, work: () => T): T {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -407,15 +382,8 @@ export function transact<T>(db: DatabaseSync, work: () => T): T {
   }
 }
 
-/**
- * Prepared statements, memoized by their SQL. `prepare()` compiles, and the
- * callers here hand it the same handful of strings forever — twice per
- * authenticated request, once a second per scheduler sweep. A `StatementSync`
- * is reusable with different bound parameters, so one per SQL string per
- * connection is the whole cache. Bound to the connection because a statement
- * belongs to the database that compiled it; SQL built per call does not
- * belong in here, since the cache would then grow without a bound.
- */
+/** Prepared statements memoized by SQL; callers hand it the same handful of
+ *  strings forever. SQL built per call does not belong here: the cache is unbounded. */
 export function statements(db: DatabaseSync): (sql: string) => StatementSync {
   const cache = new Map<string, StatementSync>();
   return (sql) => {
@@ -427,28 +395,15 @@ export function statements(db: DatabaseSync): (sql: string) => StatementSync {
 
 let shared: DatabaseSync | undefined;
 
-/**
- * The process's one connection, opened and migrated on first use. Every store
- * defaults to it; a test passes `openDb(":memory:")` instead.
- */
+/** The process's one connection; a test passes `openDb(":memory:")` instead. */
 export const pierDb = (): DatabaseSync => (shared ??= openDb(PIER_DB));
 
-/** A release-level restore point, taken for every release even when it has no
- * schema migration. The previous complete copies stay put if writing this one
- * fails, and the service may be running while it is written: `copyDatabase`
- * reads through a read-only connection, so what it writes is one consistent
- * snapshot of a live database rather than a torn `cp`.
- *
- * `version` is the Pier that produced this database, not the one being
- * installed: the updater runs this from the tree it is about to replace, and
- * restoring a database means reinstalling the code that speaks its schema
- * (`migrate` refuses one from a newer Pier). So the name carries the other half
- * of the pair. Backing up twice at one version replaces that version's copy —
- * the pairing is identical, so a second name for it would say nothing. */
+/** A restore point per release, schema migration or not. `version` is the Pier
+ *  that produced the database: restoring one means reinstalling the code that
+ *  speaks its schema, so the name carries that half of the pair. */
 export function backupDb(version: string, path = PIER_DB): string | undefined {
   if (!existsSync(path)) return undefined;
-  // In a filename, so it may not carry a separator or a traversal; a version
-  // this malformed is a broken install, not something to guess at.
+  // In a filename, so no separator or traversal.
   const safe = version.replaceAll(/[^0-9A-Za-z.+-]/g, "_") || "unknown";
   const bak = join(backupsDir(path, true), `${basename(path)}.release-${safe}.bak`);
   copyDatabase(path, bak);
@@ -457,54 +412,39 @@ export function backupDb(version: string, path = PIER_DB): string | undefined {
   return bak;
 }
 
-/** Open a database, bring it to the current schema, and lock down its files.
- *  `migrations` is injectable only so tests can exercise an upgrade — there is
- *  exactly one real list. */
+/** `migrations` is injectable only so tests can exercise an upgrade. */
 export function openDb(path: string, migrations: readonly string[] = MIGRATIONS): DatabaseSync {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path);
   // Timeout first: two processes booting together contend on the WAL switch
-  // itself. Outside the transaction below: journal_mode is a property of the
-  // file, and SQLite refuses to change it inside one.
+  // itself, and journal_mode cannot change inside a transaction.
   db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   db.exec("PRAGMA journal_mode = WAL");
-  // WAL's default leaves every commit waiting on an fsync, and DatabaseSync is
-  // synchronous — that wait is the event loop's. NORMAL still survives a
-  // process crash; only a power loss can cost the last transactions, which for
-  // routing state and task bookkeeping is a fair trade for not blocking.
+  // DatabaseSync is synchronous, so WAL's per-commit fsync would be the event
+  // loop's wait. NORMAL survives a process crash; only power loss costs anything.
   db.exec("PRAGMA synchronous = NORMAL");
-  // Off by default in SQLite, and a declared relationship nothing enforces is
-  // a comment. Set before migrate(): it is a per-connection switch and a no-op
-  // inside a transaction. Nothing older declares a key, so this changes the
-  // behaviour of exactly one table — push_subscriptions, whose rows must not
-  // outlive the session that made them.
+  // Off by default in SQLite; per connection, and a no-op inside a transaction.
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db, path, migrations);
   if (path !== ":memory:") restrict(path);
   return db;
 }
 
-/**
- * Upgrades only. `user_version` counts up and nothing counts it back down, so a
- * database from a newer Pier is refused rather than served: the old code would
- * happily write the new schema's tables and lose whatever it did not know
- * about. The way back is the `.bak` this function writes before upgrading.
- */
+/** Upgrades only: a database from a newer Pier is refused, since old code would
+ *  write the new schema's tables and lose what it did not know about. */
 function migrate(db: DatabaseSync, path: string, migrations: readonly string[]): void {
   const { user_version: at } = db.prepare("PRAGMA user_version").get() as { user_version: number };
   const target = migrations.length;
   if (at > target) {
-    // Name the snapshot that exists rather than a pattern: the operator is
-    // reading this because the service will not start.
+    // Name the snapshot that exists: the operator is reading this because the
+    // service will not start.
     const newest = path === ":memory:" ? undefined : snapshots(path)[0]?.file;
     throw new Error(
       `${path} is at schema ${at}, this Pier speaks ${target}: a database is ` +
         `never downgraded. Restore ${newest ?? `a copy from ${backupsDir(path)}`}, or run the newer Pier.`,
     );
   }
-  // Version 0 with tables is a database from before versioning existed.
-  // Migration 1 assumes an empty file, so the collision it would hit says
-  // "table already exists" — this says what is actually wrong and what to do.
+  // Version 0 with tables predates versioning; migration 1 assumes an empty file.
   if (at === 0 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' LIMIT 1").get()) {
     throw new Error(
       `${path} predates schema versioning and cannot be upgraded — nothing was changed. ` +
@@ -512,14 +452,11 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
     );
   }
   if (at === target) return;
-  // One transaction for the statements *and* the version number: a crash
-  // between them would leave a database whose version describes a schema it
-  // does not have, which is worse than a crash.
+  // Statements and version number in one transaction: a version describing a
+  // schema the database does not have is worse than a crash.
   db.exec("BEGIN IMMEDIATE");
-  // Re-read inside the lock. Two processes starting together both saw work to
-  // do; the one that waited for the lock would otherwise replay migrations the
-  // winner already committed and die on "table already exists", with a healthy
-  // database in front of it.
+  // Re-read inside the lock: the process that waited must not replay what the
+  // winner already committed.
   const { user_version: locked } = db.prepare("PRAGMA user_version").get() as {
     user_version: number;
   };
@@ -531,9 +468,8 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
     log.info(`schema already at ${locked}, migrated by another process`);
     return;
   }
-  // Keep the write lock while a second, read-only connection copies the last
-  // committed state. That connection may VACUUM while this one holds a RESERVED
-  // lock; other Pier starts wait here instead of racing on the shared .tmp.
+  // Under the write lock: a read-only connection may VACUUM while this one
+  // holds RESERVED, and other Pier starts wait instead of racing on the .tmp.
   if (locked > 0 && path !== ":memory:") {
     try {
       snapshot(path, locked);
@@ -549,9 +485,7 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
-    // Which one, and that the database is untouched: the operator's next move
-    // is to restore a backup or to report the migration, and a bare SQLite
-    // error says neither.
+    // Which one, and that the database is untouched: a bare SQLite error says neither.
     throw new Error(
       `migration ${step + 1} failed on ${path} — nothing was changed: ${String(err)}`,
       { cause: err },
@@ -561,24 +495,16 @@ function migrate(db: DatabaseSync, path: string, migrations: readonly string[]):
   if (path !== ":memory:") prune(snapshots(path).map(({ file }) => file));
 }
 
-/**
- * The copy that exists because `user_version` only counts up: the transaction
- * above protects against a migration that *failed*, and this against one that
- * succeeded and should not have. `VACUUM INTO`, not `cp`: under WAL the
- * committed tail of the database lives in the `-wal` sidecar.
- *
- * Written under a temporary name and renamed into place. `VACUUM INTO` refuses
- * an existing target, so the alternative is deleting the previous snapshot
- * first — which means the likely failure here, a full disk, leaves neither the
- * old snapshot nor a complete new one. A rename is atomic: the `.bak` name only
- * ever refers to a finished copy.
- */
+/** The transaction protects against a migration that failed; this against one
+ *  that succeeded and should not have. */
 function snapshot(path: string, at: number): void {
   const bak = join(backupsDir(path, true), `${basename(path)}.v${at}.bak`);
   copyDatabase(path, bak);
   log.info(`pre-migration backup: ${bak}`);
 }
 
+/** `VACUUM INTO`, not `cp`: under WAL the committed tail lives in the `-wal`
+ *  sidecar. Temp name plus rename, so a full disk leaves the old copy intact. */
 function copyDatabase(path: string, bak: string): void {
   const tmp = `${bak}.tmp`;
   rmSync(tmp, { force: true }); // a previous crash may have left one
@@ -592,16 +518,9 @@ function copyDatabase(path: string, bak: string): void {
   renameSync(tmp, bak);
 }
 
-/**
- * One directory for every copy of this database, `db/backups/`. Beside the
- * database was fine while there was one snapshot per schema; a restore point
- * per release turns that into a listing where the live file and its sidecars
- * are hard to pick out, and "which of these do I not delete" is the wrong
- * question to make an operator answer under pressure.
- *
- * `create` also adopts what an older Pier wrote next to the database, so the
- * restore procedure names one location instead of two forever.
- */
+/** `db/backups/`, so the live file and its sidecars are never in the listing an
+ *  operator prunes under pressure. `create` adopts copies an older Pier left
+ *  beside the database. */
 function backupsDir(path: string, create = false): string {
   const dir = join(dirname(path), "backups");
   if (!create) return dir;
@@ -615,8 +534,7 @@ function backupsDir(path: string, create = false): string {
   return dir;
 }
 
-/** The copies of one kind: `v<schema>` or `release-<version>`. Disjoint
- *  prefixes, so each kind is counted and pruned on its own. */
+/** `v<schema>` or `release-<version>`: disjoint prefixes, pruned per kind. */
 function listBackups(path: string, kind: string): string[] {
   const dir = backupsDir(path);
   if (!existsSync(dir)) return [];
@@ -624,8 +542,7 @@ function listBackups(path: string, kind: string): string[] {
   return readdirSync(dir).filter((name) => name.startsWith(prefix) && name.endsWith(".bak"));
 }
 
-/** Pre-migration snapshots, newest schema first — the number in the name is an
- *  ordinal, so it orders them without asking the filesystem. */
+/** Pre-migration snapshots, newest schema first. */
 function snapshots(path: string): { version: number; file: string }[] {
   const prefix = `${basename(path)}.v`;
   return listBackups(path, "v")
@@ -637,18 +554,14 @@ function snapshots(path: string): { version: number; file: string }[] {
     .sort((a, b) => b.version - a.version);
 }
 
-/** Release restore points, newest copy first. Ordered by mtime: the name holds
- *  a Pier version, and comparing those means reimplementing semver here — while
- *  two updates of one instance are never in flight at the same moment. Legacy
- *  `pier.db.release.bak` shares the prefix, so it ages out like the rest. */
+/** Release restore points, newest first by mtime: ordering by the version in
+ *  the name would mean reimplementing semver here. */
 function releases(path: string): string[] {
   return listBackups(path, "release")
     .map((name) => join(backupsDir(path), name))
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
 }
 
-/** Keep the newest few, oldest first out. Nobody restores a database from four
- *  upgrades ago, and every one of these is the size of the whole database. */
 function prune(newestFirst: string[]): void {
   for (const file of newestFirst.slice(KEEP_BACKUPS)) {
     rmSync(file, { force: true });
@@ -656,20 +569,12 @@ function prune(newestFirst: string[]): void {
   }
 }
 
-/**
- * The database holds the password hash, so it is not world-readable — and
- * neither are the sidecars, where a 0644 `-wal` would leak exactly what the
- * 0600 database is hiding. Done after the migration, so the sidecars that
- * writing created exist by now; SQLite gives later ones the database's mode.
- * The directory too: it exists only to hold this database and its sidecars
- * (paths.ts puts them under their own `db/`, away from the boards PIER_HOME
- * also holds), so nothing else needs to see into it.
- */
+/** The database holds the password hash; a 0644 `-wal` would leak what the
+ *  0600 database hides. After the migration, so the sidecars exist by now. */
 function restrict(path: string): void {
   for (const file of [path, `${path}-wal`, `${path}-shm`]) {
     if (existsSync(file)) chmodSync(file, 0o600);
   }
   chmodSync(dirname(path), 0o700);
-  // Full copies of the same secrets, one directory down.
   if (existsSync(backupsDir(path))) chmodSync(backupsDir(path), 0o700);
 }

@@ -1,12 +1,6 @@
 // A graceful restart: refuse new work, let running turns finish, and write
-// down what the deadline had to cut off so the next boot can tell the chats.
-//
-// The trigger is SIGUSR2 (main.ts); systemd's `Restart=always` is the "start
-// again" half. SIGTERM stays the fast path systemd expects — this file is only
-// the slow one. Nothing here is persisted for its own sake: everything durable
-// (transcripts, the chat → session map, task runs) already survives a restart,
-// so the ledger below holds only the one thing that would otherwise vanish
-// silently — turns and queued messages the deadline aborted (§5b).
+// down what the deadline cut off so the next boot can tell the chats (§5b).
+// Everything else durable already survives a restart.
 
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentSession, ConversationKey } from "./core/types.js";
@@ -14,12 +8,10 @@ import { logger } from "./log.js";
 
 const log = logger("drain");
 
-/** How long running turns may take before they are aborted. Generous: a turn
- *  can be a subagent fan-out, and an abort still persists the partial work. */
+/** Generous: a turn can be a subagent fan-out. */
 const DRAIN_DEADLINE_MS = 5 * 60_000;
 const POLL_MS = 1_000;
-/** Shared cleanup window after the deadline. All sessions use the same clock,
- *  so N hung seams still cost at most this long rather than N times as long. */
+/** Shared across sessions, so N hung seams cost this long, not N times it. */
 const CLEANUP_BOUND_MS = 10_000;
 
 export interface LedgerEntry {
@@ -64,13 +56,9 @@ export interface DrainDeps {
   ledger: RestartLedger;
 }
 
-/**
- * Resolve when the process may exit: every turn settled and every task run
- * terminal, or the deadline reached and the stragglers aborted into the
- * ledger. The caller (main.ts) owns what happens next — the ordinary shutdown,
- * minus aborting task runs: the boot-time interrupted marking is the recovery
- * path (tasks/service.ts start()), not a teardown race against dying channels.
- */
+/** Resolves when the process may exit: everything settled, or the deadline
+ *  reached and the stragglers aborted into the ledger. Task runs are left to
+ *  the boot-time interrupted marking (tasks/service.ts). */
 export async function drainForRestart(
   deps: DrainDeps,
   deadlineMs = DRAIN_DEADLINE_MS,
@@ -84,8 +72,7 @@ export async function drainForRestart(
   let lastReport = "";
   for (;;) {
     // Sleep first: a prompt accepted just before the gate closed may not have
-    // flipped its session to streaming yet, and exiting on that blink would
-    // cut off the very turn the drain exists to protect.
+    // flipped its session to streaming yet.
     await new Promise((resolve) => setTimeout(resolve, pollMs));
     const busy = router.busy();
     const runs = tasks.activeRunCount();
@@ -108,8 +95,7 @@ export async function drainForRestart(
   }
 }
 
-/** A seam call the deadline cannot wait on forever: a hang or a rejection is
- *  logged and answered with the fallback, and cleanup moves on. */
+/** A hang or a rejection is logged and answered with the fallback. */
 async function bounded<T>(work: Promise<T>, ms: number, what: string, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<T>((resolve) => {
@@ -132,9 +118,8 @@ async function bounded<T>(work: Promise<T>, ms: number, what: string, fallback: 
   }
 }
 
-/** Write the chat's entry, then abort the turn. The ledger comes first so a
- *  hung abort cannot cost the note; the abort persists the partial transcript;
- *  the pending queue would just vanish, so its texts ride along. */
+/** Ledger first, so a hung abort cannot cost the note; the pending queue would
+ *  just vanish, so its texts ride along. */
 async function abortToLedger(
   session: AgentSession,
   key: ConversationKey,
@@ -147,10 +132,8 @@ async function abortToLedger(
     `queue snapshot of session ${session.id}`, { steering: [], followUp: [] },
   );
   const pending = [...queued.steering, ...queued.followUp];
-  // A web or task key has no chat to write to: the transcript shows the
-  // aborted turn, and a task run's interruption is reported by its callback
-  // recovery. Only a dropped queue would be invisible there, so it is at
-  // least logged.
+  // A web or task key has no chat: the transcript shows the aborted turn, and
+  // only a dropped queue would be invisible, so that is logged.
   if (key.channelId === "web" || key.channelId === "task") {
     if (pending.length) {
       log.warn(`session ${session.id}: ${String(pending.length)} queued message(s) dropped by the restart`);
@@ -165,12 +148,8 @@ async function abortToLedger(
   await bounded(session.abort(), remaining(), `abort of session ${session.id}`, undefined);
 }
 
-/**
- * Deliver what a previous process wrote on its way out. Runs at boot once the
- * adapters are up, and again on a Console unlock. Each entry is removed only
- * after confirmed delivery. A missing adapter or a thrown notification keeps
- * the debt for the next start: a duplicate apology is preferable to silence.
- */
+/** Each entry is removed only after confirmed delivery: a duplicate apology is
+ *  preferable to silence. */
 export async function deliverLedger(
   ledger: RestartLedger,
   notify: (entry: LedgerEntry) => Promise<boolean>,

@@ -49,57 +49,36 @@ import { createServer } from "./web/server.js";
 
 const log = logger("pier");
 
-// Pier owns the Pi runtime dir. Set before any SDK call resolves a path, so
-// everything Pi derives from its agent dir (auth.json, models.json, sessions,
-// bin) lands under PIER_HOME instead of ~/.pi.
-//
-// An operator override wins — but only a human's. Everything Pier spawns (the
-// agent's own shell, task sessions) inherits this variable, so a second
-// Pier started from inside the first with its own PIER_HOME would adopt the
-// first one's agent dir and write its sessions, SYSTEM.md and models.json
-// there: two instances sharing a directory neither was told to share, and
-// PIER_HOME looking like it did nothing. PIER_AGENT_DIR marks the value as
-// ours, and a value that is ours is not an override, it is a leak — derive it
-// again from this instance's own PIER_HOME.
+// Before any SDK call resolves a path, so everything Pi derives from its agent
+// dir lands under PIER_HOME. PIER_AGENT_DIR marks the value as ours: a second
+// Pier spawned from inside the first inherits it, and an inherited value is a
+// leak, not an operator override (paths.ts).
 process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
 process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
-// Ahead of everything Pier spawns — sessions and tasks all inherit this
-// process's env. A tool switched on in the Console is Pier's
-// copy at Pier's version, so it goes first, not last.
 prependPath(process.env);
 
-// First, and explicitly: every store below shares this one connection, and a
-// schema that cannot be migrated must stop the process here — before a port is
-// open and before anything has written a row.
+// A schema that cannot be migrated must stop the process before a port is open.
 const db = pierDb();
 
-// Files earlier versions kept beside the database. Their values live in
-// pier.db now, and a setting that silently stops being read is a 5b violation:
-// the operator who wrote it deserves to hear that it no longer applies.
+// A setting that silently stops being read is a §5b violation.
 for (const stale of ["settings.json", "pins.json", "unread.json"]) {
   if (existsSync(pierPath(stale))) {
     log.warn(`${pierPath(stale)} is no longer read — its value lives in pier.db now; re-enter it in the Console and delete the file`);
   }
 }
 
-// One store, two readers: the Console writes the public URL, and every session
-// opened after that is told the new one.
 const settings = new SettingsStore(db);
 
-// Layer-1 credential encryption (channel tokens today). Constructed here,
-// unlocked below: file mode is instant, vt mode waits on a human approval, and
-// nothing that needs a token may run before the key arrives.
+// Unlocked below: vt mode waits on a human approval, and nothing that needs a
+// token may run before the key arrives.
 const secrets = new Secrets();
 
 let tasks: TaskService;
 const conversations = new ConversationStore(db);
 let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
-// Declared before the store exists because the factory is built first; the tool
-// only ever runs long after wiring is done.
 let channelStore: ChannelStore;
-// Shared by the adapter and the tool: a display name is looked up once per
-// process, not once per message and again per transcript.
+// Shared by the adapter and the tool: one display-name lookup per process.
 const slackDirectory = new SlackDirectory((m) => logger("slack").warn(m));
 let readyForConfigReload = false;
 const piConfig = new PiConfigStore();
@@ -115,15 +94,12 @@ const factory = new PiAgentFactory(
         handleSlackTool({
           store: channelStore,
           directory: slackDirectory,
-          // Rebuilt per call: the Console can change the token underneath us,
-          // and a client captured at boot would keep using the old one.
+          // Per call: the Console can change the token underneath us.
           client: () => {
             const config = channelStore.get("slack");
             return config.token ? new SlackApi(config.token, config.appToken) : null;
           },
-          // Which Slack thread this session is answering, so "post here" needs
-          // no ids. Looked up per call: the mapping is durable, the session is
-          // not.
+          // Per call: the mapping is durable, the session is not.
           here: (sessionId) => {
             const key = router.conversationOf(sessionId);
             if (key?.channelId !== "slack") return null;
@@ -132,44 +108,31 @@ const factory = new PiAgentFactory(
           },
           log: (m) => logger("slack.tool").warn(m),
         }, params, callerSessionId),
-      // No Slack, no schema: an unconfigured tool would sit in every prompt of
-      // every session and be able to answer nothing.
       () => slackToolAvailable(channelStore),
     ),
   ],
-  // Called per session open, so a setting changed in the Console reaches the
-  // next session without a restart.
+  // Getters, read per session open: a Console change reaches the next session
+  // without a restart.
   () => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }),
-  // Ships with Pier: documents Pier's own tools, so it loads only inside a
-  // Pier session — not in a bare Pi session that has no task tool.
+  // Documents Pier's own tools, so it loads only inside a Pier session.
   [fileURLToPath(new URL("../skills", import.meta.url))],
-  // Provider credentials live sealed in pier.db; a leftover auth.json is
-  // imported on first use and renamed to auth.json.imported.
   new CredentialStore(db, secrets),
   piConfig,
-  // Operator pins ride ahead of the curated catalog in every model picker.
   () => settings.get().modelMenu,
-  // Bundled extensions the Console switched on; read per session open, so the
-  // toggle reaches the next session the same way an edited agent file does.
   () => settings.get().extensions,
-  // The title model, if the operator picked one; read when a first turn ends.
   () => settings.get().titleModel,
-  // The search index reads Pi's transcripts, which carry the speaker header
-  // core wrote for the model; this is where the two areas meet.
+  // Transcripts carry the speaker header core wrote for the model.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
-  // Web conversation ids ARE session ids; an IM conversation id is a chat or a
-  // topic, so its session is looked up in the durable map (and created in the
-  // cwd the chat is configured for) — a restart must not re-route a group.
+  // Web conversation ids are session ids; an IM id is a chat, resolved through
+  // the durable map so a restart does not re-route a group.
   if (key.channelId === "web" || key.channelId === "task") {
     return factory.resume(key.conversationId);
   }
   return resolveIm(key);
 });
-// An attached session holds a live Pi runtime and its transcript, and nothing
-// else ever lets one go: without this, one per conversation ever answered.
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
@@ -177,14 +140,10 @@ tasks = new TaskService(new TaskStore(db), factory, router, hub, {
 });
 const configurationSync = configSyncTask(tasks, configSync);
 
-// The managed CLI tools (src/tools.ts), and the daily task that keeps them
-// current (src/tools-task.ts) — an ordinary bash task on an ordinary cron,
-// wired here because tools.ts may not import tasks/.
 const managedTools = new ManagedTools();
 const toolsUpdate = toolsTask(tasks);
 
-// Before any route exists: two first flips could otherwise both find no task
-// and create one each. A failure here is logged, and the next flip retries.
+// Before any route exists: two first flips could otherwise both create a task.
 const reconciled = await toolsUpdate.reconcile();
 if ("problem" in reconciled) log.error(`tools cannot be managed: ${reconciled.problem}`);
 
@@ -197,12 +156,9 @@ resolveIm = resolveConversation(
   control.launchFor,
   (message) => logger("channels").warn(message),
 );
-// Channels connect only once tokens are readable. A refused unlock (vt denial,
-// corrupt master.key) must not take the web surface down — it is where the
-// operator goes to repair — but it is named loudly, not served as silence.
-// Once they are up, the chats a previous restart cut off are told (drain.ts) —
-// on this path and on a later Console unlock alike, because a note held back
-// by locked secrets must not wait for yet another restart.
+// Channels connect once tokens are readable; a refused unlock must not take
+// down the web surface, which is where the operator repairs it. The chats a
+// previous restart cut off are told as soon as channels are up (drain.ts).
 const restartLedger = new RestartLedger(db);
 const startChannels = async (): Promise<void> => {
   await channels.reload();
@@ -210,18 +166,14 @@ const startChannels = async (): Promise<void> => {
     channels.notify(entry.channelId, entry.conversationId, entry.note))
     .catch((err: unknown) => log.error("restart-note delivery failed", err));
 };
-/** What "reload" means, in one place: the adapters re-read their configuration
- * and sessions are let go, so the next message re-opens them with the current
- * skills, extensions, prompts and credentials — all applied at attach, none
- * stored in a transcript. SIGHUP (`pier reload`) and the Console's Reload are
- * both this call; `includeWatched` is the only difference, and only because the
- * Console knows a person asked from the session they are looking at. */
+/** Adapters re-read their configuration and sessions are let go, so the next
+ *  message re-opens them with current skills, extensions, prompts and
+ *  credentials. SIGHUP and the Console's Reload are both this call. */
 const reloadInstance = async (includeWatched = false): Promise<number> => {
   await channels.reload();
   return router.evictIdle(0, Date.now(), { includeWatched });
 };
 
-// Bound the startup check before sessions and scheduled work can start.
 // Remote outages keep the last local configuration available.
 if (configSync.status().enabled) {
   try { await configSync.sync(); }
@@ -236,28 +188,15 @@ void secrets.unlock().then(
   (err) => log.error("secrets locked — channels not started; unlock from Console → Settings → Security, or repair master.key", err),
 );
 
-// Replacing Pier is systemd's job, not this process's: the oneshot unit
-// snapshots the database, installs, then stops the service and starts it again
-// on the new version — in that order, so only the last two are downtime. Without
-// that unit there is nothing to hand the work to, and the Console says so
-// instead of offering a button that cannot work.
+// Replacing Pier is systemd's job: the oneshot unit snapshots the database,
+// installs, then stops and starts the service. Without that unit the Console
+// says so instead of offering a button that cannot work.
 const updates = new UpdateCheck();
-// Asked once at boot, not lazily on the first page load: a restart is exactly
-// when "am I current?" is worth knowing, and it puts the answer in the journal
-// of a Pier nobody has a browser open on.
+// At boot, not lazily: it puts the answer in the journal of a Pier nobody has
+// a browser open on.
 void updates.refresh();
-/**
- * Hand over, but not onto a running turn. The updater's first act is
- * `systemctl stop`, i.e. a SIGTERM, which is the *fast* teardown — so anything
- * that started since the idle check would be killed with no note anywhere. The
- * gate closes first and the drain waits, exactly as `pier restart` does,
- * ledger included; only then is the install handed over. A handover that never
- * starts reopens the gate, because a Pier that silently refuses every message
- * forever is worse than the race it was avoiding.
- */
-// Shared restart state. The updater's handover, the SIGUSR2 drain (below) and
-// the final teardown must see each other: without this, two paths drain the
-// same Pier at once, and a failure on one reopens the gate the other still
+// The updater's handover, the SIGUSR2 drain and the teardown must see each
+// other, or two paths drain the same Pier and one reopens the gate the other
 // needs shut.
 let handingOver = false;
 let draining = false;
@@ -265,32 +204,23 @@ let shuttingDown = false;
 const takeWorkAgain = (why: string): void => {
   handingOver = false;
   log.error(`${why} — taking work again`);
-  // Not ours to reopen: a SIGUSR2 restart or the teardown owns the gate now,
-  // and reopening it would hand new work to a process that is exiting.
+  // Not ours to reopen: a restart or the teardown owns the gate now.
   if (draining || shuttingDown) return;
   router.endDrain();
   tasks.unpause();
-  // The drain may have deadline-aborted turns into the ledger. Without the
-  // restart that was supposed to follow, that debt would wait for one days
-  // away (§5b) — so the chats are told now, by the process that cut them off.
+  // Turns the drain deadline-aborted must not wait for a restart days away (§5b).
   void deliverLedger(restartLedger, (entry) =>
     channels.notify(entry.channelId, entry.conversationId, entry.note))
     .catch((err: unknown) => log.error("restart-note delivery failed", err));
 };
-/** How long the handover has to actually stop us. `systemctl start --no-block`
- *  returns when the job is *queued*, so "started" is not proof of anything;
- *  the real outcome is a SIGTERM — but only after the updater has snapshotted
- *  the database and installed the new version, which is a registry download on
- *  someone else's network — ten seconds on a good day, minutes on a bad one.
- *  So this waits far longer than the stop itself needs, because reopening the
- *  gate mid-install would take work we are about to be SIGTERM'd out of, and
- *  still short enough that a handover which never happens does not refuse
- *  messages all afternoon. */
+/** `systemctl start --no-block` returns when the job is queued; the real
+ *  outcome is a SIGTERM after a registry download on someone else's network.
+ *  Long enough not to reopen the gate mid-install, short enough that a handover
+ *  that never happens does not refuse messages all afternoon. */
 const HANDOVER_GRACE_MS = 5 * 60_000;
 const handOverToUpdater = async (): Promise<UpdateStart> => {
-  // One handover at a time, and never on top of a restart: the Console button,
-  // the auto-update tick and SIGUSR2 would otherwise drain the same Pier
-  // twice, each believing the gate is its own to reopen on failure.
+  // The updater's first act is `systemctl stop`, the fast teardown: the gate
+  // closes and the drain waits first, as `pier restart` does.
   if (handingOver || draining || shuttingDown) return "busy";
   handingOver = true;
   await drainForRestart({ router, tasks, ledger: restartLedger });
@@ -299,11 +229,8 @@ const handOverToUpdater = async (): Promise<UpdateStart> => {
     takeWorkAgain(`update not started (${started})`);
     return started;
   }
-  // The gate is closed and nothing in this process will open it again, so a
-  // handover that queues and then goes nowhere — npm failed, the unit was
-  // masked, the job sat behind another — would leave Pier alive and refusing
-  // every message with no way back. Unref'd: this must not be what keeps the
-  // process up while systemd is trying to stop it.
+  // A handover that queues and goes nowhere would leave Pier refusing every
+  // message with no way back. Unref'd: must not keep the process up under stop.
   setTimeout(() => {
     takeWorkAgain(
       `still running ${String(HANDOVER_GRACE_MS / 1000)}s after handing over — pier-update.service never stopped Pier` +
@@ -315,19 +242,16 @@ const handOverToUpdater = async (): Promise<UpdateStart> => {
 const updater = process.platform === "linux" && existsSync(unitPath())
   ? { apply: handOverToUpdater, problem: () => updaterProblem() }
   : null;
-// Unattended only when the operator asked for it *and* nothing is running.
 if (updater) {
   const problem = updaterProblem();
-  // Loudly, at boot: this is the one moment the operator is looking, and the
-  // alternative is a restart that fails months from now.
+  // At boot, when the operator is looking; the alternative is a restart that
+  // fails months from now.
   if (problem) log.warn(`the updater cannot run: ${problem}`);
   startAutoUpdate(updates, {
     enabled: () => settings.get().autoUpdate,
     idle: () => router.busy().length === 0 && tasks.activeRunCount() === 0,
     apply: async () => {
-      // Re-checked here, not only at boot: a version manager can remove the
-      // recorded Node months into an uptime, and draining for a handover that
-      // cannot happen would take the whole instance down with it.
+      // A version manager can remove the recorded Node months into an uptime.
       const now = updaterProblem();
       if (now) {
         log.error(`auto-update skipped: ${now}`);
@@ -338,18 +262,14 @@ if (updater) {
   });
 }
 
-// Composition happens here so web/ and tasks/ never import each other.
 const app = new Hono();
-// A route that threw would otherwise answer 500 and leave no trace anywhere:
-// Hono's default handler writes nothing to the log, so the operator sees a
-// failed request in the browser and an empty journal.
+// Hono's default handler writes nothing to the log.
 app.onError((err, c) => {
   log.error(`${c.req.method} ${c.req.path} failed`, err);
   return c.json({ error: String(err) }, 500);
 });
-// Before every route on purpose: Hono runs middleware in registration order,
-// so a surface added later is covered without knowing this exists. Built
-// before the listener: a first run generates and prints its password here.
+// Before every route: Hono runs middleware in registration order, so a surface
+// added later is covered without knowing this exists.
 const auth = new AuthStore(db);
 registerConfigShareRoute(app, configSync);
 app.use("*", requireAuth(auth));
@@ -364,9 +284,6 @@ registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);
-// The workbench's notifications to a browser that is not open. Composed here,
-// beside the other surfaces: it consumes the same event stream the web server
-// does, and neither one runs the other.
 registerPushRoutes(app, {
   store: new PushStore(db),
   hub,
@@ -383,11 +300,8 @@ app.route("/", createServer({
   config: piConfig,
   providers: factory,
   settings,
-  // The catalog is code, so the composition root is where it is read: web/
-  // gets names and summaries, not a module that imports the Pi SDK.
-  // One list, assembled where both halves are visible: the extensions Pier
-  // loads from inside itself and the binaries it installs are the same kind of
-  // switch to the person flipping it, and rtk is both.
+  // Assembled here so web/ gets names and summaries, not a module that
+  // imports the Pi SDK; extensions and binaries are one kind of switch.
   catalog: async () => {
     const { extensions, tools, customTools } = settings.get();
     return {
@@ -395,14 +309,10 @@ app.route("/", createServer({
       toolsTaskId: toolsUpdate.id(),
     };
   },
-  // Names only, and the same two lists the catalog above is built from: the
-  // route validates a switch against what this Pier *can* switch, which is
-  // code, never against a catalog whose custom half the request may be
-  // rewriting.
+  // A switch is validated against what this Pier *can* switch, never against
+  // a catalog whose custom half the request may be rewriting.
   names: { extensions: bundledInfo([]).map((entry) => entry.name), tools: MANAGED.map((tool) => tool.name) },
   onToolsChanged: toolsUpdate.changed,
-  // The rule lives with the installer; the names the bundled catalog already
-  // owns live with the extensions. Only here are both in scope.
   validateCustomTools: (raw: unknown) => {
     const validated = normalizeCustomTools(raw, bundledInfo([]).map((entry) => entry.name));
     return validated ? { tools: validated } : { error: CUSTOM_TOOL_RULES };
@@ -410,7 +320,6 @@ app.route("/", createServer({
   secrets,
   updates,
   updater,
-  // Unlocked from the Console: start the channels boot held back.
   onUnlocked: () => void startChannels(),
   reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
@@ -422,54 +331,43 @@ app.route("/", createServer({
 const port = Number(process.env.PORT ?? 3141);
 const hostname = process.env.HOST ?? "127.0.0.1";
 
-// Read above, and dropped here so nothing else reads them: these three
-// configure *this* process, and every command a turn runs inherits its env.
-// `NODE_ENV=production` makes an agent's `npm install` skip devDependencies and
-// silently changes what half the ecosystem builds; PORT and HOST would aim an
-// agent's own dev server at Pier's socket. Deleted at runtime rather than only
-// dropped from the unit, because an installed unit is rewritten by
-// `pier service install --force` and by nothing else.
+// Every command a turn runs inherits this env: `NODE_ENV=production` makes an
+// agent's `npm install` skip devDependencies, and PORT/HOST would aim its dev
+// server at Pier's socket.
 for (const leak of ["NODE_ENV", "PORT", "HOST"]) delete process.env[leak];
 const server = serve({ fetch: app.fetch, port, hostname }, () => {
   log.info(`workbench on http://${hostname}:${port}`);
   log.info(`pid ${process.pid}, node ${process.version}, home ${PIER_HOME}`);
-  // Only when it is not the derived default: an agent dir outside PIER_HOME is
-  // the one thing about this process's paths that cannot be guessed from it.
+  // The one path that cannot be guessed from PIER_HOME.
   if (process.env.PI_CODING_AGENT_DIR !== pierPath("pi")) {
     log.info(`agent dir ${process.env.PI_CODING_AGENT_DIR} (PI_CODING_AGENT_DIR)`);
   }
 });
 
-// A crash and a clean stop must be distinguishable after the fact, and both
-// left nothing behind before this.
 process.on("uncaughtException", (err) => {
   log.error("uncaught exception, exiting", err);
   process.exit(1); // Node's own default outcome, with the area named
 });
-// This one *does* change behaviour: Node's default is to crash. A stray
-// rejection in one adapter's background work must not take every session and
-// every scheduled task down with it — so it is logged loudly and Pier serves on.
+// Node's default is to crash; a stray rejection in one adapter's background
+// work must not take every session and scheduled task down with it.
 process.on("unhandledRejection", (reason) => {
   log.error("unhandled rejection", reason);
 });
 const shutdown = (stopTasks = true): void => {
-  // Once: SIGTERM can land while a drain is finishing, and two teardowns
-  // racing each other close the same sockets twice.
+  // SIGTERM can land while a drain is finishing.
   if (shuttingDown) return;
   shuttingDown = true;
-  // Best-effort, and bounded: a socket an adapter cannot close must not turn
-  // `systemctl restart` into a 90-second wait for SIGKILL.
+  // A socket an adapter cannot close must not turn `systemctl restart` into a
+  // 90-second wait for SIGKILL.
   setTimeout(() => process.exit(0), 3000).unref();
   stopEviction();
-  // The drain path leaves task runs alone: aborting them here would record
-  // them cancelled and race their callbacks against dying channels, when the
-  // boot-time interrupted marking is the recovery that was promised.
+  // The drain path leaves task runs alone: aborting would record them cancelled,
+  // when the boot-time interrupted marking is the recovery that was promised.
   if (stopTasks) tasks.stop();
   void channels.stop().finally(() => {
     server.close(() => process.exit(0));
     // Every workbench tab holds an SSE stream open, so `close()` alone would
-    // always wait out the timer above. (`in` because the served type is a
-    // union with HTTP/2, which has no such method — and no such problem.)
+    // wait out the timer above. (`in`: the served type is a union with HTTP/2.)
     if ("closeAllConnections" in server) server.closeAllConnections();
   });
 };
@@ -479,10 +377,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     shutdown();
   });
 }
-// The slow restart (`pier restart`): refuse new work, let running turns finish
-// — bounded by the drain deadline — then exit for `Restart=always` to bring the
-// next process up. SIGTERM above stays the fast path systemd expects. `on`,
-// not `once`: a second SIGUSR2 with no handler would fall back to Node's
+// The slow restart (`pier restart`): drain, then exit for `Restart=always`.
+// `on`, not `once`: a second SIGUSR2 with no handler would fall back to Node's
 // default and kill the drain it meant to hurry.
 process.on("SIGUSR2", () => {
   if (draining) {
@@ -495,11 +391,8 @@ process.on("SIGUSR2", () => {
     .catch((err: unknown) => log.error("drain failed — shutting down anyway", err))
     .then(() => shutdown(false));
 });
-// Reload without a restart (`pier reload`): reloadInstance above, leaving the
-// sessions someone is watching alone — nobody asked from a browser here.
-// Only under systemd (the CLI signals through systemctl): a foreground `pier
-// serve` keeps SIGHUP's default, dying with its terminal instead of surviving
-// as an orphan that holds the port.
+// Only under systemd: a foreground `pier serve` keeps SIGHUP's default, dying
+// with its terminal instead of surviving as an orphan that holds the port.
 if (process.env.INVOCATION_ID) {
   process.on("SIGHUP", () => {
     log.info("SIGHUP received, reloading channels and recycling idle sessions");

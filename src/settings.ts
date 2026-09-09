@@ -1,20 +1,10 @@
 // Instance settings: the facts about *this* Pier that are neither a credential
-// nor per-session — the public URL (nothing in the process can discover it:
-// a Host header is whatever a proxy passed on) and the operator's model menu.
-//
-// A key-value table, so the next setting is not the next table and not a third
-// kind of storage. It used to be a JSON file, justified by "the agent reads it
-// too" — the agent is told the URL in its system prompt (core/reply.ts), and
-// nothing outside this process ever opened that file.
+// nor per-session. A key-value table, so the next setting is not the next table.
 
 import type { DatabaseSync } from "node:sqlite";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "./core/types.js";
 import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
-// The one place the custom-tool vocabulary lives (names, ubix sources, the
-// names Pier already owns). Imported rather than copied: a second validator
-// would be the third-copy bug one release later, and tools.ts is root-layer
-// like this file, so nothing crosses a seam.
 import { normalizeCustomTools, type CustomTool } from "./tools.js";
 
 const log = logger("settings");
@@ -23,54 +13,39 @@ const log = logger("settings");
 export interface ModelMenuEntry {
   provider: string;
   id: string;
-  /** The reasoning level this pin is run at — advice, not a lock, but never
-   *  absent: a pin with no level was a third state every picker had to carry
-   *  a fallback for, and none of them could show it. */
+  /** Advice, not a lock — but never absent: a pin with no level is a third
+   *  state every picker would need a fallback for. */
   thinking: ThinkingLevel;
   /** Intent, not documentation — "hardest reasoning", "cheap bulk". */
   note?: string;
 }
 
 export interface Settings {
-  /** Origin (plus path prefix, if Pier is mounted under one) with no trailing
-   *  slash — `https://pier.example.com`. Empty when nobody has said. */
+  /** Origin plus path prefix, no trailing slash; nothing in the process can
+   *  discover it (a Host header is whatever a proxy passed on). Empty when unset. */
   publicUrl: string;
-  /** The deployment's model advice — pinned models with one line of intent
-   *  each. Empty means "no advice": consumers fall back to the catalog. */
+  /** Pinned models with one line of intent each; empty falls back to the catalog. */
   modelMenu: ModelMenuEntry[];
-  /** The model that names a session after its first exchange. Unset by
-   *  default: the title is then the first prompt, and no call is made —
-   *  spending tokens on every new session is the operator's decision. */
+  /** Names a session after its first exchange. Unset: the title is the first
+   *  prompt and no call is made. */
   titleModel?: ModelRef;
-  /** Let Pier install a newer release of itself while nothing is running.
-   *  Off by default: replacing your own code is the operator's decision. */
+  /** Off by default: replacing your own code is the operator's decision. */
   autoUpdate: boolean;
-  /** Names of the bundled extensions switched on (src/extensions). Empty by
-   *  default: an extension gives every session new tools, which is the
-   *  operator's call, and a name nobody ships any more is simply not found. */
+  /** Bundled extensions switched on (src/extensions); an unknown name is simply not found. */
   extensions: string[];
-  /** Names of the managed CLI tools switched on (src/tools.ts). Empty by
-   *  default: installing a binary and putting it ahead of the machine's own
-   *  copy on every PATH is the operator's decision, not a default. */
+  /** Managed CLI tools switched on (src/tools.ts). */
   tools: string[];
-  /** Tools the operator declared themselves, by ubix spec. Beside the enabled
-   *  set rather than inside it: declaring one and switching it on are two
-   *  decisions, and a tool switched off must not lose its spec. */
+  /** Beside the enabled set, not inside it: a tool switched off must not lose its spec. */
   customTools: CustomTool[];
 }
 
-/**
- * `""` clears it, `null` rejects it. Rejecting rather than repairing: a
- * mistyped host quietly turned into a URL produces board links that 404 for
- * the person they were sent to, and the sender never finds out.
- */
+/** `""` clears it, `null` rejects it: a mistyped host quietly turned into a URL
+ *  produces board links that 404 for the person they were sent to. */
 export function normalizePublicUrl(raw: string): string | null {
   const text = raw.trim();
   if (!text) return "";
   let url: URL;
   try {
-    // Scheme-less input is the common way to type a host, and https is the
-    // only guess worth making for something on the internet.
     url = new URL(text.includes("://") ? text : `https://${text}`);
   } catch {
     return null;
@@ -80,12 +55,8 @@ export function normalizePublicUrl(raw: string): string | null {
   return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
 }
 
-/**
- * Boundary check for a menu, rejecting rather than repairing (same contract as
- * `normalizePublicUrl`): a silently "fixed" entry would advertise a model the
- * operator never picked. Notes are capped — they are one line of intent, and
- * every session that asks for the menu pays for their tokens.
- */
+/** Rejecting rather than repairing: a "fixed" entry would advertise a model the
+ *  operator never picked. Notes are capped; every session pays for their tokens. */
 export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
   if (!Array.isArray(raw) || raw.length > 32) return null;
   const menu: ModelMenuEntry[] = [];
@@ -93,9 +64,8 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
     const ref = normalizeModelRef(item);
     if (!ref) return null;
     const { thinking, note } = item as Record<string, unknown>;
-    // The one thing repaired rather than rejected, because it is not input:
-    // entries stored (or exported by an instance) before the level was
-    // required have none, and dropping the menu over it would lose the pins.
+    // Repaired, not rejected: rows stored before the level was required have
+    // none, and dropping the menu over it would lose the pins.
     const level = thinking === undefined ? "medium" : thinking;
     if (!isThinkingLevel(level)) return null;
     if (note !== undefined && typeof note !== "string") return null;
@@ -109,9 +79,8 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
   return menu;
 }
 
-/** One model reference, rejecting rather than repairing — the menu above is
- *  built from these. Existence is not checked here: the catalog is the
- *  agent's, and a model that went away is reported by the call that fails. */
+/** Existence is not checked: the catalog is the agent's, and a model that went
+ *  away is reported by the call that fails. */
 export function normalizeModelRef(raw: unknown): ModelRef | null {
   if (typeof raw !== "object" || raw === null) return null;
   const { provider, id } = raw as Record<string, unknown>;
@@ -120,20 +89,13 @@ export function normalizeModelRef(raw: unknown): ModelRef | null {
   return { provider: provider.trim(), id: id.trim() };
 }
 
-/**
- * Shape only — an unknown name is not an error here. This file must not know
- * what Pier bundles (that catalog is code, and importing it would drag the Pi
- * SDK into the instance layer); agent/ matches the names it recognizes and
- * ignores the rest, which is also what keeps a downgrade from losing a
- * setting it cannot currently explain.
- */
+/** Shape only: the catalog is code behind the Pi SDK, and an unknown name is
+ *  ignored there, so a downgrade cannot lose a setting it cannot explain. */
 export function normalizeExtensions(raw: unknown): string[] | null {
   return normalizeNames(raw);
 }
 
-/** Same shape, same contract, same cap — the managed-tool set (src/tools.ts).
- *  Shape only again: tools.ts owns the catalog, and a name it does not know is
- *  ignored there rather than rejected here, so a downgrade cannot lose one. */
+/** Shape only, for the same reason: tools.ts owns the catalog. */
 export function normalizeTools(raw: unknown): string[] | null {
   return normalizeNames(raw);
 }
@@ -166,9 +128,7 @@ export class SettingsStore {
       autoUpdate: this.#value("autoUpdate") === "1",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
-      // `"drop"`: a stored row whose name the bundled catalog has since taken
-      // is redundant, not malformed — rejecting the setting over it would take
-      // every other tool declared beside it (see normalizeCustomTools).
+      // `"drop"`: a row the bundled catalog has since taken is redundant, not malformed.
       customTools: this.#json(
         "customTools",
         (raw) => normalizeCustomTools(raw, [], "drop"),
@@ -177,11 +137,7 @@ export class SettingsStore {
     };
   }
 
-  /**
-   * A JSON-valued row, validated on the way out. Only a hand-edited row can be
-   * malformed, and it is named rather than silently served as the empty value:
-   * a setting that stopped applying without saying so is the bug this logs.
-   */
+  /** A malformed row is named, not silently served as the empty value (§5b). */
   #json<T>(key: string, normalize: (raw: unknown) => T | null, expected: string): T | null {
     const raw = this.#value(key);
     if (!raw) return null;
@@ -197,21 +153,18 @@ export class SettingsStore {
     return value;
   }
 
-  /** Store an already-normalized value — validation belongs at the boundary
-   *  that received it, so this never has to guess what the caller meant. */
+  /** Setters take already-normalized values: validation belongs at the boundary. */
   setPublicUrl(publicUrl: string): Settings {
     this.#set("publicUrl", publicUrl);
     return this.get();
   }
 
-  /** Same contract: hand this `normalizeModelMenu`'s output, not raw input. */
   setModelMenu(menu: ModelMenuEntry[]): Settings {
     this.#set("modelMenu", JSON.stringify(menu));
     return this.get();
   }
 
-  /** Same contract: hand this `normalizeModelRef`'s output; null switches
-   *  auto-titling off. */
+  /** null switches auto-titling off. */
   setTitleModel(ref: ModelRef | null): Settings {
     this.#set("titleModel", ref ? JSON.stringify(ref) : "");
     return this.get();
@@ -222,30 +175,23 @@ export class SettingsStore {
     return this.get();
   }
 
-  /** Same contract again: hand this `normalizeExtensions`'s output. */
   setExtensions(names: string[]): Settings {
     this.#set("extensions", JSON.stringify(names));
     return this.get();
   }
 
-  /** Same contract again: hand this `normalizeTools`'s output. */
   setTools(names: string[]): Settings {
     this.#set("tools", JSON.stringify(names));
     return this.get();
   }
 
-  /** Same contract again: hand this `normalizeCustomTools`'s output. */
   setCustomTools(tools: CustomTool[]): Settings {
     this.#set("customTools", JSON.stringify(tools));
     return this.get();
   }
 
-  /**
-   * Several setters as one write. A request that declares a tool *and* the
-   * switch that turns it on must not be able to store one without the other:
-   * half of that pair is a switch nobody can explain — on and undeclared, or
-   * declared and invisible.
-   */
+  /** A request that declares a tool and switches it on must not store one
+   *  without the other. */
   transact<T>(work: () => T): T {
     return transact(this.#db, work);
   }

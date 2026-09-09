@@ -1,17 +1,6 @@
-// The binaries Pier manages for itself: which ones exist, how they stay
-// current, and the one directory they sit on ahead of the machine's own.
-//
-// Pier writes no downloader. `ubix` (github:timqi/ubix) is a declarative
-// installer that already knows how to find the right release asset for a
-// platform, so the only thing fetched here is ubix itself; everything after is
-// a generated config file plus `ubix upgrade --all`. The tool-specific part is
-// data (MANAGED below) — the next tool is a table row, not a code path.
-//
-// Instance-layer, and nothing above it: node stdlib, paths.ts, log.ts, db.ts
-// (the sync lock is a row, not a file) and `core/types.ts` type-only, for the
-// one shape the Console draws a switch from. It knows nothing about tasks,
-// sessions or the web — tools-task.ts owns the task that calls it, because a
-// module that scheduled itself would be two modules.
+// The binaries Pier manages for itself, installed by `ubix` (github:timqi/ubix)
+// from a generated config into one directory that goes first on PATH. The only
+// thing fetched here is ubix itself; a new tool is a row in MANAGED.
 
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -25,42 +14,30 @@ import { pierPath, resolveAgentDir } from "./paths.js";
 
 const log = logger("tools");
 
-/** Where the ubix build Pier bootstraps comes from. The API, not a fixed
- *  download URL: the asset name carries the release tag, so the tag has to be
- *  asked for before anything can be fetched. */
+/** The API, not a download URL: the asset name carries the release tag. */
 const UBIX_LATEST = "https://api.github.com/repos/timqi/ubix/releases/latest";
 
 /** One binary Pier will install and keep current on request. */
 export interface ManagedTool {
-  /** What it is to the person switching it on: an extension the agent gains,
-   *  or a command the agent can run. `rtk` is an extension that happens to
-   *  ship as a binary — it is listed with the extensions and installed like a
-   *  tool, which is the whole reason the catalog has one shape. */
+  /** `rtk` is an extension that ships as a binary: listed with the extensions,
+   *  installed like a tool. */
   kind: "extension" | "tool";
   name: string;
   /** One line, shown beside the switch that turns it on. */
   summary: string;
-  /** The body of this tool's `[tools.<name>]` block — `spec = "…"` and
-   *  whatever else ubix's ToolConfig takes. Pier owns the header and writes
-   *  the body underneath it verbatim: which keys exist is ubix's vocabulary to
-   *  know, not Pier's, and a wrong type is rejected by ubix with an error that
-   *  already reaches the run output. Pier guards the *structure* only
-   *  (`normalizeCustomTools`). */
+  /** The body of this tool's `[tools.<name>]` block, written verbatim under a
+   *  header Pier owns; which keys exist is ubix's vocabulary, and Pier guards
+   *  the structure only (`normalizeCustomTools`). */
   toml: string;
-  /** Run after every install and every upgrade, from the tool's own binary:
-   *  a tool that has to register something with Pi does it here, and doing it
-   *  on every sync is also how that registration stays current. */
+  /** Run after every install and upgrade, from the tool's own binary — also how
+   *  a registration with Pi stays current. */
   provision?: readonly string[];
-  /** Run *before* the binary is removed — undoing what `provision` did takes
-   *  the tool that did it. */
+  /** Run *before* the binary is removed: undoing `provision` takes the tool. */
   deprovision?: readonly string[];
   /** True only for a row built from an operator's own block. */
   custom?: boolean;
 }
 
-/** The catalog. Data, not code: a new tool is a row, not a branch anywhere in
- *  this file — only `rtk` has provisioning, and only because it registers
- *  something with Pi. */
 export const MANAGED: readonly ManagedTool[] = [
   {
     kind: "extension",
@@ -70,17 +47,14 @@ export const MANAGED: readonly ManagedTool[] = [
       "Compresses long bash output before it reaches the model. Ships as a " +
       "command, and installs its own Pi extension into Pier's agent dir — " +
       "refreshed on every update.",
-    // Write-if-changed inside rtk, so re-running it after an upgrade is the
-    // extension-update path and costs nothing when nothing moved.
+    // Write-if-changed inside rtk: re-running after an upgrade is the extension-update path.
     provision: ["init", "-g", "--agent", "pi"],
     deprovision: ["init", "--uninstall", "--agent", "pi", "--global"],
   },
   {
     kind: "tool",
     name: "rg",
-    // `exe`, because ubi looks for files named after the *project* and
-    // ripgrep ships `rg`: without it the install fails with "could not find
-    // any files matching [ripgrep*]". Found by installing it for real.
+    // `exe`: ubi looks for files named after the project, and ripgrep ships `rg`.
     toml: `spec = "github:BurntSushi/ripgrep"\nexe = "rg"`,
     summary: "ripgrep: searches a tree by content, fast enough to be the default.",
   },
@@ -99,11 +73,8 @@ export const MANAGED: readonly ManagedTool[] = [
   {
     kind: "tool",
     name: "jq",
-    // No `exe` and no `rename`: jq publishes bare per-platform binaries
-    // (`jq-linux-amd64`, not an archive), and ubi installs one of those under
-    // the tool's own name — observed landing as `bin/jq`, with `jq --version`
-    // answering jq-1.8.2. Archive-versus-binary is exactly what bit rg and wt,
-    // so what was seen is written down rather than assumed.
+    // No `exe`: jq publishes bare per-platform binaries, which ubi installs
+    // under the tool's own name.
     toml: `spec = "github:jqlang/jq"`,
     summary: "Slices, filters and reshapes JSON on the command line.",
   },
@@ -115,22 +86,15 @@ export interface CustomTool {
   toml: string;
 }
 
-/** A binary's name on disk, so what goes on the PATH is predictable. No dot:
- *  `[tools.a.b]` is a different table than the one Pier means to write. */
+/** No dot: `[tools.a.b]` is a different table than the one Pier means to write. */
 const TOOL_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
-/** Every one is a binary on every PATH; a list this long is already a smell. */
 const MAX_CUSTOM = 16;
-/** A tool's block is a handful of keys. Past this it is a config file, and a
- *  textarea in a settings pane is the wrong place to keep one. Generous on
- *  purpose: a templated `url:` tool carries two ~200-character URLs. */
+/** Generous: a templated `url:` tool carries two ~200-character URLs. */
 const MAX_BODY = 2000;
 
-/** The `spec = "…"` a block must carry, for the boundary check and for the
- *  one line the Console shows about a tool it has not installed yet. */
+/** The `spec = "…"` a block must carry. */
 export function specOf(toml: string): string | null {
-  // Multiline strings are skipped, not scanned: a `spec = "…"` inside one is
-  // text, not a key, and reading it as the spec would let a block with no real
-  // spec past the boundary check below.
+  // A `spec = "…"` inside a multiline string is text, not a key.
   let inside = false;
   for (const line of toml.split("\n")) {
     const fences = (line.match(/"""|'''/g) ?? []).length;
@@ -145,50 +109,26 @@ export function specOf(toml: string): string | null {
   return null;
 }
 
-/** What a custom entry must be, said once so both the route and the stored
- *  row are checked by the same rule. */
 export const CUSTOM_TOOL_RULES =
   `each custom tool needs a name (letters, digits, _ and -, ≤32 characters, not a built-in or "ubix")` +
   ` and a block body with a spec line — spec = "github:owner/repo", plus any ubix keys it needs.` +
   ` Pier writes the [tools.<name>] header itself: a line opening a section of its own is refused, so are` +
   ` control characters and a body over ${String(MAX_BODY)} characters; at most ${String(MAX_CUSTOM)} tools`;
 
-/**
- * Boundary check, rejecting rather than repairing.
- *
- * The body is the operator's — which keys ubix's ToolConfig takes is ubix's
- * vocabulary, and a wrong type is ubix's error to report, in the run output
- * where it already lands. What Pier guards is the *structure* of the file it
- * generates: nothing may open a section, because a body that could write
- * `[settings]` could point `install_dir` anywhere, and one that could write
- * `[tools.rg]` could redefine a tool the operator never touched. A name Pier
- * already manages is refused for the same reason — two rows installing into
- * one filename is a switch whose meaning depends on which ran last.
- *
- * `{name, spec}` from an older Pier is read as the body it stood for: those
- * rows were written by this code, and orphaning them would silently drop a
- * tool the operator is still using.
- */
+/** Boundary check, rejecting rather than repairing. Pier guards the structure
+ *  of the file it generates: a body that could open `[settings]` could point
+ *  `install_dir` anywhere, and a managed name twice is a switch whose meaning
+ *  depends on which ran last. Key validity is ubix's to report. */
 export function normalizeCustomTools(
   raw: unknown,
-  /** Names this instance already answers to that this file cannot see — the
-   *  bundled extensions live behind the Pi SDK, so main.ts hands them in. */
+  /** Names this file cannot see: the bundled extensions, handed in by main.ts. */
   reserved: readonly string[] = [],
-  /**
-   * What a name Pier already manages means. At the route: a refusal, because
-   * the operator is declaring it now and can pick another. Reading a stored
-   * row: `"drop"`, because the catalog grew into that name *after* the row was
-   * written — jq shipped as a bundled tool and turned the operator's own jq
-   * row into a whole setting Pier refused, dropping every *other* tool
-   * declared beside it. The bundled row installs the same binary, so the
-   * entry is redundant rather than wrong. Left in the row on purpose: a Pier
-   * that stops bundling that name finds the declaration still there.
-   */
+  /** `"drop"` when reading a stored row: the catalog may have grown into that
+   *  name after it was written, and the bundled row installs the same binary.
+   *  The declaration stays in the row for a Pier that stops bundling it. */
   managedName: "reject" | "drop" = "reject",
 ): CustomTool[] | null {
-  // Case-insensitively: two names differing only in case are one filename on a
-  // case-insensitive filesystem, and one switch whose meaning depends on which
-  // ran last.
+  // Case-insensitively: one filename on a case-insensitive filesystem.
   const taken = new Set(
     [...MANAGED.map((tool) => tool.name), ...reserved, "ubix"].map((name) => name.toLowerCase()),
   );
@@ -206,7 +146,7 @@ export function normalizeCustomTools(
       continue;
     }
     if (tools.some((tool) => tool.name.toLowerCase() === cleanName.toLowerCase())) return null;
-    // The migration: a stored `{name, spec}` is the block it always meant.
+    // A stored `{name, spec}` row is read as the block it stood for.
     const body = typeof toml === "string"
       ? toml.trim()
       : typeof spec === "string" && spec.trim()
@@ -216,8 +156,6 @@ export function normalizeCustomTools(
     // A section header would take the rest of the file with it.
     if (body.split("\n").some((line) => line.trimStart().startsWith("["))) return null;
     // Tabs and newlines are the only control characters a TOML body needs.
-    // Character by character rather than by regex class, so the rule reads as
-    // what it is and no linter has to guess whether the escapes were meant.
     if ([...body].some((ch) => (ch < " " && ch !== "\n" && ch !== "\t") || ch === "\u007f")) return null;
     if (!specOf(body)) return null;
     tools.push({ name: cleanName, toml: body });
@@ -225,18 +163,12 @@ export function normalizeCustomTools(
   return tools;
 }
 
-/** `~/.pier/tools/…` — install target, generated ubix config, ubix state. */
 const toolsDir = (...parts: string[]): string => pierPath("tools", ...parts);
 
-/** The one directory that goes on PATH: ubix installs into it, and everything
- *  Pier spawns inherits it. */
 const toolsBin = (): string => toolsDir("bin");
 
-/**
- * First on PATH, once, at boot. First rather than last on purpose: a tool
- * switched on in the Console is Pier's copy at Pier's version, whatever the
- * machine happens to have in /usr/bin.
- */
+/** First, not last: a tool switched on in the Console is Pier's copy at Pier's
+ *  version, whatever /usr/bin has. */
 export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = toolsBin()): void {
   const current = env.PATH ?? "";
   if (current.split(delimiter).includes(bin)) return;
@@ -244,50 +176,25 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
   env.PATH = current ? `${bin}${delimiter}${current}` : bin;
 }
 
-/** What one sync converges on, read inside the lock (`sync`). A getter rather
- *  than a value, and structural rather than the settings type, because
- *  settings.ts imports this file and not the other way round. */
+/** Structural rather than the settings type: settings.ts imports this file. */
 export interface EnabledTools {
   tools: readonly string[];
   customTools: readonly CustomTool[];
 }
 
-/** How long `ubix list --json` stays usable for `status()`: long enough that
- *  one Console page open spawns it once, short enough that an install done
- *  outside Pier shows up while the operator is still looking at the page. */
+/** Long enough that one Console page open spawns `ubix list` once, short
+ *  enough that an install done outside Pier shows up while they look. */
 const LIST_TTL_MS = 3_000;
 
 /** `stale` is heartbeat age, never how long the work has taken; `wait` is what
  *  a waiter gives a live holder before giving up with a reason. */
 const LOCK_TIMING = { heartbeatMs: 5_000, staleMs: 30_000, waitMs: 20 * 60_000, pollMs: 200 };
 
-/**
- * One tools sync at a time on this machine, whichever process asked.
- *
- * The contract:
- * - *Ownership* is one row and a random token. Every write to that row —
- *   release, takeover, refresh — matches on the token, so no party can undo
- *   another's.
- * - *Staleness* is heartbeat age. A holder that stops beating can be taken
- *   over; how long its work has been running never enters into it.
- * - *A heartbeat cannot prove a holder is dead*, so a holder does not assume
- *   it is still the holder: it passes a fence before every step that changes
- *   anything, and a sync that was taken over fails saying so rather than
- *   writing beside its successor.
- * - No transaction is held for the length of a sync: acquire, refresh, fence
- *   and release are each their own.
- *
- * What the fence does *not* guarantee, deliberately. It bounds the overlap to
- * one already-started step — a holder stopped between its fence and that
- * step's own writes, or an `execFile` child that outlives its stopped parent,
- * still finishes that step. Closing it would take a kernel lock every child
- * inherits, which is a native dependency (AGENTS.md 8) or `flock(1)`, which
- * macOS does not ship. It is not paid for, because the floor underneath is
- * already a kernel lock: ubix takes an exclusive advisory flock on its own
- * state file and Pier passes `--wait`, so two overlapping syncs cannot corrupt
- * what ubix records — the worst case is a redundant install, or a config.toml
- * written from a stale settings snapshot, which the next sync converges.
- */
+/** One tools sync at a time on this machine, whichever process asked: a row
+ *  and a random token, taken over on heartbeat age, and fenced before every
+ *  step because a heartbeat cannot prove a holder dead. The fence bounds
+ *  overlap to one started step — closing that would need a kernel lock — and
+ *  ubix's own flock on its state file (`--wait`) is the floor underneath. */
 export class SyncLock {
   readonly #db: DatabaseSync;
   readonly #timing: typeof LOCK_TIMING;
@@ -297,9 +204,8 @@ export class SyncLock {
     this.#timing = { ...LOCK_TIMING, ...timing };
   }
 
-  /** Run `work` with the lock held, waiting for whoever has it. `work` is
-   *  handed the fence and must call it before every step that changes
-   *  anything outside this process. */
+  /** `work` must call the fence before every step that changes anything
+   *  outside this process. */
   async run<T>(work: (fence: () => void) => Promise<T>): Promise<T> {
     const token = randomUUID();
     const deadline = Date.now() + this.#timing.waitMs;
@@ -312,7 +218,6 @@ export class SyncLock {
       }
       await new Promise((resolve) => setTimeout(resolve, this.#timing.pollMs));
     }
-    // Unref'd: a beating heart is not a reason for the process to stay up.
     const beat = setInterval(() => this.#refresh(token), this.#timing.heartbeatMs);
     beat.unref();
     try {
@@ -323,8 +228,7 @@ export class SyncLock {
     }
   }
 
-  /** Take the lock, or take it over from a holder that stopped beating — both
-   *  in one immediate transaction, so two waiters cannot both win. */
+  /** One transaction, so two waiters cannot both win a takeover. */
   #acquire(token: string): boolean {
     const now = Date.now();
     const { stale, taken } = transact(this.#db, () => ({
@@ -337,8 +241,8 @@ export class SyncLock {
     return taken.changes === 1;
   }
 
-  /** Still ours? The authority is the row, asked now — not the heartbeat's own
-   *  bookkeeping, which a stopped process does not get to run either. */
+  /** The authority is the row, asked now — a stopped process's heartbeat
+   *  bookkeeping did not run either. */
   #fence(token: string): void {
     const row = this.#db.prepare("SELECT token FROM tools_sync_lock").get() as { token: string } | undefined;
     if (row?.token !== token) {
@@ -348,49 +252,26 @@ export class SyncLock {
     }
   }
 
-  /** Say we are alive. A refresh that changes nothing is the first sign of a
-   *  takeover; the fence is what acts on it, at the next step. */
   #refresh(token: string): void {
     const beat = this.#db.prepare("UPDATE tools_sync_lock SET heartbeat_at = ? WHERE token = ?").run(Date.now(), token);
     if (!beat.changes) log.warn("this tools sync no longer holds the lock — it stops at its next step");
   }
 }
 
-/** What one sync request became, for the surface that asked for it.
- *  `waiting`: a sync was already running, and this request rides the run that
- *  follows it — not a failure, and not "nothing happened" either. */
+/** `waiting`: a sync was already running and this request rides the run that follows. */
 export type SyncRequest = "started" | "waiting";
 
-/**
- * One attempt to run the task, as whatever owns the task reports it. There is
- * always something to wait for: "refused, and nothing is in flight" is not a
- * state a caller can act on — it would loop with nothing to loop on — so the
- * type cannot spell it, and the one place that could produce it (a run that
- * finished between the refusal and the lookup) resolves it before answering.
- */
+/** Always something to wait for: "refused, nothing in flight" would loop with
+ *  nothing to loop on, so the type cannot spell it. */
 export type SyncAttempt =
   | { ran: "started"; settled: Promise<void> }
   | { ran: "overlapped"; settled: Promise<void> };
 
-/**
- * Converge, don't race.
- *
- * Every switch is its own request and every request wants the *current* set
- * installed, but the task layer refuses an overlapping run (`skipped`). Three
- * switches flipped in one second therefore produced one run that had read the
- * set as it stood halfway through and two runs that did nothing at all — the
- * Console showed four tools on and the machine had two, with nothing anywhere
- * saying so.
- *
- * So a request that lands on a running sync is *remembered*, not queued: one
- * bit, so a click storm cannot grow a backlog, and the moment the run settles
- * exactly one more run goes — reading the set as it is by then. That run can
- * be overlapped in turn and the bit set again; it terminates because every
- * follow-up starts strictly after the request that asked for it.
- */
+/** The task layer refuses an overlapping run, so a request landing on a running
+ *  sync is remembered as one bit (no backlog from a click storm) and exactly one
+ *  more run follows, reading the set as it is by then. */
 export function coalescedSync(
-  /** Start one run now, and say what to wait for. Structural, so this file
-   *  still knows nothing about tasks/. */
+  /** Structural, so this file knows nothing about tasks/. */
   run: () => SyncAttempt,
   onFailure: (err: unknown) => void,
 ): () => SyncRequest {
@@ -399,13 +280,10 @@ export function coalescedSync(
 
   const drive = async (): Promise<void> => {
     do {
-      // Cleared before the run, not after: a request arriving while this one is
-      // in flight must set it again and earn its own follow-up.
+      // Cleared before the run: a request arriving mid-flight earns its own follow-up.
       pending = false;
       const { ran, settled } = run();
       await settled;
-      // Refused as an overlap: nothing of ours has run yet, so go again once
-      // whatever was in flight is done.
       if (ran === "overlapped") pending = true;
     } while (pending);
   };
@@ -416,9 +294,7 @@ export function coalescedSync(
       return "waiting";
     }
     let finish!: () => void;
-    // Assigned before `drive` is called: a drive that never awaits would
-    // otherwise finish before this variable existed, and every later request
-    // would wait forever on a chain nobody is driving.
+    // Assigned before `drive`: one that never awaits would finish first.
     chain = new Promise<void>((resolve) => (finish = resolve));
     void drive().catch(onFailure).finally(() => {
       chain = null;
@@ -429,9 +305,8 @@ export function coalescedSync(
   };
 }
 
-/** One subprocess, never rejecting: a tool that failed is a report, not a
- *  throw, and `code: null` is "it could not even start". Injected everywhere
- *  below so tests never spawn ubix. */
+/** Never rejects: a failed tool is a report, and `code: null` is "could not
+ *  start". Injected so tests never spawn ubix. */
 export interface ExecResult {
   code: number | null;
   stdout: string;
@@ -447,27 +322,23 @@ const spawnExec: Exec = (file, args, env) =>
       resolve({
         code,
         stdout,
-        // A spawn that never happened (ENOENT, EACCES) writes nothing to
-        // stderr, and "exited null" alone would say nothing about why.
+        // A spawn that never happened (ENOENT, EACCES) writes nothing to stderr.
         stderr: failure && code === null ? `${stderr}${failure.message}` : stderr,
       });
     });
   });
 
-/** One tool as ubix reports it — the union of what `list` and `upgrade` say,
- *  with the fields the other command does not have left null. */
+/** The union of what `list` and `upgrade` say; fields the other command does
+ *  not have are null. */
 export interface UbixToolState {
   name: string;
   /** `list`: the recorded installed version. `upgrade`: what it moved to. */
   version: string | null;
   /** First tracked executable path (`list` only). */
   path: string | null;
-  /** `list`: a state record exists. Null on `upgrade`, which says nothing
-   *  about the recorded state, only about what it just did. */
+  /** `list` only: a state record exists. */
   installed: boolean | null;
-  /** `list`: every tracked path is really on disk. `installed && !exists` is
-   *  a tool that state says is there and the filesystem says is gone — broken,
-   *  not ready, and the Console must not draw it as installed. */
+  /** `list` only. `installed && !exists` is broken, not ready. */
   exists: boolean | null;
   /** The tracked paths that are missing right now. */
   missingPaths: string[];
@@ -484,26 +355,11 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
-/** The `--json` document shape Pier was written against. ubix bumps this on
- *  any breaking change to the fields read below. */
+/** ubix bumps this on any breaking change to the fields read below. */
 const UBIX_SCHEMA = 1;
 
-/**
- * Every byte of ubix JSON Pier ever reads, parsed and validated here and
- * nowhere else — one function, so a field ubix renames is a one-function fix
- * rather than a hunt through the callers.
- *
- * Both documents are `{schema_version, tools: [...]}`; the entries differ, so
- * one shape carries both and the fields the other command does not send stay
- * null.
- *
- * Everything that is not exactly what it should be throws, including a schema
- * version this does not know. The alternative was tried and is worse: a field
- * that fails to parse would become `null`, an installed tool would be drawn as
- * absent, and the switches and the machine would disagree with nothing saying
- * so (§5b). A caller that cannot read ubix reports that it cannot; it never
- * reports "no tools".
- */
+/** The one reader of ubix JSON. Anything not exactly as expected throws: a
+ *  field parsed as `null` would draw an installed tool as absent (§5b). */
 export function parseUbixJson(stdout: string): UbixToolState[] {
   let doc: unknown;
   try {
@@ -525,8 +381,6 @@ export function parseUbixJson(stdout: string): UbixToolState[] {
     const entry = record(value);
     if (!entry) throw new Error(`ubix --json entry is not an object: ${JSON.stringify(value).slice(0, 120)}`);
     const where = typeof entry.name === "string" ? entry.name : JSON.stringify(value).slice(0, 80);
-    /** A string, an explicit null, or absent. Anything else is a field that
-     *  moved, and guessing `null` for it is how "installed" becomes "gone". */
     const str = (key: string): string | null => {
       const raw = entry[key];
       if (raw === undefined || raw === null) return null;
@@ -560,8 +414,7 @@ export function parseUbixJson(stdout: string): UbixToolState[] {
       missingPaths: list("missing_paths"),
       action,
       to,
-      // A failure with no words is still a failure: without this it reads as a
-      // tool that is fine, which is the one thing this parser may never say.
+      // A failure with no words must not read as a tool that is fine.
       error: str("error") ?? (action === "failed" ? "ubix reported it failed and said no more" : null),
     };
   });
@@ -584,16 +437,10 @@ export interface ToolSyncReport {
   summary: string;
 }
 
-/** Pier only ever writes two TOML strings itself — the install dir and the
- *  spec a legacy `{name, spec}` row is migrated into. A tool's own body is the
- *  operator's text and is written verbatim. */
 const tomlString = (value: string): string => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
-/**
- * The ubix config Pier owns, generated from the enabled set. Never the
- * operator's `~/.config/ubix/config.toml`: Pier rewrites this file on every
- * sync, and doing that to a file a human maintains would delete their tools.
- */
+/** Never the operator's `~/.config/ubix/config.toml`: this file is rewritten on
+ *  every sync, which on a human-maintained one would delete their tools. */
 export function ubixConfigToml(
   tools: readonly Pick<ManagedTool, "name" | "toml">[],
   installDir: string,
@@ -605,34 +452,26 @@ export function ubixConfigToml(
     "[settings]",
     `install_dir = ${tomlString(installDir)}`,
   ];
-  // Pier owns the headers; the body under each one is written exactly as it
-  // was given. A `{version}` placeholder or a 200-character URL is the
-  // operator's business and must survive the round trip untouched.
+  // The body is the operator's and must survive the round trip untouched.
   for (const tool of tools) lines.push("", `[tools.${tool.name}]`, tool.toml.trim());
   return `${lines.join("\n")}\n`;
 }
 
-/** ubix's own words for "I do not have that flag" — clap's message for an
- *  unknown argument, and ubix's own refusal on a command that takes no JSON.
- *  Nothing else counts as too old. */
+/** clap's unknown-argument message, and ubix's own refusal on a command that
+ *  takes no JSON. Nothing else counts as too old. */
 const refusesJson = (stderr: string): boolean =>
   /unexpected argument\s+'?--json|unrecognized (?:option|argument)\s+'?--json|`--json` is not supported/i
     .test(stderr);
 
-/** The ubix in `bin/` is older than the `--json` Pier reads. Pier put it
- *  there, so this is Pier's to fix (`sync` re-bootstraps), not an errand for
- *  the operator. */
+/** Pier put that binary in `bin/`, so `sync` re-bootstraps rather than reports. */
 class UbixTooOld extends Error {}
 
-/** The rows an enabled set names: Pier's catalog plus the operator's blocks.
- *  A name in neither is not an error — the setting is shape-only, so a row a
- *  future release drops must not stop the sync of everything else. */
+/** A name in neither list is not an error: a row a future release drops must
+ *  not stop the sync of everything else. */
 function rows(custom: readonly CustomTool[]): ManagedTool[] {
   return [...MANAGED, ...custom.map((tool): ManagedTool => ({ kind: "tool", summary: "", custom: true, ...tool }))];
 }
 
-/** Which release asset is this machine's. Pure, because the mapping is the
- *  part worth a test and the download around it is not. */
 export function ubixAsset(tag: string, platform: string, arch: string): string {
   const os = platform === "linux" || platform === "darwin" ? platform : null;
   const cpu = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null;
@@ -647,8 +486,7 @@ interface ReleaseAsset {
   url: string;
 }
 
-/** The one place a GitHub release document is read. Same contract as the ubix
- *  parser: a shape that is not understood is an error, not an empty list. */
+/** A shape that is not understood is an error, not an empty list. */
 function parseRelease(doc: unknown): { tag: string; assets: ReleaseAsset[] } {
   const value = record(doc);
   const text = (raw: unknown): string | null => (typeof raw === "string" && raw.trim() ? raw.trim() : null);
@@ -665,11 +503,7 @@ function parseRelease(doc: unknown): { tag: string; assets: ReleaseAsset[] } {
   return { tag, assets };
 }
 
-/**
- * The managed-tools operation surface. One object rather than free functions
- * so the two seams it stands on — subprocesses and the network — are injected
- * once and can be replaced wholesale in a test.
- */
+/** One object so subprocesses and the network are injected once, for tests. */
 export class ManagedTools {
   readonly #exec: Exec;
   readonly #fetch: typeof fetch;
@@ -681,9 +515,7 @@ export class ManagedTools {
     this.#exec = options.exec ?? spawnExec;
     this.#fetch = options.fetch ?? ((...args) => fetch(...args));
     this.#root = options.root ?? toolsDir();
-    // Opened on the first sync, never in the constructor: `status()` and the
-    // Console's catalog need no database, and neither does a process that only
-    // reads what is installed.
+    // Opened on the first sync: `status()` and the catalog need no database.
     this.#db = options.db ?? pierDb;
   }
 
@@ -696,13 +528,8 @@ export class ManagedTools {
     return join(this.bin, "ubix");
   }
 
-  /**
-   * Put ubix in `bin/` if it is not there. Latest release → this platform's
-   * asset → sha256 against the release's own `checksums.txt` → extract →
-   * atomic rename. Any of those failing throws with what failed: a bootstrap
-   * that quietly did nothing would show up later as "the tool never installed"
-   * with no reason anywhere.
-   */
+  /** Latest release → asset → sha256 against the release's `checksums.txt` →
+   *  extract → atomic rename. Every failure throws with what failed. */
   async bootstrapUbix(replace = false): Promise<string> {
     if (existsSync(this.ubixPath) && !replace) return this.ubixPath;
     const { tag, assets } = parseRelease(JSON.parse(await this.#getText(UBIX_LATEST)));
@@ -715,9 +542,7 @@ export class ManagedTools {
     if (!sums) throw new Error(`ubix ${tag} publishes no checksums.txt — refusing to install an unverified binary`);
 
     mkdirSync(this.bin, { recursive: true });
-    // Under the same root as bin/, so the install below is a rename and not a
-    // copy across filesystems — a half-written binary on PATH is worse than
-    // none at all.
+    // Same root as bin/, so the install is a rename, never a half-written binary on PATH.
     const staging = mkdtempSync(join(this.#root, ".bootstrap-"));
     try {
       const [archive, checksums] = await Promise.all([this.#getBytes(asset.url), this.#getText(sums.url)]);
@@ -728,8 +553,7 @@ export class ManagedTools {
       }
       const tarball = join(staging, wanted);
       writeFileSync(tarball, archive);
-      // The system tar, not a dependency: unpacking one .tar.gz does not earn
-      // an npm package (AGENTS.md 8).
+      // The system tar: one .tar.gz does not earn an npm package (AGENTS.md 8).
       const untar = await this.#exec("tar", ["-xzf", tarball, "-C", staging], process.env);
       if (untar.code !== 0) throw new Error(failedRun(`tar on ${wanted}`, untar));
       const extracted = join(staging, "ubix");
@@ -743,33 +567,14 @@ export class ManagedTools {
     }
   }
 
-  /**
-   * Converge on what is switched on: uninstall what left the set (letting each
-   * tool undo its own footprint first), rewrite the config, upgrade everything,
-   * then provision. Returns what happened per tool; whole-run failures throw,
-   * because there is nothing per-tool to say about them.
-   *
-   * The set is *read here*, inside the lock, rather than handed in: ubix reads
-   * the config file before it takes its own state lock, so a hand-typed `pier
-   * tools sync` overlapping the managed run could write its config after the
-   * other had written one and before ubix read either — the older snapshot
-   * winning, both exiting 0, and nothing anywhere saying the machine is not
-   * what the switches say.
-   *
-   * `fence` is called before every step that changes anything a second sync
-   * could also be changing — the config file, ubix's own state, a tool's
-   * footprint. Holding the lock is not proof of holding it *still*: a process
-   * paused long enough to look dead is taken over and then resumes, and the
-   * fence is what stops it — by failing the sync with that sentence rather
-   * than letting it write on top of the sync that replaced it. What that
-   * leaves open, and why it is left open, is on `SyncLock`.
-   */
+  /** Per-tool outcomes; whole-run failures throw. The set is read inside the
+   *  lock: ubix reads the config before taking its own state lock, so an
+   *  overlapping sync could otherwise write an older snapshot and exit 0. */
   async sync(read: () => EnabledTools): Promise<ToolSyncReport> {
     this.#lock ??= new SyncLock(this.#db());
     return this.#lock.run(async (fence) => {
       const { tools, customTools } = read();
-      // This run is the only thing here that changes what `list` answers, so
-      // the memo `status()` reads is dropped on both sides of it.
+      // The only thing that changes what `list` answers; drop the memo both sides.
       this.#listed = undefined;
       try {
         return await this.#converge(tools, customTools, fence);
@@ -786,7 +591,6 @@ export class ManagedTools {
   ): Promise<ToolSyncReport> {
     const all = rows(custom);
     const wanted = all.filter((tool) => enabled.includes(tool.name));
-    // Nothing on and nothing installed: no config to write, no ubix to fetch.
     // A first boot must not reach the network to find out it has no work.
     if (!wanted.length && !existsSync(this.ubixPath)) {
       return { entries: [], failed: false, summary: "no tools switched on" };
@@ -796,10 +600,8 @@ export class ManagedTools {
     const env = this.#env();
     const entries: ToolSyncEntry[] = [];
 
-    // ubix prunes what its config no longer declares (`--prune` below), but it
-    // cannot know that rtk has to uninstall its own Pi extension *before* its
-    // binary goes — so the listing survives for exactly that: find the tools
-    // leaving the set that have something of their own to undo, and let them.
+    // ubix cannot know that rtk must uninstall its own Pi extension *before*
+    // its binary goes; tools leaving the set undo their footprint first.
     const kept: ManagedTool[] = [];
     for (const state of await this.#listing(ubix, env)) {
       const leaving = all.find((tool) => tool.name === state.name);
@@ -807,9 +609,7 @@ export class ManagedTools {
       fence(); // a tool's own uninstall is a change to the machine
       const error = await this.#provision(env, leaving, leaving.deprovision);
       if (error) {
-        // Removing it now would orphan what the deprovision failed to remove,
-        // with nothing left able to remove it. It stays declared, stays
-        // installed, and the next run tries again.
+        // Removing it now would orphan what deprovision failed to remove.
         kept.push(leaving);
         entries.push({ name: leaving.name, action: "kept", version: null, error });
       }
@@ -818,19 +618,14 @@ export class ManagedTools {
     fence();
     this.#writeConfig([...wanted, ...kept]);
 
-    // `--prune` is the removal: anything in ubix's state that this config no
-    // longer declares is uninstalled by ubix, which knows per source how.
-    // `--wait` on the state lock: a hand-typed `pier tools sync` overlapping
-    // the managed run should converge behind it, not fail on the lock. Bounded
-    // by the subprocess timeout, like everything else here.
+    // `--prune` removes what the config no longer declares; `--wait` lets a
+    // hand-typed `pier tools sync` converge behind the managed run.
     fence();
     const states = await this.#states(ubix, env, ["upgrade", "--all", "--prune", "--wait", "--json"]);
     for (const state of states) {
-      // One line per tool: a kept one has already said why it stayed.
       if (wanted.some((tool) => tool.name === state.name)) continue;
       if (entries.some((entry) => entry.name === state.name)) continue;
-      // A tool that left the set: ubix says what it did with it, and a failure
-      // to remove is as much a failure as one to install.
+      // A failure to remove is as much a failure as one to install.
       entries.push({ name: state.name, action: state.action ?? "removed", version: null, error: state.error });
     }
     for (const tool of wanted) {
@@ -852,11 +647,8 @@ export class ManagedTools {
     return { entries, failed, summary: summarize(entries) };
   }
 
-  /**
-   * The enabled set merged with what ubix says is on disk. Never throws: this
-   * answers a Console page, and a page that 500s says less than a row saying
-   * why its version is unknown (§5b).
-   */
+  /** Never throws: a page that 500s says less than a row saying why its
+   *  version is unknown (§5b). */
   async status(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<CatalogEntry[]> {
     const base = rows(custom).map((tool): CatalogEntry => ({
       source: "binary",
@@ -867,29 +659,22 @@ export class ManagedTools {
       binary: { spec: specOf(tool.toml) ?? "", installed: false, version: null, path: null, error: null },
       ...(tool.custom ? { custom: true } : {}),
     }));
-    // No ubix yet is not a failure — it is the state of an instance that has
-    // never switched a tool on.
+    // No ubix yet: an instance that has never switched a tool on.
     if (!existsSync(this.ubixPath)) return base;
     let states: UbixToolState[];
     try {
       states = await this.#listedTools();
     } catch (err) {
-      // The page says why it cannot answer rather than answering wrongly: a
-      // row drawn as "not installed" because a read failed is the lie §5b is
-      // about.
+      // A row drawn as "not installed" because a read failed is the lie §5b is about.
       const error = err instanceof Error ? err.message : String(err);
       return base.map((entry) => withBinary(entry, { error }));
     }
     return base.map((entry) => {
       const state = states.find((s) => s.name === entry.name);
       if (!state) return entry;
-      // State says installed, disk says otherwise: broken, and drawing that as
-      // ready is how an operator finds out from a failed turn instead.
       const gone = state.installed === true && state.exists === false;
-      // Installed, and not where Pier's PATH points: `npm:` lands in fnm's
-      // node prefix and `pixi:` in its own, under the package's binary name.
-      // The install worked and the promise did not, which is a sentence the
-      // row has to say rather than a path an operator has to notice.
+      // `npm:` lands in fnm's node prefix and `pixi:` in its own: installed,
+      // but not where Pier's PATH points, and the row has to say so.
       const elsewhere = state.path !== null && !state.path.startsWith(`${this.bin}/`);
       return withBinary(entry, {
         installed: state.installed === true && !gone,
@@ -906,11 +691,8 @@ export class ManagedTools {
     });
   }
 
-  /** What `ubix list --json` last said, retained for LIST_TTL_MS. It is a
-   *  subprocess, and the Console asks for the catalog on every settings read —
-   *  one page open is several, each of which spawned its own ubix. A failed
-   *  read is not retained: it is not an answer to hand the next caller for
-   *  three seconds. */
+  /** The Console asks for the catalog on every settings read, several per page
+   *  open. A failed read is not retained. */
   #listed?: { at: number; states: Promise<UbixToolState[]> };
 
   #listedTools(): Promise<UbixToolState[]> {
@@ -924,10 +706,8 @@ export class ManagedTools {
     return states;
   }
 
-  /** Pier's ubix config and state, never the operator's. `UBIX_CONFIG_DIR` /
-   *  `UBIX_DATA_DIR` name the directories that hold config.toml / state.toml
-   *  directly — not XDG parents, which every child ubix spawns (uv, fnm,
-   *  cargo) would read too. */
+  /** `UBIX_CONFIG_DIR` / `UBIX_DATA_DIR` name the directories directly — not
+   *  XDG parents, which every child ubix spawns (uv, fnm, cargo) would read too. */
   #env(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -945,25 +725,16 @@ export class ManagedTools {
   #writeConfig(tools: readonly CustomTool[]): void {
     mkdirSync(this.#configDir, { recursive: true });
     mkdirSync(join(this.#root, "state"), { recursive: true });
-    // Temp plus rename: ubix reads this file, and half a config is a config
-    // that declares half the tools.
+    // Rename: half a config is a config that declares half the tools.
     const path = join(this.#configDir, "config.toml");
     writeFileSync(`${path}.writing`, ubixConfigToml(tools, this.bin));
     renameSync(`${path}.writing`, path);
   }
 
-  /**
-   * One ubix call and the document it owes us.
-   *
-   * A non-zero exit is *not* a reason to skip the parse: under `--json` a tool
-   * that failed lands in the document as `action: "failed"` with its error and
-   * the run still exits non-zero, so the report says which tool it was. But the
-   * two have to agree: an exit code with no failed entry anywhere is a failure
-   * this file cannot attribute, and passing it on as a clean report is the one
-   * thing it may never do. No document at all is the third case — an ubix
-   * release that predates `--json` — and that is said in one sentence rather
-   * than by scraping the human output it printed instead.
-   */
+  /** A non-zero exit still parses: under `--json` a failed tool is in the
+   *  document as `action: "failed"`, and the run exits non-zero. The two must
+   *  agree — an exit code with no failed entry is a failure this file cannot
+   *  attribute, and passing it on as clean is the one thing it may never do. */
   async #states(ubix: string, env: NodeJS.ProcessEnv, args: readonly string[]): Promise<UbixToolState[]> {
     const result = await this.#exec(ubix, args, env);
     let states: UbixToolState[];
@@ -971,25 +742,18 @@ export class ManagedTools {
       states = parseUbixJson(result.stdout);
     } catch (err) {
       const failure = failedRun(`ubix ${args.join(" ")}`, result);
-      // Only the flag being unknown means "too old". Everything else — a
-      // malformed body in someone's block, a locked state file, a full disk —
-      // is that failure, reported as itself: re-bootstrapping ubix over a
+      // Only the flag being unknown means "too old"; re-bootstrapping over a
       // config error would fix nothing and say something false.
       if (result.code !== 0 && refusesJson(result.stderr)) throw new UbixTooOld(failure);
       throw new Error(result.code === 0 ? String(err) : `${failure} (${String(err)})`);
     }
-    // Something failed and the report names nothing that did: the two disagree,
-    // and believing the document is how a failed run is read as a machine that
-    // is fine.
     if (result.code !== 0 && !states.some((state) => state.action === "failed")) {
       throw new Error(`${failedRun(`ubix ${args.join(" ")}`, result)} — and its report names no failure`);
     }
     return states;
   }
 
-  /** The declared tools, and the one place a too-old ubix is repaired rather
-   *  than reported: Pier put that binary in `bin/`, so replacing it is Pier's
-   *  job, not an errand for whoever flipped a switch. */
+  /** The one place a too-old ubix is repaired rather than reported. */
   async #listing(ubix: string, env: NodeJS.ProcessEnv): Promise<UbixToolState[]> {
     try {
       return await this.#states(ubix, env, ["list", "--json"]);
@@ -1000,15 +764,12 @@ export class ManagedTools {
     }
   }
 
-  /** Run a tool's own binary against its own footprint. Returns the failure
-   *  text, or null. */
+  /** Returns the failure text, or null. */
   async #provision(env: NodeJS.ProcessEnv, tool: ManagedTool, args: readonly string[]): Promise<string | null> {
     const exe = join(this.bin, tool.name);
     if (!existsSync(exe)) return `${tool.name} is not in ${this.bin} — ${args.join(" ")} was not run`;
-    // Asserted, not assumed: main.ts exports PI_CODING_AGENT_DIR to every
-    // child, but `pier tools sync` typed in a shell has no such parent, and
-    // rtk would then write its extension into ~/.pi — a directory this Pier
-    // never reads.
+    // `pier tools sync` typed in a shell has no main.ts parent exporting
+    // PI_CODING_AGENT_DIR; rtk would then write its extension into ~/.pi.
     const agentDir = resolveAgentDir(env);
     if (env.PI_CODING_AGENT_DIR !== agentDir) {
       log.info(`PI_CODING_AGENT_DIR was ${env.PI_CODING_AGENT_DIR ?? "unset"} — ${tool.name} gets ${agentDir}`);
@@ -1033,14 +794,10 @@ export class ManagedTools {
   }
 }
 
-/** One catalog entry with its binary block updated. Everything this file makes
- *  is a `source: "binary"` entry; the bundled half of the catalog comes from
- *  extensions/ and never passes through here. */
 const withBinary = (entry: CatalogEntry, patch: Partial<CatalogBinary>): CatalogEntry =>
   entry.source === "binary" ? { ...entry, binary: { ...entry.binary, ...patch } } : entry;
 
-/** What a failed child said, in one line — the same shape wherever one fails,
- *  and never empty: an exit code with no words is not a report. */
+/** Never empty: an exit code with no words is not a report. */
 const failedRun = (what: string, result: ExecResult): string =>
   `${what} exited ${String(result.code)}: ${result.stderr.trim().slice(0, 300) || "(no output)"}`;
 
@@ -1053,8 +810,7 @@ function expectedSha256(checksums: string, file: string): string {
   throw new Error(`checksums.txt names no ${file} — refusing to install an unverified binary`);
 }
 
-/** What a person reads in the task run. One line per tool, failures included:
- *  a sync that says nothing is a sync nobody can tell from a crash. */
+/** One line per tool, failures included (§5b). */
 function summarize(entries: readonly ToolSyncEntry[]): string {
   if (!entries.length) return "no tools switched on";
   return entries

@@ -1,10 +1,6 @@
 #!/usr/bin/env node
-// What `pier` does when typed. Dispatch only — no logic, and no imports of the
-// server until a command that needs it: `pier service install` on a machine
-// with no database should not open one.
-//
-// Hand-rolled against node:util's parseArgs rather than a CLI framework: this
-// small command set does not earn a dependency (AGENTS.md 8).
+// What `pier` does when typed. Dispatch only, and no server imports until a
+// command needs them: `pier service install` must not open a database.
 
 import { execFileSync } from "node:child_process";
 import { accessSync, constants, realpathSync } from "node:fs";
@@ -79,14 +75,11 @@ if (values.help || command === "help") {
 } else if (values.version || command === "version") {
   process.stdout.write(`${version}\n`);
 } else if (!command) {
-  // Typing the bare name is how someone finds out what this is, so it answers
-  // that and nothing else: it used to start a server, which is a surprising
-  // amount to have done by accident.
+  // The bare name must not start a server by accident.
   process.stdout.write(HELP);
 } else if (command === "serve") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], "pier serve");
-  // The server starts on import; this file stays a dispatcher.
   await import("./main.js");
 } else if (command === "service") {
   await service(subcommand);
@@ -109,11 +102,8 @@ if (values.help || command === "help") {
   process.exit(2);
 }
 
-/**
- * Checking is Pier's own code; applying it is npm's. Under systemd the work is
- * handed to a second unit — this process is about to be restarted, and a child
- * of the service being restarted dies with it.
- */
+/** Under systemd the install is handed to a second unit: a child of the
+ *  service being restarted dies with it. */
 async function update(checkOnly: boolean): Promise<void> {
   const check = new UpdateCheck(version);
   await check.refresh();
@@ -141,19 +131,14 @@ async function update(checkOnly: boolean): Promise<void> {
     }
   }
 
-  // No service manager owns this process, so do not mutate its rollback point
-  // until the operator is ready to run all three steps.
+  // No service manager: leave the rollback point to the operator's own sequence.
   say(`pier backup`);
   say(`npm install -g @timqi/pier@${latest}`);
   say(`then restart Pier.`);
 }
 
-/**
- * What the daily task runs, and what an operator can type. The setting is the
- * instruction; this converges on it and prints what happened, one line per
- * tool. Non-zero when anything failed — the task run is then a failed run with
- * this text in it, which is the whole tools status surface.
- */
+/** Non-zero when anything failed: the task run is then a failed run with this
+ *  text in it, which is the whole tools status surface. */
 async function tools(action = ""): Promise<void> {
   if (action !== "sync") {
     process.stderr.write(`pier tools: unknown action "${action}"\n\n${HELP}`);
@@ -165,8 +150,7 @@ async function tools(action = ""): Promise<void> {
     import("./settings.js"),
   ]);
   try {
-    // Read inside the sync's lock, not here: a sync that queued behind another
-    // one must converge on the set as it is when its turn comes.
+    // Read inside the sync's lock: a queued sync converges on the set as it is then.
     const settings = new SettingsStore();
     const report = await new ManagedTools().sync(() => settings.get());
     say(report.summary);
@@ -177,8 +161,6 @@ async function tools(action = ""): Promise<void> {
   }
 }
 
-/** Both are signals to the running unit: SIGUSR2 drains then exits (systemd
- * starts the next process), SIGHUP reloads config in place (main.ts). */
 async function signalService(command: "restart" | "reload"): Promise<void> {
   if (process.platform !== "linux") {
     return fail(`only under the systemd service — send ${command === "restart" ? "SIGUSR2" : "SIGHUP"} to the pier process yourself`);
@@ -186,12 +168,10 @@ async function signalService(command: "restart" | "reload"): Promise<void> {
   const { UNIT_NAME } = await import("./service.js");
   const signal = command === "restart" ? "SIGUSR2" : "SIGHUP";
   try {
-    // `--kill-who`, not the newer `--kill-whom`: the old spelling is the one
-    // every systemd still parses (systemd/systemd#29793).
+    // `--kill-who`, not `--kill-whom`: the spelling every systemd parses (systemd/systemd#29793).
     execFileSync("systemctl", ["--user", "kill", "-s", signal, "--kill-who=main", UNIT_NAME], { stdio: "inherit" });
   } catch (err) {
-    // A failed kill already printed why on the inherited stderr; a missing
-    // systemctl printed nothing, so name it (same shape as `service status`).
+    // A failed kill already printed why; a missing systemctl printed nothing.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       process.stderr.write(`pier: systemctl is not on PATH — no systemd here.\n`);
     }
@@ -205,8 +185,7 @@ async function signalService(command: "restart" | "reload"): Promise<void> {
 
 async function backup(): Promise<void> {
   const [{ backupDb }, { PIER_DB }] = await Promise.all([import("./db.js"), import("./paths.js")]);
-  // This tree's version: the updater runs `backup` before npm replaces it, so
-  // it is the release the copy pairs with.
+  // This tree's version: the updater runs `backup` before npm replaces it.
   const path = backupDb(version, PIER_DB);
   process.stdout.write(path ? `backed up ${path}\n` : `no database yet — nothing to back up.\n`);
 }
@@ -218,7 +197,7 @@ function commandPath(name: string): string {
       accessSync(path, constants.X_OK);
       return realpathSync(path);
     } catch {
-      // Keep looking: version managers commonly put several prefixes on PATH.
+      // Keep looking: version managers put several prefixes on PATH.
     }
   }
   return fail(`${name} is not executable on PATH`);
@@ -238,7 +217,7 @@ async function service(action = "status"): Promise<void> {
   }
 
   switch (action) {
-    case "install": { // The installed unit owns this Node prefix until replaced.
+    case "install": {
       allowOnly(["force", "port", "host", "pier-home"], "pier service install");
       const port = typeof values.port === "string" ? Number(values.port) : 3141;
       if (!Number.isInteger(port) || port < 1 || port > 65_535) fail("--port must be an integer from 1 to 65535");
@@ -250,8 +229,7 @@ async function service(action = "status"): Promise<void> {
       if (!install({
         execPath: process.execPath,
         npmPath: commandPath("npm"),
-        // This command is typed in the operator's shell, so its PATH is the one
-        // they expect a turn's commands to see; the unit records it.
+        // Typed in the operator's shell, so this PATH is the one a turn should see.
         shellPath: process.env.PATH,
         entry: fileURLToPath(new URL("./main.js", import.meta.url)),
         host,
@@ -269,12 +247,10 @@ async function service(action = "status"): Promise<void> {
     case "status":
       allowOnly([], "pier service status");
       try {
-        // Inherited, not captured: systemctl's own output is the answer, and
-        // its exit code is nonzero for a service that is merely stopped.
+        // Exit code is nonzero for a service that is merely stopped.
         execFileSync("systemctl", ["--user", "status", UNIT_NAME], { stdio: "inherit" });
       } catch (err) {
-        // A stopped service already printed its status; a missing systemctl
-        // printed nothing, so name it.
+        // A stopped service already printed its status; a missing systemctl printed nothing.
         if ((err as NodeJS.ErrnoException).code === "ENOENT") {
           process.stderr.write(`pier: systemctl is not on PATH — no systemd here.\n`);
         }

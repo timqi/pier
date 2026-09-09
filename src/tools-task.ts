@@ -1,13 +1,6 @@
-// One reason: a tools switch has to become exactly one run of the one task
-// Pier owns — which takes knowing what that task runs, keeping it the task
-// Pier wrote, and turning a burst of switches into one run of it.
-//
-// It lives beside tools.ts rather than inside it because tools.ts may not
-// import tasks/, and outside main.ts because main.ts is wiring: this is the
-// only rule in the instance layer that is neither construction nor a callback.
-// The task's run history *is* the tools status surface — the install, the daily
-// update and every failure are runs with output, so there is no second place to
-// look (§5b).
+// A tools switch becomes exactly one run of the one task Pier owns. Beside
+// tools.ts because tools.ts may not import tasks/; the task's run history is
+// the tools status surface (§5b).
 
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,26 +11,18 @@ import { isTerminal } from "./tasks/types.js";
 import { coalescedSync, type SyncAttempt } from "./tools.js";
 import type { ToolsSyncNote } from "./web/types.js";
 
-/** Marks the daily update task as Pier's own — this file finds the one it owns
- *  rather than one a person wrote, and names itself with it when it writes the
- *  definition back (the owner guard in tasks/definitions.ts). */
+/** The owner guard in tasks/definitions.ts: only this creator may write it back. */
 const TOOLS_TASK_CREATOR = "tools";
 
-// The area these lines have always logged under: the move must not rename
-// anything an operator greps the journal for.
+// "pier", not "tools": what an operator greps the journal for.
 const log = logger("pier");
 
-/** POSIX single quotes: `$`, a backtick and a backslash mean things inside
- *  double quotes, and this string is run by bash months from now. */
+/** POSIX single quotes: this string is run by bash months from now. */
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
-/**
- * How this Pier runs `pier tools sync`. Installed, that is the built CLI beside
- * main.js. From a source checkout there is no `cli.js` and node cannot strip
- * types through imports that still say `.js`, so it is the same command under
- * tsx — which is what a source checkout has. Neither available is a refusal
- * with a reason, never a task whose script cannot run.
- */
+/** From a source checkout there is no `cli.js` and node cannot strip types
+ *  through `.js` imports, so it is the same command under tsx. Neither
+ *  available is a refusal with a reason, never a task whose script cannot run. */
 const toolsSyncScript = (): { script: string } | { problem: string } => {
   const built = fileURLToPath(new URL("./cli.js", import.meta.url));
   if (existsSync(built)) return { script: `${shellQuote(process.execPath)} ${shellQuote(built)} tools sync` };
@@ -54,23 +39,11 @@ const toolsSyncScript = (): { script: string } | { problem: string } => {
 };
 
 export function toolsTask(tasks: TaskService) {
-  /** Which task is Pier's, and the id every managed run goes through. */
   let toolsTaskId: string | null = null;
 
-  /**
-   * The one task Pier owns, brought in line with what it should be.
-   *
-   * Created once and never retired: a task that comes and goes is a state class
-   * of its own (two boots racing to create it, a retirement racing a switch),
-   * and the run it would have been retired for already says "no tools switched
-   * on".
-   *
-   * It repairs rather than trusts because of what came before the owner guard
-   * (tasks/definitions.ts): a definition edited by an older Pier, or by a
-   * release where the routes could still write it, is brought back to the one
-   * Pier owns here. Nothing can edit it any more — so this is a boot-time
-   * repair of state that already exists, not a defence.
-   */
+  /** Created once and never retired: a task that comes and goes is a state
+   *  class of its own, and a run with nothing on already says so. Repairs a
+   *  definition an older Pier could still edit. */
   const ensureToolsTask = async (): Promise<{ id: string } | { problem: string }> => {
     const command = toolsSyncScript();
     if ("problem" in command) return { problem: command.problem };
@@ -88,23 +61,18 @@ export function toolsTask(tasks: TaskService) {
       callback: { type: "none" as const },
       timeoutSeconds: 1800,
     };
-    // Archived is not "owned but edited": nothing can un-archive a task, so the
-    // replacement is a new one and the old one keeps its history.
+    // Nothing can un-archive a task, so an archived one is replaced, history kept.
     const owned = tasks.list().filter((task) => task.creator === TOOLS_TASK_CREATOR && !task.archived);
-    // One per creator. Two would fight over ubix's state lock every night, each
-    // reporting the other's run as an overlap.
+    // Two would fight over ubix's state lock every night.
     for (const extra of owned.slice(1)) {
       log.warn(`archiving a second tools update task (${extra.id})`);
       tasks.archive(extra.id, TOOLS_TASK_CREATOR);
     }
     const task = owned[0];
-    // Every field Pier owns, not just the command: a paused task, a renamed one
-    // or one pointed at a callback still claims to be keeping the tools current
-    // while the daily run never happens.
+    // Every field, not just the command: a paused or renamed task still claims
+    // to keep the tools current while the daily run never happens.
     if (task && Object.entries(draft).some(([key, value]) => JSON.stringify(task[key as keyof typeof task]) !== JSON.stringify(value))) {
       log.warn("the tools update task was edited — restoring the definition Pier owns");
-      // Named as the owner: this is the one path allowed to write it back
-      // (tasks/definitions.ts).
       await tasks.update(task.id, draft, TOOLS_TASK_CREATOR);
     }
     const id = task ? task.id : (await tasks.create(draft, TOOLS_TASK_CREATOR)).id;
@@ -112,16 +80,12 @@ export function toolsTask(tasks: TaskService) {
     return { id };
   };
 
-  /** The half of `coalescedSync` (tools.ts, which has the rule and why) that
-   *  knows what a task is: start a run, and hand back what to wait for — our own
-   *  run, or the one already in flight that made ours a `skipped` row. */
+  /** The half of `coalescedSync` (tools.ts) that knows what a task is. */
   const requestSync = coalescedSync((): SyncAttempt => {
     if (!toolsTaskId) throw new Error("no tools update task to run");
     const settled = (id: string): Promise<void> => tasks.waitForRun(id).then(() => undefined);
-    // Bounded, because the only way round this loop is a run that finished
-    // between being in flight and being asked about: real, rare, and not
-    // something to spin on. Three refusals in a row with nothing running is a
-    // bug, and it is reported as one rather than retried forever.
+    // A run can finish between being in flight and being asked about; three
+    // refusals with nothing running is a bug, reported rather than retried.
     for (let attempt = 0; attempt < 3; attempt++) {
       const mine = tasks.run(toolsTaskId, null, "manual");
       if (!isTerminal(mine.state)) return { ran: "started", settled: settled(mine.id) };
@@ -131,8 +95,6 @@ export function toolsTask(tasks: TaskService) {
     throw new Error("the tools sync was refused as an overlap three times with nothing running");
   }, (err: unknown) => log.error("the tools sync could not be run", err));
 
-  /** A switch was flipped: make sure the task is the one Pier means, then ask
-   *  for a sync. Answers with what that switch should say about it. */
   const toolsChanged = async (): Promise<ToolsSyncNote> => {
     try {
       const task = await ensureToolsTask();
@@ -148,10 +110,8 @@ export function toolsTask(tasks: TaskService) {
   };
 
   return {
-    /** Reconcile now. At boot, before any route exists: two first flips could
-     *  otherwise both find no task and create one each. */
+    /** At boot, before any route exists: two first flips could otherwise both create one. */
     reconcile: ensureToolsTask,
-    /** The task whose runs are the status surface, null until there is one. */
     id: () => toolsTaskId,
     changed: toolsChanged,
   };

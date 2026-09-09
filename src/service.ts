@@ -1,15 +1,7 @@
-// The systemd user unit Pier writes for itself.
-//
-// A *user* unit, not a system one: Pier runs as you, reads your Pi
-// configuration and drives sessions in your own directories. As root or a
-// dedicated service user it would be an agent that cannot touch the files you
-// wanted it to work on.
-//
-// Writing this file is a command rather than a page of documentation to copy
-// because two of its lines are only knowable at runtime: the absolute path of
-// the node that is running (systemd starts with a minimal PATH, so a node
-// installed by fnm/nvm/asdf is not on it) and the absolute path of the
-// installed entry point.
+// The systemd *user* unit Pier writes for itself: Pier runs as you, so it can
+// touch the files you wanted it to work on. Written by a command because two
+// lines are only knowable at runtime — the absolute node (systemd's minimal
+// PATH has no fnm/nvm node) and the installed entry point.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
@@ -19,20 +11,18 @@ import { dirname, join } from "node:path";
 export const UNIT_NAME = "pier.service";
 const UPDATE_UNIT_NAME = "pier-update.service";
 
-/** `~/.config/systemd/user/pier.service` — where a user unit belongs. */
 export const unitPath = (home = homedir()): string =>
   join(home, ".config", "systemd", "user", UNIT_NAME);
 
-/** The drop-in Pier writes once and never touches again: what the unit may
- *  consume is the operator's call, not ours. */
+/** Written once and never touched again: what the unit may consume is the
+ *  operator's call. */
 export const limitsPath = (home = homedir()): string =>
   join(dirname(unitPath(home)), `${UNIT_NAME}.d`, "limits.conf");
 
-/** The oneshot that installs a new version, beside the unit it restarts. */
 export const updateUnitPath = (home = homedir()): string =>
   join(dirname(unitPath(home)), UPDATE_UNIT_NAME);
 
-/** Runtime-only effective state for the updater, regenerated before each run. */
+/** Regenerated before each updater run. */
 export const updateRuntimePath = (home = homedir()): string =>
   join(dirname(unitPath(home)), `${UPDATE_UNIT_NAME}.d`, "runtime.conf");
 
@@ -40,7 +30,6 @@ export interface UnitOptions {
   /** The node and npm that installed Pier, both absolute and kept as a pair. */
   execPath: string;
   npmPath: string;
-  /** Absolute path of the entry point systemd should start. */
   entry: string;
   host: string;
   port: number;
@@ -51,8 +40,8 @@ export interface UnitOptions {
   shellPath?: string;
 }
 
-/** Quote one systemd word. Percent is doubled because specifier expansion runs
- * after parsing; dollar is doubled only for command lines. */
+/** Percent is doubled because specifier expansion runs after parsing; dollar
+ *  only for command lines. */
 function quote(value: string, command = false): string {
   if (/[\0\r\n]/.test(value)) throw new Error("systemd values cannot contain control characters");
   let escaped = value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%");
@@ -63,14 +52,9 @@ function quote(value: string, command = false): string {
 const environment = (key: string, value: string): string =>
   `Environment=${quote(`${key}=${value}`)}`;
 
-/** The PATH both units carry: the recorded node first, then the shell that ran
- * the install (`pier service install` is typed in that shell, so its own PATH
- * *is* the login one), with the standard directories as a floor.
- *
- * Recorded at install rather than sourced from a login shell at start, which
- * would hand a dotfile the power to decide whether Pier boots and which node
- * npm installs into. Relative entries are dropped: they would resolve against
- * WorkingDirectory, which is not where the operator was standing. */
+/** Recorded at install rather than sourced from a login shell at start, which
+ *  would hand a dotfile the power to decide whether Pier boots. Relative
+ *  entries would resolve against WorkingDirectory, so they are dropped. */
 function pathEnv(execPath: string, shellPath?: string): string {
   const seen = new Set<string>();
   return [dirname(execPath), ...(shellPath ?? "").split(":"), "/usr/local/bin", "/usr/bin", "/bin"]
@@ -115,8 +99,7 @@ WantedBy=default.target
 `;
 }
 
-/** The 0.0.1 unit did not record npm. This one-time bridge can only use npm
- * beside its recorded Node; a forced reinstall writes the exact executable. */
+/** A unit that recorded no npm: the bridge assumes npm beside its Node. */
 function legacyOptions(home: string): UnitOptions {
   const text = readFileSync(unitPath(home), "utf8");
   const start = text.match(/^ExecStart=(\S+) (\S+)$/m);
@@ -134,14 +117,9 @@ function legacyOptions(home: string): UnitOptions {
   };
 }
 
-/** A separate cgroup snapshots the database, updates the exact npm
- * installation recorded at install time, and only then restarts Pier.
- *
- * Both slow steps run while the service is still up, so the downtime is one
- * stop and one start rather than the ~10s an install takes. The snapshot is
- * consistent on a live database — `VACUUM INTO` off a read-only connection
- * (db.ts) — and it still runs from the tree npm is about to replace, so the
- * copy carries the version whose schema it pairs with. */
+/** Snapshot and install run while the service is still up, so downtime is one
+ *  stop and one start. The snapshot runs from the tree npm is about to replace,
+ *  so the copy carries the version whose schema it pairs with. */
 export function renderUpdateUnit(options: UnitOptions): string {
   const { execPath, npmPath, entry, pierHome, shellPath } = options;
   const cli = join(dirname(entry), "cli.js");
@@ -170,12 +148,8 @@ ExecStopPost=systemctl --user start ${UNIT_NAME}
 `;
 }
 
-/**
- * Sized as a share of the machine, not as "how much should Pier need": the
- * limit covers node, every subagent and every command a turn ran, and it
- * exists to protect the OS and sshd outside it. Written commented so the
- * operator tuning it can see what each line buys.
- */
+/** A share of the machine, not "how much Pier needs": the limit covers every
+ *  command a turn ran, and exists to protect the OS and sshd outside it. */
 function renderLimits(): string {
   return `[Service]
 # Soft ceiling: past this the kernel reclaims hard and lets the unit crawl
@@ -198,8 +172,6 @@ OOMPolicy=continue
 /** Runs a command, or in a test records that it would have. */
 export type Exec = (argv: string[]) => boolean;
 
-/** A command failure is printed here and propagated by its caller. Linger is
- * the only deliberately best-effort step. */
 const runner = (say: (message: string) => void): Exec => (argv) => {
   try {
     execFileSync(argv[0]!, argv.slice(1), { stdio: "pipe" });
@@ -216,7 +188,7 @@ export interface InstallOptions extends UnitOptions {
   force: boolean;
   home?: string;
   say: (message: string) => void;
-  /** Injected by tests, which must not talk to a real service manager. */
+  /** Injected by tests. */
   exec?: Exec;
 }
 
@@ -246,8 +218,8 @@ export function install(options: InstallOptions): boolean {
   }
 
   if (!run(["systemctl", "--user", "daemon-reload"])) return false;
-  // Without lingering, the user manager stops at logout and takes every
-  // scheduled task with it. It can need a polkit prompt, hence best-effort.
+  // Without lingering the user manager stops at logout, taking every scheduled
+  // task with it. It can need a polkit prompt, hence best-effort.
   if (!run(["loginctl", "enable-linger", userInfo().username])) {
     say(`  run it yourself so Pier survives logout: loginctl enable-linger ${userInfo().username}`);
   }
@@ -261,19 +233,12 @@ export function install(options: InstallOptions): boolean {
 
 export type UpdateStart = "started" | "not-installed" | "failed";
 
-/**
- * Why the installed updater could not do its job, or `null` when nothing is
- * wrong. Checked while Pier is still alive, because the alternative is finding
- * out at the next restart, from a service that no longer starts.
- *
- * The absolute node and npm paths in the unit are deliberate — systemd's PATH
- * has neither — but they pin the unit to one directory of one version manager.
- * `fnm install 26 && fnm uninstall 24` leaves ExecStart naming a Node that is
- * gone; the running process survives (Linux keeps a deleted binary mapped),
- * so nothing would notice until the update, or the next boot, failed.
- */
+/** The absolute node and npm paths pin the unit to one version manager's
+ *  directory: `fnm uninstall 24` leaves ExecStart naming a Node that is gone,
+ *  and the running process survives it (Linux keeps a deleted binary mapped),
+ *  so nothing would notice until the next boot failed. */
 export function updaterProblem(home = homedir()): string | null {
-  if (!existsSync(unitPath(home))) return null; // not a service install; nothing to check
+  if (!existsSync(unitPath(home))) return null; // not a service install
   const path = updateUnitPath(home);
   let unit: string;
   if (existsSync(path)) {
@@ -283,19 +248,15 @@ export function updaterProblem(home = homedir()): string | null {
       return `${path} cannot be read: ${String(err)}`;
     }
   } else {
-    // A 0.0.1 install: startUpdate generates the updater from the main unit,
-    // so a missing file is only a problem when that bridge cannot either —
-    // and the generated text gets the same executable check below.
+    // startUpdate generates a missing updater from the main unit; check that text.
     try {
       unit = renderUpdateUnit(legacyOptions(home));
     } catch {
       return `${UPDATE_UNIT_NAME} is missing — run: pier service install --force`;
     }
   }
-  // The one line that names both executables, quoted and escaped by quote().
-  // Unparseable means hand-edited, which is not this function's business to
-  // judge; the escaping is undone before existsSync sees a path (a `%` or `$`
-  // in it would otherwise read as gone on a working updater).
+  // Unparseable means hand-edited, not this function's to judge. Unescaped
+  // before existsSync: a `%` or `$` in the path would otherwise read as gone.
   const install = unit.match(/^ExecStart="((?:\\.|[^"\r\n])+)" "((?:\\.|[^"\r\n])+)" install -g/m);
   if (!install) return null;
   const unescape = (word: string): string =>
@@ -322,17 +283,15 @@ function runningPierHome(home: string): string {
       ?.slice("PIER_HOME=".length);
     return value || join(home, ".pier");
   }
-  // Installed but stopped: the unit file records any override (quoted and
-  // escaped since 0.0.2, bare in the 0.0.1 shape) — undo quote()'s escaping
-  // or the drop-in would carry `%%`/`\\"` into a real path.
+  // Installed but stopped: the unit records any override, quoted or bare;
+  // undo quote()'s escaping or the drop-in would carry `%%` into a real path.
   const raw = readFileSync(unitPath(home), "utf8")
     .match(/^Environment="?PIER_HOME=((?:\\.|[^"\r\n])+)"?$/m)?.[1];
   const fromUnit = raw?.replaceAll("%%", "%").replace(/\\(.)/g, "$1");
   return fromUnit || join(home, ".pier");
 }
 
-/** Start the updater recorded at install time. Its tiny drop-in captures the
- * running service's effective home, including an operator override. */
+/** The drop-in captures the running service's effective home, override included. */
 export function startUpdate(options: {
   home?: string;
   say: (message: string) => void;
@@ -382,8 +341,6 @@ export function uninstall(
     }
   }
   const ok = run(["systemctl", "--user", "daemon-reload"]);
-  // Left alone on purpose: the database, the boards, and linger — none of them
-  // are this command's to decide about.
   say(`$PIER_HOME is untouched; linger is still enabled.`);
   return ok;
 }
