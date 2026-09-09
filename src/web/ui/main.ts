@@ -320,8 +320,14 @@ function handleEvent(e: SessionEvent): void {
 
 function connectWorkspace(): void {
   const src = new EventSource("/api/events");
-  // Any (re)connect may follow a gap — re-list instead of replaying.
-  src.onopen = () => void refreshSessions();
+  // Any (re)connect may follow a gap, and the events it missed drove every
+  // view on this stream — each re-lists instead of replaying.
+  src.onopen = () => {
+    void refreshSessions();
+    refreshTasks();
+    refreshRuns();
+    refreshActivity();
+  };
   src.onerror = () => streamDied(src, "Workspace");
   src.onmessage = (m) => {
     const e = JSON.parse(m.data) as WorkspaceEvent;

@@ -56,6 +56,7 @@ vi.mock("./views.js", () => ({
 class Stream extends EventTarget {
   static all: Stream[] = [];
   onmessage: ((event: { data: string }) => void) | null = null;
+  onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
   constructor(readonly url: string) { super(); Stream.all.push(this); }
@@ -297,4 +298,21 @@ describe("session loads", () => {
     expect(h.content).toEqual(["selected"]);
     expect(h.sidebar.sessions().some((s) => s.id === "created")).toBe(false);
   });
+});
+
+// A reconnect follows a gap whose events are gone. Sessions were re-listed;
+// tasks, runs and activity ride the same stream and were left stale.
+it("re-lists every view the workspace stream feeds when it reconnects", async () => {
+  const views = await import("./views.js");
+  const workspace = Stream.all.find((s) => s.url === "/api/events");
+  vi.clearAllMocks();
+  (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+  workspace?.onopen?.();
+  await settled();
+
+  expect(vi.mocked(views.refreshTasks)).toHaveBeenCalledWith();
+  expect(vi.mocked(views.refreshRuns)).toHaveBeenCalledOnce();
+  expect(vi.mocked(views.refreshActivity)).toHaveBeenCalledOnce();
+  expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
 });
