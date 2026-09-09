@@ -145,7 +145,7 @@ const router = new Router(hub, (key) => {
     return factory.resume(key.conversationId);
   }
   return resolveIm(key);
-});
+}, (key) => conversations.get(key));
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,

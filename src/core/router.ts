@@ -94,6 +94,10 @@ export class Router {
     private readonly hub: EventHub,
     /** Create or resume the session owning a conversation (wired in main.ts). */
     private readonly resolve: (key: ConversationKey) => Promise<AgentSession>,
+    /** The durable chat → session mapping, read before opening: a chat and the
+     *  workbench asking for one transcript must share one lock and one object.
+     *  Undefined for a chat that has none yet. */
+    private readonly sessionIdOf: (key: ConversationKey) => string | undefined = () => undefined,
   ) {}
 
   registerChannel(channel: Channel): void {
@@ -214,73 +218,78 @@ export class Router {
       log.warn(`session ${session.id} replaced while attached to ${keyOf(existing.key)}`);
       existing.unsubscribe();
       this.forgetKeys(existing.session);
+      void existing.session.dispose().catch((err) =>
+        log.error(`disposing replaced session ${session.id} failed`, err)
+      );
     }
     this.byKey.set(keyOf(key), session);
     log.info(`attached ${keyOf(key)} → session ${session.id}`);
-    const unsubscribe = session.subscribe((payload) => {
-      this.hub.emit(session.id, payload);
-      if (payload.type === "state") {
-        const attached = this.bySession.get(session.id);
-        // Every turn passes here, so it also proves liveness to the sweeper.
-        if (attached) attached.stateSince = attached.activeAt = Date.now();
-        this.hub.emitWorkspace({
-          type: "session-state",
-          sessionId: session.id,
-          state: payload.state,
-        });
-      }
-      if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
-      // Without this a session-reported error lands only in the web timeline
-      // and the IM side goes quiet for no visible reason.
-      if (payload.type === "error") {
-        log.error(`${keyOf(key)} session ${session.id} reported: ${payload.message}`);
-        const channel = this.channels.get(key.channelId);
-        channel?.notify(key.conversationId, {
-          text: truncate(payload.message),
-          origin: { kind: "error" },
-        }).catch((err) => log.error(`notify ${key.channelId} failed`, err));
-      }
-      // Context the chat did not see typed goes out before the turn it
-      // triggers, so the answer has a visible cause. The hub carries it whole.
-      if (payload.type === "system-input") {
-        const channel = this.channels.get(key.channelId);
-        channel?.notify(key.conversationId, { text: digest(payload.text), origin: payload.origin })
-          .catch((err) => {
-            log.error(`notify ${key.channelId} failed`, err);
-            this.hub.emit(session.id, {
-              type: "error",
-              message: `notify ${key.channelId} failed: ${String(err)}`,
-            });
-          });
-      }
-      // A steer chosen against a turn that ended before the call landed sits in
-      // Pi's queue until some later turn — on IM, a message that never arrived
-      // (§5). A non-empty queue on an idle session is exactly that case.
-      if (payload.type === "queue-state" && (payload.steering.length || payload.followUp.length)) {
-        this.promoteQueued(session);
-      }
-      // Empty text included: adapters retire per-turn UI (👀 receipts) on it.
-      if (payload.type === "turn-end") {
-        log.info(
-          `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
-        );
-        const channel = this.channels.get(key.channelId);
-        if (channel) {
-          const reply = splitReply(payload.text, payload.meta);
-          this.deliver(key, () => channel.send(key.conversationId, reply))
-            .catch((err: unknown) => {
-              this.report(session.id, key, `outbound to ${key.channelId} failed: ${String(err)}`);
-            });
-        }
-      }
-    });
-    this.bySession.set(session.id, {
+    // Delivery reads `attached.key` live: a chat attaching after the workbench
+    // opened the session takes over (`reached`), and the closure must follow.
+    const attached: Attached = {
       session,
       key,
       stateSince: Date.now(),
       activeAt: Date.now(),
-      unsubscribe,
-    });
+      unsubscribe: session.subscribe((payload) => {
+        const key = attached.key;
+        this.hub.emit(session.id, payload);
+        if (payload.type === "state") {
+          // Every turn passes here, so it also proves liveness to the sweeper.
+          attached.stateSince = attached.activeAt = Date.now();
+          this.hub.emitWorkspace({
+            type: "session-state",
+            sessionId: session.id,
+            state: payload.state,
+          });
+        }
+        if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
+        // Without this a session-reported error lands only in the web timeline
+        // and the IM side goes quiet for no visible reason.
+        if (payload.type === "error") {
+          log.error(`${keyOf(key)} session ${session.id} reported: ${payload.message}`);
+          const channel = this.channels.get(key.channelId);
+          channel?.notify(key.conversationId, {
+            text: truncate(payload.message),
+            origin: { kind: "error" },
+          }).catch((err) => log.error(`notify ${key.channelId} failed`, err));
+        }
+        // Context the chat did not see typed goes out before the turn it
+        // triggers, so the answer has a visible cause. The hub carries it whole.
+        if (payload.type === "system-input") {
+          const channel = this.channels.get(key.channelId);
+          channel?.notify(key.conversationId, { text: digest(payload.text), origin: payload.origin })
+            .catch((err) => {
+              log.error(`notify ${key.channelId} failed`, err);
+              this.hub.emit(session.id, {
+                type: "error",
+                message: `notify ${key.channelId} failed: ${String(err)}`,
+              });
+            });
+        }
+        // A steer chosen against a turn that ended before the call landed sits in
+        // Pi's queue until some later turn — on IM, a message that never arrived
+        // (§5). A non-empty queue on an idle session is exactly that case.
+        if (payload.type === "queue-state" && (payload.steering.length || payload.followUp.length)) {
+          this.promoteQueued(session);
+        }
+        // Empty text included: adapters retire per-turn UI (👀 receipts) on it.
+        if (payload.type === "turn-end") {
+          log.info(
+            `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
+          );
+          const channel = this.channels.get(key.channelId);
+          if (channel) {
+            const reply = splitReply(payload.text, payload.meta);
+            this.deliver(key, () => channel.send(key.conversationId, reply))
+              .catch((err: unknown) => {
+                this.report(session.id, key, `outbound to ${key.channelId} failed: ${String(err)}`);
+              });
+          }
+        }
+      }),
+    };
+    this.bySession.set(session.id, attached);
   }
 
   /** An adapter's send is several platform calls (chunks, then attachments),
@@ -505,36 +514,36 @@ export class Router {
     if (session) await this.abort(session.id);
   }
 
-  /** Session owning a conversation, resolving and attaching it on first use. */
+  /** Session owning a conversation, resolving and attaching it on first use.
+   *  One object per session id whichever key asks first: an IM key is looked up
+   *  to its session id so it shares the lock with `web:`/`task:` aliases. */
   async ensure(key: ConversationKey): Promise<AgentSession> {
     let session = this.byKey.get(keyOf(key));
-    if (!session && isAlias(key)) {
-      session = this.bySession.get(key.conversationId)?.session;
-      if (session) this.byKey.set(keyOf(key), session);
-    }
+    if (session) return this.reached(session, key);
+    const id = isAlias(key) ? key.conversationId : this.sessionIdOf(key);
+    session = id === undefined ? undefined : this.bySession.get(id)?.session;
     if (!session) {
-      const lock = isAlias(key) ? `session:${key.conversationId}` : keyOf(key);
+      const lock = id === undefined ? keyOf(key) : `session:${id}`;
       const inflight = this.opening.get(lock);
-      // The first caller attaches before this continuation runs.
       if (inflight) {
         session = await inflight;
-        this.byKey.set(keyOf(key), session);
-        return this.reached(session, key);
+      } else {
+        try {
+          // Inside the try: a synchronous throw must report like a rejection.
+          const opening = this.resolve(key);
+          this.opening.set(lock, opening);
+          session = await opening;
+        } catch (err) {
+          this.unopened(key, err);
+          throw err;
+        } finally {
+          this.opening.delete(lock);
+        }
       }
-      try {
-        // Inside the try: a synchronous throw must report like a rejection.
-        const opening = this.resolve(key);
-        this.opening.set(lock, opening);
-        session = await opening;
-      } catch (err) {
-        this.unopened(key, err);
-        throw err;
-      } finally {
-        this.opening.delete(lock);
-      }
-      this.attach(key, session);
     }
-    return this.reached(session, key);
+    // Attaches fresh, or adds this key to the object already attached.
+    this.attach(key, session);
+    return session;
   }
 
   /** A web or task key names the session's own stream; an IM key names a chat
@@ -551,14 +560,16 @@ export class Router {
       .catch((e: unknown) => log.error(`could not report it to ${key.channelId}`, e));
   }
 
-  /** Also where a session learns which alias is current: a task callback
+  /** Also where a session learns which key is current: a task callback
    *  attaches under `task:<id>`, and the workbench's next turn must not still
-   *  read as "a task" (web/push.ts). A chat key is never overwritten. */
+   *  read as "a task" (web/push.ts). A chat outranks an alias — the workbench
+   *  may have opened the session, but its turns are answered in the chat — and
+   *  an alias never overwrites a chat. */
   private reached(session: AgentSession, key: ConversationKey): AgentSession {
     const attached = this.bySession.get(session.id);
     if (!attached) return session;
     attached.activeAt = Date.now();
-    if (isAlias(key) && isAlias(attached.key)) attached.key = key;
+    if (!isAlias(key) || isAlias(attached.key)) attached.key = key;
     return session;
   }
 

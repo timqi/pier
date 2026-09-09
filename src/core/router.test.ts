@@ -416,6 +416,43 @@ describe("opening a session", () => {
     expect(a).toBe(c);
   });
 
+  it.each([
+    ["chat", "workbench", "while it opens"],
+    ["workbench", "chat", "while it opens"],
+    ["chat", "workbench", "mid-turn"],
+    ["workbench", "chat", "mid-turn"],
+  ])("shares one object between a chat and the workbench: %s first, %s %s", async (first, second, when) => {
+    // A chat mapped to s1 and the web tab on s1 name one transcript; two live
+    // runtimes on it would both write it and both answer.
+    const web = { channelId: "web", conversationId: "s1" };
+    const keyOf = (name: string) => (name === "chat" ? KEY : web);
+    let opened = 0;
+    router = new Router(
+      hub,
+      () => {
+        opened += 1;
+        return new Promise((res) => setTimeout(() => res(fake.session), 5));
+      },
+      (key) => (key.channelId === KEY.channelId ? "s1" : undefined),
+    );
+    router.registerChannel(tg.channel);
+    let a: AgentSession, b: AgentSession;
+    if (when === "mid-turn") {
+      a = await router.ensure(keyOf(first));
+      Object.assign(fake.session, { state: "streaming" });
+      b = await router.ensure(keyOf(second));
+    } else {
+      [a, b] = await Promise.all([router.ensure(keyOf(first)), router.ensure(keyOf(second))]);
+    }
+    expect(opened).toBe(1);
+    expect(a).toBe(b);
+    expect(fake.calls).toEqual([]); // nothing opened only to be disposed
+    // Whichever order, the chat is where the turn is answered.
+    expect(router.conversationOf("s1")).toEqual(KEY);
+    fake.emit({ type: "turn-end", text: "done" });
+    expect(tg.sent).toEqual([["-100/7", { text: "done", suggestions: [], meta: undefined }]]);
+  });
+
   it("answers the alias that reached it last, never a chat it belongs to", async () => {
     // A task callback opens a workbench session under task:<id> whenever
     // nothing had it attached; the workbench asking for it again makes it a web

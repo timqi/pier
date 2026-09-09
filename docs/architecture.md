@@ -172,7 +172,10 @@ seams:
   times if events arrive across async reads, then 503.
 - **Routing** (`core/router.ts`): `ConversationKey → sessionId` map, in-memory.
   Unknown conversation → create a session lazily via the injected resolver.
-  Durability is the caller's: web conversation ids *are* session ids, task
+  One live `AgentSession` per session id: an IM key is looked up to its
+  session id (injected `sessionIdOf`) before opening, so a chat and the
+  `web:`/`task:` aliases share one lock and attach to one object; the chat is
+  the delivery key whenever it is attached. Durability is the caller's: web conversation ids *are* session ids, task
   definitions persist their target, IM channels keep
   `channels/conversations.ts`. A mapping whose session Pi no longer has is
   dropped and re-created, never retried forever.
