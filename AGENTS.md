@@ -65,6 +65,11 @@ scheduled tasks, live observability, and static Show pages.
   Runtime dependencies never go sideways. The browser may import owner-defined
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only; those
   imports are erased at build and do not let web implement either area.
+- **Browser-safe core.** `web/ui/` bundles `core/types.ts`, `core/reply.ts`,
+  `core/identity.ts` and `core/inbound-file.ts` at runtime, so those four may
+  not import `node:*` or anything that does; a `core/` module that needs Node
+  (`router.ts`, `inbox.ts`) is never imported from `web/ui/`. Vite fails the
+  build when this is broken, but the build is the last check, not the rule.
 
 ## UI/UX
 
