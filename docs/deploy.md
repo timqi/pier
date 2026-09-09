@@ -97,7 +97,8 @@ pier restart
 
 - Changing or recovering the password signs out every browser.
 - One browser: Settings → Instance → Signed-in devices.
-- A browser session expires 7 days after its last request.
+- A browser session expires 7 days after its last request, and 90 days after
+  it signed in however often it is used.
 - However a session ends, its push subscription goes with it.
 
 ## Restarting and reloading

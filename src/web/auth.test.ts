@@ -430,6 +430,20 @@ describe("the cookie", () => {
     db.close();
   });
 
+  it("stops sliding a quarter after it was issued", async () => {
+    const { store: s, password, db } = store();
+    const a = app(s);
+    const cookie = cookieOf(await login(a, password));
+    // Used this second, so the sliding window says yes; older than the
+    // absolute cap, which is the answer that counts.
+    db.prepare("UPDATE web_sessions SET created_at = ?, seen_at = ?")
+      .run(Date.now() - 91 * 24 * 60 * 60_000, Date.now());
+    expect((await a.request("/api/sessions", { headers: { cookie } })).status).toBe(401);
+    // The check deleted the row, so it is no longer a device either.
+    expect(s.list()).toEqual([]);
+    db.close();
+  });
+
   it("stores no usable credential: a copy of the database cannot sign anything", async () => {
     const { store: s, password, db } = store();
     const cookie = cookieOf(await login(app(s), password));

@@ -17,6 +17,9 @@ const log = logger("auth");
 const COOKIE = "pier_session";
 /** Sliding: a stolen cookie is dead a week after its last use. */
 const TTL_MS = 7 * 24 * 60 * 60_000;
+/** Absolute, so daily use cannot slide one cookie forever: every browser
+ *  re-authenticates a quarter after it signed in. */
+const MAX_AGE_MS = 90 * 24 * 60 * 60_000;
 /** One `seen_at` write per browser per five minutes instead of one per request. */
 const TOUCH_MS = 5 * 60_000;
 /** Not an id any row can have. */
@@ -96,8 +99,10 @@ export class AuthStore {
 
   /** Deleted, not merely refused: a push subscription hangs off the row. */
   sweep(): void {
-    const swept = this.#sql("DELETE FROM web_sessions WHERE seen_at <= ? RETURNING id")
-      .all(Date.now() - TTL_MS) as unknown as { id: string }[];
+    const now = Date.now();
+    const swept = this.#sql(
+      "DELETE FROM web_sessions WHERE seen_at <= ? OR created_at <= ? RETURNING id",
+    ).all(now - TTL_MS, now - MAX_AGE_MS) as unknown as { id: string }[];
     for (const row of swept) this.#revoked(row.id);
     if (swept.length) log.info(`swept ${String(swept.length)} expired session(s)`);
   }
@@ -138,13 +143,14 @@ export class AuthStore {
     const [id, token] = (cookie ?? "").split(".");
     if (!id || !token) return undefined;
     const row = this.#sql(
-      "SELECT token_hash AS tokenHash, seen_at AS seenAt FROM web_sessions WHERE id = ?",
-    ).get(id) as { tokenHash: string; seenAt: number } | undefined;
+      "SELECT token_hash AS tokenHash, seen_at AS seenAt, created_at AS createdAt" +
+        " FROM web_sessions WHERE id = ?",
+    ).get(id) as { tokenHash: string; seenAt: number; createdAt: number } | undefined;
     const now = Date.now();
     // Deleted here, not left for the next sweep: a session nobody may use must
     // stop being a device Pier notifies at the same moment.
     if (!row) return undefined;
-    if (now - row.seenAt >= TTL_MS) {
+    if (now - row.seenAt >= TTL_MS || now - row.createdAt >= MAX_AGE_MS) {
       this.revoke(id);
       return undefined;
     }
