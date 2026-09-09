@@ -100,6 +100,7 @@ describe("requireAuth", () => {
     const form = await a.request("/login");
     expect(form.status).toBe(200);
     expect(form.headers.get("x-frame-options")).toBe("DENY");
+    expect(form.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("refuses a write without redirecting it", async () => {
@@ -167,6 +168,9 @@ describe("login", () => {
     expect(api.status).toBe(200);
     expect(api.headers.get("cache-control")).toBe("private, no-store");
     expect(api.headers.get("x-frame-options")).toBe("DENY");
+    // Every authenticated response, files included: the content-type is the
+    // only thing that may decide how a browser treats the bytes.
+    expect(api.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("rejects the wrong password with the form again", async () => {

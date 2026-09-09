@@ -284,8 +284,10 @@ export const sessionIdOf = (c: Context): string => (getCookie(c, COOKIE) ?? "").
 
 export function requireAuth(store: AuthStore): MiddlewareHandler {
   return async (c, next) => {
-    // Public responses too: the login form must not be frameable either.
+    // Public responses too: the login form must not be frameable either, and a
+    // served file must not be sniffed into a type its content-type denies.
     c.header("x-frame-options", "DENY");
+    c.header("x-content-type-options", "nosniff");
     if (isPublic(c.req.method, c.req.path)) return next();
     const cookie = getCookie(c, COOKIE);
     const session = store.check(cookie);
