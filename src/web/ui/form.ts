@@ -9,6 +9,8 @@
 // state and calls its own render. Nothing in this file knows what a channel or
 // a task is.
 
+import { CircleQuestionMark } from "lucide";
+import { icon } from "./icons.js";
 import { h, prose } from "./dom.js";
 
 /**
@@ -33,7 +35,7 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
 /** The row under a Console view's title (or its Automation strip): filters,
  * a breadcrumb, a segmented switch, with actions pushed right by `ml-auto`.
  * Wraps below md so the right-hand group gets its own line. */
-export const toolbar = (...children: (HTMLElement | string)[]): HTMLElement =>
+export const toolbar = (...children: (HTMLElement | SVGElement | string)[]): HTMLElement =>
   h("div", "flex min-h-10 flex-none flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2", ...children);
 
 /** A segmented switch — a few exclusive choices inside a toolbar (a task
@@ -232,9 +234,11 @@ export function helpBadge(
 ): HTMLElement {
   const wrap = h("span", "group relative inline-flex");
   const badgeEl = btn(
-    "?",
+    "",
     "flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-neutral-300 text-[9px] font-bold text-neutral-400 transition-colors group-hover:border-indigo-400 group-hover:text-indigo-500",
   );
+  badgeEl.append(icon(CircleQuestionMark, "h-full w-full"));
+  badgeEl.setAttribute("aria-label", title);
   // pt-1.5 is the bridge; the visible card is the inner element. The width is
   // capped against the viewport so a narrow window cannot push it off-screen.
   const bubble = h(

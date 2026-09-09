@@ -5,6 +5,8 @@
 // the same record at its current revision. runs.ts and tasks.ts own the
 // surrounding navigation.
 
+import { ChevronRight } from "lucide";
+import { icon } from "./icons.js";
 import type { CommandResult, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "../../tasks/types.js";
 import { getJson } from "./api.js";
 import { fmtDuration, h } from "./dom.js";
@@ -168,7 +170,7 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   const back = button("Runs");
   back.className = "cursor-pointer text-neutral-500 hover:text-neutral-800 hover:underline";
   back.onclick = () => { state.selectedId = null; state.scrollTop = 0; backToList(); };
-  const actions = toolbar(back, h("span", "text-neutral-400", "›"), h("span", "min-w-0 truncate font-mono text-[12px] text-neutral-500", id));
+  const actions = toolbar(back, icon(ChevronRight, "h-3.5 w-3.5 text-neutral-400"), h("span", "min-w-0 truncate font-mono text-[12px] text-neutral-500", id));
   // Only a pane that shows another run (or nothing) gets the placeholder: a
   // refresh of the run on screen redraws it in place.
   const fresh = pane.dataset.runId !== id;
@@ -262,7 +264,7 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   );
   // The definition as it was when this run was queued, not as it is now.
   const config = h("details", "border-t border-neutral-200");
-  config.append(h("summary", "flex cursor-pointer items-center gap-1.5 px-4 py-3 text-[12px] text-neutral-500 hover:text-neutral-800", h("span", "chev", "▶"), `Configuration snapshot (revision ${run.taskRevision})`),
+  config.append(h("summary", "flex cursor-pointer items-center gap-1.5 px-4 py-3 text-[12px] text-neutral-500 hover:text-neutral-800", icon(ChevronRight, "chev h-3 w-3"), `Configuration snapshot (revision ${run.taskRevision})`),
     definitionView(run.context.definition, deps.openSession));
   body.append(config);
   if (!gotMessages.ok) body.append(h("p", "m-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700", gotMessages.error));
@@ -279,7 +281,7 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
   const raw = h("details", "border-t border-neutral-200") as HTMLDetailsElement;
   raw.open = state.rawOpen;
   raw.ontoggle = () => { if (raw.isConnected) state.rawOpen = raw.open; };
-  raw.append(h("summary", "flex cursor-pointer items-center gap-1.5 px-4 py-3 text-[12px] text-neutral-500 hover:text-neutral-800", h("span", "chev", "▶"), "Raw record"),
+  raw.append(h("summary", "flex cursor-pointer items-center gap-1.5 px-4 py-3 text-[12px] text-neutral-500 hover:text-neutral-800", icon(ChevronRight, "chev h-3 w-3"), "Raw record"),
     h("pre", CODE, JSON.stringify(run, null, 2)));
   body.append(raw);
   pane.replaceChildren(actions, body);

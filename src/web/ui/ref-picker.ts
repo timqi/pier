@@ -5,6 +5,8 @@
 // row carries its commit subject, with the full message as a hover hint.
 // Picks apply live; the panel closes like any other (outside click, Esc).
 
+import { Check, RotateCcw } from "lucide";
+import { icon } from "./icons.js";
 import { h, relTime } from "./dom.js";
 import { closeMenu, openPanel } from "./menu.js";
 
@@ -100,7 +102,7 @@ function pointRow(o: PointOption, current: string, onPick: (v: string) => void):
   const row = h(
     "button",
     "flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left hover:bg-neutral-100",
-    h("span", "w-3 flex-none text-indigo-600", o.value === current ? "\u2713" : ""),
+    icon(Check, `h-3 w-3 text-indigo-600 ${o.value === current ? "" : "invisible"}`),
     h("span", "flex-none font-mono text-[11.5px] text-neutral-800", o.label ?? o.value),
   );
   if (o.subject) row.append(h("span", "min-w-0 truncate text-[11px] text-neutral-400", o.subject));
@@ -190,7 +192,7 @@ export function openDiffPicker(
     // so it belongs to neither column.
     const reset = h("div", "flex-none border-t border-neutral-200",
       pointRow(
-        { value: resetBase, label: `↺ ${resetBase} ↔ Working tree`, subject: "back to the default: the main line's tip vs the files on disk" },
+        { value: resetBase, label: `${resetBase} ↔ Working tree`, subject: "back to the default: the main line's tip vs the files on disk" },
         base === resetBase && head === "" ? resetBase : "",
         () => {
           base = resetBase;
@@ -199,6 +201,7 @@ export function openDiffPicker(
           onPick(base, head);
         },
       ));
+    reset.firstElementChild!.prepend(icon(RotateCcw));
     content.replaceChildren(
       h("div", "flex flex-none items-center gap-1 border-b border-neutral-200 px-2 py-1.5", tab("Compare two points", "compare"), tab("One commit", "commit")),
       body,

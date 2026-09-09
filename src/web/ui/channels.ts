@@ -3,6 +3,8 @@
 // discovered chats with their per-chat overrides. A pure consumer of
 // /api/channels/:platform.
 
+import { Check, LoaderCircle, TriangleAlert } from "lucide";
+import { icon } from "./icons.js";
 import type { ModelRef } from "../../core/types.js";
 import type { ChannelConfig, ChannelPlatform, ChatConfig, ChatKind } from "../../channels/types.js";
 import { getJson, sendJson } from "./api.js";
@@ -87,9 +89,9 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     if (state === "clean") return;
     statusBox.className = `ml-auto flex items-center gap-1.5 text-[11.5px] ${STATUS_TONE[state]}`;
     if (state === "saving") {
-      statusBox.append(h("span", "spinner"), h("span", "", "Saving…"));
+      statusBox.append(icon(LoaderCircle, "spinner"), h("span", "", "Saving…"));
     } else if (state === "saved") {
-      statusBox.append(h("span", "", "✓"), h("span", "", "Saved"));
+      statusBox.append(icon(Check), h("span", "", "Saved"));
       // Fade the receipt: a permanent "Saved" says nothing about the next edit.
       setTimeout(() => {
         if (statusBox.textContent?.includes("Saved")) showStatus("clean");
@@ -97,7 +99,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     } else {
       const retry = btn("Retry", "cursor-pointer underline");
       retry.onclick = flush;
-      statusBox.append(h("span", "", "⚠"), h("span", "", "Save failed"), retry);
+      statusBox.append(icon(TriangleAlert), h("span", "", "Save failed"), retry);
     }
   }
 

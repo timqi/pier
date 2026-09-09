@@ -249,6 +249,15 @@ textarea, badge, empty, `helpBadge` — and `.btn`/`.btn-primary` from
 which is why the two tabs used to read as different apps; a new Console surface
 starts from `form.ts` and adds to it rather than beside it.
 
+`ui/icons.ts` renders decorative Lucide icons from named imports. The shell's explicit
+`data-icon` slots initialize once at boot, retaining their IDs/classes and cached DOM
+references (including Send/Queue visibility). Dynamic views create icons directly when
+they render; there is no library-wide scan or observer on streaming updates. The native
+select/directory-trigger chevron is a CSS background generated from the same Lucide
+ChevronDown node at boot. `lucide` is pinned in the lockfile: its dependency-free,
+tree-shaken icon data replaces scattered SVG paths and platform-dependent glyphs.
+Brand assets, the Activity dependency graph and symbols in content are outside this convention.
+
 `ui/dom.ts` is `h()`, `$()`, `detailsRow()` and `prose()`. `prose()` renders
 inline markdown with the `marked`/DOMPurify already bundled for the transcript,
 so walkthrough copy is written as strings instead of `h()` call chains.

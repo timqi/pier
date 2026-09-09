@@ -5,6 +5,8 @@
 // the right. Scope comes from the session list (global + each project cwd);
 // bundled switches are instance-wide, so they appear under Global only.
 
+import { ChevronRight } from "lucide";
+import { icon } from "./icons.js";
 import type { CatalogEntry, ConfigResource } from "../../core/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
@@ -354,7 +356,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       const summary = h("summary", "flex cursor-pointer select-none items-center gap-1 truncate py-1 pr-3 hover:bg-neutral-100");
       summary.style.paddingLeft = `${20 + depth * 14}px`;
       summary.title = path;
-      summary.append(h("span", "chev", "▶"), h("span", "truncate text-neutral-600", dir));
+      summary.append(icon(ChevronRight, "chev h-3 w-3"), h("span", "truncate text-neutral-600", dir));
       if (sub.link) summary.append(linkBadge());
       el.append(summary, ...renderTree(kind, sub, path, depth + 1, isActive, open));
       rows.push(el);

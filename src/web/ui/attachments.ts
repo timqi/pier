@@ -5,6 +5,8 @@
 // the rendered node is upgraded: images become thumbnails, everything else an
 // attachment card with preview + download.
 
+import { Download, Eye } from "lucide";
+import { icon } from "./icons.js";
 import { replaceOutsideCode } from "../../core/inbound-file.js";
 import { failure } from "./api.js";
 import { codePane, fileRows } from "./code.js";
@@ -241,7 +243,7 @@ function card(url: string, name: string): HTMLElement {
     // No own margins: the .thumbs strip owns the spacing between attachments.
     "inline-flex max-w-full items-center gap-2.5 rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 no-underline",
   );
-  const icon = h(
+  const fileType = h(
     "span",
     "flex h-7 w-7 flex-none items-center justify-center rounded-md bg-indigo-50 text-[10px] font-semibold uppercase text-indigo-600",
     ext.slice(0, 4) || "file",
@@ -251,7 +253,8 @@ function card(url: string, name: string): HTMLElement {
   // Every card offers a look: what it can show is decided by the bytes, not
   // by the name, so a file with no extension or an unusual one is not a
   // download-only dead end.
-  const eye = h("button", "icon-btn h-6 w-6 text-[13px]", "◉");
+  const eye = h("button", "icon-btn h-6 w-6 text-[13px]", icon(Eye));
+  eye.setAttribute("aria-label", "Preview");
   eye.title = "Preview";
   eye.onclick = (ev) => {
     ev.preventDefault();
@@ -264,9 +267,10 @@ function card(url: string, name: string): HTMLElement {
   download.href = `${url}&download=1`;
   download.download = name;
   download.title = "Download";
-  download.textContent = "↓";
+  download.append(icon(Download));
+  download.setAttribute("aria-label", "Download");
   actions.append(download);
-  wrap.append(icon, label, actions);
+  wrap.append(fileType, label, actions);
   return wrap;
 }
 

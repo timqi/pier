@@ -3,6 +3,8 @@
 // module owns only the choice: remembered per browser, following the system
 // until told otherwise, and re-applied when either changes.
 
+import { Monitor, Moon, Sun, type IconNode } from "lucide";
+import { icon } from "./icons.js";
 import { $ } from "./dom.js";
 
 type Theme = "system" | "light" | "dark";
@@ -10,12 +12,7 @@ const KEY = "pier.theme";
 const CYCLE: Theme[] = ["system", "light", "dark"];
 const system = window.matchMedia("(prefers-color-scheme: dark)");
 
-// Static markup, the same 16px / 1.5-stroke line icons the rail is drawn with.
-const ICON: Record<Theme, string> = {
-  system: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5"><circle cx="8" cy="8" r="5.25"/><path d="M8 2.75a5.25 5.25 0 0 0 0 10.5z" fill="currentColor" stroke="none"/></svg>`,
-  light: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="h-3.5 w-3.5"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.5v1.4M8 13.1v1.4M1.5 8h1.4M13.1 8h1.4M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1"/></svg>`,
-  dark: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" class="h-3.5 w-3.5"><path d="M13 9.4A5.6 5.6 0 0 1 6.6 3a5.6 5.6 0 1 0 6.4 6.4z"/></svg>`,
-};
+const ICON: Record<Theme, IconNode> = { system: Monitor, light: Sun, dark: Moon };
 
 // Storage can be denied outright (private mode, blocked cookies). That is a
 // state, not a failure: the choice simply cannot outlive the tab, and the
@@ -53,7 +50,8 @@ export function initTheme(): void {
     btn.title = `Theme: ${choice}${choice === "system" ? ` (${resolved()})` : ""}`;
     // One control, three states: the icon names the state, and for the one
     // state that is not a colour — "system" — the title says what it resolved to.
-    btn.innerHTML = ICON[choice];
+    btn.replaceChildren(icon(ICON[choice]));
+    btn.setAttribute("aria-label", btn.title);
     apply();
   };
   btn.onclick = () => {

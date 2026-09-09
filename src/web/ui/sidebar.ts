@@ -4,6 +4,8 @@
 // main.ts owns the session list; this module renders it and reports
 // interactions back.
 
+import { Ellipsis } from "lucide";
+import { icon } from "./icons.js";
 import { sendJson } from "./api.js";
 import { pathTrigger, type PathOption } from "./dir-picker.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
@@ -182,7 +184,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
   );
   // Touch has no hover, so a hover-revealed control there is unreachable —
   // pointer-coarse makes it resident instead.
-  const more = h("button", HOVER_BTN, "\u22ef");
+  const more = h("button", HOVER_BTN, icon(Ellipsis));
   more.title = "Session actions";
   more.onclick = (ev) => {
     ev.stopPropagation();

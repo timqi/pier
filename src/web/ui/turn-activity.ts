@@ -3,6 +3,8 @@
 // rendered into #turns between chat rows. chat.ts owns the rows themselves and
 // calls seal/finish/reset here so a group closes when the transcript moves on.
 
+import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
+import { icon } from "./icons.js";
 import { getJson, refused } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
@@ -43,7 +45,7 @@ export function initTurnActivity(d: ChatDeps, pane: TurnsPane): void {
 const shortId = (id: string): string => id.slice(0, 8);
 
 export interface RunHead {
-  glyph: HTMLElement;
+  glyph: SVGElement;
   /** The kind of card or the run's state, whichever the card is about. */
   label: string;
   labelCls: string;
@@ -142,21 +144,19 @@ export function runHead(o: RunHead): HTMLElement {
 // --- background runs (detached task calls made from this session) ------------------
 
 /** Run state colours are shared by detached runs and callback summaries. */
-export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: string }> = {
-  queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: "" },
-  running: { edge: "border-l-fuchsia-500", label: "text-fuchsia-700", glyph: "" },
-  succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: "\u2713" },
-  failed: { edge: "border-l-red-500", label: "text-red-600", glyph: "\u2715" },
-  cancelled: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: "\u00b7" },
-  interrupted: { edge: "border-l-amber-400", label: "text-amber-700", glyph: "\u23f8" },
-  skipped: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: "\u00b7" },
+export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: IconNode }> = {
+  queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: LoaderCircle },
+  running: { edge: "border-l-fuchsia-500", label: "text-fuchsia-700", glyph: LoaderCircle },
+  succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: Check },
+  failed: { edge: "border-l-red-500", label: "text-red-600", glyph: X },
+  cancelled: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: Minus },
+  interrupted: { edge: "border-l-amber-400", label: "text-amber-700", glyph: Pause },
+  skipped: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: Minus },
 };
 
 /** The state's glyph: a spinner while it is still moving. */
-export const stateGlyph = (state: BackgroundRun["state"]): HTMLElement =>
-  STATE_STYLE[state].glyph
-    ? h("span", `w-3 flex-none text-center font-bold ${STATE_STYLE[state].label}`, STATE_STYLE[state].glyph)
-    : h("span", `spinner ${STATE_STYLE[state].label}`);
+export const stateGlyph = (state: BackgroundRun["state"]): SVGElement =>
+  icon(STATE_STYLE[state].glyph, `h-3 w-3 ${state === "queued" || state === "running" ? "spinner" : ""} ${STATE_STYLE[state].label}`);
 
 const backgroundRows = new Map<string, HTMLElement>();
 
@@ -239,7 +239,7 @@ interface ToolRow {
 
 interface Activity {
   el: HTMLDetailsElement;
-  statusIcon: HTMLElement;
+  statusIcon: HTMLElement | SVGElement;
   headline: HTMLElement;
   rowsEl: HTMLElement;
   toolRows: Map<string, ToolRow>;
@@ -377,17 +377,17 @@ function styleGroup(el: HTMLElement, status: ActivityStatus): void {
   el.className = `px-2 py-1 rounded-xl text-[11.5px] leading-normal open:border open:border-neutral-200 open:px-3 open:py-2 ${STATUS_STYLE[status]}`;
 }
 
-const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, string> = {
-  failed: "✕",
-  interrupted: "⏸",
+const STATUS_ICON: Record<Exclude<ActivityStatus, "running" | "done">, IconNode> = {
+  failed: X,
+  interrupted: Pause,
 };
 
-function statusIconEl(status: ActivityStatus): HTMLElement {
-  if (status === "running") return h("span", "spinner");
+function statusIconEl(status: ActivityStatus): HTMLElement | SVGElement {
+  if (status === "running") return icon(LoaderCircle, "spinner");
   // Done is the common case and has nothing to say — the step count is the
   // whole message, so only the states that want attention carry a glyph.
   if (status === "done") return h("span", "hidden");
-  return h("span", "flex-none text-[12px] font-bold", STATUS_ICON[status]);
+  return icon(STATUS_ICON[status], "h-3 w-3");
 }
 
 function ensureActivity(ts: number): Activity {

@@ -34,6 +34,7 @@ vi.mock("./session-header.js", () => ({
   sessionInfo: vi.fn(), sessionMenu: vi.fn(), setHeaderPending: vi.fn(), setHeaderState: vi.fn(),
 }));
 vi.mock("./shell.js", () => ({ closeDrawer: vi.fn(), initShell: vi.fn() }));
+vi.mock("./icons.js", () => ({ initIcons: vi.fn() }));
 vi.mock("./theme.js", () => ({ initTheme: vi.fn() }));
 vi.mock("./version.js", () => ({ initVersion: vi.fn() }));
 vi.mock("./sidebar.js", () => ({

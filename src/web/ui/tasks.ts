@@ -3,6 +3,8 @@
 // a run itself in the Runs view, and the create/edit dialog in task-editor.ts;
 // this file owns navigation and state.
 
+import { ChevronRight } from "lucide";
+import { icon } from "./icons.js";
 import type { TaskDefinition, TaskRun } from "../../tasks/types.js";
 import { coalesce, failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
@@ -230,7 +232,7 @@ export function createTasksView(
     const listLink = button("Tasks");
     listLink.className = "cursor-pointer text-neutral-500 hover:text-neutral-800 hover:underline";
     listLink.onclick = () => openTask();
-    const crumb = h("span", "flex min-w-0 items-center gap-2", listLink, h("span", "text-neutral-400", "›"), h("span", "truncate font-medium", task.name), taskBadge(task));
+    const crumb = h("span", "flex min-w-0 items-center gap-2", listLink, icon(ChevronRight, "h-3.5 w-3.5 text-neutral-400"), h("span", "truncate font-medium", task.name), taskBadge(task));
     const run = button("Run now", true);
     run.disabled = task.archived;
     run.onclick = () => void runTask(task.id);

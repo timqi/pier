@@ -6,6 +6,8 @@
 // numbers, images, PDFs). A viewer, not an editor: every read is scoped
 // server-side to the root it was asked under, and nothing here writes.
 
+import { ArrowDown, ArrowUp, FoldVertical, Funnel, GitBranch, X, type IconNode } from "lucide";
+import { icon } from "./icons.js";
 import { mustGetJson } from "./api.js";
 import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
@@ -433,8 +435,8 @@ export function createExplorerView(
     };
     // The keys are this view's only while it is on screen with a diff in it.
     const live = (): boolean => segs.length > 0 && !root.classList.contains("hidden");
-    const arrow = (glyph: string, d: number, label: string, keys: [string, string]): HTMLElement => {
-      const el = h("button", "icon-btn flex-none", glyph);
+    const arrow = (glyph: IconNode, d: number, label: string, keys: [string, string]): HTMLElement => {
+      const el = h("button", "icon-btn flex-none", icon(glyph));
       el.onclick = () => go(d);
       letterKey(el, keys, label, () => go(d), live);
       return el;
@@ -444,8 +446,8 @@ export function createExplorerView(
         "div",
         "flex flex-none items-center gap-1",
         counter,
-        arrow("↑", -1, "Previous change", ["p", "k"]),
-        arrow("↓", 1, "Next change", ["n", "j"]),
+        arrow(ArrowUp, -1, "Previous change", ["p", "k"]),
+        arrow(ArrowDown, 1, "Next change", ["n", "j"]),
       ),
       set(next, rows) {
         segs = next;
@@ -497,26 +499,25 @@ export function createExplorerView(
       ? `${pickedCommit()} — ${pickedSubject() || "commit"}`
       : `${base} ↔ ${head || "working tree"}`;
 
-  const ICON_FUNNEL = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5"><path d="M2.5 3h11l-4.25 5v4.5l-2.5 1.25V8L2.5 3z" stroke-linejoin="round"/></svg>`;
-  const ICON_FOLD = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5"><path d="m4.5 2.5 3.5 3 3.5-3M4.5 13.5l3.5-3 3.5 3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-  const iconToggle = (svg: string, hint: string, active: boolean, onClick: () => void): HTMLElement => {
+  const iconToggle = (glyph: IconNode, hint: string, active: boolean, onClick: () => void): HTMLElement => {
     const el = h("button", `flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-md ${
       active ? "bg-indigo-50 text-indigo-700" : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
     }`);
-    el.innerHTML = svg;
+    el.append(icon(glyph));
     el.title = hint;
+    el.setAttribute("aria-label", hint);
+    el.setAttribute("aria-pressed", String(active));
     el.onclick = onClick;
     return el;
   };
 
   function renderCompare(): void {
-    const funnel = iconToggle(ICON_FUNNEL, "Show only files that differ", onlyChanged, () => {
+    const funnel = iconToggle(Funnel, "Show only files that differ", onlyChanged, () => {
       onlyChanged = !onlyChanged;
       renderCompare();
       renderTree();
     });
-    const fold = iconToggle(ICON_FOLD, collapsedAll ? "Restore folders" : "Collapse all folders", collapsedAll, () => {
+    const fold = iconToggle(FoldVertical, collapsedAll ? "Restore folders" : "Collapse all folders", collapsedAll, () => {
       collapsedAll = !collapsedAll;
       if (collapsedAll) {
         savedExpanded = [...expanded];
@@ -631,7 +632,7 @@ export function createExplorerView(
         cwd || undefined,
         openDir, // hash first; show() reloads
       );
-    const closeBtn = h("button", "icon-btn", "✕") as HTMLButtonElement;
+    const closeBtn = h("button", "icon-btn", icon(X)) as HTMLButtonElement;
     closeBtn.type = "button";
     closeBtn.title = "Close Files";
     closeBtn.setAttribute("aria-label", "Close Files");
@@ -639,7 +640,7 @@ export function createExplorerView(
     closeBtn.classList.add("ml-auto");
     header.replaceChildren(
       cwdChip,
-      h("span", "truncate font-mono text-[11.5px] text-neutral-400", git.branch ? `⎇ ${git.branch}` : "no git"),
+      h("span", "flex min-w-0 items-center gap-1 truncate font-mono text-[11.5px] text-neutral-400", ...(git.branch ? [icon(GitBranch), h("span", "truncate", git.branch)] : ["no git"])),
       closeBtn,
     );
   }
