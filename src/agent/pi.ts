@@ -2,6 +2,8 @@
 // Implements the AgentFactory/AgentSession seam from src/core/types.ts on the
 // Pi SDK. No Pi type may appear in an exported signature.
 
+import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import {
   createAgentSession,
   CredentialSynchronizationError,
@@ -56,12 +58,49 @@ import { curateModels, pinFirst } from "./models.js";
 
 const log = logger("agent");
 
+/** A directory is what a session is compared by — the rail groups on it, the
+ *  New-session menu drops a `<repo>.<branch>` worktree when the repository
+ *  itself is in the list — so two names for one directory are two projects. A
+ *  session opened under `/home/qiqi` (a symlink to `/essd/qiqi`) never matched
+ *  the worktrees recorded under the real path, and every branch checkout was
+ *  offered as a project of its own. Resolved once per distinct path: a symlink
+ *  that moves under a running instance is not a case we have.
+ *
+ *  A directory that is gone — a worktree merged and removed — is still a
+ *  session's cwd, and its spelling still decides whether the rail reads it as a
+ *  branch of its repository. So the deepest ancestor that does resolve carries
+ *  the rest of the path, and only a cwd with no resolvable ancestor at all is
+ *  reported as recorded. */
+const realPaths = new Map<string, string>();
+function realPath(cwd: string): string {
+  const known = realPaths.get(cwd);
+  if (known !== undefined) return known;
+  let real = cwd;
+  const missing: string[] = [];
+  for (let head = cwd; ; ) {
+    try {
+      real = join(realpathSync(head), ...missing);
+      break;
+    } catch (err) {
+      const parent = dirname(head);
+      if (parent === head) {
+        log.debug(`cwd ${cwd} has no resolvable ancestor; using it as recorded`, err);
+        break;
+      }
+      missing.unshift(basename(head));
+      head = parent;
+    }
+  }
+  realPaths.set(cwd, real);
+  return real;
+}
+
 /** A listed record as the seam reports it. The one mapping, because `list` and
  *  `find` answer with the same shape and drifting would mean two answers about
  *  one session. */
 const summaryOf = (s: SessionRecord): SessionSummary => ({
   id: s.id,
-  cwd: s.cwd,
+  cwd: realPath(s.cwd),
   createdAt: s.created,
   modified: s.modified,
   ...(s.title ? { title: s.title } : {}),
@@ -910,7 +949,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   async create(opts: AgentLaunchOptions): Promise<AgentSession> {
     this.listing = undefined;
-    return this.open(opts.cwd, SessionManager.create(opts.cwd), opts);
+    // Resolved before Pi records it, so the transcript, the session directory
+    // and every later listing all name the directory the same way.
+    const cwd = realPath(opts.cwd);
+    return this.open(cwd, SessionManager.create(cwd), { ...opts, cwd });
   }
 
   async resume(sessionId: string): Promise<AgentSession> {

@@ -665,6 +665,21 @@ describe("workbench server", () => {
     ]);
   });
 
+  // Every listed directory is reported as its real path (agent/pi.ts), and a
+  // nascent row stands in for a listing for as long as a day: a session created
+  // through a symlink must not be the one row where `/home/u` and `/essd/u`
+  // look like two projects.
+  it("creates a session in the real path of the directory it was given", async () => {
+    const real = realpathSync(mkdtempSync(join(tmpdir(), "pier-real-")));
+    const link = join(mkdtempSync(join(tmpdir(), "pier-link-")), "proj");
+    symlinkSync(real, link);
+    const { app, factory } = setup();
+    await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: link }) });
+
+    // The same resolved value the nascent row is filed under.
+    expect(factory.create).toHaveBeenCalledWith({ cwd: real });
+  });
+
   // The name goes into the transcript and nowhere else; the rail re-reads it
   // like every other title, so there is no second copy to keep in step.
   it("names a session in its transcript, and tells the surfaces to re-read", async () => {

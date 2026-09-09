@@ -124,9 +124,14 @@ per-turn Activity groups):
   sessions remain available through pagination and the search palette. New
   session opens a menu on its button, not a dialog: the listing's recent
   distinct directories (current one ticked, at most eight) then Browse…, and
-  picking one creates the session. Worktrees are left out — a `<repo>.<branch>`
+  picking one creates the session, and the menu walks by keyboard like every
+  other one (⌘⇧O opens it). Worktrees are left out — a `<repo>.<branch>`
   directory whose `<repo>` sibling is also listed is a branch checkout, not a
-  project — here and in the palette's Actions alike. A labeled
+  project — here and in the palette's Actions alike. The comparison is between
+  resolved paths: every listed directory is reported through `realpath` (with
+  the deepest surviving ancestor standing in for a worktree that has since been
+  removed), so `/home/u` and `/essd/u` behind a symlink are one project rather
+  than two. A labeled
   New session button and a separate magnifier button share one row below the
   brand. New session uses the primary blue fill; Search uses a muted neutral
   fill with a contrasting icon. Search keeps its accessible name
@@ -197,7 +202,8 @@ per-turn Activity groups):
   session title and an explicit close button; its backdrop consumes the dismissal
   click so background controls do not activate. Rail actions remain keyboard
   reachable and visible while focused or open. Menus focus a control on open,
-  support arrow / Home / End navigation, and return focus when dismissed from
+  support arrow / ⌃N ⌃P / ⌃J ⌃K / Home / End navigation — the palette's keys,
+  from the palette's own `listStep` — and return focus when dismissed from
   inside. Session actions have no reserved checkmark column and are grouped as
   Rename / Session info, New session here / Browse files, Model & reasoning.
   Model and directory hints truncate; model loading is immediate and a cancelled

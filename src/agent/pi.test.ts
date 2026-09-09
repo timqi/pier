@@ -4,6 +4,9 @@
 // Plus the one rule that decides which copy of a bundled extension runs, and
 // the runtime state that must remain private to one session.
 
+import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionEventPayload } from "../core/types.js";
 import type { PiEvent, PiMessage } from "./events.js";
@@ -558,6 +561,39 @@ describe("a session naming itself after its first exchange", () => {
     await settle();
     expect(fake.pi.sessionManager.getSessionName()).toBe("my own name");
     expect(seen).not.toContainEqual(expect.objectContaining({ type: "renamed" }));
+  });
+});
+
+describe("a directory reached through a symlink", () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), "pier-real-")));
+  const link = join(mkdtempSync(join(tmpdir(), "pier-link-")), "proj");
+  symlinkSync(real, link);
+
+  it("is created under its real path, so one directory is one project", async () => {
+    const factory = new PiAgentFactory();
+    const session = await factory.create({ cwd: link });
+    // The mocked SessionManager/createAgentSession name the session after the
+    // cwd they were handed.
+    expect(session.id).toBe(real);
+    await session.dispose();
+  });
+
+  /** A factory whose disk is one session in `cwd`. */
+  const listing = (cwd: string) =>
+    new PiAgentFactory([], undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+      scan: async () => [{ id: "s", path: `${cwd}/f.jsonl`, cwd, created: 1, modified: 2 }],
+    });
+
+  it("is listed under its real path, however an older session recorded it", async () => {
+    expect((await listing(link).list())[0]?.cwd).toBe(real);
+  });
+
+  // A worktree that was merged and removed: the rail must still read it as a
+  // branch of the repository beside it, which only holds if the part of the
+  // path that does exist is spelled the way that repository's own session is.
+  it("resolves as much of a deleted directory's path as still exists", async () => {
+    const gone = join(link, "pier.merged-branch");
+    expect((await listing(gone).list())[0]?.cwd).toBe(join(real, "pier.merged-branch"));
   });
 });
 

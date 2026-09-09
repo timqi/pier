@@ -300,9 +300,14 @@ export function createServer(
     const body = await c.req.json().catch(() => ({}));
     // A session always starts in its project directory — never in pier's own.
     if (typeof body.cwd !== "string" || !body.cwd) return c.json({ error: "cwd required" }, 400);
-    const session = await factory.create({ cwd: body.cwd });
+    // The seam records the real path (agent/pi.ts), and the row below stands in
+    // for a listing until Pi persists the session — up to a day for one never
+    // prompted. Resolved here too, or that row is the one place a directory
+    // reached through a symlink still looks like a project of its own.
+    const cwd = await realpath(body.cwd).catch(() => body.cwd as string);
+    const session = await factory.create({ cwd });
     const createdAt = Date.now();
-    nascent.set(session.id, { cwd: body.cwd, createdAt });
+    nascent.set(session.id, { cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
     // Created is as good as spoken to: the person who clicked New is about to
     // type into it, and a row born below the working set would jump on the

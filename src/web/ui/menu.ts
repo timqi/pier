@@ -21,14 +21,33 @@ function onOutside(ev: Event): void {
   if (panel && !panel.contains(ev.target as Node) && ev.target !== backdrop) closeMenu();
 }
 
+// Three idioms for the same two moves, and the one definition of them: the
+// arrows; readline's ⌃P/⌃N, for hands that would rather not leave the home
+// row; and ⌃J/⌃K, because ⌃N is a *reserved* chord in Chrome and Firefox on
+// Linux and Windows (and ⌘N on macOS) — it opens a new window and no
+// `preventDefault` can stop it, so "down" needs a key the browser will
+// actually hand over. (⌃P is only print, which is interceptable.) Bare Ctrl
+// only: ⌃⇧N is the browser's incognito window, and claiming a chord someone
+// meant for the browser is worse than not having it.
+const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
+const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
+
+/** Which way this keypress walks a list, if it does. Shared with the palette,
+ *  so the menu and the palette answer to the same keys. */
+export function listStep(ev: KeyboardEvent): number | undefined {
+  if (ev.altKey || ev.metaKey || ev.shiftKey || !ev.key) return undefined; // no `key`: synthetic event
+  return ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key];
+}
+
 function onKey(ev: KeyboardEvent): void {
-  if (panel?.dataset.menu === "true" && ["ArrowDown", "ArrowUp", "Home", "End"].includes(ev.key)) {
+  const step = listStep(ev);
+  if (panel?.dataset.menu === "true" && (step !== undefined || ev.key === "Home" || ev.key === "End")) {
     const rows = [...panel.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
     if (!rows.length) return;
     const index = rows.indexOf(document.activeElement as HTMLButtonElement);
     const next = ev.key === "Home" ? 0 : ev.key === "End" ? rows.length - 1
-      : index < 0 ? (ev.key === "ArrowDown" ? 0 : rows.length - 1)
-      : (index + (ev.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+      : index < 0 ? (step === 1 ? 0 : rows.length - 1)
+      : (index + (step ?? 0) + rows.length) % rows.length;
     ev.preventDefault();
     rows[next]?.focus();
     return;

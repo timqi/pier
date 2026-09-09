@@ -10,6 +10,7 @@ import { getJson } from "./api.js";
 import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
+import { listStep } from "./menu.js";
 import { openNewSession, orderSessions, projectCwds, stateDot, type SessionInfo } from "./sidebar.js";
 import { shortcut } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
@@ -111,14 +112,6 @@ function ask(q: string): void {
 /** Rebuilt on every render; the index is what ↑/↓ and Enter address. */
 let rows: { el: HTMLElement; open: () => void }[] = [];
 let active = 0;
-
-// Three idioms for the same two moves. The arrows; readline's ⌃P/⌃N, for hands
-// that would rather not leave the home row; and ⌃J/⌃K, because ⌃N is a
-// *reserved* chord in Chrome and Firefox on Linux and Windows — it opens a new
-// window and no `preventDefault` can stop it, so "down" needs a key the browser
-// will actually hand over. (⌃P is only print, which is interceptable.)
-const ARROW_STEP: Record<string, number | undefined> = { ArrowDown: 1, ArrowUp: -1 };
-const CTRL_STEP: Record<string, number | undefined> = { n: 1, j: 1, p: -1, k: -1 };
 
 function setActive(index: number): void {
   if (!rows.length) return;
@@ -349,11 +342,7 @@ export function initPalette(d: PaletteDeps): void {
   // The input keeps focus while the list is walked — typing must never mean
   // "start over because you moved".
   input.onkeydown = (ev) => {
-    // Bare Ctrl only: ⌃⇧N is the browser's incognito window, and claiming a
-    // chord someone meant for the browser is worse than not having it.
-    const step = ev.altKey || ev.metaKey || ev.shiftKey || !ev.key // no `key`: synthetic event
-      ? undefined
-      : (ev.ctrlKey ? CTRL_STEP[ev.key.toLowerCase()] : ARROW_STEP[ev.key]);
+    const step = listStep(ev); // the same keys the anchored menus walk on
     if (step !== undefined) {
       ev.preventDefault();
       setActive(active + step);
