@@ -20,6 +20,7 @@ const sidebar = $("#sidebar");
 const scrim = $("#drawer-scrim");
 const title = $("#mobile-title");
 const menuBtn = $("#mobile-menu");
+const meta = $("#session-meta");
 
 /** Called from every navigation: picking a destination dismisses the drawer. */
 export function closeDrawer(): void {
@@ -57,6 +58,17 @@ function toggleDrawer(): void {
  *  so one chord has to mean whichever of the two this width has. */
 const drawerMedia = window.matchMedia("(width < 48rem)");
 const isDrawer = (): boolean => drawerMedia.matches;
+
+/** The meta chips (model · reasoning · context, and the "starting…" a session
+ *  opening has to say) belong to whichever heading is on screen. One element,
+ *  moved — session-header.ts keeps rendering into it, so the phone shows the
+ *  same object rather than a second copy of the same chips. In the bar it takes
+ *  a line of its own under the title (style.css); in the chat heading it goes
+ *  back where it was written, before the ⋯. */
+function hostMeta(): void {
+  if (isDrawer()) $("#mobile-bar").append(meta);
+  else $("#chat-menu").before(meta);
+}
 
 /** Closed drawers leave the tab order; open drawers own focus until dismissed. */
 function syncDrawer(): void {
@@ -208,7 +220,11 @@ function initSwipe(): void {
 export function initShell(deps: ShellDeps): void {
   initSwipe();
   syncDrawer();
-  drawerMedia.addEventListener("change", closeDrawer);
+  hostMeta();
+  drawerMedia.addEventListener("change", () => {
+    closeDrawer();
+    hostMeta();
+  });
   $("#drawer-toggle").setAttribute("aria-controls", "sidebar");
   sidebar.addEventListener("keydown", (ev) => {
     if (!isDrawer() || sidebar.dataset.open === undefined || ev.defaultPrevented || ev.isComposing) return;

@@ -12,7 +12,11 @@ class ElementStub {
   classList = { add: vi.fn(), remove: vi.fn(), contains: vi.fn() };
   listeners = new Map<string, (event: KeyboardEvent) => void>();
   children: ElementStub[] = [];
+  appended: ElementStub[] = [];
+  precededBy: ElementStub | null = null;
   onclick?: () => void;
+  append(el: ElementStub): void { this.appended.push(el); }
+  before(el: ElementStub): void { this.precededBy = el; }
   setAttribute(key: string, value: string): void { this.attrs.set(key, value); }
   addEventListener(key: string, listener: (event: KeyboardEvent) => void): void { this.listeners.set(key, listener); }
   contains(el: ElementStub): boolean { return el === this || this.children.includes(el); }
@@ -34,7 +38,7 @@ beforeEach(async () => {
   vi.resetModules();
   dom.elements.clear();
   dom.active = null;
-  for (const selector of ["#sidebar", "#drawer-scrim", "#mobile-title", "#mobile-menu", "#rail-toggle", "#drawer-toggle", "#new-session", "main"])
+  for (const selector of ["#sidebar", "#drawer-scrim", "#mobile-title", "#mobile-menu", "#session-meta", "#mobile-bar", "#chat-menu", "#rail-toggle", "#drawer-toggle", "#new-session", "main"])
     dom.elements.set(selector, new ElementStub());
   el("#sidebar").children = [el("#new-session"), new ElementStub()];
   media = { matches: true, addEventListener: vi.fn() };
@@ -94,4 +98,13 @@ it("returns focus to the rail handle when a drawer becomes a collapsed desktop r
   el("#rail-toggle").onclick!();
   expect(el("#sidebar").inert).toBe(true);
   expect(dom.active).toBe(el("#rail-toggle"));
+});
+
+it("moves the one meta row into whichever heading the width shows", () => {
+  // Opened as a drawer (media.matches), so the chips hang off the mobile bar.
+  expect(el("#mobile-bar").appended).toContain(el("#session-meta"));
+  expect(el("#chat-menu").precededBy).toBeNull();
+  media.matches = false;
+  media.addEventListener.mock.calls[0]![1]();
+  expect(el("#chat-menu").precededBy).toBe(el("#session-meta"));
 });

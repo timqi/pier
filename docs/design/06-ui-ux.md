@@ -50,6 +50,17 @@ covers them. Only which heading floats changes: the mobile top bar below md, the
 chat heading above it, in the same slim inset rounded strip and the same glass —
 and a phone's Console view, which brings its own title strip and scrollers,
 starts below the bar instead of under it.
+The session's meta chips — model, reasoning, context size, and the "starting…"
+a session being opened has to say — are one element, hosted by whichever of the
+two headings is on screen, and they leave with the chat heading when a Console
+view takes over. This is the one place the phone needs its own answer: the chips
+do not fit beside a session's name at that width, so the bar grows a second line
+under the title for as long as there are chips, and the transcript pads by it.
+The chips stay the desktop's shortcut into the model picker; the ⋯ menu is the
+thumb-sized way to the same two actions.
+Dock cards (queue, recovery) take the composer's own inset at both widths, and
+their controls take the 44px touch target on a coarse pointer, growing the
+card's header row rather than clipping it.
 The mobile drawer keeps its available width and uses rounded outer corners
 without desktop panel margins. Keep the outer page edge neutral and
 match installed-window theme metadata to that canvas in both themes, including

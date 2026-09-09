@@ -87,8 +87,8 @@ function trackKeyboard(): void {
   vv.addEventListener("scroll", sync);
 }
 
-/** On desktop the dock (queue, recovery, composer) floats over the transcript
- *  (style.css), so the pane pads its tail by the dock's live height — the
+/** The dock (queue, recovery, composer) floats over the transcript at every
+ *  width (style.css), so the pane pads its tail by the dock's live height — the
  *  textarea grows and the queue comes and goes, and CSS cannot read either. */
 function trackDock(): void {
   const main = composer.parentElement!;

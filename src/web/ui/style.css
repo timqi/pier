@@ -396,6 +396,12 @@ main {
   #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-palette),
   #console-section :is(summary, li button) { min-height: 44px; }
   #sidebar :is(.session-more, .icon-btn, #open-palette) { min-width: 44px; }
+  /* The dock's cards are on the same thumb: the queue's whole-queue actions and
+     the recovery card's buttons. Their header row is a fixed cursor height, so
+     it gives that up rather than clipping what now stands in it. */
+  :is(#queue-panel, #recovery-panel) button { min-height: 44px; }
+  #queue-panel button { min-width: 44px; }
+  #queue-panel > div:first-child { height: auto; }
 }
 /* One selection vocabulary: the rail's rows, the Console's, and the palette's. */
 #console-section button.bg-indigo-50, #session-list li.bg-indigo-50, .palette-row.bg-indigo-50 {
@@ -595,7 +601,12 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   background-color: color-mix(in oklab, var(--color-indigo-500) 18%, transparent);
   color: inherit;
 }
-@media (pointer: coarse) { .palette-row { min-height: 44px; } }
+@media (pointer: coarse) {
+  .palette-row { min-height: 44px; }
+  /* A thumb has no arrows and no Esc key, and the backdrop is how it closes the
+     palette. The count stays: that is an answer, not an instruction. */
+  #palette kbd, #palette-keys { display: none; }
+}
 /* Where a search hit landed: a ring that fades, on the row and only there. */
 @keyframes turn-reveal {
   from { outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
@@ -653,6 +664,32 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   #automation-tabs > button { padding-inline: 0.625rem; font-size: 0.75rem; }
   #sidebar { max-width: calc(100vw - 2.5rem); }
   #composer { --composer-control-size: 2.25rem; padding-inline: 0.75rem; }
+  /* The cards take the composer's inset, which is narrower here than the 1rem
+     its px-4 leaves above md — two edges a few pixels apart in the same dock
+     read as a misalignment, not as two elements. */
+  #queue-panel, #recovery-panel { width: calc(100% - 1.5rem); }
+  /* The bar carries the chat heading's meta chips — the same element, moved
+     here by shell.ts, not a second copy. Three columns for the strip and a
+     second row for the chips, aligned under the title: at this width they do
+     not fit beside a session's name, and the row is there only when there are
+     chips to put in it. The strip's height has two values, so it is declared
+     here rather than as a utility on the element — and declared, not measured,
+     so --head-h can be too: the transcript pads by what covers it. */
+  main { --bar-h: 3rem; --head-h: calc(var(--bar-h) + 8px); }
+  main:has(#chat-header:not(.hidden)):has(#session-meta:not(.hidden)) { --bar-h: 4.5rem; }
+  #mobile-bar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    /* The gap utility is the row's, not the rows': a row gap would come out of
+       the strip, which is the one thing here with a fixed height. */
+    grid-template-rows: minmax(0, 1fr) auto;
+    row-gap: 0;
+    height: var(--bar-h);
+  }
+  #mobile-bar #session-meta { grid-row: 2; grid-column: 2 / -1; height: 1.5rem; }
+  /* A Console view hides the chat heading (views.ts), and the chips are the
+     chat's: they leave with it rather than sitting under the view's name. */
+  main:has(#chat-header.hidden) #session-meta { display: none; }
   #turns { padding-inline: 0.625rem; }
   #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }

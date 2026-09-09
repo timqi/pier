@@ -110,7 +110,7 @@
   <main class="min-w-0 overflow-hidden">
     <!-- Mobile top bar: replaces the chat header below md (which hides), so a
          Console view keeps the same way back to the drawer as a chat does. -->
-    <header id="mobile-bar" class="flex h-12 flex-none items-center gap-1 px-1.5 md:hidden">
+    <header id="mobile-bar" class="flex flex-none items-center gap-1 px-1.5 md:hidden">
       <button type="button" id="drawer-toggle" aria-label="Open sidebar"
         class="icon-btn relative h-11 w-11 text-neutral-500">
         <span data-icon="Menu" class="h-4.5 w-4.5"></span>
@@ -216,7 +216,7 @@
     </div>
     <ul id="palette-list" role="listbox" aria-label="Results" class="max-h-[60vh] overflow-y-auto px-2 pb-2 text-[0.9375rem]"></ul>
     <div class="flex items-center justify-between border-t border-neutral-200/70 px-4 py-1.5 text-[0.75rem] leading-4 text-neutral-500">
-      <span>↑↓ navigate · ↵ open</span>
+      <span id="palette-keys">↑↓ navigate · ↵ open</span>
       <span id="palette-count"></span>
     </div>
   </dialog>
