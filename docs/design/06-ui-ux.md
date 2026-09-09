@@ -28,7 +28,8 @@ and shadow; its rows stay flat, with selection expressed through tint and weight
 Floating chrome lifts off the canvas the macOS way: a canvas one step darker
 than the panel, a neutral translucent hairline (light in dark mode), a top-edge
 highlight, and a two-part shadow — wide ambient plus tight contact — shared by
-sidebar, chat heading and composer through one token set.
+sidebar, chat heading and menus through one glass token set; the composer and
+the open drawer, which sit over content, take the same set one step raised.
 The mobile drawer keeps its available width and uses rounded outer corners
 without desktop panel margins. The desktop chat heading uses the same glass
 material in a slim inset rounded strip. Keep the outer page edge neutral and

@@ -26,17 +26,17 @@ html {
   --workbench-canvas: #f1f4f3;
   --workbench-mist: #e6f1f3;
   --workbench-mint: #e8f3ed;
-  /* Floating chrome (rail, chat heading, composer): a neutral hairline the
-     canvas shows through, a top-edge highlight, and a two-part shadow — one
-     wide ambient, one tight contact — which is what reads as lifted rather
-     than drawn on. Dark swaps the hairline for a light one, since a shadow
-     alone disappears against a dark canvas. */
-  --float-edge: rgb(16 24 40 / 0.08);
-  --float-highlight: inset 0 1px 0 rgb(255 255 255 / 0.7);
-  --float-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -8px rgb(16 24 40 / 0.14);
-  /* The composer is the one control sitting on the coloured gradient, so it
-     lifts a step higher than the chrome above it. */
-  --float-shadow-raised: 0 1px 2px rgb(16 24 40 / 0.08), 0 6px 18px -2px rgb(16 24 40 / 0.12), 0 18px 40px -8px rgb(16 24 40 / 0.2);
+  /* Glass chrome (rail, chat heading, composer, menus): a neutral hairline the
+     canvas shows through, a top-edge highlight, and a shadow in two parts —
+     wide ambient plus tight contact — which is what reads as lifted rather
+     than drawn on. `-raised` is one step higher, for what sits over content
+     (composer, open drawer). Dark swaps the hairline for a light one, since a
+     shadow alone disappears against a dark canvas. */
+  --glass-edge: rgb(16 24 40 / 0.08);
+  --glass-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -8px rgb(16 24 40 / 0.14),
+    inset 0 1px 0 rgb(255 255 255 / 0.7);
+  --glass-shadow-raised: 0 1px 2px rgb(16 24 40 / 0.08), 0 6px 18px -2px rgb(16 24 40 / 0.12),
+    0 18px 40px -8px rgb(16 24 40 / 0.2), inset 0 1px 0 rgb(255 255 255 / 0.7);
   --color-neutral-50: oklch(98% 0.004 260);
   --color-neutral-100: oklch(96% 0.006 260);
   --color-neutral-200: oklch(91% 0.009 260);
@@ -63,10 +63,11 @@ html[data-theme="dark"] {
   --workbench-canvas: #14171a;
   --workbench-mist: #1d282d;
   --workbench-mint: #1d2925;
-  --float-edge: rgb(255 255 255 / 0.09);
-  --float-highlight: inset 0 1px 0 rgb(255 255 255 / 0.07);
-  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.55);
-  --float-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5), 0 6px 18px -2px rgb(0 0 0 / 0.45), 0 18px 44px -8px rgb(0 0 0 / 0.65);
+  --glass-edge: rgb(255 255 255 / 0.09);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.55),
+    inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --glass-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5), 0 6px 18px -2px rgb(0 0 0 / 0.45),
+    0 18px 44px -8px rgb(0 0 0 / 0.65), inset 0 1px 0 rgb(255 255 255 / 0.07);
   background-color: var(--workbench-canvas);
 
   /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
@@ -163,8 +164,6 @@ html[data-theme="dark"] {
 html {
   font-size: 112.5%; /* 18px base */
   --glass-surface: color-mix(in oklab, var(--color-white) 72%, transparent);
-  --glass-edge: var(--float-edge);
-  --glass-shadow: var(--float-shadow), var(--float-highlight);
   --ease-surface: cubic-bezier(0.2, 0.8, 0.2, 1);
   /* Panning is all a touch may do to the document: `user-scalable=no`
      (index.html) is the same sentence for engines that honour it, and a
@@ -271,7 +270,7 @@ html {
   }
   #sidebar[data-open] {
     transform: translateX(0);
-    box-shadow: 0 8px 30px rgb(0 0 0 / 0.18), var(--float-highlight);
+    box-shadow: var(--glass-shadow-raised);
   }
   /* Pull-to-refresh would reload the workbench mid-turn; the transcript pane
      keeps its own scroll chaining. */
@@ -482,13 +481,14 @@ main {
 #composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }
+/* The one control on the coloured gradient; `.glass` below picks the token up. */
 #composer > div {
+  --glass-shadow: var(--glass-shadow-raised);
   max-width: 58rem;
   margin-inline: auto;
-  box-shadow: var(--float-shadow-raised), var(--float-highlight);
 }
 #composer > div:focus-within {
-  box-shadow: 0 0 0 3px var(--color-indigo-100), var(--float-shadow-raised), var(--float-highlight);
+  box-shadow: 0 0 0 3px var(--color-indigo-100), var(--glass-shadow);
 }
 #composer :is(#attach, #send, #stop) {
   width: var(--composer-control-size);
