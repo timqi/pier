@@ -1,23 +1,8 @@
-// Which sessions exist on disk, and what to call them — without reading a
-// transcript that has not changed since the last scan.
-//
-// Pi's SessionManager.listAll() parses every line of every session file to
-// answer that: ~250ms for 84 sessions of 30MB here, growing with the total
-// bytes ever written rather than with the number of sessions. Every surface
-// asks (the rail, Activity, a task lookup, every reconnect), so the scan sits
-// on the interactive path and gets slower for the life of the instance. But a
-// transcript is append-only and the facts a listing needs are all derived from
-// bytes already read, so each byte is read once: rows live in pier.db, keyed by
-// path and validated by (size, mtime), and a file that grew is picked up at the
-// byte the last scan stopped on.
-//
-// The same pass indexes what was said. Every user message and every reply
-// goes into `session_fts` beside the index row, in the same transaction, so
-// the palette can search messages without a second reader of the same bytes.
-//
-// Reading Pi's on-disk entries is the cost of that; agent/ is where the
-// knowledge of Pi's formats already lives, and Pi's own reader is not
-// incremental.
+// Which sessions exist on disk and what to call them, reading each transcript
+// byte once: Pi's own listing parses every file whole (~250ms for 30MB) and
+// every surface asks. Rows live in pier.db keyed by path and validated by
+// (size, mtime); a file that grew resumes where the last scan stopped. The same
+// pass indexes what was said into `session_fts` for the palette.
 
 import { createReadStream, promises as fs } from "node:fs";
 import { join } from "node:path";
@@ -31,15 +16,14 @@ import { hasToolCalls, textOf, type PiMessage } from "./events.js";
 
 const log = logger("agent");
 
-/** What a listing knows about a session — the subset of Pi's SessionInfo that
- *  Pier reads. Nothing else is derived, so nothing else can go stale. */
+/** The subset of Pi's SessionInfo that Pier reads. */
 export interface SessionRecord {
   id: string;
   path: string;
   cwd: string;
   /** Session header timestamp, ms. */
   created: number;
-  /** File mtime, ms; the listing is ordered by it, newest first. */
+  /** File mtime, ms. */
   modified: number;
   title?: string;
 }
@@ -47,14 +31,11 @@ export interface SessionRecord {
 /** The seam pi.ts holds, so a test can hand it a listing instead of a disk. */
 export interface SessionListing {
   scan(): Promise<SessionRecord[]>;
-  /** Only a listing that shadows another parser has anything to audit. */
   audit?(native: () => Promise<NativeInfo[]>): Promise<number>;
-  /** Only a listing that indexes what was said can answer for it. */
   search?(query: string, limit?: number): SearchHit[];
 }
 
-/** What Pi's own reader answers, as far as a cross-check reads it. Declared
- *  here rather than imported: this file must not see the SDK. */
+/** Declared rather than imported: this file must not see the SDK. */
 export interface NativeInfo {
   id: string;
   cwd: string;
@@ -63,29 +44,26 @@ export interface NativeInfo {
   firstMessage?: string | undefined;
 }
 
-/** How many of the newest sessions a cross-check reads: enough that a format
- *  change surfaces within a boot or two, few enough to cost nothing. */
+/** Enough that a format change surfaces within a boot or two. */
 const AUDIT_SAMPLE = 5;
 
-/** One thing somebody said, as the search index keeps it. */
 interface Said {
   role: "user" | "assistant";
-  /** The message's own stamp, ms — what names its turn on the chat surface. */
+  /** The message's own stamp, ms. */
   at: number;
   text: string;
 }
 
-/** What one file contributes, folded entry by entry. `at` is how many bytes of
- *  it produced this — a partial trailing line is left for the next scan. */
+/** `at` is how many bytes produced this; a partial trailing line waits for the next scan. */
 interface Parsed {
   id: string;
   cwd: string;
   created: number;
-  /** The name a session was given; the latest one wins, clears included. */
+  /** The latest name wins, clears included. */
   name?: string;
-  /** Its first user message, already clipped to a title. */
+  /** Already clipped to a title. */
   first?: string;
-  /** Said in the bytes *this* read covered — a resumed read appends. */
+  /** Said in the bytes *this* read covered; a resumed read appends. */
   said: Said[];
   at: number;
 }
@@ -102,28 +80,20 @@ interface IndexRow {
   parsed_bytes: number;
 }
 
-/** An index row on its way to the database, with what its read said and
- *  whether that read started at byte 0. */
 interface Written extends IndexRow {
   said: Said[];
+  /** The read started at byte 0. */
   whole: boolean;
 }
 
-/** The name a session was given, else its first message. Two arguments rather
- *  than a row, because the stored row and the parsed one spell the second one
- *  differently and an object would silently accept either. */
 const titleOf = (name?: string | null, first?: string | null): string | undefined =>
   name || first || undefined;
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-/** What a search may find: what the person said and what the agent answered.
- *  A reply that calls a tool is work in progress, not a reply (events.ts
- *  `toChatTurns`) — its text is a step, and steps are not indexed; neither is
- *  thinking, a tool result, or a system input. `clean` takes off what was
- *  written for the model rather than said — the speaker header a channel
- *  prefixes (core/identity.ts), which as text would make "operator" hit every
- *  session the workbench ever opened. */
+/** A reply that calls a tool is a step, not a reply (events.ts), and steps are
+ *  not indexed. `clean` takes off the speaker header (core/identity.ts), which
+ *  as text would make "operator" hit every session. */
 function saidIn(
   message: PiMessage | undefined,
   entryAt: string | undefined,
@@ -137,20 +107,15 @@ function saidIn(
   return { role: message.role, at: Number.isFinite(at) ? at : 0, text };
 }
 
-/**
- * One entry folded into what a listing needs. Three answers, not two:
- * `undefined` is "no header yet" (blank and unparseable lines before it are
- * skipped, as Pi's own reader does), `null` is "not a session file" — a first
- * entry that is not a session header — and anything else is the state so far.
- */
+/** `undefined` is "no header yet" (leading junk is skipped, as Pi's reader
+ *  does), `null` is "not a session file". */
 function fold(
   acc: Parsed | undefined,
   line: string,
   clean: (text: string) => string,
 ): Parsed | undefined | null {
-  // The bulk of a transcript is entries this has no use for — tool results,
-  // model changes, compaction — each longer than this file. Two substring tests
-  // say whether a line could matter, at a fraction of parsing one that does not.
+  // The bulk of a transcript is tool results; two substring tests cost a
+  // fraction of parsing one.
   if (acc && !line.includes('"message"') && !line.includes('"session_info"')) return acc;
   let entry: Record<string, unknown> | undefined;
   try {
@@ -172,25 +137,24 @@ function fold(
     const said = saidIn(message, str(entry.timestamp), clean);
     if (!said) return acc;
     acc.said.push(said);
-    // The title keeps the header the index drops: every surface reads it back
-    // through core/identity.ts, and a second rule here would be a second rule.
+    // The title keeps the header the index drops; surfaces read it back
+    // through core/identity.ts.
     if (acc.first || said.role !== "user") return acc;
     return { ...acc, first: textOf(message?.content).trim().slice(0, SESSION_TITLE_MAX) };
   }
   return acc;
 }
 
-/** Hits a search answers with at most: a picker, not a results page. */
+/** A picker, not a results page. */
 const SEARCH_LIMIT = 8;
 
-/** Characters a snippet runs to. A trigram token is one character, so FTS's
- *  `snippet()` is asked for its ceiling of 64 tokens — the default 12 fits one
- *  word and its neighbours — and the LIKE path centres the same span itself. */
+/** A trigram token is one character, so `snippet()` is asked for its ceiling
+ *  of 64 tokens; the default 12 fits one word. */
 const SNIPPET_CHARS = 64;
 
-/** The match and its neighbourhood, delimited like `snippet()` does it
- *  (\u0001 … \u0002, `…` for a cut), so a surface draws one shape for both
- *  paths. Case folds ASCII only — LIKE found the row by the same rule. */
+/** Delimited like `snippet()` (\u0001 … \u0002, `…` for a cut), so a surface
+ *  draws one shape for both paths. ASCII case folding: LIKE found the row by
+ *  the same rule. */
 function around(text: string, query: string): string {
   const hit = text.toLowerCase().indexOf(query.toLowerCase());
   if (hit < 0) return text.slice(0, SNIPPET_CHARS);
@@ -210,7 +174,6 @@ interface FtsRow {
   text?: string;
 }
 
-/** The listing Pier runs on: Pi's session directory, remembered in pier.db. */
 export class IndexedListing implements SessionListing {
   #db?: DatabaseSync;
   #statements?: (sql: string) => StatementSync;
@@ -218,23 +181,18 @@ export class IndexedListing implements SessionListing {
   constructor(
     private readonly dir: string = join(defaultAgentDir(), "sessions"),
     db?: DatabaseSync,
-    /** What to take off a message before it is indexed as said. Handed in
-     *  rather than imported: the header rule is core's (identity.ts), and
-     *  agent/ does not import core at runtime — main.ts, which imports both,
-     *  joins them. */
+    /** Handed in rather than imported: the header rule is core's, and agent/
+     *  does not import core at runtime. */
     private readonly clean: (text: string) => string = (text) => text,
   ) {
     this.#db = db;
   }
 
-  /** Opened on the first scan rather than in the constructor: building an
-   *  agent factory must not open the instance database — tests build bare ones
-   *  and never list. */
+  /** Opened on the first scan: building a factory must not open the database. */
   #store(): DatabaseSync {
     return (this.#db ??= pierDb());
   }
 
-  /** The scan's three statements, compiled on the first scan and not again. */
   #sql(): (sql: string) => StatementSync {
     return (this.#statements ??= statements(this.#store()));
   }
@@ -262,11 +220,8 @@ export class IndexedListing implements SessionListing {
         });
         continue;
       }
-      // Only a file that *grew* can be resumed mid-way. Anything else is read
-      // whole — new, truncated, or rewritten. Rewritten includes the same
-      // length with a different mtime, which resuming would answer with the
-      // old derived data stamped with the new mtime: a row that then matches on
-      // every later scan and is never corrected.
+      // Only a file that grew can be resumed. Same length with a new mtime is
+      // rewritten, and resuming would stamp old data with the new mtime forever.
       const resumed = row !== undefined && file.size > row.size;
       const parsed = await this.#read(
         file.path,
@@ -310,14 +265,9 @@ export class IndexedListing implements SessionListing {
     return records.sort((a, b) => b.modified - a.modified);
   }
 
-  /**
-   * The reason this file is allowed to exist: it parses Pi's transcripts
-   * itself, and nothing but a comparison keeps it honest when that format
-   * moves. Reads the newest few both ways; a disagreement is logged with both
-   * answers and the index row is dropped, so the next scan reads that file
-   * whole rather than trusting what this one derived. Returns how many
-   * disagreed — off the interactive path, never blocking a boot.
-   */
+  /** This file parses Pi's transcripts itself, and only a comparison keeps it
+   *  honest when the format moves. A disagreement drops the index row, so the
+   *  next scan reads that file whole. */
   async audit(native: () => Promise<NativeInfo[]>): Promise<number> {
     const sample = (await this.scan()).slice(0, AUDIT_SAMPLE);
     if (!sample.length) return 0;
@@ -342,17 +292,12 @@ export class IndexedListing implements SessionListing {
     return stale.length;
   }
 
-  /**
-   * Sessions by what was said in them, best hit first and one per session.
-   * Three characters or more is a trigram phrase, ranked by FTS; shorter is a
-   * substring scan, newest first — the tokenizer has nothing to match under
-   * three, and a two-character query is what a CJK word often is. Counted in
-   * code points: the tokenizer counts characters, not UTF-16 units.
-   */
+  /** Under three code points the trigram tokenizer has nothing to match, and a
+   *  two-character query is what a CJK word often is: substring scan instead. */
   search(query: string, limit = SEARCH_LIMIT): SearchHit[] {
     const sql = this.#sql();
     const rows = [...query].length >= 3
-      // A quoted phrase: the query is a string to find, never FTS syntax.
+      // Quoted: the query is a string to find, never FTS syntax.
       ? sql(
         `SELECT session_id, role, at, snippet(session_fts, 0, char(1), char(2), '…', ${SNIPPET_CHARS}) AS snippet
          FROM session_fts WHERE text MATCH ? ORDER BY bm25(session_fts), at DESC`,
@@ -362,8 +307,7 @@ export class IndexedListing implements SessionListing {
       ).iterate(`%${query.replaceAll(/[\\%_]/g, "\\$&")}%`);
     const hits: SearchHit[] = [];
     const seen = new Set<string>();
-    // Walked, not fetched: a chatty session has hundreds of rows for one hit,
-    // and the walk stops at the first row of the `limit`th session.
+    // Walked, not fetched: a chatty session has hundreds of rows for one hit.
     for (const row of rows as Iterable<FtsRow>) {
       if (seen.has(row.session_id)) continue;
       seen.add(row.session_id);
@@ -378,8 +322,6 @@ export class IndexedListing implements SessionListing {
     return hits;
   }
 
-  /** Every session file with its size and mtime — the only syscalls a scan
-   *  where nothing changed makes. */
   async #files(): Promise<{ path: string; size: number; modified: number }[]> {
     const entries = await fs.readdir(this.dir, { withFileTypes: true }).catch(() => []);
     const dirs = entries.filter((e) => e.isDirectory() || e.isSymbolicLink());
@@ -397,7 +339,6 @@ export class IndexedListing implements SessionListing {
     return found.flat().filter((f): f is { path: string; size: number; modified: number } => !!f);
   }
 
-  /** From `from.at`, or from the start when there is nothing to resume. */
   async #read(path: string, from?: Parsed): Promise<Parsed | null> {
     let acc = from;
     let at = from?.at ?? 0;
@@ -415,18 +356,16 @@ export class IndexedListing implements SessionListing {
         }
       }
     } catch (err) {
-      // A file that cannot be read is left out of this listing and out of the
-      // index, so the next scan tries it again rather than remembering a gap.
+      // Left out of the index too, so the next scan tries it again.
       log.warn(`session file ${path} could not be read`, err);
       return null;
     }
     return acc ? { ...acc, at } : null;
   }
 
-  /** One transaction, after all reading: a half-written index would hand the
-   *  next scan a size it never parsed to — or a search rows the index row does
-   *  not account for. A file read whole drops what it had said before, since
-   *  its bytes are all being said again; a resumed read only adds. */
+  /** One transaction after all reading: a half-written index would hand the
+   *  next scan a size it never parsed to. A whole read replaces what the file
+   *  had said; a resumed read only adds. */
   #save(rows: Written[], gone: string[]): void {
     if (!rows.length && !gone.length) return;
     const db = this.#store();

@@ -1,7 +1,6 @@
-// Pure Pi-event → SessionEventPayload translation. Structurally typed on
-// purpose: no @earendil-works/pi-* imports, so it stays unit-testable without Pi
-// and Pi types never leak past the seam. The golden-table test in
-// events.test.ts is the mapping's spec; extend types.ts before adding events.
+// Pure Pi-event → SessionEventPayload translation. Structurally typed: no Pi
+// imports, so it is unit-testable without Pi and Pi types never leak past the
+// seam. The golden table in events.test.ts is the mapping's spec.
 
 import { isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
 import type {
@@ -13,7 +12,6 @@ import type {
   TurnMeta,
 } from "../core/types.js";
 
-/** Union of the assistant content blocks we care about (text/thinking/toolCall). */
 interface TextPart {
   type: string;
   text?: string;
@@ -48,9 +46,7 @@ export interface PiEvent {
   toolName?: string;
   args?: unknown;
   isError?: boolean;
-  // One field, two events: a tool's result content, and compaction's token
-  // counts. Structural typing is the seam's whole trick here — Pi's own union
-  // keeps them apart, and widening the mirror is cheaper than a second one.
+  // One field, two events: a tool's result content, and compaction's token counts.
   result?: { content?: TextPart[]; tokensBefore?: number; estimatedTokensAfter?: number };
   errorMessage?: string;
   steering?: readonly string[];
@@ -59,9 +55,7 @@ export interface PiEvent {
   willRetry?: boolean;
 }
 
-/** An assistant message that calls a tool is work in progress, not a reply —
- *  the rule `toChatTurns` rebuilds a transcript by, and agent/listing.ts
- *  indexes one by. */
+/** An assistant message that calls a tool is work in progress, not a reply. */
 export const hasToolCalls = (message: PiMessage | undefined): boolean =>
   Array.isArray(message?.content) && message.content.some((part) => part.type === "toolCall");
 
@@ -85,9 +79,7 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
     typeof origin.runId !== "string" ||
     (origin.sourceSessionId !== null && typeof origin.sourceSessionId !== "string")
   ) return null;
-  // Rebuilt around a checked `source` rather than cast through it: a
-  // half-valid one drawn by the card is an `undefined` in a chip, which reads
-  // as a bug in the card rather than as bad metadata.
+  // A half-valid `source` drawn by the card is an `undefined` in a chip.
   const source = inputSource(raw);
   const shape = { ...origin, ...(source ? { source } : {}) };
   if (origin.kind === "task-delegation" || origin.kind === "task-callback") {
@@ -102,9 +94,6 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   return null;
 }
 
-/** What produced a system input, as read back off disk: the name is the whole
- *  point of it, the model and the effort are each kept only if they are the
- *  shape they claim to be (core/types.ts). */
 function inputSource(value: unknown): SystemInputSource | undefined {
   if (!value || typeof value !== "object") return undefined;
   const { taskName, model, thinking } = value as Record<string, unknown>;
@@ -119,11 +108,8 @@ function inputSource(value: unknown): SystemInputSource | undefined {
   };
 }
 
-/** The assistant message that *is* a reply: nothing left to run, and the model
- *  stopped of its own accord. `length`, `aborted` and `error` are Pi's to
- *  recover from — a truncated answer is compacted and asked again without a new
- *  user message — so they stay on the `agent_end` path they have always taken,
- *  and a stopReason Pi never stamped stays there too. */
+/** `length`, `aborted` and `error` are Pi's to recover from (a truncated answer
+ *  is compacted and asked again), so they stay on the `agent_end` path. */
 const isAnswer = (m: PiMessage | undefined): boolean =>
   m?.role === "assistant" && m.stopReason === "stop" && !hasToolCalls(m);
 
@@ -135,17 +121,9 @@ function lastAssistant(messages: PiMessage[] | undefined): PiMessage | undefined
   return undefined;
 }
 
-/**
- * Completion metadata for the assistant message at `index` (bubble hover
- * hints). `completedAt` defaults to the message's own timestamp — Pi stamps
- * that at stream start, so callers with a real clock (live turn-end) pass
- * their own; history accepts the approximation.
- *
- * `tokens` is the context size at that point, not a sum: each assistant
- * message's `totalTokens` already covers the whole request (prompt + cache +
- * output), so adding them up double-counts the context on every turn. Pi
- * itself reads context usage off the last assistant message the same way.
- */
+/** Pi stamps a message's timestamp at stream start, so a live turn-end passes
+ *  its own `completedAt`. `tokens` is not a sum: each `totalTokens` already
+ *  covers the whole request. */
 export function turnMetaAt(
   messages: PiMessage[],
   index: number,
@@ -173,11 +151,8 @@ export function turnMetaAt(
   return { completedAt: end, durationMs: Math.max(0, end - started), tokens };
 }
 
-/**
- * Rebuild the renderable transcript: user/assistant turns plus the activity
- * (thinking + tool calls) that preceded each assistant answer. This is what
- * makes a page reload show the real step counts instead of restarting at zero.
- */
+/** The renderable transcript, activity included, so a reload shows the same
+ *  step counts the live stream built. */
 export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
   let steps: ActivityStep[] = []; // activity seen since the last emitted turn
@@ -194,9 +169,8 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     const turn: ChatTurn = { role, text };
     if (meta) turn.meta = meta;
     if (origin) turn.origin = origin;
-    // An assistant turn already says when it finished; these two would have no
-    // time at all after a reload, which is the one place the live stream's own
-    // stamp is gone.
+    // An assistant turn's meta says when it finished; user and system turns
+    // would have no time at all after a reload.
     if (at !== undefined && role !== "assistant") turn.at = at;
     if (steps.length) {
       turn.steps = steps;
@@ -209,8 +183,7 @@ export function toChatTurns(messages: PiMessage[]): ChatTurn[] {
     if (m.role === "toolResult") {
       const step = pendingTools.get(m.toolCallId ?? "");
       if (step) {
-        // Capped where the transcript is rebuilt, not where it is rendered: a
-        // long session's tool results are megabytes nobody ever sees.
+        // Capped here: a long session's tool results are megabytes nobody sees.
         const output = textOf(m.content);
         step.output = output.length > MAX_STEP_OUTPUT ? output.slice(0, MAX_STEP_OUTPUT) + "…" : output;
         step.isError = m.isError ?? false;
@@ -272,28 +245,19 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
   switch (e.type) {
     case "agent_start":
       return [{ type: "state", state: "streaming" }, { type: "turn-start" }];
-    // A turn ends where Pi says an answer landed, one per assistant message —
-    // not per run. Pi's agent loop drains a queued follow-up *inside* the run
-    // (`getFollowUpMessages` → `continue`) and emits a single agent_end for all
-    // of it, so a run that answered twice used to deliver only its last answer:
-    // no bubble, no message to the chat, no push for the first one (§5b).
+    // One turn-end per answer, not per run: Pi drains a queued follow-up
+    // inside the run and emits a single agent_end for all of it.
     case "turn_end":
       return isAnswer(e.message) ? [{ type: "turn-end", text: textOf(e.message?.content) }] : [];
     case "agent_end": {
-      // Pi retries a retryable provider error itself and emits one agent_end
-      // per attempt. Only the last one ends the turn: translating the others
-      // posts a reply and an error per attempt for a failure Pi is still
-      // recovering from, and an `idle` the session is not in.
+      // Pi emits one agent_end per retry attempt; only the last ends the turn.
       if (e.willRetry) return [];
       const final = lastAssistant(e.messages);
-      // An answer ended its own turn above; ending it again here posts the
-      // reply twice. What is left is every way a run ends *without* one: a tool
-      // call cut short, an error, an abort, a model that never spoke.
+      // An answer ended its own turn above; what is left is every way a run
+      // ends without one.
       if (isAnswer(final)) return [];
-      // A turn can end without the model ever answering. Carried twice on
-      // purpose: on turn-end because it is *how this turn ended*, which is what
-      // a task run settles on (tasks/agent.ts), and as the error event that is
-      // already every chat surface's failure path (core/router.ts).
+      // Carried twice: on turn-end because it is how the turn ended (what a
+      // task run settles on), and as the error event every chat surface reports.
       const failure = final?.stopReason === "error"
         ? final.errorMessage || "unknown agent error"
         : undefined;
@@ -303,30 +267,19 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       if (failure) out.push({ type: "error", message: failure });
       return out;
     }
-    // Pi's own "the run-active flag is now false": `_emitAgentSettled` clears
-    // `isStreaming` one statement before emitting this, and reaches it from the
-    // finally of the prompt — many microtasks after the last `agent_end`. Idle
-    // rides on it rather than on the turn ending, so the seam's `state` getter
-    // and this stream stop being two derivations of one fact (§5): a waiter the
-    // idle wakes now re-reads `state` as idle instead of re-arming for an event
-    // that is already spent. It is also the truthful moment — Pi's
-    // auto-compaction and queued continuations run past `agent_end`.
+    // Pi clears `isStreaming` one statement before emitting this, many
+    // microtasks after the last `agent_end`; idle rides on it so the `state`
+    // getter and this stream agree. Auto-compaction runs past `agent_end` too.
     case "agent_settled":
       return [{ type: "state", state: "idle" }];
     case "message_start": {
-      // Pi emits this for every message entering the context; the user ones are
-      // what a client can't know about (queued/steered messages, IM traffic).
       const m = e.message;
       if (!m) return [];
       if (m.role === "assistant") return [{ type: "text-start" }];
       const origin = systemOrigin(m);
       if (!origin && m.role !== "user") return [];
-      // An input entering the context opens a turn, whichever way it got in: the
-      // prompt that started the run — already announced by `agent_start`, and
-      // opening the same turn twice says nothing new — and the message Pi drains
-      // *mid-run*, whose turn `agent_start` will never announce. It rides on the
-      // message rather than on its text, because an attachment with no caption
-      // is still a turn somebody is waiting on.
+      // A message Pi drains mid-run opens a turn `agent_start` never announces.
+      // On the message, not its text: an attachment with no caption is still a turn.
       const out: SessionEventPayload[] = [{ type: "turn-start" }];
       const text = textOf(m.content);
       if (text) out.push(origin ? { type: "system-input", text, origin } : { type: "user-message", text });
@@ -360,10 +313,8 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
         },
       ];
     case "compaction_end": {
-      // The only trace compaction leaves anywhere: Pi replaces the summarized
-      // entries with a `compactionSummary` message, which `toChatTurns` above
-      // renders nothing for — so without this event the button's effect is
-      // invisible and the automatic one is invisible twice over (§5b).
+      // The only trace compaction leaves: `toChatTurns` renders nothing for the
+      // summary message (§5b).
       const r = e.result;
       if (r && typeof r.tokensBefore === "number") {
         return [{
@@ -372,9 +323,8 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
           after: r.estimatedTokensAfter ?? r.tokensBefore,
         }];
       }
-      // No result means the context was *not* shrunk — cancelled, or the
-      // summarization call failed. A manual compact reports through its route
-      // as well; an automatic one has no route, and this is all it has.
+      // No result: cancelled or failed. An automatic compaction has no route
+      // to report through; this is all it has.
       return [{ type: "error", message: e.errorMessage ?? "compaction cancelled" }];
     }
     case "tool_execution_end":

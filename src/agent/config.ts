@@ -25,14 +25,11 @@ import type {
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
 // settings.json is on the list for two fields: the default model and its
-// reasoning effort. Everything else in it is machine-local and survives an
-// import untouched.
+// reasoning effort. Everything else in it is machine-local.
 const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
 const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
-/** Pier owns the Pi runtime dir: config lives in the syncable `~/.pier/pi`
- * repo, not `~/.pi`. main.ts exports this as PI_CODING_AGENT_DIR so the SDK's
- * own path resolution (auth.json, sessions, bin) lands in the same place. */
+/** Pier owns the Pi runtime dir; main.ts exports it as PI_CODING_AGENT_DIR. */
 export const defaultAgentDir = (): string =>
   process.env.PI_CODING_AGENT_DIR ?? pierPath("pi");
 
@@ -58,10 +55,8 @@ export interface ProviderStructure {
   models?: ModelCapability[];
 }
 
-/** Pi reads the two highest levels off the model's own map, so a ceiling is
- *  read back from it and written into it — leaving the rest of a hand-written
- *  map (an `off: null` that forbids thinking-off) alone, because the Console
- *  does not offer it and therefore may not drop it. */
+/** Pi reads the two highest levels off the model's own map. The rest of a
+ *  hand-written map (an `off: null`) is left alone: the Console does not offer it. */
 const effortOf = (map: Record<string, unknown> | undefined): ModelEffort | undefined =>
   typeof map?.max === "string" ? "max" : typeof map?.xhigh === "string" ? "xhigh" : undefined;
 
@@ -360,12 +355,8 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
   }
 }
 
-/**
- * Relative paths of all files under root, bounded depth, sorted; [] if absent.
- * Symlinks are followed (skills and extensions are routinely linked in from a
- * checkout elsewhere) and everything reached through one is flagged, so the UI
- * can say where it really came from. The depth bound is also the cycle guard.
- */
+/** Symlinks are followed (skills are routinely linked in from elsewhere) and
+ *  flagged; the depth bound is also the cycle guard. */
 async function listDir(
   root: string,
   prefix = "",

@@ -1,11 +1,8 @@
-// Provider credentials — what Pi kept in <agentDir>/auth.json, and the
-// literal API keys models.json used to carry — at rest in pier.db, sealed by
-// Secrets. Implements pi-ai's CredentialStore contract structurally (shapes
-// mirrored below, no SDK import: only pi.ts names SDK modules), so
-// ModelRuntime reads through here and an OAuth refresh writes the rotated
-// token back through here instead of a file. A stored credential wins over a
-// models.json apiKey in pi-ai's resolution order, which is what lets the
-// sweep below leave models.json purely structural — and safely syncable.
+// Provider credentials at rest in pier.db, sealed by Secrets. Implements
+// pi-ai's CredentialStore structurally (no SDK import), so an OAuth refresh
+// writes back here instead of a file. A stored credential wins over a
+// models.json apiKey in pi-ai's resolution order, which is what lets the sweep
+// leave models.json purely structural and syncable.
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,7 +14,7 @@ import { defaultAgentDir } from "./config.js";
 
 const log = logger("credentials");
 
-/** Mirror of pi-ai's Credential — the one shape an auth.json entry had. */
+/** Mirror of pi-ai's Credential. */
 export type ProviderCredential =
   | { type: "api_key"; key?: string; env?: Record<string, string> }
   | ({ type: "oauth"; refresh: string; access: string; expires: number } & Record<string, unknown>);
@@ -43,9 +40,7 @@ export class CredentialStore {
     private readonly agentDir: string = defaultAgentDir(),
   ) {}
 
-  /** Locked Secrets must fail a session open loudly, with the reason — not
-   *  surface later as "provider is not configured". Called by pi.ts before
-   *  every open; encrypt() throws the `secrets locked: ...` error we want. */
+  /** encrypt() throws the `secrets locked: ...` error a session open must fail with. */
   assertUnlocked(): void {
     if (this.secrets.state === "locked") this.secrets.encrypt("");
   }
@@ -134,10 +129,8 @@ export class CredentialStore {
       .run(providerId, this.secrets.encrypt(JSON.stringify(credential)));
   }
 
-  /** One-time move of <agentDir>/auth.json into the database. Lazy because
-   *  sealing needs an unlocked Secrets; retried until it succeeds (the flag is
-   *  set only then, and #put is an idempotent upsert). The file is renamed,
-   *  never deleted: auth.json.imported is the operator's receipt and way back. */
+  /** Lazy: sealing needs an unlocked Secrets, and #put is an idempotent upsert,
+   *  so this retries until it succeeds. The file is renamed, never deleted. */
   #ensureImported(): void {
     if (this.#imported) return;
     const path = join(this.agentDir, "auth.json");
@@ -162,14 +155,9 @@ export class CredentialStore {
     this.#imported = true;
   }
 
-  /**
-   * models.json apiKeys are secrets in a file that should be pure structure
-   * (it is what a config repo syncs between hosts). Literal keys move into the
-   * database; `!command` and `$ENV` references are already not plaintext and
-   * stay — the SDK resolves those forms itself, and a sealed copy of a
-   * reference would freeze its meaning. The pre-sweep file is kept whole as
-   * models.json.imported: keys leave the file only with a receipt.
-   */
+  /** models.json is what a config repo syncs, so literal keys move into the
+   *  database. `!command` and `$ENV` references stay: a sealed copy would
+   *  freeze their meaning. The pre-sweep file is kept as models.json.imported. */
   #sweepModelsJson(): void {
     const path = join(this.agentDir, "models.json");
     if (!existsSync(path)) return;
