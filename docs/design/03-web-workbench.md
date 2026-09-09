@@ -109,12 +109,13 @@ per-turn Activity groups):
   sessions remain available through pagination and the search palette. The New
   session directory picker offers the listing's distinct directories. A labeled
   New session button and a separate magnifier button share one row below the
-  brand. Search keeps its accessible name and the existing shortcut hover hint.
-  Status dots appear after the title only
+  brand, using matching filled button surfaces. Search keeps its accessible name
+  and the existing shortcut hover hint. Status dots appear after the title only
   when needed; idle sessions reclaim their width. Title left edges stay aligned,
-  while status changes may alter the trailing truncation. Action buttons retain
-  their space on hover, appear on keyboard focus and remain visible on touch;
-  list refreshes retain
+  while status and action changes may alter trailing truncation. Action buttons
+  take no space until desktop hover or keyboard focus reveals them. On touch,
+  the current session keeps its action visible; other rows reclaim that width.
+  List refreshes retain
   the focused session control, and Load more focuses the first added session.
   The mobile drawer removes hidden controls from the tab order, contains focus
   while open, and restores its toggle on dismissal; Escape dismisses it before

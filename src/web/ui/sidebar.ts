@@ -92,8 +92,8 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
 
-/** Reserved action space keeps titles still on hover; focus and touch reveal it. */
-const HOVER_BTN = "session-more flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
+/** Actions take space only while revealed; touch keeps the current row's reachable. */
+const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";
 
 /**
  * Waiting for *you*, which is narrower than `unread`.
@@ -248,7 +248,9 @@ export function renderSessions(): void {
   );
   if (focusId) {
     const row = [...sessionList.querySelectorAll<HTMLElement>("[data-session-id]")].find((el) => el.dataset.sessionId === focusId);
-    row?.querySelector<HTMLElement>(focusAction)?.focus({ preventScroll: true });
+    // Focus the row first: its action is hidden until :focus-within reveals it.
+    row?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
+    if (focusAction === ".session-more") row?.querySelector<HTMLElement>(focusAction)?.focus({ preventScroll: true });
   }
   if (archiveDialog.open) renderArchive();
 }
