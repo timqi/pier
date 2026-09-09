@@ -16,6 +16,10 @@ export const pierPath = (...parts: string[]): string => join(PIER_HOME, ...parts
  *  the boards PIER_HOME also holds. */
 export const PIER_DB = pierPath("db", "pier.db");
 
+/** At the root of PIER_HOME: the claim is the whole instance directory, not the
+ *  database (lock.ts). */
+export const PIER_LOCK = pierPath("pier.lock");
+
 /** `PI_CODING_AGENT_DIR` is an operator override — unless it equals
  *  `PIER_AGENT_DIR`, the value Pier itself set: then a Pier spawned from inside
  *  another inherited it, and a leak is not an instruction. */

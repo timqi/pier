@@ -50,7 +50,8 @@ scheduled tasks, live observability, and static Show pages.
   file, named in docs/architecture.md
 - **One writer per instance directory.** Pier's own process is the only writer
   of its Pi session directory — no external `pi` CLI, no second Pier on the
-  same `~/.pier` — so in-process knowledge of what changed may be trusted.
+  same `~/.pier`, enforced by a pid claim on `$PIER_HOME` taken before the
+  database opens — so in-process knowledge of what changed may be trusted.
 - Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
   Runtime dependencies never go sideways. The browser may import owner-defined
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only.

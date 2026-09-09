@@ -29,6 +29,7 @@ import { bundledInfo } from "./extensions/index.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
+import { acquireInstanceLock } from "./lock.js";
 import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
@@ -57,6 +58,18 @@ process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
 process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
 prependPath(process.env);
+
+// Before the database and before task recovery, which would mark the running
+// instance's queued and active runs interrupted; the port is discovered far too
+// late, and a second Pier on another port would never notice at all.
+const lock = acquireInstanceLock();
+if ("heldBy" in lock) {
+  log.error(`another Pier (pid ${lock.heldBy === null ? "unknown" : String(lock.heldBy)}) owns ${PIER_HOME} — refusing to start`);
+  process.exit(1);
+}
+// Every exit path at once: the drain and both shutdowns end in `process.exit`,
+// and the crash that skips this is what the stale-claim takeover is for.
+process.on("exit", lock.release);
 
 // A schema that cannot be migrated must stop the process before a port is open.
 const db = pierDb();

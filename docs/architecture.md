@@ -52,6 +52,7 @@ src/
                messages, command, service, store, tool, routes
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
+  lock.ts      the claim on the instance directory: one Pier per PIER_HOME
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   limits.ts    the numbers more than one area has to agree on
@@ -206,6 +207,11 @@ One line each; the reasoning is in the commit that made it.
   the same tools. Pier is not an extension manager.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
+- **One writer per instance directory**, enforced before the database opens:
+  `$PIER_HOME/pier.lock`, created `O_EXCL` with the pid in it, held for the
+  process's lifetime, taken over only when that pid is gone (`lock.ts`). A
+  second `pier serve` names the holder and exits 1 whatever port it was given;
+  the other commands claim nothing, since they run while Pier is up.
 - Pi session files own transcripts; one SQLite database owns everything else.
   One connection opened by `db.ts`; append-only migrations in one transaction,
   upgrades only, a newer database is refused. A store owns its queries, never

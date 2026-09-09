@@ -122,6 +122,11 @@ All three signal the installed service.
   `~/.pier/tools/bin` (first on every session's PATH); one sync at a time per
   machine.
 - `systemctl --user restart pier` and `pier update` are hard stops.
+- One Pier per `$PIER_HOME`: a start whose directory another live Pier holds
+  logs `another Pier (pid N) owns …` and exits before opening the database. Kept
+  under `Restart=always` on purpose — the service takes the directory back by
+  itself once the other process (usually a hand-typed `pier serve`) is gone, at
+  one refused start every `RestartSec=2` until then.
 
 ## Updating
 
