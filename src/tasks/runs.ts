@@ -5,9 +5,9 @@
 // caller — scheduler, tool, HTTP — enqueues through this one door.
 
 import { logger } from "../log.js";
-import { TaskCallbacks } from "./callbacks.js";
+import type { TaskCallbacks } from "./callbacks.js";
 import { newId } from "./definitions.js";
-import { TaskStore } from "./store.js";
+import type { TaskStore } from "./store.js";
 import type { CallbackMode, TaskDefinition, TaskRun } from "./types.js";
 
 const log = logger("tasks");
@@ -39,7 +39,8 @@ export class TaskRunQueue {
     private readonly changed: (run: TaskRun) => void,
   ) {}
 
-  enqueue(
+  /** Validate and persist only; callers may stage several runs in a transaction. */
+  prepare(
     definition: TaskDefinition,
     input: unknown,
     source: TaskRun["triggerSource"],
@@ -108,7 +109,15 @@ export class TaskRunQueue {
       finishedAt: overlapped ? now : null,
     };
     this.store.saveRun(run);
+    return run;
+  }
+
+  /** Publish and execute only after all records this run relies on committed. */
+  start(run: TaskRun): void {
     this.changed(run);
+    const { id, depth, triggerSource: source } = run;
+    const overlapped = run.skipReason === "overlap";
+    const definition = run.context.definition;
     // Why a run exists is the first question asked of a surprising one, and it
     // is answerable only here: the row keeps the ids, not the reason. A watch
     // probe queues on every interval and mostly matches nothing, so it says so
@@ -119,6 +128,5 @@ export class TaskRunQueue {
     else log.info(queued);
     if (run.state === "queued") this.execute(run);
     else if (run.callbackState === "pending") void this.callbacks.deliver(run);
-    return run;
   }
 }

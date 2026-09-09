@@ -56,12 +56,7 @@ export function registerTaskRoutes(
     const now = Date.now();
     const recent = c.req.query("scope") === "recent";
     const windowStart = now - 24 * 60 * 60 * 1000;
-    // "recent" is a superset of "active": a run still going is part of the
-    // last 24h no matter when it was queued, so it never drops a live run.
-    const runs = tasks.recentRuns(200).filter((run) =>
-      run.state === "queued" || run.state === "running" ||
-      (recent && run.queuedAt >= windowStart),
-    );
+    const runs = tasks.activityRuns(recent ? windowStart : undefined);
     const listed = await activity.factory.list();
     const byId = new Map(listed.map((session) => [session.id, session]));
     const linkedIds = new Set<string>();

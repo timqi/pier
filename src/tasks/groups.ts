@@ -3,12 +3,12 @@
 // members are cancelled, and the single aggregated callback that goes back.
 // Delivering it is the outbox's job; deciding it is this file's.
 
-import { Router } from "../core/router.js";
+import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runRef, runResultText } from "./callbacks.js";
 import { newId } from "./definitions.js";
 import { Outbox } from "./outbox.js";
-import { TaskStore } from "./store.js";
+import type { TaskStore } from "./store.js";
 import type { CallbackMode, GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
@@ -18,7 +18,8 @@ interface GroupHost {
   getRun(id: string): TaskRun;
   cancel(id: string): void;
   openDecisionId(runId: string): string | null;
-  startMember(taskId: string, groupId: string, callerSessionId: string, parentRunId: string | null): TaskRun;
+  prepareMember(taskId: string, groupId: string, callerSessionId: string, parentRunId: string | null): TaskRun;
+  startMember(run: TaskRun): void;
 }
 
 /** Core-owned fan-out join: members run detached, the group delivers one
@@ -31,7 +32,7 @@ export class TaskGroups {
     router: Router,
     private readonly host: GroupHost,
     private readonly changed: (group: TaskGroup) => void,
-    unreachable: (sessionId: string, what: string, why: string) => void,
+    private readonly unreachable: (sessionId: string, what: string, why: string) => void,
   ) {
     this.outbox = new Outbox<TaskGroup>(router, {
       id: (group) => group.id,
@@ -59,18 +60,19 @@ export class TaskGroups {
     callbackSessionId: string | null,
     callbackMode: CallbackMode,
   ): { group: TaskGroup; runs: TaskRun[] } {
-    const group = this.create(join, callerSessionId, callbackSessionId, callbackMode);
-    const runs: TaskRun[] = [];
-    try {
-      for (const definition of definitions) {
-        runs.push(this.host.startMember(definition.id, group.id, callerSessionId, parentRunId));
-      }
-    } catch (error) {
-      log.warn(`group ${group.id} rolled back after ${String(runs.length)} members`, error);
-      for (const run of runs) this.host.cancel(run.id);
-      throw error;
-    }
-    this.setMembers(group, runs.map((run) => run.id));
+    if (definitions.length < 2) throw new Error("a task group needs at least 2 members");
+    const { group, runs } = this.store.transact(() => {
+      const group = this.create(join, callerSessionId, callbackSessionId, callbackMode);
+      const runs = definitions.map((definition) =>
+        this.host.prepareMember(definition.id, group.id, callerSessionId, parentRunId));
+      group.memberRunIds = runs.map((run) => run.id);
+      this.store.saveGroup(group);
+      return { group, runs };
+    });
+    this.changed(group);
+    for (const run of runs) this.host.startMember(run);
+    // Skipped members do not pass through execution's settled hook.
+    this.evaluate(this.get(group.id));
     return { group: this.get(group.id), runs };
   }
 
@@ -90,7 +92,7 @@ export class TaskGroups {
     callbackSessionId: string | null,
     callbackMode: CallbackMode,
   ): TaskGroup {
-    const group: TaskGroup = {
+    return {
       id: newId(),
       join,
       invokedBySessionId,
@@ -105,14 +107,6 @@ export class TaskGroups {
       createdAt: Date.now(),
       finishedAt: null,
     };
-    this.store.saveGroup(group);
-    return group;
-  }
-
-  private setMembers(group: TaskGroup, runIds: string[]): void {
-    group.memberRunIds = runIds;
-    this.store.saveGroup(group);
-    this.changed(group);
   }
 
   private get(id: string): TaskGroup {
@@ -135,6 +129,19 @@ export class TaskGroups {
   }
 
   private evaluate(group: TaskGroup): void {
+    if (group.finishedAt !== null) return;
+    // Old versions could leave an empty group when admission failed. Retire
+    // that broken record without inventing a successful zero-member join.
+    if (group.memberRunIds.length === 0) {
+      group.finishedAt = Date.now();
+      group.callbackState = group.callbackSessionId ? "abandoned" : null;
+      group.callbackError = "group admission failed before its members were recorded";
+      this.store.saveGroup(group);
+      this.changed(group);
+      log.error(`group ${group.id}: ${group.callbackError}`);
+      if (group.callbackSessionId) this.unreachable(group.callbackSessionId, `task group ${group.id}`, group.callbackError);
+      return;
+    }
     const members = group.memberRunIds.map((id) => this.host.getRun(id));
     if (group.join === "first") {
       const winner = members.find((run) => isTerminal(run.state));

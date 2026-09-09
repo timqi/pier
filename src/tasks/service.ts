@@ -6,8 +6,8 @@
 // facade, so the HTTP routes and the task tool cannot drift apart.
 
 import type { AgentFactory, BackgroundRun } from "../core/types.js";
-import { EventHub } from "../core/hub.js";
-import { Router } from "../core/router.js";
+import type { EventHub } from "../core/hub.js";
+import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
 import { TaskCallbacks } from "./callbacks.js";
@@ -16,7 +16,7 @@ import { TaskExecution } from "./execution.js";
 import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
-import { TaskStore } from "./store.js";
+import type { TaskStore } from "./store.js";
 import { handleTaskTool } from "./tool.js";
 import type { CallbackMode, GroupJoinMode, RunPage, RunQuery, RunView, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
@@ -61,21 +61,22 @@ export class TaskService {
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, (runId, prompt, fromSessionId) =>
-      this.resume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }),
-      unreachable);
+      this.prepareResume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }),
+      unreachable, (run) => this.runs.start(run));
     this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },
       openDecisionId: (runId) => this.messages.openDecisionId(runId),
-      startMember: (taskId, groupId, callerSessionId, parentRunId) => this.run(taskId, null, "agent", parentRunId, {
+      prepareMember: (taskId, groupId, callerSessionId, parentRunId) => this.prepareRun(taskId, null, "agent", parentRunId, {
         invokedBySessionId: callerSessionId,
         sourceSessionId: callerSessionId,
         callbackSessionId: null,
         background: true,
         groupId,
       }),
+      startMember: (run) => this.runs.start(run),
     }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable);
     const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run));
     this.execution = new TaskExecution(store, this.definitions, this.callbacks, agent, {
@@ -232,8 +233,8 @@ export class TaskService {
     return this.store.queryRuns(query);
   }
 
-  recentRuns(limit = 100): TaskRun[] {
-    return this.store.listRecentRuns(limit);
+  activityRuns(since?: number): TaskRun[] {
+    return this.store.activityRuns(since);
   }
 
   recentMessages(since: number): TaskMessage[] {
@@ -267,12 +268,24 @@ export class TaskService {
     parentRunId: string | null = null,
     provenance: RunProvenance = {},
   ): TaskRun {
+    const run = this.prepareRun(taskId, input, source, parentRunId, provenance);
+    this.runs.start(run);
+    return run;
+  }
+
+  private prepareRun(
+    taskId: string,
+    input: unknown,
+    source: TriggerSource,
+    parentRunId: string | null,
+    provenance: RunProvenance,
+  ): TaskRun {
     this.refusePaused(parentRunId);
     const task = this.get(taskId);
     // `enabled:false` pauses scheduling only; manual and agent triggers still
     // run a paused task on demand. Archiving is the terminal state.
     if (task.archived) throw new Error("archived tasks cannot run");
-    return this.runs.enqueue(task, input, source, parentRunId, provenance);
+    return this.runs.prepare(task, input, source, parentRunId, provenance);
   }
 
   async waitForRun(id: string): Promise<TaskRun> {
@@ -349,6 +362,20 @@ export class TaskService {
     message: string,
     provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "background"> = {},
   ): TaskRun {
+    const { run, expired } = this.store.transact(() => ({
+      run: this.prepareResume(id, message, provenance),
+      expired: this.messages.expireDecisions(id, "superseded by a manual resume"),
+    }));
+    for (const message of expired) this.messages.changed(message);
+    this.runs.start(run);
+    return run;
+  }
+
+  private prepareResume(
+    id: string,
+    message: string,
+    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "background">,
+  ): TaskRun {
     this.refusePaused();
     const prior = this.getRun(id);
     if (!isTerminal(prior.state)) throw new Error("run must be terminal before resume");
@@ -356,8 +383,7 @@ export class TaskService {
       throw new Error("only persisted Agent runs can be resumed");
     }
     const prompt = requiredString(message, "message");
-    this.messages.expireDecisions(prior.id, "superseded by a manual resume");
-    return this.runs.enqueue(prior.context.definition, null, "agent", null, {
+    return this.runs.prepare(prior.context.definition, null, "agent", null, {
       ...provenance,
       sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId,
       targetSessionId: prior.targetSessionId,

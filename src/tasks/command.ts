@@ -9,6 +9,7 @@ import type { CommandResult } from "./types.js";
 const log = logger("tasks");
 
 const OUTPUT_LIMIT = 1024 * 1024;
+const KILL_GRACE_MS = 250;
 
 class CappedOutput {
   private readonly chunks: Buffer[] = [];
@@ -49,28 +50,43 @@ export function runBash(
     const stdout = new CappedOutput();
     const stderr = new CappedOutput();
     let settled = false;
-    const kill = (): void => {
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const kill = (signal: NodeJS.Signals): void => {
       if (!child.pid) return;
       try {
-        if (process.platform === "win32") child.kill("SIGTERM");
-        else process.kill(-child.pid, "SIGTERM");
-      } catch {
-        // The process may have exited between the state check and kill.
+        if (process.platform === "win32") child.kill(signal);
+        else process.kill(-child.pid, signal);
+      } catch (err) {
+        // ESRCH means the owned process group already exited.
+        if ((err as NodeJS.ErrnoException).code !== "ESRCH") log.warn(`run ${signal} failed: ${String(err)}`);
       }
     };
-    signal.addEventListener("abort", kill, { once: true });
+    const abort = (): void => {
+      kill("SIGTERM");
+      killTimer = setTimeout(() => kill("SIGKILL"), KILL_GRACE_MS);
+      killTimer.unref();
+    };
+    const cleanup = (): void => {
+      clearTimeout(killTimer);
+      signal.removeEventListener("abort", abort);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
     child.stdout.on("data", (chunk: Buffer) => stdout.add(chunk));
     child.stderr.on("data", (chunk: Buffer) => stderr.add(chunk));
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
-      signal.removeEventListener("abort", kill);
+      cleanup();
       reject(err);
     });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
-      signal.removeEventListener("abort", kill);
+      // A TERM trap may exit the shell while a descendant ignores TERM and
+      // has redirected its pipes. Closing the shell must not spare that group.
+      if (signal.aborted) kill("SIGKILL");
+      cleanup();
       resolve({
         exitCode: code,
         stdout: stdout.text(),

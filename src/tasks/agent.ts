@@ -6,13 +6,15 @@
 
 import type { AgentFactory, AgentSession } from "../core/types.js";
 import { quietLabel, splitReply } from "../core/reply.js";
-import { Router } from "../core/router.js";
+import type { Router } from "../core/router.js";
+import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
-import { TaskMessenger } from "./messages.js";
-import { TaskStore } from "./store.js";
+import type { TaskMessenger } from "./messages.js";
+import type { TaskStore } from "./store.js";
 import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
 
 const MAX_ACTIVE_AGENTS = 4;
+const log = logger("tasks");
 
 /** What a child cannot know unless told. Every session gets the chat-surface
  * contract (<pier>/AGENTS.md), task runs included — so the delegation prompt
@@ -52,11 +54,17 @@ export class AgentTaskRunner {
     signal: AbortSignal,
     start: () => void,
   ): Promise<TaskResult> {
-    await this.acquireSlot(run, signal);
-    try {
-      const session = await this.resolveSession(run, action);
-      return await this.withSession(session.id, async () => {
+    // Reserve reuse order before resolving the session: a slow resume must not
+    // let a later run pass it. Fresh runs each have their own queue key.
+    return this.withSession(run.targetSessionId ?? run.id, signal, async () => {
+      const reused = run.targetSessionId ? await this.resolveSession(run, action, signal) : undefined;
+      if (reused) await this.waitUntilIdle(reused, signal);
+      await this.acquireSlot(run, signal);
+      try {
+        const session = reused ?? await this.resolveSession(run, action, signal);
+        // A reused session may have become busy while we waited for a slot.
         await this.waitUntilIdle(session, signal);
+        signal.throwIfAborted();
         // Task requests come seconds apart — the 1h Anthropic cache-write premium
         // never earns its 2× back, so task runs use the 5m TTL. Set here, not in
         // resolveSession: this covers create, reuse and resume alike, on
@@ -93,21 +101,16 @@ export class AgentTaskRunner {
             failure = event.error;
           }
         });
-        // The race below also settles this attempt if Pi ignores the abort:
-        // a hung turn must not hold one of the 4 slots (and its waiters)
-        // forever — the same guard execution.ts gives task-type children.
-        let rejectAborted: (reason: Error) => void = () => {};
-        const abortedTurn = new Promise<never>((_, reject) => { rejectAborted = reject; });
-        abortedTurn.catch(() => {}); // handled via the race; never unhandled
+        // Cancel the SDK turn, but release our wait even if its abort hangs.
         const abort = (): void => {
-          void session.abort();
-          rejectAborted(new Error("cancelled"));
+          void Promise.resolve().then(() => session.abort())
+            .catch((error: unknown) => log.warn(`run ${run.id} session abort failed`, error));
         };
         signal.addEventListener("abort", abort, { once: true });
-        // A pre-aborted signal never fires the listener: check before the
-        // prompt starts or a cancelled run would hang until its timeout.
-        if (signal.aborted) throw new Error("cancelled");
         try {
+          // Pre-abort does not fire a newly registered listener; keep the check
+          // inside finally's scope so it also restores retention/subscriptions.
+          signal.throwIfAborted();
           const turn = session.systemInput(
             prompt,
             {
@@ -121,14 +124,14 @@ export class AgentTaskRunner {
           );
           await Promise.resolve();
           this.messages.deliverPendingControls(run);
-          await Promise.race([turn, abortedTurn]);
+          await this.untilAborted(turn, signal);
           if (signal.aborted) throw new Error("cancelled");
           // Before the fallback below: on a reused session that reads the
           // *previous* turn's answer back out of history and reports it as
           // this run's result.
           if (failure) throw new Error(failure);
           if (!text) {
-            const history = await session.history();
+            const history = await this.untilAborted(session.history(), signal);
             text = [...history].reverse().find((turn) => turn.role === "assistant")?.text ?? "";
           }
           // The chat contract is injected into task sessions too, so a child's
@@ -146,15 +149,16 @@ export class AgentTaskRunner {
           signal.removeEventListener("abort", abort);
           unsubscribe();
         }
-      });
-    } finally {
-      this.releaseSlot(run.id);
-    }
+      } finally {
+        this.releaseSlot(run.id);
+      }
+    });
   }
 
-  private async resolveSession(run: TaskRun, action: AgentTaskAction): Promise<AgentSession> {
+  private async resolveSession(run: TaskRun, action: AgentTaskAction, signal: AbortSignal): Promise<AgentSession> {
+    signal.throwIfAborted();
     if (run.targetSessionId) {
-      return this.router.ensure({ channelId: "task", conversationId: run.targetSessionId });
+      return this.untilAborted(this.router.ensure({ channelId: "task", conversationId: run.targetSessionId }), signal);
     }
     const policy = action.session;
     // Definitions stored before fork was removed still say `"fork"`. Refused by
@@ -167,7 +171,8 @@ export class AgentTaskRunner {
     }
     const cwd = policy.mode === "fresh"
       ? policy.cwd
-      : (await this.factory.find(policy.sessionId))?.cwd ?? "";
+      : (await this.untilAborted(this.factory.find(policy.sessionId), signal))?.cwd ?? "";
+    signal.throwIfAborted();
     if (!cwd) throw new Error("could not resolve child working directory");
     const opts = {
       cwd,
@@ -178,33 +183,48 @@ export class AgentTaskRunner {
         (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
       thinking: action.launch?.thinking,
     };
-    const session = await this.factory.create(opts);
-    run.targetSessionId = session.id;
-    run.context.sessionId = session.id;
-    run.context.cwd = cwd;
-    this.store.saveRun(run);
-    this.router.attach({ channelId: "task", conversationId: session.id }, session);
-    this.changed(run);
+    const opening = this.factory.create(opts).then(async (session) => {
+      // SDK creation cannot be cancelled. A late session still belongs to
+      // this run; read back its terminal row so delivery updates are preserved.
+      // Remember it on the live run too: cancellation's final save can race
+      // this callback before it finishes writing the terminal record.
+      run.targetSessionId = session.id;
+      run.context.sessionId = session.id;
+      run.context.cwd = cwd;
+      const owner = signal.aborted ? this.store.getRun(run.id) ?? run : run;
+      owner.targetSessionId = run.targetSessionId;
+      owner.context = run.context;
+      try {
+        this.store.saveRun(owner);
+        this.changed(owner);
+      } finally {
+        if (signal.aborted) await session.dispose();
+        else this.router.attach({ channelId: "task", conversationId: session.id }, session);
+      }
+      return session;
+    });
+    // A late rejection cannot reach execute's already-cancelled race.
+    void opening.catch((error: unknown) => {
+      if (signal.aborted) log.warn(`session creation for cancelled run ${run.id} failed`, error);
+    });
+    const session = await this.untilAborted(opening, signal);
+    signal.throwIfAborted();
     return session;
   }
 
   private async acquireSlot(run: TaskRun, signal: AbortSignal): Promise<void> {
     while (this.active.size >= MAX_ACTIVE_AGENTS) {
-      if (signal.aborted) throw new Error("cancelled");
-      await new Promise<void>((resolve, reject) => {
-        const wake = (): void => {
-          signal.removeEventListener("abort", abort);
-          this.slotWaiters.delete(wake);
-          resolve();
-        };
-        const abort = (): void => {
-          this.slotWaiters.delete(wake);
-          reject(new Error("cancelled"));
-        };
-        this.slotWaiters.add(wake);
-        signal.addEventListener("abort", abort, { once: true });
-      });
+      let wake = (): void => {};
+      try {
+        await this.untilAborted(new Promise<void>((resolve) => {
+          wake = resolve;
+          this.slotWaiters.add(wake);
+        }), signal);
+      } finally {
+        this.slotWaiters.delete(wake);
+      }
     }
+    signal.throwIfAborted();
     this.active.add(run.id);
   }
 
@@ -213,38 +233,54 @@ export class AgentTaskRunner {
     for (const wake of this.slotWaiters) wake();
   }
 
-  private async withSession<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  private async untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+    let abort = (): void => {};
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => reject(new Error("cancelled"));
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    });
+    try {
+      return await Promise.race([promise, cancelled]);
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+  }
+
+  private async withSession<T>(sessionId: string, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+    signal.throwIfAborted();
     const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
     let release = (): void => {};
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const tail = previous.then(() => gate);
     this.sessionTails.set(sessionId, tail);
-    await previous;
+    // Even if this waiter is cancelled, its tail still includes its predecessor.
+    // Only delete after that tail drains, or a new arrival could skip the queue.
+    void tail.then(() => {
+      if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);
+    });
     try {
+      await this.untilAborted(previous, signal);
+      signal.throwIfAborted();
       return await fn();
     } finally {
       release();
-      if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);
     }
   }
 
   private async waitUntilIdle(session: AgentSession, signal: AbortSignal): Promise<void> {
     // The session's own event stream is the only busy/idle signal — no polling.
     while (session.state === "streaming") {
-      if (signal.aborted) throw new Error("cancelled");
-      await new Promise<void>((resolve, reject) => {
-        const settle = (error?: Error): void => {
-          unsubscribe();
-          signal.removeEventListener("abort", onAbort);
-          if (error) reject(error);
-          else resolve();
-        };
-        const onAbort = (): void => settle(new Error("cancelled"));
-        const unsubscribe = session.subscribe((event) => {
-          if (event.type === "state" && event.state === "idle") settle();
-        });
-        signal.addEventListener("abort", onAbort, { once: true });
-      });
+      let unsubscribe = (): void => {};
+      try {
+        await this.untilAborted(new Promise<void>((resolve) => {
+          unsubscribe = session.subscribe((event) => {
+            if (event.type === "state" && event.state === "idle") resolve();
+          });
+        }), signal);
+      } finally {
+        unsubscribe();
+      }
     }
   }
 }

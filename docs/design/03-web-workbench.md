@@ -183,7 +183,9 @@ per-turn Activity groups):
 - **Console Activity**: active Session table plus a directed task dependency
   graph. Invocation edges are solid, callbacks dashed, and Subagent control or
   supervisor messages dotted; Session nodes open chat and run edges open Runs.
-  Active and last-24h scopes share the same task-run records.
+  Active and last-24h scopes include every queued or running task, regardless
+  of age or newer history. Last-24h adds up to 200 terminal runs, excluding
+  successful unmatched watch probes; that history limit never hides live work.
 - **Task communication**: detached task calls create live Background Run rows in
   the invoking chat, updated in place from `task-status` session events. Agent
   delegation and callback inputs are persisted Pi custom messages rendered as

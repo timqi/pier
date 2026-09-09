@@ -2,9 +2,9 @@
 // belongs to outbox.ts; this file owns the run vocabulary and the batching.
 
 import type { SystemInputSource } from "../core/types.js";
-import { Router } from "../core/router.js";
+import type { Router } from "../core/router.js";
 import { Outbox } from "./outbox.js";
-import { TaskStore } from "./store.js";
+import type { TaskStore } from "./store.js";
 import type { TaskCallback, TaskRun } from "./types.js";
 
 /** How a run is named to the session that gets its result: the run id, and the
@@ -30,7 +30,7 @@ export function runResultText(run: TaskRun): string {
   if (run.result?.type === "bash") result = run.result.stdout || run.result.stderr || `exit ${String(run.result.exitCode)}`;
   if (run.result?.type === "task") result = JSON.stringify(run.result.result);
   if (run.result?.type === "watch") result = "Watch condition did not match";
-  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated — task tool get run_id ${run.id} returns the full text]`;
+  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated — task tool recover run_id ${run.id} with a reason returns the full text]`;
   return result;
 }
 

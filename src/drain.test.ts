@@ -238,7 +238,7 @@ const processScript = `
   if (mode.startsWith("recover")) {
     const recovered = deferred();
     const complete = () => {
-      if (store.listRecentRuns().every(run => run.state === "interrupted" &&
+      if (store.queryRuns({ showUnmatched: true }).runs.every(run => run.state === "interrupted" &&
           (!run.callbackSessionId || run.callbackState === "delivered")) && store.listOpenGroups().length === 0) recovered.resolve();
     };
     const unsubscribe = hub.subscribeWorkspace(complete);
@@ -253,7 +253,7 @@ const processScript = `
       notes.push({ id: entry.conversationId, text: entry.note });
       return true;
     });
-    await send({ phase: "recovered", runs: store.listRecentRuns(), inputs, notes, attempted, ledger: ledger.list() });
+    await send({ phase: "recovered", runs: store.queryRuns({ showUnmatched: true }).runs, inputs, notes, attempted, ledger: ledger.list() });
   } else {
     tasks.start(60_000);
     const task = await tasks.create({ name: "worker", action: {
@@ -306,7 +306,7 @@ const processScript = `
       await tasks.waitForRun(child.id);
     }
     await draining;
-    await send({ phase: "drained", runs: store.listRecentRuns(), ledger: ledger.list() });
+    await send({ phase: "drained", runs: store.queryRuns({ showUnmatched: true }).runs, ledger: ledger.list() });
   }
   // Like main shutdown(false), do not cancel task runs at a drain deadline.
   tasks.pause();

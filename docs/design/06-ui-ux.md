@@ -70,6 +70,7 @@ show the final text as the reply without duplicating it in steps or leaving empt
 Live rendering, restored history, and reconnection replay must tell the same story.
 Aborted work retains readable unfinished text; errors, pending decisions, and states without
 a reply remain explicit. Visual simplicity must never make something that happened disappear.
+Activity history limits must not displace queued or running work from the live view.
 
 System notices use wide neutral panels with visible outlines, distinct from conversation bubbles.
 They prioritize the topic, especially on phones. Keep their bodies to four rendered

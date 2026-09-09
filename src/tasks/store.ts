@@ -4,7 +4,7 @@
 // its own handle — the schema is db.ts's migration list.
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
-import { pierDb, statements } from "../db.js";
+import { pierDb, statements, transact } from "../db.js";
 import type { RunPage, RunQuery, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -19,6 +19,11 @@ export class TaskStore {
 
   constructor(private readonly db: DatabaseSync = pierDb()) {
     this.sql = statements(db);
+  }
+
+  /** Commit related task records before publishing events or starting work. */
+  transact<T>(work: () => T): T {
+    return transact(this.db, work);
   }
 
   // Every table is one JSON column plus query columns; these two are the only
@@ -126,11 +131,19 @@ export class TaskStore {
     };
   }
 
-  listRecentRuns(limit = 100): TaskRun[] {
-    return this.#many(
-      "SELECT json FROM task_runs ORDER BY queued_at DESC LIMIT ?",
-      clamp(limit, 500),
+  /** Activity never limits live work; only its optional history is bounded. */
+  activityRuns(since?: number): TaskRun[] {
+    const active = this.#many<TaskRun>(
+      "SELECT json FROM task_runs WHERE state IN ('queued', 'running') ORDER BY queued_at DESC, id DESC",
     );
+    if (since === undefined) return active;
+    const recent = this.#many<TaskRun>(`
+      SELECT json FROM task_runs
+      WHERE state NOT IN ('queued', 'running') AND queued_at >= ?
+        AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
+      ORDER BY queued_at DESC, id DESC LIMIT 200
+    `, since);
+    return [...active, ...recent].sort((a, b) => b.queuedAt - a.queuedAt || b.id.localeCompare(a.id));
   }
 
   listRunsByRoot(rootRunId: string, limit = 100): TaskRun[] {

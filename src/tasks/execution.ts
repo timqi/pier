@@ -4,11 +4,11 @@
 // command.ts and agent.ts; this file owns the lifecycle they share.
 
 import { logger } from "../log.js";
-import { AgentTaskRunner } from "./agent.js";
-import { TaskCallbacks } from "./callbacks.js";
+import type { AgentTaskRunner } from "./agent.js";
+import type { TaskCallbacks } from "./callbacks.js";
 import { runBash } from "./command.js";
-import { TaskDefinitions } from "./definitions.js";
-import { TaskStore } from "./store.js";
+import type { TaskDefinitions } from "./definitions.js";
+import type { TaskStore } from "./store.js";
 import type { TaskResult, TaskRun } from "./types.js";
 
 const log = logger("tasks");
@@ -52,6 +52,7 @@ export class TaskExecution {
     let timedOut = false;
     let cause: unknown;
     const timeout = setTimeout(() => {
+      if (controller.signal.aborted) return;
       timedOut = true;
       controller.abort();
     }, run.context.definition.timeoutSeconds * 1000);
@@ -67,6 +68,7 @@ export class TaskExecution {
         else if (run.probe.exitCode !== 0) throw new Error(`watch probe exited ${String(run.probe.exitCode)}`);
       }
       if (run.matched !== false) run.result = await this.executeAction(run, controller.signal);
+      controller.signal.throwIfAborted();
       run.state = "succeeded";
       if (definition.trigger.type === "watch" && !run.resumedFromRunId && definition.trigger.mode === "once" && run.matched) {
         // As the definition's own creator: a one-shot watch retiring itself is
@@ -114,6 +116,7 @@ export class TaskExecution {
   }
 
   private async executeAction(run: TaskRun, signal: AbortSignal): Promise<TaskResult> {
+    signal.throwIfAborted();
     const action = run.context.definition.action;
     if (action.type === "bash") {
       this.markRunning(run);
@@ -145,6 +148,7 @@ export class TaskExecution {
         rejectWait(new Error("cancelled"));
       };
       signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
       try {
         const done = await Promise.race([this.host.waitForRun(child.id), aborted]);
         if (done.state !== "succeeded") throw new Error(`child run ${done.state}`);

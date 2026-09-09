@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -16,7 +16,7 @@ import type {
   SystemInputOrigin,
   ThinkingLevel,
 } from "../core/types.js";
-import { TaskCallbacks } from "./callbacks.js";
+import { runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
 import { TaskMessenger } from "./messages.js";
 import { registerTaskRoutes } from "./routes.js";
@@ -626,8 +626,8 @@ describe("task service", () => {
     expect(await service.tool({ operation: "models" }, "s1")).toEqual({ source: "menu", models: menu });
   });
 
-  it("caps a chatty result in run lists, but not in a single-run get", async () => {
-    const long = `start ${"x".repeat(3000)}`;
+  it("caps a chatty callback but recovers the full result", async () => {
+    const long = `start ${"x".repeat(9000)}`;
     const { service, session } = setup(fakeSession("s1", long));
     const task = await service.create({
       name: "chatty",
@@ -635,12 +635,10 @@ describe("task service", () => {
       action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Go" },
     });
     const run = await service.waitForRun(service.run(task.id).id);
-    const listed = await service.tool({ operation: "get", task_id: task.id }, "s1") as RunSummary[];
-    expect(listed[0]!.result).toMatchObject({ type: "agent" });
-    const listedText = (listed[0]!.result as { text: string }).text;
-    expect(listedText.length).toBeLessThan(2200);
-    expect(listedText).toContain(`get run_id ${run.id} for the full text`);
-    const single = await service.tool({ operation: "get", run_id: run.id }, "s1") as RunSummary;
+    const callback = runResultText(run);
+    expect(callback.length).toBeLessThan(8200);
+    expect(callback).toContain(`recover run_id ${run.id}`);
+    const single = await service.tool({ operation: "recover", run_id: run.id, reason: "callback text was truncated" }, "s1") as RunSummary;
     expect((single.result as { text: string }).text).toBe(long);
   });
 
@@ -864,7 +862,7 @@ describe("task service", () => {
     // transcript until the turn drains it. Re-sending it there is a duplicate.
     const busy = streamingRecipient("busy");
     const { cwd, service, store, router, hub } = setup(busy.session);
-    const messenger = new TaskMessenger(store, router, hub, () => { throw new Error("no resume"); }, () => {});
+    const messenger = new TaskMessenger(store, router, hub, () => { throw new Error("no resume"); }, () => {}, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("steered", task, now, {
@@ -900,6 +898,7 @@ describe("task service", () => {
       store, router, hub,
       () => { throw new Error("no resume"); },
       (...args) => told.push(args.join("|")),
+      () => {},
     );
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
@@ -966,6 +965,7 @@ describe("task service", () => {
       hub,
       () => { throw new Error("no resume"); },
       () => {},
+      () => {},
     );
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
@@ -996,6 +996,7 @@ describe("task service", () => {
       hub,
       () => { throw new Error("no resume in this test"); },
       (sessionId, what, why) => told.push(`${sessionId}|${what}|${why}`),
+      () => {},
     );
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
@@ -1236,6 +1237,126 @@ describe("task service", () => {
       : ["succeeded", "succeeded", "succeeded", "succeeded", "succeeded"]);
   });
 
+  it("leaves slots available to a fresh run behind four runs reusing one session", async () => {
+    const { cwd, service, session, factory } = setup(hangingSession("shared"));
+    onTestFinished(() => service.stop());
+    const reuse = await service.create({
+      name: "reuse", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
+    });
+    const runs = Array.from({ length: 4 }, () => service.run(reuse.id, null, "agent"));
+    await vi.waitFor(() => expect(session.systemInputs).toHaveLength(1));
+    vi.mocked(factory.create).mockResolvedValueOnce(fakeSession("independent"));
+    const fresh = await service.create({
+      name: "fresh", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Independent" },
+    });
+    const independent = service.run(fresh.id);
+    await vi.waitFor(() => expect(service.getRun(independent.id).state).toBe("succeeded"));
+    expect(runs.map((run) => service.getRun(run.id).state)).toEqual(["running", "queued", "queued", "queued"]);
+    for (const run of runs) {
+      await vi.waitFor(() => expect(service.getRun(run.id).state).toBe("running"));
+      await session.abort();
+      expect((await service.waitForRun(run.id)).state).toBe("succeeded");
+    }
+    expect(session.systemInputs.map((input) => input.origin)).toEqual(runs.map((run) =>
+      expect.objectContaining({ runId: run.id })));
+  });
+
+  it("cancels a session waiter promptly without letting later arrivals pass its predecessor", async () => {
+    const { service, session } = setup(hangingSession("shared"));
+    onTestFinished(() => service.stop());
+    const task = await service.create({
+      name: "serial", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
+    });
+    const first = service.run(task.id, null, "agent");
+    await vi.waitFor(() => expect(session.systemInputs).toHaveLength(1));
+    const middle = service.run(task.id, null, "agent");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    service.cancel(middle.id);
+    await vi.waitFor(() => expect(service.getRun(middle.id)).toMatchObject({ state: "cancelled", startedAt: null }));
+    const third = service.run(task.id, null, "agent");
+    const fourth = service.run(task.id, null, "agent");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(session.systemInputs).toHaveLength(1);
+    expect(service.getRun(third.id).state).toBe("queued");
+    for (const run of [first, third, fourth]) {
+      await vi.waitFor(() => expect(service.getRun(run.id).state).toBe("running"));
+      expect(session.systemInputs.at(-1)?.origin).toMatchObject({ runId: run.id });
+      await session.abort();
+      expect((await service.waitForRun(run.id)).state).toBe("succeeded");
+    }
+  });
+
+  it("counts a session wait against the timeout from enqueue", async () => {
+    const { service, session } = setup(hangingSession("shared"));
+    onTestFinished(() => service.stop());
+    const task = await service.create({
+      name: "serial timeout", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
+      timeoutSeconds: 5,
+    });
+    const first = service.run(task.id, null, "agent");
+    await vi.waitFor(() => expect(session.systemInputs).toHaveLength(1));
+    await service.update(task.id, { ...task, timeoutSeconds: 1 });
+    const waiter = service.run(task.id, null, "agent");
+    await vi.waitFor(() => expect(service.getRun(waiter.id)).toMatchObject({
+      state: "failed", error: "task timed out", startedAt: null,
+    }), { timeout: 2000 });
+    expect(service.getRun(first.id).state).toBe("running");
+    expect(session.systemInputs).toHaveLength(1);
+    await session.abort();
+    await service.waitForRun(first.id);
+  });
+
+  it("never resolves or starts an agent cancelled immediately after enqueue", async () => {
+    const { cwd, service, factory, session } = setup();
+    const task = await service.create({
+      name: "pre-cancelled", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" },
+    });
+    const run = service.run(task.id);
+    service.cancel(run.id);
+    expect(await service.waitForRun(run.id)).toMatchObject({ state: "cancelled", startedAt: null });
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(factory.resume).not.toHaveBeenCalled();
+    expect(session.systemInputs).toHaveLength(0);
+  });
+
+  it.each([
+    { mode: "fresh", resolveBeforeCancel: false },
+    { mode: "reuse", resolveBeforeCancel: false },
+    { mode: "fresh", resolveBeforeCancel: true },
+  ] as const)("cancels slow $mode resolution, resolve before cancel: $resolveBeforeCancel", async ({ mode, resolveBeforeCancel }) => {
+    const { cwd, service, session, factory, store } = setup();
+    onTestFinished(() => service.stop());
+    const dispose = vi.spyOn(session, "dispose");
+    let resolve = (_session: AgentSession): void => {};
+    const slow = new Promise<AgentSession>((done) => { resolve = done; });
+    const resolveSession = vi.mocked(mode === "fresh" ? factory.create : factory.resume);
+    resolveSession.mockReturnValueOnce(slow);
+    const task = await service.create({
+      name: "slow resolve", trigger: { type: "manual" },
+      action: { type: "agent", session: mode === "fresh" ? { mode, cwd } : { mode, sessionId: session.id }, prompt: "Work" },
+    });
+    const run = service.run(task.id);
+    await vi.waitFor(() => expect(resolveSession).toHaveBeenCalledTimes(1));
+    if (resolveBeforeCancel) resolve(session);
+    service.cancel(run.id);
+    await vi.waitFor(() => expect(service.getRun(run.id)).toMatchObject({ state: "cancelled", startedAt: null }));
+    if (mode === "fresh") store.saveRun({ ...service.getRun(run.id), callbackState: "abandoned", callbackAttempts: 8 });
+    resolve(session);
+    await new Promise<void>((done) => setImmediate(done));
+    expect(session.systemInputs).toHaveLength(0);
+    expect(service.getRun(run.id)).toMatchObject({ state: "cancelled", startedAt: null });
+    if (mode === "fresh") {
+      expect(service.getRun(run.id)).toMatchObject({ targetSessionId: session.id, callbackState: "abandoned", callbackAttempts: 8 });
+      expect(store.taskOwnedSessionIds().has(session.id)).toBe(true);
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } else expect(dispose).not.toHaveBeenCalled();
+  });
+
   it("persists steering and resumes a completed Agent run in the same session", async () => {
     const { service, session } = setup();
     const task = await service.create({
@@ -1314,7 +1435,9 @@ describe("task service", () => {
     const done = await service.waitForRun(run.id);
     expect(done.state).toBe("succeeded");
     expect(done.callbackState).toBeNull();
-    expect((await service.tool({ operation: "get", run_id: run.id }, parent.id) as RunSummary).pendingDecisionId).toBe(receipt.id);
+    expect(service.getRunView(run.id).pendingDecisionId).toBe(receipt.id);
+    await expect(service.tool({ operation: "recover", run_id: run.id, reason: "lost the result" }, parent.id))
+      .rejects.toThrow(/decision/);
 
     // The reply resumes the terminal child with the answer as its prompt and
     // calls back to the replier.
@@ -1423,7 +1546,8 @@ describe("task service", () => {
       },
     }, "s1") as RunSummary;
     await service.waitForRun(queued.runId);
-    const run = await service.tool({ operation: "get", run_id: queued.runId }, "s1") as RunSummary;
+    await vi.waitFor(() => expect(service.getRun(queued.runId).callbackState).toBe("delivered"));
+    const run = await service.tool({ operation: "recover", run_id: queued.runId, reason: "result was lost from context" }, "s1") as RunSummary;
     expect(run.state).toBe("succeeded");
     expect(service.getRun(run.runId).invokedBySessionId).toBe("s1");
 
@@ -1612,6 +1736,70 @@ describe("task service", () => {
     expect(probeRun.error).toContain("watch probe exited 2");
   });
 
+  it.each(["cancel", "timeout"] as const)("keeps %s terminal when a bash TERM trap cleans up and exits zero", async (operation) => {
+    const { cwd, service } = setup();
+    const task = await service.create({
+      ...bashDraft(cwd, "trap 'echo cleaned; exit 0' TERM; echo ready > ready; sleep 3"),
+      timeoutSeconds: 1,
+    });
+    const run = service.run(task.id);
+    onTestFinished(async () => {
+      service.stop();
+      await service.waitForRun(run.id);
+      rmSync(cwd, { recursive: true, force: true });
+    });
+    await vi.waitFor(() => expect(existsSync(join(cwd, "ready"))).toBe(true));
+    if (operation === "cancel") service.cancel(run.id);
+    expect(await service.waitForRun(run.id)).toMatchObject({
+      state: operation === "timeout" ? "failed" : "cancelled",
+      error: operation === "timeout" ? "task timed out" : "cancelled",
+      result: { type: "bash", exitCode: 0, stdout: "cleaned\n" },
+    });
+  });
+
+  it("keeps a requested cancellation when TERM grace crosses the task timeout", async () => {
+    const { cwd, service } = setup();
+    const task = await service.create({
+      // No children, and bounded even if SIGKILL regresses.
+      ...bashDraft(cwd, "trap '' TERM; echo ready > ready; while (( SECONDS < 4 )); do :; done"),
+      timeoutSeconds: 1,
+    });
+    const run = service.run(task.id);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    onTestFinished(async () => {
+      clearTimeout(timer);
+      service.stop();
+      await service.waitForRun(run.id);
+      rmSync(cwd, { recursive: true, force: true });
+    });
+    await vi.waitFor(() => expect(existsSync(join(cwd, "ready"))).toBe(true));
+    timer = setTimeout(() => service.cancel(run.id), Math.max(0, run.queuedAt + 900 - Date.now()));
+    expect(await service.waitForRun(run.id)).toMatchObject({ state: "cancelled", error: "cancelled" });
+  });
+
+  it("does not succeed when cancellation leaves a watch probe unmatched", async () => {
+    const { cwd, service } = setup();
+    const task = await service.create({
+      ...bashDraft(cwd, "echo unexpected > action"),
+      trigger: {
+        type: "watch", cwd, intervalSeconds: 60, mode: "repeat",
+        script: "trap 'exit 1' TERM; echo ready > ready; sleep 3",
+      },
+    });
+    const run = service.run(task.id);
+    onTestFinished(async () => {
+      service.stop();
+      await service.waitForRun(run.id);
+      rmSync(cwd, { recursive: true, force: true });
+    });
+    await vi.waitFor(() => expect(existsSync(join(cwd, "ready"))).toBe(true));
+    service.cancel(run.id);
+    expect(await service.waitForRun(run.id)).toMatchObject({
+      state: "cancelled", error: "cancelled", matched: false, probe: { exitCode: 1 },
+    });
+    expect(existsSync(join(cwd, "action"))).toBe(false);
+  });
+
   it("fails a run whose turn died on the provider, instead of reporting 'no reply'", async () => {
     const outage = '503 {"error":{"message":"Upstream service overloaded"},"type":"error"}';
     const { service, session } = setup(outageSession("s1", outage));
@@ -1642,8 +1830,8 @@ describe("task service", () => {
     const run = await service.waitForRun(service.run(task.id).id);
     expect(run.state).toBe("succeeded");
 
-    const history = await service.tool({ operation: "get", task_id: task.id }, "s1") as RunSummary[];
-    expect(history.map((row) => row.runId)).toEqual([run.id]);
+    const history = service.listRuns(task.id);
+    expect(history.map((row) => row.id)).toEqual([run.id]);
     expect(history[0]).toMatchObject({ state: "succeeded", triggerSource: "manual" });
 
     service.archive(task.id);
@@ -1670,7 +1858,33 @@ describe("task service", () => {
     expect(store.getRun(queued.id)?.finishedAt).toBeNull();
   });
 
-  it("cancelling a turn Pi never settles still releases the agent slot", async () => {
+  it("observes cancellation reentered from a child's queued event", async () => {
+    const { cwd, service, hub } = setup();
+    const childTask = await service.create(bashDraft(cwd, "sleep 1"));
+    const parentTask = await service.create({ name: "parent", action: { type: "task", taskId: childTask.id } });
+    const unsubscribe = hub.subscribeWorkspace((event) => {
+      if (event.type !== "task-run-changed") return;
+      const run = service.getRun(event.runId);
+      if (run.parentRunId && run.state === "queued") service.cancel(run.parentRunId);
+    });
+    onTestFinished(() => { unsubscribe(); service.stop(); });
+    const parent = service.run(parentTask.id);
+    expect(await service.waitForRun(parent.id)).toMatchObject({ state: "cancelled" });
+    const child = service.listRuns(childTask.id)[0]!;
+    expect(await service.waitForRun(child.id)).toMatchObject({ state: "cancelled" });
+  });
+
+  it("cancels a run while its final history read is stalled", async () => {
+    const { cwd, service, session } = setup(fakeSession("history", ""));
+    session.history = vi.fn(() => new Promise<ChatTurn[]>(() => {}));
+    const task = await service.create({ name: "history", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" } });
+    const run = service.run(task.id);
+    await vi.waitFor(() => expect(session.history).toHaveBeenCalled());
+    service.cancel(run.id);
+    expect(await service.waitForRun(run.id)).toMatchObject({ state: "cancelled", error: "cancelled" });
+  });
+
+  it.each(["ignore", "reject", "throw"] as const)("releases the slot when a hung session's abort will %s", async (abortMode) => {
     const { cwd, service, factory } = setup();
     // A session that ignores its abort: systemInput never settles.
     const deaf = fakeSession("deaf");
@@ -1678,7 +1892,10 @@ describe("task service", () => {
       deaf.systemInputs.push({ text, origin, mode });
       await new Promise<void>(() => {});
     };
-    deaf.abort = async () => {};
+    deaf.abort = () => {
+      if (abortMode === "throw") throw new Error("fixture abort threw");
+      return abortMode === "reject" ? Promise.reject(new Error("fixture abort rejected")) : Promise.resolve();
+    };
     vi.mocked(factory.create)
       .mockResolvedValueOnce(deaf)
       .mockResolvedValueOnce(fakeSession("second"));
@@ -1690,7 +1907,7 @@ describe("task service", () => {
     const first = service.run(task.id);
     await vi.waitFor(() => expect(deaf.systemInputs.length).toBe(1));
     service.cancel(first.id);
-    // The abortedTurn race, not the (never-settling) turn, settles the run…
+    // Our cancellable wait settles even though the SDK turn never does.
     expect((await service.waitForRun(first.id)).state).toBe("cancelled");
     // …and the slot is free again: a second run on the same task succeeds.
     const second = await service.waitForRun(service.run(task.id).id);
@@ -1717,7 +1934,7 @@ describe("task service", () => {
     });
     expect(callback.text).toContain("angle-a");
     expect(callback.text).toContain("angle-b");
-    const fetched = await service.tool({ operation: "get", group_id: group.groupId }, "s1") as GroupSummary;
+    const fetched = await service.tool({ operation: "recover", group_id: group.groupId, reason: "group results were lost from context" }, "s1") as GroupSummary;
     expect(fetched.state).toBe("finished");
     expect(fetched.members.map((member) => member.state)).toEqual(["succeeded", "succeeded"]);
   });
@@ -1841,6 +2058,211 @@ describe("task service", () => {
     service.start(60_000);
     expect(service.getRun("stale")).toMatchObject({ state: "interrupted", finishedAt: expect.any(Number) });
     service.stop();
+  });
+});
+
+describe("task admission and delivery regressions", () => {
+  it("keeps all live Activity runs when newer history exceeds the page limit", async () => {
+    const { cwd, service, store, factory, router } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    const now = Date.now();
+    for (let i = 0; i < 240; i++) store.saveRun(storedRun(`live-${i}`, task, now - 2 * 86_400_000 + i, {
+      state: i % 2 ? "queued" : "running", finishedAt: null, result: null,
+      invokedBySessionId: "supervisor", targetSessionId: "worker",
+    }));
+    for (let i = 0; i < 210; i++) store.saveRun(storedRun(`done-${i}`, task, now - 2000 + i));
+    for (let i = 0; i < 260; i++) store.saveRun(storedRun(`probe-${i}`, task, now - 1000 + i, { matched: false }));
+    const app = new Hono(); registerTaskRoutes(app, service, { factory, router });
+    const active = await (await app.request("/api/activity")).json();
+    expect(active.runs).toHaveLength(240);
+    expect(new Set(active.sessions.map((s: { id: string }) => s.id))).toEqual(new Set(["supervisor", "worker"]));
+    const recent = await (await app.request("/api/activity?scope=recent")).json();
+    expect(recent.runs).toHaveLength(440);
+    const ids = new Set(recent.runs.map((run: TaskRun) => run.id));
+    expect(ids.size).toBe(440);
+    for (let i = 0; i < 240; i++) expect(ids.has(`live-${i}`)).toBe(true);
+    expect(ids.has("done-209")).toBe(true);
+    expect(ids.has("done-0")).toBe(false);
+    expect(recent.runs.some((run: TaskRun) => run.matched === false)).toBe(false);
+  });
+
+  it.each(["all", "first"] as const)("rejects an entire %s group before creating sessions or starting scripts", async (joinMode) => {
+    const { cwd, service, store, factory, hub, session } = setup();
+    onTestFinished(() => { service.stop(); rmSync(cwd, { recursive: true, force: true }); });
+    const good = await service.create(bashDraft(cwd, "echo ran > marker"));
+    const archived = await service.create(bashDraft(cwd, "true"));
+    service.archive(archived.id);
+    const changed: string[] = [];
+    hub.subscribeWorkspace((event) => {
+      if (event.type === "task-run-changed" || event.type === "task-group-changed") changed.push(event.type);
+    });
+    const saves = vi.spyOn(store, "saveGroup");
+    await expect(service.tool({ operation: "run", join: joinMode, tasks: [
+      { prompt: "work", cwd }, { task_id: good.id }, { task_id: archived.id },
+    ] }, "s1")).rejects.toThrow("archived tasks cannot run");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(factory.create).not.toHaveBeenCalled();
+    expect(existsSync(join(cwd, "marker"))).toBe(false);
+    expect(store.queryRuns({ showUnmatched: true }).runs).toEqual([]);
+    expect(store.listOpenGroups()).toEqual([]);
+    expect(saves).not.toHaveBeenCalled();
+    expect(changed).toEqual([]);
+    service.start(60_000);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(session.systemInputs).toEqual([]);
+  });
+
+  it("rolls back admitted siblings when a group exceeds the root's child limit", async () => {
+    const { cwd, service, store, factory } = setup();
+    const task = await service.create({ name: "member", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
+    store.saveRun(storedRun("root", task, 1, { rootRunId: "root", state: "running", targetSessionId: "s1" }));
+    for (let i = 0; i < 15; i++) store.saveRun(storedRun(`child-${i}`, task, i + 2, {
+      parentRunId: "root", rootRunId: "root", depth: 1,
+    }));
+    await expect(service.tool({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }] }, "s1"))
+      .rejects.toThrow("child limit");
+    expect(store.listRunsByRoot("root", 100)).toHaveLength(16);
+    expect(store.listOpenGroups()).toEqual([]);
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
+  it("does not execute a group when persisting a later member fails", async () => {
+    const { cwd, service, store, factory } = setup();
+    const task = await service.create({ name: "member", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
+    const save = store.saveRun.bind(store);
+    let attempts = 0;
+    vi.spyOn(store, "saveRun").mockImplementation((run) => {
+      save(run);
+      if (++attempts === 2) throw new Error("fixture disk failure");
+    });
+    expect(() => service.runGroup([task, task], "all", "s1", null, "s1", "followUp"))
+      .toThrow("fixture disk failure");
+    expect(store.queryRuns({ showUnmatched: true }).runs).toEqual([]);
+    expect(store.listOpenGroups()).toEqual([]);
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
+  it("settles a group consisting entirely of overlap skips", async () => {
+    const { cwd, service, store } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    store.saveRun(storedRun("already-going", task, 1, { state: "running" }));
+    const { group, runs } = service.runGroup([task, task], "all", "s1", null, null, "followUp");
+    expect(runs.map((run) => run.state)).toEqual(["skipped", "skipped"]);
+    expect(group.finishedAt).not.toBeNull();
+    expect(group.memberRunIds).toEqual(runs.map((run) => run.id));
+    expect(store.listOpenGroups()).toEqual([]);
+  });
+
+  it("keeps first-join's any-terminal rule when a member is skipped for overlap", async () => {
+    const { cwd, service, store, factory } = setup();
+    const busy = await service.create(bashDraft(cwd, "true"));
+    store.saveRun(storedRun("already-going", busy, 1, { state: "running" }));
+    const worker = await service.create({ name: "worker", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
+    const { group, runs } = service.runGroup([worker, busy], "first", "s1", null, null, "followUp");
+    expect(group.winnerRunId).toBe(runs[1]!.id);
+    expect(runs[1]!.state).toBe("skipped");
+    expect(await service.waitForRun(runs[0]!.id)).toMatchObject({ state: "cancelled" });
+    expect(factory.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["all", "first"] as const)("retires a legacy empty %s group with an error instead of a fake completion", async (joinMode) => {
+    const { service, store, hub, session } = setup();
+    const errors: string[] = [];
+    hub.subscribe("s1", (event) => { if (event.type === "error") errors.push(event.message); });
+    store.saveGroup({ id: "empty", join: joinMode, invokedBySessionId: "s1", callbackSessionId: "s1",
+      memberRunIds: [], winnerRunId: null, createdAt: 1, finishedAt: null,
+      callbackState: null, callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null });
+    service.start(60_000);
+    onTestFinished(() => service.stop());
+    expect(store.getGroup("empty")).toMatchObject({ callbackState: "abandoned", finishedAt: expect.any(Number) });
+    expect(store.listOpenGroups()).toEqual([]);
+    expect(errors.join(" ")).toContain("admission failed");
+    expect(session.systemInputs).toEqual([]);
+  });
+
+  it.each(["paused", "save"] as const)("keeps a decision answerable when continuation admission fails: %s", async (failure) => {
+    const rig = supervised();
+    const { service, store, hub, parent, child } = rig;
+    const { run, question, task } = await askedAndFinished(rig);
+    await vi.waitFor(() => expect(store.getMessage(question.id)?.state).toBe("delivered"));
+    const before = child.systemInputs.length;
+    const changes: string[] = [];
+    hub.subscribeWorkspace((event) => changes.push(event.type));
+    const save = store.saveMessage.bind(store);
+    const injected = vi.spyOn(store, "saveMessage").mockImplementation((message) => {
+      save(message);
+      if (failure === "save" && message.resumeRunId) throw new Error("fixture reply save failed");
+    });
+    if (failure === "paused") service.pause();
+    await expect(service.tool({ operation: "reply", message_id: question.id, message: "Use A" }, parent.id))
+      .rejects.toThrow(failure === "paused" ? "restarting" : "fixture reply save failed");
+    expect(store.getMessage(question.id)).toMatchObject({ state: "delivered", answeredAt: null });
+    expect(service.openDecisionId(run.id)).toBe(question.id);
+    expect(service.listMessages(run.id).filter((m) => m.kind === "reply")).toEqual([]);
+    expect(service.listRuns(task.id)).toHaveLength(1);
+    expect(child.systemInputs).toHaveLength(before);
+    expect(changes).toEqual([]);
+    injected.mockRestore();
+    service.unpause(60_000);
+    onTestFinished(() => service.stop());
+    const reply = await service.tool({ operation: "reply", message_id: question.id, message: "Use A" }, parent.id) as TaskMessage;
+    expect(reply.resumeRunId).toBeDefined();
+    expect(await service.waitForRun(reply.resumeRunId!)).toMatchObject({ state: "succeeded", resumedFromRunId: run.id });
+    await vi.waitFor(() => expect(service.getRun(reply.resumeRunId!).callbackState).toBe("delivered"));
+    const repeated = await service.tool({ operation: "reply", message_id: question.id, message: "Use A" }, parent.id) as TaskMessage;
+    expect(repeated.id).toBe(reply.id);
+    expect(service.listRuns(task.id)).toHaveLength(2);
+    expect(child.systemInputs).toHaveLength(before + 1);
+  });
+
+  it("rolls back a manual continuation when superseding its decision cannot be saved", async () => {
+    const rig = supervised();
+    const { service, store, child } = rig;
+    const { run, question, task } = await askedAndFinished(rig);
+    await vi.waitFor(() => expect(store.getMessage(question.id)?.state).toBe("delivered"));
+    const before = child.systemInputs.length;
+    const save = store.saveMessage.bind(store);
+    const injected = vi.spyOn(store, "saveMessage").mockImplementation((message) => {
+      save(message);
+      if (message.state === "expired") throw new Error("fixture decision save failed");
+    });
+    expect(() => service.resume(run.id, "continue without the question")).toThrow("fixture decision save failed");
+    expect(store.getMessage(question.id)?.state).toBe("delivered");
+    expect(service.listRuns(task.id)).toHaveLength(1);
+    expect(child.systemInputs).toHaveLength(before);
+    injected.mockRestore();
+    const resumed = service.resume(run.id, "continue without the question");
+    expect(await service.waitForRun(resumed.id)).toMatchObject({ state: "succeeded" });
+    expect(store.getMessage(question.id)?.state).toBe("expired");
+  });
+
+  it.each(["reject", "throw", "proof"] as const)("charges one callback attempt when delivery fails after send: %s", async (failure) => {
+    const { cwd, service, store, router, session } = setup();
+    const task = await service.create(bashDraft(cwd, "true"));
+    const run = storedRun("result", task, 1, { callbackSessionId: "s1", callbackState: "pending" });
+    store.saveRun(run);
+    const send = vi.spyOn(session, "systemInput").mockImplementation(() => {
+      if (failure === "throw") throw new Error("fixture synchronous refusal");
+      return failure === "reject" ? Promise.reject(new Error("fixture refused")) : Promise.resolve();
+    });
+    let reads = 0;
+    session.history = async () => {
+      if (failure === "proof" && ++reads % 2 === 0) throw new Error("fixture proof read failed");
+      return [];
+    };
+    const unreachable = vi.fn();
+    const callbacks = new TaskCallbacks(store, router, () => {}, unreachable);
+    for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
+      await callbacks.deliver(run);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(send).toHaveBeenCalledTimes(attempt);
+      expect(store.getRun(run.id)).toMatchObject({
+        callbackAttempts: attempt, callbackState: attempt === MAX_DELIVERY_ATTEMPTS ? "abandoned" : "failed",
+      });
+    }
+    expect(unreachable).toHaveBeenCalledTimes(1);
+    await callbacks.deliver(run);
+    expect(send).toHaveBeenCalledTimes(MAX_DELIVERY_ATTEMPTS);
   });
 });
 

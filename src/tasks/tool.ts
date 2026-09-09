@@ -1,11 +1,14 @@
 import { isAbsolute, resolve } from "node:path";
 import { Type } from "typebox";
 import type { AgentCustomTool } from "../core/types.js";
-import { TaskDefinitions, record, requiredString } from "./definitions.js";
-import { TaskMessenger } from "./messages.js";
+import { logger } from "../log.js";
+import { type TaskDefinitions, record, requiredString } from "./definitions.js";
+import type { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
-import { TaskStore } from "./store.js";
-import type { CallbackMode, TaskDefinition, TaskGroup, TaskResult, TaskRun } from "./types.js";
+import type { TaskStore } from "./store.js";
+import { isTerminal, type CallbackFields, type CallbackMode, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
+
+const log = logger("tasks");
 
 // JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
 const strEnum = <const T extends readonly string[]>(...values: T) =>
@@ -36,6 +39,9 @@ export interface RunSummary {
   result?: TaskResult;
   error?: string;
   skipReason?: string;
+  /** On a run receipt only: how the result reaches the caller, so the receipt
+   *  itself says there is nothing to query. */
+  next?: string;
 }
 
 export interface GroupSummary {
@@ -46,14 +52,15 @@ export interface GroupSummary {
   callbackMode?: TaskGroup["callbackMode"];
   winnerRunId?: string;
   members: RunSummary[];
+  next?: string;
 }
 
 /**
  * Drop the fields with nothing in them instead of sending `null`.
  *
  * A run summary has eighteen fields and most are empty for most of a run's
- * life; a model reads "absent" and "null" the same way. On a `get` that lists
- * several runs this is a third of the payload.
+ * life; a model reads "absent" and "null" the same way. On a group summary
+ * that lists several runs this is a third of the payload.
  *
  * The input names every field — a summary that forgot one would otherwise pass
  * as "that field was empty" — and the result is the type with the empty ones
@@ -64,7 +71,7 @@ const defined = <T extends object>(value: { [K in keyof T]-?: T[K] | null }): T 
     Object.entries(value).filter(([, v]) => v !== null && v !== undefined),
   ) as T;
 
-const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary => defined({
+const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary => defined<RunSummary>({
   runId: run.id,
   taskId: run.taskId,
   taskName: run.context.definition.name,
@@ -84,22 +91,53 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   result: run.result,
   error: run.error,
   skipReason: run.skipReason,
+  next: null,
 });
 
-/** A list echoes many results at once, so each is capped; a single-run `get`
- * stays whole — it is the escape hatch every truncation note points at. */
+/** What a run receipt says happens next. The callback is the whole answer, so
+ *  the receipt says so — a model that just launched work otherwise reaches
+ *  for a status call. `none` is stated as what it is: no delivery at all. */
+const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: string | null, mode: CallbackMode, callerSessionId: string): T => ({
+  ...summary,
+  next: callbackSessionId === null
+    ? "callback none: the result is not delivered to anyone"
+    : callbackSessionId !== callerSessionId
+      ? `the result is delivered to session ${callbackSessionId}; this session will not receive a callback`
+      : mode === "steer"
+        ? "the result interrupts your running turn as a steer message; nothing to query"
+        : "the result arrives as a callback message once your turn ends; nothing to query",
+});
+
+/** A group echoes many results at once, so each is capped; a single-run
+ * `recover` stays whole — it is the escape hatch every truncation note points at. */
 const trimResult = (summary: RunSummary): RunSummary => {
   if (summary.result?.type !== "agent" || summary.result.text.length <= 2000) return summary;
   return {
     ...summary,
     result: {
       ...summary.result,
-      text: `${summary.result.text.slice(0, 2000)}\n[truncated — get run_id ${summary.runId} for the full text]`,
+      text: `${summary.result.text.slice(0, 2000)}\n[truncated — recover run_id ${summary.runId} with a reason for the full text]`,
     },
   };
 };
 
-const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMessenger): GroupSummary => defined({
+/** Whether a callback record has said its last word: the input is in the
+ *  recipient's transcript, delivery was given up on and reported, or there
+ *  was never one to wait for (`callback:"none"`). Anything else is still on
+ *  its way, and reading the result here would be reading it twice. */
+const settled = (callback: CallbackFields): boolean =>
+  callback.callbackState === null || callback.callbackState === "delivered" || callback.callbackState === "abandoned";
+
+/** The one refusal `recover` gives before a result is readable. Deliberately
+ *  the same words for queued, running, pending and retrying: a refusal that
+ *  named the state would be the status query this operation replaced. */
+const notRecoverable = (what: string, callback: { callbackSessionId: string | null }): never => {
+  throw new Error(callback.callbackSessionId === null
+    ? `${what} is not recoverable yet: it was launched with callback none, so nothing will be delivered; recover reads finished results only and cannot wait for work`
+    : `${what} is not recoverable yet: wait for automatic delivery to session ${callback.callbackSessionId}; recover cannot wait for work`);
+};
+
+const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMessenger): GroupSummary => defined<GroupSummary>({
   groupId: group.id,
   join: group.join,
   state: group.finishedAt ? "finished" : "running",
@@ -107,6 +145,7 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[], messages: TaskMess
   callbackMode: group.callbackMode ?? null,
   winnerRunId: group.winnerRunId,
   members: members.map((run) => trimResult(summarize(run, messages.openDecisionId(run.id)))),
+  next: null,
 });
 
 const LaunchSchema = Type.Object({
@@ -157,10 +196,10 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Get accepts run_id, group_id, or task_id for that task's recent runs. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages once your turn ends — don't poll get for them; pass callback 'steer' to have a result interrupt your running turn instead, or 'none' for no callback at all. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
+      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Every operation returns immediately: results, group joins, and decision replies arrive as callback messages once your turn ends — there is no status query; pass callback 'steer' to have a result interrupt your running turn instead, or 'none' for no callback at all. recover (run_id or group_id, plus a reason) re-reads a finished result after its callback has settled — for truncated text or lost context, never to check progress. Use steer/follow_up/resume for child control and contact/reply for supervisor decisions. models lists the deployment's model menu (operator pins with intent notes, else the live catalog).",
     parameters: Type.Object({
       operation: strEnum(
-        "list", "create", "update", "run", "get", "cancel",
+        "list", "create", "update", "run", "recover", "cancel",
         "steer", "follow_up", "resume", "contact", "reply", "models",
       ),
       task_id: Type.Optional(Type.String()),
@@ -168,7 +207,7 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       group_id: Type.Optional(Type.String()),
       message_id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
-      reason: Type.Optional(strEnum("progress", "decision")),
+      reason: Type.Optional(Type.String({ description: "contact: progress | decision. recover: why the delivered callback is not enough (required)." })),
       session_mode: Type.Optional(strEnum("fresh")),
       // The one-shot shorthand: a prompt is the whole delegation, and the
       // fresh session in the caller's own directory is what it means.
@@ -232,15 +271,16 @@ export async function handleTaskTool(
           ? await resolveDraft(definitions, entry, active, callerSessionId)
           : resolveStored(definitions, entry.task_id, active));
       }
+      const groupCallbackSessionId = input.callback === "none" ? null : callerSessionId;
       const { group, runs } = host.runGroup(
         resolved,
         input.join === "first" ? "first" : "all",
         callerSessionId,
         active?.id ?? null,
-        input.callback === "none" ? null : callerSessionId,
+        groupCallbackSessionId,
         callbackMode,
       );
-      return summarizeGroup(group, runs, messages);
+      return receipt(summarizeGroup(group, runs, messages), groupCallbackSessionId, callbackMode, callerSessionId);
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
     const task = draft
@@ -265,20 +305,46 @@ export async function handleTaskTool(
       background: true,
       sessionMode,
     });
-    return summarize(run, null);
+    return receipt(summarize(run, null), callbackSessionId, callbackMode, callerSessionId);
   }
-  if (input.operation === "get") {
+  if (input.operation === "recover") {
+    // History only, never status: a result is readable here once its callback
+    // has said its last word, so nothing a caller could learn by asking is
+    // something it would not have been told. The reason is the friction — a
+    // caller states why the callback did not suffice, and the operator sees it.
+    const reason = requiredString(input.reason, "reason");
+    // A finished run with an open decision sends no completion callback — the
+    // question is the notification, and the reply's continuation reports.
+    const decisionOpen = (run: TaskRun): never => {
+      throw new Error(`run ${run.id} finished awaiting your decision ${messages.openDecisionId(run.id) ?? ""}; reply to it — the continuation's callback brings the result`);
+    };
+    // A member waits for its group's callback, but a race winner need not
+    // wait for losing members to finish cancelling before recovering its text.
+    const groupReady = (group: TaskGroup): void => {
+      if (!group.finishedAt || !settled(group)) notRecoverable(`group ${group.id}`, group);
+    };
     if (typeof input.group_id === "string") {
       const { group, members } = host.getGroup(input.group_id);
+      groupReady(group);
+      if (!members.every((run) => isTerminal(run.state))) {
+        throw new Error(`recover cannot inspect active members; the race has settled — recover its winning result with run_id ${group.winnerRunId ?? "from the callback"} and a reason`);
+      }
+      const asking = members.find((run) => messages.openDecisionId(run.id));
+      if (asking) decisionOpen(asking);
+      log.info(`recover group ${group.id} by ${callerSessionId}: ${reason}`);
       return summarizeGroup(group, members, messages);
     }
-    // Run history by task: without it, checking what a task did (or whether a
-    // cascade landed) means leaving the tool for the database.
-    if (input.run_id === undefined && typeof input.task_id === "string") {
-      return host.listRuns(input.task_id, 10).map((run) => trimResult(summarize(run, messages.openDecisionId(run.id))));
-    }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
-    return summarize(run, messages.openDecisionId(run.id));
+    if (run.groupId) {
+      const { group } = host.getGroup(run.groupId);
+      groupReady(group);
+      if (!isTerminal(run.state)) throw new Error("the group has reported its outcome; recover reads finished results only and cannot wait for this member");
+    } else if (!isTerminal(run.state) || !settled(run)) {
+      notRecoverable(`run ${run.id}`, run);
+    }
+    if (messages.openDecisionId(run.id)) decisionOpen(run);
+    log.info(`recover run ${run.id} by ${callerSessionId}: ${reason}`);
+    return summarize(run, null);
   }
   if (input.operation === "cancel") {
     if (typeof input.group_id === "string") {
@@ -300,16 +366,20 @@ export async function handleTaskTool(
   if (input.operation === "resume") {
     const prior = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(store, callerSessionId, active, prior);
+    const callbackSessionId = input.callback === "none" ? null : callerSessionId;
     const run = host.resume(prior.id, requiredString(input.message, "message"), {
       invokedBySessionId: callerSessionId,
-      callbackSessionId: input.callback === "none" ? null : callerSessionId,
+      callbackSessionId,
       background: true,
     });
-    return summarize(run, null);
+    return receipt(summarize(run, null), callbackSessionId, "followUp", callerSessionId);
   }
   if (input.operation === "contact") {
     if (!active) throw new Error("contact is only available inside an active Agent run");
-    const reason = input.reason === "decision" ? "decision" : "progress";
+    // The schema no longer narrows `reason` (recover shares the field), so the
+    // two names contact accepts are checked here.
+    const reason = input.reason === undefined ? "progress" : input.reason;
+    if (reason !== "progress" && reason !== "decision") throw new Error(`contact reason must be progress or decision, got ${String(reason)}`);
     return messages.contact(active, callerSessionId, reason, requiredString(input.message, "message"));
   }
   if (input.operation === "reply") {

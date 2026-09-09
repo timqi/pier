@@ -5,7 +5,7 @@
 // failed attempt.
 
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
-import { Router } from "../core/router.js";
+import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields } from "./types.js";
 
@@ -53,6 +53,7 @@ export class Outbox<T extends CallbackFields> {
     const mine = batch.filter((record) => !this.delivering.has(this.kind.id(record)));
     if (mine.length === 0) return;
     for (const record of mine) this.delivering.add(this.kind.id(record));
+    const counted = new Set<string>();
     try {
       const session = await this.router.ensure({ channelId: "task", conversationId: sessionId });
       // The transcript read is both the crash-window dedupe and the proof.
@@ -79,19 +80,22 @@ export class Outbox<T extends CallbackFields> {
         for (const record of live) if (!steerNow(record)) this.defer(record);
         if (sending.length === 0) return;
       }
-      for (const record of sending) this.sent(record);
+      for (const record of sending) {
+        this.sent(record);
+        counted.add(this.kind.id(record));
+      }
       const { text, origin } = this.kind.input(sending);
       log.debug(`callback for ${sending.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
       // Not awaited: `systemInput` settles with the recipient's whole turn, and
       // holding the delivery lock that long would keep the proof from ever
       // being read — which is the only thing that marks this delivered.
       session.systemInput(text, origin, streaming ? "steer" : "followUp")
-        .catch((error: unknown) => this.retry(sessionId, sending, error));
+        .catch((error: unknown) => this.retry(sessionId, sending, error, counted));
       // Pi records the input as it starts the turn, so the proof is usually
       // here already; the tick sweep is the backstop when it is not.
       await this.settle(sending, session);
     } catch (error) {
-      this.retry(sessionId, mine, error);
+      this.retry(sessionId, mine, error, counted);
     } finally {
       for (const record of mine) this.delivering.delete(this.kind.id(record));
     }
@@ -125,13 +129,14 @@ export class Outbox<T extends CallbackFields> {
   /** The recipient is waiting for an answer that is now late: the retry itself
    *  is silent, so this line is the only sign it is being retried — and the
    *  ceiling is what ends the retrying out loud. */
-  private retry(sessionId: string, batch: T[], error: unknown): void {
+  private retry(sessionId: string, batch: T[], error: unknown, counted: Set<string>): void {
     log.warn(`callback to session ${sessionId} failed, will retry`, error);
     for (const stale of batch) {
       const record = this.kind.reload(this.kind.id(stale));
       // Already proven delivered, or already given up on: not a failure.
       if (!record || (record.callbackState !== "pending" && record.callbackState !== "failed")) continue;
-      this.failed(record, error);
+      this.failed(record, error, counted.has(this.kind.id(record)));
+      counted.add(this.kind.id(record));
       this.spent(record, sessionId);
     }
   }
@@ -173,11 +178,9 @@ export class Outbox<T extends CallbackFields> {
     this.write(record);
   }
 
-  /** Counts the attempt too: a target that fails before anything is sent (a
-   *  transcript that no longer exists) would otherwise retry at attempt 0 for
-   *  as long as the process lives, never reaching the ceiling. */
-  private failed(record: T, error: unknown): void {
-    record.callbackAttempts += 1;
+  /** A failed pass costs one attempt, whether it died before or after send. */
+  private failed(record: T, error: unknown, counted: boolean): void {
+    if (!counted) record.callbackAttempts += 1;
     record.callbackState = "failed";
     record.callbackError = String(error);
     record.callbackNextAttemptAt = Date.now() + retryDelay(record.callbackAttempts);

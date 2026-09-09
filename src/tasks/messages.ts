@@ -6,12 +6,12 @@
 // dropped (§5b).
 
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
-import { EventHub } from "../core/hub.js";
-import { Router } from "../core/router.js";
+import type { EventHub } from "../core/hub.js";
+import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
 import { newId } from "./definitions.js";
-import { TaskStore } from "./store.js";
+import type { TaskStore } from "./store.js";
 import type { TaskMessage, TaskMessageKind, TaskRun } from "./types.js";
 import { isTerminal, MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable } from "./types.js";
 
@@ -31,10 +31,11 @@ export class TaskMessenger {
     private readonly store: TaskStore,
     private readonly router: Router,
     private readonly hub: EventHub,
-    /** Continues a terminal child with a supervisor reply as its prompt. */
-    private readonly resumeRun: (runId: string, prompt: string, fromSessionId: string) => TaskRun,
+    /** Prepares a continuation; it starts only after the reply commits. */
+    private readonly prepareResume: (runId: string, prompt: string, fromSessionId: string) => TaskRun,
     /** Reports a delivery nobody can complete (service.ts owns the surfaces). */
     private readonly unreachable: (sessionId: string, what: string, why: string) => void,
+    private readonly startRun: (run: TaskRun) => void,
   ) {}
 
   expirePending(): void {
@@ -49,15 +50,17 @@ export class TaskMessenger {
 
   /** A manual continuation supersedes an unanswered decision (design 04):
    * one continuation per run, never two racing ones. */
-  expireDecisions(runId: string, reason: string): void {
+  expireDecisions(runId: string, reason: string): TaskMessage[] {
+    const expired: TaskMessage[] = [];
     for (const message of this.store.listMessages(runId)) {
       if (message.kind !== "decision" || (message.state !== "pending" && message.state !== "delivered")) continue;
       message.state = "expired";
       message.error = reason;
       message.answeredAt = Date.now();
       this.store.saveMessage(message);
-      this.changed(message);
+      expired.push(message);
     }
+    return expired;
   }
 
   list(runId: string): TaskMessage[] {
@@ -75,6 +78,7 @@ export class TaskMessenger {
     content: string,
   ): Promise<TaskMessage> {
     const message = this.create(run, kind, fromSessionId, run.targetSessionId ?? "", content, null);
+    this.changed(message);
     if (run.targetSessionId) this.deliver(message, run, run.targetSessionId);
     return this.require(message.id);
   }
@@ -146,6 +150,7 @@ export class TaskMessenger {
       throw new Error("run already has a pending supervisor decision");
     }
     const message = this.create(run, reason, fromSessionId, run.invokedBySessionId, content, null);
+    this.changed(message);
     this.deliver(message, run, run.invokedBySessionId);
     return this.require(message.id);
   }
@@ -165,24 +170,26 @@ export class TaskMessenger {
     }
     const run = this.store.getRun(question.runId);
     if (!run) throw new Error(`unknown task run: ${question.runId}`);
-    const reply = this.create(run, "reply", fromSessionId, question.fromSessionId, text, question.id);
-    question.state = "answered";
-    question.answeredAt = Date.now();
-    this.store.saveMessage(question);
+    // A rejected continuation must leave the question answerable. Persist the
+    // answer and its queued run together, before either publishes or executes.
+    const { reply, continuation } = this.store.transact(() => {
+      const reply = this.create(run, "reply", fromSessionId, question.fromSessionId, text, question.id);
+      question.state = "answered";
+      question.answeredAt = Date.now();
+      this.store.saveMessage(question);
+      const continuation = isTerminal(run.state)
+        ? this.prepareResume(run.id, this.format(reply, run), fromSessionId)
+        : undefined;
+      if (continuation) {
+        reply.resumeRunId = continuation.id;
+        this.store.saveMessage(reply);
+      }
+      return { reply, continuation };
+    });
     this.changed(question);
-    // Core routes the reply: follow-up into an active run, auto-resume of a
-    // terminal one — the replier gets the continuation's callback.
-    if (run.targetSessionId && (run.state === "queued" || run.state === "running")) {
-      this.deliver(reply, run, run.targetSessionId);
-    } else if (isTerminal(run.state)) {
-      // Creating the continuation is not delivering the reply: the run is
-      // queued, and a restart or a cancel before it starts loses the prompt
-      // that carries the text. So the id is recorded and the sweep below
-      // settles it against the continuation's own `startedAt`.
-      reply.resumeRunId = this.resumeRun(run.id, this.format(reply, run), fromSessionId).id;
-      this.store.saveMessage(reply);
-      this.changed(reply);
-    }
+    this.changed(reply);
+    if (continuation) this.startRun(continuation);
+    else if (run.targetSessionId) this.deliver(reply, run, run.targetSessionId);
     return this.require(reply.id);
   }
 
@@ -211,7 +218,6 @@ export class TaskMessenger {
       nextAttemptAt: null,
     };
     this.store.saveMessage(message);
-    this.changed(message);
     return message;
   }
 
@@ -399,7 +405,8 @@ export class TaskMessenger {
     return message;
   }
 
-  private changed(message: TaskMessage): void {
+  /** Publish only after any transaction changing this message has committed. */
+  changed(message: TaskMessage): void {
     this.hub.emitWorkspace({ type: "task-message-changed", runId: message.runId, messageId: message.id });
   }
 }
