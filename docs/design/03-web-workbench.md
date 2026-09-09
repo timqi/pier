@@ -228,10 +228,36 @@ per-turn Activity groups):
   delegation and callback inputs are persisted Pi custom messages rendered as
   distinct System input rows with source Session and Run links, never as user
   messages. Snapshot `backgroundRuns` restores recent detached work.
-- **Automation**: Tasks, Runs and Activity share a tab strip. New task is a
-  list-only action in that strip; its editor loading/navigation guards remain
-  owned by Tasks. Runs keeps unmatched probes inside its filter group; date
+- **Console page head**: each Console page (Automation, Settings, Boards, Files)
+  opens with one head band carrying the page title, the view's tab pills and its
+  primary action. It is the heading strip's material at both widths — the same
+  8px inset rounded glass — and on desktop the collapsed rail handle aligns
+  inside it. A phone's head sits below the floating top bar rather than under
+  it, the title hides there (the bar already names the page) and the row wraps
+  instead of holding one line's height.
+- **Automation**: Tasks, Runs and Activity share that head's tab strip. New task
+  is a list-only action in it; its editor loading/navigation guards remain
+  owned by Tasks. Below the head each view is panels on the canvas, not a sheet:
+  the filter card and the list (or a task's/run's detail) are one inset surface
+  each, and the list panel is its own scroll container so a sticky table header
+  rides its top edge. A toolbar row — breadcrumb, tabs, scope switch — sits on
+  the canvas without a rule; inside a panel it is that panel's header and keeps
+  the divider. Runs keeps unmatched probes inside its filter group; date
   fields start collapsed unless active, and Reset includes all active filters.
+- **Settings**: every topic is cards, or panels, on the same canvas — no tint of
+  its own behind them, which is what read as a block pasted under the head. One
+  card radius across the topics. Channels picks its platform with a segmented
+  switch on a strip that hugs it — centred over its cards, sticky in the topic's
+  scroller so the platform and the save status stay in view; the page's head
+  already draws the pill level.
+  Agent is two panels — the list of what a session is made of, and the one thing
+  the selected item affords — each with its own title band, the Console's control
+  skin for Scope, and rows at the list scale with touch-sized targets. An agent
+  file opens in `code.ts`'s viewer, the same gutter and highlighting the Files
+  view and the read-only skills use; **Edit** swaps in the textarea and **View**
+  goes back, rendering the editor's own text so a switch never hides an unsaved
+  line. Save keeps `expected` for the conflict check and says which of saved,
+  unsaved or failed the file is in.
 - **Chat** (center): right-aligned mist-blue user bubbles and left-aligned
   opaque final-answer bubbles. Provisional text streams into the work log;
   tool/reasoning boundaries retain it as progress, and `turn-end` promotes the

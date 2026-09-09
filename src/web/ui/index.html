@@ -122,13 +122,11 @@
       <button type="button" id="mobile-menu" aria-label="Session actions"
         class="icon-btn hidden h-11 w-11"><span data-icon="Ellipsis" class="h-3.5 w-3.5"></span></button>
     </header>
-    <!-- Automation hosts three views under one title and tab strip; the
-         strip's active pill tracks the route (#/tasks, #/runs, #/activity). -->
+    <!-- Automation hosts three views under one head — title, tabs and the
+         page's primary action on one strip, drawn by views.ts; its active pill
+         tracks the route (#/tasks, #/runs, #/activity). -->
     <section id="automation-view" class="hidden min-h-0 flex-1 flex-col">
-      <header class="flex h-10 flex-none items-center gap-3 border-b border-neutral-200 bg-white px-4 max-md:hidden">
-        <span class="font-medium">Automation</span>
-      </header>
-      <div id="automation-tabs" class="tabstrip bg-white"></div>
+      <header id="automation-tabs" class="pagehead"></header>
       <section id="tasks-view" class="hidden min-h-0 flex-1 flex-col"></section>
       <section id="runs-view" class="hidden min-h-0 flex-1 flex-col"></section>
       <section id="activity-view" class="hidden min-h-0 flex-1 flex-col"></section>

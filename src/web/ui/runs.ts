@@ -22,7 +22,7 @@ export function createRunsView(
   let filters = new URLSearchParams();
   let tasks: TaskDefinition[] = [];
   let drawn = "";
-  let pane = h("div", "min-h-0 flex-1 overflow-auto");
+  let pane = h("div", "automation-list min-h-0 flex-1 overflow-auto");
   let taskSelect: HTMLSelectElement | undefined;
   const state: RunViewState = { selectedId: null, rawOpen: false, scrollTop: 0, drawn: "" };
   const go = (next: URLSearchParams, id?: string): void => navigate(Object.fromEntries(next), id);
@@ -63,7 +63,7 @@ export function createRunsView(
 
   function drawShell(): void {
     drawn = "";
-    pane = h("div", "min-h-0 flex-1 overflow-auto");
+    pane = h("div", "automation-list min-h-0 flex-1 overflow-auto");
     taskSelect = undefined;
     if (state.selectedId) { root.replaceChildren(pane); return; }
     root.replaceChildren(drawControls(), pane);

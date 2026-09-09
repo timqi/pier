@@ -10,7 +10,7 @@ import type { ActivityView } from "./activity.js";
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
-import { button, pill } from "./form.js";
+import { button, pageTitle, pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
 import { distinctCwds, orderSessions, type SessionInfo } from "./sidebar.js";
@@ -93,6 +93,7 @@ function syncAutomation(name: ConsoleName | null, arg?: string): void {
     actions.push(create);
   }
   automationTabs.replaceChildren(
+    pageTitle(AUTOMATION_LABEL),
     ...AUTOMATION.map((tab) => pill(CONSOLE_LABELS[tab], tab === name, () => showConsole(tab))),
     ...actions,
   );

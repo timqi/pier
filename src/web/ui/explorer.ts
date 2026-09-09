@@ -111,7 +111,7 @@ export function createExplorerView(
   let selectedPath: string | null = null;
   let selectedRow: HTMLElement | null = null;
 
-  const header = h("header", "flex h-10 flex-none items-center gap-2 border-b border-neutral-200 bg-white px-3");
+  const header = h("header", "pagehead");
   const compare = h("div", "flex-none border-b border-neutral-200");
   const tree = h("div", "min-h-0 flex-1 overflow-y-auto py-1");
   const left = h("aside", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[12.5px] max-md:h-2/5 max-md:w-full max-md:border-b max-md:border-r-0", compare, tree);

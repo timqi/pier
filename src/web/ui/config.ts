@@ -13,9 +13,15 @@ import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, CONTROL, field, setStatus, textInput, toggle } from "./form.js";
+import { badge, CONTROL, empty, field, PANEL, PANEL_HEAD, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { configSyncPane } from "./config-sync.js";
+
+/** Agent's two panes: the shared panel surface, clipped to its own radius
+ *  because each pane scrolls inside it. */
+const PANE = `${PANEL} flex flex-col overflow-hidden`;
+/** Their title bands — the nav's scope picker, the pane's file name. */
+const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 
 interface ConfigIndex {
   dir: string;
@@ -158,10 +164,10 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
-  // Scope sits at the top of the nav, right above the files it switches.
+  // Scope sits at the top of the nav, right above the files it switches — in
+  // the Console's one control skin, not a smaller select of its own.
   const scopeSelect = document.createElement("select");
-  scopeSelect.className =
-    "select w-full rounded-md border border-neutral-300 px-2 py-1 text-[12.5px] focus:border-indigo-400 focus:outline-none";
+  scopeSelect.className = `${CONTROL} select`;
   scopeSelect.onchange = () => {
     closeSync();
     scope = scopeSelect.value;
@@ -169,19 +175,18 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     openDirs.clear();
     void load();
   };
-  const scopeBox = h("div", "flex flex-none flex-col gap-1 border-b border-neutral-200 px-3 pb-2.5 pt-2");
-  scopeBox.append(
-    h("span", "text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", "Scope"),
-    scopeSelect,
-  );
+  const scopeBox = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
+  scopeBox.append(h("span", "field-label", "Scope"), scopeSelect);
 
   // No header of its own: embedded under Settings → Agent files, whose strip
   // already names it.
-  const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1");
-  const nav = h("nav", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[13px] max-md:max-h-48 max-md:w-full max-md:border-r-0 max-md:border-b");
+  // Two panels on the canvas rather than one sheet split by a rule: the list of
+  // what a session is made of, and the one thing the selected item affords.
+  const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1.5");
+  const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:max-h-48 max-md:w-full`);
   nav.append(scopeBox, navList);
-  const pane = h("div", "flex min-w-0 flex-1 flex-col");
-  const body = h("div", "flex min-h-0 flex-1 max-md:flex-col");
+  const pane = h("div", `${PANE} min-w-0 flex-1`);
+  const body = h("div", "flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1 max-md:flex-col");
   body.append(nav, pane);
   root.append(body);
 
@@ -265,7 +270,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   // --- nav ---------------------------------------------------------------------
 
   function navSection(title: string): HTMLElement {
-    return h("div", "px-3 pb-0.5 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title);
+    return h("div", "px-3 pb-1 pt-3 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title);
   }
 
   /** Symlinked resources are real config, just stored elsewhere — say so. */
@@ -298,8 +303,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   ): HTMLElement {
     const row = h(
       "button",
-      `flex w-full cursor-pointer items-center gap-1.5 py-1 pr-3 text-left hover:bg-neutral-100 ${
-        active ? "bg-indigo-50 hover:bg-indigo-50" : ""
+      `config-row flex w-full cursor-pointer items-center gap-1.5 py-1.5 pr-3 text-left transition-colors hover:bg-neutral-100 ${
+        active ? "bg-indigo-50 font-medium hover:bg-indigo-50" : ""
       } ${dim ? "text-neutral-400" : ""}`,
     );
     row.append(h("span", "truncate", label));
@@ -431,19 +436,23 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   function renderPlaceholder(): void {
     pane.replaceChildren(
-      h("p", "px-4 py-3 text-[13px] text-neutral-400", "Select a file to edit, or browse extensions and skills."),
+      h(
+        "div",
+        "flex min-h-0 flex-1 items-center justify-center p-6",
+        empty("Select a file to edit, or browse extensions and skills."),
+      ),
     );
   }
 
   function renderError(message: string): void {
-    pane.replaceChildren(h("p", "px-4 py-3 text-[13px] text-red-600", message));
+    pane.replaceChildren(h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
   }
 
   /** The pane's title bar: file name plus whatever the mode adds. */
   const paneBar = (name: string, ...rest: HTMLElement[]): HTMLElement =>
     h(
       "div",
-      "flex flex-none items-center gap-3 border-b border-neutral-200 px-4 py-2",
+      `${BAND} gap-3 px-4 py-2.5`,
       h("span", "font-mono text-[12.5px] text-neutral-500", name),
       ...rest,
     );
@@ -464,7 +473,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     let expected = content;
 
     const status = h("span", "text-[11.5px] text-neutral-400", "");
-    const save = h("button", "btn btn-primary ml-auto text-[12.5px]", "Save") as HTMLButtonElement;
+    const save = h("button", "btn btn-primary text-[12.5px]", "Save") as HTMLButtonElement;
     const editor = document.createElement("textarea");
     editor.className =
       "block min-h-0 flex-1 resize-none bg-white p-4 font-mono text-[13px] leading-relaxed focus:outline-none";
@@ -495,6 +504,30 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         save.disabled = false;
       }
     };
+    // An agent file is read more often than it is written, so it opens in the
+    // viewer every other file surface uses (code.ts) — gutter, highlighting,
+    // wrapping — and Edit swaps in the textarea. What the viewer renders is
+    // the editor's own text, so switching back never hides an unsaved line;
+    // highlighting the textarea itself would take a second renderer aligned to
+    // it pixel for pixel, which is the thing code.ts exists to prevent.
+    const edit = h("button", "btn text-[12.5px]", "Edit") as HTMLButtonElement;
+    const view = h("button", "btn text-[12.5px]", "View") as HTMLButtonElement;
+    const actions = (...rest: HTMLElement[]): HTMLElement =>
+      h("div", "ml-auto flex flex-none items-center gap-2", ...rest);
+    const showEdit = (): void => {
+      pane.replaceChildren(paneBar(name, status, actions(view, save)), editor);
+      editor.focus();
+    };
+    const showRead = async (): Promise<void> => {
+      const lang = await langFor(name); // first file of the session waits for hljs
+      if (request !== paneRequest) return;
+      pane.replaceChildren(
+        paneBar(name, status, actions(edit)),
+        h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(editor.value), lang)),
+      );
+    };
+    edit.onclick = showEdit;
+    view.onclick = () => void showRead();
     save.onclick = () => void doSave();
     editor.onkeydown = (ev) => {
       if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") {
@@ -506,8 +539,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       setStatus(status, "idle", "unsaved changes");
     };
 
-    pane.replaceChildren(paneBar(name, status, save), editor);
-    editor.focus();
+    await showRead();
   }
 
   /** Where every install and every failure already is: the update task's

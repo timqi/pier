@@ -168,7 +168,7 @@ export function createTasksView(
     };
     table.append(body);
     const none = h("div", "p-4", empty("No matching tasks."));
-    const pane = h("div", "min-h-0 flex-1 overflow-auto", table, none);
+    const pane = h("div", "automation-list min-h-0 flex-1 overflow-auto", table, none);
     drawRows();
     pane.onscroll = () => { listScroll = pane.scrollTop; };
     root.replaceChildren(h("div", "automation-filters task-filters", ...filters), pane);
@@ -254,7 +254,7 @@ export function createTasksView(
     archive.onclick = () => void mutate(`/api/tasks/${task.id}/archive`);
 
     const tabs = toolbar();
-    const pane = h("div", "min-h-0 flex-1 overflow-auto");
+    const pane = h("div", "automation-list min-h-0 flex-1 overflow-auto");
     pane.dataset.taskDetail = id;
     const allRuns = button("All runs");
     allRuns.onclick = () => openRuns({ taskId: task.id });

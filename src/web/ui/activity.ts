@@ -133,7 +133,7 @@ export function createActivityView(
         void load();
       }),
     );
-    const body = h("div", "min-h-0 flex-1 overflow-auto");
+    const body = h("div", "automation-list min-h-0 flex-1 overflow-auto");
     if (tab === "sessions") renderSessions(body);
     else renderGraph(body);
     root.replaceChildren(bar, body);

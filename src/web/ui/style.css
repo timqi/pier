@@ -236,8 +236,7 @@ main > section, #turns { grid-row: 1 / -1; }
 #queue-panel:not(.hidden) + #recovery-panel { margin-top: 0.5rem; }
 
 /* Desktop: the rail collapses away and its re-open handle floats in the title
-   band, which every view starts with — an h-10 header first in its pane (the
-   chat's has an id; Boards' sits inside its scroll wrapper). The padding is
+   band every view starts with — `#chat-header` or a `.pagehead`. The padding is
    what keeps the handle out of their titles without each view knowing about
    it. Unlayered, so it outranks the body's md: grid-template utility. */
 @media (width >= 48rem) {
@@ -262,10 +261,9 @@ main > section, #turns { grid-row: 1 / -1; }
   body:not([data-rail="closed"]) #rail-toggle {
     top: calc(0.625rem + 8px);
   }
+  /* Every title band is the same inset strip, so the handle clears it by the
+     same 8px whichever view is open. */
   body[data-rail="closed"] #rail-toggle {
-    left: 0.375rem;
-  }
-  body[data-rail="closed"]:has(#chat-header:not(.hidden)) #rail-toggle {
     left: calc(0.375rem + 8px);
     top: calc(0.625rem + 8px);
   }
@@ -277,11 +275,14 @@ main > section, #turns { grid-row: 1 / -1; }
   body:not([data-rail="closed"]) #rail-toggle .attention {
     display: none;
   }
-  /* Direct children only: Automation's inner views sit under its header and
-     must not indent their own toolbars a second time. */
-  body[data-rail="closed"]
-    :is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
+  body[data-rail="closed"] :is(#chat-header, .pagehead) {
     padding-left: 2.75rem;
+  }
+  /* Desktop has the width to keep title, tabs and action on one line, so the
+     head is exactly the heading's strip: one row, and its floor is its height. */
+  .pagehead {
+    flex-wrap: nowrap;
+    padding-block: 0;
   }
 }
 
@@ -338,10 +339,11 @@ main > section, #turns { grid-row: 1 / -1; }
     padding-top: env(safe-area-inset-top);
   }
   /* Only the transcript scrolls under the floating bar. A Console view brings
-     its own title strip and its own scrollers, so it starts below the bar
-     instead — by the bar's footprint, without each view knowing about it. */
+     its own head strip and its own scrollers, so it starts below the bar
+     instead — by the bar's footprint, without each view knowing about it; the
+     8px between the two strips is the head's own inset. */
   main > section {
-    padding-top: calc(var(--head-h) + 8px);
+    padding-top: var(--head-h);
   }
 }
 
@@ -394,7 +396,7 @@ main {
 }
 @media (pointer: coarse), (width < 48rem) {
   #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-palette),
-  #console-section :is(summary, li button) { min-height: 44px; }
+  #console-section :is(summary, li button), .config-row { min-height: 44px; }
   #sidebar :is(.session-more, .icon-btn, #open-palette) { min-width: 44px; }
   /* The dock's cards are on the same thumb: the queue's whole-queue actions and
      the recovery card's buttons. Their header row is a fixed cursor height, so
@@ -412,8 +414,7 @@ main {
 }
 #console-section button.bg-indigo-50 [data-icon] { color: inherit; }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
-:is(.glass, #sidebar, #mobile-bar, #chat-header,
-  main > section > header:first-child, main > section > div:first-child > header:first-child) {
+:is(.glass, #sidebar, #mobile-bar, #chat-header, .pagehead) {
   background: var(--glass-surface);
   border-color: var(--glass-edge);
   backdrop-filter: blur(28px) saturate(1.4);
@@ -440,17 +441,24 @@ main {
 }
 #rail-toggle { top: 0.625rem; border-radius: 50%; }
 /* One heading material at both breakpoints: the same slim inset strip in the
-   same glass, whichever of the two the width is showing. */
-#mobile-bar, #chat-header {
+   same glass, whichever of the two the width is showing — and a Console page's
+   head is that strip too, so a Console page and a chat read as one workbench. */
+#mobile-bar, #chat-header, .pagehead {
   margin: 8px 8px 0;
   border: 1px solid var(--glass-edge);
   border-radius: 18px;
   box-shadow: var(--glass-shadow);
   font-size: 0.9375rem;
 }
-:is(#chat-header, main > section > header:first-child, main > section > div:first-child > header:first-child) {
-  height: 3rem;
-}
+/* A bar holds one line and is that tall; the head may wrap — a phone's tab row
+   takes two lines — so its `min-h-12` is a floor instead. */
+#mobile-bar, #chat-header { height: 3rem; }
+/* A head that hugs its controls — Channels' platform switch, which is one
+   switch and a status line, not a page's worth of band — centres over the
+   column of cards below it instead of hanging off the left edge. The cap is
+   what keeps the inset: auto margins are zero while `fit-content` measures,
+   so without it a wide switch on a phone would reach both edges. */
+.pagehead-hug { width: fit-content; margin-inline: auto; max-width: calc(100% - 16px); }
 /* The ends are under the floating chrome (grid above), so they pad by what
    covers them, and rows dissolve into the pane's edges instead of being cut
    at a chrome boundary. */
@@ -649,8 +657,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: scale(0.95); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.glass, .glass-menu, #sidebar, #mobile-bar, #chat-header, #queue-panel, #recovery-panel,
-    main > section > header:first-child, main > section > div:first-child > header:first-child) {
+  :is(.glass, .glass-menu, #sidebar, #mobile-bar, #chat-header, #queue-panel, #recovery-panel, .pagehead) {
     background: var(--color-white);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -712,6 +719,22 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: none; }
 }
 
+/* Automation's two panels share one material: the filter card and the list
+   under it are the same inset surface on the canvas, under the head's strip.
+   The list scrolls itself — that is what lets a sticky table header ride the
+   card's own top edge instead of the pane's, and the radius clip is what keeps
+   rows off its corners. */
+.automation-filters, .automation-list {
+  margin: 0.75rem 1rem;
+  border: 1px solid var(--color-neutral-200);
+  border-radius: 1.25rem;
+  background: color-mix(in oklab, var(--color-white) 75%, transparent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.025);
+}
+.automation-filters + .automation-list { margin-top: 0; }
+/* A run's breadcrumb opens the card it belongs to, so there it is a header and
+   takes the divider `toolbar()` no longer draws on the canvas. */
+.automation-list > .toolbar { border-bottom: 1px solid var(--color-neutral-200); }
 /* Automation filters keep labels and actions aligned independently of option length. */
 .automation-filters {
   display: grid;
@@ -721,12 +744,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   flex: none;
   max-height: 50dvh;
   overflow-y: auto;
-  margin: 0.75rem 1rem;
   padding: 0.875rem;
-  border: 1px solid var(--color-neutral-200);
-  border-radius: 1.25rem;
-  background: color-mix(in oklab, var(--color-white) 75%, transparent);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.025);
 }
 .filter-field { display: flex; min-width: 0; flex-direction: column; gap: 0.375rem; }
 .field-label, .filter-field > span { font-size: 0.71875rem; font-weight: 500; color: var(--color-neutral-600); }
@@ -798,11 +816,13 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .icon-btn {
     @apply flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700;
   }
-  /* Console tab strip (Settings, Automation). Desktop keeps the view's tabs and its
-     right-hand control group on one line; below md the right group takes
-     `w-full` and this wraps to give it a line of its own, within thumb reach. */
-  .tabstrip {
-    @apply flex flex-none items-center gap-1 overflow-x-auto whitespace-nowrap border-b border-neutral-200 px-4 py-2 max-md:flex-wrap max-md:gap-y-2;
+  /* A Console page's head: its title, the view's tab pills and the page's
+     primary action on one band, in the heading strip's material (below). Below
+     md the title hides — the top bar already names the page — the right-hand
+     group takes `w-full` and this wraps to give it a line of its own within
+     thumb reach; the pills scroll rather than shrink when they outgrow a row. */
+  .pagehead {
+    @apply flex min-h-12 flex-none flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap px-4 py-2;
   }
   /* Lightbox paging arrows; the side comes from a `left-2` / `right-2` beside it. */
   /* The scrim under these stays black in both themes, so the glyph on it has to

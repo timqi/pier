@@ -19,7 +19,7 @@ import {
 } from "./channel-help.js";
 import { dirInput } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, btn, button, card, empty, field, pill, STATUS_TONE, textInput, toggle } from "./form.js";
+import { badge, btn, button, card, empty, field, segmented, STATUS_TONE, textInput, toggle } from "./form.js";
 import { launchField } from "./model-picker.js";
 
 const PLATFORMS: [ChannelPlatform, string][] = [["telegram", "Telegram"], ["slack", "Slack"], ["lark", "Lark"]];
@@ -46,28 +46,35 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   let config: ChannelConfig | null = null;
   let models: ModelRef[] = [];
 
-  // Embedded under Settings → Channels, so the platform strip is the only
-  // chrome this view owns. Sticky inside its own scroll container: a config
-  // page long enough to scroll still names the platform being edited, and the
-  // save status rides the strip where the header used to carry it.
+  // Embedded under Settings → Channels, so the platform switch is the only
+  // chrome this view owns — and a segmented one, not a second pill strip: the
+  // page's head already draws that level, and two rows of the same chrome read
+  // as two levels of the same navigation. It keeps the head's material and
+  // stays sticky in its own scroll container: a config page long enough to
+  // scroll still names the platform being edited, the save status rides the
+  // strip, and the glass is what the rows passing under it need.
   const statusBox = h("div", "ml-auto flex items-center gap-1.5 text-[11.5px]");
-  const tabs = h(
-    "div",
-    "sticky top-0 z-30 flex items-center gap-1 border-b border-neutral-200 bg-white px-4 py-2",
-    statusBox,
-  );
-  const pane = h("div", "px-4 py-5");
-  root.append(h("div", "min-h-0 flex-1 overflow-y-auto bg-neutral-50/60", tabs, pane));
+  // Hugs its controls and centres over the cards: a second full-width band
+  // under the page's head would say "another page", and what is on it is one
+  // switch and a status line. top-[-8px] is the strip's own inset, so once it
+  // sticks it sits flush against the scrollport instead of leaving 8px of
+  // cards sliding past above it.
+  const tabs = h("div", "pagehead pagehead-hug sticky top-[-8px] z-30", statusBox);
+  const pane = h("div", "px-4 pb-5 pt-4");
+  root.append(h("div", "min-h-0 flex-1 overflow-y-auto", tabs, pane));
 
   function renderTabs(): void {
     tabs.replaceChildren(
-      ...PLATFORMS.map(([id, label]) =>
-        pill(label, id === platform, () => {
+      segmented<ChannelPlatform>(
+        PLATFORMS.map(([id, label]) => [label, id]),
+        platform,
+        (next) => {
           if (saveTimer) flush();
-          platform = id;
-          localStorage.setItem(PLATFORM_KEY, id);
+          platform = next;
+          localStorage.setItem(PLATFORM_KEY, next);
           void load();
-        })),
+        },
+      ),
       statusBox,
     );
   }
@@ -259,7 +266,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const list = h("div", "flex flex-col");
     if (!cfg.users.length) list.append(empty("No bound users yet."));
     for (const user of cfg.users) {
-      const remove = btn("Remove", "cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100");
+      const remove = btn("Remove", "cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100 pointer-coarse:opacity-100");
       remove.onclick = async () => {
         await fetch(`/api/channels/${platform}/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
         await load();

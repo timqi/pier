@@ -62,7 +62,9 @@ Dock cards (queue, recovery) take the composer's own inset at both widths, and
 their controls take the 44px touch target on a coarse pointer, growing the
 card's header row rather than clipping it.
 The mobile drawer keeps its available width and uses rounded outer corners
-without desktop panel margins. Keep the outer page edge neutral and
+without desktop panel margins. A Console page's head — its title, tabs and
+primary action on one band — is that same strip at both widths, so a Console
+page and a chat read as one workbench. Keep the outer page edge neutral and
 match installed-window theme metadata to that canvas in both themes, including
 startup. Reserve the very pale
 mist-blue and mint background accents for the lower conversation area so color

@@ -5,7 +5,7 @@
 
 import { failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, copyBtn, h, relTime, type ConsoleView } from "./dom.js";
-import { btn, toggle } from "./form.js";
+import { btn, card, empty, pageTitle, toggle } from "./form.js";
 
 interface Board {
   slug: string;
@@ -32,12 +32,12 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
    */
   let problem = "";
 
-  const header = h(
-    "header",
-    "sticky top-0 z-30 flex h-10 items-center gap-3 border-b border-neutral-200 bg-white px-4",
-    h("span", "font-medium max-md:hidden", "Boards"),
-  );
-  const pane = h("div", "px-4 py-5");
+  // max-md:hidden: the title is all this head carries, and below md the top bar
+  // already says "Boards" — the strip would be an empty band under it.
+  // top-[-8px] is the strip's own inset, so once it sticks it sits flush
+  // against the scrollport instead of leaving 8px of cards sliding past above.
+  const header = h("header", "pagehead sticky top-[-8px] z-30 max-md:hidden", pageTitle("Boards"));
+  const pane = h("div", "px-4 pb-5 pt-1");
   root.append(h("div", "min-h-0 flex-1 overflow-y-auto", header, pane));
 
   async function patch(board: Board, isPublic: boolean): Promise<void> {
@@ -60,16 +60,19 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
   }
 
   function row(board: Board): HTMLElement {
-    const el = h("div", "group flex flex-col gap-1 border-b border-neutral-200/70 px-1 py-2.5 last:border-b-0");
+    const el = h("div", "group flex flex-col gap-1 py-2.5");
     const link = document.createElement("a");
-    link.className = "truncate font-medium text-neutral-800 hover:text-indigo-700";
+    // basis-full below md: the row's controls would otherwise squeeze the title
+    // to nothing on a phone, so there the name takes the line by itself.
+    link.className =
+      "min-w-0 flex-1 truncate text-[13px] font-medium text-neutral-800 hover:text-indigo-700 max-md:basis-full";
     // A public board opens on the URL its readers use: the password-free one,
     // so what the operator checks is the page anyone else gets.
     link.href = boardPath(board);
     link.target = "_blank";
     link.rel = "noreferrer";
     link.textContent = board.title;
-    const top = h("div", "flex items-center gap-2", link, h("span", "flex-none font-mono text-[11.5px] text-neutral-400", board.slug));
+    const top = h("div", "flex flex-wrap items-center gap-x-2 gap-y-1", link);
 
     // The toggle carries its own consequence: a public board needs no session,
     // no cookie and no invitation to read. Reuses the one switch (form.ts),
@@ -78,13 +81,13 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
       board.public = v;
       void patch(board, v);
     });
-    label.className = "ml-auto flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500";
+    label.className = "flex flex-none cursor-pointer items-center gap-1.5 text-[11.5px] text-neutral-500";
     label.append(h("span", "", "Public"));
     // Hover-revealed, like the channel user rows: deleting only renames the
     // folder, so the undo is on disk and a modal would be theatre.
     const del = btn(
       "Delete",
-      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100",
+      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100 pointer-coarse:opacity-100",
     );
     del.title = "Renames the folder on disk; nothing is erased";
     del.onclick = () => void remove(board.slug);
@@ -92,14 +95,17 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     // another machine. `board` is read at click time, so a toggle flipped a
     // second ago copies the URL the row now shows.
     const copyLink = copyBtn(
-      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-indigo-600 group-hover:opacity-100",
+      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-indigo-600 group-hover:opacity-100 pointer-coarse:opacity-100",
       () => `${location.origin}${boardPath(board)}`,
     );
     copyLink.title = "Copy the board's link";
-    top.append(label, copyLink, del);
+    top.append(h("div", "ml-auto flex flex-none items-center gap-2", label, copyLink, del));
     el.append(top);
 
+    // The slug leads the meta line rather than the title's: it is the folder's
+    // name, and beside the title it was the thing crowding it out.
     const meta = h("div", "flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-neutral-500");
+    meta.append(h("span", "min-w-0 break-all font-mono text-neutral-400", board.slug));
     if (board.description) meta.append(h("span", "min-w-0 truncate", board.description));
     meta.append(h("span", "flex-none text-neutral-400", relTime(Date.parse(board.updatedAt))));
     for (const id of board.sessions) {
@@ -109,7 +115,7 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
       meta.append(chip);
     }
     if (board.public && board.token) {
-      const url = h("span", "flex-none font-mono text-neutral-400", boardPath(board));
+      const url = h("span", "min-w-0 break-all font-mono text-neutral-400", boardPath(board));
       url.title = "Public URL — anyone holding this link can read the board, no password";
       meta.append(url);
     }
@@ -124,26 +130,16 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
   ];
 
   function render(): void {
-    const column = h("div", "mx-auto flex max-w-3xl flex-col");
+    // One card per section, the Console's own: a page of boards is a page of
+    // cards on the canvas, like every other Console page.
+    const column = h("div", "mx-auto flex w-full max-w-3xl flex-col gap-4");
     if (boards.length === 0) {
-      column.append(
-        h(
-          "p",
-          "rounded-xl border border-dashed border-neutral-300 px-4 py-6 text-center text-[12.5px] text-neutral-500",
-          "No boards yet. Ask an agent to build one — it writes a folder under ~/.pier/boards.",
-        ),
-      );
+      column.append(empty("No boards yet. Ask an agent to build one — it writes a folder under ~/.pier/boards."));
     }
     for (const { title, hint, wanted } of SECTIONS) {
       const list = boards.filter((b) => b.public === wanted);
       if (list.length === 0) continue;
-      const el = h("section", "mb-6");
-      el.append(h("h2", "text-[13px] font-semibold text-neutral-700", title));
-      el.append(h("p", "mb-1 text-[11.5px] leading-snug text-neutral-500", hint));
-      const box = h("div", "rounded-xl border border-neutral-200 bg-white px-3");
-      box.append(...list.map(row));
-      el.append(box);
-      column.append(el);
+      column.append(card(title, hint, h("div", "flex flex-col divide-y divide-neutral-200/70", ...list.map(row))));
     }
     pane.replaceChildren(
       ...(problem ? [h("p", "mb-3 text-[13px] text-red-600", problem)] : []),

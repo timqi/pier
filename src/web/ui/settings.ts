@@ -9,7 +9,7 @@ import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, empty, field, input, pill, setStatus } from "./form.js";
+import { badge, button, card, empty, field, input, pageTitle, PANEL, pill, setStatus } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
@@ -66,17 +66,13 @@ export function createSettingsView(
   const stored = localStorage.getItem(TOPIC_KEY) ?? undefined;
   let topic: Topic = isTopic(stored) ? stored : "models";
 
-  // Header and tabs sit above the topic host, which scrolls (or lays out) on
-  // its own — the strip stays visible however long a topic page gets.
-  const header = h(
-    "header",
-    "flex h-10 flex-none items-center gap-3 border-b border-neutral-200 bg-white px-4 max-md:hidden",
-    h("span", "font-medium", "Settings"),
-  );
-  const tabs = h("div", "tabstrip bg-white");
+  // The head sits above the topic host, which scrolls (or lays out) on its
+  // own — the strip stays visible however long a topic page gets.
+  const head = h("header", "pagehead");
 
   function renderTabs(): void {
-    tabs.replaceChildren(
+    head.replaceChildren(
+      pageTitle("Settings"),
       ...TOPICS.map(([id, label]) => pill(label, id === topic, () => onTopic(id))),
     );
   }
@@ -284,11 +280,13 @@ export function createSettingsView(
   // --- topic hosts -----------------------------------------------------------------
   // Simple topics share one scroll wrapper each; Channels and Agent files are
   // whole modules that manage their own layout, hosted as child console views
-  // and shown/hidden with the tab. The tint behind the cards is what keeps a
-  // page of white cards from reading as one flat sheet.
+  // and shown/hidden with the tab. No tint of its own: the cards sit on the
+  // workbench canvas the head's strip floats over, which is what the tint used
+  // to stand in for — and a second grey inside the pane read as a block pasted
+  // under the strip.
 
   const wrap = (content: HTMLElement): HTMLElement =>
-    h("div", "hidden min-h-0 flex-1 overflow-y-auto bg-neutral-50/60", h("div", "px-4 py-5", content));
+    h("div", "hidden min-h-0 flex-1 overflow-y-auto", h("div", "px-4 pb-5 pt-1", content));
 
   // One topic, two halves: the endpoints that can be reached, then the few
   // models this deployment favors. Configuring auth and then pinning what to
@@ -297,10 +295,7 @@ export function createSettingsView(
   const modelMenu = createModelMenuPane();
   // Same column width and card chrome as the menu below it, or the two halves
   // of one topic read as two pages.
-  const providersBox = h(
-    "div",
-    "mx-auto flex w-full min-w-0 max-w-3xl flex-col rounded-xl border border-neutral-200 bg-white shadow-xs",
-  );
+  const providersBox = h("div", `mx-auto flex w-full min-w-0 max-w-3xl flex-col ${PANEL}`);
 
   const channelsHost = h("section", "hidden min-h-0 flex-1 flex-col");
   const channelsChild = createChannelsView(channelsHost);
@@ -461,7 +456,7 @@ export function createSettingsView(
     ["security", securityPane, () => void loadSecurity()],
   ];
 
-  root.append(header, tabs, instancePane, modelsPane, channelsHost, filesHost, securityPane);
+  root.append(head, instancePane, modelsPane, channelsHost, filesHost, securityPane);
 
   function show(arg?: string): void {
     if (isTopic(arg)) topic = arg;

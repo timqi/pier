@@ -144,10 +144,20 @@ it. `src/boards/` depends on `node:fs` and core types only;
 
 ## Console surface (`src/web/ui/boards.ts`)
 
-One table, nothing else: public boards in a section at the top with their
-copyable `/p/<slug>-<token>/` URL, then the private ones — title · slug · linked sessions
-(links into chat) · updated, with a public toggle, copy link, open ↗ and delete. The toggle
-carries a one-line "anyone with the link can read this" warning.
+One list, nothing else: a card per section on the canvas like every other
+Console page — public boards at the top with their copyable
+`/p/<slug>-<token>/` URL, then the private ones. A row leads with the title,
+which links to the board; slug, description, updated time, linked sessions
+(links into chat) and the public URL follow on the meta line beneath it, all
+wrapping rather than pushing each other out. Each row carries a public toggle,
+copy link and delete; the two hover-revealed ones stay visible on touch. The
+toggle carries a one-line "anyone with the link can read this" warning.
+
+Below md the title takes the line by itself and the controls wrap under it — the
+one narrow-width difference, and the reason for it: with them beside the title
+there was no title left to read. The page's head strip is desktop-only here,
+since the mobile top bar already names the page and the strip carries only that
+name.
 
 No detail drawer, no title/description editing, no file list, no board picker in
 the session menu: the manifest belongs to agents, and the Console's job is the

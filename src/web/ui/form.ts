@@ -32,11 +32,18 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
   return el;
 };
 
-/** The row under a Console view's title (or its Automation strip): filters,
- * a breadcrumb, a segmented switch, with actions pushed right by `ml-auto`.
- * Wraps below md so the right-hand group gets its own line. */
+/** A Console page's title, first on its `.pagehead` (style.css owns the band).
+ * Phones hide it: the mobile top bar already names every view. */
+export const pageTitle = (label: string): HTMLElement =>
+  h("span", "mr-1 flex-none font-medium max-md:hidden", label);
+
+/** The row under a Console view's head: a breadcrumb, a segmented switch, with
+ * actions pushed right by `ml-auto`. Wraps below md so the right-hand group
+ * gets its own line. On the canvas it draws no rule of its own — the panel
+ * below is its edge; as a list card's first row it is that card's header, and
+ * style.css gives it the divider there. */
 export const toolbar = (...children: (HTMLElement | SVGElement | string)[]): HTMLElement =>
-  h("div", "flex min-h-10 flex-none flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2", ...children);
+  h("div", "toolbar flex min-h-10 flex-none flex-wrap items-center gap-2 px-4 py-2", ...children);
 
 /** A segmented switch — a few exclusive choices inside a toolbar (a task
  * page's Runs/Definition, Activity's table/graph and its time scope). Smaller
@@ -74,12 +81,19 @@ export function pill(label: string, active: boolean, onClick: () => void): HTMLB
   return el;
 }
 
+/** The Console's one panel surface — a card, the providers box, Agent's two
+ * panes. Layout stays at the call site; this is what the surface is made of. */
+export const PANEL = "rounded-3xl border border-neutral-200 bg-white shadow-sm";
+/** A panel's title band: the card's header, the providers box's, the file
+ * name over Agent's pane. Padding and corners stay at the call site. */
+export const PANEL_HEAD = "border-b border-neutral-200/70 bg-neutral-50/50";
+
 /** A titled panel. The subtitle carries the "why", so fields need fewer words. */
 // No overflow-hidden: help bubbles escape their card, so the header rounds its
 // own top corners instead of being clipped into shape by the section.
 export function card(title: string, subtitle: string, ...body: HTMLElement[]): HTMLElement {
-  const el = h("section", "rounded-3xl border border-neutral-200 bg-white shadow-sm");
-  const head = h("div", "rounded-t-3xl border-b border-neutral-200/70 bg-neutral-50/50 px-5 py-4");
+  const el = h("section", PANEL);
+  const head = h("div", `rounded-t-3xl ${PANEL_HEAD} px-5 py-4`);
   head.append(h("h2", "text-[14px] font-semibold text-neutral-800", title));
   if (subtitle) head.append(h("p", "mt-1 text-[12px] leading-normal text-neutral-500", subtitle));
   el.append(head, h("div", "flex flex-col gap-4 px-5 py-5", ...body));

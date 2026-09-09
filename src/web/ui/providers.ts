@@ -14,7 +14,7 @@ import type {
 } from "../../core/types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
-import { badge, button, CONTROL, empty, field, input, select, setStatus, textarea } from "./form.js";
+import { badge, button, CONTROL, empty, field, input, PANEL_HEAD, select, setStatus, textarea } from "./form.js";
 import { openAuthFlow, type AuthFlow } from "./auth-flow.js";
 
 const POPULAR = ["anthropic", "openai", "openai-codex", "google", "openrouter", "deepseek"];
@@ -31,7 +31,7 @@ export async function openProviders(pane: HTMLElement): Promise<void> {
   add.classList.add("ml-auto");
   const bar = h(
     "div",
-    "flex flex-none items-center gap-3 rounded-t-xl border-b border-neutral-200/70 bg-neutral-50/70 px-4 py-2",
+    `flex flex-none items-center gap-3 rounded-t-3xl ${PANEL_HEAD} px-4 py-2`,
     h("h2", "text-[13px] font-semibold text-neutral-700", "Providers"),
     add,
   );

@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
   return { element, elements, tasks: view(), runs: view(), activity: view(), bar: vi.fn(), pill: vi.fn() };
 });
 vi.mock("./dom.js", () => ({ $: mocks.element, h: vi.fn(), consoleView: vi.fn() }));
-vi.mock("./form.js", () => ({ pill: mocks.pill, button: mocks.element }));
+vi.mock("./form.js", () => ({ pill: mocks.pill, button: mocks.element, pageTitle: mocks.element }));
 vi.mock("./chat.js", () => ({ turnsPane: mocks.element("turns") }));
 vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
 vi.mock("./session-header.js", () => ({ renderHeader: vi.fn() }));
