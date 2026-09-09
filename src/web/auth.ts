@@ -203,9 +203,14 @@ function sameSecret(a: string, b: string): boolean {
 }
 
 /** `//evil.example` is protocol-relative and browsers normalize `/\evil.example`
- *  to it; `startsWith("/")` alone is an open redirect. */
+ *  to it — and they strip whitespace and control characters from a Location
+ *  first, which turns `/<TAB>/evil.example` into one as well. Only a plain
+ *  path survives; anything else is an open redirect. */
 const safeNext = (raw: unknown): string =>
-  typeof raw === "string" && /^\/(?![/\\])/.test(raw) ? raw : "/";
+  typeof raw === "string" && /^\/(?![/\\])\S*$/.test(raw) &&
+    ![...raw].some((ch) => ch <= "\u001f" || ch === "\u007f")
+    ? raw
+    : "/";
 
 // In memory: the window is minutes, and the point is to make guessing slow.
 // Fresh identities spill into one overflow bucket once the cap is reached.

@@ -191,6 +191,11 @@ describe("login", () => {
     expect(await to("//evil.example/")).toBe("/");
     expect(await to("/\\evil.example/")).toBe("/");
     expect(await to("https://evil.example/")).toBe("/");
+    // A browser strips these from a Location before parsing it, so each of
+    // them is `//evil.example` by the time it navigates.
+    expect(await to("/\t/evil.example")).toBe("/");
+    expect(await to("/\n/evil.example")).toBe("/");
+    expect(await to("/\0/evil.example")).toBe("/");
     // A real in-app destination survives, hash and all.
     expect(await to("/#/session/abc")).toBe("/#/session/abc");
   });
