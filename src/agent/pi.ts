@@ -38,8 +38,10 @@ import type {
   TurnMeta,
 } from "../core/types.js";
 import { inlineExtensions } from "../extensions/index.js";
+import { SESSION_TITLE_MAX } from "../limits.js";
 import { logger } from "../log.js";
 import {
+  textOf,
   toChatTurns,
   toSessionEvents,
   turnMetaAt,
@@ -86,6 +88,42 @@ const PROVIDER_CHECK_MAX_TOKENS = 8192;
 /** Neither half of a probe is worth more than a screen. */
 const clip = (text: string): string =>
   text.length > 4000 ? `${text.slice(0, 4000)}\n[… ${text.length - 4000} more characters]` : text;
+
+/** Naming a session: one bare request on the operator's title model, after the
+ *  first exchange. Each half of the exchange is cut to a few hundred
+ *  characters — a title is about the subject, and the subject is in the
+ *  opening lines — and the answer is a line, so the cap is a line's worth. */
+const TITLE_INPUT_CHARS = 600;
+const TITLE_MAX_TOKENS = 40;
+const TITLE_TIMEOUT_MS = 20_000;
+const TITLE_PROMPT =
+  "Name this conversation for a session list. Reply with the title only: at most 12 Chinese characters " +
+  "or 6 English words, in the language the user wrote in, no quotes, no trailing period. " +
+  "A leading `[name<id> time]` on the user's message is a speaker header, not content.";
+
+/** A subject, not the request: the model is asked to title the exchange, and
+ *  the two halves are labelled so a reply that quotes an instruction back is
+ *  not mistaken for one. */
+const titleRequest = (first: string, reply: string): string =>
+  `${TITLE_PROMPT}\n\n<user>\n${first.slice(0, TITLE_INPUT_CHARS)}\n</user>\n\n<assistant>\n${reply.slice(0, TITLE_INPUT_CHARS)}\n</assistant>`;
+
+/** The text of a bare completion, or the refusal it was: a provider can
+ *  decline as a message rather than a throw, and only the stop reason tells
+ *  that from an answer. */
+function textOfAnswer(answer: PiMessage): string {
+  if (answer.stopReason === "error" || answer.stopReason === "aborted") {
+    throw new Error(answer.errorMessage ?? `the provider stopped: ${answer.stopReason}`);
+  }
+  return textOf(answer.content).trim();
+}
+
+/** What a model hands back as a title, made into one: the first line, quotes
+ *  off, capped where every other title is capped. Empty is a failure, not a
+ *  cleared name — the caller reports it. */
+export function titleFromAnswer(text: string): string {
+  const line = text.trim().split("\n")[0]?.trim() ?? "";
+  return line.replace(/^["'“‘「]+|["'”’」.。]+$/g, "").trim().slice(0, SESSION_TITLE_MAX);
+}
 
 /** Pier's baseline replaces Pi's generic default; a user's SYSTEM.md follows it. */
 const PIER_SYSTEM_PROMPT = `You are a general-purpose agent with a live workspace: you can read and change files and run shell commands. Act with expert care — do the work and verify the result.
@@ -178,6 +216,10 @@ export class PiSession implements AgentSession {
      *  callback only because the session is what knows it happened. */
     private readonly wrote: () => void = () => {},
     private readonly retention: CacheRetentionBox = { value: "long" },
+    /** The operator's title model asked to name a first exchange, or nothing
+     *  when auto-titling is off. Read per turn: switching it on names the next
+     *  session that finishes a first turn, without a restart. */
+    private readonly suggestTitle: () => ((first: string, reply: string) => Promise<string>) | undefined = () => undefined,
   ) {}
 
   /** Pi's dispose unhooks the one listener that persists and emits, so a turn
@@ -430,8 +472,45 @@ export class PiSession implements AgentSession {
       }
       for (const payload of toSessionEvents(piEvent)) {
         fn(payload.type === "turn-end" ? { ...payload, meta: this.lastTurnMeta() } : payload);
+        if (payload.type === "turn-end" && !payload.error) this.autoTitle(payload.text, fn);
       }
     });
+  }
+
+  /** Whether naming has been decided for this session — done, started, or
+   *  never: a session that already has a name (a task's, a rename during the
+   *  turn) or more than one exchange behind it keeps what it has. Several
+   *  subscribers see every turn-end; this is what makes the request one. */
+  private titleDecided = false;
+
+  /** Name the session after its first exchange, on the operator's title model.
+   *  Off by default (settings.titleModel), in which case the title stays the
+   *  first prompt that agent/listing.ts derives. The result is a rename like
+   *  any other — an append the next listing reads — announced as `renamed` so
+   *  every surface re-lists; a failure is announced too, because a title that
+   *  silently stayed the prompt looks like the setting did nothing (§5b). */
+  private autoTitle(reply: string, fn: (e: SessionEventPayload) => void): void {
+    if (this.titleDecided) return;
+    const suggest = this.suggestTitle();
+    if (!suggest) return; // off — not decided: switched on later, the next turn still counts
+    this.titleDecided = true;
+    if (this.pi.sessionManager.getSessionName()) return;
+    const users = (this.pi.messages as PiMessage[]).filter((m) => m.role === "user");
+    const first = users.length === 1 ? textOf(users[0]?.content) : "";
+    if (!first.trim()) return;
+    void suggest(first, reply).then(
+      (title) => {
+        // Named while we waited — by a person, whose word beats the model's.
+        if (this.disposed || this.pi.sessionManager.getSessionName()) return;
+        this.pi.sessionManager.appendSessionInfo(title);
+        this.wrote();
+        fn({ type: "renamed", title });
+      },
+      (err: unknown) => {
+        log.warn(`session ${this.pi.sessionId} could not be titled`, err);
+        fn({ type: "error", message: `session title: ${err instanceof Error ? err.message : String(err)} — the first message stays the title` });
+      },
+    );
   }
 
   /** Meta of the just-finished turn; live path, so "now" is the completion. */
@@ -472,6 +551,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     /** Which bundled extensions the Console has switched on. A getter for the
      * same reason again: the toggle takes effect on the next session open. */
     private readonly enabledExtensions: () => string[] = () => [],
+    /** The model that names a session after its first exchange (Console →
+     * Settings → Models); unset means the first prompt stays the title. A
+     * getter, read per turn end. */
+    private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** What exists on disk. Injected so a test can hand this factory a listing
      * instead of a session directory and a database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -608,17 +691,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
         { messages: [{ role: "user", content: "hi", timestamp: Date.now() }] },
         { maxTokens: PROVIDER_CHECK_MAX_TOKENS, signal, fetch: recorded },
       );
-      // A refusal can arrive as a message rather than a throw; the stop reason
-      // is the only thing separating it from an answer.
-      const refused = answer.stopReason === "error" || answer.stopReason === "aborted";
-      if (refused) {
-        throw new Error(answer.errorMessage ?? `the provider stopped: ${answer.stopReason}`);
-      }
-      const text = answer.content
-        .filter((part): part is { type: "text"; text: string } => part.type === "text")
-        .map((part) => part.text)
-        .join("")
-        .trim();
+      const text = textOfAnswer(answer as PiMessage);
       // An empty answer is still an answer; say which kind of nothing it was.
       return answered(clip(text) || `(no text; stop reason: ${answer.stopReason})`, true);
     } catch (err) {
@@ -632,6 +705,22 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
         false,
       );
     }
+  }
+
+  /** One bare completion — no session, no tools, no history — on the title
+   *  model. Rejects on anything but a usable line: the session reports it. */
+  private async suggestTitle(model: ModelRef, first: string, reply: string): Promise<string> {
+    const runtime = await this.refreshedRuntime();
+    const resolved = runtime.getModel(model.provider, model.id);
+    if (!resolved) throw new Error(`title model ${model.provider}/${model.id} is not in the catalog`);
+    const answer = await runtime.completeSimple(
+      resolved,
+      { messages: [{ role: "user", content: titleRequest(first, reply), timestamp: Date.now() }] },
+      { maxTokens: TITLE_MAX_TOKENS, signal: AbortSignal.timeout(TITLE_TIMEOUT_MS) },
+    );
+    const title = titleFromAnswer(textOfAnswer(answer as PiMessage));
+    if (!title) throw new Error(`${model.provider}/${model.id} answered with no title`);
+    return title;
   }
 
   async setup(input: ProviderSetup): Promise<void> {
@@ -803,7 +892,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     live.agent.followUpMode = "all";
     const session = new PiSession(live, this.pinned, () => {
       this.listing = undefined;
-    }, retention);
+    }, retention, () => {
+      const model = this.titleModel();
+      return model && ((first, reply) => this.suggestTitle(model, first, reply));
+    });
     if (opts.model) await session.setModel(opts.model);
     if (opts.thinking) session.setThinkingLevel(opts.thinking);
     log.info(`session ${session.id} open in ${cwd}${opts.name ? ` (${opts.name})` : ""}`);

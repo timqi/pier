@@ -8,7 +8,7 @@
 // nothing outside this process ever opened that file.
 
 import type { DatabaseSync } from "node:sqlite";
-import { isThinkingLevel, type ThinkingLevel } from "./core/types.js";
+import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "./core/types.js";
 import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
 // The one place the custom-tool vocabulary lives (names, ubix sources, the
@@ -36,6 +36,10 @@ export interface Settings {
   /** The deployment's model advice — pinned models with one line of intent
    *  each. Empty means "no advice": consumers fall back to the catalog. */
   modelMenu: ModelMenuEntry[];
+  /** The model that names a session after its first exchange. Unset by
+   *  default: the title is then the first prompt, and no call is made —
+   *  spending tokens on every new session is the operator's decision. */
+  titleModel?: ModelRef;
   /** Let Pier install a newer release of itself while nothing is running.
    *  Off by default: replacing your own code is the operator's decision. */
   autoUpdate: boolean;
@@ -84,21 +88,30 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
   if (!Array.isArray(raw) || raw.length > 32) return null;
   const menu: ModelMenuEntry[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null) return null;
-    const { provider, id, thinking, note } = item as Record<string, unknown>;
-    if (typeof provider !== "string" || !provider.trim()) return null;
-    if (typeof id !== "string" || !id.trim()) return null;
+    const ref = normalizeModelRef(item);
+    if (!ref) return null;
+    const { thinking, note } = item as Record<string, unknown>;
     if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
     if (note !== undefined && typeof note !== "string") return null;
     const cleaned = note?.trim().slice(0, 200);
     menu.push({
-      provider: provider.trim(),
-      id: id.trim(),
+      ...ref,
       ...(thinking !== undefined ? { thinking } : {}),
       ...(cleaned ? { note: cleaned } : {}),
     });
   }
   return menu;
+}
+
+/** One model reference, rejecting rather than repairing — the menu above is
+ *  built from these. Existence is not checked here: the catalog is the
+ *  agent's, and a model that went away is reported by the call that fails. */
+export function normalizeModelRef(raw: unknown): ModelRef | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { provider, id } = raw as Record<string, unknown>;
+  if (typeof provider !== "string" || !provider.trim()) return null;
+  if (typeof id !== "string" || !id.trim()) return null;
+  return { provider: provider.trim(), id: id.trim() };
 }
 
 /**
@@ -139,9 +152,11 @@ export class SettingsStore {
   }
 
   get(): Settings {
+    const titleModel = this.#json("titleModel", normalizeModelRef, "a {provider, id}");
     return {
       publicUrl: this.#value("publicUrl") ?? "",
       modelMenu: this.#json("modelMenu", normalizeModelMenu, "a valid menu") ?? [],
+      ...(titleModel ? { titleModel } : {}),
       autoUpdate: this.#value("autoUpdate") === "1",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
@@ -186,6 +201,13 @@ export class SettingsStore {
   /** Same contract: hand this `normalizeModelMenu`'s output, not raw input. */
   setModelMenu(menu: ModelMenuEntry[]): Settings {
     this.#set("modelMenu", JSON.stringify(menu));
+    return this.get();
+  }
+
+  /** Same contract: hand this `normalizeModelRef`'s output; null switches
+   *  auto-titling off. */
+  setTitleModel(ref: ModelRef | null): Settings {
+    this.#set("titleModel", ref ? JSON.stringify(ref) : "");
     return this.get();
   }
 

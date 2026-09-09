@@ -288,6 +288,9 @@ export class Router {
           state: payload.state,
         });
       }
+      // A title the session gave itself: every list reads the transcript, so
+      // the same re-list a rename route broadcasts.
+      if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
       // An error the session itself reported (a tool that threw, a model
       // refusal, a lost connection). Without this it lands only in the web
       // timeline and the IM side goes quiet for no visible reason.

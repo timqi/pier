@@ -1,8 +1,10 @@
-// Settings → Models: the operator's model menu — the few models this
-// deployment actually favors, each with one line of intent ("hardest
-// reasoning", "cheap bulk"). Agents read it through the task tool's `models`
-// operation, and every picker lists pinned entries first. Empty menu = no
-// advice; everything falls back to the curated catalog.
+// Settings → Models: which models this deployment reaches for. The operator's
+// menu — the few models it actually favors, each with one line of intent
+// ("hardest reasoning", "cheap bulk"); agents read it through the task tool's
+// `models` operation, and every picker lists pinned entries first. Empty menu
+// = no advice; everything falls back to the curated catalog. And the one model
+// Pier itself calls: the title model that names a session after its first
+// exchange, off unless picked.
 
 import { Plus } from "lucide";
 import { icon } from "./icons.js";
@@ -33,8 +35,11 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   let entries: MenuEntry[] = [];
   let catalog: ModelRef[] = [];
   let dirty = false;
+  let titleModel: ModelRef | undefined;
 
   const status = h("span", "text-[11.5px]", "");
+  const titleStatus = h("span", "text-[11.5px]", "");
+  const titleBox = h("div", "flex items-center gap-3");
   const save = button("Save menu", true);
   const listBox = h("div", "flex min-w-0 flex-col gap-2");
   const adder = h("div", "flex items-center gap-2");
@@ -110,6 +115,35 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     adder.replaceChildren(picker, add);
   }
 
+  /** One select, written on change — no save button: a model picked here has
+   *  no second field to fill in and nothing to be dirty against. */
+  function renderTitleModel(): void {
+    // The stored model stays selectable when the catalog no longer lists it:
+    // the row must say what is set, and the failing call says the rest.
+    const stored = titleModel;
+    const options = stored && !catalog.some((m) => key(m) === key(stored)) ? [stored, ...catalog] : catalog;
+    const picker = select(
+      [["off — the first message is the title", ""], ...options.map((m): [string, string] => [key(m), key(m)])],
+      stored ? key(stored) : "",
+    );
+    picker.classList.replace("w-full", "flex-1");
+    picker.classList.add("min-w-0");
+    picker.onchange = () => {
+      const picked = options.find((m) => key(m) === picker.value) ?? null;
+      void (async () => {
+        setStatus(titleStatus, "saving", "saving…");
+        const res = await sendJson("/api/settings", { titleModel: picked && { provider: picked.provider, id: picked.id } }, "PUT");
+        if (!res.ok) {
+          setStatus(titleStatus, "failed", await failure(res, "Could not save"));
+          return renderTitleModel(); // back to what is stored
+        }
+        titleModel = ((await res.json()) as { titleModel?: ModelRef }).titleModel;
+        setStatus(titleStatus, "saved", titleModel ? "Saved — names the next new session after its first reply." : "Off.");
+      })();
+    };
+    titleBox.replaceChildren(picker, titleStatus);
+  }
+
   function render(): void {
     listBox.replaceChildren(
       ...(entries.length
@@ -117,6 +151,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         : [empty("Nothing pinned — every picker shows the curated catalog as is.")]),
     );
     renderAdder();
+    renderTitleModel();
   }
 
   async function saveMenu(): Promise<void> {
@@ -140,11 +175,12 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     if (dirty) return; // an unsaved edit survives tab hops; reload happens on save
     void (async () => {
       const [settings, models] = await Promise.all([
-        getJson<{ modelMenu: MenuEntry[] }>("/api/settings", "Could not load the menu"),
+        getJson<{ modelMenu: MenuEntry[]; titleModel?: ModelRef }>("/api/settings", "Could not load the menu"),
         getJson<ModelRef[]>("/api/models", "Could not load the model catalog"),
       ]);
       if (!settings.ok) return setStatus(status, "failed", settings.error);
       entries = settings.value.modelMenu;
+      titleModel = settings.value.titleModel;
       catalog = models.ok ? models.value : [];
       status.textContent = "";
       render();
@@ -167,6 +203,12 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
       field("Add", adder, { hint: "The list is the live catalog — only models that exist right now can be pinned." }),
       h("div", "flex items-center gap-3", save, status),
       presets,
+    ),
+    card(
+      "Session titles",
+      "A session is titled by its first message unless a model names it: one short request after the first " +
+        "reply, on the model picked here — a small, cheap one is plenty. A failed request is reported in the session and the first message stays the title.",
+      field("Title model", titleBox),
     ),
   );
 

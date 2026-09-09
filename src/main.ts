@@ -150,6 +150,8 @@ const factory = new PiAgentFactory(
   // Bundled extensions the Console switched on; read per session open, so the
   // toggle reaches the next session the same way an edited agent file does.
   () => settings.get().extensions,
+  // The title model, if the operator picked one; read when a first turn ends.
+  () => settings.get().titleModel,
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {

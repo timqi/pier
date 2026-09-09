@@ -12,7 +12,7 @@ import { appendTurn } from "./chat.js";
 import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
-import { chord, chordLabel } from "./shortcut.js";
+import { chord, chordLabel, modalOpen } from "./shortcut.js";
 import { renameSession, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel, TurnMeta } from "../../core/types.js";
 
@@ -46,12 +46,8 @@ export function initHeader(d: HeaderDeps): void {
     if (!s) return;
     closeMenu();
     deps.toggleFiles(); // no cwd: the current session's own last folder + diff
-  }, modal);
+  }, modalOpen);
 }
-
-/** A modal dialog is a mode: navigating underneath it would leave it floating
- *  over a view it was never opened from, so both chords stand down. */
-const modal = (): boolean => document.querySelector("dialog[open]") !== null;
 
 const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘O are taken
 

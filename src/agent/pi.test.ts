@@ -53,7 +53,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   },
 }));
 
-const { PiAgentFactory, PiSession, standDownShadowed, standDownUndocumented } = await import("./pi.js");
+const { PiAgentFactory, PiSession, standDownShadowed, standDownUndocumented, titleFromAnswer } = await import("./pi.js");
 
 /** Only what PiSession touches on these paths. */
 function fakePi() {
@@ -483,5 +483,89 @@ describe("naming a session", () => {
     const s = new PiSession(fake.pi as never, () => [], wrote);
     await s.rename("");
     expect(wrote).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a session naming itself after its first exchange", () => {
+  const exchange = (fake: ReturnType<typeof fakePi>, users = 1): void => {
+    for (let i = 0; i < users; i++) {
+      fake.pi.messages.push({ role: "user", content: `[operator<web> 10:12] fix the parser (${i})`, timestamp: 1 });
+      fake.pi.messages.push({ role: "assistant", content: [{ type: "text", text: "Done — parser.ts" }], timestamp: 2 });
+    }
+    fake.emit({ type: "agent_end", messages: fake.pi.messages });
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it("asks the title model once, appends the answer and announces the rename", async () => {
+    const suggest = vi.fn(async () => "Parser fix");
+    const wrote = vi.fn();
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never, () => [], wrote, { value: "long" }, () => suggest);
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    s.subscribe(() => {}); // a second consumer (a task run) sees the same turn-end
+    exchange(fake);
+    await settle();
+    expect(suggest).toHaveBeenCalledExactlyOnceWith("[operator<web> 10:12] fix the parser (0)", "Done — parser.ts");
+    expect(fake.calls).toContain("appendSessionInfo:Parser fix");
+    expect(wrote).toHaveBeenCalledOnce();
+    expect(seen).toContainEqual({ type: "renamed", title: "Parser fix" });
+  });
+
+  it("reports a failed request as an error on the session, and keeps the prompt title", async () => {
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never, () => [], () => {}, { value: "long" }, () => async () => {
+      throw new Error("401 invalid key");
+    });
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    exchange(fake);
+    await settle();
+    expect(fake.calls).not.toContainEqual(expect.stringMatching(/^appendSessionInfo/));
+    expect(seen).toContainEqual({ type: "error", message: expect.stringContaining("401 invalid key") });
+  });
+
+  it("leaves alone a session that has a name, has history, or whose operator picked no model", async () => {
+    const suggest = vi.fn(async () => "never");
+    // Named (a task's, or a rename during the turn).
+    const named = fakePi();
+    named.pi.sessionManager.appendSessionInfo("digest");
+    named.calls.length = 0;
+    new PiSession(named.pi as never, () => [], () => {}, { value: "long" }, () => suggest).subscribe(() => {});
+    exchange(named);
+    // Resumed with more than one exchange behind it.
+    const old = fakePi();
+    new PiSession(old.pi as never, () => [], () => {}, { value: "long" }, () => suggest).subscribe(() => {});
+    exchange(old, 2);
+    // Off.
+    const off = fakePi();
+    new PiSession(off.pi as never).subscribe(() => {});
+    exchange(off);
+    await settle();
+    expect(suggest).not.toHaveBeenCalled();
+    expect([...named.calls, ...old.calls, ...off.calls]).not.toContainEqual(expect.stringMatching(/^appendSessionInfo/));
+  });
+
+  it("does not overwrite a name a person gave while the model was thinking", async () => {
+    let answer!: (title: string) => void;
+    const fake = fakePi();
+    const s = new PiSession(fake.pi as never, () => [], () => {}, { value: "long" }, () => () => new Promise((r) => (answer = r)));
+    const seen: SessionEventPayload[] = [];
+    s.subscribe((event) => seen.push(event));
+    exchange(fake);
+    await s.rename("my own name");
+    answer("model's name");
+    await settle();
+    expect(fake.pi.sessionManager.getSessionName()).toBe("my own name");
+    expect(seen).not.toContainEqual(expect.objectContaining({ type: "renamed" }));
+  });
+});
+
+describe("titleFromAnswer", () => {
+  it("takes one clean line out of whatever the model said", () => {
+    expect(titleFromAnswer('"Parser fix."\nsecond line')).toBe("Parser fix");
+    expect(titleFromAnswer("「解析器修复」。")).toBe("解析器修复");
+    expect(titleFromAnswer("  \n")).toBe("");
+    expect(titleFromAnswer("x".repeat(100))).toHaveLength(80);
   });
 });

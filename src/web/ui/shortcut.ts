@@ -35,6 +35,15 @@ export function chordLabel(spec: string): string {
   return `${meta ? "⌘" : MOD}${shift ? SHIFT : ""}${key.toUpperCase()}`;
 }
 
+/** A modal dialog is a mode: a chord acting underneath it would leave it
+ *  floating over a view it was never opened from, so every binding here and
+ *  the callers that pass `unless` stand down on the same claim. */
+export const modalOpen = (): boolean => document.querySelector("dialog[open]") !== null;
+
+/** What Shift turns a bracket into on a US layout — the only non-letter keys
+ *  a chord here is written with. */
+const SHIFTED: Record<string, string | undefined> = { "[": "{", "]": "}" };
+
 const CARD =
   "pointer-events-none fixed z-50 flex items-center gap-2 whitespace-nowrap rounded-md bg-neutral-800 px-2 py-1 text-[11.5px] text-neutral-100 shadow-lg";
 
@@ -114,7 +123,7 @@ export function escapeKey(
   document.addEventListener("keydown", (ev) => {
     // Esc during IME composition cancels the candidate, nothing else.
     if (ev.key !== "Escape" || ev.isComposing || ev.defaultPrevented) return;
-    if (document.querySelector("dialog[open]") || !when()) return;
+    if (modalOpen() || !when()) return;
     ev.preventDefault();
     run();
   });
@@ -150,7 +159,7 @@ export function letterKey(
     // a global listener that dereferences it crashes on every such event.
     if (!ev.key || !keys.includes(ev.key.toLowerCase())) return;
     if ((ev.target as Element | null)?.closest?.(TYPING)) return;
-    if (document.querySelector("dialog[open]") || !when()) return;
+    if (modalOpen() || !when()) return;
     ev.preventDefault();
     run();
   });
@@ -166,10 +175,15 @@ export function letterKey(
  */
 export function chord(spec: string, run: () => void, unless?: () => boolean): void {
   const { key, shift, meta } = parse(spec);
+  // A shifted bracket arrives as the character Shift makes of it (`{`), and a
+  // binding written as ⇧[ should not have to know the layout's answer.
+  const shifted = SHIFTED[key];
   document.addEventListener(
     "keydown",
     (ev) => {
-      if (!ev.key || ev.key.toLowerCase() !== key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
+      if (!ev.key || ev.altKey || ev.shiftKey !== shift) return; // no `key`: synthetic event
+      const pressed = ev.key.toLowerCase();
+      if (pressed !== key && pressed !== shifted) return;
       if (meta ? !ev.metaKey : !ev.metaKey && !ev.ctrlKey) return;
       if (unless?.()) return;
       ev.preventDefault();

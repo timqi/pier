@@ -12,7 +12,7 @@ import { $, basename, h, relTime, untitled } from "./dom.js";
 import { closeMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { setAttention } from "./shell.js";
-import { shortcut } from "./shortcut.js";
+import { chord, modalOpen, shortcut } from "./shortcut.js";
 import type { SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
@@ -87,6 +87,18 @@ export function pageOf(list: SessionInfo[], shown: number): { rows: SessionInfo[
   const { top, rest } = orderSessions(list);
   const rows = [...top, ...rest].slice(0, shown);
   return { rows, hidden: list.length - rows.length };
+}
+
+/** The session `by` rows from the current one in the rail's order, hidden rows
+ *  included, wrapping at either end; the first row when nothing is selected.
+ *  Nothing to move to — an empty rail, or a rail of one — is `undefined`. */
+export function neighbor(list: SessionInfo[], currentId: string | null, by: number): string | undefined {
+  const { top, rest } = orderSessions(list);
+  const order = [...top, ...rest];
+  if (!order.length) return undefined;
+  const at = order.findIndex((s) => s.id === currentId);
+  const next = at < 0 ? order[0] : order[(at + by + order.length) % order.length];
+  return next && next.id !== currentId ? next.id : undefined;
 }
 
 /** How many the New-session menu lists before "Browse…": a menu is scanned,
@@ -443,6 +455,15 @@ export function initSidebar(d: SidebarDeps): void {
   // ⇧O, not ⇧N: ⌘⇧N / ⌘⇧T are the browser's own windows and cannot be
   // taken back — ⇧O is what the chat apps settled on for the same action.
   shortcut(newBtn, "shift+o", "New session", openNew);
+  // ⌘⇧[ / ⌘⇧] walk the rail in the order it is drawn — the tab-switching
+  // chord, applied to sessions. No button carries it: the rail itself is the
+  // affordance.
+  const step = (by: number): void => {
+    const next = neighbor(deps.sessions(), deps.currentId(), by);
+    if (next) deps.select(next);
+  };
+  chord("shift+[", () => step(-1), modalOpen);
+  chord("shift+]", () => step(1), modalOpen);
   const search = $("#open-archive");
   search.onclick = toggleArchive;
   // Once the palette is open the chord belongs to its list (⌃K walks up), so

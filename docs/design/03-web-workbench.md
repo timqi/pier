@@ -103,8 +103,14 @@ Single page, with chat plus Console views (the raw timeline pane was folded into
 per-turn Activity groups):
 
 - **Sessions** (left): the server-maintained working set first, remaining
-  sessions by creation time. Human input promotes a session into the working
-  set; background activity does not reorder rows under the pointer. State dots,
+  sessions by creation time. Creating a session or speaking to one promotes it
+  to the front of the working set; background activity does not reorder rows
+  under the pointer. ⌘⇧[ / ⌘⇧] select the previous / next row in that order,
+  wrapping, and stand down under a modal dialog. A session is titled by its
+  first message; when Settings → Models names a title model, one bare request
+  on it after the first reply renames the session (a `renamed` session event
+  re-lists every surface), and a failed request is reported in the session
+  while the first message stays the title. State dots,
   titles and session actions share the existing listing and event state. More
   sessions remain available through pagination and the search palette. New
   session opens a menu on its button, not a dialog: the listing's recent

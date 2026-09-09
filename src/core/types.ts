@@ -154,6 +154,10 @@ export type SessionEventPayload =
   // model's context, the opposite happened — and the only trace compaction
   // leaves on a surface, because the transcript renders none.
   | { type: "context-compacted"; before: number; after: number }
+  // The session named itself (the operator's title model, after the first
+  // exchange). A rename made through a route already tells every surface to
+  // re-list; this is the same fact for one the session made on its own.
+  | { type: "renamed"; title: string }
   | { type: "state"; state: SessionState }
   // Authoritative pending-queue snapshot (emitted whenever it changes).
   | { type: "queue-state"; steering: string[]; followUp: string[] }

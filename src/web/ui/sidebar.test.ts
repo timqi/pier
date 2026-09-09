@@ -7,7 +7,7 @@ vi.mock("./dir-picker.js", () => ({ openBrowser: vi.fn(), openPathMenu: vi.fn() 
 vi.mock("./menu.js", () => ({ closeMenu: vi.fn() }));
 vi.mock("./notifications.js", () => ({ setUnreadBadge: vi.fn() }));
 vi.mock("./shell.js", () => ({ setAttention: vi.fn() }));
-vi.mock("./shortcut.js", () => ({ shortcut: vi.fn() }));
+vi.mock("./shortcut.js", () => ({ shortcut: vi.fn(), chord: vi.fn() }));
 let sidebar: typeof import("./sidebar.js");
 beforeEach(async () => {
   vi.resetModules();
@@ -69,4 +69,17 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   // Unread, but answering Slack: that turn was delivered where it came from.
   expect(dot({ unread: true, channel: "slack" })).toBeUndefined();
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
+});
+
+// ⌘⇧[ / ⌘⇧] step through the rail as it is drawn — working set, then the
+// rest — past the "Load more" fold and around either end.
+it("steps to the neighbouring session in rail order, wrapping", () => {
+  const list = [row("s-old", { createdAt: 1 }), row("w1", { rank: 1 }), row("s-new", { createdAt: 2 }), row("w0", { rank: 0 })];
+  expect(sidebar.neighbor(list, "w0", 1)).toBe("w1");
+  expect(sidebar.neighbor(list, "w1", 1)).toBe("s-new");
+  expect(sidebar.neighbor(list, "s-old", 1)).toBe("w0");
+  expect(sidebar.neighbor(list, "w0", -1)).toBe("s-old");
+  expect(sidebar.neighbor(list, null, 1)).toBe("w0");
+  expect(sidebar.neighbor([row("only")], "only", 1)).toBeUndefined();
+  expect(sidebar.neighbor([], null, 1)).toBeUndefined();
 });

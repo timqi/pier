@@ -8,6 +8,7 @@ import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
   normalizeModelMenu,
+  normalizeModelRef,
   normalizePublicUrl,
   type SettingsStore,
 } from "../settings.js";
@@ -237,6 +238,7 @@ export function registerInstanceRoutes(
       | {
         publicUrl?: unknown;
         modelMenu?: unknown;
+        titleModel?: unknown;
         autoUpdate?: unknown;
         customTools?: unknown;
         extension?: unknown;
@@ -244,11 +246,11 @@ export function registerInstanceRoutes(
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.autoUpdate, body.customTools, body.extension, body.tool]
+      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.extension, body.tool]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, autoUpdate, customTools, extension or tool required",
+        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, extension or tool required",
       }, 400);
     }
     // Everything is validated before anything is written, and everything is
@@ -266,6 +268,12 @@ export function registerInstanceRoutes(
       const menu = normalizeModelMenu(body.modelMenu);
       if (menu === null) return refuse("modelMenu must be [{provider, id, note?}] (≤32 entries)");
       writes.push(() => settings.setModelMenu(menu));
+    }
+    if (body?.titleModel !== undefined) {
+      // null is the off switch; anything else has to be a model.
+      const ref = body.titleModel === null ? null : normalizeModelRef(body.titleModel);
+      if (ref === null && body.titleModel !== null) return refuse("titleModel must be {provider, id} or null");
+      writes.push(() => settings.setTitleModel(ref));
     }
     if (body?.autoUpdate !== undefined) {
       const { autoUpdate } = body;

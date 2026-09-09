@@ -196,6 +196,14 @@ describe("channel fan-out", () => {
     ]);
   });
 
+  it("re-lists every surface when the session names itself", async () => {
+    await router.ensure(KEY);
+    const workspace: string[] = [];
+    hub.subscribeWorkspace((e) => workspace.push(e.type));
+    fake.emit({ type: "renamed", title: "Parser fix" });
+    expect(workspace).toEqual(["sessions-changed"]);
+  });
+
   it("tells the conversation when the session itself reports an error", async () => {
     const { channel, notes, sent } = fakeChannel("telegram");
     router.registerChannel(channel);

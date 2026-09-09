@@ -235,8 +235,14 @@ export function createServer(
   const allSessions = async (): Promise<SessionSummary[]> => {
     const sessions = await listSessions();
     for (const s of sessions) nascent.delete(s.id);
-    // A session created but never prompted would otherwise be listed forever.
-    for (const [id, n] of nascent) if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
+    // A session created but never prompted would otherwise be listed forever —
+    // and, since creation ranks it, hold a working-set slot forever too.
+    for (const [id, n] of nascent) {
+      if (Date.now() - n.createdAt > 86_400_000) {
+        nascent.delete(id);
+        state.forget(id);
+      }
+    }
     const owned = taskSessions?.() ?? new Set<string>();
     return [
       ...[...nascent].map(([id, n]) => ({ id, ...n })),
@@ -258,9 +264,9 @@ export function createServer(
   });
 
   // The rail's top rows are maintained here and nowhere else: a session a
-  // human speaks to and that is not in the working set already takes the front
-  // slot (web/session-state.ts). No route — there is no gesture to make, and
-  // an IM message has no browser to make it from.
+  // human speaks to — or creates, below — and that is not in the working set
+  // already takes the front slot (web/session-state.ts). No route — there is no
+  // gesture to make, and an IM message has no browser to make it from.
   router.onSpokenTo((id) => {
     if (state.promote(id)) hub.emitWorkspace({ type: "sessions-changed" });
   });
@@ -279,6 +285,11 @@ export function createServer(
     const createdAt = Date.now();
     nascent.set(session.id, { cwd: body.cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
+    // Created is as good as spoken to: the person who clicked New is about to
+    // type into it, and a row born below the working set would jump on the
+    // first message. Ghosts give the slot back (`ensureLoadable`, the expiry
+    // above).
+    state.promote(session.id);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });

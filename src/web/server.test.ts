@@ -596,19 +596,18 @@ describe("workbench server", () => {
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
-    // Not on disk yet — the nascent entry fills the gap. No rank: a new
-    // session is the newest row, which is where the list puts it anyway, and
-    // nobody has spoken to it yet.
+    // Not on disk yet — the nascent entry fills the gap, already at the front
+    // of the working set: the person who created it is about to type into it.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
     listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: 7 });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -696,9 +695,9 @@ describe("workbench server", () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: "s1" });
     expect(factory.create).toHaveBeenCalledExactlyOnceWith({ cwd: "/tmp" });
-    // No rank: the working set is what has been spoken to, and creating a
-    // session is not speaking to it.
-    expect(state.flags().get("s1")?.rank).toBeUndefined();
+    // Front of the working set from birth: the row must not move on the first
+    // message.
+    expect(state.flags().get("s1")?.rank).toBe(0);
     // attached: session events now reach the hub
     const seen = vi.fn();
     hub.subscribe("s1", seen);
@@ -964,6 +963,23 @@ describe("workbench server", () => {
     expect(settings.get().autoUpdate).toBe(true);
     expect((await put(false)).status).toBe(200);
     expect(settings.get().autoUpdate).toBe(false);
+  });
+
+  it("stores the title model, clears it with null, and rejects anything else", async () => {
+    const { app, settings } = setup();
+    const put = (titleModel: unknown) =>
+      app.request("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ titleModel }),
+      });
+    expect((await put({ provider: "openai", id: "gpt-5-nano" })).status).toBe(200);
+    expect(settings.get().titleModel).toEqual({ provider: "openai", id: "gpt-5-nano" });
+    expect((await put("gpt-5-nano")).status).toBe(400);
+    expect((await put({ provider: "openai" })).status).toBe(400);
+    expect(settings.get().titleModel).toEqual({ provider: "openai", id: "gpt-5-nano" });
+    expect((await put(null)).status).toBe(200);
+    expect(settings.get().titleModel).toBeUndefined();
   });
 
   it("switches a bundled extension on, refuses a mis-shaped delta, and recycles", async () => {
