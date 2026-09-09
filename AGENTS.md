@@ -87,6 +87,25 @@ for materials, chat hierarchy, editing, filters, motion and accessibility;
 - Keep both documents current when behavior changes. Report actual browser
   coverage; Chromium emulation is not native Safari/iOS verification.
 
+## Docs
+
+A document holds contracts, facts and commands. The reasoning behind them is
+the commit that made them; the history is `git log`.
+
+- Each file has one reason to exist, named in its first line: `deploy.md` is
+  the operator's runbook, `architecture.md` the map and the seams, `design/*`
+  the behaviour and wire contracts of one area, `skills/*` instructions an
+  agent reads at runtime. A paragraph that does not serve that reason is
+  deleted, not moved.
+- A rule is one sentence. A fact is one bullet. A command is a code block.
+  No "what it replaced", no measured numbers from the incident that settled
+  it, no design justification — if the justification is needed, it is one
+  clause, not a paragraph.
+- Nothing the code already says: a unit file the installer renders, a type
+  the seam declares, a directory tree `ls` gives. Point at the file instead.
+- Same size test as code: a doc that grows owes a sentence naming what the
+  reader could not do without the new lines.
+
 ## Budgets
 
 The target is disordered growth and duplication. Line counts are a *proxy* for
