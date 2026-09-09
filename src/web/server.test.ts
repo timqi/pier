@@ -2318,6 +2318,26 @@ describe("workbench server", () => {
     expect(emitted).toBeLessThan(200);
     await res.body!.cancel().catch(() => {});
   });
+
+  it("drops a workspace reader that stopped reading, and unsubscribes it", async () => {
+    // The workspace stream shares the session stream's ceiling: pointers are
+    // small, but a tab that never drains would queue them without bound.
+    // The hub has no accessor for workspace subscribers; the set is the leak.
+    const { app, hub } = setup();
+    const subscribers = () => (hub as unknown as { workspace: Set<unknown> }).workspace.size;
+    const before = subscribers();
+    const res = await app.request("/api/events");
+    expect(subscribers()).toBe(before + 1);
+    let emitted = 0;
+    while (subscribers() > before && emitted < 200_000) {
+      hub.emitWorkspace({ type: "task-run-changed", taskId: "t", runId: "r" });
+      emitted++;
+    }
+    // Dropped past the ceiling, and the subscription went with the stream.
+    expect(subscribers()).toBe(before);
+    expect(emitted).toBeLessThan(200_000);
+    await res.body!.cancel().catch(() => {});
+  });
 });
 
 describe("configuration reaching live sessions", () => {

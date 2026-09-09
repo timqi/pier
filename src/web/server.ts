@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
-import { streamSSE } from "hono/streaming";
+import { type SSEStreamingApi, streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
 import { QueueOperationError, Router } from "../core/router.js";
@@ -107,9 +107,28 @@ export interface WebDeps {
 }
 
 const HEARTBEAT_MS = 15_000;
-/** Past this much frame text in flight the stream is dropped; EventSource
- *  reconnects and replays from its Last-Event-ID. */
+/** Past this much frame text in flight a stream is dropped. */
 const SSE_HIGH_WATER = 4 * 1024 * 1024;
+/** Both SSE routes: Hono queues every write, so backpressure alone never stops
+ *  a caller from adding more. Neither stream needs durable replay to recover —
+ *  the session stream resumes from Last-Event-ID, the workspace stream re-lists
+ *  — so a reader past the ceiling is dropped instead of buffered. */
+function boundedWriter(stream: SSEStreamingApi, who: string): (frame: string) => void {
+  let queued = 0; // frame chars written but not yet drained by the reader
+  return (frame) => {
+    if (stream.aborted || stream.closed) return;
+    if (queued > SSE_HIGH_WATER) {
+      log.warn(`dropping slow event client for ${who} — ${queued} chars queued`);
+      stream.abort(); // unsubscribes; the client reconnects
+      return;
+    }
+    queued += frame.length;
+    void stream
+      .write(frame)
+      .catch((err: unknown) => log.warn(`event write for ${who} failed: ${String(err)}`))
+      .finally(() => (queued -= frame.length));
+  };
+}
 // Canonical base64 only: Buffer.from(.., "base64") happily "decodes" garbage.
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -521,10 +540,8 @@ export function createServer(
   // One per client; keeps every session list in sync without polling.
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
-      // A write to a torn-down stream must not become an unhandled rejection.
-      const unsubscribe = hub.subscribeWorkspace(
-        (e) => void stream.writeSSE({ data: JSON.stringify(e) }).catch(() => {}),
-      );
+      const send = boundedWriter(stream, "workspace");
+      const unsubscribe = hub.subscribeWorkspace((e) => send(`data: ${JSON.stringify(e)}\n\n`));
       stream.onAbort(unsubscribe);
       while (!stream.aborted) {
         await stream.sleep(HEARTBEAT_MS);
@@ -543,20 +560,7 @@ export function createServer(
         await stream.writeSSE({ event: "reset", data: "snapshot required" });
         return;
       }
-      let queued = 0; // frame chars written but not yet drained by the reader
-      const send = (frame: string): void => {
-        if (stream.aborted || stream.closed) return;
-        if (queued > SSE_HIGH_WATER) {
-          log.warn(`dropping slow event client for ${id} — ${queued} chars queued`);
-          stream.abort(); // unsubscribes; the client reconnects and replays
-          return;
-        }
-        queued += frame.length;
-        void stream
-          .write(frame)
-          .catch((err: unknown) => log.warn(`event write for ${id} failed: ${String(err)}`))
-          .finally(() => (queued -= frame.length));
-      };
+      const send = boundedWriter(stream, id);
       // Subscribe before the replay write can wait on its reader, or an event
       // arriving during backpressure falls between replay() and subscribe().
       const unsubscribe = hub.subscribe(id, (e) => send(sseFrame(e)));
