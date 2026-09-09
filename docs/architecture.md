@@ -55,7 +55,6 @@ src/
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
-  limits.ts    the numbers more than one area has to agree on
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   settings.ts  instance facts a human owns (public URL, model menu, auto-update
                switch, which bundled extensions are on)
@@ -71,6 +70,10 @@ src/
                (BEGIN IMMEDIATE), re-checked before every mutating step
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns, coalescing a burst of switches into a single run
+  service.ts   the systemd units `pier service install` writes
+  config-sync.ts the configuration subscription: fetch (HTTPS, 1 MiB cap),
+               apply, ETag
+  config-sync-task.ts the hourly task that subscription owns
 ```
 
 Dependency rules:
