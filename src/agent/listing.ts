@@ -122,6 +122,7 @@ function fold(
     const value: unknown = JSON.parse(line);
     if (value && typeof value === "object") entry = value as Record<string, unknown>;
   } catch {
+    // The tail of a transcript Pi is still appending to; the next scan reads it whole.
     return acc ?? undefined;
   }
   if (!acc) {

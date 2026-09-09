@@ -104,6 +104,6 @@ export function initVersion(current: string): void {
   renderLabel(current);
   // The panel is the destination; the anchor is the fallback.
   link.onclick = (ev) => { ev.preventDefault(); openPanel(link, panel()); };
-  const refresh = (): void => void load(current).catch(() => {});
+  const refresh = (): void => void load(current);
   refresh(); setInterval(refresh, POLL_MS);
 }

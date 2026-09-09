@@ -77,7 +77,7 @@ export function registerConfigSyncRoutes(app: Hono, deps: {
       // Application can succeed while reload fails; still reconcile the owned
       // task to the persisted subscription switch in that case.
       try { await deps.reconcile(); }
-      catch { log.error("Could not reconcile configuration sync task"); }
+      catch (reconcile) { log.error("Could not reconcile configuration sync task", reconcile); }
       return c.json({ error: err instanceof Error ? err.message : "Configuration sync failed", status: deps.status() }, 409);
     }
   });

@@ -130,8 +130,10 @@ export async function listBoards(dir: string): Promise<BoardSummary[]> {
     entries = (await readdir(dir, { withFileTypes: true }))
       .filter((e) => e.isDirectory() && SLUG.test(e.name))
       .map((e) => e.name);
-  } catch {
-    return []; // no boards yet
+  } catch (err) {
+    // No directory is no boards yet; anything else hides every board at once.
+    if ((err as { code?: string }).code !== "ENOENT") logger("boards").warn(`cannot scan ${dir}`, err);
+    return [];
   }
   // One board's manifest says nothing about the next one's, so the scan waits
   // once for all of them rather than once per board.

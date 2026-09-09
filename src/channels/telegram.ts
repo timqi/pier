@@ -227,7 +227,9 @@ export class TelegramChannel implements Channel {
     query: TgCallbackQuery,
     onMessage: (msg: InboundMessage) => void,
   ): Promise<void> {
-    await this.api.answerCallbackQuery(query.id).catch(() => {});
+    // Unanswered, the tapped button keeps its spinner until Telegram gives up.
+    await this.api.answerCallbackQuery(query.id)
+      .catch((err) => this.log(`callback ack failed: ${String(err)}`));
     const msg = query.message;
     if (!msg || !query.data) return;
     const chatId = String(msg.chat.id);
@@ -253,7 +255,8 @@ export class TelegramChannel implements Channel {
       }).catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
       return;
     }
-    await this.api.clearKeyboard(chatId, msg.message_id).catch(() => {});
+    await this.api.clearKeyboard(chatId, msg.message_id)
+      .catch((err) => this.log(`retiring options failed: ${String(err)}`));
     // A bot cannot post as the user, so the pick is echoed: otherwise the chat
     // shows an answer to a request nobody can see, with nothing to carry the eyes.
     const echo = await this.api.sendMessage({
@@ -333,7 +336,8 @@ export class TelegramChannel implements Channel {
         parse_mode: "HTML",
         message_thread_id: msg.message_thread_id,
         reply_to_message_id: msg.message_id,
-      }).catch(() => {});
+        // Without the pointer, General shows a question whose answer went elsewhere.
+      }).catch((err) => this.log(`topic pointer failed: ${String(err)}`));
       return topic.message_thread_id;
     } catch (err) {
       this.log(`topic creation failed, staying in General: ${String(err)}`);

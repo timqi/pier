@@ -254,13 +254,14 @@ export class ConfigSync {
       }
       if (this.#state.needsReload) {
         try { await this.deps.reload(); }
-        catch { throw new Error("Configuration saved, but reload failed; retry synchronization"); }
+        catch (cause) { throw new Error("Configuration saved, but reload failed; retry synchronization", { cause }); }
         this.#save({ needsReload: false });
       }
       return changed ? "Configuration applied; reload completed" : `Configuration unchanged (${response.status})`;
     } catch (err) {
       const error = err instanceof Error ? err.message : "Configuration sync failed";
-      log.error(error);
+      // The message is the operator's; the cause, when there is one, is the log's.
+      log.error(error, err instanceof Error ? err.cause : err);
       this.#save({ lastChecked: Date.now(), error });
       throw new Error(error);
     }

@@ -405,6 +405,16 @@ describe("topic mode", () => {
     expect(inbound.map((m) => m.key.conversationId)).toEqual(["-100", "42"]);
   });
 
+  it("routes into the topic even when the pointer to it cannot be posted, and says so", async () => {
+    const send = client.sendMessage.bind(client);
+    client.sendMessage = (payload) => payload.text?.startsWith("→")
+      ? Promise.reject(new Error("blocked"))
+      : send(payload);
+    await feed(message({ chat: FORUM, text: "hello" }));
+    expect(inbound[0]?.key.conversationId).toBe("-100/77");
+    expect(dropped[0]).toMatch(/topic pointer failed: Error: blocked/);
+  });
+
   it("falls back to General when topic creation fails", async () => {
     client.createForumTopic = () => Promise.reject(new Error("no rights"));
     await feed(message({ chat: FORUM, text: "hello" }));
@@ -607,6 +617,18 @@ describe("outbound", () => {
     await feed(tapped("sg:0", ["retry"]));
     expect(inbound.map((m) => m.text)).toEqual(["retry"]);
     expect(dropped.some((m) => m.includes("option echo failed"))).toBe(true);
+  });
+
+  it("still dispatches when the ack or the keyboard retirement fails, and logs which", async () => {
+    openGates();
+    client.answerCallbackQuery = () => Promise.reject(new Error("query too old"));
+    client.clearKeyboard = () => Promise.reject(new Error("message gone"));
+    await feed(tapped("sg:0", ["retry"]));
+    expect(inbound.map((m) => m.text)).toEqual(["retry"]);
+    expect(dropped).toEqual(expect.arrayContaining([
+      expect.stringContaining("callback ack failed: Error: query too old"),
+      expect.stringContaining("retiring options failed: Error: message gone"),
+    ]));
   });
 
   it("says so when the payload is not on that message any more", async () => {

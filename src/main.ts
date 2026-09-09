@@ -176,6 +176,7 @@ const reloadInstance = async (includeWatched = false): Promise<number> => {
 
 // Remote outages keep the last local configuration available.
 if (configSync.status().enabled) {
+  // sync() already logged the cause; this line says what the boot did about it.
   try { await configSync.sync(); }
   catch { log.error("Startup configuration sync failed; using the last local configuration"); }
 }

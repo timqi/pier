@@ -201,7 +201,14 @@ export abstract class ChatPanel<S extends PanelState, C> {
   private async showModels(key: ConversationKey, page: number): Promise<void> {
     const state = this.state(key);
     if (!state) return;
-    state.models = await this.deps.control.models().catch(() => []);
+    // An empty list and a catalog that could not be read are two different
+    // answers; the second must not draw as the first.
+    let unavailable: string | undefined;
+    state.models = await this.deps.control.models().catch((err: unknown) => {
+      unavailable = `Could not list models: ${String(err)}`;
+      this.deps.log(unavailable);
+      return [];
+    });
     const status = await this.deps.control.status(key);
     const pages = Math.max(1, Math.ceil(state.models.length / MODELS_PER_PAGE));
     const at = Math.min(Math.max(page, 0), pages - 1);
@@ -210,7 +217,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
       groups: [{
         title: "Model",
         suffix: ` · page ${at + 1}/${pages}`,
-        lines: state.models.length ? [] : ["No models with configured auth."],
+        lines: state.models.length ? [] : [unavailable ?? "No models with configured auth."],
       }],
       picks: slice.map((model, i) => {
         const current = status?.model?.provider === model.provider && status.model.id === model.id;

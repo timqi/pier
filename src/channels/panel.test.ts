@@ -147,6 +147,17 @@ describe("telegram panel", () => {
     expect(control.setModels).toEqual([MODELS[9]]);
   });
 
+  it("says the catalog could not be read instead of drawing an empty list", async () => {
+    control.models = () => Promise.reject(new Error("models.json is broken"));
+    const api = new FakeTelegram();
+    const panel = tgPanel(api);
+    await panel.open(KEY, "100");
+    await tap(panel, "cfg:models:0");
+    expect(String(api.edits[0]!.text)).toContain("Could not list models: Error: models.json is broken");
+    expect(String(api.edits[0]!.text)).not.toContain("No models");
+    expect(logs.join(" ")).toContain("models.json is broken");
+  });
+
   it("ignores a payload that is not the panel's", async () => {
     const panel = tgPanel(new FakeTelegram());
     expect(await tap(panel, "Run it")).toBe(false);

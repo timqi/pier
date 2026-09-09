@@ -80,8 +80,11 @@ describe("scanning", () => {
     expect(await listBoards(dir)).toEqual([]);
   });
 
-  it("returns nothing when the boards dir does not exist", async () => {
+  it("returns nothing when the boards dir does not exist, or cannot be scanned", async () => {
     expect(await listBoards(join(dir, "missing"))).toEqual([]);
+    // Not a directory: an empty answer with a warning, not a throw or a 500.
+    writeFileSync(join(dir, "file"), "");
+    expect(await listBoards(join(dir, "file"))).toEqual([]);
   });
 });
 
