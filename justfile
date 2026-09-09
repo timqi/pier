@@ -11,12 +11,8 @@ stable:
 release bump="patch":
     test "$(git branch --show-current)" = main
     git pull --ff-only
-    npm i
-    npm run check
-    npm run lint
-    npm test
-    npm run build
-    git push
+    # CI on this exact commit is the gate; release.yml runs the same steps again on the tag.
+    gh run list --workflow=ci.yml --commit $(git rev-parse HEAD) -L1 --json conclusion -q '.[0].conclusion' | grep -qx success
     npm version {{bump}}
     git push --follow-tags
     gh run watch --exit-status $(sleep 5 && gh run list --workflow=release.yml -L1 --json databaseId -q '.[0].databaseId')
