@@ -118,8 +118,12 @@ per-turn Activity groups):
   the current session keeps its action visible; other rows reclaim that width.
   List refreshes retain
   the focused session control, and Load more focuses the first added session.
+  An expanded menu keeps its trigger visible and reuses that button across list
+  refreshes so closing the menu can restore focus. Pagination also retains focus
+  on refresh, falling back to a remaining session when Load more disappears.
   The mobile drawer removes hidden controls from the tab order, contains focus
-  while open, and restores its toggle on dismissal; Escape dismisses it before
+  while open, and restores the visible drawer or desktop rail toggle on dismissal
+  or a breakpoint change; Escape dismisses it before
   reaching the conversation's stop shortcut. Touch controls have 44px minimum
   targets. On desktop, the sidebar floats in an 8px inset panel with a 20px
   radius, a glass surface, a thin border and a soft shadow. Its system sans-serif

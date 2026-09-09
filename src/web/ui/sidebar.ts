@@ -165,7 +165,7 @@ const CHIP = "flex-none text-xs font-medium uppercase leading-5 text-neutral-500
 const channelChip = (s: SessionInfo): HTMLElement[] =>
   s.channel && s.channel !== "web" ? [h("span", CHIP, s.channel[0] ?? "")] : [];
 
-function sessionRow(s: SessionInfo): HTMLElement {
+function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, "\u22ef")): HTMLElement {
   const active = s.id === deps.currentId();
   const li = h(
     "li",
@@ -173,7 +173,6 @@ function sessionRow(s: SessionInfo): HTMLElement {
       active ? "bg-indigo-50 hover:bg-indigo-50" : ""
     }`,
   );
-  const more = h("button", HOVER_BTN, "\u22ef");
   more.setAttribute("type", "button");
   more.setAttribute("aria-label", `Session actions: ${s.title ?? "untitled"}`);
   more.title = "Session actions";
@@ -181,7 +180,7 @@ function sessionRow(s: SessionInfo): HTMLElement {
     ev.stopPropagation();
     deps.sessionMenu(more, s);
   };
-  const open = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg py-1.5 text-left",
+  const open = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
     h("span", "min-w-0 flex-1 truncate", s.title ?? "untitled"),
     ...stateDot(s),
   );
@@ -227,9 +226,13 @@ export function renderSessions(): void {
   setAttention(waiting.length);
   setUnreadBadge(waiting.length);
   const { rows, hidden } = pageOf(sessions, shown);
-  const nodes: HTMLElement[] = rows.map(sessionRow);
+  // Keep an open menu's trigger alive across refreshes so Escape can return focus.
+  const expanded = sessionList.querySelector<HTMLElement>(".session-more[aria-expanded='true']");
+  const expandedId = expanded?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  const nodes: HTMLElement[] = rows.map((s) => sessionRow(s, s.id === expandedId ? expanded! : undefined));
   if (hidden > 0) {
-    const more = h("button", "session-open w-full cursor-pointer rounded-lg py-1.5 text-left text-sm text-neutral-500", `Load more (${hidden})`);
+    const more = h("button", "session-open w-full cursor-pointer rounded-lg text-left text-sm text-neutral-500", `Load more (${hidden})`);
+    more.id = "session-load-more";
     more.setAttribute("type", "button");
     more.onclick = () => {
       shown += PAGE;
@@ -251,6 +254,9 @@ export function renderSessions(): void {
     // Focus the row first: its action is hidden until :focus-within reveals it.
     row?.querySelector<HTMLElement>(".session-open")?.focus({ preventScroll: true });
     if (focusAction === ".session-more") row?.querySelector<HTMLElement>(focusAction)?.focus({ preventScroll: true });
+  } else if (focused?.id === "session-load-more") {
+    (sessionList.querySelector<HTMLElement>("#session-load-more") ?? sessionList.querySelector<HTMLElement>(".session-open") ?? $("#new-session"))
+      .focus({ preventScroll: true });
   }
   if (archiveDialog.open) renderArchive();
 }
@@ -436,7 +442,6 @@ export function initSidebar(d: SidebarDeps): void {
   $<HTMLFormElement>("#new-form").onsubmit = () =>
     void deps.createSession($<HTMLInputElement>("#new-cwd").value.trim());
   const search = $("#open-archive");
-  search.onclick = toggleArchive;
   search.onclick = toggleArchive;
   // Once the palette is open the chord belongs to its list (⌃K walks up), so
   // the global binding stands down; Esc is what a <dialog> closes on anyway.

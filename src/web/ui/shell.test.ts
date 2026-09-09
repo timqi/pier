@@ -79,3 +79,19 @@ it("clears drawer state and releases both panes when resizing to desktop", () =>
   expect(el("main").inert).toBe(false);
   expect(el("#drawer-toggle").attrs.get("aria-expanded")).toBe("false");
 });
+
+it("returns focus to the rail handle when a drawer becomes a collapsed desktop rail", () => {
+  document.body.dataset.rail = "closed";
+  el("#drawer-toggle").onclick!();
+  media.matches = false;
+  media.addEventListener.mock.calls[0]![1]();
+  expect(el("#sidebar").inert).toBe(true);
+  expect(el("main").inert).toBe(false);
+  expect(dom.active).toBe(el("#rail-toggle"));
+  el("#rail-toggle").onclick!();
+  expect(el("#sidebar").inert).toBe(false);
+  el("#new-session").focus();
+  el("#rail-toggle").onclick!();
+  expect(el("#sidebar").inert).toBe(true);
+  expect(dom.active).toBe(el("#rail-toggle"));
+});

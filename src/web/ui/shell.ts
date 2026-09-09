@@ -43,6 +43,7 @@ if (localStorage.getItem(RAIL_KEY) === "1") document.body.dataset.rail = "closed
 function setRail(closed: boolean): void {
   document.body.dataset.rail = closed ? "closed" : "";
   localStorage.setItem(RAIL_KEY, closed ? "1" : "0");
+  syncDrawer();
 }
 
 function toggleDrawer(): void {
@@ -62,10 +63,10 @@ function syncDrawer(): void {
   const open = isDrawer() && sidebar.dataset.open !== undefined;
   const main = $("main");
   main.inert = open;
-  sidebar.inert = isDrawer() && !open;
+  sidebar.inert = isDrawer() ? !open : document.body.dataset.rail === "closed";
   $("#drawer-toggle").setAttribute("aria-expanded", String(open));
   if (open && !sidebar.contains(document.activeElement)) $("#new-session").focus();
-  if (sidebar.inert && sidebar.contains(document.activeElement)) $("#drawer-toggle").focus();
+  if (sidebar.inert && sidebar.contains(document.activeElement)) $(isDrawer() ? "#drawer-toggle" : "#rail-toggle").focus();
 }
 
 // --- attention ----------------------------------------------------------------------
