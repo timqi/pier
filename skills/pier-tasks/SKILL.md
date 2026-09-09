@@ -25,8 +25,8 @@ status query. The receipt's `next` tells you where/how delivery happens:
   not for work you launch and forget. Receipt echoes `callbackMode`.
 - `callback:"none"`: no delivery; means you do not want the result, not pull later.
 - Single-run `callback_session_id`: deliver to another existing session.
-  Top-level sessions only; inside a run it is ignored and the result returns
-  to you.
+  Top-level sessions only, and never with `callback:"none"` or `tasks[]`;
+  inside a run it is refused, so your result always returns to you.
 
 Receipts include `runId`, `taskId`, state. Keep IDs: the callback also names
 `Run:`, and there is no lookup by task. `triggerSource` names the actual invoker
@@ -56,9 +56,9 @@ policy (`manual` means on demand).
 {"operation":"run","task":{"timeoutSeconds":7200,"action":{"type":"agent","session":{"mode":"reuse","sessionId":"..."},"prompt":"Check the result"}}}
 ```
 
-Inline drafts may omit `trigger`; only `manual` is allowed. Their nested
-`callback` is ignored: use top-level delivery options above. Nested callbacks
-matter for saved schedules (below).
+Inline drafts may omit `trigger`; only `manual` is allowed. A nested
+`callback` is refused: use the top-level delivery options above. Nested
+callbacks matter for saved schedules (below).
 
 ## Groups and chains
 

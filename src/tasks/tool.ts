@@ -242,10 +242,14 @@ export async function handleTaskTool(
   }
   if (input.operation === "run") {
     const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
+    // A run's own callback is its parent's link back; a child that could point
+    // it elsewhere would strand the supervisor waiting for a result.
+    if (active && input.callback_session_id !== undefined) throw new Error("subagents cannot redirect callbacks (callback_session_id)");
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
       if (input.session_mode !== undefined) throw new Error("session_mode applies to a single run only");
+      if (input.callback_session_id !== undefined) throw new Error("callback_session_id applies to a single run only");
       if (input.tasks.length < 2) throw new Error("tasks[] needs at least 2 entries; use task for a single run");
       const resolved: TaskDefinition[] = [];
       for (const rawEntry of input.tasks) {
@@ -277,7 +281,8 @@ export async function handleTaskTool(
     }
     const sessionMode = input.session_mode;
     let callbackSessionId: string | null = input.callback === "none" ? null : callerSessionId;
-    if (!active && callbackSessionId && typeof input.callback_session_id === "string") {
+    if (input.callback_session_id !== undefined) {
+      if (callbackSessionId === null) throw new Error("callback none and callback_session_id conflict: pick one delivery target");
       callbackSessionId = requiredString(input.callback_session_id, "callback_session_id");
       if (!(await definitions.sessionExists(callbackSessionId))) throw new Error(`unknown session: ${callbackSessionId}`);
     }
@@ -417,6 +422,11 @@ async function resolveDraft(
   if (!draft) throw new Error("task definition required");
   if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
     throw new Error("inline subagent tasks must use a manual trigger");
+  }
+  // Delivery of a one-off run is the top-level fields' business; a nested
+  // callback only means anything on a stored definition's schedule.
+  if (draft.callback !== undefined || draft.callback_session_id !== undefined) {
+    throw new Error("an inline task draft cannot set callback; use the top-level callback / callback_session_id");
   }
   if (active) {
     const action = record(draft.action);

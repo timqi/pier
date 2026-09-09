@@ -156,6 +156,23 @@ describe("task tool recover", () => {
     expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
   });
 
+  it("refuses every delivery redirect a subagent or a fan-out cannot honour", async () => {
+    // A running child whose target session is the caller: `active` is truthy.
+    const child = rig([run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null })]);
+    await expect(child({ operation: "run", task_id: task.id, callback_session_id: "other" }))
+      .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
+    await expect(child({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }], callback_session_id: "other" }))
+      .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
+
+    const top = rig([]);
+    await expect(top({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }], callback_session_id: "other" }))
+      .rejects.toThrow("callback_session_id applies to a single run only");
+    await expect(top({ operation: "run", task_id: task.id, callback: "none", callback_session_id: "other" }))
+      .rejects.toThrow(/callback none and callback_session_id conflict/);
+    await expect(top({ operation: "run", task: { action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "Work" }, callback: { type: "session", sessionId: "other" } } }))
+      .rejects.toThrow(/inline task draft cannot set callback/);
+  });
+
   it("does not take task_id", async () => {
     const tool = rig([run("r1")]);
     await expect(tool({ operation: "recover", task_id: task.id, reason: "x" })).rejects.toThrow(/run_id/);
