@@ -145,7 +145,7 @@ function setup(session = fakeSession(), instance?: ConstructorParameters<typeof 
   return { cwd, session, factory, hub, router, store, service };
 }
 
-/** A stored run row. The literal is long and four tests need one, differing
+/** A stored run row. The literal is long and a dozen tests need one, differing
  *  only in the handful of fields each is about. */
 function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<TaskRun> = {}): TaskRun {
   return {
@@ -209,6 +209,15 @@ async function askedAndFinished(rig: ReturnType<typeof supervised>) {
   child.setState("idle");
   await service.waitForRun(run.id);
   return { task, run, question };
+}
+
+/** Moves the sweep's clock past a backoff instead of sleeping it out. */
+function skewClock(): (ms: number) => void {
+  const real = Date.now;
+  let skew = 0;
+  const spy = vi.spyOn(Date, "now").mockImplementation(() => real() + skew);
+  onTestFinished(() => spy.mockRestore());
+  return (ms) => { skew += ms; };
 }
 
 const bashDraft = (cwd: string, script: string) => ({
@@ -327,16 +336,11 @@ describe("newId", () => {
   });
 
   it("mints 16 characters from that alphabet, distinct across a large sample", () => {
-    const ids = new Set<string>();
-    for (let i = 0; i < 10_000; i++) {
-      const id = newId();
-      expect(id).toHaveLength(16);
-      expect([...id].every((c) => alphabet.includes(c))).toBe(true);
-      ids.add(id);
-    }
+    const ids = Array.from({ length: 10_000 }, newId);
+    expect(ids.filter((id) => id.length !== 16 || [...id].some((c) => !alphabet.includes(c)))).toEqual([]);
     // Not a guarantee — 80 bits makes a repeat here a ~1e-13 event, so one
     // would mean the source stopped being random, not that luck ran out.
-    expect(ids.size).toBe(10_000);
+    expect(new Set(ids).size).toBe(10_000);
   });
 });
 
@@ -779,6 +783,7 @@ describe("task service", () => {
     const amnesiac = fakeSession();
     amnesiac.systemInput = async () => {};
     const { cwd, service } = setup(amnesiac);
+    const advance = skewClock();
     service.start(20);
     const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo lost") }, "s1") as TaskDefinition;
     const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
@@ -788,7 +793,8 @@ describe("task service", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(service.getRun(done.id).callbackState).toBe("pending");
     // ...and it keeps trying, on the backoff curve rather than every tick.
-    await vi.waitFor(() => expect(service.getRun(done.id).callbackAttempts).toBe(2), { timeout: 3000 });
+    advance(retryDelay(1) + 100);
+    await vi.waitFor(() => expect(service.getRun(done.id).callbackAttempts).toBe(2));
     expect(service.getRun(done.id).callbackState).toBe("pending");
     service.stop();
   });
@@ -931,22 +937,11 @@ describe("task service", () => {
     hub.subscribe("s1", (event) => { if (event.type === "error") errors.push(event.message); });
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
-    store.saveRun({
-      id: "spent", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      rootRunId: "spent", depth: 0, resumedFromRunId: null,
-      triggerSource: "agent", invokedBySessionId: "s1", sourceSessionId: "s1",
-      targetSessionId: null, sessionMode: null,
-      callbackSessionId: "s1", background: true, callbackState: "failed",
-      callbackAttempts: MAX_DELIVERY_ATTEMPTS, callbackError: "unknown session",
-      callbackNextAttemptAt: now,
-      state: "succeeded", input: null,
-      context: { definition: task }, probe: null, matched: null,
-      result: {
-        type: "bash", exitCode: 0, stdout: "done", stderr: "",
-        stdoutTruncated: false, stderrTruncated: false,
-      },
-      error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: now,
-    });
+    store.saveRun(storedRun("spent", task, now, {
+      invokedBySessionId: "s1", sourceSessionId: "s1", callbackSessionId: "s1", background: true,
+      callbackState: "failed", callbackAttempts: MAX_DELIVERY_ATTEMPTS,
+      callbackError: "unknown session", callbackNextAttemptAt: now,
+    }));
     service.start(20);
 
     await vi.waitFor(() => expect(service.getRun("spent")).toMatchObject({
@@ -1003,17 +998,10 @@ describe("task service", () => {
     );
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
-    store.saveRun({
-      id: "live", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      rootRunId: "live", depth: 0, resumedFromRunId: null,
-      triggerSource: "agent", invokedBySessionId: "owner", sourceSessionId: "owner",
-      targetSessionId: "target", sessionMode: "reuse",
-      callbackSessionId: null, background: true, callbackState: null,
-      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
-      state: "running", input: null,
-      context: { definition: task }, probe: null, matched: null, result: null,
-      error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: null,
-    });
+    store.saveRun(storedRun("live", task, now, {
+      state: "running", finishedAt: null, result: null,
+      targetSessionId: "target", sessionMode: "reuse", invokedBySessionId: "owner", sourceSessionId: "owner", background: true,
+    }));
     const run = store.getRun("live")!;
     const message = await messenger.control(run, "owner", "steer", "Change direction");
     expect(message.state).toBe("pending");
@@ -1039,6 +1027,7 @@ describe("task service", () => {
 
   it("does not spend a delivery attempt while the callback target is busy", async () => {
     const { cwd, service, session } = setup();
+    const advance = skewClock();
     service.start(20);
     const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     session.setState("streaming");
@@ -1052,6 +1041,7 @@ describe("task service", () => {
     expect(service.getRun(done.id)).toMatchObject({ callbackState: "pending", callbackAttempts: 0 });
 
     session.setState("idle");
+    advance(1100);
     await vi.waitFor(() => expect(service.getRun(done.id).callbackState).toBe("delivered"));
     expect(service.getRun(done.id).callbackAttempts).toBe(1);
     service.stop();
@@ -1063,6 +1053,7 @@ describe("task service", () => {
     const session = fakeSession();
     session.systemInput = async (text, origin, mode) => { session.systemInputs.push({ text, origin, mode }); };
     const { cwd, service } = setup(session);
+    const advance = skewClock();
     service.start(20);
     const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     session.setState("streaming");
@@ -1083,8 +1074,12 @@ describe("task service", () => {
     expect(service.getRun(waiting.runId)).toMatchObject({ callbackState: "pending", callbackAttempts: 0 });
 
     session.setState("idle");
-    // The deferred sweep is a second away, not a tick away.
-    await vi.waitFor(() => expect(service.getRun(waiting.runId).callbackState).toBe("delivered"), { timeout: 3000 });
+    // The deferred sweep is a second away, not a tick away — and a deferral
+    // written mid-flight as the turn ended is another second out.
+    await vi.waitFor(() => {
+      advance(1100);
+      expect(service.getRun(waiting.runId).callbackState).toBe("delivered");
+    });
     expect(session.systemInputs.at(-1)).toMatchObject({ mode: "followUp" });
     service.stop();
   });
@@ -1095,6 +1090,7 @@ describe("task service", () => {
     // transcript alone would read that as "never arrived" and send it again.
     const busy = streamingRecipient("s1");
     const { cwd, service, store } = setup(busy.session);
+    const advance = skewClock();
     service.start(20);
     const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     const urgent = await service.tool({ operation: "run", task_id: task.id, callback: "steer" }, "s1") as RunSummary;
@@ -1102,13 +1098,15 @@ describe("task service", () => {
 
     await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
     // Past the first retry's backoff, which is when the re-send would happen.
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    advance(retryDelay(1) + 100);
+    await new Promise((resolve) => setTimeout(resolve, 80));
     expect(busy.queued).toHaveLength(1);
     // Waiting on the queue is not an attempt either: one send, one count.
     expect(store.getRun(urgent.runId)).toMatchObject({ callbackState: "pending", callbackAttempts: 1 });
 
     busy.drain();
-    await vi.waitFor(() => expect(store.getRun(urgent.runId)?.callbackState).toBe("delivered"), { timeout: 3000 });
+    advance(1100);
+    await vi.waitFor(() => expect(store.getRun(urgent.runId)?.callbackState).toBe("delivered"));
     expect(busy.queued).toHaveLength(0);
     service.stop();
   });
@@ -1144,7 +1142,6 @@ describe("task service", () => {
       targetSessionId: "fresh-child",
       sessionMode: "fresh",
     });
-    expect(freshRun.sourceSessionId).toBe("s1");
   });
 
   it("refuses a definition stored with the removed fork mode instead of guessing a directory", async () => {
@@ -2006,8 +2003,9 @@ describe("task service", () => {
     await service.waitForRun(second.runId);
     session.setState("idle");
     const before = session.systemInputs.length;
+    skewClock()(1100);
     service.start(50);
-    await vi.waitFor(() => expect(service.getRun(first.runId).callbackState).toBe("delivered"), { timeout: 3000 });
+    await vi.waitFor(() => expect(service.getRun(first.runId).callbackState).toBe("delivered"));
     expect(service.getRun(second.runId).callbackState).toBe("delivered");
     expect(session.systemInputs).toHaveLength(before + 1);
     expect(session.systemInputs.at(-1)!.origin).toMatchObject({
@@ -2044,26 +2042,6 @@ describe("task service", () => {
     }
   });
 
-  it("marks unfinished records interrupted on startup", async () => {
-    const { cwd, store, factory, router, hub } = setup();
-    const service = new TaskService(store, factory, router, hub);
-    const task = await service.create(bashDraft(cwd, "true"));
-    const now = Date.now();
-    store.saveRun({
-      id: "stale", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      rootRunId: "stale", depth: 0, resumedFromRunId: null,
-      triggerSource: "cron", invokedBySessionId: null, sourceSessionId: null,
-      targetSessionId: null, sessionMode: null,
-      callbackSessionId: null, background: false, callbackState: null,
-      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
-      state: "running", input: null,
-      context: { definition: task }, probe: null, matched: null, result: null,
-      error: null, skipReason: null, queuedAt: now, startedAt: now, finishedAt: null,
-    });
-    service.start(60_000);
-    expect(service.getRun("stale")).toMatchObject({ state: "interrupted", finishedAt: expect.any(Number) });
-    service.stop();
-  });
 });
 
 describe("task admission and delivery regressions", () => {

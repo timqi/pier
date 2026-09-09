@@ -139,12 +139,16 @@ describe("the audit rule", () => {
 describe("HTTP policy", () => {
   it("retries a 429 and honours retry-after", async () => {
     let attempts = 0;
+    const started = Date.now();
+    // A zero header falls back to the jittered backoff; a positive one is the
+    // wait, and this one is short enough to tell the two apart by the clock.
     globalThis.fetch = (async () => {
       attempts++;
-      return attempts < 3 ? fail(429, "slow down", { "retry-after": "0" }) : ok({ fine: true });
+      return attempts < 3 ? fail(429, "slow down", { "retry-after": "0.01" }) : ok({ fine: true });
     }) as never;
     expect(await postJson("X", "https://x", new Headers(), {})).toEqual({ fine: true });
     expect(attempts).toBe(3);
+    expect(Date.now() - started).toBeLessThan(250);
   });
 
   it("does not retry a 400, and reports the provider's own message", async () => {

@@ -1403,7 +1403,7 @@ describe("workbench server", () => {
     expect(empty.status).toBe(400);
   });
 
-  it("returns 404 for unknown sessions", async () => {
+  it("returns 404 for unknown sessions, on a read and on a compact", async () => {
     const { factory } = setup();
     const hub = new EventHub();
     const router = new Router(hub, async () => {
@@ -1420,8 +1420,8 @@ describe("workbench server", () => {
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
     });
-    const res = await app.request("/api/sessions/nope/history");
-    expect(res.status).toBe(404);
+    expect((await app.request("/api/sessions/nope/history")).status).toBe(404);
+    expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
   });
 
   it("drops a ghost session's rail entry when loading it proves Pi never persisted it", async () => {
@@ -2252,26 +2252,6 @@ describe("workbench server", () => {
     const res = await app.request("/api/sessions/s1/compact", { method: "POST" });
     expect(res.status).toBe(409);
     expect((await res.json() as { error: string }).error).toContain("already compacting");
-  });
-
-  it("404s a compact for a session that does not exist", async () => {
-    const { factory } = setup();
-    const hub = new EventHub();
-    const router = new Router(hub, async () => {
-      throw new Error("unknown session: nope");
-    });
-    const app = createServer({
-      factory,
-      router,
-      hub,
-      sessions: new SessionStateStore(openDb(":memory:")),
-      config: fakeConfig(),
-      providers: fakeProviders(),
-      settings: new SettingsStore(openDb(":memory:")),
-      updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
-      secrets: fakeSecrets(),
-    });
-    expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
   });
 
   it("aborts via the router", async () => {
