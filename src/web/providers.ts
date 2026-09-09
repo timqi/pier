@@ -1,8 +1,8 @@
 // HTTP boundary for provider configuration.
 
 import type { Hono } from "hono";
-import { isProviderApi, validateProviderSetup } from "../core/types.js";
-import type { ProviderInfo, ProviderManager, ProviderSetup } from "../core/types.js";
+import { isProviderApi, MODEL_EFFORTS, validateProviderSetup } from "../core/types.js";
+import type { ModelCapability, ModelEffort, ProviderInfo, ProviderManager, ProviderSetup } from "../core/types.js";
 import { ProviderFlows } from "./provider-flows.js";
 
 /** Unknown JSON into a trimmed, validated ProviderSetup. Shape lives here;
@@ -18,14 +18,20 @@ function setupFrom(raw: unknown): ProviderSetup | null {
   if (!id) return null;
   if (input.kind === "builtin") return { kind: "builtin", id, ...(endpoint ? { endpoint } : {}) };
   if (input.kind !== "custom" || !isProviderApi(input.api) || !Array.isArray(input.models)) return null;
-  const models: { id: string; reasoning: boolean }[] = [];
+  const models: ModelCapability[] = [];
   for (const model of input.models) {
     const modelId = typeof model === "object" && model !== null &&
       typeof (model as { id?: unknown }).id === "string"
       ? (model as { id: string }).id.trim()
       : "";
     if (!modelId) return null;
-    models.push({ id: modelId, reasoning: (model as { reasoning?: unknown }).reasoning === true });
+    const effort = (model as { effort?: unknown }).effort;
+    if (effort !== undefined && !(MODEL_EFFORTS as readonly unknown[]).includes(effort)) return null;
+    models.push({
+      id: modelId,
+      reasoning: (model as { reasoning?: unknown }).reasoning === true,
+      ...(effort === undefined ? {} : { effort: effort as ModelEffort }),
+    });
   }
   return {
     kind: "custom",

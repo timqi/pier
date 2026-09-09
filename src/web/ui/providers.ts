@@ -4,6 +4,7 @@
 // card head, hand-built only because this pane owns a button in it.
 
 import type {
+  ModelEffort,
   ModelRef,
   ProviderApi,
   ProviderAuthType,
@@ -258,6 +259,14 @@ function openSetup(
   models.placeholder = "model-id\nanother-model-id";
   const reasoning = document.createElement("input");
   reasoning.type = "checkbox";
+  // Every reasoning model goes up to High on its own; the two levels above it
+  // are offered only to a model whose entry claims them, and this is where a
+  // custom model gets to claim them.
+  const effort = select([["Up to High", "high"], ["Up to Extra high", "xhigh"], ["Up to Max", "max"]], "high");
+  effort.classList.replace("w-full", "w-48");
+  reasoning.onchange = () => {
+    effort.disabled = !reasoning.checked;
+  };
   const auth = document.createElement("select");
   auth.className = `${CONTROL} select`;
   const fields = h("div", "flex flex-col gap-4");
@@ -281,6 +290,20 @@ function openSetup(
     const capabilities = provider?.models?.map((model) => model.reasoning) ?? [];
     reasoning.checked = capabilities.length ? capabilities.every(Boolean) : !provider;
     reasoning.indeterminate = capabilities.some(Boolean) && !capabilities.every(Boolean);
+    // The select's answer to the checkbox's indeterminate: models that disagree
+    // keep what each of them says until one ceiling is picked for all.
+    const ceilings = new Set(
+      (provider?.models ?? []).filter((model) => model.reasoning).map((model) => model.effort ?? "high"),
+    );
+    const mixed = ceilings.size > 1;
+    effort.replaceChildren(
+      ...(mixed ? [new Option("Keep as configured", "")] : []),
+      new Option("Up to High", "high"),
+      new Option("Up to Extra high", "xhigh"),
+      new Option("Up to Max", "max"),
+    );
+    effort.value = mixed ? "" : [...ceilings][0] ?? "high";
+    effort.disabled = !reasoning.checked && !reasoning.indeterminate;
 
     const authOptions: HTMLOptionElement[] = [];
     if (provider?.configured) authOptions.push(new Option("Keep current authentication", ""));
@@ -300,9 +323,13 @@ function openSetup(
         field("API format", api),
         field("Models", models),
         field("Model capabilities", h(
-          "label", "flex items-center gap-2 text-[12.5px] text-neutral-600",
-          reasoning, h("span", "", "Reasoning"),
-        )),
+          "div", "flex flex-wrap items-center gap-3",
+          h(
+            "label", "flex items-center gap-2 text-[12.5px] text-neutral-600",
+            reasoning, h("span", "", "Reasoning"),
+          ),
+          effort,
+        ), { hint: "Extra high and Max reach the model only if it accepts them; every reasoning model has High." }),
       );
     } else {
       endpoint.placeholder = "Provider default";
@@ -340,12 +367,18 @@ function openSetup(
           endpoint: endpoint.value.trim(),
           api: api.value as ProviderApi,
           models: [...new Set(models.value.split("\n").map((id) => id.trim()).filter(Boolean))]
-            .map((id) => ({
-              id,
-              reasoning: reasoning.indeterminate
-                ? provider?.models?.find((model) => model.id === id)?.reasoning ?? reasoning.checked
-                : reasoning.checked,
-            })),
+            .map((id) => {
+              const known = provider?.models?.find((model) => model.id === id);
+              const reasons = reasoning.indeterminate ? known?.reasoning ?? reasoning.checked : reasoning.checked;
+              // "" is the mixed case: each model keeps its own ceiling. High is
+              // the absence of one, so it is sent as nothing.
+              const ceiling = effort.value ? effort.value as ModelEffort : known?.effort;
+              return {
+                id,
+                reasoning: reasons,
+                ...(reasons && ceiling && ceiling !== "high" ? { effort: ceiling } : {}),
+              };
+            }),
         }
       : {
           kind: "builtin",

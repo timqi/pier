@@ -298,6 +298,53 @@ describe("provider setup", () => {
       },
     });
   });
+
+  it("carries an effort ceiling into the model's level map and back out of it", async () => {
+    // A map the operator wrote by hand: the ceiling owns xhigh and max, the
+    // rest of it is none of the Console's business.
+    writeFileSync(join(agentDir, "models.json"), JSON.stringify({
+      providers: { "my-proxy": { models: [{ id: "reasoner", thinkingLevelMap: { off: null } }] } },
+    }));
+    const save = (effort?: "high" | "xhigh" | "max") =>
+      store.setupProvider({
+        kind: "custom",
+        id: "my-proxy",
+        endpoint: "https://llm.example/v1",
+        api: "openai-completions",
+        models: [{ id: "reasoner", reasoning: true, ...(effort ? { effort } : {}) }],
+      });
+    const stored = (): Record<string, unknown> =>
+      JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8")).providers["my-proxy"].models[0];
+
+    await save("max");
+    expect(stored().thinkingLevelMap).toEqual({ off: null, xhigh: "xhigh", max: "max" });
+    expect((await store.providerStructures())["my-proxy"]?.models).toEqual([
+      { id: "reasoner", reasoning: true, effort: "max" },
+    ]);
+
+    await save("xhigh");
+    expect(stored().thinkingLevelMap).toEqual({ off: null, xhigh: "xhigh" });
+    expect((await store.providerStructures())["my-proxy"]?.models).toEqual([
+      { id: "reasoner", reasoning: true, effort: "xhigh" },
+    ]);
+
+    // Back to the default ceiling: the two levels go, the hand-written rest stays.
+    await save();
+    expect(stored().thinkingLevelMap).toEqual({ off: null });
+    expect((await store.providerStructures())["my-proxy"]?.models).toEqual([
+      { id: "reasoner", reasoning: true },
+    ]);
+  });
+
+  it("refuses an effort ceiling on a model that does not reason", async () => {
+    await expect(store.setupProvider({
+      kind: "custom",
+      id: "my-proxy",
+      endpoint: "https://llm.example/v1",
+      api: "openai-completions",
+      models: [{ id: "chat", reasoning: false, effort: "max" }],
+    })).rejects.toThrow(/effort requires reasoning/);
+  });
 });
 
 describe("resources", () => {

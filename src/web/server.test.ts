@@ -1604,6 +1604,22 @@ describe("workbench server", () => {
       }),
     });
     expect(unsafeEndpoint.status).toBe(400);
+    // A level Pi has no name for would be written into the catalog verbatim.
+    const unknownEffort = await app.request("/api/providers/setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        setup: {
+          kind: "custom",
+          id: "my-proxy",
+          endpoint: "https://llm.example/v1",
+          api: "openai-completions",
+          models: [{ id: "reasoner", reasoning: true, effort: "ultra" }],
+        },
+        authType: "api_key",
+      }),
+    });
+    expect(unknownEffort.status).toBe(400);
     expect(providers.calls).toEqual([]);
 
     const started = await app.request("/api/providers/setup", {

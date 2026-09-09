@@ -500,6 +500,20 @@ export type ProviderApi = typeof PROVIDER_APIS[number];
 export const isProviderApi = (value: unknown): value is ProviderApi =>
   typeof value === "string" && (PROVIDER_APIS as readonly string[]).includes(value);
 
+/** How far a model's reasoning goes. Every reasoning model offers up to
+ *  "high"; the two levels above it exist only for a model whose catalog entry
+ *  says so, which is the one thing a Console-defined model could not say. */
+export const MODEL_EFFORTS = ["high", "xhigh", "max"] as const;
+export type ModelEffort = (typeof MODEL_EFFORTS)[number];
+
+/** What a surface may declare about one model of a custom provider. */
+export interface ModelCapability {
+  id: string;
+  reasoning: boolean;
+  /** Absent = up to "high", the level every reasoning model has. */
+  effort?: ModelEffort;
+}
+
 export type ProviderSetup =
   | { kind: "builtin"; id: string; endpoint?: string }
   | {
@@ -508,7 +522,7 @@ export type ProviderSetup =
       name?: string;
       endpoint: string;
       api: ProviderApi;
-      models: { id: string; reasoning: boolean }[];
+      models: ModelCapability[];
     };
 
 /** The rules of the ProviderSetup seam, in one place: agent/ enforces them on
@@ -534,6 +548,14 @@ export function validateProviderSetup(input: ProviderSetup): void {
   const ids = input.models.map((model) => model.id);
   if (ids.some((id) => !id || id.length > 200 || id !== id.trim()) || new Set(ids).size !== ids.length) {
     throw new Error("model ids must be non-empty, trimmed and unique");
+  }
+  // An effort ceiling on a model that does not reason would be written into
+  // the catalog and never offered — a setting that lies about itself.
+  if (input.models.some((model) => model.effort !== undefined && !model.reasoning)) {
+    throw new Error("effort requires reasoning");
+  }
+  if (input.models.some((model) => model.effort !== undefined && !MODEL_EFFORTS.includes(model.effort))) {
+    throw new Error("unsupported model effort");
   }
 }
 
@@ -583,7 +605,7 @@ export interface ProviderInfo {
   stored?: ProviderAuthType;
   endpoint?: string;
   api?: ProviderApi;
-  models?: { id: string; reasoning: boolean }[];
+  models?: ModelCapability[];
 }
 
 /**

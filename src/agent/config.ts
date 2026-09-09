@@ -15,6 +15,8 @@ import type {
   ConfigResourceKind,
   ConfigScope,
   ConfigStore,
+  ModelCapability,
+  ModelEffort,
   ModelRef,
   ProviderApi,
   ProviderSetup,
@@ -53,7 +55,23 @@ export interface ProviderStructure {
   name?: string;
   endpoint?: string;
   api?: ProviderApi;
-  models?: { id: string; reasoning: boolean }[];
+  models?: ModelCapability[];
+}
+
+/** Pi reads the two highest levels off the model's own map, so a ceiling is
+ *  read back from it and written into it — leaving the rest of a hand-written
+ *  map (an `off: null` that forbids thinking-off) alone, because the Console
+ *  does not offer it and therefore may not drop it. */
+const effortOf = (map: Record<string, unknown> | undefined): ModelEffort | undefined =>
+  typeof map?.max === "string" ? "max" : typeof map?.xhigh === "string" ? "xhigh" : undefined;
+
+function withEffort(map: Record<string, unknown> | undefined, effort: ModelEffort | undefined): Record<string, unknown> | undefined {
+  const next = { ...map };
+  delete next.xhigh;
+  delete next.max;
+  if (effort === "xhigh" || effort === "max") next.xhigh = "xhigh";
+  if (effort === "max") next.max = "max";
+  return Object.keys(next).length ? next : undefined;
 }
 
 const missing = (err: unknown): boolean =>
@@ -171,9 +189,11 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
             if (typeof model !== "object" || model === null || typeof (model as { id?: unknown }).id !== "string") {
               return [];
             }
+            const effort = effortOf(asRecord((model as { thinkingLevelMap?: unknown }).thinkingLevelMap));
             return [{
               id: (model as { id: string }).id,
               reasoning: (model as { reasoning?: unknown }).reasoning === true,
+              ...(effort ? { effort } : {}),
             }];
           })
         : undefined;
@@ -215,6 +235,9 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
           };
           if (model.reasoning) next.reasoning = true;
           else delete next.reasoning;
+          const map = withEffort(asRecord(next.thinkingLevelMap), model.effort);
+          if (map) next.thinkingLevelMap = map;
+          else delete next.thinkingLevelMap;
           return next;
         });
       }
