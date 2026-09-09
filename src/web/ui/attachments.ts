@@ -44,9 +44,9 @@ const ZOOM = 2.5;
 const zoomed = (): boolean => imageStage.dataset.zoom !== undefined;
 
 /** Grow the image to a fixed multiple of its fitted size about the tapped
- *  point, and let the stage scroll: panning is then the platform's own (touch
- *  drag, wheel, scrollbars) rather than a drag handler of ours. `at` is a
- *  viewport point — the tap — which stays where it was under the growth.
+ *  point; the stage becomes the scroll box, so where you are in the image is
+ *  its scroll offset and nothing else has to remember it. `at` is a viewport
+ *  point — the tap — which stays where it was under the growth.
  *  Pinching is not an option to add here: the workbench turns page zoom off
  *  (index.html, style.css, main.ts), so a tap is the whole gesture. */
 function zoom(on: boolean, at?: { x: number; y: number }): void {
@@ -92,7 +92,38 @@ function showImage(clicked: HTMLImageElement): void {
 // does the ✕ (a phone has no Esc). This was a double-tap-to-zoom with a 260ms
 // window, which is shorter than two deliberate taps: on the surface the
 // gesture is for, "zoom" was read as "close" nearly every time.
+// Dragging a zoomed image. The stage is a scroll box, so a *touch* could
+// already pan it — a mouse could not: an overflow box has no drag-to-scroll,
+// and the scrollbars are the one handle a lightbox has no room to show. Pointer
+// events, so finger and mouse take one path (style.css hands us the touch as
+// well, with `touch-action: none` while zoomed); the capture keeps the drag
+// alive when the pointer leaves the image, or the window.
+const SLOP = 4; // a click from a shaky hand is still a click
+let from: { x: number; y: number; left: number; top: number } | undefined;
+let panned = false;
+imageStage.onpointerdown = (ev) => {
+  panned = false; // before the guard: a stale pan would eat the next click
+  if (!zoomed() || ev.button !== 0) return;
+  from = { x: ev.clientX, y: ev.clientY, left: imageStage.scrollLeft, top: imageStage.scrollTop };
+  imageStage.setPointerCapture(ev.pointerId);
+};
+imageStage.onpointermove = (ev) => {
+  if (!from) return;
+  const dx = ev.clientX - from.x;
+  const dy = ev.clientY - from.y;
+  if (Math.abs(dx) > SLOP || Math.abs(dy) > SLOP) panned = true;
+  imageStage.scrollLeft = from.left - dx;
+  imageStage.scrollTop = from.top - dy;
+};
+const endPan = (): void => {
+  from = undefined;
+};
+imageStage.onpointerup = endPan;
+imageStage.onpointercancel = endPan;
+
 imageStage.onclick = (ev) => {
+  // A drag is a pan, not the click that would fit the image again.
+  if (panned) return;
   if (ev.target === imageFull) zoom(!zoomed(), { x: ev.clientX, y: ev.clientY });
   else imageDialog.close();
 };

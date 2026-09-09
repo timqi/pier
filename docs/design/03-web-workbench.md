@@ -307,10 +307,16 @@ per-turn Activity groups):
   attachments (`web/ui/attachments.ts`); images open in the lightbox.
 - **Lightbox**: a click on the image magnifies it about that point and a second
   one fits it again (the workbench itself never zooms, so the tap is the whole
-  gesture — there is no pinch to offer); the scrim beside it, the ✕ and Esc
-  close. ‹ › and ← / → page through the gallery the image was opened from — the
-  transcript or the pending strip, never across the two — and hide when it holds
-  only one image.
+  gesture — there is no pinch to offer); dragging pans what is magnified, on
+  mouse and finger alike, because an overflow box gives a mouse no way to scroll
+  it and a lightbox has no room for scrollbars. The scrim beside the image, the
+  ✕ and Esc close. ‹ › and ← / → page through the gallery the image was opened
+  from — the transcript or the pending strip, never across the two — and hide
+  when it holds only one image. The controls are pinned to the viewport's edges,
+  and from `md` up the image's width leaves them their gutters so a wide shot
+  never renders on top of them; on a phone there is no width to spare for
+  gutters that are only sometimes needed, so the arrows overlay the image and a
+  darker fill with a white rim is what keeps them findable over a screenshot.
 - Auto-scroll sticks to the bottom only when the user is already near it;
   own sends force-scroll.
 

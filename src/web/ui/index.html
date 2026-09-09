@@ -220,13 +220,13 @@
   </dialog>
 
   <!-- Full-size view of a thumbnail; a click on the image zooms about the
-       point and a second one fits it again, a click beside it — or the ✕, or
-       Esc — closes. The arrows page through the gallery it was opened from, as
-       do ← / →; they hide when there is only one image to look at. The dialog
-       fills the viewport rather than hugging the image, so the controls sit at
-       the screen's edges and a tall shot and a wide one don't move the one
-       under your thumb; #image-stage is the box a zoomed image scrolls inside
-       (ui/attachments.ts). -->
+       point and a second one fits it again, dragging pans what is magnified, a
+       click beside it — or the ✕, or Esc — closes. The arrows page through the
+       gallery it was opened from, as do ← / →; they hide when there is only one
+       image to look at. The dialog fills the viewport rather than hugging the
+       image, so the controls sit at the screen's edges and a tall shot and a
+       wide one don't move the one under your thumb; #image-stage is the box a
+       zoomed image scrolls inside (ui/attachments.ts). -->
   <!-- The size is written out, not left to `inset-0`: a dialog is `width:
        fit-content` in the UA sheet, and an inset pair does not stretch a box
        that already has a width — it sized itself to the image and sat in the
@@ -234,7 +234,15 @@
        of on #image-stage. -->
   <dialog id="image-dialog" class="fixed inset-0 m-0 h-[100dvh] w-full max-h-none max-w-none bg-transparent p-0 backdrop:bg-black/70">
     <div id="image-stage" class="flex h-full w-full items-center justify-center overflow-hidden">
-      <img id="image-full" alt="" class="max-h-[92dvh] max-w-[92vw] cursor-zoom-in rounded-xl object-contain" />
+      <!-- The width leaves the arrows their gutters wherever there is room for
+           them: a wide shot at 92vw ran under both, which is what "the buttons
+           are gone" was. Below md there is no such room — taking 9rem off a
+           390px screen would shrink every portrait screenshot to fit controls
+           that are only sometimes there — so the arrows overlay the image and
+           the rim in style.css is what keeps them legible over it.
+           draggable=false: the browser's own image drag would race the pan. -->
+      <img id="image-full" alt="" draggable="false"
+        class="max-h-[92dvh] max-w-[92vw] cursor-zoom-in rounded-xl object-contain md:max-w-[calc(100vw-9rem)]" />
     </div>
     <!-- Siblings of the stage, not children of it: the stage is what scrolls
          when zoomed, and a control inside it would scroll away with the image.

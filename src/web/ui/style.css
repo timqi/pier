@@ -790,7 +790,11 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
    own `overflow-hidden` and the image's `max-h`/`max-w`, and a layered rule
    loses to a utility however specific it is. */
 #image-stage[data-zoom] {
+  /* touch-action: the drag is ours on every pointer (ui/attachments.ts), so a
+     finger must not also scroll this box — native panning and the handler
+     moved it twice per gesture. */
   @apply items-start justify-start overflow-auto;
+  touch-action: none;
 }
 #image-stage[data-zoom] img {
   @apply max-h-none max-w-none cursor-zoom-out;
@@ -833,9 +837,12 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
      utility beside it (`left-2 top-1/2 -translate-y-1/2`, `right-2 top-2`), so
      placement never fights the class. */
   /* The scrim under these stays black in both themes, so the glyph on it has to
-     stay white — which `text-white` no longer means once the palette flips. */
+     stay white — which `text-white` no longer means once the palette flips.
+     The rim and the darker fill are for the one case the gutters cannot cover:
+     below md a wide image sits under these, and a translucent grey disc on a
+     screenshot of a UI is a disc nobody finds. */
   .lightbox-btn {
-    @apply absolute flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/45 text-[1.5rem] leading-none text-white dark:text-neutral-950 hover:bg-black/70;
+    @apply absolute flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-[1.5rem] leading-none text-white ring-1 ring-white/30 dark:text-neutral-950 hover:bg-black/75;
   }
   /* Collapsible rows: hide native markers, rotate our chevron on open. */
   summary {
