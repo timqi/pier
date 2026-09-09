@@ -55,8 +55,10 @@ const TYPES: Record<string, string> = {
 };
 
 // Active content on the workbench origin: the sandbox removes forms, frames,
-// popups and network. Public pages omit same-origin too, so their scripts
-// cannot inherit an operator's authority.
+// popups and subresource requests. A private board keeps `allow-same-origin`
+// for the session cookie, so its script reads this origin's storage and
+// top-level navigation remains a way out (docs/design/05-boards.md). Public
+// pages omit same-origin, so their scripts inherit no authority at all.
 const CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
   "script-src 'self' 'unsafe-inline'; connect-src 'none'; frame-src 'none'; " +

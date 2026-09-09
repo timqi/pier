@@ -279,25 +279,27 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
 }
 
 // --- composer drafts -------------------------------------------------------------------
-// Per session, in localStorage only: an unsent draft is never the agent's business.
+// Per session, in sessionStorage only: an unsent draft is never the agent's
+// business, and a board's own script runs on this origin (boards/boards.ts) —
+// in another tab, which is what keeps it out of reach.
 
 const draftKey = (id: string): string => `pier.draft.${id}`;
 let draftVersion = 0;
 
-/** In memory, not localStorage: a couple of pasted screenshots are past what
+/** In memory, not sessionStorage: a couple of pasted screenshots are past what
  *  it will hold. Survives switching sessions, not a reload. Written from
  *  renderFileStrip, which every mutation of `pendingFiles` goes through. */
 const pendingBySession = new Map<string, PendingFile[]>();
 
 export function saveDraft(id = deps.sessionId(), text = input.value): void {
   if (!id) return;
-  if (text) localStorage.setItem(draftKey(id), text);
-  else localStorage.removeItem(draftKey(id));
+  if (text) sessionStorage.setItem(draftKey(id), text);
+  else sessionStorage.removeItem(draftKey(id));
 }
 
 export function restoreDraft(id: string): void {
   ++draftVersion;
-  input.value = localStorage.getItem(draftKey(id)) ?? "";
+  input.value = sessionStorage.getItem(draftKey(id)) ?? "";
   autosize();
   pendingFiles = pendingBySession.get(id) ?? [];
   renderFileStrip();
@@ -412,7 +414,7 @@ async function recallQueue(): Promise<void> {
     if (messages.length) {
       // The server already removed these messages: retain them even after navigation.
       try {
-        const draft = selected ? input.value : localStorage.getItem(draftKey(id)) ?? "";
+        const draft = selected ? input.value : sessionStorage.getItem(draftKey(id)) ?? "";
         const text = (draft ? [draft, ...messages] : messages).join("\n");
         if (selected) {
           input.value = text;

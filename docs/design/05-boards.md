@@ -88,6 +88,15 @@ whitelist extended with `html/css/js/svg/woff2/ico`, no directory listing,
 img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'
 'unsafe-inline'; connect-src 'none'; frame-ancestors 'none'`.
 
+Both handlers also send `sandbox allow-scripts` — a private board adds
+`allow-same-origin`, because the session cookie is what authorizes it:
+
+- Its script runs on the workbench origin: it reads that origin's
+  `localStorage`, and top-level navigation is not something the CSP removes, so
+  what it reads can leave.
+- Nothing secret belongs in `localStorage`; unsent composer drafts live in
+  tab-scoped `sessionStorage`, and a board opens in its own tab.
+
 One module owns scan, manifest read/write, rename-delete and the routes.
 `readManifest` is the single place a slug becomes a path and is validated;
 every route reaches the filesystem through it. Depends on `node:fs` and core

@@ -64,7 +64,9 @@ beforeEach(async () => {
     readAsDataURL() { this.onload?.(); }
   });
   vi.stubGlobal("fetch", state.fetch);
-  vi.stubGlobal("localStorage", {
+  // Drafts live in sessionStorage: a board's script shares this origin but
+  // never this tab.
+  vi.stubGlobal("sessionStorage", {
     getItem: (key: string) => drafts.get(key) ?? null,
     setItem: (key: string, value: string) => drafts.set(key, value),
     removeItem: (key: string) => drafts.delete(key),
@@ -126,6 +128,20 @@ async function recallPending(stage: "fetch" | "body") {
 it("measures the dock's parts as border-box", () => {
   expect(state.observed.length).toBe(3);
   expect(state.observed).toEqual(state.observed.map(() => ({ box: "border-box" })));
+});
+
+// A board's page is active content on this origin (boards/boards.ts), so
+// localStorage is readable by a script the agent wrote; a tab-scoped store is not.
+it("keeps an unsent draft out of localStorage", () => {
+  const shared = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => shared.get(key) ?? null,
+    setItem: (key: string, value: string) => shared.set(key, value),
+    removeItem: (key: string) => shared.delete(key),
+  });
+  type("unsent operator secret");
+  expect(drafts.get("pier.draft.a")).toBe("unsent operator secret");
+  expect([...shared.keys()]).toEqual([]);
 });
 
 describe("queue recall drafts", () => {
@@ -214,7 +230,7 @@ describe("queue recall drafts", () => {
   it("retains selected recalled text in the input when storage fills up", async () => {
     type("draft");
     const finish = await recallPending("body");
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("quota exceeded"); });
+    vi.spyOn(sessionStorage, "setItem").mockImplementation(() => { throw new Error("quota exceeded"); });
     await finish([" first\n", "second"]);
     expect(state.nodes.get("#input")!.value).toBe("draft\n first\n\nsecond");
     expect(drafts.get("pier.draft.a")).toBe("draft");
@@ -229,7 +245,7 @@ describe("queue recall drafts", () => {
     type("B draft");
     composer.renderQueue([], ["B queue"]);
     const rows = state.nodes.get("#queue-rows")!.children;
-    vi.spyOn(localStorage, method).mockImplementation(() => { throw new Error("storage unavailable"); });
+    vi.spyOn(sessionStorage, method).mockImplementation(() => { throw new Error("storage unavailable"); });
     await finish([" first\n", "second"]);
     expect(state.nodes.get("#input")!.value).toBe("B draft");
     expect(state.nodes.get("#input")!.focus).not.toHaveBeenCalled();
