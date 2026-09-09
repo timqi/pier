@@ -33,8 +33,14 @@ const listing = async (path?: string): Promise<Listing | null> => {
 const folders = (list: Listing): string[] =>
   list.entries.filter((e) => e.dir && !e.name.startsWith(".")).map((e) => e.name);
 
+/** One row of the tree, in the action menu's own shape (menu.ts): the panel
+ *  it sits in is a menu, so its rows read and hit like menu rows. */
+const ROW = "flex w-full min-h-10 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100";
+/** Path line, error line, "New folder" field: the shared 0.875rem mono. */
+const MONO = "font-mono text-[0.875rem]";
+
 const row = (label: string, cls: string, onSelect: () => void): HTMLElement => {
-  const el = btn(label, `flex w-full cursor-pointer items-center gap-1.5 px-3 py-1 text-left ${cls}`);
+  const el = btn(label, `${ROW} ${cls}`);
   el.onclick = onSelect;
   return el;
 };
@@ -46,13 +52,12 @@ const row = (label: string, cls: string, onSelect: () => void): HTMLElement => {
  * the user backed out or the server refused.
  */
 function newFolderRow(parent: string, onCreated: (path: string) => void): HTMLElement {
-  const box = h("div", "flex-none border-t border-neutral-200");
-  const start = row("+ New folder", "text-[12px] text-neutral-500 hover:bg-neutral-100", () => {
+  const box = h("div", "mt-2 flex-none border-t border-neutral-200 pt-2");
+  const start = row("+ New folder", "text-neutral-500", () => {
     const input = document.createElement("input");
-    input.className =
-      "w-full border-0 bg-transparent px-3 py-1 font-mono text-[12.5px] focus:outline-none";
+    input.className = `w-full rounded-xl border-0 bg-neutral-100 px-3 py-2 ${MONO} focus:outline-none`;
     input.placeholder = "folder-name";
-    const error = h("p", "hidden px-3 pb-1 text-[11.5px] text-red-600");
+    const error = h("p", "hidden px-3 pt-1 text-[0.8125rem] text-red-600");
     input.onkeydown = async (ev) => {
       // Escape is handled by the panel itself (menu.ts). Enter must not reach
       // an enclosing form (the channel config's), which would submit it.
@@ -91,21 +96,22 @@ export function openBrowser(
   async function open(path?: string): Promise<void> {
     const list = await listing(path);
     if (!list) return;
-    const content = h("div", "flex max-h-80 w-80 flex-col");
-    const use = btn("Use", "ml-auto flex-none cursor-pointer rounded bg-indigo-600 px-2 py-0.5 text-[11.5px] text-white dark:text-neutral-50");
+    // Fills a sheet; a fixed width on desktop so walking the tree does not
+    // resize the panel under the pointer.
+    const content = h("div", "flex max-h-[60dvh] w-full flex-col sm:w-88");
+    const use = btn("Use", "btn btn-primary ml-auto flex-none px-3 py-1 text-[0.8125rem]");
     use.onclick = () => commit(list.path);
     // The path is typed as often as it is clicked to — a directory nobody has a
     // session in is several clicks from home and one paste from anywhere — so
     // the line that names where you are is the line you can edit. Enter takes
     // it, once the server confirms it is a folder this can read.
     const typed = document.createElement("input");
-    typed.className =
-      "min-w-0 flex-1 border-0 bg-transparent font-mono text-[11.5px] text-neutral-500 focus:outline-none";
+    typed.className = `min-w-0 flex-1 border-0 bg-transparent ${MONO} text-neutral-600 focus:outline-none`;
     typed.value = list.path;
     typed.spellcheck = false;
     typed.title = "Type or paste a path, then Enter";
     typed.onfocus = () => typed.select();
-    const error = h("p", "hidden flex-none px-3 pb-1 text-[11.5px] text-red-600");
+    const error = h("p", "hidden flex-none px-3 pb-1 text-[0.8125rem] text-red-600");
     typed.onkeydown = async (ev) => {
       // Escape belongs to the panel (menu.ts). Enter must not reach an
       // enclosing form (the channel config's), which would submit it.
@@ -124,17 +130,17 @@ export function openBrowser(
     };
     const head = h(
       "div",
-      "flex flex-none items-center gap-2 border-b border-neutral-200 px-3 py-1.5",
+      "mb-2 flex flex-none items-center gap-2 border-b border-neutral-200 px-3 pb-2 pt-1",
       typed,
       use,
     );
-    const body = h("div", "min-h-0 flex-1 overflow-y-auto py-0.5 text-[12.5px]");
-    if (list.parent) body.append(row("../", "font-mono text-neutral-500 hover:bg-neutral-100", () => void open(list.parent!)));
+    const body = h("div", "min-h-0 flex-1 overflow-y-auto");
+    if (list.parent) body.append(row("../", `${MONO} text-neutral-500`, () => void open(list.parent!)));
     const names = folders(list);
     for (const name of names) {
-      body.append(row(name, "truncate hover:bg-neutral-100", () => void open(`${list.path}/${name}`.replace("//", "/"))));
+      body.append(row(name, "truncate", () => void open(`${list.path}/${name}`.replace("//", "/"))));
     }
-    if (!names.length) body.append(h("p", "px-3 py-1.5 text-[12px] text-neutral-400", "No sub-folders."));
+    if (!names.length) body.append(h("p", "px-3 py-2 text-[0.8125rem] text-neutral-400", "No sub-folders."));
     // Creating navigates into the new folder, so "Use" is one click away.
     content.append(head, error, body, newFolderRow(list.path, (path) => void open(path)));
     openPanel(anchor, content);
