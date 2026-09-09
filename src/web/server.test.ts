@@ -1344,7 +1344,7 @@ describe("workbench server", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ modelMenu }),
       });
-    const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hard problems" }];
+    const menu = [{ provider: "anthropic", id: "claude-opus-4-5", thinking: "high", note: "hard problems" }];
     const ok = await put(menu);
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({

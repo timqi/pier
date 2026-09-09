@@ -16,7 +16,7 @@ import { SettingsStore } from "./settings.js";
 
 const SOURCE = "https://source.example/config-sync/token";
 const agent = (text = "local"): AgentConfigSnapshot => ({ files: { "SYSTEM.md": text, "AGENTS.md": null }, providers: {} });
-const document = (text = "remote") => ({ schemaVersion: 1, instanceId: "other-instance", agent: agent(text), modelMenu: [{ provider: "anthropic", id: "model" }] });
+const document = (text = "remote") => ({ schemaVersion: 1, instanceId: "other-instance", agent: agent(text), modelMenu: [{ provider: "anthropic", id: "model", thinking: "medium" }] });
 const answer = (text = "remote", etag = '"one"'): ConfigDownload => ({ status: 200, etag, body: JSON.stringify(document(text)) });
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });

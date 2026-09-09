@@ -23,8 +23,10 @@ const log = logger("settings");
 export interface ModelMenuEntry {
   provider: string;
   id: string;
-  /** The reasoning level this pin is usually run at — advice, not a lock. */
-  thinking?: ThinkingLevel;
+  /** The reasoning level this pin is run at — advice, not a lock, but never
+   *  absent: a pin with no level was a third state every picker had to carry
+   *  a fallback for, and none of them could show it. */
+  thinking: ThinkingLevel;
   /** Intent, not documentation — "hardest reasoning", "cheap bulk". */
   note?: string;
 }
@@ -91,12 +93,16 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
     const ref = normalizeModelRef(item);
     if (!ref) return null;
     const { thinking, note } = item as Record<string, unknown>;
-    if (thinking !== undefined && !isThinkingLevel(thinking)) return null;
+    // The one thing repaired rather than rejected, because it is not input:
+    // entries stored (or exported by an instance) before the level was
+    // required have none, and dropping the menu over it would lose the pins.
+    const level = thinking === undefined ? "medium" : thinking;
+    if (!isThinkingLevel(level)) return null;
     if (note !== undefined && typeof note !== "string") return null;
     const cleaned = note?.trim().slice(0, 200);
     menu.push({
       ...ref,
-      ...(thinking !== undefined ? { thinking } : {}),
+      thinking: level,
       ...(cleaned ? { note: cleaned } : {}),
     });
   }

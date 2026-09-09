@@ -72,7 +72,9 @@ describe("SettingsStore", () => {
   it("round-trips the model menu and ignores a corrupt row rather than crashing", () => {
     const db = openDb(":memory:");
     const store = new SettingsStore(db);
-    const menu = [{ provider: "anthropic", id: "claude-opus-4-5", note: "hardest reasoning" }];
+    const menu = [
+      { provider: "anthropic", id: "claude-opus-4-5", thinking: "high" as const, note: "hardest reasoning" },
+    ];
     expect(store.setModelMenu(menu).modelMenu).toEqual(menu);
     // A hand-edited row must not take get() down with it.
     db.prepare("UPDATE settings SET value = 'not json' WHERE key = 'modelMenu'").run();
@@ -162,9 +164,11 @@ describe("managed tools", () => {
 
 describe("normalizeModelMenu", () => {
   it("accepts entries, trims, and drops an empty note", () => {
+    // A level is required, so an entry stored before it was — or exported by an
+    // instance that predates it — keeps its pin at the shared default.
     expect(
       normalizeModelMenu([{ provider: " anthropic ", id: " claude-opus-4-5 ", note: "  " }]),
-    ).toEqual([{ provider: "anthropic", id: "claude-opus-4-5" }]);
+    ).toEqual([{ provider: "anthropic", id: "claude-opus-4-5", thinking: "medium" }]);
     expect(
       normalizeModelMenu([{ provider: "a", id: "x", thinking: "high", note: "hard" }]),
     ).toEqual([{ provider: "a", id: "x", thinking: "high", note: "hard" }]);

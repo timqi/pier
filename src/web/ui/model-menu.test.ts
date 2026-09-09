@@ -1,7 +1,8 @@
 // Pinning goes through the shared picker: it offers what is not pinned yet,
-// and a pick stages a row that Save writes.
+// and a pick stages a row — with the reasoning level the picker was left on,
+// because a pin never has none — that Save writes.
 import { beforeEach, expect, it, vi } from "vitest";
-import type { ModelRef } from "../../core/types.js";
+import type { ModelRef, ThinkingLevel } from "../../core/types.js";
 import { getJson, sendJson } from "./api.js";
 import { openPanel } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
@@ -52,6 +53,7 @@ const button = (root: Element, text: string): Element => {
 
 const pinned: ModelRef = { provider: "anthropic", id: "pinned-model" };
 const free: ModelRef = { provider: "openai", id: "free-model" };
+const stored = { ...pinned, thinking: "high" as ThinkingLevel };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -67,7 +69,7 @@ beforeEach(() => {
   });
   vi.mocked(getJson).mockImplementation((url: string) =>
     Promise.resolve(
-      url.startsWith("/api/models") ? { ok: true, value: [pinned, free] } : { ok: true, value: { modelMenu: [pinned] } },
+      url.startsWith("/api/models") ? { ok: true, value: [pinned, free] } : { ok: true, value: { modelMenu: [stored] } },
     ) as never
   );
 });
@@ -84,16 +86,19 @@ it("offers only what is not pinned yet, and a pick stages the row", async () => 
   const el = await pane();
   button(el, "Pin model").onclick!();
   expect(openPanel).toHaveBeenCalledTimes(1);
-  expect(vi.mocked(modelPicker).mock.lastCall![0]).toMatchObject({
+  const props = vi.mocked(modelPicker).mock.lastCall![0];
+  expect(props).toMatchObject({
     models: [free], // the pinned one is not offered a second time
     current: null,
-    thinkingLevels: [], // this pane picks models; reasoning is the row's own field
+    thinkingLevel: "medium", // the level a new pin starts at
   });
+  expect(props.thinkingLevels.length).toBeGreaterThan(0);
 
   vi.mocked(sendJson).mockResolvedValue(
-    { ok: true, json: async () => ({ modelMenu: [pinned, free] }) } as unknown as Response,
+    { ok: true, json: async () => ({ modelMenu: [stored, { ...free, thinking: "low" }] }) } as unknown as Response,
   );
-  vi.mocked(modelPicker).mock.lastCall![0].onPick(free);
+  props.onThinkingPick("low");
+  props.onPick(free);
   expect(el.textContent).toContain("openai/free-model");
   expect(el.textContent).toContain("unsaved changes");
 
@@ -101,7 +106,12 @@ it("offers only what is not pinned yet, and a pick stages the row", async () => 
   await vi.waitFor(() => expect(sendJson).toHaveBeenCalled());
   expect(vi.mocked(sendJson).mock.lastCall).toMatchObject([
     "/api/settings",
-    { modelMenu: [{ provider: "anthropic", id: "pinned-model" }, { provider: "openai", id: "free-model" }] },
+    {
+      modelMenu: [
+        { provider: "anthropic", id: "pinned-model", thinking: "high" },
+        { provider: "openai", id: "free-model", thinking: "low" },
+      ],
+    },
     "PUT",
   ]);
 });
@@ -111,7 +121,7 @@ it("has nothing to pin once every model is pinned", async () => {
     Promise.resolve(
       url.startsWith("/api/models")
         ? { ok: true, value: [pinned] }
-        : { ok: true, value: { modelMenu: [pinned] } },
+        : { ok: true, value: { modelMenu: [stored] } },
     ) as never
   );
   const el = await pane();

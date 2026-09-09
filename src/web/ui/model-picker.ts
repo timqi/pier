@@ -17,8 +17,9 @@ export interface ModelPickerProps {
   current?: ModelRef | null;
   thinkingLevel: ThinkingLevel;
   thinkingLevels: ThinkingLevel[];
-  /** A pinned combo passes its reasoning level; the caller must apply the
-   *  model first, because supported levels depend on the model. */
+  /** A pin passes its reasoning level — a plain catalog row has none to pass;
+   *  the caller must apply the model first, because supported levels depend on
+   *  the model. */
   onPick: (model: ModelRef, thinking?: ThinkingLevel) => void;
   onThinkingPick: (level: ThinkingLevel) => void;
 }
@@ -28,8 +29,8 @@ let reasoningGroup = 0;
 
 const modelKey = (m: ModelRef): string => `${m.provider}/${m.id}`;
 
-/** A pinned model with an optional reasoning level and operator's intent. */
-type Entry = ModelRef & { thinking?: ThinkingLevel; note?: string };
+/** A pinned model with its reasoning level and the operator's intent. */
+type Entry = ModelRef & { thinking: ThinkingLevel; note?: string };
 
 // Settings → Models: the operator's instance-wide shortlist.
 // The last known menu renders instantly; the fetch reconciles it.
@@ -117,7 +118,6 @@ export function modelPicker({
   /** Only pins naming a model available to this session can be selected. */
   const known = new Map(models.map((m) => [modelKey(m), m]));
 
-  /** Pins without a reasoning level preserve the current selection. */
   const renderPinned = (normalized: string): void => {
     const rows = (pinnedMenu ?? [])
       .map((e) => ({ e, model: known.get(modelKey(e)) }))
@@ -128,16 +128,15 @@ export function modelPicker({
     if (!rows.length) return;
     listWrap.append(
       h("div", "px-3 pb-0.5 pt-1 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", "Pinned"),
-      ...rows.map(({ e, model }) => {
-        const thinking = e.thinking ?? level;
-        return modelRow({
+      ...rows.map(({ e, model }) =>
+        modelRow({
           label: model.id,
-          hint: e.thinking ? thinkingLabel(e.thinking) : undefined,
+          hint: thinkingLabel(e.thinking),
           title: e.note,
-          checked: !!current && modelKey(current) === modelKey(model) && level === thinking,
+          checked: !!current && modelKey(current) === modelKey(model) && level === e.thinking,
           onSelect: () => onPick(model, e.thinking),
-        });
-      }),
+        })
+      ),
       h("div", "my-1 border-t border-neutral-100"),
     );
   };

@@ -188,7 +188,9 @@ per-turn Activity groups):
   only directory and ID have copy buttons. Snapshot-only details appear for the
   selected session. `model-picker.ts` is the
   standalone grouped-by-provider list, with the Settings-managed Pinned
-  model/reasoning combinations first and no browser-local favorites. Provider
+  model/reasoning combinations first and no browser-local favorites. A pin is
+  always a combination: it is created through this same picker, with the level
+  the picker is on, so selecting one sets model and reasoning together. Provider
   groups are collapsed except the one holding
   the current model — separate because model choice will also be needed outside
   chat (scheduled tasks). The session model panel caps its desktop content at
