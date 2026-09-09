@@ -98,7 +98,8 @@ present; actions also reclaim their width when hidden. Hover and keyboard focus
 reveal desktop row actions; touch keeps the current session's action visible.
 Titles may truncate earlier while these controls appear, but their left edge
 stays aligned. The labeled New session action and a distinct magnifier share a
-row with matching filled surfaces. Search retains an accessible name and
+row: New session has the primary blue fill and Search a muted neutral fill with
+contrasting icon. Search retains an accessible name and
 shortcut hint. Row actions remain
 reachable by keyboard and touch, with 44px minimum touch targets. A closed mobile
 drawer is inert; an open drawer owns keyboard focus, supports Escape, and returns

@@ -109,7 +109,8 @@ per-turn Activity groups):
   sessions remain available through pagination and the search palette. The New
   session directory picker offers the listing's distinct directories. A labeled
   New session button and a separate magnifier button share one row below the
-  brand, using matching filled button surfaces. Search keeps its accessible name
+  brand. New session uses the primary blue fill; Search uses a muted neutral
+  fill with a contrasting icon. Search keeps its accessible name
   and the existing shortcut hover hint. Status dots appear after the title only
   when needed; idle sessions reclaim their width. Title left edges stay aligned,
   while status and action changes may alter trailing truncation. Action buttons
