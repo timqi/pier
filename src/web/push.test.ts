@@ -1,9 +1,14 @@
-import { createDecipheriv, createECDH, hkdfSync, randomBytes } from "node:crypto";
+import { createDecipheriv, createECDH, createVerify, hkdfSync, randomBytes } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { openDb } from "../db.js";
+import { Secrets } from "../secrets.js";
 import { AuthStore } from "./auth.js";
+import { vapidAuthorization } from "./webpush.js";
 
 /** A signed-in browser's session id — what a subscription has to name. */
 const sessionOf = (auth: AuthStore, ip = "10.0.0.1"): string =>
@@ -91,6 +96,39 @@ describe("PushStore", () => {
     const first = store.identity();
     expect(first.publicKey).toHaveLength(87); // 65 raw octets, base64url
     expect(store.identity()).toEqual(first);
+  });
+
+  it("seals the private key at rest, and seals one minted before sealing", async () => {
+    const secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-push-")), "master.key"));
+    await secrets.unlock();
+    const db = openDb(":memory:");
+    const stored = () =>
+      (db.prepare("SELECT private_key AS k FROM push_identity WHERE id = 1").get() as { k: string }).k;
+
+    const keys = new PushStore(db, secrets).identity();
+    expect(stored()).not.toBe(keys.privateKey);
+    expect(stored()).toMatch(/^v1:[0-9a-f]{8}:/);
+    // The key handed back is the one that signs: a VAPID token made with it
+    // verifies under the public half a browser subscribed with.
+    const header = vapidAuthorization("https://push.example.net/s/1", keys, "mailto:pier@localhost");
+    const [, token = ""] = /^vapid t=([^,]+),/.exec(header) ?? [];
+    const [head, payload, signature] = token.split(".");
+    const verify = createVerify("sha256").update(`${head ?? ""}.${payload ?? ""}`);
+    const spki = Buffer.concat([
+      Buffer.from("3059301306072a8648ce3d020106082a8648ce3d030107034200", "hex"),
+      Buffer.from(keys.publicKey, "base64url"),
+    ]);
+    expect(verify.verify(
+      { key: spki, format: "der", type: "spki", dsaEncoding: "ieee-p1363" },
+      Buffer.from(signature ?? "", "base64url"),
+    )).toBe(true);
+
+    // A row from before sealing is honored once and sealed in place, because
+    // replacing the pair would invalidate every subscription made with it.
+    db.prepare("UPDATE push_identity SET private_key = ? WHERE id = 1").run(keys.privateKey);
+    expect(new PushStore(db, secrets).identity()).toEqual(keys);
+    expect(stored()).toMatch(/^v1:[0-9a-f]{8}:/);
+    expect(new PushStore(db, secrets).identity()).toEqual(keys);
   });
 
   it("upserts by endpoint and caps how many devices it keeps", () => {

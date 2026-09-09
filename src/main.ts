@@ -299,7 +299,7 @@ registerChannelRoutes(app, channelStore, channels);
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);
 registerPushRoutes(app, {
-  store: new PushStore(db),
+  store: new PushStore(db, secrets),
   hub,
   unread: (id) => sessionState.unread(id),
   channelOf: (id) => router.conversationOf(id)?.channelId,

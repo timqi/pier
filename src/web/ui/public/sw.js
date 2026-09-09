@@ -18,6 +18,18 @@ button{margin-top:1rem;padding:.5rem 1rem;border:1px solid light-dark(#d4d4d4,#3
 <p class="dim">This device is offline, or the server is not answering.</p>
 <button onclick="location.reload()">Try again</button></main></body></html>`;
 
+/** A payload URL is data: resolved against this origin, and replaced by the
+ *  root if it lands anywhere else — a notification may not open a foreign page. */
+const here = (url) => {
+  const root = new URL("/", self.location.origin);
+  try {
+    const target = new URL(url || "/", self.location.origin);
+    return target.origin === root.origin ? target : root;
+  } catch {
+    return root;
+  }
+};
+
 self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
@@ -66,7 +78,7 @@ self.addEventListener("push", (event) => {
       icon: "/icon-192.png",
       badge: "/icon-32.png",
       timestamp: Date.now(),
-      data: { url: data.url || "/" },
+      data: { url: here(data.url).href },
     });
     // The home-screen badge is the only trace left once a notification is
     // dismissed; the page recomputes it from the session list when it opens.
@@ -76,7 +88,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || "/", self.location.origin);
+  const target = here(event.notification.data?.url);
   event.waitUntil((async () => {
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     // An open workbench is focused and pointed at the session, rather than

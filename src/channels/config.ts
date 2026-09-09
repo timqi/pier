@@ -4,7 +4,7 @@
 import { randomInt } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
-import type { Secrets } from "../secrets.js";
+import { isSealed, type Secrets } from "../secrets.js";
 import {
   type BindCode,
   type BindOutcome,
@@ -21,9 +21,6 @@ const BIND_CODE_TTL_MS = 10 * 60_000;
  *  needs the TTL; five wrong tries void the code instead. */
 const BIND_CODE_TRIES = 5;
 const BIND_CODE_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-/** Anything not matching is legacy plaintext, honored and re-sealed on the next save. */
-const SEALED = /^v1:[0-9a-f]{8}:/;
 
 export class ChannelStore {
   private readonly db: DatabaseSync;
@@ -47,7 +44,7 @@ export class ChannelStore {
       : defaultChannelConfig();
     if (this.secrets) {
       for (const key of ["token", "appToken"] as const) {
-        if (SEALED.test(config[key])) config[key] = this.secrets.decrypt(config[key]);
+        if (isSealed(config[key])) config[key] = this.secrets.decrypt(config[key]);
       }
     }
     this.cache.set(platform, config);

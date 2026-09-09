@@ -66,9 +66,10 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the
   push service's answer (principle 5).
-- `sw.js` caches nothing; its one `fetch` handler is a navigation fallback.
+- `sw.js` caches nothing; its one `fetch` handler is a navigation fallback, and
+  a notification only ever opens a same-origin URL.
 - One VAPID key pair per instance, minted on first use, never rotated on its
-  own.
+  own; the private half is sealed by `Secrets` in `push_identity`.
 
 ## Frontend (`src/web/ui/`, Vite + Tailwind, vanilla TS, no framework)
 

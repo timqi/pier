@@ -9,6 +9,7 @@ import type { EventHub } from "../core/hub.js";
 import { readableTitle } from "../core/identity.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
+import { isSealed, type Secrets } from "../secrets.js";
 import { sessionIdOf } from "./auth.js";
 import {
   generateVapidKeys,
@@ -46,7 +47,9 @@ const sessionGone = (err: unknown): boolean =>
 export class PushStore {
   readonly #db: DatabaseSync;
 
-  constructor(db: DatabaseSync = pierDb()) {
+  /** Without `secrets` (tests), the private key persists as given. A locked
+   *  store throws rather than serving a key it cannot read. */
+  constructor(db: DatabaseSync = pierDb(), private readonly secrets?: Secrets) {
     this.#db = db;
   }
 
@@ -55,13 +58,28 @@ export class PushStore {
     const row = this.#db
       .prepare("SELECT public_key AS publicKey, private_key AS privateKey FROM push_identity WHERE id = 1")
       .get() as VapidKeys | undefined;
-    if (row) return row;
+    if (row) return { ...row, privateKey: this.#unsealed(row.privateKey) };
     const keys = generateVapidKeys();
     this.#db
       .prepare("INSERT INTO push_identity(id, public_key, private_key, created_at) VALUES (1, ?, ?, ?)")
-      .run(keys.publicKey, keys.privateKey, Date.now());
+      .run(keys.publicKey, this.#sealed(keys.privateKey), Date.now());
     log.info("minted this instance's VAPID key pair");
     return keys;
+  }
+
+  /** A key minted before sealing is honored once and sealed in place — the pair
+   *  cannot be replaced without invalidating every subscription. */
+  #unsealed(stored: string): string {
+    if (!this.secrets) return stored;
+    if (isSealed(stored)) return this.secrets.decrypt(stored);
+    this.#db.prepare("UPDATE push_identity SET private_key = ? WHERE id = 1")
+      .run(this.secrets.encrypt(stored));
+    log.info("sealed this instance's VAPID private key");
+    return stored;
+  }
+
+  #sealed(privateKey: string): string {
+    return this.secrets ? this.secrets.encrypt(privateKey) : privateKey;
   }
 
   list(): PushSubscriptionRow[] {

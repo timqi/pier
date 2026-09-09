@@ -36,6 +36,10 @@ interface KeyFile {
   dekId: string;
 }
 
+/** Anything not matching predates sealing: honored as plaintext, and re-sealed
+ *  by whichever store owns the row. */
+export const isSealed = (blob: string): boolean => /^v1:[0-9a-f]{8}:/.test(blob);
+
 export class Secrets {
   #dek?: Buffer;
   #file?: KeyFile;
