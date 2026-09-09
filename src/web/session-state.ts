@@ -36,11 +36,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb, transact } from "../db.js";
 
-/** How many rows the rail keeps on top. Larger than the handful anybody
- *  switches between (3–6), and small enough that every member is somewhere a
- *  hand can see: a set as deep as the page (20) would count a row nobody has
- *  scrolled to as "already up there" and never bring it back. */
-export const WORKING_SET = 8;
+/** How many rows the rail keeps on top. The handful anybody actually switches
+ *  between, and small enough that every member is somewhere a hand can see: a
+ *  set as deep as the page (20) would count a row nobody has scrolled to as
+ *  "already up there" and never bring it back. */
+export const WORKING_SET = 5;
 
 export interface SessionFlags {
   unread: boolean;

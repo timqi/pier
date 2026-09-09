@@ -353,7 +353,7 @@ of truth (this doc stopped mirroring it to avoid drift). The seams:
   chosen once, when a session is created. The new-session dialog suggests the
   distinct cwds of the list; a grouping by repository existed and was removed
   as noise the order below did better.
-- The rail's order never moves on its own. On top is a working set of eight,
+- The rail's order never moves on its own. On top is a working set of five,
   which a session enters at the front when a human speaks to it and only when
   it is not in the set already — members hold their places until one is pushed
   out of the last slot; below it, every other session by birth. Pinning and
