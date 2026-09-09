@@ -1,11 +1,6 @@
-// Inbound user files: bytes land on disk exactly once.
-//
-// A photo pasted on the web, dropped in Telegram or uploaded to Slack used to
-// travel as base64 through the seam into the transcript, where it was re-sent
-// with every provider request until compaction. Now the adapter (or the web
-// upload route) saves the bytes under `$PIER_HOME/inbox/<channel>/` and the
-// prompt carries only a marker line (core/inbound-file.ts owns that grammar),
-// so the agent reads a file only when it decides the file is worth looking at.
+// Inbound user files: bytes land on disk once under `$PIER_HOME/inbox/<channel>/`
+// and the prompt carries only a marker line, so a file is never re-sent with
+// every provider request and the agent reads it only when it chooses to.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
@@ -16,22 +11,16 @@ import { fileMarker, lostMarker, MAX_INBOUND_BYTES, safeName } from "./inbound-f
 /** Where every inbound file lives; the attachment route allowlists this root. */
 const INBOX_DIR = pierPath("inbox");
 
-/**
- * Write one inbound file and return its absolute path. The timestamp-random
- * prefix keeps concurrent saves collision-free (`wx` turns the impossible
- * collision into an error instead of an overwrite) and makes `ls` read as a
- * timeline. Owner-only modes: uploads are private conversation content on a
- * possibly shared machine. Nothing is ever deleted here — pruning the inbox
- * is the operator's call (docs/deploy.md).
- */
+/** `wx` turns a prefix collision into an error, not an overwrite. Owner-only
+ *  modes: uploads are private content on a possibly shared machine. Nothing is
+ *  deleted here; pruning is the operator's call (docs/deploy.md). */
 export async function saveInbound(
   channelId: string,
   name: string | undefined,
   mimeType: string,
   bytes: Uint8Array,
 ): Promise<string> {
-  // The channel id is ours ("web" | "telegram" | "slack"), not user input,
-  // but basename() keeps a future id honest.
+  // The channel id is ours, not user input; basename() keeps a future id honest.
   const dir = join(INBOX_DIR, basename(channelId));
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, `${String(Date.now())}-${randomBytes(3).toString("hex")}-${safeName(name, mimeType)}`);
@@ -39,13 +28,9 @@ export async function saveInbound(
   return path;
 }
 
-/**
- * Collect a fetch response's body, refusing past `maxBytes` mid-stream. The
- * metadata size gate in saveInboundAll is only as honest as the platform's
- * metadata — absent or wrong, `arrayBuffer()` buffers whatever arrives — so
- * the read itself is bounded too. Throws with "too large" in the message,
- * which the loop below translates into the honest lost-marker reason.
- */
+/** The metadata size gate is only as honest as the platform's metadata, so the
+ *  read itself is bounded too. Throws with "too large" in the message, which
+ *  saveInboundAll translates into the lost-marker reason. */
 export async function readCapped(
   body: ReadableStream<Uint8Array> | null,
   maxBytes: number,
@@ -88,14 +73,8 @@ export interface InboundAttachment {
   fetch(): Promise<{ bytes: Uint8Array; name?: string; mimeType?: string }>;
 }
 
-/**
- * Save a message's attachments; each becomes a marker line for the prompt —
- * and a failed or oversized one becomes a lost-marker line, never silence
- * (5b). Written three times, once per adapter, before landing here: the
- * size gate before the fetch (an unauthorized sender is already filtered by
- * then, but a movie must not be buffered whole either) and the never-silent
- * failure path are invariants, and invariants drift when copied.
- */
+/** Each attachment becomes a marker line; a failed or oversized one becomes a
+ *  lost-marker line, never silence (§5b). The size gate runs before the fetch. */
 export async function saveInboundAll(
   channelId: string,
   files: InboundAttachment[],
@@ -118,7 +97,6 @@ export async function saveInboundAll(
       markers.push(fileMarker(path));
     } catch (err) {
       log(`attachment download failed: ${String(err)}`);
-      // A fetch that refused mid-stream names its reason; keep it honest.
       const why = String(err).includes("too large") ? "too large" : "download failed";
       markers.push(lostMarker(file.label, why));
     }

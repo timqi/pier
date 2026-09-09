@@ -7,8 +7,7 @@ import type { SessionEvent, SessionEventPayload, WorkspaceEvent } from "./types.
 const log = logger("core");
 const RING_SIZE = 1000;
 
-/** A throwing subscriber costs only itself — emit() runs on the emitter's
- *  stack (Pi's dispatch path, for session events), which must not unwind. */
+/** emit() runs on the emitter's stack (Pi's dispatch path), which must not unwind. */
 function fanOut<E>(subscribers: Iterable<(e: E) => void>, event: E): void {
   for (const fn of subscribers) {
     try {
@@ -28,8 +27,7 @@ interface SessionBus {
 
 export class EventHub {
   private readonly buses = new Map<string, SessionBus>();
-  // Workspace bus: no seq, no replay — a client that missed events just
-  // re-lists on reconnect, so there is nothing to renumber.
+  // No seq, no replay: a client that missed events re-lists on reconnect.
   private readonly workspace = new Set<(e: WorkspaceEvent) => void>();
 
   private bus(sessionId: string): SessionBus {
@@ -49,13 +47,9 @@ export class EventHub {
       sessionId,
       ...payload,
     };
-    // Text deltas fan out live but never enter the ring: one long reply emits
-    // thousands of them, so a ring that held them would hold *only* them and
-    // would have evicted the turn-start, tool and turn-end events a
-    // reconnecting client replays for. The text is not lost — `turn-end`
-    // carries the full reply (web/ui/chat.ts treats it as authoritative).
-    // Thinking stays replayable because a native EventSource reconnect does
-    // not reload the transcript snapshot that would otherwise restore it.
+    // One long reply emits thousands of text deltas; a ring holding them would
+    // hold only them. `turn-end` carries the full text. Thinking stays
+    // replayable: an EventSource reconnect does not reload the transcript.
     if (payload.type !== "text-delta") {
       b.buffer.push(event);
       if (b.buffer.length > RING_SIZE) b.replayFloor = b.buffer.shift()!.seq;
@@ -100,15 +94,8 @@ export class EventHub {
     return (this.buses.get(sessionId)?.subscribers.size ?? 0) > 0;
   }
 
-  /**
-   * Release the ring of a session nobody is watching — the memory an evicted
-   * session leaves behind (1000 events of text, per session, forever).
-   *
-   * The bus itself stays, holding its seq: a client that reconnects with a
-   * Last-Event-ID drops anything numbered at or below what it saw, so a
-   * counter restarting at 1 would make every later event invisible to it.
-   * What is left is a number and an empty set.
-   */
+  /** The bus keeps its seq: a client reconnecting with a Last-Event-ID drops
+   *  anything numbered at or below what it saw. */
   dropReplay(sessionId: string): void {
     if (this.hasSubscribers(sessionId)) return;
     const b = this.buses.get(sessionId);

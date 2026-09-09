@@ -19,41 +19,29 @@ import type {
 
 const log = logger("core");
 
-/** How long a session may sit idle in memory before it is let go. Generous on
- *  purpose: eviction is a memory measure, and re-opening one costs a Pi
- *  resume plus the transcript being read back. */
+/** Generous: eviction is a memory measure, and re-opening costs a Pi resume
+ *  plus a transcript read. */
 const IDLE_TTL_MS = 30 * 60_000;
-/** Sweep interval. Nothing here is urgent, so it is coarse. */
 const SWEEP_MS = 5 * 60_000;
 
 /** An error goes into a chat window, so it is trimmed to something readable. */
 const truncate = (message: string): string =>
   message.length > 600 ? `${message.slice(0, 600)}…` : message;
 
-/** What a chat window gets of a system input, and how much it may stand in
- *  for. A task callback carries up to 8000 characters of result text
- *  (tasks/callbacks.ts). */
+/** What a chat window gets of a system input; a task callback carries up to
+ *  8000 characters of result text (tasks/callbacks.ts). */
 const NOTE_CHARS = 200;
 const NOTE_LINES = 4;
 
-/**
- * The head of a system input plus a count of what was left out.
- *
- * A note is *context* for the turn it precedes, not the message: pasted whole,
- * a run result buries the conversation it was meant to explain — and on IM
- * that is the one surface with no way to collapse it. The hub, the web
- * timeline and the Pi transcript keep every character.
- *
- * Cut on a line boundary and then on a word, so the head reads as text rather
- * than as a string that ran out.
- */
+/** A note is context for the turn it precedes, not the message: pasted whole,
+ *  a run result buries the chat on IM, which cannot collapse it. The hub and
+ *  the transcript keep every character. */
 function digest(text: string): string {
   const body = text.trimEnd();
   let head = body.split("\n").slice(0, NOTE_LINES).join("\n");
   if (head.length > NOTE_CHARS) {
     const capped = head.slice(0, NOTE_CHARS);
-    // Only a boundary in the second half is worth taking: cutting further back
-    // than that loses more than the ragged edge was costing.
+    // A boundary before the midpoint loses more than the ragged edge costs.
     const boundary = Math.max(capped.lastIndexOf("\n"), capped.lastIndexOf(" "));
     head = capped.slice(0, boundary > NOTE_CHARS / 2 ? boundary : NOTE_CHARS);
   }
@@ -67,10 +55,8 @@ function keyOf(key: ConversationKey): string {
   return `${key.channelId}:${key.conversationId}`;
 }
 
-/** `web:<id>` and `task:<id>` are two names for one session id, and neither is
- *  a chat — no Channel is registered under them. So they share a lock in
- *  `ensure`, and which of the two a session records costs nothing but the
- *  answer to "what is it answering". */
+/** `web:<id>` and `task:<id>` name one session id and neither is a chat — no
+ *  Channel is registered under them — so they share a lock in `ensure`. */
 const isAlias = (key: ConversationKey): boolean =>
   key.channelId === "web" || key.channelId === "task";
 
@@ -78,11 +64,9 @@ interface Attached {
   session: AgentSession;
   key: ConversationKey;
   stateSince: number;
-  /** Last time this session was reached for or ran a turn — what eviction
-   *  ages. Distinct from stateSince, which the UI reads as "idle since". */
+  /** What eviction ages; distinct from stateSince, which the UI reads as "idle since". */
   activeAt: number;
-  /** Its event subscription, so eviction can stop listening to a disposed
-   *  session instead of leaking the closure that holds it. */
+  /** So eviction stops listening instead of leaking the closure that holds the session. */
   unsubscribe: () => void;
 }
 
@@ -95,16 +79,14 @@ export class QueueOperationError extends Error {
 export class Router {
   private readonly byKey = new Map<string, AgentSession>();
   private readonly bySession = new Map<string, Attached>();
-  /** Resolves in flight, so two surfaces asking at once share one session
-   *  object instead of opening a second Pi runtime on the same transcript.
-   *  Web and task keys collapse to the session id they both name. */
+  /** Resolves in flight: two surfaces asking at once must share one session
+   *  object, not open a second Pi runtime on the same transcript. */
   private readonly opening = new Map<string, Promise<AgentSession>>();
   private readonly channels = new Map<string, Channel>();
   /** Who each session last heard from, so a header costs tokens only on news. */
   private readonly senders = new SenderPrefix();
-  /** Set by a graceful restart (src/drain.ts). Usually never unset, because
-   *  the process exits when the drain ends — `endDrain` exists for the one
-   *  caller that drains *speculatively* and may not get to exit. */
+  /** Set by a graceful restart (src/drain.ts); `endDrain` is for the caller
+   *  that drains speculatively and may not get to exit. */
   private draining = false;
   private spokenTo?: (sessionId: string) => void;
 
@@ -118,33 +100,21 @@ export class Router {
     this.channels.set(channel.id, channel);
   }
 
-  /** Told which session a human just spoke to — every message from a chat or
-   *  the workbench passes through `dispatch`, and nothing a task or a subagent
-   *  starts does. Registered rather than a constructor argument: the one
-   *  listener is the rail's working set (web/session-state.ts), built with the
-   *  web surface long after the router. */
+  /** Fires for humans only: chats and the workbench pass through `dispatch`,
+   *  tasks and subagents do not. Registered late because the listener
+   *  (web/session-state.ts) is built with the web surface. */
   onSpokenTo(listener: (sessionId: string) => void): void {
     this.spokenTo = listener;
   }
 
-  /**
-   * Tell the conversation something went wrong, then the event stream.
-   *
-   * Applies to every channel, because the failure mode is the same everywhere:
-   * an IM user watching the eyes come off with no reply cannot tell a crash
-   * from a deliberate silence, and the operator cannot debug what they never
-   * saw. The web reads errors off the hub already, so only a registered channel
-   * gets a note; `notify` is used rather than `send` so it is never mistaken
-   * for an assistant turn.
-   */
+  /** A failure reaches the chat as well as the hub (§5b): on IM, silence is
+   *  indistinguishable from a crash. `notify`, not `send`, so it is never
+   *  mistaken for an assistant turn. */
   private report(sessionId: string, key: ConversationKey, message: string): void {
-    // Three surfaces, one failure: the chat that is waiting, the web timeline,
-    // and the log the operator greps once it is reported to them.
     log.error(`${keyOf(key)} session ${sessionId}: ${message}`);
     this.hub.emit(sessionId, { type: "error", message });
     const channel = this.channels.get(key.channelId);
-    // Best-effort and never recursive: if telling the chat also fails, the hub
-    // already has the original.
+    // Never recursive: if telling the chat also fails, the hub has the original.
     channel?.notify(key.conversationId, { text: truncate(message), origin: { kind: "error" } })
       .catch((err) => {
         log.error(`could not report the failure to ${key.channelId}`, err);
@@ -155,43 +125,26 @@ export class Router {
       });
   }
 
-  /**
-   * Report something that happened *to* a session rather than in it: a task
-   * result that could not be delivered, say. Its conversation is told when one
-   * is attached — an agent that was promised an answer and a human watching the
-   * same thread learn it is not coming from the same place they were waiting.
-   * Otherwise the hub carries it for the web timeline.
-   */
+  /** Something that happened *to* a session (an undeliverable task result): the
+   *  attached conversation is told where it was waiting, else the hub carries it. */
   reportTo(sessionId: string, message: string): void {
     const key = this.conversationOf(sessionId);
     if (key) this.report(sessionId, key, message);
     else this.hub.emit(sessionId, { type: "error", message });
   }
 
-  /**
-   * Let go of every session that has been idle too long, so a process serving
-   * IM threads and task runs for weeks does not hold one live Pi runtime per
-   * conversation it ever saw. Only the in-memory attachment goes: the durable
-   * conversation → session mapping stays, so the next message resumes the very
-   * same transcript (channels/conversations.ts).
-   *
-   * Skipped for anything that would notice: a streaming turn, and a session
-   * someone is still watching over SSE.
-   *
-   * `includeWatched` is the one caller that may take a watched session too:
-   * configuration a session reads only when it opens has just changed, and the
-   * session most likely to need it is the one open in the tab that changed it.
-   * A turn in flight is still never touched — the exemption that stands is the
-   * one about interrupting work, not the one about being looked at.
-   */
+  /** Only the in-memory attachment goes; the durable mapping
+   *  (channels/conversations.ts) resumes the same transcript on the next message.
+   *  `includeWatched` is for config a session reads only at open: the session
+   *  most likely to need it is the one open in the tab that changed it. A
+   *  streaming turn is never evicted. */
   async evictIdle(
     ttlMs = IDLE_TTL_MS,
     now = Date.now(),
     { includeWatched = false }: { includeWatched?: boolean } = {},
   ): Promise<number> {
     let evicted = 0;
-    // Snapshot on purpose: this loop awaits dispose(), so another turn may
-    // attach or drop a session while it is suspended.
+    // Snapshot: the loop awaits dispose(), and the map may change meanwhile.
     // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, attached] of [...this.bySession]) {
       if (attached.session.state === "streaming") continue;
@@ -205,8 +158,7 @@ export class Router {
       this.hub.dropReplay(id);
       evicted += 1;
       log.info(`evicted idle session ${id} (${keyOf(attached.key)})`);
-      // Best-effort: a runtime that will not shut down must not keep the
-      // sweeper from releasing the rest.
+      // A runtime that will not shut down must not block releasing the rest.
       await attached.session.dispose().catch((err) =>
         log.error(`disposing session ${id} failed`, err)
       );
@@ -237,19 +189,13 @@ export class Router {
     return this.bySession.get(sessionId)?.session.model;
   }
 
-  /**
-   * Which conversation a session is answering, if any. The inverse of
-   * `sessionOf`, and what lets a tool act on "here" — an agent reached through
-   * a Slack thread otherwise has no way to name the thread it is replying in.
-   * A task or subagent session is attached to nothing and answers undefined.
-   */
+  /** Inverse of `sessionOf`; lets a tool act on "here". A task or subagent
+   *  session is attached to nothing and answers undefined. */
   conversationOf(sessionId: string): ConversationKey | undefined {
     return this.bySession.get(sessionId)?.key;
   }
 
-  /** Every key that points at this session object. One session can be reached
-   *  under more than one — `web:<id>` and `task:<id>` name the same session —
-   *  and a key left behind hands out a session that is no longer live. */
+  /** Every alias: a key left behind hands out a session that is no longer live. */
   private forgetKeys(session: AgentSession): void {
     for (const [key, held] of this.byKey) if (held === session) this.byKey.delete(key);
   }
@@ -263,11 +209,8 @@ export class Router {
       return;
     }
     if (existing) {
-      // Two live objects on one transcript: both would write it and both would
-      // answer the chat. Single-flight `ensure` closes the race that makes
-      // this, so reaching here is a bug worth seeing — the replaced one is
-      // silenced and unreachable, rather than left answering under aliases
-      // nobody knows are stale.
+      // Two live objects on one transcript would both write it and both answer
+      // the chat; single-flight `ensure` should make this unreachable.
       log.warn(`session ${session.id} replaced while attached to ${keyOf(existing.key)}`);
       existing.unsubscribe();
       this.forgetKeys(existing.session);
@@ -276,11 +219,9 @@ export class Router {
     log.info(`attached ${keyOf(key)} → session ${session.id}`);
     const unsubscribe = session.subscribe((payload) => {
       this.hub.emit(session.id, payload);
-      // Run state is workspace-visible: every client's session list shows it.
       if (payload.type === "state") {
         const attached = this.bySession.get(session.id);
-        // Every turn passes through here, so this is also where a session
-        // proves to the sweeper that it is still in use.
+        // Every turn passes here, so it also proves liveness to the sweeper.
         if (attached) attached.stateSince = attached.activeAt = Date.now();
         this.hub.emitWorkspace({
           type: "session-state",
@@ -288,12 +229,9 @@ export class Router {
           state: payload.state,
         });
       }
-      // A title the session gave itself: every list reads the transcript, so
-      // the same re-list a rename route broadcasts.
       if (payload.type === "renamed") this.hub.emitWorkspace({ type: "sessions-changed" });
-      // An error the session itself reported (a tool that threw, a model
-      // refusal, a lost connection). Without this it lands only in the web
-      // timeline and the IM side goes quiet for no visible reason.
+      // Without this a session-reported error lands only in the web timeline
+      // and the IM side goes quiet for no visible reason.
       if (payload.type === "error") {
         log.error(`${keyOf(key)} session ${session.id} reported: ${payload.message}`);
         const channel = this.channels.get(key.channelId);
@@ -302,11 +240,10 @@ export class Router {
           origin: { kind: "error" },
         }).catch((err) => log.error(`notify ${key.channelId} failed`, err));
       }
-      // A system input is context the chat did not see being typed. It goes
-      // out before the turn it triggers, so the answer has a visible cause.
+      // Context the chat did not see typed goes out before the turn it
+      // triggers, so the answer has a visible cause. The hub carries it whole.
       if (payload.type === "system-input") {
         const channel = this.channels.get(key.channelId);
-        // A digest, not the input: the hub emit above is what carries it whole.
         channel?.notify(key.conversationId, { text: digest(payload.text), origin: payload.origin })
           .catch((err) => {
             log.error(`notify ${key.channelId} failed`, err);
@@ -316,18 +253,13 @@ export class Router {
             });
           });
       }
-      // A queued message with no turn left to deliver it. `decide` reads the
-      // state once, so a steer chosen against a turn that ends before the call
-      // lands sits in Pi's queue until some *later* turn reads it — on IM that
-      // is indistinguishable from the message never arriving (§5b). Pi drains
-      // its own queues up to the agent_end handler, so a non-empty queue on an
-      // idle session is exactly the message that missed that window.
+      // A steer chosen against a turn that ended before the call landed sits in
+      // Pi's queue until some later turn — on IM, a message that never arrived
+      // (§5b). A non-empty queue on an idle session is exactly that case.
       if (payload.type === "queue-state" && (payload.steering.length || payload.followUp.length)) {
         this.promoteQueued(session);
       }
-      // Every turn-end reaches the channel, empty text included: an adapter's
-      // per-turn UI (Telegram's 👀 receipts) is retired here, and a turn that
-      // settled with nothing to say still has to settle.
+      // Empty text included: adapters retire per-turn UI (👀 receipts) on it.
       if (payload.type === "turn-end") {
         log.info(
           `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
@@ -351,23 +283,18 @@ export class Router {
     });
   }
 
-  /** The reply being delivered to a conversation, if any. A run ends one turn
-   *  per answer (agent/events.ts) and an adapter's send is several platform
-   *  calls — chunks, then attachments — so two answers left to overlap
-   *  interleave in the chat. Keyed per conversation: a slow chat may not hold
-   *  up another. */
+  /** An adapter's send is several platform calls (chunks, then attachments),
+   *  so two answers left to overlap interleave in the chat. Per conversation:
+   *  a slow chat may not hold up another. */
   private readonly delivering = new Map<string, Promise<void>>();
 
   private deliver(key: ConversationKey, send: () => Promise<void>): Promise<void> {
     const id = keyOf(key);
     const pending = this.delivering.get(id);
-    // Started right here when the conversation is free — the common case must
-    // not wait a tick for the queue the rare one needs. The wrapper is what
-    // turns a synchronous throw into this reply's rejection.
+    // The async wrapper turns a synchronous throw into this reply's rejection.
     const done = pending ? pending.then(send) : (async () => send())();
-    // What the next reply waits on is this one's outcome minus its failure: a
-    // rejection is the caller's to report, and inherited it would fail every
-    // later reply to this conversation as well.
+    // A rejection is the caller's to report; inherited, it would fail every
+    // later reply to this conversation.
     const settled = done.catch(() => {});
     this.delivering.set(id, settled);
     // Only the tail clears the slot — a newer reply owns it by then.
@@ -380,8 +307,8 @@ export class Router {
   private readonly queueOperations = new Set<string>();
   private readonly promotionRequested = new Set<string>();
   private readonly recoveries = new Map<string, QueueRecovery[]>();
-  // Keep the latest failed batch ID so a clear cannot erase a newer rejection
-  // that arrived while it awaited the backend. ACK affects only the copy.
+  // Latest failed batch id, so a clear cannot erase a newer rejection that
+  // arrived while it awaited the backend.
   private readonly uncertaintyHeld = new Map<string, string>();
 
   queueUncertain(sessionId: string): boolean {
@@ -409,8 +336,8 @@ export class Router {
     this.recoveryChanged(sessionId);
   }
 
-  /** Only queue mutation owns this lock. A model turn owns its batch, not the
-   *  next queue: manual controls remain available while that turn runs. */
+  /** Only queue mutation holds this lock; a running turn does not, so manual
+   *  controls stay available while it runs. */
   private async useQueue<T>(
     sessionId: string,
     action: (session: AgentSession) => Promise<T>,
@@ -470,8 +397,8 @@ export class Router {
           this.checkQueueDrain();
           if (mode === "restart") await this.abort(sessionId);
           this.checkQueueDrain();
-          // Already headed at original dispatch. Calling dispatch again would
-          // discard rejection and could attribute these words to the operator.
+          // Not via dispatch: the text was headed at original dispatch, and a
+          // second pass could attribute these words to the operator.
           invoked = true;
           const submitted = mode === "steer" && session.state === "streaming"
             ? session.steer(text) : session.prompt(text);
@@ -493,16 +420,9 @@ export class Router {
     }
   }
 
-  /**
-   * Turn a stranded queue into the turn it was waiting for. Not routed through
-   * `dispatch`: the text was prefixed when it was first dispatched
-   * (identity.ts), and sending it back through would head it a second time.
-   *
-   * Only ever reached from a queue-state event, never from a turn ending: Pi
-   * leaves the queue alone on `abort()`, so promoting on idle would make /stop
-   * start the very turn it was asked to stop. Recovering *those* messages stays
-   * the web's recall route, which hands them back to the composer.
-   */
+  /** Only from a queue-state event, never from a turn ending: Pi leaves the
+   *  queue alone on `abort()`, so promoting on idle would make /stop start the
+   *  very turn it was asked to stop. */
   private promoteQueued(session: AgentSession): void {
     if (session.state !== "idle") return;
     this.promotionRequested.add(session.id);
@@ -513,7 +433,6 @@ export class Router {
     // queue_update precedes the backend's enqueue. Never clear it reentrantly.
     queueMicrotask(() => {
       if (!this.promotionRequested.has(sessionId) || this.queueOperations.has(sessionId)) return;
-      // A queue event followed by rejection might describe the same input.
       // Retained failures require a human decision, not an automatic resend.
       if (this.queueUncertain(sessionId) || this.recoveries.get(sessionId)?.length) return;
       this.promotionRequested.delete(sessionId);
@@ -535,17 +454,9 @@ export class Router {
     }
   }
 
-  /**
-   * Drop what this session was told about who is speaking, so the next message
-   * carries a full header again.
-   *
-   * For the surfaces that take a prefixed message back *out* of the context it
-   * was counted into — a recalled queue, a rewound turn. The tracker's whole
-   * job is "the model has already been told" (identity.ts), and a header that
-   * never reached the model, or reached it and was then rewound away, makes
-   * every later message from that speaker unattributed in a group chat. One
-   * redundant header is the same price eviction already pays.
-   */
+  /** For surfaces that take a prefixed message back out of the context it was
+   *  counted into (recalled queue, rewound turn): the tracker means "the model
+   *  has been told" (identity.ts), and here it has not. */
   forgetSender(sessionId: string): void {
     this.senders.forget(sessionId);
   }
@@ -555,23 +466,19 @@ export class Router {
     this.draining = true;
   }
 
-  /** Take work again. The auto-updater closes the gate *before* handing over,
-   *  so a turn cannot slip in behind the idle check — and when the handover
-   *  never happens, a Pier left refusing every message forever would be a far
-   *  worse outcome than the race it was avoiding. */
+  /** The auto-updater closes the gate before handing over; when the handover
+   *  never happens, refusing every message forever is the worse outcome. */
   endDrain(): void {
     this.draining = false;
   }
 
-  /** For surfaces that mutate state before dispatching (the web's edit and
-   *  queue-deliver routes): ask first, so a refused dispatch cannot cost a
-   *  rewound transcript or a cleared queue. */
+  /** For surfaces that mutate state before dispatching (edit, queue-deliver):
+   *  a refused dispatch must not cost a rewound transcript or a cleared queue. */
   isDraining(): boolean {
     return this.draining;
   }
 
-  /** The drain gate, throwing. Told to the chat directly (5b): an adapter's
-   *  dispatch catch only logs, and the web caller gets the throw. */
+  /** Told to the chat directly (§5b): an adapter's dispatch catch only logs. */
   private refuseDraining(key: ConversationKey): void {
     const message = "Pier is restarting — this message was not taken; send it again in a moment.";
     this.channels.get(key.channelId)
@@ -588,10 +495,7 @@ export class Router {
       .map((attached) => ({ session: attached.session, key: attached.key }));
   }
 
-  /**
-   * The session already attached to a conversation, if any. Never creates one:
-   * a channel's stop or settings command must not be what opens a session.
-   */
+  /** Never creates one: a stop or settings command must not open a session. */
   sessionOf(key: ConversationKey): AgentSession | undefined {
     return this.byKey.get(keyOf(key));
   }
@@ -604,27 +508,21 @@ export class Router {
   /** Session owning a conversation, resolving and attaching it on first use. */
   async ensure(key: ConversationKey): Promise<AgentSession> {
     let session = this.byKey.get(keyOf(key));
-    // Web and task conversation ids are session ids. Reuse an attached
-    // instance so two surfaces never open the same Pi transcript twice.
     if (!session && isAlias(key)) {
       session = this.bySession.get(key.conversationId)?.session;
       if (session) this.byKey.set(keyOf(key), session);
     }
     if (!session) {
-      // Aliases share one lock: web:<id> and task:<id> must not each open one.
       const lock = isAlias(key) ? `session:${key.conversationId}` : keyOf(key);
       const inflight = this.opening.get(lock);
-      // A second caller rides the first one's resolve — which attaches before
-      // this continuation runs, having awaited it first — and registers its own
-      // key against the session that came back.
+      // The first caller attaches before this continuation runs.
       if (inflight) {
         session = await inflight;
         this.byKey.set(keyOf(key), session);
         return this.reached(session, key);
       }
       try {
-        // Inside the try: a resolver that throws synchronously is the same
-        // failure as one that rejects, and reports the same way.
+        // Inside the try: a synchronous throw must report like a rejection.
         const opening = this.resolve(key);
         this.opening.set(lock, opening);
         session = await opening;
@@ -639,15 +537,11 @@ export class Router {
     return this.reached(session, key);
   }
 
-  /** A session that would not open has no event stream of its own to report on
-   *  — unless its id is what we were asked for, which is what a web or task key
-   *  is. Otherwise the chat that is waiting is told directly. Callers still get
-   *  the rejection; this is only so the waiting side is not left with nothing. */
+  /** A web or task key names the session's own stream; an IM key names a chat
+   *  that is waiting. Either way the waiting side is not left with nothing. */
   private unopened(key: ConversationKey, err: unknown): void {
     log.error(`could not open a session for ${keyOf(key)}`, err);
     const message = truncate(`could not open a session: ${String(err)}`);
-    // A web or task key names the session that would not open, so its own
-    // stream is where the waiting surface is looking; an IM key names a chat.
     if (key.channelId === "web" || key.channelId === "task") {
       this.reportTo(key.conversationId, message);
       return;
@@ -657,15 +551,9 @@ export class Router {
       .catch((e: unknown) => log.error(`could not report it to ${key.channelId}`, e));
   }
 
-  /** Reached for, so not idle — every surface that uses a session comes
-   *  through `ensure`, including the ones that only read it.
-   *
-   *  Also where a session learns which of its two aliases is current: a task
-   *  callback (tasks/outbox.ts) opens a workbench session under `task:<id>`
-   *  whenever nothing had it attached, and the key from that first attach used
-   *  to stand forever — so the workbench's own next turn was still "a task",
-   *  and the notification for it (web/push.ts) was never sent. A chat key is
-   *  never overwritten: that one is also where turn-ends are delivered. */
+  /** Also where a session learns which alias is current: a task callback
+   *  attaches under `task:<id>`, and the workbench's next turn must not still
+   *  read as "a task" (web/push.ts). A chat key is never overwritten. */
   private reached(session: AgentSession, key: ConversationKey): AgentSession {
     const attached = this.bySession.get(session.id);
     if (!attached) return session;
@@ -675,26 +563,20 @@ export class Router {
   }
 
   async dispatch(msg: InboundMessage): Promise<{ sessionId: string }> {
-    // Before ensure — a drain must not be what opens a session …
+    // Before ensure — a drain must not open a session — and after, for a
+    // dispatch that was inside a slow ensure when the gate closed.
     if (this.draining) this.refuseDraining(msg.key);
     const session = await this.ensure(msg.key);
-    // … and after — a dispatch that was inside a slow ensure when the gate
-    // closed must not start the turn the drain just declared finished with.
     if (this.draining) this.refuseDraining(msg.key);
     this.spokenTo?.(session.id);
     const { action, text } = decide(msg, session.state);
-    // A group chat is many people talking into one session; without a speaker
-    // line the agent cannot tell them apart or mention anyone back. Emitted
-    // only when the speaker or the clock says something new.
     const prompt = withPrefix(this.senders.next(session.id, msg.sender), text);
     log.debug(
       `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );
-    // Turn outcomes flow through the event stream; a rejected call surfaces
-    // there too, never as a thrown exception across the seam.
+    // A rejected call surfaces on the event stream, never as a throw across the seam.
     session[action](prompt).catch((err) => {
-      // The header was counted as delivered a line above; this message never
-      // arrived, so the next one from this speaker must carry it again.
+      // The header was counted as delivered above; it never arrived.
       this.senders.forget(session.id);
       this.report(session.id, msg.key, String(err));
     });

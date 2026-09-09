@@ -1,21 +1,11 @@
 // Assistant-reply presentation, computed once for every surface: the next-step
-// block below, and a turn's completion stats. Both are rendered by the web
-// chat and by every IM adapter, so the wording and the units live here rather
-// than being re-derived per surface (they drifted once already).
-//
-// An agent may
-// end a turn with a "next step" block — a `---` rule followed by a row of
-// `[label]` tokens — and each surface renders those labels as buttons whose
-// click sends the label back as an ordinary user message. The syntax lives
-// here so web, IM adapters and Show pages never re-implement it.
+// block syntax, silence, completion stats and the emphasis repair. Web chat and
+// every IM adapter render these, so the wording and units live here.
 
 import type { AgentReply, NoteOrigin, ThinkingLevel, TurnMeta } from "./types.js";
 
-/**
- * The surface contract handed to every agent Pier launches (main.ts wires it
- * into the factory). Both halves of the feature live in this file: the syntax
- * the agent is told to emit, and the parser that reads it back.
- */
+/** The surface contract handed to every agent Pier launches (main.ts); the
+ *  syntax the agent is told to emit sits beside the parser that reads it back. */
 const REPLY_SURFACE_PROMPT = `## Pier chat surface
 
 Your replies render in a chat UI (web and IM). Three optional markdown
@@ -43,22 +33,9 @@ new day — so the last one still applies; a gap alone shows as time only, like
 \`[14:23]\`. Use that \`id\` to mention someone; never ask for their own.
 `;
 
-/**
- * The contract above plus the facts about *this* deployment that an agent
- * cannot work out for itself.
- *
- * Told, not discovered. Pier knows them — the home is its own startup argument
- * and the address is a file it wrote — while an agent can only guess at a
- * path and shell out to look. The guess is wrong on every instance that moves
- * `PIER_HOME`, and it fails as "nothing is configured": indistinguishable from
- * the truth, and reported to the user as such. Which is what happened.
- *
- * The editing line is the same shape of fact, learned the same way: GPT models
- * carry `apply_patch` from their own post-training, and not finding it in the
- * tool list they go looking in the shell — one failed call, then a filesystem
- * hunt, and in one session a stale Codex binary that worked, which put every
- * later edit outside Pi's tooling.
- */
+/** Deployment facts an agent cannot discover: a guessed path is wrong wherever
+ *  `PIER_HOME` moved and fails as "nothing is configured"; GPT models carry
+ *  `apply_patch` from post-training and go hunting for it in the shell. */
 export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }): string {
   const reach = instance.publicUrl
     ? `Address: ${instance.publicUrl} — a board's link is that plus ` +
@@ -77,13 +54,7 @@ so do not call one or go looking for one in the shell.
 `;
 }
 
-/**
- * Where a system input came from, in the fewest words that still say it.
- *
- * Lives here with `formatTurnMeta` for the same reason: it is *wording*, and
- * every surface must spell it the same way. It was copied verbatim into the
- * second adapter before landing here.
- */
+/** Where a system input came from; wording every surface must spell the same. */
 export function originLabel(origin: NoteOrigin): string {
   if (origin.kind === "error") return "\u26a0 failed";
   if (origin.kind !== "task-message") {
@@ -99,42 +70,20 @@ export function originLabel(origin: NoteOrigin): string {
   return `from a subagent \u00b7 ${kinds[origin.messageKind] ?? origin.messageKind}`;
 }
 
-/**
- * Is a turn coming, once this note is posted?
- *
- * A system input is context for the turn it triggers, so on IM the note is the
- * only message that turn has to wear the 👀 — nobody typed one. An error note
- * is the opposite: it reports a turn that already ended or never began, and a
- * receipt marked on it would hang until the stale sweep.
- *
- * Beside `originLabel` for the same reason it is: three adapters ask this, and
- * three copies of the answer are three chances to drift.
- */
+/** Is a turn coming once this note is posted? On IM the note is the only
+ *  message that turn has to wear the 👀; an error note reports a turn that
+ *  already ended, and a receipt on it would hang until the stale sweep. */
 export const awaitsTurn = (origin: NoteOrigin): boolean => origin.kind !== "error";
 
-/**
- * Quote and bracket characters that may be lifted out of a `**strong**` run.
- * Moving them changes nothing a reader can see — the punctuation is simply no
- * longer bold — while taking the delimiter off a character the parser refuses
- * to close on.
- */
+/** Punctuation that may be lifted out of a `**strong**` run: nothing a reader
+ *  can see changes, and the delimiter comes off a character the parser refuses
+ *  to close on. */
 const LIFTABLE = /[\u201c\u201d"\u2018\u2019'()\uff08\uff09\u300c\u300d\u300e\u300f\u3010\u3011\u300a\u300b\u3008\u3009[\]]/;
 
-/**
- * Repair emphasis that CommonMark refuses to close.
- *
- * A closing `**` must be *right-flanking*: preceded by non-whitespace, and
- * either not preceded by punctuation or else followed by whitespace or
- * punctuation. `**\u201c\u600e\u4e48\u505a\u201d**\uff1a` fails both halves \u2014 preceded by a quote,
- * followed by a CJK colon the rule does not count \u2014 so the run never closes and
- * the reader sees literal asterisks. `**\u95f2\u804a**\uff1a` is fine, because a letter
- * precedes the delimiter. This is a known ten-year-old hole in the spec around
- * CJK, not a Slack bug, and it shows up constantly in model output.
- *
- * The repair is to move the punctuation outside the delimiters, so the `**`
- * lands against a letter: `\u201c**\u600e\u4e48\u505a**\u201d\uff1a`. Code is protected first \u2014 asterisks
- * inside a fence or a code span are content, not markup.
- */
+/** CommonMark's right-flanking rule does not count CJK punctuation, so
+ *  `**“怎么做”**：` never closes (a spec hole, not a platform bug, and constant
+ *  in model output). Moving the punctuation outside — `“**怎么做**”：` — lands
+ *  the `**` against a letter. Fences and code spans are content, protected first. */
 export function cjkFriendly(markdown: string): string {
   const stash: string[] = [];
   const keep = (text: string): string => `\uE010${stash.push(text) - 1}\uE011`;
@@ -153,24 +102,17 @@ export function cjkFriendly(markdown: string): string {
       trail = body.at(-1)! + trail;
       body = body.slice(0, -1);
     }
-    // Nothing was on the edges, or the run is only punctuation: leave it be.
     return lead || trail ? `${lead}**${body}**${trail}` : whole;
   });
   return out.replace(/\uE010(\d+)\uE011/g, (_m, i: string) => stash[Number(i)] ?? "");
 }
 
-/**
- * The one wording for a turn that said nothing, wherever it is shown — the
- * chat surfaces and the task result path. The reason arrives pre-escaped
- * because each surface escapes for its own markup; the label itself contains
- * nothing any of them escape.
- */
+/** The reason arrives pre-escaped: each surface escapes for its own markup,
+ *  and the label itself contains nothing any of them escape. */
 export const quietLabel = (silence?: string): string =>
   silence ? `stayed silent — ${silence}` : "no reply";
 
-/** One policy for "did this turn actually reply": options count as a reply —
- *  the buttons are the answer, so a turn that is only its options is not
- *  "nothing". Every surface decides through here. */
+/** Options count as a reply: a turn that is only its buttons is not "nothing". */
 export const isSilentReply = (reply: { text: string; suggestions: string[] }): boolean =>
   !reply.text.trim() && reply.suggestions.length === 0;
 
@@ -182,8 +124,7 @@ export const thinkingLabel = (level: ThinkingLevel): string =>
 export const compact = (n: number): string => {
   if (n < 1000) return String(n);
   const k = n / 1000;
-  // Precision comes from the *rounded* value, so 9_990 reads "10K" instead of
-  // a "10.0K" that claims a decimal it does not have.
+  // Precision from the rounded value: 9_990 reads "10K", not "10.0K".
   return k >= 9.95 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
 };
 
@@ -193,46 +134,24 @@ function formatDuration(ms: number): string {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
 }
 
-/**
- * A turn's cost, in the one wording every surface uses: how long it took and
- * how big the context is now. `tokens` is the context size at completion, not
- * a per-turn sum (see TurnMeta) — the label stays "tok" because that is what
- * the number is counted in.
- */
+/** `tokens` is the context size at completion, not a per-turn sum (TurnMeta). */
 export const formatTurnMeta = (meta: TurnMeta): string =>
   `${formatDuration(meta.durationMs)} · ${compact(meta.tokens)} tok`;
 
-/**
- * Trailing `---` line + a row of bracket tokens, optionally `|`-separated.
- * A markdown link (`[label](url)`) leaves `(url)` unmatched, so reference-link
- * blocks stay message content instead of turning into buttons.
- *
- * `(?:^|\n)` because a turn is allowed to be nothing but its options: anchoring
- * on a preceding newline left that whole block sitting in the message as raw
- * text, with no buttons anywhere.
- */
+/** Trailing `---` line + a row of bracket tokens, optionally `|`-separated. A
+ *  markdown link leaves `(url)` unmatched, so reference-link blocks stay
+ *  content. `(?:^|\n)`: a turn may be nothing but its options. */
 const BLOCK = /(?:^|\n)[ \t]*-{3,}[ \t]*\r?\n((?:[ \t]*\[[^\]\r\n]+\][ \t]*(?:[|｜][ \t]*)?)+)\s*$/;
 const TOKEN = /\[([^\]\r\n]+)\]/g;
 const MAX_SUGGESTIONS = 5;
 
-/**
- * A deliberate non-answer. In a group thread the agent is handed every message,
- * and most of them are two humans talking; a bot that replies to each one is
- * unusable. Stripping the block here means an adapter needs no new concept: a
- * turn whose text is empty already posts nothing and still retires its per-turn
- * UI, which is exactly "listened, said nothing".
- *
- * The reason inside stays in the Pi transcript, so the choice is auditable
- * without being broadcast to the chat.
- */
+/** A deliberate non-answer. Stripped here so an adapter needs no new concept:
+ *  an empty turn already posts nothing and retires its per-turn UI. The reason
+ *  stays in the transcript, auditable without being broadcast. */
 const SILENT = /<silent>([\s\S]*?)<\/silent>/gi;
 
-/**
- * Why the agent stayed quiet. Stripped from anything sent to a chat, but the
- * workbench is the operator's own view of the run — "it said nothing and here
- * is why" is observability, and hiding it there would just make a silent turn
- * look like a broken one.
- */
+/** Why the agent stayed quiet; hidden from the chat, shown on the workbench,
+ *  where a silent turn must not look like a broken one. */
 export function silentReason(markdown: string): string | undefined {
   const reasons = [...markdown.matchAll(SILENT)]
     .map((m) => (m[1] ?? "").trim())
@@ -242,9 +161,6 @@ export function silentReason(markdown: string): string | undefined {
 
 /** Split an assistant turn's markdown into renderable text + next-step labels. */
 export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
-  // Every surface that renders this goes through here, and every CommonMark
-  // parser has some version of the CJK emphasis hole — so the repair belongs
-  // once, at the seam, not per adapter.
   const markdown = streamBody(rawMarkdown);
   const silence = silentReason(rawMarkdown);
   const m = BLOCK.exec(markdown);
@@ -257,38 +173,21 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
   return { text: markdown.slice(0, m.index).trimEnd(), suggestions, meta, silence };
 }
 
-/**
- * The body of a block that is still being written, for a surface rendering it
- * before the turn ends: everything `splitReply` repairs, minus the next-step
- * block. That block is only a next-step block at the very *end* of a turn, so
- * text a later paragraph has already closed behind keeps it as body — which is
- * what the final render will do with it too.
- */
+/** For rendering mid-turn: everything `splitReply` repairs, minus the
+ *  next-step block, which is only one at the very end of a turn. */
 export const streamBody = (markdown: string): string => cjkFriendly(markdown.replace(SILENT, "").trim());
 
-/** Lines a blank line does not necessarily separate: a list item, a quote and
- *  an indented continuation all survive one — a loose list is still one list.
- *  Deliberately over-matching (`*` and `-` also catch emphasis and a rule):
- *  claiming one boundary too few costs nothing but a repaint. */
+/** Lines a blank line does not necessarily separate (a loose list is still one
+ *  list). Over-matching is fine: one boundary too few costs only a repaint. */
 const CONTINUES = /^(?:\s|[-*+>]|\d+[.)])/;
 
-/**
- * How much of `markdown` after `from` can no longer change as more text
- * arrives: the offset just past the last blank line that closes a block, or
- * `from` if there is none.
- *
- * Streaming markdown is the caller. Re-parsing the whole reply on every
- * repaint costs O(N²) over a turn, so the web chat renders each closed prefix
- * once and keeps its DOM. A boundary is therefore only claimed where parsing
- * the two sides separately renders the same as parsing them together: never
- * inside a backtick or tilde fence, inside a block stripped on completion, or
- * between two lines a blank line leaves in the same list or quote. Fence runs
- * keep their length as in `channels/chunk.ts`: a ```` fence is not closed by
- * the ``` it quotes.
- */
+/** Offset past the last blank line after `from` that closes a block, so a
+ *  streaming renderer can parse each closed prefix once (whole-reply reparse is
+ *  O(N²) over a turn). A boundary is claimed only where the two sides render the
+ *  same apart as together: never inside a fence, a `<silent>` block, or a loose
+ *  list/quote. A ```` fence is not closed by the ``` it quotes. */
 export function stableBlockEnd(markdown: string, from = 0): number {
-  // The last line is still growing, so it decides nothing — not the fence
-  // state, and not whether the blank line above it ended a block.
+  // The last line is still growing, so it decides nothing.
   const end = markdown.lastIndexOf("\n") + 1;
   /** Marker run of the fence currently open; empty = closed. */
   let open = "";
