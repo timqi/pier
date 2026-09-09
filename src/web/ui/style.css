@@ -395,6 +395,16 @@ main {
   backdrop-filter: blur(28px) saturate(1.4);
   -webkit-backdrop-filter: blur(28px) saturate(1.4);
 }
+/* Chrome is glanced at, a menu is read: model ids, paths and session actions
+   are scanned over whatever is scrolling behind them, and 20% of a transcript
+   coming through a search field is noise in the one place that needs none. So
+   panels keep the glass edge, shadow and entrance, and lose the translucency —
+   the blur goes with it, since nothing shows through to blur. */
+.glass-menu {
+  background: var(--color-white);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 #rail-toggle { top: 0.625rem; border-radius: 50%; }
 #chat-header {
   margin: 8px 8px 0;

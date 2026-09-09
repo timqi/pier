@@ -30,6 +30,10 @@ than the panel, a neutral translucent hairline (light in dark mode), a top-edge
 highlight, and a two-part shadow — wide ambient plus tight contact — shared by
 sidebar, chat heading and menus through one glass token set; the composer and
 the open drawer, which sit over content, take the same set one step raised.
+Menus and popovers take that token set on a solid surface rather than a
+translucent one: chrome is glanced at, but a menu is read — model ids, paths
+and session actions are scanned over whatever scrolls behind them, and the
+transcript coming through them is noise where there should be none.
 On desktop the transcript runs the full pane and the heading and composer dock
 float over it, so rows scroll under the glass and dissolve at the pane's edges
 rather than being cut at a chrome boundary; the pane pads its ends by what
