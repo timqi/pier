@@ -1,8 +1,8 @@
 # Boards (product spec)
 
 A **Board** is a folder of static files an agent writes to present something at
-a stable URL, readable on a phone, with no runtime. Every surface is behind the
-instance password (`src/web/auth.ts`); `/p/*` (published boards plus the
+a stable URL, readable on a phone, with no server-side runtime. Every surface
+is behind the instance password (`src/web/auth.ts`); `/p/*` (published boards plus the
 stylesheet they link) is the only exemption, so `public` is a security boundary.
 
 ## Product decisions
@@ -16,14 +16,17 @@ stylesheet they link) is the only exemption, so `public` is a security boundary.
    the user asked for a public board in that request. The Console can flip it
    and lists every public board in one place.
 4. HTML only: no markdown source, no renderer, no content negotiation.
-5. Static and self-contained: `site/index.html` plus relative paths under
-   `site/`, zero network at view time (CSP-enforced), no server-side execution.
+5. Static and self-contained: `site/index.html` plus relative assets under
+   `site/` and the shipped stylesheet; no external resources, network data
+   requests or server-side execution.
 6. No build system; Pier ships no toolchain. A board that needs a build brings
    its own (output into `site/`) and explains it in `README.md`.
 7. Only `site/` is served; `board.json`, `README.md` and sources are
    unreachable over HTTP. Pier never runs anything for a board.
 8. Static bytes off disk; board count and size do not affect the rest of Pier.
-9. No JS framework: rich interaction is one board bundling one small library.
+9. No JS framework: local scripts may enhance embedded data, using a small
+   bundled library when needed; the answer and evidence remain readable with
+   JavaScript off, and unavailable controls are hidden or disabled.
 
 ## On-disk layout
 
@@ -58,13 +61,11 @@ Timestamps come from the filesystem (`site/` mtime), not the manifest.
 
 ## Shipped stylesheet (`/p/_assets/pier.css`)
 
-Served from Pier's package dir, not `$PIER_HOME`. Classless: readable measure,
-mobile-first, system font stack, styled `h1-h4 / p / ul / table / blockquote /
-pre / code / hr / details` (zebra rows), `prefers-color-scheme` dark block.
-Helpers: `--good/--warn/--bad`, `.lede`, `.grid` + `.card` + `.kpi`, `.callout`,
-`.tag`, `.num`, `.bar`, each with status variants. The skill teaches them and
-sets the rules (colour pairs with a word, two or three accents per page,
-structure before graphics). A board may ship its own CSS; no linter.
+[`pier.css`](../../src/boards/pier.css) is served from Pier's package directory;
+it styles semantic HTML with responsive widths, dark mode and optional helpers.
+The [skill](../../skills/pier-boards/SKILL.md) owns their usage and presentation
+guidance: content determines layout, status has text labels, graphics serve
+understanding. Custom CSS must preserve contrast and phone reflow; no linter.
 
 ## Routes (`src/boards/boards.ts`, ≤ 200 lines of code incl. the filesystem side)
 
@@ -105,11 +106,9 @@ in the session menu. Refetch after own actions and on window focus.
 
 ## Agent surface (`skills/pier-boards/SKILL.md`)
 
-No new tool — boards are files. The skill carries the directory contract, the
-manifest fields, the slug rule, the `pier.css` URL, an HTML skeleton, the
-publish rule, the no-build rule and its README exception, and the style guide.
-Shipped in the `skills/` dir `PiAgentFactory` already loads; no
-`boards.enabled` flag.
+The bundled skill covers creation, publishing, presentation and verification
+through file operations; `PiAgentFactory` loads it from `skills/`, with no new
+tool or `boards.enabled` flag.
 
 ## Tests
 
@@ -131,4 +130,6 @@ Shipped in the `skills/` dir `PiAgentFactory` already loads; no
   lands it in the Console's public section.
 - A second, unrelated session edits the same board's content and description.
 - Deleting the linked session changes nothing about the board.
-- The board reads well on a phone with JavaScript disabled.
+- New pages and layout/interaction changes pass the skill's phone/desktop,
+  theme, keyboard/touch, asset and JavaScript-disabled checks; content-only
+  edits check the affected content and links, with actual coverage or gaps reported.
