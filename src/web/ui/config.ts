@@ -604,8 +604,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
     const tools = toolEntries();
-    // Every binary that is on: rtk is switched by the same set from its own pane.
-
     const runs = taskLink("the update task");
 
     const row = (tool: CatalogEntry): HTMLElement => {
