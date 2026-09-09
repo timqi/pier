@@ -1,8 +1,5 @@
-// One delivery engine for everything that has to reach a session as a system
-// input: run callbacks and group callbacks. Its whole reason to exist is that
-// this logic was written twice and the two copies drifted — the ceiling was
-// checked in one order here and another there, and only one of them counted a
-// failed attempt.
+// One delivery engine for everything that reaches a session as a system input:
+// run callbacks and group callbacks.
 
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
 import type { Router } from "../core/router.js";
@@ -39,16 +36,9 @@ export class Outbox<T extends CallbackFields> {
     private readonly unreachable: (sessionId: string, what: string, why: string) => void,
   ) {}
 
-  /**
-   * Delivers a batch aimed at one session: one model turn drains the backlog
-   * instead of one turn per record.
-   *
-   * `delivered` is written only against proof — the input visible in the
-   * recipient's own transcript. Pi's queues are memory, so an abort or a
-   * restart drops an accepted input and `systemInput` resolving proves
-   * nothing; a delivery reported on a resolved send is how a delegating agent
-   * ends up waiting forever on a result that was never read.
-   */
+  /** One model turn drains the batch instead of one per record. `delivered` is
+   *  written only against the input visible in the recipient's transcript: Pi's
+   *  queues are memory, so a resolved `systemInput` proves nothing. */
   async deliver(sessionId: string, batch: T[]): Promise<void> {
     const mine = batch.filter((record) => !this.delivering.has(this.kind.id(record)));
     if (mine.length === 0) return;
@@ -62,14 +52,9 @@ export class Outbox<T extends CallbackFields> {
       // given up on for having spent its last attempt landing it.
       const live = unproven.filter((record) => !this.spent(record, sessionId));
       if (live.length === 0) return;
-      // Waiting for a busy target is not a delivery attempt: counting it would
-      // inflate the attempts once per second and skip the failure backoff
-      // straight to its ceiling. A record delegated with `steer` is the
-      // exception it asked for — it joins the running turn instead, and the
-      // rest of the batch keeps waiting for the turn to end. But only once:
-      // handed over, a steer sits in Pi's in-memory queue, invisible in the
-      // transcript until the turn drains it, so the queue is the second place
-      // this has to look before deciding nothing arrived (messages.ts:340).
+      // Waiting for a busy target is not an attempt, or the ceiling arrives in
+      // seconds. A `steer` record joins the running turn instead, but only once:
+      // handed over, it sits in Pi's in-memory queue, invisible in the transcript.
       const streaming = session.state === "streaming";
       let sending = live;
       if (streaming) {
@@ -86,13 +71,10 @@ export class Outbox<T extends CallbackFields> {
       }
       const { text, origin } = this.kind.input(sending);
       log.debug(`callback for ${sending.map((r) => this.kind.id(r)).join(", ")} → session ${sessionId}`);
-      // Not awaited: `systemInput` settles with the recipient's whole turn, and
-      // holding the delivery lock that long would keep the proof from ever
-      // being read — which is the only thing that marks this delivered.
+      // Not awaited: `systemInput` settles with the recipient's whole turn.
       session.systemInput(text, origin, streaming ? "steer" : "followUp")
         .catch((error: unknown) => this.retry(sessionId, sending, error, counted));
-      // Pi records the input as it starts the turn, so the proof is usually
-      // here already; the tick sweep is the backstop when it is not.
+      // Pi records the input as it starts the turn; the tick sweep is the backstop.
       await this.settle(sending, session);
     } catch (error) {
       this.retry(sessionId, mine, error, counted);
@@ -101,9 +83,7 @@ export class Outbox<T extends CallbackFields> {
     }
   }
 
-  /** Handed over and waiting in the recipient's queue for the running turn to
-   *  drain it — what the transcript cannot answer yet. Empty unless the
-   *  session is streaming: Pi drops the list when the turn ends. */
+  /** What the transcript cannot answer yet; empty unless the session is streaming. */
   private async queued(session: AgentSession): Promise<Set<string>> {
     const ids = new Set<string>();
     for (const origin of await session.pendingSystemInputs()) for (const id of callbackIds(origin)) ids.add(id);
@@ -126,9 +106,7 @@ export class Outbox<T extends CallbackFields> {
     return unproven;
   }
 
-  /** The recipient is waiting for an answer that is now late: the retry itself
-   *  is silent, so this line is the only sign it is being retried — and the
-   *  ceiling is what ends the retrying out loud. */
+  /** The retry itself is silent, so this line is the only sign of it. */
   private retry(sessionId: string, batch: T[], error: unknown, counted: Set<string>): void {
     log.warn(`callback to session ${sessionId} failed, will retry`, error);
     for (const stale of batch) {
@@ -141,8 +119,7 @@ export class Outbox<T extends CallbackFields> {
     }
   }
 
-  /** Out of attempts: stop, record why, and report it. An agent waiting on a
-   *  result it will never get must not be left waiting on silence. */
+  /** An agent waiting on a result it will never get must not wait on silence. */
   private spent(record: T, sessionId: string): boolean {
     if (record.callbackAttempts < MAX_DELIVERY_ATTEMPTS) return false;
     if (record.callbackState !== "abandoned") {
@@ -161,8 +138,8 @@ export class Outbox<T extends CallbackFields> {
     this.kind.save(record);
   }
 
-  /** Handed over, proof pending. Backs off like a failure, so an input the
-   *  recipient never records is re-sent on a curve, not once a second. */
+  /** Backs off like a failure, so an input never recorded is re-sent on a
+   *  curve, not once a second. */
   private sent(record: T): void {
     record.callbackAttempts += 1;
     record.callbackState = "pending";

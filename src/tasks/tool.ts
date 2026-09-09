@@ -55,17 +55,9 @@ export interface GroupSummary {
   next?: string;
 }
 
-/**
- * Drop the fields with nothing in them instead of sending `null`.
- *
- * A run summary has eighteen fields and most are empty for most of a run's
- * life; a model reads "absent" and "null" the same way. On a group summary
- * that lists several runs this is a third of the payload.
- *
- * The input names every field — a summary that forgot one would otherwise pass
- * as "that field was empty" — and the result is the type with the empty ones
- * gone, which is why those are declared optional above.
- */
+/** Absent instead of `null`: a model reads both the same way, and on a group
+ *  summary the nulls are a third of the payload. The input names every field
+ *  so a summary that forgot one cannot pass as "empty". */
 const defined = <T extends object>(value: { [K in keyof T]-?: T[K] | null }): T =>
   Object.fromEntries(
     Object.entries(value).filter(([, v]) => v !== null && v !== undefined),
@@ -94,9 +86,8 @@ const summarize = (run: TaskRun, pendingDecisionId: string | null): RunSummary =
   next: null,
 });
 
-/** What a run receipt says happens next. The callback is the whole answer, so
- *  the receipt says so — a model that just launched work otherwise reaches
- *  for a status call. `none` is stated as what it is: no delivery at all. */
+/** The receipt says the callback is the whole answer, or a model that just
+ *  launched work reaches for a status call. */
 const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: string | null, mode: CallbackMode, callerSessionId: string): T => ({
   ...summary,
   next: callbackSessionId === null
@@ -121,15 +112,12 @@ const trimResult = (summary: RunSummary): RunSummary => {
   };
 };
 
-/** Whether a callback record has said its last word: the input is in the
- *  recipient's transcript, delivery was given up on and reported, or there
- *  was never one to wait for (`callback:"none"`). Anything else is still on
- *  its way, and reading the result here would be reading it twice. */
+/** Delivered, given up on and reported, or never owed (`callback:"none"`).
+ *  Anything else is still on its way, and reading it here would be reading it twice. */
 const settled = (callback: CallbackFields): boolean =>
   callback.callbackState === null || callback.callbackState === "delivered" || callback.callbackState === "abandoned";
 
-/** The one refusal `recover` gives before a result is readable. Deliberately
- *  the same words for queued, running, pending and retrying: a refusal that
+/** The same words for queued, running, pending and retrying: a refusal that
  *  named the state would be the status query this operation replaced. */
 const notRecoverable = (what: string, callback: { callbackSessionId: string | null }): never => {
   throw new Error(callback.callbackSessionId === null
@@ -153,8 +141,8 @@ const LaunchSchema = Type.Object({
   thinking: Type.Optional(Type.String()),
 });
 
-// Model-facing draft shape. Guidance only: runtime truth stays in parseDraft,
-// so schema drift can never loosen boundary validation.
+// Guidance only: runtime truth stays in parseDraft, so schema drift cannot
+// loosen boundary validation.
 const DraftSchema = Type.Object({
   name: Type.Optional(Type.String({ description: "Defaults to the prompt's first line." })),
   description: Type.Optional(Type.String()),
@@ -209,16 +197,13 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
       message: Type.Optional(Type.String()),
       reason: Type.Optional(Type.String({ description: "contact: progress | decision. recover: why the delivered callback is not enough (required)." })),
       session_mode: Type.Optional(strEnum("fresh")),
-      // The one-shot shorthand: a prompt is the whole delegation, and the
-      // fresh session in the caller's own directory is what it means.
       prompt: Type.Optional(Type.String()),
       cwd: Type.Optional(Type.String()),
       launch: Type.Optional(LaunchSchema),
       name: Type.Optional(Type.String()),
       task: Type.Optional(DraftSchema),
-      // The same draft again, spelled out, cost more tokens in every session
-      // than the whole rest of this contract. One copy is the guidance; this
-      // one points at it, and `parseDraft` is what actually validates either.
+      // Spelled out, the draft schema costs more tokens per session than the
+      // rest of this contract; `parseDraft` validates either shape.
       tasks: Type.Optional(Type.Unsafe<unknown[]>({
         type: "array",
         description: "2+ entries, each a prompt string, {prompt, cwd?, launch?, name?}, a task draft shaped exactly like `task`, or {task_id}.",
@@ -255,8 +240,6 @@ export async function handleTaskTool(
     return definitions.update(requiredString(input.task_id, "task_id"), await expandDraft(definitions, input.task, callerSessionId));
   }
   if (input.operation === "run") {
-    // One reading of `callback` for both shapes below: a run and a fan-out
-    // choose the same way, and two readings are two things to keep in step.
     const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
@@ -308,18 +291,14 @@ export async function handleTaskTool(
     return receipt(summarize(run, null), callbackSessionId, callbackMode, callerSessionId);
   }
   if (input.operation === "recover") {
-    // History only, never status: a result is readable here once its callback
-    // has said its last word, so nothing a caller could learn by asking is
-    // something it would not have been told. The reason is the friction — a
-    // caller states why the callback did not suffice, and the operator sees it.
+    // History only, never status: readable once the callback has said its last
+    // word. The required reason is the friction, and the operator sees it.
     const reason = requiredString(input.reason, "reason");
-    // A finished run with an open decision sends no completion callback — the
-    // question is the notification, and the reply's continuation reports.
+    // The open question is the notification; the reply's continuation reports.
     const decisionOpen = (run: TaskRun): never => {
       throw new Error(`run ${run.id} finished awaiting your decision ${messages.openDecisionId(run.id) ?? ""}; reply to it — the continuation's callback brings the result`);
     };
-    // A member waits for its group's callback, but a race winner need not
-    // wait for losing members to finish cancelling before recovering its text.
+    // A race winner need not wait for losing members to finish cancelling.
     const groupReady = (group: TaskGroup): void => {
       if (!group.finishedAt || !settled(group)) notRecoverable(`group ${group.id}`, group);
     };
@@ -396,8 +375,7 @@ function inlineDraft(input: Record<string, unknown>): Record<string, unknown> | 
   return { prompt, cwd, launch, name };
 }
 
-/** The prompt's first line, unmarked and cut short: a label for the Console,
- *  not an identifier — the run's id is what anything addresses. */
+/** A label for the Console, not an identifier. */
 function nameFromPrompt(prompt: string): string {
   const line = prompt.split("\n")
     .map((l) => l.replace(/^[\s#>*-]+/, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim())
@@ -405,13 +383,8 @@ function nameFromPrompt(prompt: string): string {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
 }
 
-/**
- * The shape a draft is validated in, from the shapes a caller may write it in.
- * A `prompt` shorthand becomes a fresh Agent action; a fresh session's cwd
- * resolves against the caller's own directory (and is that directory when
- * omitted); a missing name is the prompt's first line. Everything the caller
- * did spell out passes through untouched — parseDraft still judges it.
- */
+/** A `prompt` shorthand becomes a fresh Agent action in the caller's own
+ *  directory; everything the caller did spell out passes through to parseDraft. */
 async function expandDraft(definitions: TaskDefinitions, raw: unknown, callerSessionId: string): Promise<unknown> {
   let draft = record(raw);
   if (!draft) return raw;
@@ -431,8 +404,8 @@ async function expandDraft(definitions: TaskDefinitions, raw: unknown, callerSes
   return draft;
 }
 
-/** Inline one-shot subagent: persisted like any task (kind "subagent",
- * filtered from default lists) so runs stay auditable and resumable. */
+/** Persisted like any task (kind "subagent", filtered from default lists) so
+ *  runs stay auditable and resumable. */
 async function resolveDraft(
   definitions: TaskDefinitions,
   raw: unknown,

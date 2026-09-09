@@ -95,12 +95,8 @@ export function runBash(
         stderrTruncated: stderr.truncated,
       });
     });
-    // A script that never reads stdin is ordinary (`exit 0`, a one-line curl),
-    // and writing the input to a pipe nobody is holding raises EPIPE *here*.
-    // Unhandled, that is an `error` event on a stream, which is an uncaught
-    // exception, which is main.ts exiting the process: one task script could
-    // take every session and every other run down with it. The input not being
-    // wanted is not a failure of the run — anything else still gets said.
+    // A script that never reads stdin raises EPIPE here; unhandled, that is an
+    // uncaught exception that exits the process. Not wanting the input is not a failure.
     child.stdin.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code !== "EPIPE") log.warn(`run input could not be written: ${err.message}`);
     });

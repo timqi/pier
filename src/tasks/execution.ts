@@ -1,7 +1,5 @@
-// One queued run carried to a result: dispatched by action kind (a bash
-// script, an agent session, another task or an owned system action), abortable
-// while it goes, settled exactly once. Command and agent work lives in
-// command.ts and agent.ts; this file owns the lifecycle they share.
+// One queued run carried to a result: dispatched by action kind, abortable,
+// settled exactly once. The lifecycle command.ts and agent.ts share.
 
 import { logger } from "../log.js";
 import type { AgentTaskRunner } from "./agent.js";
@@ -71,15 +69,12 @@ export class TaskExecution {
       controller.signal.throwIfAborted();
       run.state = "succeeded";
       if (definition.trigger.type === "watch" && !run.resumedFromRunId && definition.trigger.mode === "once" && run.matched) {
-        // As the definition's own creator: a one-shot watch retiring itself is
-        // the task layer keeping its own promise, not a surface editing
-        // somebody's task, and the owner guard (definitions.ts) would
-        // otherwise fail the run that had just succeeded.
+        // As the definition's own creator, or the owner guard (definitions.ts)
+        // would fail the run that just succeeded.
         this.definitions.setEnabled(definition.id, false, definition.creator);
       }
     } catch (error) {
-      // A killed child reports `exited null`, not `cancelled`: report why we
-      // aborted instead of how the corpse looked.
+      // A killed child reports `exited null`; report why we aborted instead.
       const aborted = controller.signal.aborted;
       run.state = aborted ? (timedOut ? "failed" : "cancelled") : "failed";
       run.error = timedOut ? "task timed out" : aborted ? "cancelled" : String(error);
@@ -89,10 +84,8 @@ export class TaskExecution {
       run.finishedAt = Date.now();
       const seconds = ((run.finishedAt - (run.startedAt ?? run.queuedAt)) / 1000).toFixed(1);
       const settled = `run ${run.id} (${run.context.definition.name}) ${run.state} in ${seconds}s`;
-      // A scheduled run has no one watching it: the run row is the only other
-      // place this exists, and nobody opens the Console to find out it failed.
-      // A watch probe that did not match is the opposite case — it fires on
-      // every interval and at info would be most of the journal.
+      // Nobody opens the Console to find out a scheduled run failed. A watch
+      // probe that did not match fires every interval and would be most of the journal.
       if (run.state === "failed") log.error(settled, cause);
       else if (run.matched === false) log.debug(`${settled} (watch did not match)`);
       else log.info(settled);
@@ -103,10 +96,8 @@ export class TaskExecution {
       try {
         this.store.saveRun(run);
       } catch (err) {
-        // Waiters settle from the in-memory run below; the callback and any
-        // group join read the stale row and wait — the next boot's interrupt
-        // sweep re-marks it and delivers then. Named here so that delay has
-        // an explanation.
+        // Waiters settle from the in-memory run; the callback reads the stale
+        // row and waits for the next boot's interrupt sweep.
         log.error(`run ${run.id} final save failed — callback/join deferred to next boot`, err);
       }
       this.host.changed(run);

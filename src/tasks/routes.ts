@@ -1,7 +1,5 @@
-// The area's HTTP surface: tasks, runs, group and message routes for the
-// Console, plus the Activity snapshot it draws its graph from. A route reads
-// its body, names the caller and hands the decision to TaskService — policy
-// that lives here would be policy the task tool does not get.
+// The area's HTTP surface. A route names the caller and hands the decision to
+// TaskService: policy here would be policy the task tool does not get.
 
 import type { Hono } from "hono";
 import type { AgentFactory } from "../core/types.js";
@@ -229,9 +227,8 @@ export function registerTaskRoutes(
     const body = record(await jsonBody(c.req));
     const input = body && "input" in body ? body.input : null;
     try {
-      // A caller that names a mode gets an answer about it: dropping an
-      // unsupported override would run the definition's own policy instead —
-      // on a reuse definition, work injected into a live session.
+      // Dropping an unsupported override would run the definition's own policy
+      // instead — on a reuse definition, work injected into a live session.
       if (body?.sessionMode !== undefined && body.sessionMode !== "fresh") {
         throw new Error(`unsupported sessionMode: ${String(body.sessionMode)}`);
       }

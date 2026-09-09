@@ -1,7 +1,5 @@
-// Every query this area makes against pier.db, and nothing else: definitions,
-// runs, groups and messages are rows here, read and written through one
-// connection db.ts opened. A store owns its queries, never its own tables or
-// its own handle — the schema is db.ts's migration list.
+// Every query this area makes against pier.db, and nothing else; the schema is
+// db.ts's migration list.
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
@@ -26,9 +24,7 @@ export class TaskStore {
     return transact(this.db, work);
   }
 
-  // Every table is one JSON column plus query columns; these two are the only
-  // readers, and the one seam where a future schema change normalizes old rows
-  // (pre-v1 databases are refused outright in db.ts).
+  // The only readers of the JSON columns, and where a schema change normalizes old rows.
   #one<T>(sql: string, ...params: (string | number)[]): T | undefined {
     const row = this.sql(sql).get(...params) as JsonRow | undefined;
     return row ? JSON.parse(row.json) as T : undefined;
@@ -54,9 +50,7 @@ export class TaskStore {
     `).run(task.id, task.updatedAt, JSON.stringify(task));
   }
 
-  /** The tick's whole question, asked of the index rather than of every
-   *  document: a task with no next run (disabled, archived, manual) is not in
-   *  it, so an idle second reads no row. */
+  /** Asked of the index, not every document: an idle second reads no row. */
   listDueTasks(now: number): TaskDefinition[] {
     return this.#many(
       "SELECT json FROM tasks WHERE next_run_at IS NOT NULL AND next_run_at <= ?",
@@ -91,9 +85,8 @@ export class TaskStore {
     );
   }
 
-  /** The global list: filters precede the limit, and the id breaks timestamp
-   *  ties so a page boundary never repeats or skips a row. The statement is
-   *  built per call and not cached — the filter set makes it. */
+  /** The id breaks timestamp ties so a page boundary never repeats or skips a
+   *  row. Built per call, not cached: the filter set makes it. */
   queryRuns(query: RunQuery = {}): RunPage {
     const where: string[] = [];
     const params: (string | number)[] = [];
@@ -177,9 +170,7 @@ export class TaskStore {
     `, sessionId);
   }
 
-  /** How many background runs each session has in flight, for a list that
-   *  draws one dot per row: the state column narrows the scan to the handful
-   *  of live runs, and no row's JSON is parsed. */
+  /** The state column narrows the scan to live runs; no JSON is parsed. */
   countActiveBackgroundRunsBySession(): Map<string, number> {
     const rows = this.sql(`
       SELECT json_extract(json, '$.invokedBySessionId') AS session_id, COUNT(*) AS n
@@ -192,10 +183,8 @@ export class TaskStore {
     return new Map(rows.map((row) => [row.session_id, row.n]));
   }
 
-  /** Every session a run created for itself — `fresh` is the one mode that
-   *  makes a session rather than borrowing one, and a resumed run reuses the
-   *  session its `fresh` predecessor already stamped. These are the agent's
-   *  conversations with itself, which the rail does not list. */
+  /** `fresh` is the one mode that makes a session rather than borrowing one;
+   *  these are the agent's conversations with itself, which the rail does not list. */
   taskOwnedSessionIds(): Set<string> {
     const rows = this.sql(`
       SELECT DISTINCT json_extract(json, '$.context.sessionId') AS id
@@ -261,10 +250,8 @@ export class TaskStore {
     );
   }
 
-  /** Messages whose injection never landed, each beside the run it belongs to:
-   *  the delivery sweep needs both, and fetching the run per message made one
-   *  sweep cost a query per undelivered message. A message whose run is gone
-   *  comes back with `run: undefined` — the sweep drops it. */
+  /** Each beside its run, so the sweep costs one query. A message whose run is
+   *  gone comes back with `run: undefined`. */
   listUndeliveredMessages(): { message: TaskMessage; run: TaskRun | undefined }[] {
     const rows = this.sql(`
       SELECT m.json AS json, r.json AS run_json
@@ -285,9 +272,8 @@ export class TaskStore {
       WHERE state = 'pending' AND json_extract(json, '$.kind') != 'decision'
     `).map((message) => {
       message.state = "expired";
-      // "Confirmed", not "completed": the input may well have been read — the
-      // proof of it lives in the recipient's transcript, which this layer
-      // cannot see, and the run it steered is interrupted by the same restart.
+      // "Confirmed", not "completed": the proof lives in a transcript this
+      // layer cannot see.
       message.error = "Pier restarted before delivery could be confirmed";
       this.saveMessage(message);
       return message;

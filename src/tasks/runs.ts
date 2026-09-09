@@ -1,8 +1,5 @@
-// A definition plus an input becomes a queued run: where it came from, how
-// deep in a subagent chain it sits, whether it overlaps a run already going,
-// and which session hears about it. The limits that keep a chain from
-// exploding (depth, children per root) are decided here, once, because every
-// caller — scheduler, tool, HTTP — enqueues through this one door.
+// A definition plus an input becomes a queued run. The depth and per-root
+// limits are decided here because every caller enqueues through this one door.
 
 import { logger } from "../log.js";
 import type { TaskCallbacks } from "./callbacks.js";
@@ -118,10 +115,8 @@ export class TaskRunQueue {
     const { id, depth, triggerSource: source } = run;
     const overlapped = run.skipReason === "overlap";
     const definition = run.context.definition;
-    // Why a run exists is the first question asked of a surprising one, and it
-    // is answerable only here: the row keeps the ids, not the reason. A watch
-    // probe queues on every interval and mostly matches nothing, so it says so
-    // at debug and lets its settled line (execution.ts) carry the news.
+    // Why a run exists is answerable only here: the row keeps the ids, not the
+    // reason. A watch probe queues every interval, so it logs at debug.
     const queued = `run ${id} ${run.state}: ${definition.name} via ${source}` +
       `${overlapped ? " (overlapped)" : ""}${depth > 0 ? ` depth ${String(depth)}` : ""}`;
     if (source === "watch" && !overlapped) log.debug(queued);

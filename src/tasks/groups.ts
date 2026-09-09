@@ -1,7 +1,5 @@
-// The fan-out join: members start detached, and the group is what turns their
-// separate endings into one answer — when the join condition is met, which
-// members are cancelled, and the single aggregated callback that goes back.
-// Delivering it is the outbox's job; deciding it is this file's.
+// The fan-out join: when the join condition is met, which members are
+// cancelled, and the single aggregated callback. Delivering it is the outbox's job.
 
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
@@ -39,9 +37,8 @@ export class TaskGroups {
       reload: (id) => this.store.getGroup(id),
       save: (group) => { this.store.saveGroup(group); },
       changed,
-      // A group names itself in the origin where a run names its run id, so the
-      // engine's transcript proof works unchanged; the console's run route
-      // resolves that id to the group's members (web/ui/task-runs.ts).
+      // A group names itself where a run names its run id, so the engine's
+      // transcript proof works unchanged.
       input: (groups) => ({
         text: this.text(groups[0]!),
         origin: { kind: "task-callback", taskId: groups[0]!.id, runId: groups[0]!.id, sourceSessionId: null },
@@ -130,8 +127,8 @@ export class TaskGroups {
 
   private evaluate(group: TaskGroup): void {
     if (group.finishedAt !== null) return;
-    // Old versions could leave an empty group when admission failed. Retire
-    // that broken record without inventing a successful zero-member join.
+    // An empty group is a broken record; retire it without inventing a
+    // successful zero-member join.
     if (group.memberRunIds.length === 0) {
       group.finishedAt = Date.now();
       group.callbackState = group.callbackSessionId ? "abandoned" : null;

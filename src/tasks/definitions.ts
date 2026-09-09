@@ -26,48 +26,24 @@ import type {
 const DEFAULT_TIMEOUT = 900;
 const MIN_WATCH_SECONDS = 5;
 
-/** Crockford's base32, lowercased: i, l, o and u are gone — the three that
- *  misread as 1/0 and the one that completes most accidental words — and one
- *  case throughout, so a model re-types an id it read verbatim. */
+/** Crockford's base32, lowercased: i, l, o and u are gone, and one case
+ *  throughout, so a model re-types an id it read verbatim. */
 const ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 
-/** The one byte → symbol step, exported only so a test can walk all 256 byte
- *  values: a repeated or omitted character in the alphabet above biases every
- *  id ever minted, and no sample of finished ids can show it. */
+/** Exported only so a test can walk all 256 byte values for alphabet bias. */
 export const idSymbol = (byte: number): string => ID_ALPHABET.charAt(byte & 31);
 
-/** The id every task record is minted with — runs, definitions, groups and
- *  messages alike — because these ids ride through model context constantly:
- *  every run summary, callback, get, steer and reply echoes one, and a UUID
- *  spends ~12 tokens where this spends ~6. Nothing parses or orders by them —
- *  every comparison in the area is string equality and every listing orders by
- *  a timestamp column — so rows minted as UUIDs before this keep working
- *  untouched; there is nothing to migrate. It lives here rather than in
- *  types.ts because the browser type-checks that file and it stays node-free.
- *
- *  Sixteen characters, 80 bits (`& 31` is unbiased because 256 is a multiple
- *  of 32). Sixty would have read the same and cost a token less, but a watch
- *  task on a 5-second interval mints ~6M runs a year, and a collision here is
- *  not an error: `saveRun`'s ON CONFLICT DO UPDATE would quietly overwrite the
- *  older run with the newer one. Four more characters buy ~16 million times
- *  the headroom for four bytes — cheaper than the alternative fix, which is a
- *  strict INSERT and a retry loop on every one of the four mint sites. */
+/** Every task record's id. These ride through model context constantly, and a
+ *  UUID spends ~12 tokens where this spends ~6. Sixteen characters (80 bits;
+ *  `& 31` is unbiased): a watch task mints ~6M runs a year, and a collision is
+ *  not an error — `saveRun`'s ON CONFLICT DO UPDATE would quietly overwrite. */
 export const newId = (): string => Array.from(randomBytes(16), idSymbol).join("");
 
-/**
- * Seam decision (tasks/): a definition Pier's own code created is reconciled by
- * that code, and edited by nobody.
- *
- * `creator` is `"http"` for the Console and `session:<id>` for the task tool.
- * Anything else is an instance-layer owner — today the tools update task
- * (src/tools-task.ts), whose script a switch in Settings runs on demand and
- * cron runs nightly. Both
- * public surfaces could rename it, point it at another script, pause it or
- * archive it, and the switch would go on claiming Pier keeps the tools current
- * while the run did something else entirely. The owner names itself in `by`;
- * neither the routes nor the tool has a `by` to pass, so this one function
- * closes both.
- */
+/** A definition Pier's own code created is reconciled by that code and edited
+ *  by nobody: `creator` is `"http"` (Console) or `session:<id>` (task tool);
+ *  anything else is an instance-layer owner, which names itself in `by`.
+ *  Otherwise a public surface could repoint the tools task while its switch
+ *  went on claiming Pier keeps the tools current. */
 const ownerOf = (task: TaskDefinition): string | null =>
   task.creator === "http" || task.creator.startsWith("session:") ? null : task.creator;
 
@@ -156,9 +132,8 @@ export class TaskDefinitions {
     return task;
   }
   async create(raw: unknown, creator = "http", kind: TaskDefinition["kind"] = "task"): Promise<TaskDefinition> {
-    // The tool schema marks trigger optional, so a trigger-less new definition
-    // means manual. Update keeps requiring it: replacing a cron task with a
-    // draft that forgot its trigger must not silently unschedule it.
+    // A trigger-less new definition means manual. Update keeps requiring it:
+    // a draft that forgot its trigger must not silently unschedule a cron task.
     const value = record(raw);
     const draft = await this.parseDraft(
       value && value.trigger === undefined ? { ...value, trigger: { type: "manual" } } : raw,
@@ -244,8 +219,7 @@ export class TaskDefinitions {
   }
   claimDue(now: number): TaskDefinition[] {
     const due: TaskDefinition[] = [];
-    // The store narrows to the tasks with a next run at or before `now`; the
-    // JSON is still the record, so its own fields decide.
+    // The store narrows by index; the JSON is still the record, so its fields decide.
     for (const task of this.store.listDueTasks(now)) {
       if (!task.enabled || task.archived || task.nextRunAt === null || task.nextRunAt > now) continue;
       task.nextRunAt = nextRunAt(task.trigger, now);
@@ -338,8 +312,7 @@ export class TaskDefinitions {
       await this.assertDirectory(cwd);
       session = { mode: "fresh", cwd };
     } else {
-      // Validation never mutates: a dedicated session is created explicitly
-      // (POST /api/sessions) and then referenced with mode:"reuse".
+      // Validation never mutates: a session is created explicitly and then reused.
       throw new Error('agent session policy required, e.g. {"mode":"fresh","cwd":"/abs/path"} or {"mode":"reuse","sessionId":"..."}');
     }
     if (session.mode === "reuse" && launch) throw new Error("launch policy only applies to fresh sessions");

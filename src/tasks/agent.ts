@@ -1,8 +1,6 @@
-// A run that *is* a Pi session: which session it opens (fresh or reused),
-// what the child is told before the prompt, and how many may run at once. The
-// concurrency caps are here rather than in execution.ts because they bound
-// agents specifically — a bash run costs a process, an agent run costs a
-// model's context and someone's rate limit.
+// A run that *is* a Pi session: which session it opens, what the child is told
+// before the prompt, and how many may run at once (an agent run costs a
+// model's context and someone's rate limit, so the caps are here).
 
 import type { AgentFactory, AgentSession } from "../core/types.js";
 import { quietLabel, splitReply } from "../core/reply.js";
@@ -16,10 +14,8 @@ import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
 const MAX_ACTIVE_AGENTS = 4;
 const log = logger("tasks");
 
-/** What a child cannot know unless told. Every session gets the chat-surface
- * contract (<pier>/AGENTS.md), task runs included — so the delegation prompt
- * says which of it does not apply here, and a supervised run how to reach the
- * agent that is waiting on it. Skipped on resume: the session already saw it. */
+/** Every session gets the chat-surface contract, task runs included, so the
+ *  delegation prompt says which of it does not apply. Skipped on resume. */
 const preamble = (run: TaskRun): string => {
   // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
@@ -65,35 +61,25 @@ export class AgentTaskRunner {
         // A reused session may have become busy while we waited for a slot.
         await this.waitUntilIdle(session, signal);
         signal.throwIfAborted();
-        // Task requests come seconds apart — the 1h Anthropic cache-write premium
-        // never earns its 2× back, so task runs use the 5m TTL. Set here, not in
-        // resolveSession: this covers create, reuse and resume alike, on
-        // every attempt — and only after the session is idle, so a reused
-        // interactive session's in-flight turn keeps its 1h writes.
+        // Task requests come seconds apart, so the 1h cache-write premium never
+        // earns back; after idle, so a reused session's in-flight turn keeps its 1h.
         session.setCacheRetention("short");
         start();
-        // No input is no block: `<task_input>\nnull\n</task_input>` is four
-        // lines telling the agent nothing, on every run that has no input.
-        // Compact for the same reason tool results are (agent/pi.ts), and
-        // `<\/` is the same JSON — a value cannot close the fence early.
+        // No input is no block. `<\/` is the same JSON, so a value cannot close
+        // the fence early.
         const input = run.input === undefined || run.input === null
           ? ""
           : `\n\n<task_input>\n${JSON.stringify(run.input).replaceAll("</task_input>", "<\\/task_input>")}\n</task_input>`;
         const prompt = run.context.resumePrompt ?? `${preamble(run)}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
-        // The level the session settled on, not the one the task asked for:
-        // an unspecified effort inherits the caller's, and the card in the
-        // subagent's own transcript should say which one that was.
+        // The level the session settled on: an unspecified effort inherits the caller's.
         run.context.thinking = session.thinkingLevel;
         run.context.renderedPrompt = prompt;
         this.store.saveRun(run);
         let text = "";
-        // Not only what the turn said but how it ended: a provider outage ends
-        // it with an empty reply, and a run that settles on that reports "no
-        // reply" — the one wording for a turn that *chose* to say nothing, so
-        // the outage arrives at the caller looking like an answer (§5b). Pi has
-        // already retried by the time this lands; the run only reports.
+        // How it ended, too: a provider outage ends with an empty reply, which
+        // would otherwise report as a turn that chose to say nothing (§5b).
         let failure: string | undefined;
         const unsubscribe = session.subscribe((event) => {
           if (event.type === "turn-end") {
@@ -126,25 +112,19 @@ export class AgentTaskRunner {
           this.messages.deliverPendingControls(run);
           await this.untilAborted(turn, signal);
           if (signal.aborted) throw new Error("cancelled");
-          // Before the fallback below: on a reused session that reads the
-          // *previous* turn's answer back out of history and reports it as
-          // this run's result.
+          // Before the fallback: on a reused session it would read the previous
+          // turn's answer back as this run's result.
           if (failure) throw new Error(failure);
           if (!text) {
             const history = await this.untilAborted(session.history(), signal);
             text = [...history].reverse().find((turn) => turn.role === "assistant")?.text ?? "";
           }
-          // The chat contract is injected into task sessions too, so a child's
-          // reply may carry chat-only markup. The result is read by a
-          // supervisor or the Console, never a chat renderer: buttons are
-          // dropped, and a turn that said nothing names which kind of nothing
-          // it was (principle 5b) instead of storing an empty result.
+          // The result is read by a supervisor, never a chat renderer: buttons
+          // are dropped, and an empty turn names which kind of nothing (§5b).
           const reply = splitReply(text);
           return { type: "agent", text: reply.text || quietLabel(reply.silence), sessionId: session.id };
         } finally {
-          // The run is what earns "short"; a reused interactive session goes
-          // back to chat afterwards. For task-created sessions this is moot —
-          // idle until the next run downgrades them again.
+          // A reused interactive session goes back to chat afterwards.
           session.setCacheRetention("long");
           signal.removeEventListener("abort", abort);
           unsubscribe();
@@ -161,9 +141,8 @@ export class AgentTaskRunner {
       return this.untilAborted(this.router.ensure({ channelId: "task", conversationId: run.targetSessionId }), signal);
     }
     const policy = action.session;
-    // Definitions stored before fork was removed still say `"fork"`. Refused by
-    // name: every directory this could pick instead is a guess at what the
-    // author meant, and a child in the wrong tree edits real files.
+    // Stored definitions may still say `"fork"`. Refused by name: any directory
+    // picked instead is a guess, and a child in the wrong tree edits real files.
     if (run.sessionMode === "fork" || (policy as { mode: string }).mode === "fork") {
       throw new Error(
         `task "${run.context.definition.name}" uses the removed fork session mode; recreate it with {"mode":"fresh","cwd":"/abs/path"}`,
@@ -184,10 +163,8 @@ export class AgentTaskRunner {
       thinking: action.launch?.thinking,
     };
     const opening = this.factory.create(opts).then(async (session) => {
-      // SDK creation cannot be cancelled. A late session still belongs to
-      // this run; read back its terminal row so delivery updates are preserved.
-      // Remember it on the live run too: cancellation's final save can race
-      // this callback before it finishes writing the terminal record.
+      // SDK creation cannot be cancelled; a late session still belongs to this
+      // run. Cancellation's final save can race this callback, so both records get it.
       run.targetSessionId = session.id;
       run.context.sessionId = session.id;
       run.context.cwd = cwd;

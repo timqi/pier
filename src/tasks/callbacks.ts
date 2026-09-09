@@ -7,17 +7,12 @@ import { Outbox } from "./outbox.js";
 import type { TaskStore } from "./store.js";
 import type { TaskCallback, TaskRun } from "./types.js";
 
-/** How a run is named to the session that gets its result: the run id, and the
- *  session that did the work — a relayer's next move is a deep link to it
- *  (`#/session/<id>`), and without this line that costs a second tool call.
- *  Shared with the group callback, which has always carried both. */
+/** The run id and the session that did the work: a relayer's next move is a
+ *  deep link to it, and without this that costs a second tool call. */
 export const runRef = (run: TaskRun): string =>
   `Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`;
 
-/** What the card in the recipient's transcript says the input came from. Part
- *  of the run vocabulary for the same reason `runRef` is: the callback, the
- *  subagent messages and the delegation prompt all name a run, and three
- *  spellings of "which task, on what model" would be three cards. */
+/** What the card in the recipient's transcript says the input came from. */
 export const runSource = (run: TaskRun): SystemInputSource => ({
   taskName: run.context.definition.name,
   ...(run.context.model ? { model: run.context.model } : {}),
@@ -56,10 +51,8 @@ export class TaskCallbacks {
           runId: runs[0]!.id,
           sourceSessionId: runs[0]!.targetSessionId,
           runIds: runs.map((run) => run.id),
-          // Only when the input is about one run: a batch is several tasks in
-          // one delivery, and the first one's name and model as the card's
-          // caption would attribute every other result to it. The text names
-          // each run; the card says nothing rather than something false.
+          // Only for one run: a batch's caption would attribute every result
+          // to the first run's name and model.
           ...(runs.length === 1 ? { source: runSource(runs[0]!), state: runs[0]!.state } : {}),
         },
       }),
@@ -83,8 +76,7 @@ export class TaskCallbacks {
     const first = this.store.getRun(candidate.id);
     if (!first?.callbackSessionId || (first.callbackState !== "pending" && first.callbackState !== "failed")) return;
     const sessionId = first.callbackSessionId;
-    // Retry due-times are ignored when sweeping the batch: once one callback is
-    // deliverable, everything pending for the session rides along.
+    // Once one callback is deliverable, everything pending for the session rides along.
     const batch = this.store.listPendingCallbacks(Number.MAX_SAFE_INTEGER)
       .filter((run) => run.callbackSessionId === sessionId);
     if (!batch.some((run) => run.id === first.id)) return;

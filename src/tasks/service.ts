@@ -1,9 +1,6 @@
-// The one object the rest of Pier talks to about tasks, and the clock behind
-// it: the tick that finds what is due, the boot recovery that writes off runs
-// a restart interrupted, and the pause a drain needs. Every decision it looks
-// like it makes belongs to a file beside it (definitions, runs, execution,
-// groups, messages, callbacks) — what is genuinely here is scheduling and the
-// facade, so the HTTP routes and the task tool cannot drift apart.
+// The facade the rest of Pier talks to about tasks, and the clock behind it:
+// the tick, the boot recovery that writes off interrupted runs, and the pause a
+// drain needs. Decisions belong to the files beside it.
 
 import type { AgentFactory, BackgroundRun } from "../core/types.js";
 import type { EventHub } from "../core/hub.js";
@@ -23,9 +20,8 @@ import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
 
-/** The text a run was given, as the operator wrote it: a resume's follow-up,
- *  else the action's own prompt or script. Not `renderedPrompt` — that is the
- *  preamble and the input wrapper, which the delegating session did not send. */
+/** Not `renderedPrompt`: that carries the preamble and input wrapper, which the
+ *  delegating session did not send. */
 const runPrompt = (run: TaskRun): string | null => {
   if (run.context.resumePrompt) return run.context.resumePrompt;
   const action = run.context.definition.action;
@@ -51,8 +47,7 @@ export class TaskService {
     private readonly factory: AgentFactory,
     private readonly router: Router,
     private readonly hub: EventHub,
-    /** Structural on purpose: tasks/ must not import settings.ts — main.ts
-     *  hands in a closure over the store instead. Absent in bare test rigs. */
+    /** Structural: tasks/ must not import settings.ts. Absent in bare test rigs. */
     private readonly instance?: {
       modelMenu(): { provider: string; id: string; thinking?: string; note?: string }[];
       systemActions?: SystemActions;
@@ -129,10 +124,8 @@ export class TaskService {
     this.timer.unref();
   }
 
-  /** Undo a `pause()` that was not followed by an exit — the auto-updater
-   *  drains before handing over, and a handover that never started must not
-   *  leave the scheduler switched off. Deliberately not `start()`: the boot
-   *  recovery in there would write off runs this process is still running. */
+  /** For a handover that never started. Not `start()`: its boot recovery would
+   *  write off runs this process is still running. */
   unpause(tickMs = 1000): void {
     if (this.timer) return;
     this.paused = false;
@@ -144,11 +137,8 @@ export class TaskService {
     this.execution.stop();
   }
 
-  /** Stop taking new work but leave running runs alone — a graceful restart
-   *  (src/drain.ts) waits for them, where stop() would abort them. The
-   *  scheduler timer goes, and new root runs are refused; children of a run
-   *  that is still finishing stay allowed, because refusing them would fail
-   *  the very work the drain is waiting for. */
+  /** New root runs are refused, running ones left for the drain to wait on;
+   *  children of a finishing run stay allowed, or the drain fails its own work. */
   pause(): void {
     this.paused = true;
     if (this.timer) clearInterval(this.timer);
@@ -168,11 +158,8 @@ export class TaskService {
     return this.store.countActiveRuns();
   }
 
-  /** The run this task has in flight, if any. The store already answers this
-   *  for the overlap guard (runs.ts); a caller that has just been refused as
-   *  an overlap needs the same answer to know what to wait for, and scanning
-   *  run history for it finds nothing once the skipped rows outnumber the
-   *  window. */
+  /** A caller refused as an overlap needs this to know what to wait for;
+   *  scanning run history finds nothing once skipped rows outnumber the window. */
   activeRun(taskId: string): TaskRun | undefined {
     return this.store.findActiveRun(taskId);
   }
@@ -189,8 +176,7 @@ export class TaskService {
     return this.definitions.create(raw, creator);
   }
 
-  /** `by` is how the code that owns a definition says so; the HTTP routes and
-   *  the task tool have none, which is what closes both (definitions.ts). */
+  /** `by` is how owning code says so; the routes and the tool have none (definitions.ts). */
   update(id: string, raw: unknown, by?: string): Promise<TaskDefinition> {
     return this.definitions.update(id, raw, by);
   }
@@ -241,8 +227,7 @@ export class TaskService {
     return this.messages.recent(since);
   }
 
-  /** Every run this session delegated: the card is the message that started
-   *  it, and a message does not leave the transcript because the run ended. */
+  /** Every run, not the last hour's: the card is a message in the transcript. */
   backgroundRuns(sessionId: string): BackgroundRun[] {
     return this.store.listRunsForSession(sessionId, 200)
       .filter((run) => run.background)
@@ -250,8 +235,6 @@ export class TaskService {
       .map((run) => this.backgroundRun(run));
   }
 
-  /** The same runs `backgroundRuns` reports as in flight, counted per session
-   *  in one query — a list needs the number, not the runs. */
   activeBackgroundRunCounts(): Map<string, number> {
     return this.store.countActiveBackgroundRunsBySession();
   }
@@ -399,9 +382,7 @@ export class TaskService {
     return handleTaskTool(this, this.definitions, this.store, this.messages, raw, callerSessionId);
   }
 
-  /** The deployment's model advice: the operator's pinned menu when one is
-   * set, the curated live catalog otherwise — an agent picks from names that
-   * exist right now, never from memory. */
+  /** An agent picks from names that exist right now, never from memory. */
   async models(): Promise<{
     source: "menu" | "catalog";
     models: { provider: string; id: string; thinking?: string; note?: string }[];
@@ -429,17 +410,14 @@ export class TaskService {
     }
   }
 
-  /** A delivery nobody can complete. Retrying it forever costs the same
-   * silence as dropping it, so it stops here and says so on three surfaces:
-   * the operator's log, the record the tool and Console read, and the event
-   * stream of the session that was supposed to receive it (§5b). */
+  /** Retrying forever costs the same silence as dropping, so it stops and says
+   *  so on the log, the record and the recipient's event stream (§5b). */
   private unreachable(sessionId: string, what: string, why: string): void {
     log.error(`gave up delivering ${what} to session ${sessionId}: ${why}`);
     this.router.reportTo(sessionId, `${what} could not be delivered — ${why}`);
   }
 
-  /** Four independent sweeps, isolated: one throwing (a group whose member row
-   * is gone throws on every pass) must not starve the retries behind it. */
+  /** Isolated: one sweep throwing on every pass must not starve the others. */
   private sweep(what: string, run: () => void): void {
     try {
       run();

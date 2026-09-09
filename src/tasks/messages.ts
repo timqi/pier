@@ -1,8 +1,6 @@
-// What a parent and a child say to each other while a run is going: steer,
-// follow-up and resume in one direction, progress and decision questions in
-// the other. Every message is a durable row before it is a delivery, because
-// the two ends are different sessions and either may be mid-turn, gone, or
-// finished — an undelivered message is retried, expired and *said*, never
+// What a parent and a child say to each other while a run is going. Every
+// message is a durable row before it is a delivery: either end may be mid-turn
+// or gone, and an undelivered message is retried, expired and said, never
 // dropped (§5b).
 
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
@@ -105,24 +103,17 @@ export class TaskMessenger {
         this.changed(message);
         continue;
       }
-      // A reply that resumed a terminal run was never a system input: its text
-      // is the continuation's prompt, so the transcript read below would find
-      // nothing and re-inject a second copy, starting a turn no run owns. The
-      // continuation is the proof instead. `startedAt` is written one statement
-      // before the prompt reaches the session (agent.ts), so `delivered` here
-      // means "handed to the run that reports for it" — a `systemInput` that
-      // then throws fails *that* run, and the failure reaches the replier
-      // through its callback.
+      // A reply that resumed a terminal run is the continuation's prompt, not a
+      // system input: the transcript read would re-inject it and start a turn no
+      // run owns. The continuation's `startedAt` is the proof instead.
       if (message.kind === "reply" && isTerminal(run.state)) {
         const resumed = message.resumeRunId ? this.store.getRun(message.resumeRunId) : undefined;
         if (resumed?.startedAt) this.confirmed(message.id);
         else if (!resumed) this.abandon(message, `continuation ${message.resumeRunId ?? "(none)"} is gone`);
         else if (isTerminal(resumed.state)) {
-          // Never started, and never will: say so rather than wait for a
-          // ceiling that would only report the same thing four minutes later.
-          // Both ends hear it here; the supervisor may also get the
-          // continuation's own cancelled callback, and a duplicate beats a
-          // special case that could suppress the only report either gets.
+          // Never started and never will: said now, not four minutes later at
+          // the ceiling. A duplicate report beats a special case that could
+          // suppress the only one.
           this.abandon(message, `continuation ${resumed.id} ${resumed.state} before it started`);
         }
         continue;
@@ -133,12 +124,9 @@ export class TaskMessenger {
     }
   }
 
-  /** Asynchronous by design: returns the receipt immediately. A decision
-   * child states what it awaits and ends its turn; the reply arrives as a
-   * follow-up (active run) or resumes the session (terminal run).
-   * A decision steers the supervisor: a follow-up only lands once the
-   * supervisor has no tool calls left, so a blocked child would wait out the
-   * whole turn. Progress stays a follow-up — nobody waits on it. */
+  /** Returns the receipt immediately; the reply arrives as a follow-up (active
+   *  run) or resumes the session (terminal run). A decision steers the
+   *  supervisor, or a blocked child would wait out its whole turn. */
   async contact(
     run: TaskRun,
     fromSessionId: string,
@@ -221,12 +209,10 @@ export class TaskMessenger {
     return message;
   }
 
-  /** Never awaits the recipient: the seam's `systemInput` settles with the turn
-   * the input triggers, so awaiting it would block the sender — a child's
-   * `contact` on its supervisor's whole answer turn — which the design forbids.
-   * So `delivered` is written by `confirmed`, against the one proof that
-   * survives an abort or a restart: the message visible in the recipient's own
-   * transcript. Until then it stays pending and the sweep tries again. */
+  /** Never awaits the recipient: `systemInput` settles with the turn it
+   *  triggers, which would block a child on its supervisor's whole turn.
+   *  `delivered` is written by `confirmed`, against the one proof that survives
+   *  an abort or a restart: the message in the recipient's transcript. */
   private deliver(candidate: TaskMessage, run: TaskRun, targetSessionId: string): void {
     const message = this.require(candidate.id);
     if (message.state !== "pending" && message.state !== "failed") return;
@@ -251,10 +237,7 @@ export class TaskMessenger {
     this.changed(message);
   }
 
-  /** Waiting is not a failed attempt: the message is in flight or the turn it
-   *  has to wait for is still running, so it is tried again shortly and the
-   *  ceiling is left for the deliveries that actually failed (the rule
-   *  outbox.ts keeps for callbacks). */
+  /** Waiting is not a failed attempt; the ceiling is for deliveries that failed. */
   private defer(id: string): void {
     const message = this.store.getMessage(id);
     if (!message || message.state !== "pending") return;
@@ -262,9 +245,8 @@ export class TaskMessenger {
     this.store.saveMessage(message);
   }
 
-  /** Counts one hand-off and says whether it may happen: a recipient that
-   *  never records the message must not be re-sent once a second forever.
-   *  False means the ceiling was reached and the message is now expired. */
+  /** A recipient that never records the message must not be re-sent once a
+   *  second forever. False: the ceiling was reached and the message expired. */
   private spend(id: string): boolean {
     const message = this.store.getMessage(id);
     if (!message || message.state !== "pending") return false;
@@ -278,10 +260,8 @@ export class TaskMessenger {
     return true;
   }
 
-  /** Out of attempts. Both ends are told — the recipient that was owed it and
-   *  the sender waiting on the answer — and a decision that expires here stops
-   *  suppressing its run's completion callback, which `execution.ts` decided
-   *  once, at the end of the run, and never revisits. */
+  /** Both ends are told, and an expired decision stops suppressing its run's
+   *  completion callback, which `execution.ts` decided once and never revisits. */
   private abandon(message: TaskMessage, why: string): void {
     message.state = "expired";
     message.error = why;
@@ -301,26 +281,20 @@ export class TaskMessenger {
     }
   }
 
-  /** Steer whatever someone is blocked on: a decision, and the reply that
-   * answers it — a follow-up lands only once the recipient runs out of tool
-   * calls, so each would wait out a whole turn (the reply waited 3 minutes
-   * behind one on 2026-09-07). Progress is a follow-up because nobody waits. */
+  /** Steer whatever someone is blocked on: a follow-up lands only once the
+   *  recipient runs out of tool calls. Progress is a follow-up because nobody waits. */
   private mode(message: TaskMessage): "steer" | "follow_up" {
     return message.kind === "follow_up" || message.kind === "progress" ? "follow_up" : "steer";
   }
 
   private failed(id: string, error: unknown, spent: boolean): void {
     const message = this.store.getMessage(id);
-    // Only a still-pending message can fail: a late rejection must not undo a
-    // delivery a newer attempt already proved, nor revive an expired one.
+    // A late rejection must not undo a delivery a newer attempt proved.
     if (message?.state !== "pending") return;
-    // Both ends are waiting on this one: the sender for an answer, the
-    // recipient for a message it never got told about.
     log.warn(`${message.kind} ${id} to session ${message.toSessionId} failed`, error);
     message.state = "failed";
     message.error = String(error);
-    // A pass that died before the send never spent its attempt — an
-    // unresolvable target dies there every time, and would retry forever.
+    // An unresolvable target dies before the send every time, and would retry forever.
     if (!spent) message.attempts += 1;
     message.nextAttemptAt = Date.now() + retryDelay(message.attempts);
     this.store.saveMessage(message);
@@ -330,10 +304,8 @@ export class TaskMessenger {
     }
   }
 
-  /** One pass at getting the message into the recipient: the dedupe on a retry
-   *  and the proof of delivery are the same transcript read. Owns its own
-   *  failure, so an attempt is counted exactly once whether the pass died
-   *  before the send or the send itself was refused. */
+  /** The dedupe on a retry and the proof of delivery are the same transcript
+   *  read. Owns its own failure, so an attempt is counted exactly once. */
   private async inject(
     message: TaskMessage,
     run: TaskRun,
@@ -347,11 +319,8 @@ export class TaskMessenger {
         (await session.history()).some((turn) =>
           turn.role === "system" && turn.origin?.kind === "task-message" && turn.origin.messageId === message.id);
       if (await recorded()) return this.confirmed(message.id);
-      // Accepted and waiting in the recipient's queue for the running turn to
-      // drain it: not recorded yet, and sending again would deliver the same
-      // guidance twice. Unlike a callback this is not deferred on a busy
-      // target — a steer's whole point is to reach the turn already running —
-      // so the queue is where it sits, and waiting for it costs no attempt.
+      // Waiting in the recipient's queue: not recorded yet, and sending again
+      // would deliver the same guidance twice. Costs no attempt.
       if (await this.queued(session, message.id)) return this.defer(message.id);
       spent = this.spend(message.id);
       if (!spent) return;
@@ -366,8 +335,7 @@ export class TaskMessenger {
     }
   }
 
-  /** In the recipient's queue, by the id its origin carries — the transcript
-   *  read above answers "landed", this answers "handed over and waiting". */
+  /** The transcript answers "landed"; this answers "handed over and waiting". */
   private async queued(session: AgentSession, id: string): Promise<boolean> {
     return (await session.pendingSystemInputs()).some((origin) =>
       origin.kind === "task-message" && origin.messageId === id);
