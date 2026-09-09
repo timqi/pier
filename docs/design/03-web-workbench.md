@@ -148,8 +148,11 @@ browser keeps no second session order.
   pointerdown, focus leaving, Esc, page scroll (not scroll inside). Below 640px
   a bottom sheet with title and close button; its backdrop consumes the click.
 - Focus a control on open; arrow / ⌃N ⌃P / ⌃J ⌃K / Home / End (the palette's
-  `listStep`); return focus on dismissal. An open menu owns those keys: ⌘K/⌃K
-  stands down. ⌘N/⌘P are never bound.
+  `listStep`), from wherever the focus sits rather than only from inside the
+  panel; return focus on dismissal. A panel that is not all list marks the part
+  that is (`data-list`, the directory tree's folders) and keeps Home/End for
+  its text field. An open menu owns those keys: ⌘K/⌃K stands down. ⌘N/⌘P are
+  never bound.
 - Session menu: Rename / Session info, New session here / Browse files, Model &
   reasoning. Model loading is immediate; a cancelled load cannot reopen the
   panel. Manual compaction is API-only.

@@ -40,7 +40,7 @@ export function listStep(ev: KeyboardEvent): number | undefined {
 
 /** From outside the list the first step lands on the near end. False when
  *  there is nothing to walk, so the caller can leave the key alone. */
-export function walkRows(list: HTMLElement, to: number | "first" | "last"): boolean {
+function walkRows(list: HTMLElement, to: number | "first" | "last"): boolean {
   const rows = [...list.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
   if (!rows.length) return false;
   const index = rows.indexOf(document.activeElement as HTMLButtonElement);
@@ -51,10 +51,23 @@ export function walkRows(list: HTMLElement, to: number | "first" | "last"): bool
   return true;
 }
 
+/** A menu is all list; any other panel says which part of it is one
+ *  (`data-list`). Handled here rather than by the panel's own content, because
+ *  the keys have to walk from wherever the focus sits — the path line above
+ *  the tree, or nothing at all. Home/End are the list's only in a menu: a
+ *  panel with a text field owes them to the caret. */
+function listIn(p: HTMLElement): { rows: HTMLElement; ends: boolean } | null {
+  if (p.dataset.menu === "true") return { rows: p, ends: true };
+  const rows = p.querySelector<HTMLElement>("[data-list]");
+  return rows ? { rows, ends: false } : null;
+}
+
 function onKey(ev: KeyboardEvent): void {
-  if (panel?.dataset.menu === "true") {
-    const to = ev.key === "Home" ? "first" : ev.key === "End" ? "last" : listStep(ev);
-    if (to !== undefined && walkRows(panel, to)) {
+  const walk = panel ? listIn(panel) : null;
+  if (walk) {
+    const end = walk.ends ? (ev.key === "Home" ? "first" : ev.key === "End" ? "last" : undefined) : undefined;
+    const to = end ?? listStep(ev);
+    if (to !== undefined && walkRows(walk.rows, to)) {
       ev.preventDefault();
       return;
     }

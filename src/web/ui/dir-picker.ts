@@ -7,7 +7,7 @@ import { icon } from "./icons.js";
 import { getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn } from "./form.js";
-import { closeMenu, listStep, openMenu, openPanel, walkRows } from "./menu.js";
+import { closeMenu, openMenu, openPanel } from "./menu.js";
 
 interface Listing {
   path: string;
@@ -120,12 +120,8 @@ export function openBrowser(
       use,
     );
     const body = h("div", "min-h-0 flex-1 overflow-y-auto");
-    // Not the menu's own handler (menu.ts): Home/End belong to the caret in
-    // the path line.
-    content.onkeydown = (ev) => {
-      const step = listStep(ev);
-      if (step !== undefined && walkRows(body, step)) ev.preventDefault();
-    };
+    // The folders are the list menu.ts walks; the path line keeps Home/End.
+    body.dataset.list = "";
     if (list.parent) body.append(row("../", `${MONO} text-neutral-500`, () => void open(list.parent!)));
     const names = folders(list);
     for (const name of names) {
