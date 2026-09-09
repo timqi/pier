@@ -1,10 +1,5 @@
-// Telegram's half of the settings panel: HTML markup, an inline keyboard, and
-// a forced reply for the one typed answer. The panel itself lives in
-// `panel.ts`.
-//
-// Asking for a working directory costs a Map here: a forced reply arrives as
-// an ordinary message, so the prompt's message id has to be remembered to
-// recognize the answer. Slack's modal carries that context itself.
+// Telegram's half of the settings panel (panel.ts has the rest). A forced reply
+// arrives as an ordinary message, so the prompt's id is remembered to recognize it.
 
 import type { ConversationKey } from "../core/types.js";
 import {
@@ -25,7 +20,6 @@ export interface TelegramPanelDeps extends PanelDeps {
   api: Pick<TelegramClient, "sendMessage" | "editMessage" | "deleteMessage">;
 }
 
-/** Where this conversation's panel lives. */
 interface TelegramPanelState extends PanelState {
   topicId?: number;
   messageId: number;
@@ -36,7 +30,6 @@ const button = (b: PanelButton) => ({ text: b.label, callback_data: `${PANEL_PRE
 export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
   protected readonly platform = "telegram" as const;
   protected readonly fence: [string, string] = ["<code>", "</code>"];
-  /** Conversations waiting for a typed working directory (ForceReply). */
   private readonly cwdPrompts = new Map<string, number>();
 
   constructor(protected override readonly deps: TelegramPanelDeps) {
@@ -47,7 +40,6 @@ export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
     return esc(text);
   }
 
-  /** Topics are a Telegram-only gate, and only on a forum. */
   protected override gateExtras(chat: ChatConfig, policy: ChatPolicy): string {
     return chat.kind === "forum" ? ` · topics ${policy.topicMode ? "on" : "off"}` : "";
   }
@@ -71,7 +63,6 @@ export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
     };
   }
 
-  /** Open a fresh panel, replacing whichever one this conversation had. */
   async open(key: ConversationKey, chatId: string, topicId?: number): Promise<void> {
     const view = await this.view(key, chatId);
     const sent = await this.deps.api.sendMessage({
@@ -105,10 +96,7 @@ export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
 
   // --- actions -----------------------------------------------------------------
 
-  /**
-   * Handle a `cfg:` button. Returns false when the payload is not ours, so the
-   * caller can treat it as one of the agent's next-step labels instead.
-   */
+  /** Returns false when the payload is not ours. */
   async onCallback(query: TgCallbackQuery, key: ConversationKey): Promise<boolean> {
     return this.dispatch(key, query.data ?? "", undefined, async () => {
       const message = query.message;
@@ -122,7 +110,6 @@ export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
     const sent = await this.deps.api.sendMessage({
       chat_id: state.chatId,
       message_thread_id: state.topicId,
-      // Said plainly: this is not an edit, it is a new session.
       text:
         `Reply with an absolute path. ${CWD_TAIL}`,
       reply_markup: { force_reply: true, input_field_placeholder: CWD_PLACEHOLDER },
@@ -130,18 +117,14 @@ export class TelegramPanel extends ChatPanel<TelegramPanelState, void> {
     this.cwdPrompts.set(key.conversationId, sent.message_id);
   }
 
-  /**
-   * Consume a reply to the working-directory prompt. Returns true when this
-   * message was that answer and must not reach the agent.
-   */
+  /** True when this message was the answer and must not reach the agent. */
   async consumeCwdReply(msg: TgMessage, key: ConversationKey): Promise<boolean> {
     const pending = this.cwdPrompts.get(key.conversationId);
     if (!pending || msg.reply_to_message?.message_id !== pending) return false;
     this.cwdPrompts.delete(key.conversationId);
     const path = (msg.text ?? "").trim();
     const started = await this.startSessionIn(key, path);
-    // The answer was typed in the chat, so the outcome is said in the chat:
-    // a panel note alone would be easy to miss under one's own message.
+    // The answer was typed in the chat, so the outcome is said there too.
     await this.deps.api.sendMessage({
       chat_id: msg.chat.id,
       message_thread_id: msg.message_thread_id,

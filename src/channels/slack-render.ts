@@ -1,71 +1,46 @@
 // How a reply looks on Slack: mrkdwn text, and buttons as a Block Kit
-// `actions` row.
-//
-// mrkdwn is not markdown. Bold is `*one*` star, italic is `_underscore_`,
-// strikethrough is `~one~` tilde, and a link is `<url|label>` — so the agent's
-// markdown has to be translated, not passed through. Only `&`, `<` and `>` are
-// escaped; unlike Telegram's HTML parser Slack degrades unknown syntax to
-// literal text instead of rejecting the message, so the risk here is an ugly
-// reply rather than a lost one.
+// `actions` row. mrkdwn is not markdown (`*bold*`, `_italic_`, `~strike~`,
+// `<url|label>`), so the agent's markdown is translated; Slack degrades unknown
+// syntax to literal text rather than rejecting the message.
 
 import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
 
-/**
- * A `markdown` block's budget: Slack caps them at 12,000 cumulative chars per
- * message, and one message carries one. This is the normal path.
- */
+/** Slack caps `markdown` blocks at 12,000 cumulative chars per message. */
 export const MARKDOWN_MAX = 11_000;
-/**
- * The legacy fallback's budget: a `section` block's text caps at 3000, and the
- * mrkdwn translation adds a little markup.
- */
+/** A `section` block's text caps at 3000, and the mrkdwn translation adds markup. */
 export const MRKDWN_MAX = 2800;
 // Slack truncates a button label past this, mid-word.
 const BUTTON_MAX = 75;
 
-/** Shared: the adapter and the panel escape plain text with this too. */
 export const escapeMrkdwn = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/**
- * Inline emphasis, applied after escaping so our own markup stays ours.
- *
- * Bold is marked with a private-use sentinel rather than written as `*` right
- * away: mrkdwn spells bold with the single star that markdown uses for italic,
- * so emitting it early would let the italic pass eat it again.
- */
+/** mrkdwn spells bold with the single star markdown uses for italic, so bold
+ *  is marked with a sentinel until the italic pass has run. */
 const BOLD = "\uE002";
 
 function inline(text: string): string {
   return text
-    // Links first: their label may itself carry emphasis. Slack inverts the
-    // order of markdown's pair, and `>` inside is already escaped.
+    // Links first: their label may itself carry emphasis.
     .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label: string, url: string) =>
       `<${url}|${label}>`)
     // Bold before italic: `**x**` must not be seen as two `*x*` runs.
     .replace(/\*\*([^\n*]+)\*\*/g, `${BOLD}$1${BOLD}`)
     .replace(/~~([^\n~]+)~~/g, "~$1~")
     .replace(/(^|[\s(])[*_]([^\n*_]+)[*_](?=[\s).,!?:;]|$)/g, "$1_$2_")
-    // Headings have no size in Slack either; bold is the closest honest render.
     .replace(/^#{1,6}[ \t]+(.+)$/gm, `${BOLD}$1${BOLD}`)
-    // Slack renders neither `-` nor `*` as a list marker, so bullets are drawn.
+    // Slack renders neither `-` nor `*` as a list marker.
     .replace(/^[ \t]*[-*+][ \t]+/gm, "\u2022 ")
     .replaceAll(BOLD, "*");
 }
 
-/**
- * Render one assistant turn as mrkdwn. Code spans and fences are extracted
- * before escaping so emphasis inside them stays literal.
- */
+/** Code is stashed before escaping so emphasis inside it stays literal. */
 export function toMrkdwn(markdown: string): string {
   const stash: string[] = [];
-  // Private-use sentinels: markdown cannot contain them, so a stashed block
-  // cannot be re-matched by the escaping and emphasis passes that follow.
   const keep = (text: string): string => `\uE000${stash.push(text) - 1}\uE001`;
 
-  // Slack code fences carry no language, so the hint is dropped rather than
-  // shown as the first line of the block.
+  // Slack fences carry no language; the hint would show as the first line.
   let out = markdown.replace(/```[\w.+-]*\n?([\s\S]*?)```/g, (_m, code: string) =>
     keep("```\n" + escapeMrkdwn(code.replace(/\n+$/, "")) + "\n```"));
   out = out.replace(/`([^`\n]+)`/g, (_m, code: string) => keep(`\`${escapeMrkdwn(code)}\``));
@@ -73,20 +48,11 @@ export function toMrkdwn(markdown: string): string {
   return out.replace(/\uE000(\d+)\uE001/g, (_m, i: string) => stash[Number(i)] ?? "");
 }
 
-/**
- * Split rendered mrkdwn into sendable chunks at the last blank line or newline
- * that fits, then re-balance code fences across the cut (see chunk.ts for why
- * an unbalanced fence is a mangled reply here and not on Telegram).
- */
 export const chunk = (text: string, max: number): string[] =>
   balanceFences(chunkText(text, max));
 
-/**
- * The body of a turn, as Slack's own markdown renderer sees it. Preferred over
- * `section` for everything the agent wrote: it takes the markdown unmodified
- * (so tables and headers survive) and the client never folds it behind
- * "Show more".
- */
+/** Slack's own renderer: tables and headers survive, and the client never
+ *  folds it behind "Show more". */
 export const markdown = (text: string): SlackBlock => ({ type: "markdown", text });
 
 export const section = (text: string): SlackBlock => ({
@@ -96,15 +62,10 @@ export const section = (text: string): SlackBlock => ({
 
 // Slack caps a message at 50 blocks; the footer and the button row need two.
 const MAX_BLOCKS = 45;
-// A section block's hard limit. Nothing should reach it — chunk() caps a whole
-// message below this — but the overflow merge below could in principle.
+// A section block's hard limit; only the overflow merge in sections() can reach it.
 const SECTION_MAX = 2900;
 
-/**
- * Split rendered mrkdwn into paragraphs without ever cutting a fenced code
- * block — a fence split across two blocks would leave both unbalanced, the
- * same hazard `chunk()` handles for messages.
- */
+/** Never cuts a fenced block: a fence split across two blocks leaves both unbalanced. */
 function paragraphs(text: string): string[] {
   const out: string[] = [];
   let buf: string[] = [];
@@ -115,7 +76,6 @@ function paragraphs(text: string): string[] {
   };
   for (const line of text.split("\n")) {
     const isFence = line.trimStart().startsWith("```");
-    // A blank line only ends a paragraph outside a fence; inside one it is code.
     if (!fenced && !isFence && !line.trim()) {
       flush();
       continue;
@@ -123,7 +83,6 @@ function paragraphs(text: string): string[] {
     buf.push(line);
     if (isFence) {
       fenced = !fenced;
-      // A closed fence stands alone, so it can never be merged apart.
       if (!fenced) flush();
     }
   }
@@ -131,33 +90,20 @@ function paragraphs(text: string): string[] {
   return out;
 }
 
-/**
- * The body of one message as one `section` block per paragraph — the fallback
- * for a workspace whose Slack refuses the `markdown` block.
- *
- * A whole turn in a single section block gets collapsed behind "Show more",
- * hiding most of the answer; several blocks render unfolded. Paragraphs are
- * deliberately *not* packed together to fill a size budget — a paragraph is
- * already the natural short unit, and merging a few of them back into one tall
- * block is exactly what brings the collapse back.
- */
+/** The fallback for a workspace that refuses the `markdown` block. One section
+ *  per paragraph, never packed: a tall single block is collapsed behind "Show
+ *  more", several short ones render unfolded. */
 export function sections(text: string): SlackBlock[] {
   const paras = paragraphs(text);
   if (!paras.length) return [];
-  // Past the block cap the tail is folded into the last block rather than
-  // dropped: a truncated reply is worse than a tall one, and silently losing
-  // the end of an answer is worst of all.
+  // The tail is folded into the last block, not dropped.
   const kept = paras.slice(0, MAX_BLOCKS - 1);
   const tail = paras.slice(MAX_BLOCKS - 1);
   if (tail.length) kept.push(tail.join("\n\n").slice(0, SECTION_MAX));
   return kept.map(section);
 }
 
-/**
- * Slack's small muted text. Telegram has none, which is why `formatTurnMeta`
- * lands there as an italic footnote; here the footer gets the block the
- * platform actually has for it.
- */
+/** Slack's small muted text, for the footer. */
 export const context = (text: string): SlackBlock => ({
   type: "context",
   elements: [{ type: "mrkdwn", text }],
@@ -165,22 +111,14 @@ export const context = (text: string): SlackBlock => ({
 
 // --- next-step buttons -------------------------------------------------------
 
-/**
- * `action_id` carries an index, not the label. Slack would allow 2000 chars of
- * `value`, but the index is what makes a button survive a `runtime.reload()`:
- * the label is read back off the message Slack echoes with the click, so no
- * adapter-instance memory is involved.
- */
+/** `action_id` carries an index: the label is read back off the message Slack
+ *  echoes with the click, so a button survives a reload. */
 export const OFFER_PREFIX = "sg:";
 
 const truncate = (label: string): string =>
   label.length > BUTTON_MAX ? `${label.slice(0, BUTTON_MAX - 1)}\u2026` : label;
 
-/**
- * One actions row. Slack wraps buttons on its own and gives each its natural
- * width, so unlike Telegram there is no row packing to budget — a long label
- * beside a short one costs nothing.
- */
+/** Slack wraps buttons on its own, so there is no row packing to budget. */
 export function actions(labels: string[]): SlackBlock | undefined {
   if (!labels.length) return undefined;
   const elements: SlackButton[] = labels.map((label, index) => ({
@@ -191,12 +129,6 @@ export function actions(labels: string[]): SlackBlock | undefined {
   return { type: "actions", elements };
 }
 
-/**
- * The label a next-step `action_id` stands for, read off the clicked message's
- * own blocks — which Slack echoes back in the interaction payload. A button
- * therefore keeps working across a restart or a config reload, where an
- * in-memory offer list would not.
- */
 export function offeredLabel(
   blocks: SlackBlock[] | undefined,
   actionId: string,

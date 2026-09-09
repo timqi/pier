@@ -1,16 +1,6 @@
-// The in-chat settings panel, minus the platform.
-//
-// One message edited in place — a new message per tap would bury the chat.
-// Every payload is namespaced `cfg:` and consumed here, so a panel tap can
-// never be mistaken for one of the agent's next-step buttons (whose payload is
-// the label itself) and never reaches the agent. Choices travel as an index
-// rather than a name: Telegram's callback data caps at 64 bytes, and an index
-// cannot be invalidated by a label someone rewrote.
-//
-// What is left to a platform is markup, how its one message is sent, edited
-// and deleted, and how it asks for a single typed answer — Slack has modals,
-// Telegram has a forced reply. Everything above that is the same panel, so it
-// is written once here.
+// The in-chat settings panel, minus the platform: one message edited in place,
+// every payload namespaced `cfg:` so a tap never reaches the agent. Choices
+// travel as an index: Telegram's callback data caps at 64 bytes.
 
 import { compact, thinkingLabel } from "../core/reply.js";
 import type { ConversationKey, ModelRef, ThinkingLevel } from "../core/types.js";
@@ -21,8 +11,6 @@ import type { ChannelPlatform, ChatConfig, ChatPolicy } from "./types.js";
 export const PANEL_PREFIX = "cfg:";
 const MODELS_PER_PAGE = 8;
 
-/** The cwd prompt's one sentence and placeholder — each platform owns only
- *  its widget's lead-in ("Reply with…", a modal hint, a form label). */
 export const CWD_TAIL = "A new session starts there; the current one stays in its own directory.";
 export const CWD_PLACEHOLDER = "/path/to/project";
 
@@ -44,11 +32,8 @@ export interface PanelGroup {
 
 export interface PanelView {
   groups: PanelGroup[];
-  /**
-   * A list of same-kind choices. Laid out by the platform, because that is
-   * where the constraint lives: Slack fits them on one row, Telegram gives a
-   * long model id a row of its own.
-   */
+  /** Same-kind choices, laid out by the platform: Slack fits them on one row,
+   *  Telegram gives a long model id a row of its own. */
   picks?: PanelButton[];
   /** Button rows, taken as authored. */
   rows: PanelButton[][];
@@ -60,12 +45,7 @@ export interface PanelDeps {
   log(message: string): void;
 }
 
-/** What every panel remembers, beside where its own message is. */
 export interface PanelState {
-  /**
-   * The chat the panel is in. Kept rather than decoded back out of the
-   * conversation id: the adapter already knew it when it opened the panel.
-   */
   chatId: string;
   /** The list the payload's indices point into. */
   models: ModelRef[];
@@ -81,13 +61,10 @@ export abstract class ChatPanel<S extends PanelState, C> {
   protected abstract readonly platform: ChannelPlatform;
   /** What wraps a fixed-width span in this platform's markup. */
   protected abstract readonly fence: [string, string];
-  /** Escape text that is not markup. */
   protected abstract esc(text: string): string;
-  /** Paint the view onto the panel's one message. */
   protected abstract draw(state: S, view: PanelView, note?: string): Promise<void>;
-  /** Ask for a working directory: a modal, or a forced reply. */
+  /** A modal, or a forced reply. */
   protected abstract promptCwd(key: ConversationKey, state: S, ctx: C): Promise<void>;
-  /** Take the panel message down. */
   protected abstract erase(state: S): Promise<void>;
   /** Gates this platform has and the other does not. */
   protected gateExtras(_chat: ChatConfig, _policy: ChatPolicy): string {
@@ -108,7 +85,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   // --- rendering ---------------------------------------------------------------
 
-  /** The panel proper: this session, this chat, and what can be done to them. */
   protected async view(key: ConversationKey, chatId: string): Promise<PanelView> {
     const status = await this.deps.control.status(key);
     return {
@@ -119,8 +95,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
             ? this.sessionLines(status)
             : ["None yet — send a message to start one."],
         },
-        // Slack calls it a channel, Telegram a chat; the panel says what the
-        // person reading it says.
         {
           title: this.platform === "slack" ? "Channel" : "Chat",
           lines: this.chatLines(chatId),
@@ -164,7 +138,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
     return [`${this.esc(chat.name || chatId)} · ${chat.kind} · ${this.code(chatId)}`, gates];
   }
 
-  /** Redraw the panel this conversation owns. */
   protected async refresh(key: ConversationKey, note?: string): Promise<void> {
     const state = this.state(key);
     if (!state) return;
@@ -173,14 +146,8 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   // --- actions -----------------------------------------------------------------
 
-  /**
-   * Handle a `cfg:` payload. Returns false when it is not ours, so the caller
-   * can treat it as one of the agent's next-step labels instead.
-   *
-   * `reopen` is how a panel left behind by a previous process recovers: its
-   * state died with that process, and redrawing from the platform's own copy
-   * of the message is the only honest answer. It costs one tap.
-   */
+  /** Returns false when the payload is not ours. `reopen` recovers a panel
+   *  whose state died with a previous process; it costs one tap. */
   protected async dispatch(
     key: ConversationKey,
     payload: string,
@@ -290,18 +257,13 @@ export abstract class ChatPanel<S extends PanelState, C> {
     await this.refresh(key, `Reasoning set to ${thinkingLabel(level)}.`);
   }
 
-  /**
-   * The one action that is not reversible in place: Pi fixes cwd at session
-   * creation, so "change the working directory" *is* "start a new session
-   * there". Shared because both platforms have to say so and handle the same
-   * two failures.
-   */
+  /** Pi fixes cwd at session creation, so "change the working directory" *is*
+   *  "start a new session there". */
   protected async startSessionIn(
     key: ConversationKey,
     path: string,
   ): Promise<{ id: string } | { error: string }> {
     if (!path.startsWith("/")) {
-      // A silent no-op here reads as "the button is broken".
       const error = "That is not an absolute path — nothing changed.";
       await this.refresh(key, error);
       return { error };

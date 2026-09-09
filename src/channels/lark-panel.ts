@@ -1,12 +1,6 @@
-// Lark's half of the settings panel: card markup, flow button rows, and a form
-// card for the one typed answer. The panel itself lives in `panel.ts`.
-//
-// Lark has no modal a WebSocket app can open — a "modal" here is the panel
-// message patched into a form card (an input plus a submit button), which is
-// avibe's verified pattern. The submit button's `name` carries the thread root
-// the same way every other panel button's callback value does, so a submission
-// needs no adapter-side state to find its conversation — the map below only
-// remembers where the panel message itself lives.
+// Lark's half of the settings panel (panel.ts has the rest). Lark has no modal
+// a WebSocket app can open, so the typed answer is the panel patched into a
+// form card; the submit button's `name` carries the thread root.
 
 import type { ConversationKey } from "../core/types.js";
 import type { LarkCard, LarkCardAction, LarkClient, LarkElement } from "./lark-api.js";
@@ -31,16 +25,13 @@ import {
 
 /** A form-submit button name: `cwdgo:<thread root>`. */
 export const CWD_SUBMIT_PREFIX = "cwdgo:";
-/** The form input's field name, the key `form_value` answers under. */
 const CWD_FIELD = "cwd";
 
 export interface LarkPanelDeps extends PanelDeps {
   api: Pick<LarkClient, "replyCard" | "patchCard" | "deleteMessage">;
 }
 
-/** Where this conversation's panel lives. */
 interface LarkPanelState extends PanelState {
-  /** The thread root every panel button needs in its callback value. */
   root: string;
   messageId: string;
 }
@@ -53,8 +44,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     super(deps);
   }
 
-  /** Lark's markdown treats what it cannot parse as literal text; there is no
-   *  escape syntax to apply (see lark-render.ts). */
+  /** Lark's markdown has no escape syntax (lark-render.ts). */
   protected esc(text: string): string {
     return text;
   }
@@ -69,7 +59,6 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     const elements: LarkElement[] = [
       ...view.groups.map((g) =>
         markdown([`**${g.title}**${g.suffix ?? ""}`, ...g.lines].join("\n"))),
-      // A flow row wraps, so a page of models lays out like Slack's one row.
       ...(view.picks?.length ? [buttonRow(view.picks.map((p) => this.btn(p, root)))] : []),
       ...view.rows.filter((r) => r.length).map((row) =>
         buttonRow(row.map((b) => this.btn(b, root)))),
@@ -78,7 +67,6 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     return card(elements);
   }
 
-  /** Open a fresh panel, replacing whichever one this conversation had. */
   async open(key: ConversationKey, chatId: string, root: string): Promise<void> {
     const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, chatId), root));
     this.remember(key, { chatId, root, messageId: sent.messageId, models: [] });
@@ -96,10 +84,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
 
   // --- actions ---------------------------------------------------------------
 
-  /**
-   * Handle a `cfg:` click. Returns false when the action is not ours, so the
-   * caller can treat it as one of the agent's next-step labels instead.
-   */
+  /** Returns false when the action is not ours. */
   async onAction(
     action: LarkCardAction,
     key: ConversationKey,
@@ -137,11 +122,8 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     ).catch((err) => this.deps.log(`cwd form failed: ${String(err)}`));
   }
 
-  /**
-   * Consume a form submission. The adapter routes any `cwdgo:` submit here;
-   * a panel that outlived its process is re-remembered from the event itself,
-   * so the outcome still lands on the card the user is looking at.
-   */
+  /** A panel that outlived its process is re-remembered from the event, so
+   *  the outcome lands on the card the user is looking at. */
   async onCwdSubmit(key: ConversationKey, action: LarkCardAction, root: string): Promise<void> {
     if (!this.state(key)) {
       this.remember(key, { chatId: action.chatId, root, messageId: action.messageId, models: [] });

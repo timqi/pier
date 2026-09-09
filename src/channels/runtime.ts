@@ -1,6 +1,5 @@
-// Channel lifecycle: which adapters are running, and where their sessions
-// live. Keeps main.ts wiring-only and gives the Console one call to apply a
-// config change.
+// Channel lifecycle: which adapters are running; one call for the Console to
+// apply a config change.
 
 import type { Router } from "../core/router.js";
 import type { Channel } from "../core/types.js";
@@ -12,10 +11,8 @@ import { SlackChannel } from "./slack.js";
 import { TelegramChannel } from "./telegram.js";
 import type { ChannelPlatform } from "./types.js";
 
-/** Platforms with an adapter, and what each needs before it can start. */
 const ADAPTERS: {
   platform: ChannelPlatform;
-  /** Slack authenticates its event socket separately from its Web API. */
   needsAppToken: boolean;
   build(deps: {
     store: ChannelStore;
@@ -25,13 +22,11 @@ const ADAPTERS: {
 }[] = [
   { platform: "telegram", needsAppToken: false, build: (deps) => new TelegramChannel(deps) },
   { platform: "slack", needsAppToken: true, build: (deps) => new SlackChannel(deps) },
-  // Lark's "token" is the App ID and "appToken" the App Secret; the adapter
-  // needs both before it can start, same gate as Slack's two credentials.
+  // Lark's "token" is the App ID and "appToken" the App Secret.
   { platform: "lark", needsAppToken: true, build: (deps) => new LarkChannel(deps) },
 ];
 
-// Lifecycle news, which is not what the injected sink below is for: that one
-// is a warning sink the adapters share, and "slack started" is not a warning.
+// The injected sink is for warnings; "slack started" is not one.
 const log = logger("channels");
 // The parameter below shadows `log` inside its own default expression.
 const warn = (m: string): void => log.warn(m);
@@ -48,10 +43,8 @@ export class ChannelRuntime {
     private readonly log: (message: string) => void = warn,
   ) {}
 
-  /** (Re)start every platform whose config says it should run. Idempotent.
-   *  Serialized — two concurrent Console saves raced into duplicate live
-   *  adapters; platforms restart in parallel so a hung start on one cannot
-   *  stall the other, and a failure is logged, never swallowed. */
+  /** Serialized: two concurrent Console saves would race into duplicate live
+   *  adapters. Platforms restart in parallel so a hung start cannot stall another. */
   reload(): Promise<void> {
     const run = this.reloading.catch(() => {}).then(async () => {
       if (this.stopped) return;
@@ -71,24 +64,20 @@ export class ChannelRuntime {
     const existing = this.live.get(platform);
     if (existing) {
       this.live.delete(platform);
-      // Never fatal — the config still has to be applied — but a socket that
-      // refuses to close is exactly what makes the next start behave oddly.
+      // Never fatal: the config still has to be applied.
       await existing.stop().catch((err: unknown) =>
         this.log(`${platform} did not stop cleanly: ${String(err)}`));
     }
     const config = this.store.get(platform);
     if (!config.enabled || !config.token) return;
     if (needsAppToken && !config.appToken) {
-      // Named, not silent: "enabled but nothing happens" is otherwise
-      // indistinguishable from a broken adapter.
+      // "Enabled but nothing happens" is indistinguishable from a broken adapter.
       this.log(`${platform}: enabled but no app token, not starting`);
       return;
     }
     const channel = build({
       store: this.store,
       log: (m) => this.log(`${platform}: ${m}`),
-      // The runtime owns the router, so channel control (stop, the settings
-      // panel) is wired here instead of widening the Channel seam.
       control: this.control,
     });
     try {
@@ -104,9 +93,8 @@ export class ChannelRuntime {
     log.info(`${platform} started`);
   }
 
-  /** Post a note into a conversation on a live adapter. Boot-time restart-note
-   *  delivery (src/drain.ts) has no session to report through; false means the
-   *  platform is not running, so the caller can say so instead of dropping it. */
+  /** For restart-note delivery (src/drain.ts), which has no session to report
+   *  through; false means the platform is not running. */
   async notify(platform: string, conversationId: string, text: string): Promise<boolean> {
     const channel = this.live.get(platform as ChannelPlatform);
     if (!channel) return false;
@@ -115,8 +103,8 @@ export class ChannelRuntime {
   }
 
   async stop(): Promise<void> {
-    // Join the reload queue first: an in-flight restart could otherwise
-    // register an adapter after `live` was cleared — running, unstoppable.
+    // An in-flight restart could otherwise register an adapter after `live`
+    // was cleared — running, unstoppable.
     this.stopped = true;
     await this.reloading.catch(() => {});
     for (const channel of this.live.values()) {

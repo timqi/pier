@@ -1,6 +1,4 @@
-// Settings → Channels HTTP surface. One document per platform: credentials,
-// global defaults, bound users and discovered chats travel together, so the
-// UI never has to stitch two half-configs.
+// Settings → Channels HTTP surface: one document per platform.
 
 import type { Hono } from "hono";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
@@ -31,12 +29,8 @@ function asModel(v: unknown): ModelRef | null {
   return provider && id ? { provider, id } : null;
 }
 
-/**
- * Apply the client's edits on top of what the store knows. Iterating the
- * stored list, not the payload, is what makes the save non-destructive: chats
- * are discovered, so one that appeared while the operator had the page open
- * must survive their save instead of being deleted by a stale client list.
- */
+/** Iterates the stored list, not the payload: a chat discovered while the
+ *  operator had the page open must survive their save. */
 function parseChats(raw: unknown, known: ChatConfig[]): ChatConfig[] {
   if (!Array.isArray(raw)) return known;
   const edits = new Map<string, ChatConfig>();

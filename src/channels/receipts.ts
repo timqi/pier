@@ -1,36 +1,20 @@
-// Reaction receipts: the whole lifecycle, storage included.
-//
-// A 👀 goes on an inbound message and comes off when its turn settles. Both
-// halves live in Telegram, not in Pier, so anything ending the process between
-// them leaves the emoji on a user's message with nobody left to clear it —
-// and so does a message whose session never started a turn at all. Making the
-// pending set durable is what closes the loop: an adapter clears every receipt
-// it finds at startup (nothing in memory can be its own yet), and sweeps its
-// own stragglers on a timer.
+// Reaction receipts: a 👀 goes on an inbound message and comes off when its
+// turn settles. Durable, because the emoji lives on the platform: a process
+// ending between the two halves would leave it with nobody to clear it.
 
 import type { DatabaseSync } from "node:sqlite";
 import type { TurnMeta } from "../core/types.js";
 import { pierDb } from "../db.js";
 import type { ChannelPlatform } from "./types.js";
 
-/**
- * How often the straggler sweep may really run. Adapters ask on the inbound
- * path — per envelope, or per `getUpdates` round trip — and the books only
- * change on the scale of `staleMs`, so a busy chat would otherwise run this
- * query hundreds of times a minute. Throttled here rather than in each
- * adapter, which is where the same timestamp had been copied twice already.
- */
+/** Adapters ask on every inbound envelope; the books change on the scale of `staleMs`. */
 const SWEEP_EVERY_MS = 60_000;
 
 export interface Receipt {
   /** The conversation whose turn-end clears this receipt. */
   conversationId: string;
   chatId: string;
-  /**
-   * Opaque platform message token. A string, not a number: Telegram numbers
-   * its messages but a Slack `ts` is `1761234567.123456`, which no float holds
-   * exactly. Adapters convert at their own API boundary.
-   */
+  /** A string: a Slack `ts` is `1761234567.123456`, which no float holds exactly. */
   messageId: string;
 }
 
@@ -43,8 +27,7 @@ interface ReceiptRow {
 const toReceipt = (row: ReceiptRow): Receipt => ({
   conversationId: row.conversation_id,
   chatId: row.chat_id,
-  // SQLite hands back whatever affinity it stored; the column is TEXT, but
-  // coercing keeps a numeric-looking id from arriving as a number.
+  // The column is TEXT, but a numeric-looking id could still arrive as a number.
   messageId: String(row.message_id),
 });
 
@@ -58,7 +41,6 @@ export class ReceiptLedger {
     this.db = db;
   }
 
-  /** Re-marking the same message replaces the row rather than duplicating it. */
   add(receipt: Receipt): void {
     this.db.prepare(`
       INSERT INTO receipts(platform, conversation_id, chat_id, message_id, created_at)
@@ -68,8 +50,8 @@ export class ReceiptLedger {
     `).run(this.platform, receipt.conversationId, receipt.chatId, receipt.messageId, Date.now());
   }
 
-  /** Claim a conversation's receipts: returned once, then gone. `bookedBy`
-   *  claims only what was on the books by then — see `Receipts.settle`. */
+  /** Returned once, then gone. `bookedBy` claims only what was on the books by
+   *  then — see `Receipts.settle`. */
   take(conversationId: string, bookedBy?: number): Receipt[] {
     const scope = bookedBy === undefined ? "" : " AND created_at <= ?";
     const args = bookedBy === undefined ? [] : [bookedBy];
@@ -96,24 +78,15 @@ export class ReceiptLedger {
 
 }
 
-/**
- * The one platform call the lifecycle needs; `null` clears the reaction.
- * Ids are opaque strings — an adapter converts to whatever its API wants, and
- * names the emoji itself (Slack's remove call needs the short name back).
- */
+/** `null` clears the reaction. */
 export interface ReactionApi {
   setReaction(chatId: string, messageId: string, emoji: string | null): Promise<void>;
 }
 
-/**
- * Marks messages as being worked on and unmarks them when their turn settles.
- * Lives next to the ledger because the ordering rule spans both: a receipt is
- * booked synchronously (so an instant turn cannot clear an unbooked one) while
- * the platform call is in flight, and the clear must wait for that call to land
- * or the reaction stays up forever.
- */
+/** A receipt is booked synchronously (an instant turn must not clear an
+ *  unbooked one) while the platform call is in flight, and the clear waits for
+ *  that call to land or the reaction stays up forever. */
 export class Receipts {
-  /** In-flight `setReaction` per marked message. Only this process's own. */
   private readonly applying = new Map<string, Promise<unknown>>();
   private sweptAt = 0;
 
@@ -135,27 +108,16 @@ export class Receipts {
     this.ledger.add({ conversationId, chatId, messageId });
   }
 
-  /**
-   * The turn this conversation was running has ended, and the messages *that*
-   * turn was working on lose their 👀 — a run ends one turn per answer
-   * (agent/events.ts), so a message queued mid-turn is still owed one, and
-   * clearing its emoji here reads as an answer that never comes. `meta` says
-   * when the ending turn began; a receipt booked after that belongs to the
-   * next one. No meta clears everything: the refusal paths have no turn to
-   * scope by, and the stale sweep is the other backstop.
-   */
+  /** Only the messages *this* turn was working on: a message queued mid-turn
+   *  is still owed an answer. `meta` says when the turn began; no meta clears
+   *  everything (the refusal paths have no turn to scope by). */
   settle(conversationId: string, meta?: TurnMeta): Promise<void> {
     const began = meta && meta.completedAt - meta.durationMs;
     return this.clear(this.ledger.take(conversationId, began));
   }
 
-  /**
-   * Deliver a turn and settle its receipts *whatever happens* — a 👀 left on
-   * a message because the reply failed to send sits there looking like work
-   * until the stale sweep. The try/finally was copied into all three
-   * adapters' send() before landing here; the error still propagates, because
-   * a failed delivery is the router's to report.
-   */
+  /** Settles whatever happens; the error still propagates, because a failed
+   *  delivery is the router's to report. */
   async settleAfter(
     conversationId: string,
     deliver: () => Promise<void>,
@@ -168,21 +130,16 @@ export class Receipts {
     }
   }
 
-  /**
-   * Everything on the books at startup is orphaned — nothing in memory can be
-   * ours yet — and past `staleMs` a receipt's turn is never going to settle.
-   */
+  /** `all` is the startup sweep: everything on the books is orphaned then. */
   sweep(all = false): Promise<void> {
     const now = Date.now();
-    // `all` is the startup sweep: it takes everything, so it is never skipped.
     if (!all && now - this.sweptAt < SWEEP_EVERY_MS) return Promise.resolve();
     this.sweptAt = now;
     return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs));
   }
 
   private async clear(receipts: Receipt[]): Promise<void> {
-    // Wait together, then launch clears in booking order: if one apply is slow,
-    // it must not let a later receipt clear first.
+    // A slow apply must not let a later receipt clear first.
     await Promise.all(receipts.map(({ chatId, messageId }) =>
       this.applying.get(`${chatId}:${messageId}`)));
     for (const { chatId, messageId } of receipts) this.applying.delete(`${chatId}:${messageId}`);

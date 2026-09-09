@@ -1,14 +1,6 @@
-// Durable conversation → session routing for IM channels.
-//
-// core/router.ts keeps its map in memory, which is enough for the surfaces
-// whose conversation id already IS a session id (web) or that persist their
-// target themselves (tasks). An IM conversation id is a chat or a topic, so
-// without this table a restart would silently hand every group a brand-new
-// session: the chat history stays on screen while the agent forgets all of
-// it, and the old transcript becomes unreachable.
-//
-// Owned by channels/ rather than core/ so core stays storage-agnostic — the
-// same split tasks/ already uses for its target session ids.
+// Durable conversation → session routing for IM channels: an IM conversation id
+// is a chat, not a session id, so without this table a restart would hand every
+// group a brand-new session. In channels/ so core stays storage-agnostic.
 
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentLaunchOptions, ConversationKey } from "../core/types.js";
@@ -37,10 +29,8 @@ export class ConversationStore {
     `).run(key.channelId, key.conversationId, sessionId, Date.now());
   }
 
-  /** Which channel owns this session, durably — the router's own answer is
-   * in-memory and becomes undefined the moment an idle session is evicted, so
-   * a surface asking "was this turn already delivered to a chat?" long after
-   * the turn cannot use it. Sessions with no row are nobody's conversation. */
+  /** Durable, unlike the router's answer, which is gone once an idle session
+   *  is evicted. No row: nobody's conversation. */
   channelOf(sessionId: string): string | undefined {
     const row = this.db.prepare(`
       SELECT channel_id FROM conversations WHERE session_id = ? LIMIT 1
@@ -48,8 +38,6 @@ export class ConversationStore {
     return row?.channel_id;
   }
 
-  /** Drop a mapping whose session Pi no longer has, so the next message
-   * starts a fresh one instead of failing forever. */
   forget(key: ConversationKey): void {
     this.db.prepare(`
       DELETE FROM conversations WHERE channel_id = ? AND conversation_id = ?
@@ -58,12 +46,8 @@ export class ConversationStore {
 
 }
 
-/**
- * The IM half of the router's session factory: reuse this conversation's
- * session across restarts, and only create when there is nothing to resume.
- * Wired in main.ts, so neither core nor an adapter learns where the mapping
- * lives.
- */
+/** The IM half of the router's session factory, wired in main.ts so neither
+ *  core nor an adapter learns where the mapping lives. */
 export function resolveConversation<S extends { id: string }>(
   store: ConversationStore,
   factory: {
@@ -79,8 +63,7 @@ export function resolveConversation<S extends { id: string }>(
       try {
         return await factory.resume(known);
       } catch (err) {
-        // Pi never persisted it (a first turn that never landed) or the
-        // transcript was deleted. Re-route rather than fail every message.
+        // Never persisted, or deleted: re-route rather than fail every message.
         onStale?.(`${key.channelId}:${key.conversationId} lost session ${known}: ${String(err)}`);
         store.forget(key);
       }

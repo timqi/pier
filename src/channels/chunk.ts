@@ -1,16 +1,8 @@
-// Splitting a long turn into sendable messages.
-//
-// Every platform caps a message, and the index arithmetic for "cut at the last
-// blank line that fits, else the last newline, else mid-text" is fiddly enough
-// that having it twice is having it wrong once. The cap and any per-platform
-// repair (Slack re-balances code fences across the cut) stay with the renderer.
+// Splitting a long turn into sendable messages; the cap and any per-platform
+// repair stay with the renderer.
 
-/**
- * Cut `text` into pieces of at most `max` characters, preferring a blank line,
- * then a newline, then the hard limit. A cut lands mid-text only when there is
- * no break in the second half of the window — better a blunt split than a
- * dropped turn.
- */
+/** Prefers a blank line, then a newline, then the hard limit; a cut lands
+ *  mid-text only when there is no break in the second half of the window. */
 export function chunkText(text: string, max: number): string[] {
   if (text.length <= max) return [text];
   const parts: string[] = [];
@@ -26,27 +18,15 @@ export function chunkText(text: string, max: number): string[] {
   return parts;
 }
 
-/**
- * Close a fence a chunk left open, and reopen it on the next one. Telegram can
- * be cut mid-`<pre>` and shrug — its parser closes the tag itself — but Slack
- * and Lark both swallow the rest of a message after an unterminated ```, and
- * the next chunk starts *outside* a fence, so the tail of a long code block
- * renders as prose.
- *
- * Fences are tracked by line-leading runs with their *length*, per CommonMark:
- * a ```` fence (used to quote a ``` block) only closes on a run at least as
- * long, so counting bare ``` occurrences would see the inner block close the
- * outer one and mangle both halves of the cut.
- */
+/** Slack and Lark swallow the rest of a message after an unterminated ```, so a
+ *  fence left open is closed and reopened on the next chunk. Runs are tracked
+ *  by length, per CommonMark: a ```` fence only closes on a run at least as long. */
 export function balanceFences(parts: string[]): string[] {
-  /** Backticks of the fence currently open across the boundary; 0 = closed. */
   let open = 0;
   const fence = (n: number): string => "`".repeat(n);
   return parts.map((part) => {
     const reopened = open ? `${fence(open)}\n${part}` : part;
-    // The prepended fence counts too — the scan restarts from "closed" and
-    // reads it as the opener, so a chunk that closes the block it inherited
-    // comes out even.
+    // The scan restarts from "closed" and reads the prepended fence as the opener.
     open = 0;
     for (const line of reopened.split("\n")) {
       const run = /^\s*(`{3,})/.exec(line)?.[1]?.length ?? 0;

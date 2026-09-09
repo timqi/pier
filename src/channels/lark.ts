@@ -1,25 +1,11 @@
 // Lark (Feishu) adapter: normalize long-connection events, render outbound
-// turns as cards.
-//
-// The anchor is threads, exactly as on Slack: Pier never posts into a chat's
-// main flow — a message in the chat is answered in *its own* topic
-// (`reply_in_thread`), a message inside a topic is answered there. So a
-// conversation is `<chatId>/<rootMessageId>`, the thread is the session, and
-// DMs follow the same rule (Feishu DMs thread; avibe verified it). Telegram's
-// `topicMode` toggle is meaningless here — there is no other behaviour.
-//
-// Four more things are Lark-specific and live only here:
-//  - Message bodies are JSON *strings* (`content` is double-encoded), and a
-//    mention is a `@_user_N` placeholder resolved through `mentions[]`.
-//  - Reactions are named keys: 👀 is `OnIt`, and removal is list-then-delete
-//    because the API deletes by reaction_id.
-//  - A card callback does not say which thread its message lives in, so every
-//    button's value carries the thread root (`LarkActionValue.root`).
-//  - Delivery is at-least-once and the transport acks only after the handler
-//    returns, so handlers queue work and return; `event_id` is deduplicated.
-//
-// Everything policy-shaped (mention/bind gates, per-chat overrides) is in
-// config.ts, platform-blind and shared with Telegram and Slack.
+// turns as cards. As on Slack, Pier never posts into a chat's main flow: a
+// conversation is `<chatId>/<rootMessageId>` (`reply_in_thread`; DMs thread
+// too). Lark-specific: `content` is a double-encoded JSON string and a mention
+// is a `@_user_N` placeholder resolved through `mentions[]`; 👀 is the reaction
+// key `OnIt`, removed by reaction_id; a card callback does not say which thread
+// its message lives in, so every button value carries the root; delivery is
+// at-least-once and acked when the handler returns, so handlers queue and return.
 
 import type {
   AgentReply,
@@ -52,22 +38,15 @@ import { card, markdown, OFFER_PREFIX } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 
-/** Lark wants a named key here; 👀 has none, `OnIt` is its "being handled". */
 const WORKING = "OnIt";
-// Backpressure: bounds concurrency (downloads, API calls), not the backlog —
-// the event is already acked by the transport, so nothing slows the source.
+// The event is already acked, so this bounds concurrency, not the backlog.
 const MAX_ACTIVE_CHATS = 16;
 const RECEIPT_STALE_MS = 30 * 60_000;
 const DRAIN_TIMEOUT_MS = 5000;
-/** How long a delivered event id is remembered, against redelivery. */
 const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
 
-/**
- * A Lark conversation is always `<chatId>/<rootMessageId>` — the thread is
- * the session. This pair is the only definition of the format; control.ts
- * decodes with it rather than splitting on "/" itself.
- */
+/** The only definition of the conversation id format; control.ts decodes with it. */
 const conversationId = (chatId: string, root: string): string => `${chatId}/${root}`;
 
 export const parseConversation = (id: string): { chatId: string; root: string } => {
@@ -77,14 +56,9 @@ export const parseConversation = (id: string): { chatId: string; root: string } 
     : { chatId: id.slice(0, at), root: id.slice(at + 1) };
 };
 
-/**
- * The thread a message belongs to. A message already in a topic keeps its
- * root; one posted in the chat becomes the root of its own — which is what
- * makes every request its own session without asking Lark for anything.
- */
+/** A message posted in the chat becomes the root of its own topic. */
 const threadOf = (msg: LarkMessageEvent["message"]): string => msg.rootId || msg.messageId;
 
-/** An inbound attachment: where its bytes live and what to call them. */
 interface LarkAttachment {
   key: string;
   type: "image" | "file";
@@ -96,11 +70,11 @@ export interface LarkDeps {
   store: ChannelStore;
   /** Dropped and malformed input is reported here — never a silent catch. */
   log?: (message: string) => void;
-  /** Injected in tests; production builds a real Lark client. */
+  /** Injected in tests. */
   client?: LarkClient;
-  /** Injected in tests; production opens the shared channel database. */
+  /** Injected in tests. */
   receipts?: ReceiptLedger;
-  /** Channel-level control that is not a prompt; wired by runtime.ts. */
+  /** Wired by runtime.ts, so `/stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
 }
 
@@ -108,20 +82,13 @@ export class LarkChannel implements Channel {
   readonly id = "lark";
   private readonly api: LarkClient;
   private readonly log: (message: string) => void;
-  /** 👀 lifecycle, durable; see receipts.ts for why it is not just a Map. */
   private readonly receipts: Receipts;
-  /** Ordering per chat, concurrency across them; see chains.ts. */
   private readonly chains: Chains;
-  /** The inbound gate and the bind-hint throttle; see gatekeeper.ts. */
   private readonly gate: Gatekeeper;
-  /** Event ids already handled, against at-least-once delivery. */
   private readonly seen: Dedup;
-  /** The in-chat settings panel; absent when no control was wired (tests). */
+  /** Absent when no control was wired (tests). */
   private readonly panel?: LarkPanel;
-  /** User names, cached for the process — one contact lookup per person. */
   private readonly names = new Map<string, string>();
-  /** Chats already reported to the store this process; a rename waits for a
-   *  restart, which is soon enough for a Console display label. */
   private readonly discovered = new Set<string>();
   private me = "";
   private readonly out: LarkOutbound;
@@ -138,7 +105,7 @@ export class LarkChannel implements Channel {
     this.api = deps.client ?? new LarkApi(config.token, config.appToken, this.log);
     this.out = new LarkOutbound(this.api, this.log);
     this.receipts = new Receipts(
-      // Reaction removal needs the emoji key back, and Pier only applies one.
+      // Removal needs the emoji key back.
       {
         setReaction: (_chatId, messageId, emoji) =>
           emoji
@@ -163,12 +130,10 @@ export class LarkChannel implements Channel {
   async start(onMessage: (msg: InboundMessage) => void): Promise<void> {
     this.me = await this.api.botOpenId();
     if (!this.me) {
-      // Without our own open_id, "was I mentioned?" can only answer no, so
-      // every chat with require-mention on goes silent. Loud, not a debug line.
+      // Every chat with require-mention on goes silent; loud, not a debug line.
       this.log("bot info returned no open_id: mention detection is disabled");
     }
     this.running = true;
-    // Best-effort and off the critical path.
     void this.receipts.sweep(true);
     this.socket = await this.api.connect({
       onMessage: (event) => this.onEvent(event, onMessage),
@@ -186,15 +151,11 @@ export class LarkChannel implements Channel {
 
   // --- inbound ---------------------------------------------------------------
 
-  /**
-   * Already (about to be) acked by the transport — the SDK answers the frame
-   * when this returns, so routing is synchronous and the work is queued.
-   */
+  /** The SDK acks the frame when this returns, so routing is synchronous and
+   *  the work is queued. */
   private onEvent(event: LarkMessageEvent, onMessage: (msg: InboundMessage) => void): void {
     if (!this.running) return;
-    // Asked on every event, throttled inside receipts.ts.
     void this.receipts.sweep();
-    // Our own echo or another app's message.
     if (event.senderType === "app") return;
     if (this.seen.duplicate(event.eventId)) return;
     const chatId = event.message.chatId;
@@ -204,8 +165,6 @@ export class LarkChannel implements Channel {
 
   private onCardEvent(action: LarkCardAction, onMessage: (msg: InboundMessage) => void): void {
     if (!this.running) return;
-    // A card callback carries its own event id; the composed key is the
-    // fallback for a payload that arrives without one.
     const dedupId = action.eventId ??
       `card:${action.messageId}:${action.operatorId}:${action.value?.key ?? action.name ?? ""}`;
     if (this.seen.duplicate(dedupId)) return;
@@ -233,7 +192,7 @@ export class LarkChannel implements Channel {
       const name = isDm
         ? `DM · ${await this.userName(senderId)}`
         : (await this.api.chatName(msg.chatId).catch((err) => {
-          // Named, not silent: this failing usually means a missing scope.
+          // Usually a missing scope.
           this.log(`chat lookup failed for ${msg.chatId}: ${String(err)}`);
           return undefined;
         })) ?? msg.chatId;
@@ -245,9 +204,8 @@ export class LarkChannel implements Channel {
     }
 
     const text = raw.trim();
-    // A command aimed at another bot (`/stop@other`) is not ours to answer
-    // and travels on as ordinary text — Lark gives Pier no @username a target
-    // could positively match, so any target means "not us".
+    // Lark gives Pier no @username a command target could match, so any target
+    // means "not us".
     const parsed = parseCommand(text);
     const command = parsed?.target ? undefined : parsed;
     const root = threadOf(msg);
@@ -255,8 +213,7 @@ export class LarkChannel implements Channel {
     const bindRequest = command?.name === "bind" && isDm;
     const admitted = this.gate.admit("message", msg.chatId, {
       isDm,
-      // Mentioned, or continuing a topic Pier already owns — Lark's
-      // equivalent of Telegram's "replying to the bot", durable so it still
+      // Mentioned, or continuing a topic Pier already owns — durable, so it
       // holds after a restart.
       addressed: mentioned || (!!msg.rootId && !!this.deps.control?.knows(here)),
       userId: senderId,
@@ -268,23 +225,19 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    // `@bot` on its own (the text is empty once the mention is stripped) and
-    // `/settings` are the same request: show me this conversation's settings.
+    // A bare `@bot` and `/settings` are the same request.
     if (this.panel && (command?.name === "settings" || (!text && !attachments.length && mentioned))) {
       return this.panel.open(here, msg.chatId, root);
     }
 
-    // Downloading only past the gate: an unauthorized sender must not be able
-    // to make the bot pull bytes on their behalf.
+    // Downloading only past the gate: an unauthorized sender must not make the
+    // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(msg.messageId, attachments);
-    // Every await between mark() and dispatch is a window in which a previous
-    // turn can end and settle — taking this receipt with it before its own
-    // turn even starts — so the name is resolved first and the mark→dispatch
-    // pair stays synchronous.
+    // Resolved before the mark: any await between mark() and dispatch is a
+    // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: senderId, name: await this.userName(senderId) };
     this.receipts.mark(here.conversationId, msg.chatId, msg.messageId);
-    // IM messages steer by default: a follow-up that waits for the turn to
-    // end is the wrong default when the human is watching a 👀 in a topic.
+    // Steer: a follow-up is the wrong default when the human is watching a 👀.
     onMessage({
       key: here,
       senderId,
@@ -294,11 +247,8 @@ export class LarkChannel implements Channel {
     });
   }
 
-  /**
-   * One message's readable content: text with mentions resolved, attachments
-   * to fetch, and whether the bot was addressed. `content` is a JSON string;
-   * malformed or unreadable types are logged and dropped at this boundary.
-   */
+  /** `content` is a JSON string; malformed or unreadable types are logged and
+   *  dropped at this boundary. */
   private readContent(
     msg: LarkMessageEvent["message"],
   ): { text: string; attachments: LarkAttachment[]; mentioned: boolean } {
@@ -329,8 +279,7 @@ export class LarkChannel implements Channel {
       case "media":
       case "audio":
         if (content.file_key) {
-          // `file_size` is optional and sometimes a numeric string; a missing
-          // one is fine — download() enforces the cap mid-stream regardless.
+          // `file_size` is optional and sometimes a numeric string.
           const size = Number(content.file_size);
           attachments.push({
             key: String(content.file_key),
@@ -343,9 +292,8 @@ export class LarkChannel implements Channel {
       default:
         this.log(`ignored message type ${msg.messageType ?? "?"}`);
     }
-    // A mention arrives as a `@_user_N` placeholder: the bot's own is
-    // addressing, not content, and is removed; anyone else's becomes their
-    // name, so the agent sees who was meant.
+    // The bot's own placeholder is addressing and is removed; anyone else's
+    // becomes their name.
     let mentioned = false;
     for (const mention of msg.mentions ?? []) {
       const isMe = !!this.me && mention.id?.open_id === this.me;
@@ -355,11 +303,8 @@ export class LarkChannel implements Channel {
     return { text, attachments, mentioned };
   }
 
-  /** Rich text: the readable runs, and any images embedded in it. */
   private readPost(raw: Record<string, unknown>): { text: string; images: LarkAttachment[] } {
-    // A post body may arrive wrapped in a locale (`{zh_cn: {title, content}}`)
-    // rather than flat — both shapes are real. Take the flat body when it is
-    // one, else the first locale entry that is an object.
+    // A post body may arrive flat or wrapped in a locale (`{zh_cn: {title, content}}`).
     const content = Array.isArray(raw.content) || typeof raw.title === "string"
       ? raw
       : (Object.values(raw).find((v) => !!v && typeof v === "object" && !Array.isArray(v)) ??
@@ -375,9 +320,8 @@ export class LarkChannel implements Channel {
       for (const run of row as Record<string, unknown>[]) {
         if (run.tag === "text" || run.tag === "a") parts.push(String(run.text ?? ""));
         else if (run.tag === "at") {
-          // Inline, not a `@_user_N` placeholder: rich text carries the at run
-          // itself. The bot's own is addressing (detected via `mentions[]`),
-          // not content; anyone else's becomes their name.
+          // Rich text carries the at run inline, not as a placeholder; the
+          // bot's own is detected via `mentions[]`.
           if (run.user_id !== this.me) parts.push(`@${run.user_name ?? run.user_id ?? "?"}`);
         } else if (run.tag === "img" && run.image_key) {
           images.push({ key: String(run.image_key), type: "image", name: "image.png" });
@@ -394,9 +338,8 @@ export class LarkChannel implements Channel {
     action: LarkCardAction,
     onMessage: (msg: InboundMessage) => void,
   ): Promise<void> {
-    // The thread root travels in the button payload (a callback does not say
-    // which topic its message lives in); a form submit carries it in the
-    // button's name. Absent both, the payload is not one Pier minted.
+    // A form submit carries the root in the button's name instead of the
+    // value. Absent both, the payload is not one Pier minted.
     const payload = action.value?.key ?? "";
     const formRoot = action.name?.startsWith(CWD_SUBMIT_PREFIX)
       ? action.name.slice(CWD_SUBMIT_PREFIX.length)
@@ -420,7 +363,6 @@ export class LarkChannel implements Channel {
       await this.panel?.onCwdSubmit(key, action, root);
       return;
     }
-    // Panel clicks are namespaced `cfg:` and never reach the agent.
     if (payload.startsWith(PANEL_PREFIX)) {
       if (!(await this.panel?.onAction(action, key, payload, root))) {
         this.log(`panel action ${payload} with no panel wired, dropped`);
@@ -428,11 +370,9 @@ export class LarkChannel implements Channel {
       return;
     }
 
-    // A next-step button. The label travels in the value the platform echoes
-    // back — the only durable place, since Lark cannot return a 2.0 card
-    // (LarkActionValue documents the probe) — so a click needs no adapter
-    // state and survives a restart. A value without one is a stale card from
-    // before this convention, and the user clicked expecting something.
+    // The label travels in the echoed value (Lark cannot return a 2.0 card;
+    // see LarkActionValue), so a click survives a restart. A value without
+    // one is a stale card, and the user clicked expecting something.
     const label = payload.startsWith(OFFER_PREFIX) && typeof action.value?.label === "string"
       ? action.value.label
       : undefined;
@@ -442,10 +382,8 @@ export class LarkChannel implements Channel {
         .catch((err) => this.log(`stale-option notice failed: ${String(err)}`));
       return;
     }
-    // The taken row comes off (best-effort; see LarkOutbound.retire), and the
-    // pick is echoed — a bot cannot post as the user, so without the echo the
-    // topic shows an answer to a request nobody can see being made, and there
-    // is nothing to carry the eyes.
+    // A bot cannot post as the user, so the pick is echoed: otherwise the
+    // topic shows an answer to a request nobody can see, with nothing to carry the eyes.
     const sender = { id: action.operatorId, name: await this.userName(action.operatorId) };
     await this.out.retire(action.messageId);
     const echo = await this.api.replyCard(root, card([markdown(picked(label))]))
@@ -464,11 +402,7 @@ export class LarkChannel implements Channel {
     });
   }
 
-  /**
-   * Stop the turn this conversation is running. The abort makes Pi end the
-   * turn, which reaches send() through the normal turn-end path and clears
-   * the 👀 receipts — so nothing here touches them.
-   */
+  /** The abort ends the turn, which reaches send() and clears the receipts. */
   private async abortTurn(key: ConversationKey, messageId: string): Promise<void> {
     await this.deps.control?.abort(key);
     await this.api.replyCard(messageId, card([markdown(STOPPED)]));
@@ -476,10 +410,8 @@ export class LarkChannel implements Channel {
 
   // --- bind ------------------------------------------------------------------
 
-  /**
-   * Tell an unbound DM sender what to do. Groups stay silent (see gate()),
-   * but a DM that swallows every message looks broken rather than locked.
-   */
+  /** Groups stay silent, but a DM that swallows every message looks broken
+   *  rather than locked. */
   private async hintBind(userId: string, messageId: string): Promise<void> {
     if (!this.gate.mayHint(userId)) return;
     await this.api.replyCard(messageId, card([markdown(bindHint("`/bind <code>`"))]))
@@ -498,7 +430,6 @@ export class LarkChannel implements Channel {
     const hit = this.names.get(openId);
     if (hit) return hit;
     const name = await this.api.userName(openId).catch((err) => {
-      // The id is the honest fallback label; the reason still gets said.
       this.log(`user lookup failed for ${openId}: ${String(err)}`);
       return openId;
     });
@@ -506,10 +437,6 @@ export class LarkChannel implements Channel {
     return name;
   }
 
-  /** The message's attachments as the shared save loop wants them (the loop
-   *  itself, size gate and lost markers included, is core/inbox.ts; the
-   *  mid-stream refusal in download() names "too large" so the loop's marker
-   *  stays honest when the metadata lied by omission). */
   private saveAttachments(messageId: string, files: LarkAttachment[]): Promise<string[]> {
     return saveInboundAll(this.id, files.map((file) => ({
       label: file.name ?? "attachment",
@@ -522,36 +449,21 @@ export class LarkChannel implements Channel {
 
   // --- outbound --------------------------------------------------------------
 
-  /**
-   * Called on every turn-end, empty text included: the turn settled with
-   * nothing to say, and the 👀 receipts still have to come off.
-   */
   async send(conversation: string, reply: AgentReply): Promise<void> {
     const { root } = parseConversation(conversation);
-    // Every id this adapter mints carries a thread root, so an empty one is a
-    // corrupted or foreign conversation id. Posting it would put an agent
-    // turn in the chat's main flow — the one thing this adapter promises
-    // never to do — so it is refused loudly instead, and the receipts still
-    // come off so no 👀 is stranded.
+    // No root is a foreign id; posting it would put a turn in the chat's main
+    // flow. Refused loudly, receipts still cleared.
     if (!root) {
       this.log(`refusing to answer ${conversation}: no thread root in the conversation id`);
       await this.receipts.settle(conversation);
       return;
     }
-    // settleAfter: the turn ended either way, and a 👀 left up because the
-    // reply failed to send looks like work until the stale sweep. The meta
-    // scopes it to this turn's own messages (receipts.ts `settle`).
+    // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply), reply.meta);
   }
 
-  /**
-   * A system note, and the 👀 goes on the note itself: the turn it triggers has
-   * no message of the user's to carry them — nobody typed one — so without this
-   * the topic shows nothing at all while the agent works. The turn-end `send`
-   * clears it like any other receipt; an error note is not marked, because no
-   * turn follows it (`awaitsTurn`) and the eyes would sit there until the stale
-   * sweep.
-   */
+  /** The 👀 goes on the note itself: the turn it triggers has no message of
+   *  the user's to carry them. */
   async notify(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
     const { chatId, root } = parseConversation(conversation);
     if (!root) {
@@ -559,9 +471,6 @@ export class LarkChannel implements Channel {
       return;
     }
     const messageId = await this.out.note(root, note);
-    // The last card of a long note, so the eyes sit at the foot of the topic,
-    // where the reply will land. A reaction that fails is swallowed and logged
-    // by receipts.ts, so the note itself is never lost to one.
     if (messageId && awaitsTurn(note.origin)) this.receipts.mark(conversation, chatId, messageId);
   }
 }

@@ -1,14 +1,8 @@
-// Thin Slack client: HTTP shapes and the Socket Mode transport, no policy.
-// The one file in channels/ that talks to slack.com, so the adapter stays
-// testable against `SlackClient`.
-//
-// Socket Mode, not the Events API over HTTP: Pier is one local process and must
-// not require a public inbound URL. It needs two credentials — an app-level
-// token (`xapp-`) opens the socket, the bot token (`xoxb-`) signs every Web API
-// call — which is why ChannelConfig carries `appToken` beside `token`.
-//
-// No SDK: `apps.connections.open` plus Node's built-in WebSocket is the whole
-// protocol, and @slack/socket-mode would pull a dependency tree to wrap it.
+// Thin Slack client: HTTP shapes and the Socket Mode transport, no policy; the
+// one file that talks to slack.com. Socket Mode so Pier needs no public inbound
+// URL: the app-level token (`xapp-`) opens the socket, the bot token (`xoxb-`)
+// signs every Web API call. No SDK: `apps.connections.open` plus Node's
+// WebSocket is the whole protocol.
 
 import { readCapped } from "../core/inbox.js";
 
@@ -23,11 +17,8 @@ export interface SlackFile {
   url_private?: string;
 }
 
-/**
- * A forwarded message, however the share carries it: Slack flattens these
- * fields onto the attachment, and some shares nest the original under
- * `original_message` instead — avibe reads both, so both are declared.
- */
+/** Slack flattens these onto the attachment, and some shares nest the original
+ *  under `original_message` instead; both are read. */
 export interface SharedMessage {
   text?: string;
   ts?: string;
@@ -37,20 +28,14 @@ export interface SharedMessage {
   files?: SlackFile[];
 }
 
-/**
- * The one secondary attachment the adapter reads: a message somebody
- * forwarded into a channel. None of these fields is in Slack's own published
- * types — they are what a share actually arrives with.
- */
+/** A forwarded message. None of these fields is in Slack's published types;
+ *  they are what a share actually arrives with. */
 export interface SlackAttachment extends SharedMessage {
   /** The share flag proper; the `message_share` subtype may arrive without it. */
   is_share?: boolean;
-  /**
-   * Slack previewed a permalink. Set on a real share too, so it can only ever
-   * rule a share *out*, never in — see `sharesOf` in slack.ts.
-   */
+  /** Set on a real share too, so it can only rule a share out (`sharesOf`). */
   is_msg_unfurl?: boolean;
-  /** Absent on some shares, which give only a name; never invent one. */
+  /** Absent on some shares, which give only a name. */
   author_id?: string;
   author_name?: string;
   author_subname?: string;
@@ -85,7 +70,6 @@ export interface SlackEventPayload {
   event?: SlackMessageEvent;
 }
 
-/** A Block Kit button, the only interactive element Pier renders. */
 export interface SlackButton {
   type: "button";
   action_id: string;
@@ -93,18 +77,14 @@ export interface SlackButton {
 }
 
 export type SlackBlock =
-  /**
-   * Standard markdown, rendered by Slack itself — tables, headers and nested
-   * lists included, none of which survive the mrkdwn subset. Also the only
-   * body block the client does not collapse behind "Show more". 12,000 chars
-   * cumulative per message.
-   */
+  /** Rendered by Slack itself (tables, headers, nested lists) and not collapsed
+   *  behind "Show more". 12,000 chars cumulative per message. */
   | { type: "markdown"; text: string }
   | { type: "section"; text: { type: "mrkdwn"; text: string } }
   | { type: "context"; elements: { type: "mrkdwn"; text: string }[] }
   | { type: "actions"; elements: SlackButton[] };
 
-/** What a button click posts back. Slack echoes the whole message with it. */
+/** Slack echoes the whole message with a click. */
 export interface SlackInteraction {
   type: string; // "block_actions" | "view_submission"
   trigger_id?: string;
@@ -122,10 +102,8 @@ export interface SlackView {
 }
 
 
-/**
- * One Socket Mode frame. `hello` and `disconnect` carry no envelope id and are
- * handled by the transport; everything else reaches the adapter already acked.
- */
+/** `hello` and `disconnect` are handled by the transport; everything else
+ *  reaches the adapter already acked. */
 export interface SlackEnvelope {
   type: string;
   envelope_id?: string;
@@ -135,20 +113,15 @@ export interface SlackEnvelope {
 
 export interface SlackSend {
   channel: string;
-  /** Always set by the adapter: a reply belongs in its thread, never the channel. */
   thread_ts?: string;
   text: string;
   blocks?: SlackBlock[];
-  /**
-   * Both off on every send. A turn that mentions three URLs would otherwise
-   * grow three preview cards taller than the answer itself, and the agent
-   * quoting a link is not a request to render it.
-   */
+  /** Both off on every send: three URLs would grow three preview cards taller
+   *  than the answer. */
   unfurl_links?: boolean;
   unfurl_media?: boolean;
 }
 
-/** One page of `conversations.history` / `conversations.replies`. */
 export interface SlackHistoryPage {
   messages: SlackMessageEvent[];
   nextCursor?: string;
@@ -162,16 +135,12 @@ export interface SlackHistoryQuery {
   cursor?: string;
 }
 
-/** A live Socket Mode connection. `close()` stops it reconnecting. */
+/** `close()` stops it reconnecting. */
 export interface SlackSocket {
   close(): Promise<void>;
 }
 
-/**
- * The part of `WebSocket` the transport uses. A seam, so the reconnect loop is
- * testable without a real socket — it is the one piece of this file with
- * behaviour worth pinning down rather than just payload shapes.
- */
+/** The part of `WebSocket` the transport uses, so the reconnect loop is testable. */
 export interface SocketLike {
   onmessage: ((ev: { data: unknown }) => void) | null;
   onclose: (() => void) | null;
@@ -184,38 +153,28 @@ export type SocketFactory = (url: string) => SocketLike;
 
 /** Every call the adapter makes — the seam a test double implements. */
 export interface SlackClient {
-  /** Who am I: the bot's own user id, needed for mention detection. */
   authTest(): Promise<{ userId: string }>;
-  /**
-   * Open Socket Mode and keep it open. Envelopes are acknowledged by the
-   * transport *before* `onEnvelope` runs — a turn takes far longer than
-   * Slack's ack deadline, and an unacked envelope is redelivered.
-   */
+  /** Envelopes are acked by the transport *before* `onEnvelope` runs: a turn
+   *  outlives Slack's ack deadline, and an unacked envelope is redelivered. */
   connect(onEnvelope: (env: SlackEnvelope) => void): Promise<SlackSocket>;
   postMessage(payload: SlackSend): Promise<{ ts: string }>;
-  /** Panels are edited in place; a new message per click would bury the thread. */
   updateMessage(payload: SlackSend & { ts: string }): Promise<void>;
   deleteMessage(channel: string, ts: string): Promise<void>;
-  /** Retire a used button row without touching the text. */
   setBlocks(channel: string, ts: string, text: string, blocks: SlackBlock[]): Promise<void>;
   /** `name` is a short name (`eyes`); Slack rejects a raw codepoint. */
   addReaction(channel: string, ts: string, name: string): Promise<void>;
   removeReaction(channel: string, ts: string, name: string): Promise<void>;
-  /** A modal is Slack's way to ask for one typed answer. */
   openView(triggerId: string, view: unknown): Promise<void>;
   channelInfo(channel: string): Promise<{ name?: string; isIm: boolean }>;
   userName(userId: string): Promise<string>;
-  /** Channel timeline, newest first — how Slack orders it. */
+  /** Newest first — how Slack orders it. */
   history(channel: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
-  /** One thread: the parent message followed by its replies, oldest first. */
+  /** The parent message followed by its replies, oldest first. */
   replies(channel: string, ts: string, query: SlackHistoryQuery): Promise<SlackHistoryPage>;
-  /**
-   * One file's metadata by id, which is all a transcript line can carry.
-   * Needs the `files:read` scope.
-   */
+  /** Needs the `files:read` scope. */
   filesInfo(id: string): Promise<SlackFile>;
   downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }>;
-  /** Upload one file into a thread. Needs the `files:write` scope. */
+  /** Needs the `files:write` scope. */
   uploadFile(
     channel: string,
     threadTs: string,
@@ -229,29 +188,16 @@ interface SlackResponse {
   [key: string]: unknown;
 }
 
-/**
- * Did Slack refuse the payload because of the *block* itself? The `markdown`
- * block is recent, so a workspace that predates it answers with one of these —
- * the signal to re-render the turn as legacy mrkdwn rather than to lose it.
- *
- * Slack has no capability API to ask up front, so the only detection is a
- * failed send. That makes the test's *narrowness* the whole safety property:
- * the caller latches the answer for the process, so anything matched here
- * degrades every later message too. `invalid_arguments` is deliberately NOT
- * matched even though avibe lists it — avibe retries per message, where a
- * broad match costs one fallback; latching turns the same breadth into a
- * permanent downgrade triggered by an unrelated bad argument (a malformed
- * `thread_ts` would silently cost the whole process its rendering). A wrong
- * call should surface as an error, not as a quieter renderer.
- */
+/** A workspace that predates the `markdown` block answers with one of these;
+ *  there is no capability API, so a failed send is the only detection. The
+ *  caller latches the answer for the process, so the match must stay narrow:
+ *  `invalid_arguments` is deliberately not matched — a malformed `thread_ts`
+ *  would otherwise permanently downgrade the renderer. */
 export const isBlockRejection = (err: unknown): boolean =>
   /invalid_blocks|unsupported_block_type/.test(String(err));
 
-/**
- * A connection that dies younger than this was a failed attempt, however it
- * ended: Slack answers "too many connections" by accepting the socket and
- * closing it straight away, which is not an error the loop would otherwise see.
- */
+/** Younger than this was a failed attempt: Slack answers "too many
+ *  connections" by accepting the socket and closing it straight away. */
 const MIN_CONNECTION_MS = 5000;
 const RECONNECT_FLOOR_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
@@ -263,17 +209,13 @@ export class SlackApi implements SlackClient {
     private readonly token: string,
     private readonly appToken: string,
     private readonly log: (message: string) => void = () => {},
-    /** Injected in tests; production opens a real WebSocket. */
+    /** Injected in tests. */
     private readonly openSocket: SocketFactory = (url) => new WebSocket(url) as SocketLike,
   ) {}
 
-  /**
-   * Slack accepts a JSON body only on *write* methods. A read method
-   * (`users.info`, `conversations.info|history|replies`) silently ignores it and
-   * then reports the missing parameter — `users.info` answers `user_not_found`,
-   * which reads like "no such person" rather than "you sent the id in a place I
-   * do not look". So reads go form-encoded. This was worth four broken calls.
-   */
+  /** Slack accepts a JSON body only on write methods; a read method silently
+   *  ignores it and reports the parameter missing (`users.info` answers
+   *  `user_not_found`). So reads go form-encoded. */
   private async read<T extends SlackResponse>(
     method: string,
     params: Record<string, string | number | boolean | undefined>,
@@ -303,9 +245,8 @@ export class SlackApi implements SlackClient {
       body: form ? payload.toString() : JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
     });
-    // Slack answers a flood (a long turn split into chunks hits ~1 msg/s per
-    // channel) with the exact wait in a header. Obeying it once turns a dropped
-    // reply into a late one; a second 429 is a real problem and throws.
+    // A long turn split into chunks hits ~1 msg/s per channel; the header
+    // carries the exact wait. Obeyed once; a second 429 throws.
     if (res.status === 429 && retry) {
       const after = Number(res.headers.get("retry-after") ?? "1");
       if (Number.isFinite(after) && after <= 60) {
@@ -326,19 +267,15 @@ export class SlackApi implements SlackClient {
 
   // --- Socket Mode -----------------------------------------------------------
 
-  /**
-   * Reconnecting is part of the protocol, not the adapter's problem: Slack
-   * cycles a connection every few hours with `disconnect: refresh_requested`,
-   * so the loop reopens until `close()` clears the flag.
-   */
+  /** Slack cycles a connection every few hours with `disconnect:
+   *  refresh_requested`, so the loop reopens until `close()` clears the flag. */
   async connect(onEnvelope: (env: SlackEnvelope) => void): Promise<SlackSocket> {
     this.socketRunning = true;
     let socket: SocketLike | undefined;
     const run = async (): Promise<void> => {
       let backoff = RECONNECT_FLOOR_MS;
       while (this.socketRunning) {
-        // Set once the socket exists, so a slow `apps.connections.open` cannot
-        // make a connection that died instantly look like a healthy one.
+        // Set once the socket exists, not before `apps.connections.open`.
         let connectedAt = 0;
         try {
           const open = await this.call<SlackResponse & { url?: string }>(
@@ -347,13 +284,11 @@ export class SlackApi implements SlackClient {
             this.appToken,
           );
           if (!open.url) throw new Error("apps.connections.open returned no url");
-          // stop() may have landed while that call was in flight. Opening now
-          // would leave a live socket nobody holds a reference to.
+          // stop() may have landed while that call was in flight.
           if (!this.socketRunning) return;
           socket = this.openSocket(open.url);
           connectedAt = Date.now();
-          // Resolves on close, never rejects: a dropped socket is normal and
-          // the loop's job is to reopen it, not to treat it as an error.
+          // Resolves on close, never rejects: a dropped socket is normal.
           await new Promise<void>((resolve) => {
             const ws = socket!;
             ws.onmessage = (ev: { data: unknown }) => {
@@ -361,13 +296,11 @@ export class SlackApi implements SlackClient {
               try {
                 env = JSON.parse(String(ev.data)) as SlackEnvelope;
               } catch {
-                // Validate at the boundary: log and drop, never half-handle.
                 this.log(`unparseable socket frame dropped`);
                 return;
               }
-              // Ack first and always. Handling happens after, because a turn
-              // outlives the deadline and Slack redelivers what it never saw
-              // acknowledged.
+              // Ack first: a turn outlives the deadline, and an unacked
+              // envelope is redelivered.
               if (env.envelope_id) {
                 try {
                   ws.send(JSON.stringify({ envelope_id: env.envelope_id }));
@@ -377,8 +310,6 @@ export class SlackApi implements SlackClient {
               }
               if (env.type === "hello") return;
               if (env.type === "disconnect") {
-                // Expected: Slack recycles connections. Closing resolves the
-                // promise below and the loop reopens.
                 this.log(`socket disconnect (${env.reason ?? "no reason"}), reconnecting`);
                 ws.close();
                 return;
@@ -394,10 +325,7 @@ export class SlackApi implements SlackClient {
           this.log(`socket connect failed: ${String(err)}`);
         }
         if (!this.socketRunning) return;
-        // The anti-spin floor. A socket that lived a while was healthy, so the
-        // next attempt starts from the floor again; one that died young — or
-        // threw — backs off, because reopening instantly would hammer
-        // apps.connections.open in a tight loop.
+        // A socket that lived a while was healthy; one that died young backs off.
         if (connectedAt && Date.now() - connectedAt >= MIN_CONNECTION_MS) {
           backoff = RECONNECT_FLOOR_MS;
         }
@@ -447,7 +375,6 @@ export class SlackApi implements SlackClient {
     try {
       await this.call("reactions.add", { channel, timestamp: ts, name });
     } catch (err) {
-      // The reaction is already where we want it; that is a success.
       if (!String(err).includes("already_reacted")) throw err;
     }
   }
@@ -491,7 +418,7 @@ export class SlackApi implements SlackClient {
         response_metadata?: { next_cursor?: string };
       }
     >(method, params);
-    // An empty cursor means "no more"; Slack sends `""` rather than omitting it.
+    // Slack sends `""` for "no more" rather than omitting it.
     const next = body.response_metadata?.next_cursor;
     return { messages: body.messages ?? [], nextCursor: next || undefined };
   }
@@ -511,8 +438,7 @@ export class SlackApi implements SlackClient {
     return this.page("conversations.replies", {
       channel,
       ts,
-      // Slack drops the boundary message unless asked; the caller wants it and
-      // filters for itself, the same as `history` above.
+      // Slack drops the boundary message unless asked; the caller filters for itself.
       oldest: query.oldest,
       inclusive: true,
       limit: query.limit ?? 200,
@@ -520,18 +446,14 @@ export class SlackApi implements SlackClient {
     });
   }
 
-  /**
-   * Slack file URLs are private: they need the bot token as a bearer header and
-   * answer HTML (a login page) rather than an error when it is missing.
-   */
-  /** A read method, so form-encoded (see read()); `id` is the `F…` id. */
   async filesInfo(id: string): Promise<SlackFile> {
     const body = await this.read<SlackResponse & { file?: SlackFile }>("files.info", { file: id });
-    // `ok` without a file would leave the caller downloading `undefined`.
     if (!body.file) throw new Error("slack files.info: no file in the response");
     return body.file;
   }
 
+  /** File URLs need the bot token as a bearer header, and answer HTML (a login
+   *  page) rather than an error without it. */
   async downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
     const url = file.url_private_download ?? file.url_private;
     if (!url) throw new Error("slack file has no private url");
@@ -541,29 +463,21 @@ export class SlackApi implements SlackClient {
     });
     if (!res.ok) throw new Error(`slack file download: ${res.status}`);
     const mimeType = res.headers.get("content-type")?.split(";")[0] ?? file.mimetype ?? "application/octet-stream";
-    // Bounded mid-stream: the event's size metadata is the platform's word.
     return { bytes: await readCapped(res.body, maxBytes), mimeType };
   }
 
-  /**
-   * Three calls, because that is what Slack's current upload is: ask for a
-   * one-shot URL, POST the bytes to it (that host is not the Web API and
-   * answers with plain text, not JSON), then tell Slack where the file goes.
-   * `files.upload` did it in one, and is retired.
-   */
+  /** Three calls is Slack's current upload (`files.upload` is retired); the
+   *  upload host is not the Web API and answers plain text. */
   async uploadFile(
     channel: string,
     threadTs: string,
     file: { name: string; bytes: Uint8Array },
   ): Promise<void> {
-    // A read method: form-encoded, or Slack ignores the body (see read()).
     const slot = await this.read<SlackResponse & { upload_url?: string; file_id?: string }>(
       "files.getUploadURLExternal",
       { filename: file.name, length: file.bytes.length },
     ).catch((err: unknown) => {
-      // An app installed before Pier could upload has every other scope, so
-      // this reads as a mysterious refusal in the chat. Name the fix instead:
-      // the manifest is only applied when an app is *created*.
+      // The manifest is only applied when an app is created; name the fix.
       if (!/missing_scope/.test(String(err))) throw err;
       throw new Error(
         "the Slack app is missing the files:write scope — add it under " +
@@ -576,8 +490,7 @@ export class SlackApi implements SlackClient {
     const put = await fetch(slot.upload_url, {
       method: "POST",
       headers: { "content-type": "application/octet-stream" },
-      // Copied into a fresh view: a request body must be backed by an
-      // ArrayBuffer, and a Buffer read off disk is the wider ArrayBufferLike.
+      // A request body must be backed by an ArrayBuffer, not a Buffer's ArrayBufferLike.
       body: new Uint8Array(file.bytes),
       signal: AbortSignal.timeout(120_000),
     });

@@ -1,31 +1,17 @@
-// Thin Lark (Feishu) client: API shapes and the WebSocket transport, no policy.
-// The one file in channels/ that talks to open.feishu.cn, so the adapter stays
-// testable against `LarkClient`.
-//
-// Unlike Slack's Socket Mode — JSON frames a while loop can own — Lark's long
-// connection is a protobuf-framed proprietary protocol with server-pushed
-// reconnect/ping config, so the official SDK carries the transport (and its
-// tenant-token refresh). It is confined to this file; nothing SDK-shaped leaks
-// past `LarkClient`. Domain is fixed to Feishu (open.feishu.cn) on purpose:
-// this instance's operator uses Feishu, and a Lark-international switch is a
-// config field we would carry for nobody.
-//
-// Two credentials, like Slack but for a different reason: every call and the
-// socket itself authenticate as `app_id` + `app_secret`, so ChannelConfig's
-// `token` carries the App ID and `appToken` the App Secret.
-//
-// One transport fact that shaped the adapter: the SDK sends the WS response
-// frame only *after* the registered handler resolves, and Lark redelivers what
-// it never saw answered — so handlers here must return once the event is
-// queued, never once it is handled ("ack is not handling", paid for on Slack).
+// Thin Lark (Feishu) client: API shapes and the WebSocket transport, no policy;
+// the one file that talks to open.feishu.cn. The long connection is a
+// protobuf-framed proprietary protocol, so the official SDK carries the
+// transport, confined to this file. Domain is fixed to Feishu. ChannelConfig's
+// `token` is the App ID and `appToken` the App Secret. The SDK acks a frame only
+// after the handler resolves and Lark redelivers what it never saw answered, so
+// handlers return once the event is queued.
 
 import * as Lark from "@larksuiteoapi/node-sdk";
 
 // --- card shapes (schema 2.0) --------------------------------------------------
-// Verified against the live API by avibe: schema 2.0 is what makes button
-// callbacks arrive over the WebSocket (`card.action.trigger`); 1.0 cards only
-// answer to webhooks. 2.0 dropped the `note` component, so the footer is a
-// notation-sized markdown element with an inline grey font tag.
+// Schema 2.0 is what makes button callbacks arrive over the WebSocket; 1.0
+// cards only answer to webhooks. 2.0 has no `note`, so the footer is a
+// notation-sized markdown element.
 
 export interface LarkButton {
   tag: "button";
@@ -38,16 +24,10 @@ export interface LarkButton {
   behaviors?: { type: "callback"; value: LarkActionValue }[];
 }
 
-/**
- * What a button click posts back. `root` rides along because the callback
- * event does not carry the clicked message's thread — only the message and
- * chat ids — and the conversation cannot be reconstructed without it.
- * `label` rides along for the same reason, worse: `message.get` cannot return
- * a 2.0 card at all (it answers a "please upgrade your client" post
- * structure, verified against the live API), so the value the platform echoes
- * back is the *only* place a clicked button's meaning survives. Labels are
- * truncated to 60 chars at render, so the value stays tiny.
- */
+/** `root` rides along because the callback does not carry the message's
+ *  thread. `label` too: `message.get` cannot return a 2.0 card (it answers a
+ *  "please upgrade your client" post), so the echoed value is the only place a
+ *  clicked button's meaning survives. */
 export interface LarkActionValue {
   key: string;
   root: string;
@@ -106,13 +86,11 @@ export interface LarkMessageEvent {
   };
 }
 
-/** One `card.action.trigger` callback. */
 export interface LarkCardAction {
   eventId?: string;
   messageId: string;
   chatId: string;
   operatorId: string;
-  /** The `behaviors` callback value of a plain button. */
   value?: Partial<LarkActionValue>;
   /** Form submissions: the submit button's `name` and the typed values. */
   name?: string;
@@ -124,8 +102,7 @@ export interface LarkHandlers {
   onCardAction(action: LarkCardAction): void;
 }
 
-/** The wire shape of `card.action.trigger` v2 — ids nested under `context`,
- *  with top-level fallbacks kept for older payload variants. */
+/** Ids nested under `context`, with top-level fallbacks for older payload variants. */
 interface RawCardTrigger {
   event_id?: string;
   context?: { open_message_id?: string; open_chat_id?: string };
@@ -139,21 +116,17 @@ interface RawCardTrigger {
   };
 }
 
-/** A live long connection. `close()` stops the SDK's own reconnect loop. */
+/** `close()` stops the SDK's own reconnect loop. */
 export interface LarkSocket {
   close(): Promise<void>;
 }
 
 /** Every call the adapter makes — the seam a test double implements. */
 export interface LarkClient {
-  /** The bot's own open_id, needed for mention detection. */
   botOpenId(): Promise<string>;
-  /** Open the long connection and keep it open (the SDK owns reconnection). */
   connect(handlers: LarkHandlers): Promise<LarkSocket>;
-  /** Reply in the message's thread (`reply_in_thread`). Deliberately the
-   *  *only* way to post: this adapter never writes to a chat's main flow. */
+  /** Deliberately the only way to post: never into a chat's main flow. */
   replyCard(messageId: string, card: LarkCard): Promise<{ messageId: string }>;
-  /** Panels are edited in place; a new message per tap would bury the chat. */
   patchCard(messageId: string, card: LarkCard): Promise<void>;
   deleteMessage(messageId: string): Promise<void>;
   /** `emojiType` is a Lark key (`OnIt`), never a codepoint. */
@@ -162,12 +135,11 @@ export interface LarkClient {
   removeReaction(messageId: string, emojiType: string): Promise<void>;
   chatName(chatId: string): Promise<string | undefined>;
   userName(openId: string): Promise<string>;
-  /** Upload one file and post it into the message's thread. */
   uploadFile(
     rootId: string,
     file: { name: string; bytes: Uint8Array; image: boolean },
   ): Promise<void>;
-  /** Fetch one attachment, refusing past `maxBytes` mid-stream. */
+  /** Refuses past `maxBytes` mid-stream. */
   download(
     messageId: string,
     fileKey: string,
@@ -189,8 +161,7 @@ function ok<T extends LarkResponse>(what: string, res: T): T {
 
 export class LarkApi implements LarkClient {
   private readonly client: Lark.Client;
-  /** Our own open_id, remembered from botOpenId() — reaction removal must
-   *  only ever touch a reaction *this* app made. */
+  /** Reaction removal must only touch a reaction this app made. */
   private me = "";
 
   constructor(
@@ -222,13 +193,8 @@ export class LarkApi implements LarkClient {
 
   // --- long connection ---------------------------------------------------------
 
-  /**
-   * The SDK owns the loop: endpoint discovery, protobuf frames, ping/pong and
-   * the reconnect pacing the server itself pushes down. `card.action.trigger`
-   * is registered through `register`'s generic because IHandles types events
-   * only, not callbacks; its payload shape is pinned by the adapter's golden
-   * tests instead.
-   */
+  /** `card.action.trigger` goes through `register`'s generic because IHandles
+   *  types events only, not callbacks. */
   connect(handlers: LarkHandlers): Promise<LarkSocket> {
     const dispatcher = new Lark.EventDispatcher({
       loggerLevel: Lark.LoggerLevel.error,
@@ -248,8 +214,7 @@ export class LarkApi implements LarkClient {
             mentions: data.message.mentions,
           },
         });
-        // Resolve now: the SDK answers the frame only after this returns, and
-        // a turn outlives Lark's redelivery deadline.
+        // The SDK acks only after this returns; a turn outlives the redelivery deadline.
         return Promise.resolve();
       },
       "card.action.trigger": (data) => {
@@ -271,12 +236,9 @@ export class LarkApi implements LarkClient {
       domain: Lark.Domain.Feishu,
       loggerLevel: Lark.LoggerLevel.error,
     });
-    // Fire and forget, deliberately: start() settles on the SDK's schedule —
-    // it retries a busy endpoint and can sit in that loop for a long time —
-    // and ChannelRuntime serializes reloads, so awaiting here would let one
-    // unreachable network block every later Console save. Credentials were
-    // already proven by botOpenId() before connect() is called; a transport
-    // failure after that is the reconnect loop's job, and is logged.
+    // Not awaited: start() can sit in the SDK's retry loop for a long time,
+    // and ChannelRuntime serializes reloads, so one unreachable network would
+    // block every later Console save. botOpenId() already proved the credentials.
     void ws.start({ eventDispatcher: dispatcher })
       .catch((err) => this.log(`lark long connection failed: ${String(err)}`));
     return Promise.resolve({
@@ -299,24 +261,16 @@ export class LarkApi implements LarkClient {
       data: {
         msg_type: "interactive",
         content: JSON.stringify(card),
-        // What makes the reply land in the message's own topic instead of the
-        // chat's main flow — Lark's equivalent of posting to a thread_ts.
+        // Lark's equivalent of posting to a thread_ts.
         reply_in_thread: true,
       },
     });
     return { messageId: ok("message.reply", res).data?.message_id ?? "" };
   }
 
-  /**
-   * Two calls: the bytes go to the platform first and come back as a key,
-   * then the key is posted as a message. Images take the image endpoint so
-   * they render inline; everything else is a `stream` file, which is Lark's
-   * name for "a file whose type I am not claiming to know".
-   *
-   * The SDK unwraps an upload response to its `data`, so a business failure
-   * arrives as a missing key rather than as a code — hence the explicit throw
-   * instead of `ok()`.
-   */
+  /** Images take the image endpoint so they render inline; `stream` is Lark's
+   *  "type unknown". The SDK unwraps an upload response to its `data`, so a
+   *  failure arrives as a missing key, not a code. */
   async uploadFile(
     rootId: string,
     file: { name: string; bytes: Uint8Array; image: boolean },
@@ -375,12 +329,8 @@ export class LarkApi implements LarkClient {
     );
   }
 
-  /**
-   * Lark deletes reactions by `reaction_id`, and several parties may have
-   * used the same emoji — so list, keep only the entry *this app* owns
-   * (`operator_type` alone is not ownership: another bot's 👀 is an app
-   * reaction too, and deleting it would strand our own), delete that.
-   */
+  /** `operator_type` alone is not ownership: another bot's 👀 is an app
+   *  reaction too, and deleting it would strand our own. */
   async removeReaction(messageId: string, emojiType: string): Promise<void> {
     let pageToken: string | undefined;
     do {
@@ -395,7 +345,7 @@ export class LarkApi implements LarkClient {
         const op = item.operator;
         if (op?.operator_type !== "app") continue;
         // The list reports an app operator by open_id or app_id depending on
-        // surface; accept either of ours, never a blank (avibe's rule).
+        // surface; accept either of ours, never a blank.
         const id = (op.operator_id ?? "").trim();
         if (!id || (id !== this.me && id !== this.appId)) continue;
         if (item.reaction_id) {
@@ -438,13 +388,8 @@ export class LarkApi implements LarkClient {
 
   // --- files ----------------------------------------------------------------------
 
-  /**
-   * `maxBytes` is enforced *while streaming*: the receive event often omits
-   * `file_size`, so the metadata check upstream cannot be the only cap, and
-   * buffering an unbounded stream whole into memory is the exact failure the
-   * cap exists for. The error message carries "too large" — the adapter's
-   * lost-marker wording keys on it.
-   */
+  /** Enforced while streaming: the receive event often omits `file_size`. The
+   *  error carries "too large", which the lost-marker wording keys on. */
   async download(
     messageId: string,
     fileKey: string,

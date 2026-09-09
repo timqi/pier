@@ -1,9 +1,6 @@
-// Slack's half of the settings panel: mrkdwn markup, Block Kit, and a modal
-// for the one typed answer. The panel itself lives in `panel.ts`.
-//
-// The modal is what makes this half smaller than Telegram's: `private_metadata`
-// carries the conversation with the dialog, so a submitted path needs no
-// adapter-side state to be understood, and survives a reload.
+// Slack's half of the settings panel (panel.ts has the rest). The modal's
+// `private_metadata` carries the conversation, so a submission needs no
+// adapter-side state and survives a reload.
 
 import type { ConversationKey } from "../core/types.js";
 import {
@@ -19,7 +16,6 @@ import {
 import type { SlackBlock, SlackButton, SlackClient, SlackInteraction } from "./slack-api.js";
 import { context, escapeMrkdwn as esc, section } from "./slack-render.js";
 
-/** The modal's ids. `private_metadata` carries which conversation it is for. */
 const CWD_VIEW = "cfg_cwd";
 const CWD_BLOCK = "cwd_block";
 const CWD_INPUT = "cwd_input";
@@ -28,7 +24,6 @@ export interface SlackPanelDeps extends PanelDeps {
   api: Pick<SlackClient, "postMessage" | "updateMessage" | "deleteMessage" | "openView">;
 }
 
-/** Where this conversation's panel lives. */
 interface SlackPanelState extends PanelState {
   threadTs: string;
   ts: string;
@@ -62,14 +57,12 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
   private blocks(view: PanelView, note?: string): SlackBlock[] {
     return [
       ...view.groups.map((g) => section([`*${g.title}*${g.suffix ?? ""}`, ...g.lines].join("\n"))),
-      // Slack fits a page of choices on one row; Telegram would not.
       ...(view.picks?.length ? [row(view.picks)] : []),
       ...view.rows.filter((r) => r.length).map(row),
       ...(note ? [context(esc(note))] : []),
     ];
   }
 
-  /** Open a fresh panel, replacing whichever one this conversation had. */
   async open(key: ConversationKey, channel: string, threadTs: string): Promise<void> {
     const sent = await this.deps.api.postMessage({
       channel,
@@ -96,10 +89,7 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
 
   // --- actions ---------------------------------------------------------------
 
-  /**
-   * Handle a `cfg:` click. Returns false when the action is not ours, so the
-   * caller can treat it as one of the agent's next-step labels instead.
-   */
+  /** Returns false when the action is not ours. */
   async onAction(
     interaction: SlackInteraction,
     key: ConversationKey,

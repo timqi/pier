@@ -1,10 +1,5 @@
-// How a turn becomes cards in a Lark thread.
-//
-// Split from the adapter the way slack-outbound.ts is: what a turn renders as
-// — one card per chunk, footer and buttons on the last, and what an empty turn
-// still has to say — is a different decision from routing inbound traffic. The
-// adapter keeps the 👀 receipts, because those are about the turn ending, not
-// about what was said.
+// How a turn becomes cards in a Lark thread: one card per chunk, footer and
+// buttons on the last, and what an empty turn still has to say.
 
 import type { AgentReply, NoteOrigin } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
@@ -23,18 +18,12 @@ import {
   withoutButtons,
 } from "./lark-render.js";
 
-/** How many sent cards the retire cache remembers (avibe keeps 200). */
 const SENT_CACHE = 200;
 
 export class LarkOutbound {
-  /**
-   * The cards this process sent with buttons on them, for retiring the row
-   * once an option is taken — a 2.0 card cannot be read back from the
-   * platform (see LarkActionValue), so what we sent is the only copy.
-   * In-memory and bounded, copied from avibe: purely cosmetic state. A click
-   * after a restart still *works* (the label rides in the value); the buttons
-   * merely stay up, and the skip is logged.
-   */
+  /** A 2.0 card cannot be read back (LarkActionValue), so what we sent is the
+   *  only copy to retire buttons from. Cosmetic: a click after a restart still
+   *  works, the buttons merely stay up. */
   private readonly sent = new Map<string, LarkCard>();
 
   constructor(
@@ -42,20 +31,11 @@ export class LarkOutbound {
     private readonly log: (message: string) => void,
   ) {}
 
-  /**
-   * Post one turn as replies into the conversation's thread, empty text
-   * included: a turn that produced nothing still posts its footer and says
-   * which kind of nothing it was — total silence is indistinguishable from a
-   * crash, and the person watching the 👀 come off has no way to tell.
-   *
-   * The footer folds into the last body chunk's own markdown element (a
-   * second element renders a blank gap); only a bodiless turn gets it as the
-   * standalone muted element. Buttons ride the last chunk, like every other
-   * platform — the card is remembered so retire() can rebuild it without them.
-   */
+  /** An empty turn still posts its footer and says which kind of nothing (§5b).
+   *  The footer folds into the last chunk's element (a second element renders
+   *  a blank gap); only a bodiless turn gets the standalone one. */
   async reply(root: string, reply: AgentReply): Promise<void> {
-    // A file the agent linked lives on Pier's machine, so the link is dead in
-    // Lark: the bytes are uploaded instead and the label stays in the text.
+    // A local file link is dead in Lark: the bytes are uploaded instead.
     const { text: spoken, paths } = splitAttachments(reply.text);
     const text = spoken.trim();
     const meta = reply.meta ? formatTurnMeta(reply.meta) : "";
@@ -77,17 +57,11 @@ export class LarkOutbound {
       const { messageId } = await this.api.replyCard(root, card(elements));
       if (last && row && messageId) this.remember(messageId, card(elements));
     }
-    // Attachments follow the words, so the card introducing them is above
-    // them; anything that could not be sent says so in the thread.
     const lost = await sendAttachments(paths, (file) => this.api.uploadFile(root, file), this.log);
     if (lost) await this.api.replyCard(root, card([markdown(lost)]));
   }
 
-  /**
-   * Take the buttons off a card one option was just taken from — the rest
-   * answer a question the conversation has moved past. Best-effort by design:
-   * an unremembered card (sent before a restart) keeps its row, logged.
-   */
+  /** Best-effort: a card sent before a restart keeps its row, logged. */
   async retire(messageId: string): Promise<void> {
     const known = this.sent.get(messageId);
     if (!known) {
@@ -111,14 +85,8 @@ export class LarkOutbound {
     }
   }
 
-  /**
-   * A system note: quoted, labelled with where it came from, and deliberately
-   * plain — no buttons and no turn footer, because the turn this input
-   * triggers has not ended yet.
-   *
-   * Answers with the id of the last card it posted — where the caller puts the
-   * 👀 for that turn, at the foot of the topic the reply will land in.
-   */
+  /** No footer: the turn this input triggers has not ended. Answers with the
+   *  id of the last card posted, where the caller puts the 👀. */
   async note(root: string, note: { text: string; origin: NoteOrigin }): Promise<string | undefined> {
     const body = note.text.split("\n").map((line) => `> ${line}`).join("\n");
     let messageId: string | undefined;

@@ -1,8 +1,5 @@
-// Channel config persistence and the permission gate every adapter shares.
-// One JSON document per platform holds credentials, defaults, bound users and
-// the discovered chats — token, groups and permissions in one place, so a
-// surface configuring a platform reads and writes exactly one row.
-// The shapes live in types.ts; this file is the store and the policy.
+// Channel config persistence and the permission gate every adapter shares: one
+// JSON document per platform, so a surface configuring one reads and writes one row.
 
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
@@ -19,27 +16,20 @@ import {
 
 const BIND_CODE_TTL_MS = 10 * 60_000;
 
-/** Envelope from secrets.ts. A token that matches was sealed by us; anything
- *  else is legacy plaintext, still honored and re-sealed on the next save. */
+/** Anything not matching is legacy plaintext, honored and re-sealed on the next save. */
 const SEALED = /^v1:[0-9a-f]{8}:/;
 
 export class ChannelStore {
   private readonly db: DatabaseSync;
   private readonly cache = new Map<ChannelPlatform, ChannelConfig>();
 
-  /** Without `secrets`, tokens persist as given — tests and one-off tools.
-   *  With it, tokens are sealed at rest; a locked store throws on both paths
+  /** Without `secrets` (tests), tokens persist as given. A locked store throws
    *  rather than serving a token it cannot read. */
   constructor(db: DatabaseSync = pierDb(), private readonly secrets?: Secrets) {
     this.db = db;
   }
 
-  /**
-   * The live cached document. Private on purpose: handing it out let a caller
-   * mutate config without saving, so memory and disk could disagree with no
-   * way to tell which was right. Internal readers use this; everyone outside
-   * gets a copy from get().
-   */
+  /** Private: handed out, a caller could mutate config without saving. */
   private cached(platform: ChannelPlatform): ChannelConfig {
     const hit = this.cache.get(platform);
     if (hit) return hit;
@@ -58,17 +48,14 @@ export class ChannelStore {
     return config;
   }
 
-  /** A detached copy: edit it freely, then hand it back to save(). */
   get(platform: ChannelPlatform): ChannelConfig {
     return structuredClone(this.cached(platform));
   }
 
   save(platform: ChannelPlatform, config: ChannelConfig): void {
-    // Clone on the way in too, so the caller keeping its object and mutating
-    // it later cannot reach into the cache behind save()'s back.
+    // Cloned, so the caller's object cannot reach into the cache later.
     this.cache.set(platform, structuredClone(config));
-    // The cache holds plaintext (it is what adapters connect with); only the
-    // row is sealed.
+    // The cache holds plaintext; only the row is sealed.
     const stored = this.secrets ? structuredClone(config) : config;
     if (this.secrets) {
       for (const key of ["token", "appToken"] as const) {
@@ -85,16 +72,9 @@ export class ChannelStore {
     return this.get(platform).chats.find((c) => c.id === chatId);
   }
 
-  /**
-   * Record a chat the bot just met. Telegram has no "list my chats" API, so
-   * discovery is passive. A new chat copies the platform defaults and owns
-   * them from then on — the mention and bind gates are what keep it harmless
-   * until an operator configures it.
-   *
-   * Telegram gets a chat's name free with every update, so it discovers on
-   * every message: the "already known, unchanged" answer is read off the
-   * cached document and costs no clone. Only a real change pays for one.
-   */
+  /** Telegram has no "list my chats" API, so discovery is passive and happens
+   *  on every message: the unchanged case must cost no clone. A new chat copies
+   *  the platform defaults and owns them from then on. */
   discoverChat(platform: ChannelPlatform, chat: { id: string; name: string; kind: ChatKind }): void {
     const cached = this.cached(platform).chats.find((c) => c.id === chat.id);
     if (cached && cached.name === chat.name && cached.kind === chat.kind) return;
@@ -114,9 +94,7 @@ export class ChannelStore {
     this.save(platform, config);
   }
 
-  // Read-only and on the per-message path: no clone, nothing here escapes.
-  // An undiscovered chat falls back to the platform seed; in practice the
-  // adapter discovers before it asks.
+  // On the per-message path: no clone, nothing here escapes.
   policy(platform: ChannelPlatform, chatId: string): ChatPolicy {
     const config = this.cached(platform);
     const chat = config.chats.find((c) => c.id === chatId);
@@ -136,7 +114,6 @@ export class ChannelStore {
     return this.cached(platform).users.some((u) => u.id === userId);
   }
 
-  /** Single-use, short-lived code an operator reads off the Console. */
   issueBindCode(platform: ChannelPlatform): BindCode {
     const config = this.get(platform);
     const code = Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -178,19 +155,12 @@ export interface GateInput {
 
 export type GateVerdict = "allow" | "chat-disabled" | "not-addressed" | "not-bound";
 
-/**
- * The whole inbound permission policy, platform-blind and total.
- *
- * A group denial is silent by contract: a group where the bot answers "you are
- * not allowed" to every passing message is worse than one that stays quiet.
- * A DM is the exception — two parties, so silence is just confusing — and the
- * adapter answers `not-bound` there.
- */
+/** The whole inbound permission policy. A group denial is silent by contract;
+ *  a DM is the exception, and the adapter answers `not-bound` there. */
 export function gate({ policy, isDm, addressed, bound, bindRequest }: GateInput): GateVerdict {
   if (!policy.enabled) return "chat-disabled";
-  // A DM has exactly two parties: mention is meaningless, and bind is not
-  // optional there — it is the only thing between a stranger and an agent with
-  // a shell. `requireMention`/`requireBind` are group settings by construction.
+  // In a DM bind is not optional: it is the only thing between a stranger and
+  // an agent with a shell. `requireMention`/`requireBind` are group settings.
   if (isDm) return bound || bindRequest ? "allow" : "not-bound";
   if (policy.requireMention && !addressed) return "not-addressed";
   if (policy.requireBind && !bound && !bindRequest) return "not-bound";

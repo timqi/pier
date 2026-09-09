@@ -1,12 +1,7 @@
 // IM channel configuration types — the wire contract shared by the store, the
-// adapters and the Console view (which type-only imports it, so this file must
-// stay free of node builtins, exactly like core/types.ts).
-//
-// Defaults are least-privilege: mention AND bind are required. The platform
-// values are *seeds*, copied into a chat when the bot first sees it — not a
-// fallback consulted at runtime. So every chat carries its own answer and a
-// switch means what it says, instead of a three-state "inherit" nobody can
-// read off the screen.
+// adapters and the Console view (type-only, so no node builtins here). Defaults
+// are least-privilege, and platform values are seeds copied into a chat on
+// discovery, not a runtime fallback: a switch means what it says.
 
 import type { ModelRef, ThinkingLevel } from "../core/types.js";
 
@@ -18,14 +13,8 @@ const PLATFORMS: readonly string[] = ["telegram", "slack", "lark"];
 export const isChannelPlatform = (v: unknown): v is ChannelPlatform =>
   typeof v === "string" && PLATFORMS.includes(v);
 
-/**
- * The chat a conversation id belongs to. Every adapter spells its ids
- * `<chatId>` or `<chatId>/<thread>` — Telegram's topic, Slack's thread_ts,
- * Lark's root message — so the chat half has one decoder instead of one per
- * platform (control.ts used to import all three adapters for exactly this).
- * The *thread* half stays with each adapter: its type and meaning genuinely
- * differ per platform.
- */
+/** Every adapter spells its ids `<chatId>` or `<chatId>/<thread>`, so the chat
+ *  half has one decoder; the thread half genuinely differs per platform. */
 export const chatOf = (conversationId: string): string =>
   conversationId.split("/", 1)[0] ?? "";
 
