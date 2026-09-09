@@ -48,7 +48,8 @@ truth.
   into the running turn as a steer.
 - From an IM chat, every mid-turn message steers the running turn directly —
   no `!` needed, and a leading `!` is just content.
-- `/stop` aborts the current turn outright.
+- `/stop` from an IM chat aborts the current turn outright; the web has a Stop
+  button.
 
 ## In-chat commands and the settings panel
 
@@ -66,7 +67,8 @@ truth.
   A 👀 that never clears means the turn died, not that you are still thinking.
 - Every finished reply carries its cost: elapsed time and the context size at
   completion (`1m14s · 32K tok`) — a running total, not this turn's spend. IM
-  shows it as a footer line, the web on hover.
+  shows it as a footer line; the web shows the duration in the reply's activity
+  headline and the context size in the session header.
 - A reply past the platform's message cap is split across several messages
   (Telegram ~3.8k chars); the footer and the next-step buttons ride the last
   one.
@@ -102,9 +104,10 @@ truth.
 - `pier reload`: channel adapters re-read configuration and idle, unwatched
   sessions reopen with current agent files on their next message. Streaming or
   watched sessions are not interrupted.
-- `pier update`: the separate updater hard-stops the service, backs up the
-  database, replaces the package, and starts it again. It can interrupt active
-  work. All three are operator shell commands for an installed Linux systemd
+- `pier update`: a separate updater backs up the database and installs the new
+  package while Pier is still up, then hard-stops and starts the service. From
+  the shell it does not drain, so it can interrupt active work; the Console's
+  Update and auto-update drain first. All three are operator shell commands for an installed Linux systemd
   service, not tools available to the agent.
 
 ## Only the Console can change

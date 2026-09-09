@@ -2,7 +2,9 @@
 // one refusal everything else gets. Service-level behaviour lives in
 // service.test.ts; here the host is a stub over a real in-memory store.
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { THINKING_LEVELS } from "../core/types.js";
 import { openDb } from "../db.js";
 import type { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
@@ -167,5 +169,12 @@ describe("task tool recover", () => {
   it("contact still accepts only progress or decision as reason", async () => {
     const tool = rig([run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null })]);
     await expect(tool({ operation: "contact", reason: "recover", message: "hi" })).rejects.toThrow(/progress or decision/);
+  });
+
+  // The skill is what the agent acts on; a level added here and not there is a
+  // drift no agent can see.
+  it("the pier-tasks skill lists every thinking level", () => {
+    const skill = readFileSync(new URL("../../skills/pier-tasks/SKILL.md", import.meta.url), "utf8");
+    expect(skill).toContain(`\`${THINKING_LEVELS.join("/")}\``);
   });
 });

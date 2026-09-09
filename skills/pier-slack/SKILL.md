@@ -30,8 +30,8 @@ Four things markdown cannot express:
   thread. Asking a human to paste their own user ID is never acceptable.
 - Escape `&` `<` `>` when they are text, not markup: `&amp;` `&lt;` `&gt;`.
 - Emoji as `:white_check_mark:`, not the raw glyph.
-- ~11,000 chars per message: split longer content across replies in one thread
-  rather than truncating.
+- 11,000 chars per message; the tool refuses longer `text`. Split longer
+  content across replies in one thread rather than truncating.
 
 ## Targeting
 

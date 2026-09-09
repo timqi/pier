@@ -5,8 +5,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { splitInboundFiles } from "../core/inbound-file.js";
+import { MAX_INBOUND_BYTES, splitInboundFiles } from "../core/inbound-file.js";
 import { ChannelStore } from "./config.js";
+import { MARKDOWN_MAX } from "./slack-render.js";
 import { SlackDirectory } from "./slack-directory.js";
 import type {
   SlackClient,
@@ -793,6 +794,16 @@ describe("files", () => {
     await expect(call({ operation: "fetch_file", file: "F00" }))
       .rejects.toThrow(/no file with that id/);
     await expect(call({ operation: "fetch_file" })).rejects.toThrow(/file is required/);
+  });
+});
+
+describe("pier-slack skill", () => {
+  // The skill is what the agent acts on; a limit changed here without changing
+  // the skill is a drift no agent can see.
+  it("quotes the message and file limits the tool enforces", () => {
+    const skill = readFileSync(new URL("../../skills/pier-slack/SKILL.md", import.meta.url), "utf8");
+    expect(skill).toContain(`${MARKDOWN_MAX.toLocaleString("en-US")} chars per message`);
+    expect(skill).toContain(`Over ${MAX_INBOUND_BYTES / (1024 * 1024)} MB`);
   });
 });
 

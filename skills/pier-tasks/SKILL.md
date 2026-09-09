@@ -25,6 +25,8 @@ status query. The receipt's `next` tells you where/how delivery happens:
   not for work you launch and forget. Receipt echoes `callbackMode`.
 - `callback:"none"`: no delivery; means you do not want the result, not pull later.
 - Single-run `callback_session_id`: deliver to another existing session.
+  Top-level sessions only; inside a run it is ignored and the result returns
+  to you.
 
 Receipts include `runId`, `taskId`, state. Keep IDs: the callback also names
 `Run:`, and there is no lookup by task. `triggerSource` names the actual invoker
@@ -93,7 +95,7 @@ available IDs by callback; invalid `launch.thinking` fails the call.
 
 ## Control and decisions
 
-`message` must be non-empty, <16 KiB. Controls require ownership: your delegated
+`message` must be non-empty, at most 16 KiB. Controls require ownership: your delegated
 trees, or only descendants when you are a subagent.
 
 - `steer`: interrupt a child with corrections.
@@ -151,8 +153,8 @@ draft, including `trigger`. Schedules notify only with nested
 which scheduled runs lack.
 
 - Inside a run: Agent actions only (stored/inline), no reuse or create/update.
-- Depth 0–2: at most 3 runs below the invoking session; a fourth errors. Each
-  root allows 16 descendant runs (depth ≥1, resumes included). Your direct
+- Depth 0–2: three levels of nesting below the invoking session; a fourth
+  level errors. Each root allows 16 descendant runs (depth ≥1, resumes included). Your direct
   children are separate roots and do not count toward that limit.
 - 4 Agent runs execute instance-wide; others queue without error. Timeout
   starts **at enqueue**, so a run can time out before starting.
