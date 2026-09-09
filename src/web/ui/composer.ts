@@ -283,8 +283,31 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
 // business, and a board's own script runs on this origin (boards/boards.ts) —
 // in another tab, which is what keeps it out of reach.
 
-const draftKey = (id: string): string => `pier.draft.${id}`;
+const DRAFT_PREFIX = "pier.draft.";
+const draftKey = (id: string): string => `${DRAFT_PREFIX}${id}`;
 let draftVersion = 0;
+
+/** Drafts were kept in localStorage until they became tab-scoped, and a board's
+ *  script reads that store on this origin — so an upgraded workbench moves what
+ *  is left into this tab and deletes the exposed copies. Storage can be denied
+ *  outright (private mode, blocked cookies), which costs the move, not the boot. */
+function adoptStoredDrafts(): void {
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(DRAFT_PREFIX)) stale.push(key);
+    }
+    for (const key of stale) {
+      const text = localStorage.getItem(key);
+      // This tab's own draft is the newer one; the old copy only fills a gap.
+      if (text && !sessionStorage.getItem(key)) sessionStorage.setItem(key, text);
+      localStorage.removeItem(key);
+    }
+  } catch (err) {
+    console.warn("could not move older drafts out of localStorage", err);
+  }
+}
 
 /** In memory, not sessionStorage: a couple of pasted screenshots are past what
  *  it will hold. Survives switching sessions, not a reload. Written from
@@ -437,6 +460,7 @@ async function recallQueue(): Promise<void> {
 
 export function initComposer(d: ComposerDeps): void {
   deps = d;
+  adoptStoredDrafts();
   trackKeyboard();
   trackDock();
   const abort = (): void => {

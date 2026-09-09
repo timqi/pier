@@ -95,7 +95,12 @@ Both handlers also send `sandbox allow-scripts` — a private board adds
   `localStorage`, and top-level navigation is not something the CSP removes, so
   what it reads can leave.
 - Nothing secret belongs in `localStorage`; unsent composer drafts live in
-  tab-scoped `sessionStorage`, and a board opens in its own tab.
+  tab-scoped `sessionStorage`, and a board opens in its own tab. A private
+  board's URL pasted into the workbench tab does read that tab's drafts; the
+  UI never opens one there.
+- Dropping `allow-same-origin` is not the answer: an opaque-origin document
+  sends no `SameSite=Lax` cookie with its own sub-resources, so a private
+  board's stylesheet and images 302 to `/login` (verified in Chromium).
 
 One module owns scan, manifest read/write, rename-delete and the routes.
 `readManifest` is the single place a slug becomes a path and is validated;

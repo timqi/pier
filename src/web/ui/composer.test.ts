@@ -43,13 +43,24 @@ vi.mock("./icons.js", () => ({ icon: () => ({}) })); // lucide wants a real docu
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
 
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+/** Enough of the Storage interface for a draft: the migration enumerates it. */
+const storage = (entries: Map<string, string>) => ({
+  getItem: (key: string) => entries.get(key) ?? null,
+  setItem: (key: string, value: string) => entries.set(key, value),
+  removeItem: (key: string) => entries.delete(key),
+  key: (i: number) => [...entries.keys()][i] ?? null,
+  get length() { return entries.size; },
+});
+
 let composer: typeof import("./composer.js");
 let drafts: Map<string, string>;
+let stored: Map<string, string>;
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   state.nodes.clear(); state.created = []; state.id = "a"; state.visible = true; state.observed = [];
   drafts = new Map();
+  stored = new Map();
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { activeElement: null });
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
@@ -66,11 +77,8 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", state.fetch);
   // Drafts live in sessionStorage: a board's script shares this origin but
   // never this tab.
-  vi.stubGlobal("sessionStorage", {
-    getItem: (key: string) => drafts.get(key) ?? null,
-    setItem: (key: string, value: string) => drafts.set(key, value),
-    removeItem: (key: string) => drafts.delete(key),
-  });
+  vi.stubGlobal("sessionStorage", storage(drafts));
+  vi.stubGlobal("localStorage", storage(stored));
   composer = await import("./composer.js");
   composer.initComposer({
     sessionId: () => state.id, starting: () => false, sessionState: () => "idle",
@@ -133,15 +141,31 @@ it("measures the dock's parts as border-box", () => {
 // A board's page is active content on this origin (boards/boards.ts), so
 // localStorage is readable by a script the agent wrote; a tab-scoped store is not.
 it("keeps an unsent draft out of localStorage", () => {
-  const shared = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => shared.get(key) ?? null,
-    setItem: (key: string, value: string) => shared.set(key, value),
-    removeItem: (key: string) => shared.delete(key),
-  });
   type("unsent operator secret");
   expect(drafts.get("pier.draft.a")).toBe("unsent operator secret");
-  expect([...shared.keys()]).toEqual([]);
+  expect([...stored.keys()]).toEqual([]);
+});
+
+// A workbench upgraded mid-draft: what the old build wrote is still readable by
+// a board's script, so the first load after it takes the drafts along and clears
+// them. Only drafts — the other pier.* preferences belong in localStorage.
+it("moves drafts left in localStorage into this tab and deletes them", async () => {
+  stored.set("pier.draft.a", "pre-upgrade secret");
+  stored.set("pier.draft.b", "another one");
+  stored.set("pier.filesPrefs", "{}");
+  drafts.set("pier.draft.b", "typed in this tab");
+
+  vi.resetModules();
+  composer = await import("./composer.js");
+  composer.initComposer({
+    sessionId: () => state.id, starting: () => false, sessionState: () => "idle",
+    chatVisible: () => state.visible, setState: vi.fn(), reload: state.reload,
+  });
+
+  expect([...stored.keys()]).toEqual(["pier.filesPrefs"]);
+  expect(drafts.get("pier.draft.a")).toBe("pre-upgrade secret");
+  // The tab's own draft is the newer one and survives the move.
+  expect(drafts.get("pier.draft.b")).toBe("typed in this tab");
 });
 
 describe("queue recall drafts", () => {
