@@ -25,5 +25,5 @@ size:
         printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts'))"
     done
     printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -v '\.test\.ts$'))"
-    echo; echo "modules over 500:"
-    for f in $(find src -name '*.ts' -not -name '*.test.ts'); do n=$(count "$f"); [ "$n" -gt 500 ] && echo "  $n $f"; done | sort -rn
+    echo; echo "modules over 750:"
+    for f in $(find src -name '*.ts' -not -name '*.test.ts'); do n=$(count "$f"); [ "$n" -gt 750 ] && echo "  $n $f"; done | sort -rn

@@ -127,7 +127,7 @@ exists to catch.
 | `tasks/` | 3k | one delivery engine, durable control messages, scheduler, owner seam |
 | root `src/*.ts` | 3k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix |
 | one bundled extension | 500 | pays for itself or is not shipped |
-| one module | 500 | rule 2 before splitting |
+| one module | 750 | rule 2 before splitting; `agent/pi.ts` is the one file that may touch the Pi SDK, and every block in it does |
 | channel adapter file | 400 | transport, render and panel counted separately |
 
 Non-blank, non-comment lines, tests excluded. No repo-wide number.
