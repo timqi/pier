@@ -403,11 +403,11 @@ export class SlackChannel implements Channel {
     code: string,
   ): Promise<void> {
     const name = await this.directory.user(this.api, userId);
-    const ok = this.deps.store.redeemBindCode("slack", code, { id: userId, name });
+    const outcome = this.deps.store.redeemBindCode("slack", code, { id: userId, name });
     await this.api.postMessage({
       channel,
       thread_ts: threadTs,
-      text: bindResult(ok, escapeMrkdwn(name)),
+      text: bindResult(outcome, escapeMrkdwn(name)),
     });
   }
 

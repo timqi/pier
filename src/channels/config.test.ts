@@ -138,12 +138,29 @@ describe("channel config store", () => {
 
   it("redeems a bind code exactly once", () => {
     const { code } = store.issueBindCode("telegram");
-    expect(store.redeemBindCode("telegram", code.toLowerCase(), { id: "7", name: "Q" })).toBe(true);
+    expect(code).toMatch(/^[0-9A-Z]{6}$/);
+    expect(store.redeemBindCode("telegram", code.toLowerCase(), { id: "7", name: "Q" }))
+      .toBe("bound");
     expect(store.isBound("telegram", "7")).toBe(true);
-    expect(store.redeemBindCode("telegram", code, { id: "8", name: "R" })).toBe(false);
+    expect(store.redeemBindCode("telegram", code, { id: "8", name: "R" })).toBe("invalid");
     expect(store.isBound("telegram", "8")).toBe(false);
     store.unbind("telegram", "7");
     expect(store.isBound("telegram", "7")).toBe(false);
+  });
+
+  it("voids a bind code after five wrong tries, and says so on the fifth", () => {
+    const { code } = store.issueBindCode("telegram");
+    for (let i = 0; i < 4; i++) {
+      expect(store.redeemBindCode("telegram", "AAAAAA", { id: "7", name: "Q" })).toBe("invalid");
+    }
+    expect(store.redeemBindCode("telegram", "AAAAAA", { id: "7", name: "Q" })).toBe("voided");
+    // The real code is dead too, and no longer pending in the Console.
+    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe("invalid");
+    expect(store.isBound("telegram", "7")).toBe(false);
+    expect(store.get("telegram").bindCode).toBeNull();
+    // A fresh code starts over.
+    const next = store.issueBindCode("telegram").code;
+    expect(store.redeemBindCode("telegram", next, { id: "7", name: "Q" })).toBe("bound");
   });
 
   it("rejects an expired bind code", () => {
@@ -151,7 +168,7 @@ describe("channel config store", () => {
     const config = store.get("telegram");
     config.bindCode = { code, expiresAt: Date.now() - 1 };
     store.save("telegram", config);
-    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe(false);
+    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe("invalid");
   });
 
   it("hands out a copy, so an unsaved edit cannot reach the store", () => {

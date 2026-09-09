@@ -1,11 +1,13 @@
 // Channel config persistence and the permission gate every adapter shares: one
 // JSON document per platform, so a surface configuring one reads and writes one row.
 
+import { randomInt } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb } from "../db.js";
 import type { Secrets } from "../secrets.js";
 import {
   type BindCode,
+  type BindOutcome,
   type ChannelConfig,
   type ChannelPlatform,
   type ChatConfig,
@@ -15,6 +17,10 @@ import {
 } from "./types.js";
 
 const BIND_CODE_TTL_MS = 10 * 60_000;
+/** Six symbols out of 36 is 2 billion, but a caller who may retry forever only
+ *  needs the TTL; five wrong tries void the code instead. */
+const BIND_CODE_TRIES = 5;
+const BIND_CODE_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 /** Anything not matching is legacy plaintext, honored and re-sealed on the next save. */
 const SEALED = /^v1:[0-9a-f]{8}:/;
@@ -114,25 +120,40 @@ export class ChannelStore {
     return this.cached(platform).users.some((u) => u.id === userId);
   }
 
+  /** `randomInt` rejection-samples, and this code is the whole distance
+   *  between a stranger and an agent with a shell. */
   issueBindCode(platform: ChannelPlatform): BindCode {
     const config = this.get(platform);
-    const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const code = Array.from(
+      { length: 6 },
+      () => BIND_CODE_ALPHABET[randomInt(BIND_CODE_ALPHABET.length)],
+    ).join("");
     config.bindCode = { code, expiresAt: Date.now() + BIND_CODE_TTL_MS };
     this.save(platform, config);
     return config.bindCode;
   }
 
-  redeemBindCode(platform: ChannelPlatform, code: string, user: { id: string; name: string }): boolean {
+  redeemBindCode(
+    platform: ChannelPlatform,
+    code: string,
+    user: { id: string; name: string },
+  ): BindOutcome {
     const config = this.get(platform);
     const pending = config.bindCode;
-    if (!pending || pending.expiresAt < Date.now()) return false;
-    if (pending.code !== code.trim().toUpperCase()) return false;
+    if (!pending || pending.expiresAt < Date.now()) return "invalid";
+    if (pending.code !== code.trim().toUpperCase()) {
+      const tries = (pending.tries ?? 0) + 1;
+      const voided = tries >= BIND_CODE_TRIES;
+      config.bindCode = voided ? null : { ...pending, tries };
+      this.save(platform, config);
+      return voided ? "voided" : "invalid";
+    }
     config.bindCode = null;
     if (!config.users.some((u) => u.id === user.id)) {
       config.users.push({ id: user.id, name: user.name, boundAt: Date.now() });
     }
     this.save(platform, config);
-    return true;
+    return "bound";
   }
 
   unbind(platform: ChannelPlatform, userId: string): void {

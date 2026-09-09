@@ -301,10 +301,10 @@ export class TelegramChannel implements Channel {
   private async bind(msg: TgMessage, code: string): Promise<void> {
     const user = msg.from!;
     const name = senderName(user);
-    const ok = this.deps.store.redeemBindCode("telegram", code, { id: String(user.id), name });
+    const outcome = this.deps.store.redeemBindCode("telegram", code, { id: String(user.id), name });
     await this.api.sendMessage({
       chat_id: msg.chat.id,
-      text: bindResult(ok, name),
+      text: bindResult(outcome, name),
     });
   }
 

@@ -165,7 +165,8 @@ launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
   gates — groups always, a DM only from a bound sender (`gate.mayDiscover()`),
   so a stranger's DM writes no row.
 - **Bind**: a Console-issued single-use code with a TTL, redeemed by `/bind
-  <code>` in a DM; bind requests pass the bind gate.
+  <code>` in a DM; bind requests pass the bind gate. Five wrong tries void the
+  code, and the fifth reply says so.
 
 ## Commands
 

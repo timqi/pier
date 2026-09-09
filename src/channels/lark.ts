@@ -420,8 +420,8 @@ export class LarkChannel implements Channel {
 
   private async bind(userId: string, messageId: string, code: string): Promise<void> {
     const name = await this.userName(userId);
-    const ok = this.deps.store.redeemBindCode("lark", code, { id: userId, name });
-    await this.api.replyCard(messageId, card([markdown(bindResult(ok, name))]));
+    const outcome = this.deps.store.redeemBindCode("lark", code, { id: userId, name });
+    await this.api.replyCard(messageId, card([markdown(bindResult(outcome, name))]));
   }
 
   // --- lookups ---------------------------------------------------------------

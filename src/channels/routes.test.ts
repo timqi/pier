@@ -93,7 +93,7 @@ describe("channel config routes", () => {
   it("issues a bind code and unbinds a user, without a channel restart", async () => {
     const res = await app.request("/api/channels/telegram/bind-code", { method: "POST" });
     const { code } = (await res.json()) as { code: string };
-    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe(true);
+    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe("bound");
     // A save must not wipe the users it never sees.
     await put({ enabled: true, token: "t" });
     expect(store.isBound("telegram", "7")).toBe(true);

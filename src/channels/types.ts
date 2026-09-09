@@ -46,7 +46,13 @@ export interface BoundUser {
 export interface BindCode {
   code: string;
   expiresAt: number;
+  /** Wrong redeems so far; enough of them void the code before its TTL. */
+  tries?: number;
 }
+
+/** What a `/bind <code>` attempt did: bound the sender, was wrong, or was the
+ *  wrong try that voided the code — which the sender is told. */
+export type BindOutcome = "bound" | "invalid" | "voided";
 
 /** Platform-level values double as the seed for newly discovered chats. */
 export interface ChannelConfig {
