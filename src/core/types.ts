@@ -119,8 +119,7 @@ export interface BackgroundRun {
   taskName: string;
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "skipped";
   targetSessionId: string | null;
-  /** Runs from before fork was removed still carry `"fork"` on disk; the
-   *  timeline prints what it reads. */
+  /** `"fork"` exists only in stored runs; the timeline prints what it reads. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
   depth: number;
   /** What the run was asked to do — the card in the delegating session sits
@@ -488,18 +487,9 @@ export interface AgentFactory {
   create(opts: AgentLaunchOptions): Promise<AgentSession>;
   resume(sessionId: string): Promise<AgentSession>;
   list(): Promise<SessionSummary[]>;
-  /**
-   * One session by id — the lookup four surfaces were each doing by scanning
-   * the whole list for it (a chat's cwd, a task's source or reuse target, a
-   * task asking whether a session still exists, a file served out of a
-   * session's directory).
-   *
-   * A miss is checked against disk before it is reported, for the reason
-   * `resume` does the same: every caller reads `undefined` as a fact and acts
-   * on it — starting a session in the wrong directory, refusing a file,
-   * rejecting a task's target — and a listing retained for a few seconds is
-   * not evidence that a session does not exist.
-   */
+  /** One session by id. A miss is checked against disk before it is reported:
+   *  every caller reads `undefined` as a fact, and a cached listing is not
+   *  evidence that a session does not exist. */
   find(sessionId: string): Promise<SessionSummary | undefined>;
   /** Sessions by what was said in them — user messages and replies, never
    *  steps — at most one hit per session, best first. How the text is indexed
@@ -670,7 +660,6 @@ export interface ProviderManager {
   logout(providerId: string): Promise<void>;
 }
 
-/** Portable model metadata; transport, credentials and executable specs stay local. */
 /** One models.json provider with its credentials and endpoints removed; the
  * remaining metadata is Pi's to validate, so this seam does not restate it. */
 export type SyncProvider = Record<string, unknown>;

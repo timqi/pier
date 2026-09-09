@@ -119,8 +119,7 @@ export interface TaskRun extends CallbackFields {
   invokedBySessionId: string | null;
   sourceSessionId: string | null;
   targetSessionId: string | null;
-  /** `"fork"` is legacy: runs stored before the mode was removed still say it,
-   *  and the runner refuses them by name rather than guessing a directory. */
+  /** `"fork"` exists only in stored runs; the runner refuses it by name. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
   callbackSessionId: string | null;
   background: boolean;
@@ -199,10 +198,8 @@ export interface TaskMessage {
    *  counter that resets with the process is a ceiling that never arrives. */
   attempts: number;
   nextAttemptAt: number | null;
-  /** A reply that resumed a terminal run: the continuation that carries it.
-   *  Lives in the existing JSON column, so no migration — and it is the only
-   *  proof this delivery has, the resume prompt being the message itself
-   *  rather than a system input the recipient's transcript can be read for. */
+  /** A reply that resumed a terminal run: the continuation that carries it,
+   *  which is the only delivery proof — the resume prompt is the message. */
   resumeRunId?: string;
 }
 
@@ -219,8 +216,7 @@ export interface CallbackFields {
   callbackAttempts: number;
   callbackError: string | null;
   callbackNextAttemptAt: number | null;
-  /** Absent means `followUp`, which is also what every run stored before this
-   *  field existed means — so no migration. */
+  /** Absent means `followUp`. */
   callbackMode?: CallbackMode;
 }
 
