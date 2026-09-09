@@ -90,13 +90,15 @@ export class TaskStore {
   }
 
   /** A watch at the five-second floor mints 17k rows a day, ~1.6 kB each, that
-   *  no list shows; only rows nothing can dangle from are dropped. */
+   *  no list shows; only rows nothing can dangle from are dropped — a child
+   *  run is named in its parent's stored result. */
   pruneUnmatchedProbes(taskId: string): void {
     this.sql(`
       DELETE FROM task_runs WHERE id IN (
         SELECT r.id FROM task_runs r
         WHERE r.task_id = ? AND r.state = 'succeeded' AND json_extract(r.json, '$.matched') IS 0
           AND r.callback_state IS NULL AND json_extract(r.json, '$.groupId') IS NULL
+          AND json_extract(r.json, '$.parentRunId') IS NULL
           AND NOT EXISTS (SELECT 1 FROM task_messages m WHERE m.run_id = r.id)
           -- A NULL in this list would make NOT IN unknown for every candidate.
           AND r.id NOT IN (

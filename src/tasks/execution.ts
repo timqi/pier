@@ -109,7 +109,14 @@ export class TaskExecution {
         // row and waits for the next boot's interrupt sweep.
         log.error(`run ${run.id} final save failed — callback/join deferred to next boot`, err);
       }
-      if (run.matched === false) this.store.pruneUnmatchedProbes(run.taskId);
+      if (run.matched === false) {
+        try {
+          this.store.pruneUnmatchedProbes(run.taskId);
+        } catch (err) {
+          // Housekeeping: a waiter on this run is owed its settlement regardless.
+          log.warn(`run ${run.id} probe retention failed`, err);
+        }
+      }
       this.host.changed(run);
       this.host.settled(run);
       if (run.callbackState === "pending") void this.callbacks.deliver(run);

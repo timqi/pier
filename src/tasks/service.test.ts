@@ -586,6 +586,44 @@ describe("task service", () => {
     expect(kept).not.toContain("probe-1");
   });
 
+  it("keeps an unmatched probe that a parent run's result names", async () => {
+    const { cwd, service, store } = setup();
+    const watch = await service.create({
+      ...bashDraft(cwd, "echo action"),
+      name: "watcher",
+      trigger: { type: "watch", cwd, script: "exit 1", intervalSeconds: 5, mode: "repeat" },
+    });
+    const parent = await service.create({
+      name: "parent", trigger: { type: "manual" }, action: { type: "task", taskId: watch.id },
+    });
+    const done = await service.waitForRun(service.run(parent.id).id);
+    const child = (done.result as { type: "task"; runId: string }).runId;
+    expect(store.getRun(child)?.matched).toBe(false);
+    const now = Date.now();
+    for (let i = 0; i < 60; i++) {
+      store.saveRun(storedRun(`probe-${i}`, watch, now - 60_000 + i * 100, { matched: false, triggerSource: "watch" }));
+    }
+    const run = await service.waitForRun(service.run(watch.id, null, "watch").id);
+    const kept = store.listRuns(watch.id, 200).map((stored) => stored.id);
+    expect(kept).toHaveLength(51);
+    expect(kept).toContain(child);
+    expect(kept).toContain(run.id);
+    expect(kept).not.toContain("probe-0");
+  });
+
+  it("settles an unmatched probe's waiter even when retention fails", async () => {
+    const { cwd, service, store } = setup();
+    const task = await service.create({
+      ...bashDraft(cwd, "echo action"),
+      name: "watcher",
+      trigger: { type: "watch", cwd, script: "exit 1", intervalSeconds: 5, mode: "repeat" },
+    });
+    store.pruneUnmatchedProbes = () => { throw new Error("database is locked"); };
+    const run = await service.waitForRun(service.run(task.id, null, "watch").id);
+    expect(run).toMatchObject({ state: "succeeded", matched: false });
+    expect(store.getRun(run.id)?.state).toBe("succeeded");
+  });
+
   it("links an Agent result to its session and exact rendered prompt", async () => {
     const { service, session } = setup();
     const task = await service.create({
