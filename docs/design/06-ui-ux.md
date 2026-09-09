@@ -23,6 +23,10 @@ Use solid surfaces for replies, modal forms, search dialogs, and file previews.
 Reserve glass, subtle borders, and shadows for navigation and floating controls where they
 clarify layering. Coordinate corner radii with nesting rather than imposing one radius everywhere.
 Reuse the shared palette, controls, menus, and time labels instead of inventing page-specific styles.
+The desktop sidebar uses one inset floating panel with restrained glass, border
+and shadow; its rows stay flat, with selection expressed through tint and weight.
+The mobile drawer keeps its available width and uses rounded outer corners
+without desktop panel margins.
 A dialog hosting viewport-fixed menus must not use backdrop blur or transform animations:
 these change the menus' containing block and can cause offsets or clipping. Keep menus in
 its top layer, and clip only content that needs clipping. Verify actual overlay hit targets.
@@ -84,14 +88,15 @@ styles, and consolidate repeated logic without speculative abstractions or new f
 Use native controls and semantics, readable contrast, visible focus, and generous touch targets.
 Account for safe areas and software keyboards; content panels own scrolling, and wide content
 must not force the whole conversation to scroll horizontally. Navigation titles
-keep their geometry when status or hover actions change. Primary sidebar actions
-have visible labels; row actions remain reachable by keyboard and touch, with
-44px minimum touch targets. A closed mobile drawer is inert; an open drawer owns
-keyboard focus, supports Escape, and returns focus on dismissal. Sidebar type
-uses the system sans-serif stack, a shared reading size and line height across
-desktop and mobile, sentence-case section labels and medium-weight selection.
-Increase row breathing room with a minimum height, preserving single-line titles
-and a scrolling session list instead of enlarging all metadata equally.
+keep their left edge aligned. Trailing status marks occupy space only when
+present; hover actions reserve their width so pointer movement never changes
+truncation. Primary sidebar actions have visible labels; row actions remain
+reachable by keyboard and touch, with 44px minimum touch targets. A closed mobile
+drawer is inert; an open drawer owns keyboard focus, supports Escape, and returns
+focus on dismissal. Sidebar type uses the system sans-serif stack, sentence-case
+section labels and medium-weight selection. Desktop rows use a denser reading
+rhythm than the touch drawer; keep section gaps restrained, titles on one line
+and sessions in their own scrolling list.
 
 Validate the behavior affected by a change: normal use, failure, cancellation, interruption,
 loading, and reconnection. Exercise keyboard, pointer, touch, narrow and wide viewports,

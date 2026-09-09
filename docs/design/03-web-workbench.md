@@ -109,17 +109,23 @@ per-turn Activity groups):
   sessions remain available through pagination and the search palette. The New
   session directory picker offers the listing's distinct directories. A labeled
   New session button and Search entry sit below the brand; the desktop search
-  entry shows the platform shortcut. Session buttons reserve space for status
-  and actions so hover and state changes do not shift titles. Actions appear
-  on hover or keyboard focus and remain visible on touch; list refreshes retain
+  entry shows the platform shortcut. Status dots appear after the title only
+  when needed; idle sessions reclaim their width. Title left edges stay aligned,
+  while status changes may alter the trailing truncation. Action buttons retain
+  their space on hover, appear on keyboard focus and remain visible on touch;
+  list refreshes retain
   the focused session control, and Load more focuses the first added session.
   The mobile drawer removes hidden controls from the tab order, contains focus
   while open, and restores its toggle on dismissal; Escape dismisses it before
   reaching the conversation's stop shortcut. Touch controls have 44px minimum
-  targets. Desktop and drawer share system sans-serif type at 0.9375rem with
-  1.5 line height and 2.5rem minimum navigation rows (about 17/25/45px at the
-  workbench's default scale). Section labels use sentence case; selected rows
-  use medium weight, and channel initials retain readable secondary contrast.
+  targets. On desktop, the sidebar floats in an 8px inset panel with a 20px
+  radius, a glass surface, a thin border and a soft shadow. Its system sans-serif
+  type is 0.875rem with 1.4 line height and 2rem minimum rows (about 16/22/36px
+  at the default scale). Compact section and action spacing leaves room for
+  sessions. The mobile drawer stays full-height without exterior margins,
+  rounds its outer corners, and keeps 0.9375rem type with 1.5 leading. Section
+  labels use sentence case; selected rows use medium weight and a flat blue
+  tint, and channel initials retain readable secondary contrast.
 - **Search palette** (search icon, ⌘K): sessions searchable by title, directory
   and channel, under Running / Recent / Sessions, plus Console destinations.
   Working-set rank and unread state belong to `web/session-state.ts`; the

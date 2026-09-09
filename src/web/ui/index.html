@@ -74,7 +74,7 @@
       <button type="button" id="theme-toggle" aria-label="Theme"
         class="icon-btn text-[13px]"></button>
     </header>
-    <div class="flex flex-none flex-col gap-1 px-3 pb-2">
+    <div class="flex flex-none flex-col gap-0.5 px-3 pb-1">
       <button type="button" id="new-session" aria-label="New session"
         class="btn btn-primary flex w-full items-center justify-center gap-2">
         <span aria-hidden="true">＋</span> New session
@@ -88,10 +88,10 @@
       </button>
     </div>
     <details id="console-section" open class="flex-none border-b border-neutral-200/70">
-      <summary class="flex cursor-pointer select-none items-center gap-1 px-3 pb-1 pt-3 text-xs font-semibold leading-5 text-neutral-500 hover:bg-neutral-100">
+      <summary class="flex cursor-pointer select-none items-center gap-1 px-3 py-1 text-xs font-semibold leading-5 text-neutral-500 hover:bg-neutral-100">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" class="chev h-3 w-3"><path d="m6 4 4 4-4 4" stroke-linecap="round" stroke-linejoin="round" /></svg>Console
       </summary>
-      <ul class="pb-2">
+      <ul class="pb-1">
         <!-- One row for the tasks area: Tasks, Runs and Activity are tabs of
              the Automation page (views.ts), not three sidebar entries. -->
         <li><button type="button" id="open-tasks"
@@ -113,7 +113,7 @@
           </svg>Settings</button></li>
       </ul>
     </details>
-    <div class="flex-none px-3 pb-1 pt-3 text-xs font-semibold leading-5 text-neutral-500">Sessions</div>
+    <div class="flex-none px-3 pb-1 pt-2 text-xs font-semibold leading-5 text-neutral-500">Sessions</div>
     <div id="session-list" class="min-h-0 flex-1 overflow-y-auto"></div>
   </aside>
 

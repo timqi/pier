@@ -109,8 +109,8 @@ const HOVER_BTN = "session-more flex h-7 w-7 flex-none cursor-pointer items-cent
 const waitingForYou = (s: SessionInfo): boolean => s.unread && s.channel === "web";
 
 /** Attention dot: green = running, amber = finished and waiting for a look,
- *  sky = idle itself but subagents still in flight. Idle has no mark; the rail
- *  reserves its slot to keep titles still, while the palette can omit it. */
+ *  sky = idle itself but subagents still in flight. Idle has no mark or slot;
+ *  the rail puts marks after the title so its left edge stays aligned. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   const mark: [string, string] | null =
     s.state === "streaming"
@@ -182,8 +182,8 @@ function sessionRow(s: SessionInfo): HTMLElement {
     deps.sessionMenu(more, s);
   };
   const open = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg py-1.5 text-left",
-    h("span", "flex w-2 flex-none items-center", ...stateDot(s)),
-    h("span", "truncate", s.title ?? "untitled"),
+    h("span", "min-w-0 flex-1 truncate", s.title ?? "untitled"),
+    ...stateDot(s),
   );
   open.setAttribute("type", "button");
   if (active) open.setAttribute("aria-current", "page");

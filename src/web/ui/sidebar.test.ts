@@ -59,7 +59,7 @@ it("offers each directory once, newest session first", () => {
   ])).toEqual(["/y", "/x"]);
 });
 
-// An idle session has no mark; the rail separately reserves space for it.
+// An idle session has no mark or reserved slot in the rail.
 it("draws no dot on an idle row and paints one only for something to look at", () => {
   const dot = (over: Partial<Row>) => sidebar.stateDot(row("x", over))[0] as unknown as { cls: string; title: string } | undefined;
   expect(dot({})).toBeUndefined();
