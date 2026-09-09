@@ -73,6 +73,13 @@ export function initReport(): void {
   // thrown before this line could run.
   (window as unknown as { __pierReporting?: boolean }).__pierReporting = true;
   window.addEventListener("error", (e) => {
+    // Not a failure: the browser says a ResizeObserver round could not deliver
+    // its notifications in the same frame, which is what our own observers do
+    // by design (the dock height in composer.ts feeds the pane that chat.ts
+    // re-pins). It arrives with no `error` object, once per frame, and there
+    // is nothing to act on — reporting it is noise in the chat pane and in the
+    // journal, and noise is how a real line gets missed.
+    if (!e.error && e.message.includes("ResizeObserver loop")) return;
     report(`script error: ${e.message}`, e.error);
   });
   // Every `void fetch(...)` and un-awaited async call in the workbench lands
