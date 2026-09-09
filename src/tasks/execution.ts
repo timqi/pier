@@ -109,6 +109,7 @@ export class TaskExecution {
         // row and waits for the next boot's interrupt sweep.
         log.error(`run ${run.id} final save failed — callback/join deferred to next boot`, err);
       }
+      if (run.matched === false) this.store.pruneUnmatchedProbes(run.taskId);
       this.host.changed(run);
       this.host.settled(run);
       if (run.callbackState === "pending") void this.callbacks.deliver(run);

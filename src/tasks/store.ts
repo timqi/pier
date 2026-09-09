@@ -11,6 +11,10 @@ interface JsonRow {
 
 const clamp = (limit: number, cap: number): number => Math.min(Math.max(limit, 1), cap);
 
+/** Kept unmatched probes per watch: one page of history, which is all any
+ *  surface lists of a probe that found nothing. */
+const KEPT_PROBES = 50;
+
 export class TaskStore {
   /** Every query below is a fixed string, so each is compiled once. */
   private readonly sql: (sql: string) => StatementSync;
@@ -83,6 +87,25 @@ export class TaskStore {
       run.callbackState,
       JSON.stringify(run),
     );
+  }
+
+  /** A watch at the five-second floor mints 17k rows a day, ~1.6 kB each, that
+   *  no list shows; only rows nothing can dangle from are dropped. */
+  pruneUnmatchedProbes(taskId: string): void {
+    this.sql(`
+      DELETE FROM task_runs WHERE id IN (
+        SELECT r.id FROM task_runs r
+        WHERE r.task_id = ? AND r.state = 'succeeded' AND json_extract(r.json, '$.matched') IS 0
+          AND r.callback_state IS NULL AND json_extract(r.json, '$.groupId') IS NULL
+          AND NOT EXISTS (SELECT 1 FROM task_messages m WHERE m.run_id = r.id)
+          -- A NULL in this list would make NOT IN unknown for every candidate.
+          AND r.id NOT IN (
+            SELECT json_extract(c.json, '$.resumedFromRunId') FROM task_runs c
+            WHERE c.task_id = ? AND json_extract(c.json, '$.resumedFromRunId') IS NOT NULL
+          )
+        ORDER BY r.queued_at DESC, r.id DESC LIMIT -1 OFFSET ?
+      )
+    `).run(taskId, taskId, KEPT_PROBES);
   }
 
   /** The id breaks timestamp ties so a page boundary never repeats or skips a

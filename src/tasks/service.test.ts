@@ -559,6 +559,33 @@ describe("task service", () => {
     expect(service.get(once.id).enabled).toBe(false);
   });
 
+  it("bounds the history of a watch that keeps finding nothing", async () => {
+    const { cwd, service, store } = setup();
+    const task = await service.create({
+      ...bashDraft(cwd, "echo action"),
+      name: "watcher",
+      trigger: { type: "watch", cwd, script: "exit 1", intervalSeconds: 5, mode: "repeat" },
+    });
+    const now = Date.now();
+    for (let i = 0; i < 60; i++) {
+      store.saveRun(storedRun(`probe-${i}`, task, now - 60_000 + i * 100, { matched: false, triggerSource: "watch" }));
+    }
+    // The oldest probe still carries a message, so retention has to keep it.
+    store.saveMessage({
+      id: "m1", runId: "probe-0", kind: "decision", fromSessionId: "child", toSessionId: "parent",
+      replyTo: null, state: "delivered", content: "?", createdAt: now - 60_000,
+      deliveredAt: now - 60_000, answeredAt: null, error: null, attempts: 1, nextAttemptAt: null,
+    });
+    const run = await service.waitForRun(service.run(task.id, null, "watch").id);
+    expect(run.matched).toBe(false);
+    const kept = store.listRuns(task.id, 200).map((stored) => stored.id);
+    expect(kept).toHaveLength(51);
+    expect(kept).toContain("probe-0");
+    expect(kept).toContain("probe-59");
+    expect(kept).toContain(run.id);
+    expect(kept).not.toContain("probe-1");
+  });
+
   it("links an Agent result to its session and exact rendered prompt", async () => {
     const { service, session } = setup();
     const task = await service.create({

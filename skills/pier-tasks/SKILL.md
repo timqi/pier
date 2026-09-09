@@ -164,3 +164,5 @@ which scheduled runs lack.
   and reports `failed / task timed out`.
 - Restart marks queued/running runs `interrupted`; callbacks still apply.
   During drain, new roots are refused: retry after restart.
+- Watch probes that matched nothing are kept only 50 deep per watch; older
+  ones are deleted unless a message, a pending callback or a resume needs them.
