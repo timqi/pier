@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import type { SearchHit } from "../core/types.js";
 import { pierDb, statements, transact } from "../db.js";
-import { SESSION_TITLE_MAX } from "../limits.js";
+import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import { defaultAgentDir } from "./config.js";
 import { hasToolCalls, textOf, type PiMessage } from "./events.js";

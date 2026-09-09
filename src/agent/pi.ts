@@ -41,7 +41,7 @@ import type {
   TurnMeta,
 } from "../core/types.js";
 import { inlineExtensions } from "../extensions/index.js";
-import { SESSION_TITLE_MAX } from "../limits.js";
+import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import {
   textOf,

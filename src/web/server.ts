@@ -30,8 +30,7 @@ import type {
   SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
-import { isThinkingLevel } from "../core/types.js";
-import { SESSION_TITLE_MAX } from "../limits.js";
+import { isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";

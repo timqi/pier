@@ -203,6 +203,11 @@ export type WorkspaceEvent =
  *  payload, and the bytes past this point were downloaded to be sliced off. */
 export const MAX_STEP_OUTPUT = 8_000;
 
+/** How much of a message becomes a title, wherever one is derived: the listing
+ *  reading a transcript (agent/listing.ts), a rename's fallback (agent/pi.ts),
+ *  the fill at first prompt and the rename boundary (web/). */
+export const SESSION_TITLE_MAX = 80;
+
 /**
  * One step of an assistant turn's activity, reconstructed from the transcript
  * so a reloaded client shows the same Activity group the live stream built.
