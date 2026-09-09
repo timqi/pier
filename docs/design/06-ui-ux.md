@@ -54,8 +54,12 @@ The session's meta chips — model, reasoning, context size, and the "starting�
 a session being opened has to say — are one element, hosted by whichever of the
 two headings is on screen, and they leave with the chat heading when a Console
 view takes over. This is the one place the phone needs its own answer: the chips
-do not fit beside a session's name at that width, so the bar grows a second line
-under the title for as long as there are chips, and the transcript pads by it.
+do not fit beside a session's name at that width, and a second line under the
+title for a reading nobody has to act on is a line the transcript pays for — so
+below md the row appears only when it is carrying something that cannot wait for
+a tap: a session still opening, or a context at 70% or more. Otherwise the phone
+shows the title alone, and the title opens the info panel, which reports model,
+reasoning and context in full. When the row is there the transcript pads by it.
 The chips stay the desktop's shortcut into the model picker; the ⋯ menu is the
 thumb-sized way to the same two actions.
 Dock cards (queue, recovery) take the composer's own inset at both widths, and

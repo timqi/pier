@@ -132,6 +132,10 @@ export function renderHeader(): void {
   deps.syncBar();
 }
 
+/** Where a context reading stops being information and becomes something to
+ *  act on — the chip's amber, and the one size worth a phone's bar line. */
+const CONTEXT_WARN = 70;
+
 /** Percent of the context window used (capped at 100). */
 const contextUsed = (tokens: number, u: ContextUsage): number =>
   Math.min(100, Math.round((tokens / u.contextWindow) * 100));
@@ -176,9 +180,12 @@ function renderSessionMeta(): void {
       items.push(pickerButton(currentThinking, "text-neutral-500 hover:text-indigo-700"));
     }
   }
+  // Context pressure decides two things: the chip's tone, and — below md —
+  // whether this row is worth a line of the bar at all.
+  let pressure = 0;
   if (u && tokens !== null) {
-    const used = contextUsed(tokens, u);
-    const tone = used >= 90 ? "text-red-700" : used >= 70 ? "text-amber-700" : "text-neutral-500";
+    pressure = contextUsed(tokens, u);
+    const tone = pressure >= 90 ? "text-red-700" : pressure >= CONTEXT_WARN ? "text-amber-700" : "text-neutral-500";
     items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
   }
   const children = items.flatMap((item, i) =>
@@ -187,6 +194,14 @@ function renderSessionMeta(): void {
   sessionMeta.replaceChildren(...children);
   sessionMeta.classList.toggle("hidden", items.length === 0);
   sessionMeta.classList.toggle("flex", items.length > 0);
+  // On a phone these chips cost the bar a second line, and model · reasoning ·
+  // size is a reading, not something to answer — the bar title opens the info
+  // panel, which carries all three in full. Two of them are worth the line even
+  // there: a session still opening (§5b — the wait would otherwise look like
+  // nothing happening) and a context near full, which is acted on by starting a
+  // new session. The row says which it is holding; style.css shows only this
+  // one below md.
+  sessionMeta.toggleAttribute("data-urgent", (!id && !!pending) || pressure >= CONTEXT_WARN);
 }
 
 /** Read-only details panel: what this session is and how full its context is.

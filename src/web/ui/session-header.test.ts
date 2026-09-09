@@ -14,6 +14,8 @@ interface Node {
   textContent: string;
   closest: () => null;
   setAttribute: () => void;
+  attrs: Record<string, boolean>;
+  toggleAttribute: (name: string, on: boolean) => void;
   append: (...kids: (Node | string)[]) => void;
   replaceChildren: (...kids: (Node | string)[]) => void;
   replaceWith: (next: Node) => void;
@@ -33,6 +35,10 @@ const node = (tag: string, ...children: unknown[]): Node => {
     textContent: "",
     closest: () => null,
     setAttribute: () => {},
+    attrs: {},
+    toggleAttribute: (name, on) => {
+      self.attrs[name] = on;
+    },
     append: (...kids) => self.children.push(...kids),
     replaceChildren: (...kids) => {
       self.children = kids;
@@ -97,6 +103,17 @@ beforeEach(async () => {
     Promise.resolve(url.endsWith("/models") ? [model] : { level: "high", levels }) as never
   );
   header.setHeaderState(model, null, "high", null);
+});
+
+// Below md the chips cost the bar a line, so only the row that has to be seen
+// without opening anything keeps it (style.css reads the mark).
+it("marks the meta row urgent only once the context is near full", () => {
+  const meta = () => state.roots[2] as Node;
+  const usage = { contextWindow: 100_000, tokens: 20_000 };
+  header.setHeaderState(model, usage, "high", null);
+  expect(meta().attrs["data-urgent"]).toBe(false);
+  header.setHeaderState(model, { ...usage, tokens: 75_000 }, "high", null);
+  expect(meta().attrs["data-urgent"]).toBe(true);
 });
 
 it("draws the second open from cache, before the read answers", async () => {

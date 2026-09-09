@@ -678,12 +678,14 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* The bar carries the chat heading's meta chips — the same element, moved
      here by shell.ts, not a second copy. Three columns for the strip and a
      second row for the chips, aligned under the title: at this width they do
-     not fit beside a session's name, and the row is there only when there are
-     chips to put in it. The strip's height has two values, so it is declared
-     here rather than as a utility on the element — and declared, not measured,
-     so --head-h can be too: the transcript pads by what covers it. */
+     not fit beside a session's name, and the row is there only when the chips
+     are the kind that has to be seen without opening anything (data-urgent,
+     session-header.ts) — the rest is a reading the title's info panel gives in
+     full. The strip's height has two values, so it is declared here rather
+     than as a utility on the element — and declared, not measured, so --head-h
+     can be too: the transcript pads by what covers it. */
   main { --bar-h: 3rem; --head-h: calc(var(--bar-h) + 8px); }
-  main:has(#chat-header:not(.hidden)):has(#session-meta:not(.hidden)) { --bar-h: 4.5rem; }
+  main:has(#chat-header:not(.hidden)):has(#session-meta[data-urgent]:not(.hidden)) { --bar-h: 4.5rem; }
   #mobile-bar {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -697,6 +699,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* A Console view hides the chat heading (views.ts), and the chips are the
      chat's: they leave with it rather than sitting under the view's name. */
   main:has(#chat-header.hidden) #session-meta { display: none; }
+  /* And the row itself is only there when it is the urgent kind (above). */
+  #mobile-bar #session-meta:not([data-urgent]) { display: none; }
   #turns { padding-inline: 0.625rem; }
   #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
