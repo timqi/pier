@@ -243,7 +243,7 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
 
 async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo): Promise<void> {
   const loading = h("div", "px-3 py-3 text-[15px] text-neutral-500", "Loading models…");
-  const content = h("div", "", loading);
+  const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full", loading);
   if (session) {
     const back = h("button", "icon-btn h-11 w-11", "←");
     back.setAttribute("aria-label", "Back to session actions");
@@ -251,8 +251,9 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
     const close = h("button", "icon-btn h-11 w-11", "×");
     close.setAttribute("aria-label", "Close model picker");
     close.onclick = closeMenu;
-    content.prepend(h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2",
-      back, h("span", "min-w-0 flex-1 truncate text-sm font-medium", session.title ?? untitled(session.cwd)), close));
+    const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", session.title ?? untitled(session.cwd));
+    title.title = title.textContent ?? "";
+    content.prepend(h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", back, title, close));
   }
   openPanel(anchor, content);
   // Closing or replacing the panel cancels presentation of an in-flight read.

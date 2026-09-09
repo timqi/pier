@@ -138,7 +138,10 @@ per-turn Activity groups):
   selected session. `model-picker.ts` is the
   standalone grouped-by-provider list, groups collapsed except the one holding
   the current model — separate because model choice will also be needed outside
-  chat (scheduled tasks).
+  chat (scheduled tasks). The session model panel caps its desktop content at
+  24rem and truncates its title; the picker fills the available width. Reasoning
+  effort expands inline into styled radio choices, with native arrow-key
+  selection and a visible current value; it does not open a platform select menu.
 - **Console Activity**: active Session table plus a directed task dependency
   graph. Invocation edges are solid, callbacks dashed, and Subagent control or
   supervisor messages dotted; Session nodes open chat and run edges open Runs.

@@ -36,6 +36,9 @@ use tight field/group spacing and place relative times beside their timestamps
 when space allows. Paths and IDs use 0.875rem
 monospace with room to wrap. Phone sheets have a
 backdrop that dismisses without activating controls underneath.
+Model picker content fills its panel; long session titles truncate within a
+bounded width. Reasoning effort uses an inline disclosure with styled native
+radio choices, visible selection and keyboard focus, avoiding nested overlays.
 A dialog hosting viewport-fixed menus must not use backdrop blur or transform animations:
 these change the menus' containing block and can cause offsets or clipping. Keep menus in
 its top layer, and clip only content that needs clipping. Verify actual overlay hit targets.

@@ -115,7 +115,7 @@ export function modelPicker({
 }: ModelPickerProps): HTMLElement {
   let favorites = loadFavorites();
   let level = thinkingLevel;
-  const wrap = h("div", "flex w-72 flex-col");
+  const wrap = h("div", "flex w-full min-w-0 flex-col sm:min-w-72");
   const controls = h("div", "flex flex-col gap-2 border-b border-neutral-200 px-2 py-2");
   const search = document.createElement("input");
   search.type = "search";
@@ -126,25 +126,32 @@ export function modelPicker({
   controls.append(search);
 
   if (thinkingLevels.length) {
-    const reasoning = h("label", "flex items-center gap-2 px-1 text-[12px] text-neutral-500");
-    const select = document.createElement("select");
-    select.className =
-      "select ml-auto rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-700 focus:border-indigo-400 focus:outline-none";
-    select.setAttribute("aria-label", "Reasoning level");
+    const reasoning = document.createElement("details");
+    const selected = h("span", "ml-auto font-medium text-indigo-700", thinkingLabel(level));
+    const summary = h("summary", "flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-3 text-sm text-neutral-700 hover:bg-neutral-100 [&::-webkit-details-marker]:hidden",
+      h("span", "font-medium", "Reasoning effort"), selected, h("span", "chev text-neutral-400", "\u25b6\ufe0e"));
+    const choices = h("fieldset", "grid grid-cols-2 gap-1 rounded-xl bg-neutral-50 p-1");
+    choices.append(h("legend", "sr-only", "Reasoning effort"));
+    const name = `reasoning-${crypto.randomUUID()}`;
     for (const l of thinkingLevels) {
-      const option = document.createElement("option");
-      option.value = l;
-      option.textContent = thinkingLabel(l);
-      select.append(option);
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = name;
+      radio.value = l;
+      radio.checked = l === level;
+      radio.className = "peer sr-only";
+      radio.onchange = () => {
+        if (!radio.checked) return;
+        level = l;
+        selected.textContent = thinkingLabel(level);
+        // A star records model + reasoning, so its selected mark changes too.
+        renderModels(search.value);
+        onThinkingPick(level);
+      };
+      choices.append(h("label", "relative cursor-pointer",
+        radio, h("span", "flex min-h-11 items-center rounded-lg border border-transparent px-3 text-sm text-neutral-700 hover:bg-neutral-100 peer-checked:border-indigo-200 peer-checked:bg-indigo-50 peer-checked:font-semibold peer-checked:text-indigo-700 peer-focus-visible:outline-2 peer-focus-visible:outline-indigo-500", thinkingLabel(l))));
     }
-    select.value = thinkingLevel;
-    select.onchange = () => {
-      level = select.value as ThinkingLevel;
-      // A star records model + reasoning, so the list's starred marks move too.
-      renderModels(search.value);
-      onThinkingPick(level);
-    };
-    reasoning.append(h("span", "font-medium", "Reasoning"), select);
+    reasoning.append(summary, choices);
     controls.append(reasoning);
   }
 
