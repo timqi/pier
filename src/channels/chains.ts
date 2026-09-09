@@ -3,6 +3,8 @@
 
 export class Chains {
   private readonly active = new Map<string, Promise<void>>();
+  private held = 0;
+  private readonly waiting: Array<() => void> = [];
 
   constructor(
     private readonly log: (message: string) => void,
@@ -15,21 +17,36 @@ export class Chains {
   }
 
   run(key: string, task: () => Promise<void>): void {
+    // A conversation owns one slot for the life of its chain, so a follow-up
+    // message queues behind its own handler instead of claiming a second.
     const mine = this.active.get(key);
-    // Only a new conversation waits for a slot; `active` is non-empty whenever
-    // the cap is hit, so the race always settles.
-    const start = mine ??
-      (this.active.size >= this.maxActive
-        ? Promise.race(this.active.values()).catch(() => {})
-        : Promise.resolve());
-    const next = start
+    const next = (mine ?? this.acquire())
       .then(task)
       // Every link catches: one rejection would otherwise silence the chat for good.
       .catch((err) => this.log(`handler failed in ${key}: ${String(err)}`));
     this.active.set(key, next);
     void next.then(() => {
-      if (this.active.get(key) === next) this.active.delete(key);
+      if (this.active.get(key) !== next) return;
+      this.active.delete(key);
+      this.release();
     });
+  }
+
+  /** Reserved synchronously, so a burst of `run` calls cannot all pass the cap. */
+  private acquire(): Promise<void> {
+    if (this.held < this.maxActive) {
+      this.held += 1;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => this.waiting.push(resolve));
+  }
+
+  private release(): void {
+    // The slot moves to one waiter rather than being counted back, which is
+    // what keeps a release from waking the whole queue.
+    const next = this.waiting.shift();
+    if (next) next();
+    else this.held -= 1;
   }
 
   /** The backpressure primitive. */
