@@ -29,6 +29,10 @@ const PROJECT_FILES = ["AGENTS.md"];
 // Console shows the file and never edits it; the rest of it is machine-local.
 const READONLY_FILES = ["settings.json"];
 const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
+/** What a first boot writes (docs/deploy.md says why each key): the list the
+ *  Console installs into, and Pi's attribution headers off — a server is not a
+ *  person to survey. Every other key stays Pi's default by omission. */
+const SEED_SETTINGS = { packages: [], enableInstallTelemetry: false };
 
 /** Pier owns the Pi runtime dir; main.ts exports it as PI_CODING_AGENT_DIR. */
 export const defaultAgentDir = (): string =>
@@ -273,6 +277,17 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       if (typeof next !== "string" || next === raw) return;
       await fs.mkdir(this.agentDir, { recursive: true });
       await atomicWrite(path, next);
+    });
+  }
+
+  /** Once per boot, before a session opens: SEED_SETTINGS when there is no
+   *  settings.json at all. An existing file, whatever it holds, is never touched. */
+  seedSettings(): Promise<void> {
+    return this.withWrite(async () => {
+      const path = join(this.agentDir, "settings.json");
+      if (await pathExists(path)) return;
+      await fs.mkdir(this.agentDir, { recursive: true });
+      await atomicWrite(path, `${JSON.stringify(SEED_SETTINGS, null, 2)}\n`);
     });
   }
 

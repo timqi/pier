@@ -258,9 +258,10 @@ browser keeps no second session order.
     bundled extensions on; `skillsOff`: Pier's skills switched off — default
     states differ, so one list would flip the other on upgrade). Every other
     switch and every package is settings.json.
-  - settings.json has two writers: `ConfigStore.writeDefaults` (atomic whole
-    write of the defaults pair) and Pi's `SettingsManager` (merge-write of the
-    modified keys under its own lock). Every package operation runs inside
+  - settings.json has two writers: `ConfigStore` (the first-boot seed when no
+    file exists — docs/deploy.md names its keys — and `writeDefaults`, an
+    atomic whole write of the defaults pair) and Pi's `SettingsManager`
+    (merge-write of the modified keys under its own lock). Every package operation runs inside
     `ConfigStore`'s write queue with a `SettingsManager` created for that call,
     so Pi reads Pier's latest defaults and touches only `packages`,
     `extensions`, `skills`. The test: write defaults, install a package, read

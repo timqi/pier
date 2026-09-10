@@ -124,7 +124,16 @@ All three signal the installed service.
   `~/.pier/tools/bin` (first on every session's PATH); one sync at a time per
   machine.
 - `~/.pier/pi/settings.json` is Pier's: the default model is set in Console →
-  Settings → Models; any other key is edited on disk, then `pier reload`.
+  Settings → Models, packages in Console → Settings → Agent; any other key is
+  edited on disk, then `pier reload`. A first boot with no file writes one:
+  - `packages: []` — the list the Console's Add package writes into.
+  - `enableInstallTelemetry: false` — Pi's default is on, and the SDK reads it
+    to stamp attribution headers on OpenRouter, NVIDIA and Cloudflare requests;
+    a server instance is not a person to survey. (`enableAnalytics` is not
+    written: nothing on the SDK path reads it, and its default is already off.)
+  - The default model trio is left to Settings → Models; compaction, retries
+    and every other key stay at Pi's defaults by omission, on purpose.
+  An existing file is never touched, whatever it holds.
 - `systemctl --user restart pier` and `pier update` are hard stops.
 - One Pier per `$PIER_HOME`: a start whose directory another live Pier holds
   logs `another Pier (pid N) owns …` and exits before opening the database. Kept

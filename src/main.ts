@@ -96,6 +96,8 @@ let channelStore: ChannelStore;
 const slackDirectory = new SlackDirectory((m) => logger("slack").warn(m));
 let readyForConfigReload = false;
 const piConfig = new PiConfigStore();
+// Before anything reads settings.json: a first boot gets Pier's seed file.
+await piConfig.seedSettings();
 const configSync = new ConfigSync({
   db, settings, config: piConfig, normalizeAgent: normalizeAgentSnapshot,
   reload: () => readyForConfigReload ? reloadInstance() : Promise.resolve(),
