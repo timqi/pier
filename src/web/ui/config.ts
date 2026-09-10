@@ -2,16 +2,17 @@
 // to act on the selected item. The agent files and the command-line tools are
 // drawn here; the package registry's panes are packages-pane.ts.
 
-import { ChevronRight } from "lucide";
+import { ChevronDown, ChevronRight } from "lucide";
 import type { CatalogEntry, ConfigFile, Package } from "../../core/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, BAND, btn, CONTROL, empty, field, PANE, setStatus, textInput, toggle } from "./form.js";
+import { badge, BAND, btn, CONTROL, CONTROL_TRIGGER, empty, field, PANE, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { icon } from "./icons.js";
+import { closeMenu, openMenu } from "./menu.js";
 import { configSyncPane } from "./config-sync.js";
 import { createRegistry, isBuiltIn, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
@@ -111,6 +112,7 @@ export function createConfigView(
   // Where "Global" lives, from the API — PIER_HOME moves it, so no path is
   // hardcoded here. Empty until the first load answers.
   let globalDir = "";
+  const globalLabel = (): string => (globalDir ? `Global (${globalDir})` : "Global");
   /** What the nav is currently drawn from, so a switch can redraw its badge
    *  without re-reading the scope's files. */
   let lastIndex: ConfigIndex | null = null;
@@ -134,20 +136,34 @@ export function createConfigView(
   /** A row the operator wrote, and may remove again. */
   const isCustom = (entry: CatalogEntry): boolean => entry.custom === true;
 
-  // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
+  // --- static skeleton: header + (scope ▸ nav) | pane ------------------------
 
   // Scope sits at the top of the nav, right above the files it switches — in
-  // the Console's one control skin, not a smaller select of its own.
-  const scopeSelect = document.createElement("select");
-  scopeSelect.className = `${CONTROL} select`;
-  scopeSelect.onchange = () => {
-    closeSync();
-    scope = scopeSelect.value;
-    selection = null;
-    void load();
+  // the Console's one control skin, and its list is the workbench's anchored
+  // menu (menu.ts): a native popup is the platform's to draw, and these rows
+  // are long absolute paths that want the menu's hover, keys and phone sheet.
+  const scopeLabel = h("span", "min-w-0 flex-1 truncate");
+  const scopeTrigger = h(
+    "button",
+    `${CONTROL_TRIGGER} flex items-center gap-1.5`,
+    scopeLabel,
+    icon(ChevronDown, "h-3.5 w-3.5 text-neutral-500"),
+  );
+  scopeTrigger.setAttribute("aria-haspopup", "true");
+  scopeTrigger.onclick = () => {
+    if (scopeTrigger.getAttribute("aria-expanded") === "true") return closeMenu();
+    openMenu(scopeTrigger, [
+      { label: globalLabel(), checked: scope === "global", onSelect: () => pickScope("global") },
+      ...getCwds().map((cwd) => ({
+        label: cwd,
+        hint: basename(cwd),
+        checked: scope === cwd,
+        onSelect: () => pickScope(cwd),
+      })),
+    ], "Scope");
   };
   const scopeBox = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
-  scopeBox.append(h("span", "field-label", "Scope"), scopeSelect);
+  scopeBox.append(h("span", "field-label", "Scope"), scopeTrigger);
 
   const navList = h("div", "min-h-0 flex-1 overflow-y-auto py-1.5");
   const nav = h("nav", `${PANE} w-64 flex-none text-[13px] leading-5 max-md:max-h-48 max-md:w-full`);
@@ -241,7 +257,7 @@ export function createConfigView(
     const index = got.value;
     if (scope === "global" && index.dir) {
       globalDir = index.dir;
-      renderScopeOptions();
+      renderScope();
     }
     lastIndex = index;
     renderNav(index);
@@ -655,17 +671,26 @@ export function createConfigView(
     ));
   }
 
-  function renderScopeOptions(): void {
-    scopeSelect.replaceChildren(
-      new Option(globalDir ? `Global (${globalDir})` : "Global", "global"),
-      ...getCwds().map((cwd) => new Option(`${basename(cwd)} — ${cwd}`, cwd)),
-    );
-    if (![...scopeSelect.options].some((o) => o.value === scope)) scope = "global";
-    scopeSelect.value = scope;
+  function pickScope(next: string): void {
+    closeMenu();
+    if (next === scope) return;
+    closeSync();
+    scope = next;
+    selection = null;
+    renderScope();
+    void load();
+  }
+
+  /** Only the trigger's own label: the list is built when the menu opens, so a
+   *  directory that appeared since is in it. */
+  function renderScope(): void {
+    if (scope !== "global" && !getCwds().includes(scope)) scope = "global";
+    scopeLabel.textContent = scope === "global" ? globalLabel() : basename(scope);
+    scopeTrigger.title = scope === "global" ? globalDir : scope;
   }
 
   return consoleView(root, () => {
-    renderScopeOptions();
+    renderScope();
     void load();
   }, closeSync);
 }

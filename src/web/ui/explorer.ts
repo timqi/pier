@@ -7,7 +7,7 @@ import { mustGetJson } from "./api.js";
 import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
-import { BAND, btn, CONTROL, empty, PANE, pageTitle } from "./form.js";
+import { BAND, btn, CONTROL_TRIGGER, empty, PANE, pageTitle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
 import { letterKey } from "./shortcut.js";
@@ -555,7 +555,7 @@ export function createExplorerView(
         fold));
       return;
     }
-    const picker = btn(diffLabel(), `${CONTROL} cursor-pointer truncate text-left font-mono`);
+    const picker = btn(diffLabel(), `${CONTROL_TRIGGER} font-mono`);
     if (pickedCommit()) {
       const c = git.commits.find((x) => x.hash === pickedCommit());
       hoverHint(picker, () => (c ? commitHint(c) : ""));

@@ -8,7 +8,7 @@ import { THINKING_LEVELS, type AgentDefaults, type ModelRef, type ThinkingLevel 
 import { thinkingLabel } from "../../core/reply.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
-import { btn, button, card, CONTROL, empty, field, input, select, setStatus } from "./form.js";
+import { btn, button, card, CONTROL_TRIGGER, empty, field, input, select, setStatus } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { launchField, modelPicker, type LaunchChoice } from "./model-picker.js";
 
@@ -144,13 +144,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     // must say what is set, and the failing call says the rest.
     const stored = titleModel;
     const options = stored && !catalog.some((m) => key(m) === key(stored)) ? [stored, ...catalog] : catalog;
-    // A dropdown trigger that must read as the controls above it, so it wears
-    // the shared control skin rather than a copy of it.
     const open = btn(
       stored ? stored.id : TITLE_OFF,
-      `${CONTROL} flex min-w-0 flex-1 cursor-pointer items-center truncate text-left hover:bg-neutral-50 ${
-        stored ? "text-neutral-700" : "text-neutral-400"
-      }`,
+      `${CONTROL_TRIGGER} flex min-w-0 flex-1 items-center ${stored ? "text-neutral-700" : "text-neutral-400"}`,
     );
     if (stored) open.title = key(stored);
 

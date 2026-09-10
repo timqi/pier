@@ -109,6 +109,11 @@ export function field(label: string, control: HTMLElement, opts: FieldOptions = 
 export const CONTROL =
   "w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-3 py-2.5 text-[12.5px] transition-colors placeholder:text-neutral-400 hover:border-neutral-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none";
 
+/** The skin a dropdown trigger wears: it must read as the input beside it, so
+ *  it is CONTROL plus what makes it clickable. The call site adds the layout
+ *  its own label needs. */
+export const CONTROL_TRIGGER = `${CONTROL} cursor-pointer truncate text-left hover:bg-neutral-50`;
+
 export const textInput = (
   value: string,
   placeholder: string,

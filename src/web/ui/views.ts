@@ -8,7 +8,7 @@ import { $, consoleView, h, type ConsoleView } from "./dom.js";
 import { button, pageTitle, pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
-import { distinctCwds, orderSessions, type SessionInfo } from "./sidebar.js";
+import { orderSessions, projectCwds, type SessionInfo } from "./sidebar.js";
 import type { RunsView } from "./runs.js";
 import type { TasksView } from "./tasks.js";
 
@@ -300,7 +300,7 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
   settings: async (root) =>
     (await import("./settings.js")).createSettingsView(
       root,
-      () => distinctCwds(deps.sessions()),
+      () => projectCwds(deps.sessions()),
       // Through the router, not a local re-render: the hash is the one
       // copy of "where am I", and Back should walk tabs too.
       (t) => showConsole("settings", t),

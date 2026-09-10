@@ -8,7 +8,7 @@ import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/t
 import { thinkingLabel } from "../../core/reply.js";
 import { mustGetJson } from "./api.js";
 import { h } from "./dom.js";
-import { btn, CONTROL, field } from "./form.js";
+import { btn, CONTROL_TRIGGER, field } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
 import { report } from "./report.js";
 
@@ -222,13 +222,9 @@ export function launchField(
     : choice.thinking
     ? `Pi default · ${thinkingLabel(choice.thinking)}`
     : "Pi default";
-  // Not a button: a dropdown trigger that must read as the input beside it, so
-  // it wears the shared control skin rather than a copy of it.
   const open = btn(
     summary,
-    `${CONTROL} flex cursor-pointer items-center gap-1.5 truncate text-left hover:bg-neutral-50 ${
-      choice.model ? "text-neutral-700" : "text-neutral-400"
-    }`,
+    `${CONTROL_TRIGGER} flex items-center gap-1.5 ${choice.model ? "text-neutral-700" : "text-neutral-400"}`,
   );
   open.title = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Whatever the project and Pi pick";
   open.onclick = () => {

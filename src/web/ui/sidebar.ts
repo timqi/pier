@@ -90,14 +90,15 @@ export function neighbor(list: SessionInfo[], currentId: string | null, by: numb
  *  not scrolled, and the project you want is almost always a recent one. */
 const RECENT_CWDS = 8;
 
-/** Distinct directories, newest session first: what the Settings scope list
- *  offers, and the ground `projectCwds` picks from. */
+/** Distinct directories, newest session first: the ground `projectCwds` picks
+ *  from. */
 export const distinctCwds = (list: SessionInfo[]): string[] =>
   [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
 
 /** The distinct directories less the worktrees: `wt` puts a checkout beside its
  *  repository as `<repo>.<branch>`, and the next conversation about a project
- *  belongs in the project. A worktree with no such sibling stays. */
+ *  belongs in the project. A worktree with no such sibling stays. What the
+ *  New-session menu and the Settings scope list both offer. */
 export function projectCwds(list: SessionInfo[]): string[] {
   const all = distinctCwds(list);
   const known = new Set(all);
