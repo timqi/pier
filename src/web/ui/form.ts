@@ -157,7 +157,7 @@ export function toggle(
   box.onchange = () => onChange(box.checked);
   const track = h(
     "span",
-    "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white dark:after:bg-neutral-950 after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200",
+    "relative h-4 w-7 flex-none rounded-full bg-neutral-300 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white dark:after:bg-neutral-950 after:shadow-sm after:transition-transform peer-checked:bg-indigo-600 peer-checked:after:translate-x-3 peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-200 peer-disabled:cursor-not-allowed peer-disabled:opacity-45",
   );
   const row = h("label", `flex cursor-pointer gap-2.5 ${label ? "items-start" : "items-center"}`);
   row.append(box, track);

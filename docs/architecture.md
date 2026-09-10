@@ -66,9 +66,9 @@ src/
   drain.ts     graceful restart: finish running turns and outbound sends,
                ledger what the deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes
-  tools.ts     managed CLI binaries via ubix (install, update, PATH); `rtk` is
-               an extension shipped as one; a custom tool is the body of its
-               ubix block. `~/.pier/tools/bin` goes first on the PATH everything
+  tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool's
+               provision step may register with Pi (rtk writes its extension);
+               a custom tool is the body of its ubix block. `~/.pier/tools/bin` goes first on the PATH everything
                Pier spawns inherits. One sync per machine: a lock row in pier.db
                (BEGIN IMMEDIATE), re-checked before every mutating step
   tools-task.ts a tools switch becomes exactly one run of the one task Pier

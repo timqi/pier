@@ -769,7 +769,6 @@ describe("ManagedTools.status", () => {
     const entries = await tools.status(["rtk"]);
     expect(entries.map((e) => e.name)).toEqual(MANAGED.map((t) => t.name));
     expect(entries[0]).toEqual({
-      kind: "extension",
       name: "rtk",
       summary: expect.any(String),
       enabled: true,

@@ -19,9 +19,6 @@ const UBIX_LATEST = "https://api.github.com/repos/timqi/ubix/releases/latest";
 
 /** One binary Pier will install and keep current on request. */
 export interface ManagedTool {
-  /** `rtk` is an extension that ships as a binary: listed under the `pier`
-   *  package's extensions, installed like a tool. */
-  kind: "extension" | "tool";
   name: string;
   /** One line, shown beside the switch that turns it on. */
   summary: string;
@@ -40,38 +37,33 @@ export interface ManagedTool {
 
 export const MANAGED: readonly ManagedTool[] = [
   {
-    kind: "extension",
     name: "rtk",
     toml: `spec = "github:rtk-ai/rtk"`,
     summary:
-      "Compresses long bash output before it reaches the model. Ships as a " +
-      "command, and installs its own Pi extension into Pier's agent dir — " +
+      "Compresses long bash output before it reaches the model. Installs its own " +
+      "Pi extension (extensions/rtk.ts, listed under the local package) — " +
       "refreshed on every update.",
     // Write-if-changed inside rtk: re-running after an upgrade is the extension-update path.
     provision: ["init", "-g", "--agent", "pi"],
     deprovision: ["init", "--uninstall", "--agent", "pi", "--global"],
   },
   {
-    kind: "tool",
     name: "rg",
     // `exe`: ubi looks for files named after the project, and ripgrep ships `rg`.
     toml: `spec = "github:BurntSushi/ripgrep"\nexe = "rg"`,
     summary: "ripgrep: searches a tree by content, fast enough to be the default.",
   },
   {
-    kind: "tool",
     name: "fd",
     toml: `spec = "github:sharkdp/fd"`,
     summary: "Finds files by name, respecting .gitignore — what `find` should feel like.",
   },
   {
-    kind: "tool",
     name: "wt",
     toml: `spec = "github:max-sixty/worktrunk"\nexe = "wt"`,
     summary: "worktrunk: git worktrees as one command — branch, switch, merge, clean up.",
   },
   {
-    kind: "tool",
     name: "jq",
     // No `exe`: jq publishes bare per-platform binaries, which ubi installs
     // under the tool's own name.
@@ -465,7 +457,7 @@ class UbixTooOld extends Error {}
 /** A name in neither list is not an error: a row a future release drops must
  *  not stop the sync of everything else. */
 function rows(custom: readonly CustomTool[]): ManagedTool[] {
-  return [...MANAGED, ...custom.map((tool): ManagedTool => ({ kind: "tool", summary: "", custom: true, ...tool }))];
+  return [...MANAGED, ...custom.map((tool): ManagedTool => ({ summary: "", custom: true, ...tool }))];
 }
 
 export function ubixAsset(tag: string, platform: string, arch: string): string {
@@ -647,7 +639,6 @@ export class ManagedTools {
    *  version is unknown (§5). */
   async status(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<CatalogEntry[]> {
     const base = rows(custom).map((tool): CatalogEntry => ({
-      kind: tool.kind,
       name: tool.name,
       summary: tool.summary,
       enabled: enabled.includes(tool.name),

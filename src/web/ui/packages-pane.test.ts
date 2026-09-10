@@ -63,16 +63,18 @@ vi.mock("./config-sync.js", () => ({ configSyncPane: () => ({ el: make("div"), d
 import { createConfigView } from "./config.js";
 
 const resource = (kind: "extension" | "skill", name: string, path: string, enabled: boolean, extra: Partial<Package["resources"][number]> = {}) =>
-  ({ kind, name, path, enabled, version: null, state: null, ...extra });
+  ({ kind, name, path, enabled, state: null, ...extra });
 const pier: Package = {
   source: "pier", kind: "pier", scope: "global", version: "0.1.2", installedPath: null, updateAvailable: false,
   resources: [
     resource("extension", "web", "<inline:web>", false),
-    resource("extension", "rtk", "/pi/extensions/rtk.ts", true, { version: "v0.5.0" }),
     resource("skill", "pier-help", "/pier/skills/pier-help/SKILL.md", true),
   ],
 };
-const local: Package = { source: "local", kind: "local", scope: "global", version: null, installedPath: "/pi", updateAvailable: false, resources: [] };
+const local: Package = {
+  source: "local", kind: "local", scope: "global", version: null, installedPath: "/pi", updateAvailable: false,
+  resources: [resource("extension", "rtk", "/pi/extensions/rtk.ts", true, { state: "installed by the rtk tool", locked: true })],
+};
 const demo: Package = {
   source: "npm:@acme/demo@1.0.0", kind: "npm", scope: "global", version: "1.0.0", installedPath: "/pi/packages/npm/demo",
   updateAvailable: false, resources: [resource("extension", "hello", "/pi/packages/npm/demo/extensions/hello.ts", true)],
@@ -127,8 +129,8 @@ describe("Settings → Agent", () => {
     expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "Extensions", "Skills", "Tools"]);
     expect(rows().map((el) => el.textContent)).toEqual([
       "Configuration sync", "SYSTEM.md",
-      "pieron", "local", "demoon",
-      "webpier", "rtkpierv0.5.0", "hellodemo",
+      "pieron", "localon", "demoon",
+      "webpier", "rtklocal", "hellodemo",
       "pier-helppier",
       "command-line tools",
     ]);

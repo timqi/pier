@@ -21,7 +21,6 @@ const answering = (body: unknown, status = 200): void => {
 const declaredTool = (
   state: { enabled?: boolean; installed?: boolean; error?: string | null } = {},
 ): CatalogEntry => ({
-  kind: "tool",
   name: "eza",
   summary: "",
   custom: true,

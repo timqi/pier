@@ -133,8 +133,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   let customTools: { name: string; toml: string }[] = [];
   /** A row the operator wrote, and may remove again. */
   const isCustom = (entry: CatalogEntry): boolean => entry.custom === true;
-  /** rtk is a binary too, but its row is the `pier` package's. */
-  const toolEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "tool");
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
 
@@ -346,8 +344,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       if (!found.length && !registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
       for (const { pkg, r } of found) {
         const sel: Selection = { type: "resource", source: pkg.source, kind, path: r.path };
-        const tags = [navBadge(packageLabel(pkg.source)), ...(r.version ? [navBadge(r.version)] : [])];
-        rows.push(navRow(r.name, isActive(sel), !r.enabled, () => open(sel), 0, ...tags));
+        rows.push(navRow(r.name, isActive(sel), !r.enabled, () => open(sel), 0, navBadge(packageLabel(pkg.source))));
       }
     }
     if (scope === "global") {
@@ -357,7 +354,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       if (catalogError) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError));
       else {
         const sel: Selection = { type: "tools" };
-        const on = toolEntries().filter((t) => t.enabled).length;
+        const on = catalog.filter((t) => t.enabled).length;
         rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), 0, ...(on ? [onBadge()] : [])));
       }
     }
@@ -502,7 +499,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     paneRequest++;
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
-    const tools = toolEntries();
     const runs = taskLink("the update task");
 
     const row = (tool: CatalogEntry): HTMLElement => {
@@ -594,7 +590,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         ),
         catalogError
           ? h("p", "max-w-2xl text-[12.5px] text-red-600", catalogError)
-          : h("div", "flex max-w-2xl flex-col", ...tools.map(row)),
+          : h("div", "flex max-w-2xl flex-col", ...catalog.map(row)),
         h(
           "div",
           "flex max-w-2xl flex-col gap-2 border-t border-neutral-200 pt-4",

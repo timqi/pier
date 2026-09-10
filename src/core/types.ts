@@ -370,10 +370,6 @@ export interface CatalogBinary {
  * Pier's own bin (src/tools.ts). Its switch is an instance setting, not a file.
  */
 export interface CatalogEntry {
-  /** `extension` when the command *is* an extension (rtk registers its own Pi
-   *  extension, and is listed under the `pier` package); `tool` when it is
-   *  just a command, listed under Tools. */
-  kind: "extension" | "tool";
   name: string;
   summary: string;
   enabled: boolean;
@@ -419,10 +415,12 @@ export interface PackageResource {
   path: string;
   /** What the switch says. What the runtime did with it is `state`. */
   enabled: boolean;
-  version: string | null;
   /** The one line a row shows instead of a plain switch reading (`stood down —
    *  web_search from <path>`, `follows Channels → agent tool`), or null. */
   state: string | null;
+  /** The switch is another surface's (rtk.ts: the rtk tool's, under Tools);
+   *  drawn disabled, `state` names whose. */
+  locked?: boolean;
 }
 
 /** One row of the registry: a source and what it provides. */

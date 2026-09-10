@@ -13,7 +13,7 @@ import { registerPackageRoutes } from "./packages.js";
 const PKG: Package = {
   source: "npm:pkg", kind: "npm", scope: "global", version: "1.0.0", installedPath: "/agent/npm/node_modules/pkg",
   updateAvailable: false,
-  resources: [{ kind: "extension", name: "a", path: "/agent/npm/node_modules/pkg/extensions/a.ts", enabled: true, version: null, state: null }],
+  resources: [{ kind: "extension", name: "a", path: "/agent/npm/node_modules/pkg/extensions/a.ts", enabled: true, state: null }],
 };
 const REGISTRY: PackageRegistry = { packages: [PKG], checkedAt: null, busy: null };
 

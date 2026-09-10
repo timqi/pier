@@ -11,7 +11,7 @@ let home: string;
 let skills: string;
 let pkgDir: string;
 let config: PiConfigStore;
-let pier: PierPackage & { on: string[]; off: string[]; tools: AgentCustomTool[]; rtkOn: boolean; rtkSet: boolean[] };
+let pier: PierPackage & { on: string[]; off: string[]; tools: AgentCustomTool[] };
 let store: PiPackageStore;
 const previousHome = process.env.HOME;
 
@@ -56,16 +56,11 @@ beforeEach(() => {
     skill: "pier-slack", available: () => false,
   };
   pier = {
-    version: "0.1.2", on: ["web"], off: [], tools: [slack], rtkOn: true, rtkSet: [],
+    version: "0.1.2", on: ["web"], off: [], tools: [slack],
     extensions() { return this.on; },
     setExtensions(names) { this.on = names; },
     skillsOff() { return this.off; },
     setSkillsOff(names) { this.off = names; },
-    rtk: {
-      enabled: () => pier.rtkOn,
-      version: async () => "0.9.0",
-      set: async (on) => { pier.rtkOn = on; pier.rtkSet.push(on); },
-    },
   };
   store = new PiPackageStore(config, pier, [skills], agentDir);
 });
@@ -101,18 +96,18 @@ describe("the registry", () => {
     const pierRow = row(packages, "pier");
     expect(pierRow.version).toBe("0.1.2");
     expect(pierRow.resources).toEqual([
-      { kind: "extension", name: "web", path: "<inline:web>", enabled: true, version: null, state: null },
-      // rtk.ts on disk is the tools switch's file: folded here, its badge the binary's version.
-      { kind: "extension", name: "rtk", path: join(agentDir, "extensions", "rtk.ts"), enabled: true, version: "0.9.0", state: null },
-      { kind: "skill", name: "pier-help", path: join(skills, "pier-help", "SKILL.md"), enabled: true, version: null, state: null },
-      { kind: "skill", name: "pier-slack", path: join(skills, "pier-slack", "SKILL.md"), enabled: true, version: null, state: "follows Channels → agent tool" },
+      { kind: "extension", name: "web", path: "<inline:web>", enabled: true, state: null },
+      { kind: "skill", name: "pier-help", path: join(skills, "pier-help", "SKILL.md"), enabled: true, state: null },
+      { kind: "skill", name: "pier-slack", path: join(skills, "pier-slack", "SKILL.md"), enabled: true, state: "follows Channels → agent tool" },
     ]);
 
     const local = row(packages, "local");
     expect(local.installedPath).toBe(agentDir);
     expect(local.resources).toEqual([
-      { kind: "extension", name: "mine", path: join(agentDir, "extensions", "mine.ts"), enabled: false, version: null, state: null },
-      { kind: "skill", name: "x", path: join(agentDir, "skills", "x", "SKILL.md"), enabled: true, version: null, state: null },
+      { kind: "extension", name: "mine", path: join(agentDir, "extensions", "mine.ts"), enabled: false, state: null },
+      // rtk init's file: a local row like any other, its switch the rtk tool's.
+      { kind: "extension", name: "rtk", path: join(agentDir, "extensions", "rtk.ts"), enabled: true, state: "installed by the rtk tool", locked: true },
+      { kind: "skill", name: "x", path: join(agentDir, "skills", "x", "SKILL.md"), enabled: true, state: null },
     ]);
 
     const pkg = row(packages, pkgDir);
@@ -143,7 +138,7 @@ describe("the registry", () => {
 });
 
 describe("switches", () => {
-  it("writes pier switches to the pier.db lists and rtk's to the tools switch", async () => {
+  it("writes pier switches to the pier.db lists", async () => {
     const web = await store.setEnabled({ source: "pier", kind: "extension", path: "<inline:web>", enabled: false });
     expect(web.enabled).toBe(false);
     expect(pier.on).toEqual([]);
@@ -152,10 +147,13 @@ describe("switches", () => {
     expect(pier.off).toEqual(["pier-help"]);
     await store.setEnabled({ source: "pier", kind: "skill", path: join(skills, "pier-help", "SKILL.md"), enabled: true });
     expect(pier.off).toEqual([]);
-    const rtk = await store.setEnabled({ source: "pier", kind: "extension", path: join(agentDir, "extensions", "rtk.ts"), enabled: false });
-    expect(rtk.enabled).toBe(false);
-    expect(pier.rtkSet).toEqual([false]);
     // Nothing of the above is settings.json's business.
+    expect(settingsJson).toThrow();
+  });
+
+  it("refuses to flip rtk.ts: a settings.json pattern would fight the rtk tool's install", async () => {
+    await expect(store.setEnabled({ source: "local", kind: "extension", path: join(agentDir, "extensions", "rtk.ts"), enabled: false }))
+      .rejects.toMatchObject({ reason: "refused" });
     expect(settingsJson).toThrow();
   });
 
@@ -199,7 +197,7 @@ describe("switches", () => {
     expect(settingsJson()).toEqual({ packages: [pkgDir] });
     // An overridden global resource is the project's row now (Pi: first scope wins).
     const after = await store.list(cwd);
-    expect(row(after.packages, "local").resources.map((r) => r.name)).toEqual(["x"]);
+    expect(row(after.packages, "local").resources.map((r) => r.name)).toEqual(["rtk", "x"]);
     expect(after.packages.find((p) => p.source === "local" && p.scope === "project")?.resources.map((r) => [r.name, r.enabled]))
       .toEqual([["mine", false], ["proj", false]]);
     // Global still reads the global answer.

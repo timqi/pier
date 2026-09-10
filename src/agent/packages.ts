@@ -35,17 +35,19 @@ const KINDS = { extensions: "extension", skills: "skill" } as const;
 type ArrayKey = keyof typeof KINDS;
 /** The state line for a skill whose tool this instance is not given (docs/design/03). */
 const FOLLOWS_TOOL = "follows Channels → agent tool";
+/** Written by `rtk init -g --agent pi` (tools.ts provision): a `local` file whose
+ *  switch is the rtk tool's, so a settings.json pattern would fight the tool. */
+const RTK_FILE = join("extensions", "rtk.ts");
+const RTK_STATE = "installed by the rtk tool";
 
-/** The built-in `pier` package's switches: pier.db lists and the tools switch,
- *  none of it settings.json, so main.ts hands them in. */
+/** The built-in `pier` package's switches: pier.db lists, none of it
+ *  settings.json, so main.ts hands them in. */
 export interface PierPackage {
   version: string;
   extensions(): string[];
   setExtensions(names: string[]): void;
   skillsOff(): string[];
   setSkillsOff(names: string[]): void;
-  /** `rtk` ships as a binary (tools.ts): its switch is the tools switch, its version the binary's. */
-  rtk: { enabled(): boolean; version(): Promise<string | null>; set(on: boolean): Promise<void> };
   /** Whose skills stand down with them (pi.ts standDownUndocumented). */
   tools: AgentCustomTool[];
 }
@@ -90,7 +92,7 @@ const flip = (entries: readonly string[], pattern: string, enabled: boolean): st
 ];
 
 const resourceRow = (kind: PackageResourceKind, r: ResolvedResource): PackageResource => ({
-  kind, name: nameOf(kind, r.path), path: r.path, enabled: r.enabled, version: null, state: null,
+  kind, name: nameOf(kind, r.path), path: r.path, enabled: r.enabled, state: null,
 });
 
 export class PiPackageStore implements PackageStore {
@@ -127,7 +129,7 @@ export class PiPackageStore implements PackageStore {
 
   async list(cwd?: string): Promise<PackageRegistry> {
     const { manager } = this.#open(cwd);
-    const rtkPath = join(this.agentDir, "extensions", "rtk.ts");
+    const rtkPath = join(this.agentDir, RTK_FILE);
     const resolved = await manager.resolve(async () => "skip");
     const rows = new Map<string, Package>();
     const row = (source: string, kind: PackageKind, scope: Package["scope"], installedPath: string | null): Package => {
@@ -143,12 +145,12 @@ export class PiPackageStore implements PackageStore {
     row("local", "local", "global", this.agentDir);
     for (const key of Object.keys(KINDS) as ArrayKey[]) {
       for (const r of resolved[key]) {
-        // Written by `rtk init` for the tools switch: the pier row's, never listed twice.
-        if (r.path === rtkPath) continue;
         const own = r.metadata.origin === "top-level";
         const scope = r.metadata.scope === "project" ? "project" : "global";
+        const resource = resourceRow(KINDS[key], r);
+        if (r.path === rtkPath) Object.assign(resource, { state: RTK_STATE, locked: true });
         row(own ? "local" : r.metadata.source, own ? "local" : kindOf(r.metadata.source), scope, r.metadata.baseDir ?? null)
-          .resources.push(resourceRow(KINDS[key], r));
+          .resources.push(resource);
       }
     }
     // Configured but unresolved (not installed, or empty): still a row.
@@ -172,13 +174,8 @@ export class PiPackageStore implements PackageStore {
     pkg.version = this.pier.version;
     const on = this.pier.extensions();
     pkg.resources = BUNDLED.map(({ name }): PackageResource => ({
-      kind: "extension", name, path: `<inline:${name}>`, enabled: on.includes(name), version: null,
-      state: shadowedBuiltin(name),
+      kind: "extension", name, path: `<inline:${name}>`, enabled: on.includes(name), state: shadowedBuiltin(name),
     }));
-    pkg.resources.push({
-      kind: "extension", name: "rtk", path: join(this.agentDir, "extensions", "rtk.ts"),
-      enabled: this.pier.rtk.enabled(), version: await this.pier.rtk.version(), state: null,
-    });
     const off = this.pier.skillsOff();
     const gone = new Set(this.pier.tools.filter((t) => t.skill && !(t.available?.() ?? true)).map((t) => t.skill));
     for (const dir of this.skillDirs) {
@@ -186,7 +183,7 @@ export class PiPackageStore implements PackageStore {
         const path = join(dir, entry.name, "SKILL.md");
         if (!existsSync(path)) continue;
         pkg.resources.push({
-          kind: "skill", name: entry.name, path, enabled: !off.includes(entry.name), version: null,
+          kind: "skill", name: entry.name, path, enabled: !off.includes(entry.name),
           state: gone.has(entry.name) ? FOLLOWS_TOOL : null,
         });
       }
@@ -285,9 +282,9 @@ export class PiPackageStore implements PackageStore {
   async setEnabled(change: PackageSwitch): Promise<PackageResource> {
     const { source, kind, path, enabled, cwd } = change;
     const { pkg, resource } = await this.#find(change);
+    if (resource.locked) throw new PackageError("refused", `${resource.name} is ${resource.state} — its switch is under Tools`);
     if (pkg.kind === "pier") {
       if (kind === "skill") this.pier.setSkillsOff(withName(this.pier.skillsOff(), resource.name, !enabled));
-      else if (resource.name === "rtk") await this.pier.rtk.set(enabled);
       else this.pier.setExtensions(withName(this.pier.extensions(), resource.name, enabled));
     } else {
       const key: ArrayKey = kind === "extension" ? "extensions" : "skills";

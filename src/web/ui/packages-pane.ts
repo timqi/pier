@@ -35,7 +35,6 @@ interface Outcome {
 
 const STATUS = "text-[11.5px] text-neutral-400";
 const KIND_BADGE = "bg-neutral-50 text-neutral-500 ring-neutral-200";
-const VERSION_BADGE = "bg-indigo-50 text-indigo-700 ring-indigo-100";
 const PIN_BADGE = "bg-amber-50 text-amber-700 ring-amber-100";
 /** Pi's own security note, in front of every install. */
 const SECURITY_NOTE =
@@ -110,12 +109,14 @@ export function createRegistry(deps: RegistryDeps) {
     h("dt", "text-[12px] text-neutral-500", term),
     h("dd", `text-[12px] leading-snug text-neutral-700 ${mono ? "font-mono break-all" : ""}`, value),
   ];
-  const tagsOf = (r: PackageResource): HTMLElement[] => [
-    badge(r.kind, KIND_BADGE),
-    ...(r.version ? [badge(r.version, VERSION_BADGE)] : []),
-  ];
+  /** A locked switch is drawn as it stands, and `state` says whose it is. */
+  const switchFor = (pkg: Package, r: PackageResource, label: string, hint: string, after: (outcome: Outcome) => void): HTMLElement => {
+    const box = toggle(label, hint, r.enabled, (checked) => void flip(pkg, r, checked).then(after));
+    if (r.locked) for (const input of box.querySelectorAll("input")) input.disabled = true;
+    return box;
+  };
 
-  /** One resource, one switch: the same row in the package pane and the flat views. */
+  /** One resource, one switch: the same row in the package pane and the nav. */
   function resourceRow(pkg: Package, r: PackageResource, after: (outcome: Outcome) => void): HTMLElement {
     const name = btn(r.name, "font-mono text-[13px] text-neutral-700 hover:text-indigo-600 hover:underline");
     name.onclick = () => {
@@ -126,11 +127,10 @@ export function createRegistry(deps: RegistryDeps) {
     const line = h(
       "div",
       "flex min-w-0 flex-1 flex-col gap-0.5",
-      h("span", "flex flex-wrap items-center gap-2", name, ...tagsOf(r)),
+      h("span", "flex flex-wrap items-center gap-2", name, badge(r.kind, KIND_BADGE)),
       ...(r.state ? [h("span", "text-[11.5px] leading-snug text-amber-700", r.state)] : []),
     );
-    const box = toggle("", "", r.enabled, (checked) => void flip(pkg, r, checked).then(after));
-    return h("div", "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0", line, box);
+    return h("div", "flex max-w-2xl items-start gap-3 border-b border-neutral-100 py-2.5 last:border-0", line, switchFor(pkg, r, "", "", after));
   }
 
   function openPackage(source: string, scope: PackageScope, note?: Outcome): void {
@@ -233,8 +233,8 @@ export function createRegistry(deps: RegistryDeps) {
 
   /** What flipping this switch writes, in one line under it. */
   const hintFor = (pkg: Package, r: PackageResource): string => {
+    if (r.locked) return `${r.state} — switch it under Tools; the tool's install writes this file and its uninstall removes it.`;
     if (pkg.kind === "pier") {
-      if (r.name === "rtk") return "The tools switch: installs the rtk binary through the tools task, whose rtk init writes this extension. Off uninstalls both.";
       return r.kind === "skill"
         ? "Pier's own skill. Off, no session is offered it."
         : "Loaded from inside Pier — nothing installed, nothing to update. A session mid-turn keeps the tools it started with.";
@@ -255,16 +255,15 @@ export function createRegistry(deps: RegistryDeps) {
       deps.paneBar(
         resource.name,
         badge(packageLabel(pkg.source), KIND_BADGE),
-        ...tagsOf(resource),
+        badge(resource.kind, KIND_BADGE),
         h("span", "ml-auto font-mono text-[11px] text-neutral-400 break-all", resource.path),
       ),
       h(
         "div",
         "flex flex-none flex-col gap-2 border-b border-neutral-200 px-4 py-3",
-        toggle("Enabled", hintFor(pkg, resource), resource.enabled, (checked) =>
-          void flip(pkg, resource, checked).then((outcome) => {
-            if (deps.live(ticket)) void openResource(source, kind, path, outcome);
-          })),
+        switchFor(pkg, resource, "Enabled", hintFor(pkg, resource), (outcome) => {
+          if (deps.live(ticket)) void openResource(source, kind, path, outcome);
+        }),
         ...(resource.state ? [h("p", "text-[12px] text-amber-700", resource.state)] : []),
         status,
       ),
