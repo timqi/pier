@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { openDb } from "./db.js";
+import { resolveAgentDir } from "./paths.js";
 import {
   coalescedSync,
   type Exec,
@@ -278,7 +279,13 @@ interface Call {
 /** A rig with a bin/ that already holds ubix (and optionally the tools), so
  *  nothing here ever fetches or spawns anything. */
 function rig(
-  options: { answer?: (call: Call) => ExecResult | undefined; installed?: string[]; fetch?: typeof fetch } = {},
+  options: {
+    answer?: (call: Call) => ExecResult | undefined;
+    installed?: string[];
+    fetch?: typeof fetch;
+    /** What `ubix --version` prints; the current release unless a test is about age. */
+    version?: string;
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "pier-tools-"));
   mkdirSync(join(root, "bin"), { recursive: true });
@@ -289,6 +296,7 @@ function rig(
   const exec: Exec = (file, args, env) => {
     const call = { file, args: [...args], env };
     calls.push(call);
+    if (args[0] === "--version") return Promise.resolve(ok(`${options.version ?? "ubix v20260910-61f07ae"}\n`));
     return Promise.resolve(options.answer?.(call) ?? ok(upgradeJson()));
   };
   // Its own database, like its own directory: one lock per machine, and a test
@@ -324,115 +332,75 @@ describe("ManagedTools.sync", () => {
     expect(await tools.sync(on())).toEqual({ entries: [], failed: false, summary: "no tools switched on" });
   });
 
-  it("writes the config, upgrades, then provisions from the tool's own binary", async () => {
-    const r = rig({
-      installed: ["rtk"],
-      answer: (call) =>
-        call.args[0] === "list" ? ok(JSON.stringify({ schema_version: 1, tools: [] })) : ok(upgradeJson(upgraded)),
-    });
+  it("writes the config, with rtk's hooks in it, and upgrades once", async () => {
+    const r = rig({ installed: ["rtk"], answer: () => ok(upgradeJson(upgraded)) });
     const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(false);
     expect(report.entries).toEqual([{ name: "rtk", action: "upgraded", version: "v0.23.5", error: null }]);
     expect(report.summary).toBe("rtk: upgraded v0.23.5");
-    expect(r.lines()).toEqual([
-      "ubix list --json",
-      "ubix upgrade --all --prune --wait --json",
-      "rtk init -g --agent pi",
-    ]);
+    // No `rtk init` of Pier's own: the hooks in the TOML are ubix's to run.
+    expect(r.lines()).toEqual(["ubix --version", "ubix upgrade --all --prune --wait --json"]);
     // Pier's own config, never the operator's ~/.config/ubix.
-    expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).toContain("[tools.rtk]");
+    const config = readFileSync(join(r.root, "config", "config.toml"), "utf8");
+    expect(config).toContain("[tools.rtk]");
+    expect(config).toContain(`post_install = ["rtk", "init", "-g", "--agent", "pi", "--auto-patch"]`);
+    expect(config).toContain(
+      `pre_remove = ["rtk", "init", "--uninstall", "--agent", "pi", "--global", "--auto-patch"]`,
+    );
     const [, upgrade] = r.calls;
     expect(upgrade?.env.UBIX_CONFIG_DIR).toBe(join(r.root, "config"));
     expect(upgrade?.env.UBIX_DATA_DIR).toBe(join(r.root, "state"));
-    // The provision runs with an agent dir, always — rtk writes its Pi
-    // extension there, and inheriting nothing would send it to ~/.pi.
-    expect(r.calls[2]?.env.PI_CODING_AGENT_DIR).toBeTruthy();
-    expect(existsSync(join(r.calls[2]?.env.PI_CODING_AGENT_DIR ?? "", "extensions"))).toBe(true);
-  });
-
-  it("lets a tool uninstall its own footprint before the binary is removed", async () => {
-    const r = rig({
-      installed: ["rtk"],
-      answer: (call) => (call.args[0] === "list" ? ok(LIST_JSON) : ok(upgradeJson())),
-    });
-    await r.tools.sync(on());
-    // The listing survives for one reason: rtk has to uninstall its own Pi
-    // extension *before* its binary goes, and ubix cannot know that. Removing
-    // the rest is ubix's own `--prune`, which knows per source how.
-    expect(r.lines()).toEqual([
-      "ubix list --json",
-      "rtk init --uninstall --agent pi --global",
-      "ubix upgrade --all --prune --wait --json",
-    ]);
-    // Nothing is declared any more, so prune takes all three.
-    expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).not.toContain("[tools.");
-    // The config that follows no longer declares it.
-    expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).not.toContain("[tools.rtk]");
+    // The hooks inherit ubix's env: rtk writes its Pi extension under this
+    // directory, and inheriting nothing would send it to ~/.pi.
+    expect(upgrade?.env.PI_CODING_AGENT_DIR).toBe(resolveAgentDir(process.env));
   });
 
   it("reports a tool ubix failed on, and still parses the report on a non-zero exit", async () => {
     const r = rig({
       installed: ["rtk"],
-      answer: (call) =>
-        call.args[0] === "list" ? ok(JSON.stringify({ schema_version: 1, tools: [] })) : {
-          code: 1,
-          stdout: upgradeJson({
-            name: "rtk",
-            action: "failed",
-            from_version: null,
-            to_version: null,
-            reason: null,
-            error: "no asset for linux-amd64",
-          }),
-          stderr: "1 tool(s) failed",
-        },
+      answer: () => ({
+        code: 1,
+        stdout: upgradeJson({
+          name: "rtk",
+          action: "failed",
+          from_version: null,
+          to_version: null,
+          reason: null,
+          error: "no asset for linux-amd64",
+        }),
+        stderr: "1 tool(s) failed",
+      }),
     });
     const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(true);
     expect(report.summary).toBe("rtk: FAILED — no asset for linux-amd64");
-    // A failed install is not provisioned on top of.
-    expect(r.lines()).not.toContain("rtk init -g --agent pi");
   });
 
-  it("reports a provision that failed, with what the tool said", async () => {
+  it("reports a hook that failed as a failure, though the binary was upgraded", async () => {
+    // A failed `post_install` keeps ubix's action and carries the text in `error`.
     const r = rig({
       installed: ["rtk"],
-      answer: (call) => {
-        if (call.args[0] === "list") return ok(JSON.stringify({ schema_version: 1, tools: [] }));
-        if (call.args[0] === "upgrade") return ok(upgradeJson(upgraded));
-        return { code: 3, stdout: "", stderr: "unknown agent: pi" };
-      },
+      answer: () => ({
+        code: 1,
+        stdout: upgradeJson({ ...upgraded, error: "post_install exited 3: unknown agent: pi" }),
+        stderr: "1 tool(s) failed",
+      }),
     });
     const report = await r.tools.sync(on("rtk"));
     expect(report.failed).toBe(true);
-    expect(report.summary).toContain("rtk init -g --agent pi exited 3: unknown agent: pi");
+    expect(report.entries).toEqual([
+      { name: "rtk", action: "upgraded", version: "v0.23.5", error: "post_install exited 3: unknown agent: pi" },
+    ]);
+    expect(report.summary).toBe("rtk: FAILED — post_install exited 3: unknown agent: pi");
   });
 
-  it("keeps a tool ubix knows about when its own uninstall failed", async () => {
-    // Removing it now would orphan rtk's Pi extension with nothing left able
-    // to remove it — so it stays declared and the next run tries again.
-    const r = rig({
-      installed: ["rtk"],
-      answer: (call) => {
-        if (call.args[0] === "list") return ok(LIST_JSON);
-        if (call.args[0] === "upgrade") return ok(upgradeJson());
-        return { code: 2, stdout: "", stderr: "rtk: cannot write the agent dir" };
-      },
-    });
-    const report = await r.tools.sync(on());
-    expect(report.failed).toBe(true);
-    expect(report.summary).toContain("rtk: FAILED");
-    // Still declared, so `--prune` leaves the binary alone.
-    expect(readFileSync(join(r.root, "config", "config.toml"), "utf8")).toContain("[tools.rtk]");
-  });
-
-  it("replaces an ubix too old for --json rather than sending the operator to do it", async () => {
-    // Pier put that binary in bin/; a version of it Pier cannot read is Pier's
-    // to fix. (The replacement itself needs the network, which tests refuse —
-    // what is asserted is that it was attempted, not that it landed.)
+  it("replaces an ubix older than the one that runs hooks rather than sending the operator to do it", async () => {
+    // Pier put that binary in bin/; one that would parse the hook keys and
+    // ignore them is Pier's to fix. (The replacement itself needs the network,
+    // which tests refuse — what is asserted is that it was attempted.)
     let fetched = 0;
     const r = rig({
-      answer: () => ({ code: 1, stdout: "", stderr: "error: unexpected argument '--json' found" }),
+      version: "ubix v20260828-59b4f00",
       fetch: () => {
         fetched++;
         return Promise.reject(new Error("the network is not open in tests"));
@@ -440,11 +408,11 @@ describe("ManagedTools.sync", () => {
     });
     await expect(r.tools.sync(on("rtk"))).rejects.toThrow(/network/);
     expect(fetched).toBe(1);
+    expect(r.lines()).toEqual(["ubix --version"]);
   });
 });
 
 describe("two syncs at once", () => {
-  const EMPTY_LIST = JSON.stringify({ schema_version: 1, tools: [] });
   const config = (root: string): string => readFileSync(join(root, "config", "config.toml"), "utf8");
 
   it("serializes them across processes, so nobody rewrites the config ubix is reading", async () => {
@@ -460,7 +428,7 @@ describe("two syncs at once", () => {
     let release = (): void => {};
     const held = new Promise<void>((resolve) => (release = resolve));
     const exec: Exec = (_file, args) => {
-      if (args[0] === "list") return Promise.resolve(ok(EMPTY_LIST));
+      if (args[0] === "--version") return Promise.resolve(ok("ubix v20260910-61f07ae\n"));
       seen.push(config(root));
       // The first run stays in flight until the test lets it go.
       return seen.length === 1 ? held.then(() => ok(upgradeJson())) : Promise.resolve(ok(upgradeJson()));
@@ -846,7 +814,7 @@ describe("ManagedTools.status", () => {
     // did may be read back off the memo.
     await r.tools.sync(on());
     await r.tools.status(["rtk"]);
-    expect(r.lines().filter((line) => line === "ubix list --json")).toHaveLength(3);
+    expect(r.lines().filter((line) => line === "ubix list --json")).toHaveLength(2);
   });
 
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {

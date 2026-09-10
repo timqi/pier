@@ -26,11 +26,6 @@ export interface ManagedTool {
    *  header Pier owns; which keys exist is ubix's vocabulary, and Pier guards
    *  the structure only (`normalizeCustomTools`). */
   toml: string;
-  /** Run after every install and upgrade, from the tool's own binary — also how
-   *  a registration with Pi stays current. */
-  provision?: readonly string[];
-  /** Run *before* the binary is removed: undoing `provision` takes the tool. */
-  deprovision?: readonly string[];
   /** True only for a row built from an operator's own block. */
   custom?: boolean;
 }
@@ -38,14 +33,16 @@ export interface ManagedTool {
 export const MANAGED: readonly ManagedTool[] = [
   {
     name: "rtk",
-    toml: `spec = "github:rtk-ai/rtk"`,
+    // The hooks register and unregister its Pi extension; `--auto-patch` keeps
+    // `rtk init` non-interactive and overwrites a stale copy, which is right
+    // because nothing else writes Pier's agent dir.
+    toml: `spec = "github:rtk-ai/rtk"\n` +
+      `post_install = ["rtk", "init", "-g", "--agent", "pi", "--auto-patch"]\n` +
+      `pre_remove = ["rtk", "init", "--uninstall", "--agent", "pi", "--global", "--auto-patch"]`,
     summary:
-      "Compresses long bash output before it reaches the model. Installs its own " +
-      "Pi extension (extensions/rtk.ts, listed under the local package) — " +
-      "refreshed on every update.",
-    // Write-if-changed inside rtk: re-running after an upgrade is the extension-update path.
-    provision: ["init", "-g", "--agent", "pi"],
-    deprovision: ["init", "--uninstall", "--agent", "pi", "--global"],
+      "Compresses long bash output before it reaches the model. Its install hook " +
+      "writes its own Pi extension (extensions/rtk.ts, listed under the local " +
+      "package) — refreshed on every update.",
   },
   {
     name: "rg",
@@ -445,14 +442,10 @@ export function ubixConfigToml(
   return `${lines.join("\n")}\n`;
 }
 
-/** clap's unknown-argument message, and ubix's own refusal on a command that
- *  takes no JSON. Nothing else counts as too old. */
-const refusesJson = (stderr: string): boolean =>
-  /unexpected argument\s+'?--json|unrecognized (?:option|argument)\s+'?--json|`--json` is not supported/i
-    .test(stderr);
-
-/** Pier put that binary in `bin/`, so `sync` re-bootstraps rather than reports. */
-class UbixTooOld extends Error {}
+/** The first ubix that runs `post_install` / `pre_remove`. An older one parses
+ *  the keys as unknown and ignores them, so rtk would install without its
+ *  extension and nothing would say so. Release tags are `vYYYYMMDD-<sha>`. */
+const UBIX_MIN = "v20260910-61f07ae";
 
 /** A name in neither list is not an error: a row a future release drops must
  *  not stop the sync of everything else. */
@@ -584,27 +577,12 @@ export class ManagedTools {
       return { entries: [], failed: false, summary: "no tools switched on" };
     }
     fence();
-    const ubix = await this.bootstrapUbix();
     const env = this.#env();
+    const ubix = await this.#current(await this.bootstrapUbix(), env);
     const entries: ToolSyncEntry[] = [];
 
-    // ubix cannot know that rtk must uninstall its own Pi extension *before*
-    // its binary goes; tools leaving the set undo their footprint first.
-    const kept: ManagedTool[] = [];
-    for (const state of await this.#listing(ubix, env)) {
-      const leaving = all.find((tool) => tool.name === state.name);
-      if (!leaving?.deprovision || wanted.some((tool) => tool.name === state.name)) continue;
-      fence(); // a tool's own uninstall is a change to the machine
-      const error = await this.#provision(env, leaving, leaving.deprovision);
-      if (error) {
-        // Removing it now would orphan what deprovision failed to remove.
-        kept.push(leaving);
-        entries.push({ name: leaving.name, action: "kept", version: null, error });
-      }
-    }
-
     fence();
-    this.#writeConfig([...wanted, ...kept]);
+    this.#writeConfig(wanted);
 
     // `--prune` removes what the config no longer declares; `--wait` lets a
     // hand-typed `pier tools sync` converge behind the managed run.
@@ -612,24 +590,19 @@ export class ManagedTools {
     const states = await this.#states(ubix, env, ["upgrade", "--all", "--prune", "--wait", "--json"]);
     for (const state of states) {
       if (wanted.some((tool) => tool.name === state.name)) continue;
-      if (entries.some((entry) => entry.name === state.name)) continue;
-      // A failure to remove is as much a failure as one to install.
+      // A failure to remove (a `pre_remove` hook included) is as much a failure as one to install.
       entries.push({ name: state.name, action: state.action ?? "removed", version: null, error: state.error });
     }
     for (const tool of wanted) {
       const state = states.find((s) => s.name === tool.name);
-      const entry: ToolSyncEntry = {
+      entries.push({
         name: tool.name,
         action: state?.action ?? "missing",
         version: state?.to ?? state?.version ?? null,
-        // A tool ubix never mentioned is not a tool that is fine.
+        // A tool ubix never mentioned is not a tool that is fine; a failed
+        // `post_install` arrives here as `error` beside an `installed` action.
         error: state?.error ?? (state ? null : "ubix reported nothing about it"),
-      };
-      if (!entry.error && tool.provision) {
-        fence();
-        entry.error = await this.#provision(env, tool, tool.provision);
-      }
-      entries.push(entry);
+      });
     }
     const failed = entries.some((entry) => entry.error !== null);
     return { entries, failed, summary: summarize(entries) };
@@ -693,12 +666,20 @@ export class ManagedTools {
   }
 
   /** `UBIX_CONFIG_DIR` / `UBIX_DATA_DIR` name the directories directly — not
-   *  XDG parents, which every child ubix spawns (uv, fnm, cargo) would read too. */
+   *  XDG parents, which every child ubix spawns (uv, fnm, cargo) would read too.
+   *  Hooks inherit this env: `pier tools sync` typed in a shell has no main.ts
+   *  parent exporting PI_CODING_AGENT_DIR, and rtk would then write its
+   *  extension into ~/.pi. */
   #env(): NodeJS.ProcessEnv {
+    const agentDir = resolveAgentDir(process.env);
+    if (process.env.PI_CODING_AGENT_DIR !== agentDir) {
+      log.info(`PI_CODING_AGENT_DIR was ${process.env.PI_CODING_AGENT_DIR ?? "unset"} — ubix gets ${agentDir}`);
+    }
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       UBIX_CONFIG_DIR: this.#configDir,
       UBIX_DATA_DIR: join(this.#root, "state"),
+      PI_CODING_AGENT_DIR: agentDir,
     };
     prependPath(env, this.bin);
     return env;
@@ -718,8 +699,9 @@ export class ManagedTools {
   }
 
   /** A non-zero exit still parses: under `--json` a failed tool is in the
-   *  document as `action: "failed"`, and the run exits non-zero. The two must
-   *  agree — an exit code with no failed entry is a failure this file cannot
+   *  document as `action: "failed"` — or as `installed`/`upgraded` with an
+   *  `error`, when its `post_install` hook failed — and the run exits non-zero.
+   *  The two must agree — an exit code with no failed entry is a failure this file cannot
    *  attribute, and passing it on as clean is the one thing it may never do. */
   async #states(ubix: string, env: NodeJS.ProcessEnv, args: readonly string[]): Promise<UbixToolState[]> {
     const result = await this.#exec(ubix, args, env);
@@ -728,41 +710,24 @@ export class ManagedTools {
       states = parseUbixJson(result.stdout);
     } catch (err) {
       const failure = failedRun(`ubix ${args.join(" ")}`, result);
-      // Only the flag being unknown means "too old"; re-bootstrapping over a
-      // config error would fix nothing and say something false.
-      if (result.code !== 0 && refusesJson(result.stderr)) throw new UbixTooOld(failure);
       throw new Error(result.code === 0 ? String(err) : `${failure} (${String(err)})`);
     }
-    if (result.code !== 0 && !states.some((state) => state.action === "failed")) {
+    if (result.code !== 0 && !states.some((state) => state.error !== null)) {
       throw new Error(`${failedRun(`ubix ${args.join(" ")}`, result)} — and its report names no failure`);
     }
     return states;
   }
 
-  /** The one place a too-old ubix is repaired rather than reported. */
-  async #listing(ubix: string, env: NodeJS.ProcessEnv): Promise<UbixToolState[]> {
-    try {
-      return await this.#states(ubix, env, ["list", "--json"]);
-    } catch (err) {
-      if (!(err instanceof UbixTooOld)) throw err;
-      log.warn(`the ubix in ${this.bin} is too old for --json — replacing it`);
-      return this.#states(await this.bootstrapUbix(true), env, ["list", "--json"]);
-    }
-  }
-
-  /** Returns the failure text, or null. */
-  async #provision(env: NodeJS.ProcessEnv, tool: ManagedTool, args: readonly string[]): Promise<string | null> {
-    const exe = join(this.bin, tool.name);
-    if (!existsSync(exe)) return `${tool.name} is not in ${this.bin} — ${args.join(" ")} was not run`;
-    // `pier tools sync` typed in a shell has no main.ts parent exporting
-    // PI_CODING_AGENT_DIR; rtk would then write its extension into ~/.pi.
-    const agentDir = resolveAgentDir(env);
-    if (env.PI_CODING_AGENT_DIR !== agentDir) {
-      log.info(`PI_CODING_AGENT_DIR was ${env.PI_CODING_AGENT_DIR ?? "unset"} — ${tool.name} gets ${agentDir}`);
-    }
-    mkdirSync(join(agentDir, "extensions"), { recursive: true });
-    const result = await this.#exec(exe, args, { ...env, PI_CODING_AGENT_DIR: agentDir });
-    return result.code === 0 ? null : failedRun(`${tool.name} ${args.join(" ")}`, result);
+  /** The one place a too-old ubix is repaired rather than reported: Pier put
+   *  that binary in `bin/`, and one below UBIX_MIN would run the config and
+   *  skip its hooks without a word. */
+  async #current(ubix: string, env: NodeJS.ProcessEnv): Promise<string> {
+    const result = await this.#exec(ubix, ["--version"], env);
+    const date = /\bv(\d{8})-/.exec(result.stdout)?.[1];
+    if (result.code === 0 && date && date >= UBIX_MIN.slice(1, 9)) return ubix;
+    const found = result.code === 0 ? result.stdout.trim() || "(no version)" : failedRun("ubix --version", result);
+    log.warn(`the ubix in ${this.bin} is ${found} and Pier needs ${UBIX_MIN} or newer — replacing it`);
+    return this.bootstrapUbix(true);
   }
 
   async #getText(url: string): Promise<string> {

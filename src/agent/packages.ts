@@ -35,7 +35,7 @@ const KINDS = { extensions: "extension", skills: "skill" } as const;
 type ArrayKey = keyof typeof KINDS;
 /** The state line for a skill whose tool this instance is not given (docs/design/03). */
 const FOLLOWS_TOOL = "follows Channels → agent tool";
-/** Written by `rtk init -g --agent pi` (tools.ts provision): a `local` file whose
+/** Written by `rtk init -g --agent pi` (the rtk block's `post_install` hook): a `local` file whose
  *  switch is the rtk tool's, so a settings.json pattern would fight the tool. */
 const RTK_FILE = join("extensions", "rtk.ts");
 const RTK_STATE = "installed by the rtk tool";

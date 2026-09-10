@@ -269,7 +269,8 @@ browser keeps no second session order.
   - Console-only: no agent tool installs packages; one operation at a time
     (`busy` names the source), 409 for a second.
   - `rtk` is a Tool: its switch installs the binary through the tools task,
-    whose `rtk init -g --agent pi` writes `<agentDir>/extensions/rtk.ts`. That
+    and the `post_install` hook in its ubix block (`rtk init -g --agent pi
+    --auto-patch`, run by ubix) writes `<agentDir>/extensions/rtk.ts`. That
     file is a `local` row like any other, `locked` with the state
     `installed by the rtk tool`, so the Console never writes a settings.json
     pattern the tool's next install or uninstall would fight.
