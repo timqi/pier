@@ -237,9 +237,10 @@ browser keeps no second session order.
 - **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
   was opened from): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to
-  `MAX_AUTO_EXPAND` folders), elsewhere every folder unfolds up to the same
-  bound. `?select=<relative path>` opens that file with its row marked and
-  the diff filter off; a path with no row leaves the viewer on "Select a file."
+  `MAX_AUTO_EXPAND` folders); elsewhere only the root's own folders unfold —
+  one level down may be `node_modules`. `?select=<relative path>` opens that
+  file with its ancestors unfolded, its row marked and the diff filter off; a
+  path with no row leaves the viewer on "Select a file."
   Without a repository (`GET /api/explorer/git` answers `branch: null`) the
   branch chip, the compare picker, the changed-only funnel and the diff
   stepper are all absent, the compare block says so, and an empty folder reads

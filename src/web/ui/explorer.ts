@@ -28,8 +28,7 @@ const STATUS_TONE: Record<string, string> = {
   A: "text-emerald-600", M: "text-amber-600", D: "text-red-600",
 };
 
-/** Auto-expanding the tree — to every change, or every folder of a plain
- *  directory — stops helping past a screenful. */
+/** Auto-expanding the tree to every change stops helping past a screenful. */
 const MAX_AUTO_EXPAND = 30;
 
 type Segment = { start: number; end: number; tone: "add" | "del" | "mixed" };
@@ -213,11 +212,10 @@ export function createExplorerView(
       expanded[el.open ? "add" : "delete"](path);
       if (el.open) load();
     };
-    // The changed-only filter is a flat list of changes — everything unfolds;
-    // a plain directory unfolds too, up to the bound.
-    const autoOpen = git.branch ? onlyChanged : expanded.size < MAX_AUTO_EXPAND;
+    // The changed-only filter is a flat list of changes — everything unfolds.
+    // A plain directory opens its first level only: one below may be node_modules.
+    const autoOpen = git.branch ? onlyChanged : !path.includes("/");
     if ((autoOpen && !collapsedAll) || expanded.has(path)) {
-      expanded.add(path);
       el.open = true;
       load();
     }
