@@ -927,6 +927,28 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     --tw-prose-quote-borders: var(--color-neutral-200);
     --tw-prose-td-borders: var(--color-neutral-200);
   }
+  /* Prose marks a link bold *and* underlined; beside CJK body text that reads
+     as two shouts. Keep the body's weight and ink, and let the underline be
+     the whole signal: a hairline at rest, full ink once it is being used. */
+  .md a {
+    font-weight: inherit;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+    text-decoration-color: color-mix(in oklab, currentColor 30%, transparent);
+    transition: text-decoration-color 120ms ease;
+  }
+  .md a:hover,
+  .md a:focus-visible {
+    text-decoration-color: currentColor;
+  }
+  /* A link inside a paragraph cannot grow to a 44px target without breaking the
+     line rhythm; the vertical padding is what a thumb gets instead. */
+  @media (pointer: coarse) {
+    .md a {
+      padding-block: 2px;
+    }
+  }
+
   .md p,
   .md ul,
   .md ol,
