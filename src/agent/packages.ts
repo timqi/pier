@@ -24,6 +24,7 @@ import {
 } from "../core/types.js";
 import { BUNDLED } from "../extensions/index.js";
 import { logger } from "../log.js";
+import type { SettingsStore } from "../settings.js";
 import { defaultAgentDir, type PiConfigStore } from "./config.js";
 import { shadowedBuiltin } from "./pi.js";
 
@@ -40,14 +41,10 @@ const FOLLOWS_TOOL = "follows Channels → agent tool";
 const RTK_FILE = join("extensions", "rtk.ts");
 const RTK_STATE = "installed by the rtk tool";
 
-/** The built-in `pier` package's switches: pier.db lists, none of it
- *  settings.json, so main.ts hands them in. */
+/** The built-in `pier` package: its switches are pier.db lists, none of it settings.json. */
 export interface PierPackage {
   version: string;
-  extensions(): string[];
-  setExtensions(names: string[]): void;
-  skillsOff(): string[];
-  setSkillsOff(names: string[]): void;
+  settings: Pick<SettingsStore, "get" | "setExtensions" | "setSkillsOff">;
   /** Whose skills stand down with them (pi.ts standDownUndocumented). */
   tools: AgentCustomTool[];
 }
@@ -172,11 +169,12 @@ export class PiPackageStore implements PackageStore {
 
   async #fillPier(pkg: Package): Promise<void> {
     pkg.version = this.pier.version;
-    const on = this.pier.extensions();
+    const { extensions: on, skillsOff: off } = this.pier.settings.get();
+    // Off is off: a stand-down recorded while it was on is not this switch's state.
     pkg.resources = BUNDLED.map(({ name }): PackageResource => ({
-      kind: "extension", name, path: `<inline:${name}>`, enabled: on.includes(name), state: shadowedBuiltin(name),
+      kind: "extension", name, path: `<inline:${name}>`, enabled: on.includes(name),
+      state: on.includes(name) ? shadowedBuiltin(name) : null,
     }));
-    const off = this.pier.skillsOff();
     const gone = new Set(this.pier.tools.filter((t) => t.skill && !(t.available?.() ?? true)).map((t) => t.skill));
     for (const dir of this.skillDirs) {
       for (const entry of (await fs.readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory())) {
@@ -284,8 +282,9 @@ export class PiPackageStore implements PackageStore {
     const { pkg, resource } = await this.#find(change);
     if (resource.locked) throw new PackageError("refused", `${resource.name} is ${resource.state} — its switch is under Tools`);
     if (pkg.kind === "pier") {
-      if (kind === "skill") this.pier.setSkillsOff(withName(this.pier.skillsOff(), resource.name, !enabled));
-      else this.pier.setExtensions(withName(this.pier.extensions(), resource.name, enabled));
+      const { extensions, skillsOff } = this.pier.settings.get();
+      if (kind === "skill") this.pier.settings.setSkillsOff(withName(skillsOff, resource.name, !enabled));
+      else this.pier.settings.setExtensions(withName(extensions, resource.name, enabled));
     } else {
       const key: ArrayKey = kind === "extension" ? "extensions" : "skills";
       await this.#write(async (manager, settings) => {

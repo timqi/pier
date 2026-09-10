@@ -3,15 +3,17 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PackageError, type AgentCustomTool, type Package } from "../core/types.js";
+import { openDb } from "../db.js";
+import { SettingsStore } from "../settings.js";
 import { PiConfigStore } from "./config.js";
-import { kindOf, PiPackageStore, pinnedRef, type PierPackage } from "./packages.js";
+import { kindOf, PiPackageStore, pinnedRef } from "./packages.js";
 
 let agentDir: string;
 let home: string;
 let skills: string;
 let pkgDir: string;
 let config: PiConfigStore;
-let pier: PierPackage & { on: string[]; off: string[]; tools: AgentCustomTool[] };
+let settings: SettingsStore;
 let store: PiPackageStore;
 const previousHome = process.env.HOME;
 
@@ -55,14 +57,9 @@ beforeEach(() => {
     name: "slack", label: "Slack", description: "", parameters: {}, execute: async () => null,
     skill: "pier-slack", available: () => false,
   };
-  pier = {
-    version: "0.1.2", on: ["web"], off: [], tools: [slack],
-    extensions() { return this.on; },
-    setExtensions(names) { this.on = names; },
-    skillsOff() { return this.off; },
-    setSkillsOff(names) { this.off = names; },
-  };
-  store = new PiPackageStore(config, pier, [skills], agentDir);
+  settings = new SettingsStore(openDb(":memory:"));
+  settings.setExtensions(["web"]);
+  store = new PiPackageStore(config, { version: "0.1.2", settings, tools: [slack] }, [skills], agentDir);
 });
 
 afterEach(() => {
@@ -141,12 +138,12 @@ describe("switches", () => {
   it("writes pier switches to the pier.db lists", async () => {
     const web = await store.setEnabled({ source: "pier", kind: "extension", path: "<inline:web>", enabled: false });
     expect(web.enabled).toBe(false);
-    expect(pier.on).toEqual([]);
+    expect(settings.get().extensions).toEqual([]);
     const help = await store.setEnabled({ source: "pier", kind: "skill", path: join(skills, "pier-help", "SKILL.md"), enabled: false });
     expect(help.enabled).toBe(false);
-    expect(pier.off).toEqual(["pier-help"]);
+    expect(settings.get().skillsOff).toEqual(["pier-help"]);
     await store.setEnabled({ source: "pier", kind: "skill", path: join(skills, "pier-help", "SKILL.md"), enabled: true });
-    expect(pier.off).toEqual([]);
+    expect(settings.get().skillsOff).toEqual([]);
     // Nothing of the above is settings.json's business.
     expect(settingsJson).toThrow();
   });

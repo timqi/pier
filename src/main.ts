@@ -165,16 +165,7 @@ const toolsUpdate = toolsTask(tasks);
 const reconciled = await toolsUpdate.reconcile();
 if ("problem" in reconciled) log.error(`tools cannot be managed: ${reconciled.problem}`);
 
-// The built-in `pier` package's switches live in pier.db; the registry gets
-// them as data, so agent/ stays blind to settings.ts.
-const packages = new PiPackageStore(piConfig, {
-  version: currentVersion(),
-  extensions: () => settings.get().extensions,
-  setExtensions: (names) => void settings.setExtensions(names),
-  skillsOff: () => settings.get().skillsOff,
-  setSkillsOff: (names) => void settings.setSkillsOff(names),
-  tools: agentTools,
-}, [skillsDir]);
+const packages = new PiPackageStore(piConfig, { version: currentVersion(), settings, tools: agentTools }, [skillsDir]);
 // At boot, not lazily: the answer waits for the next Console open (update.ts).
 packages.watchUpdates();
 
