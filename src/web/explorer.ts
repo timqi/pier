@@ -79,9 +79,11 @@ export function registerExplorerRoutes(app: Hono): void {
     const file = c.req.query("file");
     if (file === undefined) {
       // name-status carries the letter, numstat the +/- counts; joined by path.
+      // --relative: the root may be a directory inside the checkout (Browse
+      // files on a skill), and the tree reads every path from that root.
       const [nameStatus, numstat] = await Promise.all([
-        git(root, "diff", "--name-status", ...range, "--"),
-        git(root, "diff", "--numstat", ...range, "--"),
+        git(root, "diff", "--relative", "--name-status", ...range, "--"),
+        git(root, "diff", "--relative", "--numstat", ...range, "--"),
       ]);
       // numstat spells a rename "a/{old => new}.ts" — reduce it to the new path.
       const newPath = (p: string): string =>

@@ -84,6 +84,20 @@ describe("explorer routes", () => {
     expect(diff).toContain("+const x = 2;");
   });
 
+  // Browse files opens a skill's directory inside a checkout: the tree reads
+  // every path from that root, so the list must be relative to it and stop at it.
+  it("lists a subdirectory root's own changes, relative to it", async () => {
+    writeFileSync(join(root, "sub", "b.md"), "# bb\n");
+    const sub = join(root, "sub");
+    const inside = (await (await app.request(`/api/explorer/diff?${new URLSearchParams({ root: sub, base: "HEAD" })}`)).json()) as {
+      files: { status: string; path: string }[];
+    };
+    expect(inside.files.map((f) => f.path)).toEqual(["b.md"]);
+    const { diff } = (await (await app.request(`/api/explorer/diff?${new URLSearchParams({ root: sub, base: "HEAD", file: "b.md" })}`)).json()) as { diff: string };
+    expect(diff).toContain("+# bb");
+    git("checkout", "--", "sub/b.md");
+  });
+
   it("widens diff context on request — the whole-file inline view", async () => {
     writeFileSync(join(root, "long.txt"), "a\nb\nc\nd\ne\nf\ng\nh\n");
     git("add", "long.txt");
