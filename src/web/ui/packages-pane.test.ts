@@ -45,7 +45,7 @@ vi.mock("./dom.js", () => ({
   consoleView: (_root: Element, load: () => void) => ({ visible: false, show() { load(); }, hide() {} }),
 }));
 vi.mock("./form.js", () => ({
-  CONTROL: "", PANEL: "", PANEL_HEAD: "",
+  CONTROL: "", PANEL: "", PANEL_HEAD: "", PANE: "", BAND: "",
   badge: (text: string) => make("span", "badge", text),
   btn: (label: string, cls = "") => make("button", cls, label),
   empty: (text: string) => make("p", "empty", text),

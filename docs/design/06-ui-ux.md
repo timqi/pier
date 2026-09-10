@@ -77,6 +77,12 @@ updates this document.
   0.9375rem body at 1.5, 1.125rem titles, 0.8125rem supporting text; 26rem
   desktop width; relative times beside timestamps when space allows; paths and
   IDs 0.875rem monospace, wrapping.
+- **Two-pane Console views** (Agent, Files): panes are the panel surface
+  clipped to its own radius, inset on the canvas under the page head, each
+  with a title band and its own scroller. Below md they stack — nav or tree
+  first at half the height — and every row, control and download in them is a
+  44px target; a head with no tab row keeps its chips and close on one line,
+  and a path too long for a phone wears its last segment instead.
 - **Model picker**: fills its panel; long titles truncate in a bounded width.
   Reasoning effort: inline disclosure with styled native radios, visible
   selection and focus, no nested overlay.

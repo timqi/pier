@@ -69,6 +69,13 @@ export const PANEL = "rounded-3xl border border-neutral-200 bg-white shadow-sm";
  * name over Agent's pane. Padding and corners stay at the call site. */
 export const PANEL_HEAD = "border-b border-neutral-200/70 bg-neutral-50/50";
 
+/** A side-by-side pane — Agent's nav and file pane, Files' tree and viewer.
+ * The panel surface clipped to its own radius, because the pane scrolls
+ * inside it. */
+export const PANE = `${PANEL} flex flex-col overflow-hidden`;
+/** A pane's title band: the scope picker, the file name, the compare block. */
+export const BAND = `${PANEL_HEAD} flex flex-none items-center`;
+
 /** A titled panel. The subtitle carries the "why", so fields need fewer words. */
 // No overflow-hidden: help bubbles escape their card, so the header rounds its
 // own top corners instead of being clipped into shape by the section.

@@ -399,6 +399,10 @@ main {
   #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-palette),
   #console-section :is(summary, li button), .config-row { min-height: 44px; }
   #sidebar :is(.session-more, .icon-btn, #open-palette) { min-width: 44px; }
+  /* Files' tree rows and controls are on the same thumb as the rail's. The
+     heat-map marks are sized from the diff, so the floor may not reach them. */
+  #files-view :is(summary, button:not(.map-mark), a.btn) { min-height: 44px; }
+  #files-view .icon-btn { min-width: 44px; }
   /* The dock's cards are on the same thumb: the queue's whole-queue actions and
      the recovery card's buttons. Their header row is a fixed cursor height, so
      it gives that up rather than clipping what now stands in it. */
@@ -407,7 +411,8 @@ main {
   #queue-panel > div:first-child { height: auto; }
 }
 /* One selection vocabulary: the rail's rows, the Console's, and the palette's. */
-#console-section button.bg-indigo-50, #session-list li.bg-indigo-50, .palette-row.bg-indigo-50 {
+#console-section button.bg-indigo-50, #session-list li.bg-indigo-50, .palette-row.bg-indigo-50,
+#files-view button.bg-indigo-50 {
   color: var(--color-indigo-700);
   font-weight: 500;
   background-color: var(--color-indigo-100);
@@ -644,7 +649,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 /* Native disclosure state stays authoritative, including keyboard activation.
    Engines without details-content/interpolate-size retain instant expansion. */
-#turns details::details-content {
+:is(#turns, #files-view) details::details-content {
   interpolate-size: allow-keywords;
   block-size: 0;
   opacity: 0;
@@ -652,7 +657,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   transition: block-size 180ms var(--ease-surface), opacity 180ms,
     content-visibility 180ms allow-discrete;
 }
-#turns details[open]::details-content { block-size: auto; opacity: 1; }
+:is(#turns, #files-view) details[open]::details-content { block-size: auto; opacity: 1; }
 :is(.btn, .icon-btn, #composer button) {
   transition: background-color 180ms, box-shadow 180ms, transform 180ms var(--ease-surface);
 }
@@ -720,7 +725,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
   #sidebar { transition: none; }
   #drawer-scrim { transition-duration: 120ms; }
-  #turns details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
+  :is(#turns, #files-view) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
   :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: none; }
 }
 

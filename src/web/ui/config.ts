@@ -9,17 +9,11 @@ import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, btn, CONTROL, empty, field, PANEL, PANEL_HEAD, setStatus, textInput, toggle } from "./form.js";
+import { badge, BAND, btn, CONTROL, empty, field, PANE, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { icon } from "./icons.js";
 import { configSyncPane } from "./config-sync.js";
 import { createRegistry, packageLabel, type RegistrySelection } from "./packages-pane.js";
-
-/** Agent's two panes: the shared panel surface, clipped to its own radius
- *  because each pane scrolls inside it. */
-const PANE = `${PANEL} flex flex-col overflow-hidden`;
-/** Their title bands — the nav's scope picker, the pane's file name. */
-const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 
 interface ConfigIndex {
   dir: string;

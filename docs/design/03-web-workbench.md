@@ -240,6 +240,10 @@ browser keeps no second session order.
   `MAX_AUTO_EXPAND` folders), elsewhere every folder unfolds up to the same
   bound. `?select=<relative path>` opens that file with its row marked and
   the diff filter off; a path with no row leaves the viewer on "Select a file."
+  Without a repository (`GET /api/explorer/git` answers `branch: null`) the
+  branch chip, the compare picker, the changed-only funnel and the diff
+  stepper are all absent, the compare block says so, and an empty folder reads
+  "Empty." rather than "No changes." — the filter is not in force.
 
   The Agent nav, drawn from one `GET /api/packages` answer. The management
   unit is the **package** (a source); its resources are the extensions and

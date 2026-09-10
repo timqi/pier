@@ -7,6 +7,7 @@ import { mustGetJson } from "./api.js";
 import { codePane, fileRows, type CodeRow } from "./code.js";
 import { openPathMenu } from "./dir-picker.js";
 import { basename, consoleView, detailsRow, h, type ConsoleView } from "./dom.js";
+import { BAND, btn, CONTROL, empty, PANE, pageTitle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { commitHint, hoverHint, openDiffPicker, type Commit } from "./ref-picker.js";
 import { letterKey } from "./shortcut.js";
@@ -67,20 +68,19 @@ const writePrefs = (sessionId: string, p: Prefs): void => {
   }
 };
 
-/** The compare panel's control skin — a chip, like the header's model chip. */
-const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonElement => {
-  const el = h(
-    "button",
-    `min-w-0 cursor-pointer truncate rounded-md px-2 py-0.5 text-left font-mono text-[11.5px] ${
+/** The head's chips — folder and branch — in the meta-chip vocabulary the chat
+ *  heading's model chip already wears. */
+const CHIP = "flex min-w-0 flex-none items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11.5px]";
+
+const chip = (label: string, tone: "indigo" | "neutral" = "indigo"): HTMLButtonElement =>
+  btn(
+    label,
+    `${CHIP} cursor-pointer truncate text-left ${
       tone === "indigo"
         ? "bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-100"
         : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
     }`,
-    label,
-  ) as HTMLButtonElement;
-  el.type = "button";
-  return el;
-};
+  );
 
 export function createExplorerView(
   root: HTMLElement,
@@ -108,19 +108,26 @@ export function createExplorerView(
    *  there leaves the viewer on "Select a file." */
   let pendingSelect: string | null = null;
 
-  const header = h("header", "pagehead");
-  const compare = h("div", "flex-none border-b border-neutral-200");
-  const tree = h("div", "min-h-0 flex-1 overflow-y-auto py-1");
-  const left = h("aside", "flex w-64 flex-none flex-col border-r border-neutral-200 text-[12.5px] max-md:h-2/5 max-md:w-full max-md:border-b max-md:border-r-0", compare, tree);
-  // The viewer scrolls; `right` stays put so the minimap can pin to its edge.
+  // flex-nowrap: two chips and a ✕ is one line at every width, and the head's
+  // wrap exists for a tab row this view does not have.
+  const header = h("header", "pagehead flex-nowrap");
+  const compare = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
+  const tree = h("div", "min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5");
+  const left = h("aside", `${PANE} w-64 flex-none text-[12.5px] leading-5 max-md:h-1/2 max-md:w-full`, compare, tree);
+  /** The viewer's own title band — outside the scroller, so a path over code
+   *  needs no sticky layer and the pane's material stays one surface. */
+  const bar = h("div", `${BAND} flex-wrap gap-2 px-4 py-2.5 font-mono text-[11.5px] text-neutral-500`);
   const viewer = h("div", "h-full min-w-0 overflow-auto");
   // pointer-events: only the marks catch clicks — the strip sits over the
   // viewer's scrollbar, which must stay draggable through it.
-  const minimap = h("div", "pointer-events-none absolute inset-y-0 right-0 z-20 hidden w-2");
+  const minimap = h("div", "pointer-events-none absolute inset-y-1 right-0.5 z-20 hidden w-2");
+  // The scroller and the strip share one box, so a mark's proportional top is
+  // the viewer's own and never the band's.
+  const stage = h("div", "relative min-h-0 flex-1", viewer, minimap);
   // min-h-0: stacked below md the pane is a column item, whose auto minimum
   // is its content — without this it grows past the view and nothing scrolls.
-  const right = h("section", "relative min-h-0 min-w-0 flex-1", viewer, minimap);
-  root.append(header, h("div", "flex min-h-0 flex-1 max-md:flex-col", left, right));
+  const right = h("section", `${PANE} min-h-0 min-w-0 flex-1`, bar, stage);
+  root.append(header, h("div", "flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1 max-md:flex-col", left, right));
 
   /** Two route families, one question: what git knows about this root
    *  (web/explorer.ts) and what is on disk under it (web/fs.ts). */
@@ -130,7 +137,15 @@ export function createExplorerView(
     `/api/fs/${ep}?${new URLSearchParams({ root: cwd, ...params })}`;
 
   const note = (text: string, tone = "text-neutral-400"): HTMLElement =>
-    h("p", `px-4 py-3 text-[12.5px] ${tone}`, text);
+    h("p", `px-3 py-2 text-[12.5px] ${tone}`, text);
+
+  /** A whole pane's worth of nothing — the Console's placeholder, centred. */
+  const placeholder = (text: string): HTMLElement =>
+    h("div", "flex h-full items-center justify-center p-6", empty(text));
+
+  /** The changed-only filter is a git question; without a repo it is not in
+   *  force, so nothing may be described as hidden by it. */
+  const filtering = (): boolean => onlyChanged && git.branch !== null;
 
   // --- tree ---------------------------------------------------------------------------
 
@@ -154,7 +169,7 @@ export function createExplorerView(
     let list = entries;
     // No repo → nothing could pass the filter, so it must not apply (the
     // funnel toggle only renders for git projects).
-    if (onlyChanged && git.branch) {
+    if (filtering()) {
       list = entries.filter((e) =>
         e.dir ? changesUnder(`${prefix}${e.name}`) > 0 : changes.has(`${prefix}${e.name}`),
       );
@@ -170,7 +185,7 @@ export function createExplorerView(
         "could not list this folder",
       );
       box.replaceChildren(...rowsFor(path, entries));
-      if (!box.childElementCount) box.append(note(onlyChanged ? "No changes." : "Empty."));
+      if (!box.childElementCount) box.append(note(filtering() ? "No changes." : "Empty."));
     } catch (err) {
       // A directory deleted in the working tree still has diffable children.
       const phantoms = rowsFor(path, []);
@@ -182,9 +197,9 @@ export function createExplorerView(
   function dirNode(path: string, name: string): HTMLElement {
     const n = changesUnder(path);
     const label = [h("span", "truncate", name)];
-    if (n) label.push(h("span", "ml-auto flex-none rounded bg-amber-100/80 px-1 font-mono text-[10px] text-amber-700", String(n)));
+    if (n) label.push(h("span", "ml-auto flex-none rounded-full bg-amber-100/80 px-1.5 font-mono text-[10px] font-semibold text-amber-700", String(n)));
     const { el, summary } = detailsRow("", label);
-    summary.className += " px-2 py-0.5 hover:bg-neutral-100";
+    summary.className += " rounded-lg px-2 py-1 transition-colors hover:bg-neutral-100";
     const children = h("div", "pl-3");
     el.append(children);
     let loaded = false;
@@ -209,15 +224,16 @@ export function createExplorerView(
     return el;
   }
 
+  /** The rail's, the palette's and Agent's nav all say "selected" this way. */
   function markSelected(row: HTMLElement): void {
-    selectedRow?.classList.remove("bg-indigo-50", "text-indigo-700");
+    selectedRow?.classList.remove("bg-indigo-50", "font-medium", "text-indigo-700");
     selectedRow = row;
-    row.classList.add("bg-indigo-50", "text-indigo-700");
+    row.classList.add("bg-indigo-50", "font-medium", "text-indigo-700");
   }
 
   function fileRow(path: string, name: string): HTMLElement {
     const status = changes.get(path)?.status;
-    const row = h("button", "flex w-full cursor-pointer items-center gap-1.5 px-2 py-0.5 pl-6 text-left hover:bg-neutral-100", h("span", "truncate", name));
+    const row = h("button", "flex w-full cursor-pointer items-center gap-1.5 rounded-lg py-1 pl-6 pr-2 text-left transition-colors hover:bg-neutral-100", h("span", "truncate", name));
     if (status) row.append(h("span", `ml-auto flex-none font-mono text-[10.5px] font-semibold ${STATUS_TONE[status] ?? "text-neutral-500"}`, status));
     row.title = path;
     if (path === selectedPath) markSelected(row);
@@ -245,26 +261,31 @@ export function createExplorerView(
     ...(del ? [h("span", "flex-none font-mono text-[10.5px] font-semibold text-red-600", `−${del}`)] : []),
   ];
 
-  function viewerTitle(path: string, download: boolean, extra?: HTMLElement): HTMLElement {
+  /** The band over the viewer: which file, what changed in it, what may be
+   *  done with it. Empty when nothing is open. */
+  function setTitle(path?: string, download = false, extra?: HTMLElement): void {
+    // An empty band is a rule drawn for nothing; both classes, because `hidden`
+    // and `flex` are one property and neither reliably outranks the other.
+    bar.classList.toggle("hidden", !path);
+    bar.classList.toggle("flex", !!path);
+    if (!path) return bar.replaceChildren();
     const change = changes.get(path);
-    const title = h("div", "sticky top-0 z-10 flex items-center gap-2 border-b border-neutral-200 bg-white px-4 py-1.5 font-mono text-[11.5px] text-neutral-500",
-      h("span", "truncate", path));
+    const parts: HTMLElement[] = [h("span", "min-w-0 truncate", path)];
     if (change) {
-      title.append(h("span", `flex-none font-semibold ${STATUS_TONE[change.status] ?? ""}`, change.status));
-      title.append(...countChips(change.add, change.del));
+      parts.push(h("span", `flex-none font-semibold ${STATUS_TONE[change.status] ?? ""}`, change.status));
+      parts.push(...countChips(change.add, change.del));
     }
     const tail = h("div", "ml-auto flex flex-none items-center gap-2");
     if (extra) tail.append(extra);
     if (download) {
       const dl = document.createElement("a");
-      dl.className = "flex-none text-neutral-400 hover:text-indigo-700 hover:underline";
+      dl.className = "btn flex-none text-[12px]";
       dl.href = fsApi("file", { path });
       dl.download = basename(path);
       dl.textContent = "Download";
       tail.append(dl);
     }
-    title.append(tail);
-    return title;
+    bar.replaceChildren(...parts, tail);
   }
 
   /** No common edge means the line was rewritten, which the row tone already says. */
@@ -321,7 +342,8 @@ export function createExplorerView(
     const url = fsApi("file", { path });
     const body = h("div", "min-w-0");
     viewer.classList.remove("flex", "flex-col");
-    viewer.replaceChildren(viewerTitle(path, true), body);
+    setTitle(path, true);
+    viewer.replaceChildren(body);
     if (IMG_EXT.test(path)) {
       const img = h("img", "max-w-full p-4") as HTMLImageElement;
       img.src = url;
@@ -332,7 +354,7 @@ export function createExplorerView(
       const frame = document.createElement("iframe");
       frame.className = "h-full w-full";
       frame.src = url;
-      viewer.replaceChildren(viewerTitle(path, true), frame);
+      viewer.replaceChildren(frame);
       viewer.classList.add("flex", "flex-col");
       return;
     }
@@ -402,7 +424,9 @@ export function createExplorerView(
   /** The heatmap strip: every change site as a proportional, clickable mark. */
   function renderMinimap(segs: Segment[], total: number, rowEls: HTMLElement[]): void {
     minimap.replaceChildren(...segs.map((s) => {
-      const mark = h("button", `pointer-events-auto absolute w-full cursor-pointer ${SEG_TONE[s.tone]}`);
+      // map-mark: the height is the diff's, so the phone's 44px floor (style.css)
+      // must not reach it.
+      const mark = h("button", `map-mark pointer-events-auto absolute left-1/2 w-1 -translate-x-1/2 cursor-pointer rounded-full ${SEG_TONE[s.tone]}`);
       mark.style.top = `${(s.start / total) * 100}%`;
       mark.style.height = `${Math.max(0.4, ((s.end - s.start + 1) / total) * 100)}%`;
       mark.title = `line ${rowsLabel(rowEls, s.start)}`;
@@ -457,7 +481,8 @@ export function createExplorerView(
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
     const canDownload = changes.get(path)?.status !== "D";
-    viewer.replaceChildren(viewerTitle(path, canDownload), note("…"));
+    setTitle(path, canDownload);
+    viewer.replaceChildren(note("…"));
     try {
       const { diff } = await mustGetJson<{ diff: string }>(
         api("diff", { base, head, file: path, context: "99999" }),
@@ -473,10 +498,13 @@ export function createExplorerView(
       const rowEls = [...pane.children] as HTMLElement[];
       const segs = segmentsOf(rows);
       diffNav.set(segs, rowEls);
-      viewer.replaceChildren(viewerTitle(path, canDownload, diffNav.el), pane);
+      setTitle(path, canDownload, diffNav.el);
+      viewer.replaceChildren(pane);
       renderMinimap(segs, rows.length, rowEls);
     } catch (err) {
-      if (current(seq)) viewer.replaceChildren(viewerTitle(path, false), note(String(err), "text-red-600"));
+      if (!current(seq)) return;
+      setTitle(path);
+      viewer.replaceChildren(note(String(err), "text-red-600"));
     }
   }
 
@@ -495,9 +523,7 @@ export function createExplorerView(
       : `${base} ↔ ${head || "working tree"}`;
 
   const iconToggle = (glyph: IconNode, hint: string, active: boolean, onClick: () => void): HTMLElement => {
-    const el = h("button", `flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-md ${
-      active ? "bg-indigo-50 text-indigo-700" : "text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
-    }`);
+    const el = h("button", `icon-btn ${active ? "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-700" : ""}`);
     el.append(icon(glyph));
     el.title = hint;
     el.setAttribute("aria-label", hint);
@@ -523,12 +549,15 @@ export function createExplorerView(
       renderCompare();
       renderTree();
     });
-    // No repo → no diff to pick, but folding the tree still applies.
+    // No repo → no diff to pick, but folding the tree still applies. The
+    // absence is named here rather than left as an empty strip (§5).
     if (!git.branch) {
-      compare.replaceChildren(h("div", "flex items-center justify-end gap-1 p-1.5", fold));
+      compare.replaceChildren(h("div", "flex items-center gap-1.5",
+        h("span", "min-w-0 flex-1 text-[11px] leading-snug text-neutral-400", "Not a git repository — nothing to compare."),
+        fold));
       return;
     }
-    const picker = chip(diffLabel());
+    const picker = btn(diffLabel(), `${CONTROL} cursor-pointer truncate text-left font-mono`);
     if (pickedCommit()) {
       const c = git.commits.find((x) => x.hash === pickedCommit());
       hoverHint(picker, () => (c ? commitHint(c) : ""));
@@ -554,14 +583,14 @@ export function createExplorerView(
       adds += c.add;
       dels += c.del;
     }
-    compare.replaceChildren(h("div", "flex flex-col gap-1 p-2",
+    compare.replaceChildren(
       picker,
-      h("div", "flex items-center gap-1.5 pl-1",
+      h("div", "flex items-center gap-1.5 pl-0.5",
         h("span", "text-[11px] text-neutral-400", `${changes.size} changed file${changes.size === 1 ? "" : "s"}`),
         ...countChips(adds, dels),
         h("span", "ml-auto"),
         funnel,
-        fold)));
+        fold));
   }
 
   /** Written on every change, not on close: the view is an overlay and its ✕
@@ -612,9 +641,15 @@ export function createExplorerView(
   // --- header + orchestration ----------------------------------------------------------
 
   function renderHeader(): void {
-    const cwdChip = chip(cwd || "Choose a folder…", "neutral");
+    // A phone has no room for the path and no tooltip to recover it, so the
+    // chip wears the folder's name there and the whole path above md.
+    const cwdChip = chip("", "neutral");
     cwdChip.className += " max-w-72";
-    cwdChip.title = "Switch folder";
+    cwdChip.append(
+      h("span", "truncate max-md:hidden", cwd || "Choose a folder…"),
+      h("span", "truncate md:hidden", cwd ? basename(cwd) : "Choose a folder…"),
+    );
+    cwdChip.title = cwd ? `${cwd} — switch folder` : "Choose a folder";
     // Every checkout of this repository, and nothing else; other directories
     // are one "Browse…" away.
     cwdChip.onclick = () =>
@@ -624,17 +659,17 @@ export function createExplorerView(
         cwd || undefined,
         openDir, // hash first; show() reloads
       );
-    const closeBtn = h("button", "icon-btn", icon(X)) as HTMLButtonElement;
+    const closeBtn = h("button", "icon-btn ml-auto", icon(X)) as HTMLButtonElement;
     closeBtn.type = "button";
     closeBtn.title = "Close Files";
     closeBtn.setAttribute("aria-label", "Close Files");
     closeBtn.onclick = close;
-    closeBtn.classList.add("ml-auto");
-    header.replaceChildren(
-      cwdChip,
-      h("span", "flex min-w-0 items-center gap-1 truncate font-mono text-[11.5px] text-neutral-400", ...(git.branch ? [icon(GitBranch), h("span", "truncate", git.branch)] : ["no git"])),
-      closeBtn,
-    );
+    // No branch chip without a repo: the compare block names that absence, and
+    // a head saying it too is one level of hierarchy saying it twice.
+    const branch = git.branch
+      ? [h("span", `${CHIP} bg-neutral-100 text-neutral-600`, icon(GitBranch), h("span", "truncate", git.branch))]
+      : [];
+    header.replaceChildren(pageTitle("Files"), cwdChip, ...branch, closeBtn);
   }
 
   /** A commit made in a terminal is invisible here and nothing pushes it. */
@@ -644,7 +679,7 @@ export function createExplorerView(
       git = await mustGetJson<GitInfo>(api("git", {}), "could not read this repository");
       renderHeader(); // the branch may have moved too
     } catch (err) {
-      viewer.replaceChildren(note(String(err), "text-red-600"));
+      viewer.replaceChildren(placeholder(String(err)));
     }
   }
 
@@ -667,18 +702,19 @@ export function createExplorerView(
     }
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
-    viewer.replaceChildren(note("Select a file."));
+    setTitle();
+    viewer.replaceChildren(placeholder("Select a file."));
     if (!cwd) {
       compare.replaceChildren();
       tree.replaceChildren();
-      viewer.replaceChildren(note("No folder yet — pick one from the chip above."));
+      viewer.replaceChildren(placeholder("No folder yet — pick one from the chip above."));
       return;
     }
     try {
       git = await mustGetJson<GitInfo>(api("git", {}), "could not read this repository");
     } catch (err) {
       git = { branch: null, refs: [], commits: [], worktrees: [] };
-      viewer.replaceChildren(note(String(err), "text-red-600"));
+      viewer.replaceChildren(placeholder(String(err)));
     }
     // The diff this session last chose here, when it still resolves.
     const saved = readPrefs(sessionKey);
@@ -713,6 +749,7 @@ export function createExplorerView(
     // Re-entering re-renders anyway.
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
-    viewer.replaceChildren(note("Select a file."));
+    setTitle();
+    viewer.replaceChildren(placeholder("Select a file."));
   });
 }
