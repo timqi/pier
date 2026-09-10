@@ -164,8 +164,10 @@ export const showRuns = (filters: Record<string, string> = {}, id?: string): voi
 export const showRun = (id: string): void => showRuns({}, id);
 
 /** Entry for the ⋯ menus (session header, project row): browse a cwd — or
- *  none, which reopens where the current session left off. */
-export const showFiles = (dir?: string): void => showConsole("files", dir);
+ *  none, which reopens where the current session left off. `select` names a
+ *  file under it to open (Settings → Agent's Browse files). */
+export const showFiles = (dir?: string, select?: string): void =>
+  showConsole("files", dir, select ? new URLSearchParams({ select }).toString() : undefined);
 
 /** The chord's version: one key both opens the overlay and, pressed again, is
  *  its ✕. A menu row keeps opening — it names a directory, so it always does. */
@@ -302,6 +304,7 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
       // Through the router, not a local re-render: the hash is the one
       // copy of "where am I", and Back should walk tabs too.
       (t) => showConsole("settings", t),
+      showFiles,
     ),
 };
 

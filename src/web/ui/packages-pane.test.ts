@@ -86,6 +86,8 @@ const demo: Package = {
 let registry: PackageRegistry;
 let root: Element;
 let fetcher: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
+/** What Browse files handed the router: `#/files/<dir>?select=<file>` in parts. */
+let browsed: [string, string | undefined][];
 /** The next POST /api/packages answers this; a promise parks it. */
 let install: () => Promise<Response>;
 const settled = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
@@ -125,7 +127,8 @@ beforeEach(async () => {
     throw new Error(`Unexpected request: ${url}`);
   });
   vi.stubGlobal("fetch", fetcher);
-  createConfigView(root as unknown as HTMLElement, () => []).show();
+  browsed = [];
+  createConfigView(root as unknown as HTMLElement, () => [], (dir, select) => browsed.push([dir, select])).show();
   await settled();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -201,6 +204,33 @@ describe("Settings → Agent", () => {
       expect.anything(),
     );
     expect(walk(root).find((el) => el.tag === "pre")?.textContent).toBe("# help");
+  });
+
+  it("Browse files opens the Files view on a skill's directory, an extension's, or the package's install path", async () => {
+    row("pier-help")!.onclick!();
+    await settled();
+    button("Browse files")!.onclick!();
+    chevron("demo").onclick!();
+    row("hello")!.onclick!();
+    await settled();
+    button("Browse files")!.onclick!();
+    row("demo")!.onclick!();
+    await settled();
+    button("Browse files")!.onclick!();
+    expect(browsed).toEqual([
+      ["/pier/skills/pier-help", "SKILL.md"],
+      ["/pi/packages/npm/demo/extensions", "hello.ts"],
+      ["/pi/packages/npm/demo", undefined],
+    ]);
+  });
+
+  it("offers no Browse files where there is no directory: the pier package, a bundled extension", async () => {
+    row("pier")!.onclick!();
+    await settled();
+    expect(button("Browse files")).toBeUndefined();
+    row("web")!.onclick!();
+    await settled();
+    expect(button("Browse files")).toBeUndefined();
   });
 
   it("installs: the row appears before the answer, then the list is the server's", async () => {

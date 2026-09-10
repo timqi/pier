@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => {
     return el;
   };
   const view = () => ({ show: vi.fn(), hide: vi.fn(), create: vi.fn(), refresh: vi.fn(), visible: true });
-  return { element, elements, tasks: view(), runs: view(), activity: view(), bar: vi.fn(), pill: vi.fn() };
+  return { element, elements, tasks: view(), runs: view(), activity: view(), files: view(), bar: vi.fn(), pill: vi.fn() };
 });
 vi.mock("./dom.js", () => ({ $: mocks.element, h: vi.fn(), consoleView: vi.fn() }));
 vi.mock("./form.js", () => ({ pill: mocks.pill, button: mocks.element, pageTitle: mocks.element }));
@@ -22,6 +22,7 @@ vi.mock("./tasks.js", () => ({ createTasksView: () => mocks.tasks }));
 vi.mock("./runs.js", () => ({ createRunsView: () => mocks.runs }));
 vi.mock("./activity.js", () => ({ createActivityView: () => mocks.activity }));
 vi.mock("./boards.js", () => ({ createBoardsView: () => mocks.activity }));
+vi.mock("./explorer.js", () => ({ createExplorerView: () => mocks.files }));
 const settled = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 let views: typeof import("./views.js");
 beforeEach(async () => {
@@ -69,6 +70,13 @@ it("round-trips run deep links with standard query filters and Back", async () =
   location.hash = "#/runs?taskId=task-a"; views.applyRoute(); await settled();
   expect(mocks.runs.show).toHaveBeenLastCalledWith(undefined, "taskId=task-a");
   views.showRun("child"); await settled(); expect(location.hash).toBe("#/runs/child");
+});
+it("routes Browse files as a folder plus the file to select, and hands both to the view", async () => {
+  views.showFiles("/pi/skills/a b", "SKILL.md"); await settled();
+  expect(location.hash).toBe("#/files/%2Fpi%2Fskills%2Fa%20b?select=SKILL.md");
+  expect(mocks.files.show).toHaveBeenLastCalledWith("/pi/skills/a b", "select=SKILL.md");
+  views.showFiles("/pi"); await settled();
+  expect(location.hash).toBe("#/files/%2Fpi");
 });
 it("places creation in the Tasks tab strip only on the list route", async () => {
   views.showConsole("tasks"); await settled();

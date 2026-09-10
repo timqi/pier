@@ -24,6 +24,8 @@ export interface RegistryDeps {
   cwd(): string | undefined;
   /** The nav redraws itself from `registry` after every write. */
   changed(): void;
+  /** Browse files: the Files overlay on `dir`, with `select` (relative) opened. */
+  browse(dir: string, select?: string): void;
   /** Highlights a row; null clears. Never opens a pane — the caller does. */
   select(sel: RegistrySelection | null): void;
 }
@@ -52,6 +54,8 @@ const kindOf = (source: string): Package["kind"] =>
   source.startsWith("npm:") ? "npm" : /^(git:|\w+:\/\/)/.test(source) ? "git" : "path";
 
 const isBuiltIn = (pkg: Package): boolean => pkg.kind === "pier" || pkg.kind === "local";
+
+const dirOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || "/";
 
 export function createRegistry(deps: RegistryDeps) {
   let registry: PackageRegistry | null = null;
@@ -109,6 +113,11 @@ export function createRegistry(deps: RegistryDeps) {
     h("dt", "text-[12px] text-neutral-500", term),
     h("dd", `text-[12px] leading-snug text-neutral-700 ${mono ? "font-mono break-all" : ""}`, value),
   ];
+  const browseBtn = (dir: string, select?: string): HTMLElement => {
+    const el = btn("Browse files", "btn text-[12px]");
+    el.onclick = () => deps.browse(dir, select);
+    return el;
+  };
   /** A locked switch is drawn as it stands, and `state` says whose it is. */
   const switchFor = (pkg: Package, r: PackageResource, label: string, hint: string, after: (outcome: Outcome) => void): HTMLElement => {
     const box = toggle(label, hint, r.enabled, (checked) => void flip(pkg, r, checked).then(after));
@@ -150,7 +159,9 @@ export function createRegistry(deps: RegistryDeps) {
       ...fact("Kind", pkg.kind === "pier" ? "built in — ships with Pier" : pkg.kind === "local" ? "the agent directory's own files" : pkg.kind, false),
       ...(pkg.version ? fact("Version", pkg.version) : []),
       // `pier` has no directory; a configured source that has none yet is missing.
-      ...(pkg.installedPath !== null || !isBuiltIn(pkg) ? fact("Installed at", pkg.installedPath ?? "not installed", pkg.installedPath !== null) : []),
+      ...(pkg.installedPath !== null
+        ? fact("Installed at", h("span", "flex flex-wrap items-center gap-2", h("span", "font-mono break-all", pkg.installedPath), browseBtn(pkg.installedPath)), false)
+        : !isBuiltIn(pkg) ? fact("Installed at", "not installed", false) : []),
     ];
     const actions: HTMLElement[] = [];
     // A path package moves when its directory does: nothing to check or update.
@@ -251,12 +262,19 @@ export function createRegistry(deps: RegistryDeps) {
     const status = h("span", STATUS, "");
     if (note) setStatus(status, note.state, note.text);
     const content = h("div", "min-h-0 flex-1 overflow-auto");
+    // A skill is its directory (scripts beside SKILL.md); an extension its file's.
+    const onDisk = path.startsWith("/");
     deps.pane.replaceChildren(
       deps.paneBar(
         resource.name,
         badge(packageLabel(pkg.source), KIND_BADGE),
         badge(resource.kind, KIND_BADGE),
-        h("span", "ml-auto font-mono text-[11px] text-neutral-400 break-all", resource.path),
+        h(
+          "span",
+          "ml-auto flex flex-wrap items-center gap-2",
+          h("span", "font-mono text-[11px] text-neutral-400 break-all", resource.path),
+          ...(onDisk ? [browseBtn(dirOf(path), basename(path))] : []),
+        ),
       ),
       h(
         "div",
@@ -284,8 +302,7 @@ export function createRegistry(deps: RegistryDeps) {
   /** A resource file lives wherever its package does; /api/fs/file reads any
    *  absolute root, /api/config/* only the whitelisted agent files. */
   async function readFile(path: string): Promise<{ ok: true; value: string } | { ok: false; error: string }> {
-    const dir = path.slice(0, path.lastIndexOf("/")) || "/";
-    const url = `/api/fs/file?root=${encodeURIComponent(dir)}&path=${encodeURIComponent(basename(path))}`;
+    const url = `/api/fs/file?root=${encodeURIComponent(dirOf(path))}&path=${encodeURIComponent(basename(path))}`;
     let res: Response;
     try {
       res = await fetch(url, { cache: "no-store" });

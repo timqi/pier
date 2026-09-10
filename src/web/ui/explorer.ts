@@ -27,7 +27,8 @@ const STATUS_TONE: Record<string, string> = {
   A: "text-emerald-600", M: "text-amber-600", D: "text-red-600",
 };
 
-/** Auto-expanding the tree to every change stops helping past a screenful. */
+/** Auto-expanding the tree — to every change, or every folder of a plain
+ *  directory — stops helping past a screenful. */
 const MAX_AUTO_EXPAND = 30;
 
 type Segment = { start: number; end: number; tone: "add" | "del" | "mixed" };
@@ -103,6 +104,9 @@ export function createExplorerView(
   const expanded = new Set<string>();
   let selectedPath: string | null = null;
   let selectedRow: HTMLElement | null = null;
+  /** `?select=`: opened by the row that renders it, so a path that is not
+   *  there leaves the viewer on "Select a file." */
+  let pendingSelect: string | null = null;
 
   const header = h("header", "pagehead");
   const compare = h("div", "flex-none border-b border-neutral-200");
@@ -194,8 +198,11 @@ export function createExplorerView(
       expanded[el.open ? "add" : "delete"](path);
       if (el.open) load();
     };
-    // The changed-only filter is a flat list of changes — everything unfolds.
-    if ((onlyChanged && git.branch && !collapsedAll) || expanded.has(path)) {
+    // The changed-only filter is a flat list of changes — everything unfolds;
+    // a plain directory unfolds too, up to the bound.
+    const autoOpen = git.branch ? onlyChanged : expanded.size < MAX_AUTO_EXPAND;
+    if ((autoOpen && !collapsedAll) || expanded.has(path)) {
+      expanded.add(path);
       el.open = true;
       load();
     }
@@ -214,6 +221,12 @@ export function createExplorerView(
     if (status) row.append(h("span", `ml-auto flex-none font-mono text-[10.5px] font-semibold ${STATUS_TONE[status] ?? "text-neutral-500"}`, status));
     row.title = path;
     if (path === selectedPath) markSelected(row);
+    if (path === pendingSelect) {
+      pendingSelect = null;
+      selectedPath = path;
+      markSelected(row);
+      void view(path);
+    }
     row.onclick = () => {
       markSelected(row);
       selectedPath = path;
@@ -639,11 +652,19 @@ export function createExplorerView(
   const defaultBase = (): string =>
     git.refs.some((r) => r.name === "main") ? "main" : git.refs.some((r) => r.name === "master") ? "master" : "HEAD";
 
-  async function load(): Promise<void> {
+  async function load(select?: string): Promise<void> {
     renderHeader();
     selectedPath = null;
     selectedRow = null;
     expanded.clear();
+    pendingSelect = select || null;
+    if (select) {
+      // The named file must have a row: its folders open, and the diff filter
+      // (a git: package is a checkout) would hide an unchanged file.
+      onlyChanged = false;
+      const parts = select.split("/");
+      for (let i = 1; i < parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
+    }
     clearDiffChrome();
     viewer.classList.remove("flex", "flex-col");
     viewer.replaceChildren(note("Select a file."));
@@ -668,15 +689,16 @@ export function createExplorerView(
     await applyRefs();
   }
 
-  return consoleView(root, (arg) => {
+  return consoleView(root, (arg, query) => {
     const s = session();
     const id = s?.id ?? "";
+    const select = new URLSearchParams(query).get("select") ?? undefined;
     // No first-project fallback: landing in somebody else's repository is
     // worse than the empty chip that asks which folder you meant.
     const next = arg?.startsWith("/")
       ? arg
       : (id === sessionKey ? cwd : "") || readPrefs(id)?.cwd || s?.cwd || "";
-    if (next === cwd && id === sessionKey && tree.childElementCount) {
+    if (next === cwd && id === sessionKey && tree.childElementCount && (!select || select === selectedPath)) {
       // Back to the view: keep tree + selection, but re-read git and the diff —
       // both moved while it was away.
       renderHeader();
@@ -685,7 +707,7 @@ export function createExplorerView(
     }
     sessionKey = id;
     cwd = next;
-    void load();
+    void load(select);
   }, () => {
     // The largest DOM in the workbench; hiding the view only flips a class.
     // Re-entering re-renders anyway.

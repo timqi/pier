@@ -59,6 +59,8 @@ export function createSettingsView(
   getCwds: () => string[],
   /** Tab clicks route (#/settings/<topic>) so refresh and Back keep the tab. */
   onTopic: (topic: string) => void,
+  /** Agent → Packages' Browse files: the Files overlay on a package directory. */
+  openFiles: (dir: string, select: string) => void,
 ): ConsoleView {
   const stored = localStorage.getItem(TOPIC_KEY) ?? undefined;
   let topic: Topic = isTopic(stored) ? stored : "models";
@@ -286,7 +288,7 @@ export function createSettingsView(
   const channelsHost = h("section", "hidden min-h-0 flex-1 flex-col");
   const channelsChild = createChannelsView(channelsHost);
   const filesHost = h("section", "hidden min-h-0 flex-1 flex-col");
-  const filesChild = createConfigView(filesHost, getCwds);
+  const filesChild = createConfigView(filesHost, getCwds, openFiles);
 
   function loadInstance(): void {
     void (async () => {

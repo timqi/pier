@@ -105,7 +105,11 @@ export function removalStep(
   };
 }
 
-export function createConfigView(root: HTMLElement, getCwds: () => string[]): ConsoleView {
+export function createConfigView(
+  root: HTMLElement,
+  getCwds: () => string[],
+  openFiles: (dir: string, select: string) => void,
+): ConsoleView {
   let scope = "global";
   let selection: Selection | null = null;
   let loadRequest = 0;
@@ -175,6 +179,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     live: (ticket) => ticket === paneRequest,
     cwd: () => (scope === "global" ? undefined : scope),
     changed: () => renderNav(lastIndex),
+    browse: openFiles,
     select: (sel) => {
       selection = sel;
       // A resource picked from its package's pane is shown where it sits.
