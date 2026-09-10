@@ -1,6 +1,7 @@
-// Images and file attachments in a chat bubble: the lightbox, the thumbnail
-// strip, and agent attachments. A `file://` link is rewritten to the files route
-// before sanitizing (DOMPurify drops `file:` URLs), then upgraded to a thumbnail or card.
+// Opening a file from a chat bubble: the lightbox, the thumbnail strip, agent
+// attachments, and a code span that names one. A `file://` link is rewritten to
+// the files route before sanitizing (DOMPurify drops `file:` URLs), then
+// upgraded to a thumbnail or card.
 
 import { Download, Eye } from "lucide";
 import { icon } from "./icons.js";
@@ -204,8 +205,9 @@ const previewNote = (msg: string, tone = "text-neutral-500"): HTMLElement =>
 let previewSeq = 0;
 
 /** Text is whatever the server served the bytes as (it sniffs, web/fs.ts).
- *  An SVG is shown as its markup, never rendered. */
-async function preview(url: string, name: string): Promise<void> {
+ *  An SVG is shown as its markup, never rendered. `line` is the line a
+ *  reference named: tinted and scrolled to the middle of the pane. */
+async function preview(url: string, name: string, line?: number): Promise<void> {
   const seq = ++previewSeq;
   fileName.textContent = name;
   fileDownload.href = `${url}&download=1`;
@@ -228,7 +230,55 @@ async function preview(url: string, name: string): Promise<void> {
   const body = await res.text();
   const text = body.length > MAX_PREVIEW_BYTES ? `${body.slice(0, MAX_PREVIEW_BYTES)}\n…` : body;
   const lang = await langFor(name); // the first preview waits for hljs
-  show(codePane(fileRows(text), lang));
+  const pane = codePane(fileRows(text), lang);
+  show(pane);
+  if (line === undefined || seq !== previewSeq) return;
+  const row = pane.querySelector<HTMLElement>(`[data-line="${String(line)}"]`);
+  row?.classList.add("bg-indigo-100");
+  row?.scrollIntoView({ block: "center" });
+}
+
+/** Extensions that are a file even without a directory in front of them.
+ *  Everything else needs a `/`, so `res.text` stays a method call. */
+const REF_EXT = new Set([
+  "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "json", "md", "css", "html",
+  "py", "rs", "go", "rb", "java", "c", "h", "cpp", "hpp", "sh", "sql",
+  "yml", "yaml", "toml", "ini", "conf", "txt", "lock",
+]);
+
+/** `src/web/ui/chat.ts:481`, `chat.ts:481:12`, `/tmp/run.log` — path, and the
+ *  line if one was named. A column is parsed only to be dropped, and an
+ *  extension is required: `src/web/ui` is as likely a directory as a file. */
+export function parseFileRef(raw: string): { path: string; line?: number } | null {
+  const m = /^([^\s`"'()[\]{}<>]+?)(?::(\d+))?(?::\d+)?$/.exec(raw);
+  if (!m || raw.includes("://")) return null;
+  const path = m[1]!;
+  const ext = path.includes(".") ? extOf(path) : "";
+  if (!ext || (!REF_EXT.has(ext) && !path.includes("/"))) return null;
+  return { path, line: m[2] === undefined ? undefined : Number(m[2]) };
+}
+
+/** A code span naming a file opens the preview, at its line when it named one.
+ *  A relative path resolves against the session's cwd — the files route takes
+ *  absolute paths only — so without one it stays plain code. */
+export function renderFileRefs(root: HTMLElement, sessionId: string, cwd: string | null): void {
+  for (const el of root.querySelectorAll<HTMLElement>(":not(pre) > code")) {
+    const ref = parseFileRef(el.textContent?.trim() ?? "");
+    if (!ref || el.closest("a")) continue; // inside a link, the label is the link's
+    const path = ref.path.startsWith("/") ? ref.path : cwd ? `${cwd}/${ref.path}` : null;
+    if (!path) continue;
+    const open = (): void => void preview(fileUrl(sessionId, path), basename(path), ref.line);
+    el.classList.add("fileref");
+    el.tabIndex = 0;
+    el.setAttribute("role", "button");
+    el.title = ref.line === undefined ? path : `${path}:${String(ref.line)}`;
+    el.onclick = open;
+    el.onkeydown = (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      ev.preventDefault();
+      open();
+    };
+  }
 }
 
 function thumb(url: string, name: string): HTMLElement {

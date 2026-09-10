@@ -7,7 +7,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { isSilentReply, silentReason, splitReply, stableBlockEnd, streamBody } from "../../core/reply.js";
 import { failure, sendJson } from "./api.js";
-import { imageRow, inboundAttachment, renderAttachments, rewriteFileLinks } from "./attachments.js";
+import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewriteFileLinks } from "./attachments.js";
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
@@ -41,6 +41,8 @@ import type {
 /** Everything chat rendering needs from the orchestrator (main.ts). */
 export interface ChatDeps {
   sessionId: () => string | null;
+  /** Where a `src/x.ts:12` in a reply resolves from; null when unknown. */
+  sessionCwd: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
   showRun: (runId: string) => void;
@@ -496,6 +498,8 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   void highlightCode(node);
   addCodeCopy(node);
   renderAttachments(node);
+  const id = deps.sessionId();
+  if (id) renderFileRefs(node, id, deps.sessionCwd());
 }
 
 /** `offer`: next-step buttons only on the turn that just ended or the last

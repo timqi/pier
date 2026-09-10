@@ -1024,6 +1024,16 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .md :not(pre) > code::after {
     content: none;
   }
+  /* A code span that opens a file (ui/attachments.ts). At rest it is code like
+     any other — a paragraph of paths should still read as prose. */
+  .md code.fileref {
+    cursor: pointer;
+  }
+  .md code.fileref:hover {
+    background-color: var(--color-indigo-50);
+    text-decoration: underline dotted;
+    text-underline-offset: 0.18em;
+  }
 
   /* hljs tokens: muted and low-contrast on purpose — highlighting should guide
      the eye inside the block without competing with the prose around it. */

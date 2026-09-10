@@ -207,6 +207,11 @@ browser keeps no second session order.
   sent, optimistic and echoed text are identical. The strip is per session, in
   memory only. User bubbles strip markers and render them via
   `web/ui/attachments.ts`; images open in the lightbox.
+- **File references**: an inline code span that is a path with an extension —
+  `src/web/ui/chat.ts:481`, and a bare name only when the extension is a
+  file-ish one — opens the preview dialog, at the named line when it names one.
+  Relative paths resolve against the session's cwd; the files route takes
+  absolute paths only.
 - **Lightbox**: click magnifies about the point, second click fits; drag pans
   (mouse and finger); scrim, ✕, Esc close; ‹ › and ← / → page the gallery the
   image came from (transcript or strip, never across), hidden for one image.
