@@ -4,7 +4,7 @@
 
 import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { getJson, refused } from "./api.js";
+import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
 import { detailsRow, h, STREAM_PAINT_MS } from "./dom.js";
 import { MAX_STEP_OUTPUT } from "../../core/types.js";
@@ -14,8 +14,6 @@ import type { ActivityStep, BackgroundRun, ModelRef } from "../../core/types.js"
  *  importing it back is a runtime cycle. */
 export interface TurnsPane {
   el: HTMLElement;
-  /** Append a chat row; this module only ever needs the error kind. */
-  append: (kind: "error", text: string) => HTMLElement;
   scroll: (force?: boolean) => void;
   /** A whole snapshot is being replayed: no step may measure layout. */
   bulk: () => boolean;
@@ -152,12 +150,6 @@ const backgroundRows = new Map<string, HTMLElement>();
  *  reader who expanded it must not watch it snap shut when the run moves on. */
 const promptBodies = new WeakMap<HTMLElement, HTMLElement[]>();
 
-/** A control that fails silently is indistinguishable from a dropped connection. */
-async function post(url: string, fallback: string): Promise<void> {
-  const error = await refused(url, "POST", fallback);
-  if (error) turns.append("error", error);
-}
-
 export function renderBackgroundRun(run: BackgroundRun): void {
   // Rows leave the pane without telling us (rewind, trim); a card held here
   // after the pane let go is where the trimmed DOM survives.
@@ -173,7 +165,6 @@ export function renderBackgroundRun(run: BackgroundRun): void {
   const active = run.state === "queued" || run.state === "running";
   // The header's running chip finds its card by this mark (chat.ts).
   row.toggleAttribute("data-active", active);
-  const runUrl = `/api/task-runs/${run.runId}`;
   const seconds = Math.max(0, Math.round(((run.finishedAt ?? Date.now()) - (run.startedAt ?? run.queuedAt)) / 1000));
   const head = runHead({
     glyph: stateGlyph(run.state),
@@ -184,18 +175,8 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     runId: run.runId,
     sessionId: run.targetSessionId,
   });
-  // Stop is the only control: anything with a message in it is typed in this
-  // session, which delegated the run.
-  const controls = h("div", "flex flex-none items-center gap-2 text-[11px] font-semibold text-neutral-700");
-  if (active) {
-    const cancel = h("button", "hover:underline", "Stop");
-    // One click from the end of a running agent, so it asks first.
-    cancel.onclick = () => {
-      if (window.confirm(`Stop "${run.taskName}"?`)) void post(`${runUrl}/cancel`, "could not stop the run");
-    };
-    controls.append(cancel);
-  }
-  if (controls.childElementCount) head.append(controls);
+  // No control on the card: the run's page, one click away on its id, is where
+  // a run is stopped.
   // This card sits where the delegating turn sent the message, so it is the
   // message: the prompt, clamped to a glance like a delegation card's is.
   let body = promptBodies.get(row);

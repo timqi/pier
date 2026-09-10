@@ -59,7 +59,7 @@ export const turnsPane = $("#turns");
 export function initChat(d: ChatDeps): void {
   deps = d;
   // The pane is handed over rather than imported back: see TurnsPane there.
-  initTurnActivity(d, { el: turnsPane, append: appendTurn, scroll: scrollBottom, bulk: () => bulk });
+  initTurnActivity(d, { el: turnsPane, scroll: scrollBottom, bulk: () => bulk });
 }
 
 // --- scrolling -------------------------------------------------------------------
