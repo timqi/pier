@@ -277,6 +277,10 @@ export function renderFileRefs(root: HTMLElement, sessionId: string, cwd: string
     el.setAttribute("role", "button");
     el.title = ref.line === undefined ? path : `${path}:${String(ref.line)}`;
     el.onclick = open;
+    // A focus ring left on a pressed span reads as a blue box drawn around the
+    // prose, and the preview dialog hands focus back when it closes. Keyboard
+    // focus keeps its ring: it never arrives with a pointerup.
+    el.addEventListener("pointerup", () => el.blur());
     el.onkeydown = (ev) => {
       if (ev.key !== "Enter" && ev.key !== " ") return;
       ev.preventDefault();

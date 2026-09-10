@@ -140,6 +140,50 @@ export function copyBtn(cls: string, text: () => string): HTMLElement {
   return btn;
 }
 
+/** Long enough that a press meant as the start of a drag or a selection is
+ *  not read as a hold; the slop is what a finger moves while holding still. */
+const HOLD_MS = 450;
+const HOLD_SLOP = 8;
+const FLASH_MS = 700;
+
+/** The copy affordance for a span too small to carry a button: press and hold
+ *  it, mouse or finger, and it copies itself and flashes the outcome in place.
+ *  A press that moves is a selection and cancels; a hold swallows the click it
+ *  would have been, so it must be wired *before* any click handler of its own. */
+export function holdToCopy(el: HTMLElement, text: () => string): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let fade: ReturnType<typeof setTimeout> | undefined;
+  let from = { x: 0, y: 0 };
+  let held = false;
+  const stop = (): void => clearTimeout(timer);
+  // The outcome where the gesture happened: no toast, and no layout shift. A
+  // second hold restarts the flash instead of inheriting the first one's fade.
+  const flash = (tone: string): void => {
+    el.classList.remove("bg-emerald-100", "bg-red-100");
+    el.classList.add(tone);
+    clearTimeout(fade);
+    fade = setTimeout(() => el.classList.remove(tone), FLASH_MS);
+  };
+  el.addEventListener("pointerdown", (ev) => {
+    held = false;
+    from = { x: ev.clientX, y: ev.clientY };
+    stop();
+    timer = setTimeout(() => {
+      held = true;
+      void copy(text()).then(() => flash("bg-emerald-100"), () => flash("bg-red-100"));
+    }, HOLD_MS);
+  });
+  el.addEventListener("pointermove", (ev) => {
+    if (Math.hypot(ev.clientX - from.x, ev.clientY - from.y) > HOLD_SLOP) stop();
+  });
+  for (const name of ["pointerup", "pointercancel", "pointerleave"]) el.addEventListener(name, stop);
+  el.addEventListener("click", (ev) => {
+    if (!held) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+  });
+}
+
 /** Chevron + summary skeleton shared by activity groups and project nodes. */
 export function detailsRow(cls: string, summaryChildren: (HTMLElement | SVGElement)[]): { el: HTMLDetailsElement; summary: HTMLElement } {
   const el = document.createElement("details");

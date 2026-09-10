@@ -11,7 +11,7 @@ import { imageRow, inboundAttachment, renderAttachments, renderFileRefs, rewrite
 import { splitInboundFiles } from "../../core/inbound-file.js";
 import { splitSpeaker, type Speaker } from "../../core/identity.js";
 import { highlightCode } from "./highlight.js";
-import { $, agoLabel, copyBtn, externalLinks, h, stampTime, STREAM_PAINT_MS } from "./dom.js";
+import { $, agoLabel, copyBtn, externalLinks, h, holdToCopy, stampTime, STREAM_PAINT_MS } from "./dom.js";
 import { button } from "./form.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
@@ -497,6 +497,10 @@ function renderMarkdown(node: HTMLElement, raw: string): void {
   // those hang off <pre>, the element highlightCode() never replaces.
   void highlightCode(node);
   addCodeCopy(node);
+  // Ahead of renderFileRefs: holding a path copies it instead of opening it,
+  // and the hold can only swallow a click it was wired before.
+  for (const code of node.querySelectorAll<HTMLElement>(":not(pre) > code"))
+    holdToCopy(code, () => code.textContent ?? "");
   renderAttachments(node);
   const id = deps.sessionId();
   if (id) renderFileRefs(node, id, deps.sessionCwd());

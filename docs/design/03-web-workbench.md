@@ -212,7 +212,13 @@ browser keeps no second session order.
   `src/web/ui/chat.ts:481`, and a bare name only when the extension is a
   file-ish one — opens the preview dialog, at the named line when it names one.
   Relative paths resolve against the session's cwd; the files route takes
-  absolute paths only.
+  absolute paths only. A pointer press leaves no focus ring on one; a keyboard
+  focus does.
+- **Copy**: a fenced block has a Copy button in its corner; any inline code
+  span — a file reference included — copies on a 450 ms press-and-hold that
+  stays put, flashing green or red in place and swallowing the click it would
+  have been. A press that moves is a selection, and on a touch screen the hold
+  is ours (no native callout or selection handles over inline code).
 - **Lightbox**: click magnifies about the point, second click fits; drag pans
   (mouse and finger); scrim, ✕, Esc close; ‹ › and ← / → page the gallery the
   image came from (transcript or strip, never across), hidden for one image.

@@ -1024,6 +1024,15 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .md :not(pre) > code::after {
     content: none;
   }
+  /* Holding an inline code span copies it (ui/dom.ts). On a touch screen the
+     platform's own long-press — selection handles, the callout — would fire on
+     top of that gesture; a pointer with a cursor keeps ordinary selection. */
+  @media (pointer: coarse) {
+    .md :not(pre) > code {
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+  }
   /* A code span that opens a file (ui/attachments.ts). At rest it is code like
      any other — a paragraph of paths should still read as prose. */
   .md code.fileref {
