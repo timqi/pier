@@ -198,7 +198,7 @@ function pathOf(url: string): string {
 }
 
 const previewNote = (msg: string, tone = "text-neutral-500"): HTMLElement =>
-  h("div", `px-3 py-2 text-[12.5px] ${tone}`, msg);
+  h("div", `px-3 py-2 text-[12.5px] [overflow-wrap:anywhere] ${tone}`, msg);
 
 /** Only the newest open may write the dialog: a slow fetch for the file just
  *  closed must not land on the one now shown. */
@@ -222,7 +222,11 @@ async function preview(url: string, name: string, line?: number): Promise<void> 
   } catch (err) {
     return show(previewNote(`failed to load: ${String(err)}`, "text-red-600"));
   }
-  if (!res.ok) return show(previewNote(await failure(res, "failed to load"), "text-red-600"));
+  // With the path: the header carries a basename, and a reference resolved
+  // against the wrong root is only recognisable as the whole path.
+  if (!res.ok) {
+    return show(previewNote(`${await failure(res, "failed to load")}: ${pathOf(url)}`, "text-red-600"));
+  }
   const type = res.headers.get("content-type") ?? "";
   if (!type.startsWith("text/") && !type.startsWith("image/svg+xml")) {
     return show(previewNote("Binary file — use Download."));
