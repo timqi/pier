@@ -32,7 +32,6 @@ export function registerConfigRoutes(
       // Where this scope's files live on disk — the UI labels "Global" with it.
       dir: scope.kind === "global" ? config.globalDir : scope.cwd,
       files: await config.listFiles(scope),
-      resources: await config.listResources(scope),
     });
   });
 
@@ -70,19 +69,6 @@ export function registerConfigRoutes(
     await config.writeDefaults(defaults);
     onConfigWritten?.();
     return c.json(await config.readDefaults());
-  });
-
-  // Resource names may contain slashes — query params, not path params.
-  guarded(app, "GET", "/api/config/resource", 400, async (c) => {
-    c.header("cache-control", "no-store");
-    const scope = await parseScope(c.req.query("scope"));
-    if (!scope) return c.json({ error: "unknown scope" }, 400);
-    const kind = c.req.query("kind");
-    const name = c.req.query("name");
-    if ((kind !== "extensions" && kind !== "skills") || !name) {
-      return c.json({ error: "kind and name required" }, 400);
-    }
-    return c.json({ content: await config.readResource(scope, kind, name) });
   });
 }
 

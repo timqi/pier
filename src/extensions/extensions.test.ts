@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { BUNDLED, bundledInfo, inlineExtensions } from "./index.js";
+import { BUNDLED, inlineExtensions } from "./index.js";
 
 describe("the bundled extensions", () => {
   it("load through Pi's own loader and register their tools", async () => {
@@ -25,32 +25,10 @@ describe("the bundled extensions", () => {
     expect(loaded.extensions.map((ext) => [ext.path, [...ext.tools.keys()]])).toEqual([
       ["<inline:web>", ["web_search", "web_fetch"]],
     ]);
-    // The Console tells the operator which tools a switch adds and what each
-    // needs; a renamed tool must not leave that page quietly lying.
-    for (const ext of BUNDLED) {
-      const registered = loaded.extensions.find((e) => e.path === `<inline:${ext.name}>`);
-      expect([...(registered?.tools.keys() ?? [])].sort())
-        .toEqual(ext.tools.map((tool) => tool.name).sort());
-    }
   });
 
-  it("hands surfaces names and summaries, and loads only what is switched on", () => {
-    expect(bundledInfo([])).toEqual([
-      {
-        // Half of one catalog: the tools Pier installs are the other half,
-        // and `source` is what tells a surface which half it is holding.
-        source: "bundled",
-        kind: "extension",
-        name: "web",
-        summary: expect.stringContaining("hosted web tools"),
-        adds: [
-          { name: "web_search", needs: expect.stringContaining("Anthropic or OpenAI") },
-          { name: "web_fetch", needs: expect.stringContaining("Anthropic") },
-        ],
-        enabled: false,
-      },
-    ]);
-    expect(bundledInfo(["web"])[0]?.enabled).toBe(true);
+  it("loads only what is switched on", () => {
+    expect(inlineExtensions(["web"]).map((ext) => ext.name)).toEqual(["web"]);
     expect(inlineExtensions([])).toEqual([]);
     // A name from another release is not ours to load.
     expect(inlineExtensions(["something-else"])).toEqual([]);

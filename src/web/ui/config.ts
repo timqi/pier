@@ -1,18 +1,17 @@
 // Settings → Agent: one list of everything a session is made of, and one pane
-// to act on the selected item. Bundled switches are instance-wide, so they
-// appear under Global only.
+// to act on the selected item. The agent files and the command-line tools are
+// drawn here; the package registry's panes are packages-pane.ts.
 
-import { ChevronRight } from "lucide";
-import { icon } from "./icons.js";
-import type { CatalogEntry, ConfigFile, ConfigResource } from "../../core/types.js";
+import type { CatalogEntry, ConfigFile } from "../../core/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { codePane, fileRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, CONTROL, empty, field, PANEL, PANEL_HEAD, setStatus, textInput, toggle } from "./form.js";
+import { badge, btn, CONTROL, empty, field, PANEL, PANEL_HEAD, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
 import { configSyncPane } from "./config-sync.js";
+import { createRegistry, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
 /** Agent's two panes: the shared panel surface, clipped to its own radius
  *  because each pane scrolls inside it. */
@@ -23,19 +22,17 @@ const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 interface ConfigIndex {
   dir: string;
   files: ConfigFile[];
-  resources: { extensions: ConfigResource[]; skills: ConfigResource[] };
 }
 
 type Selection =
   | { type: "file"; name: string; readonly: boolean }
-  | { type: "resource"; kind: "extensions" | "skills"; name: string }
-  | { type: "bundled"; name: string }
   /** One pane for every command-line tool: a row and a switch each, because a
    *  page per binary is four pages saying the same three facts. */
   | { type: "tools" }
-  | { type: "sync" };
+  | { type: "sync" }
+  | RegistrySelection;
 
-/** The one settings answer every switch here is drawn from. */
+/** The one settings answer every tool switch is drawn from. */
 interface CatalogResponse {
   catalog: CatalogEntry[];
   /** The blocks the operator wrote, as stored — the catalog carries only the
@@ -117,8 +114,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   /** What the nav is currently drawn from, so a switch can redraw its badge
    *  without re-reading the scope's files. */
   let lastIndex: ConfigIndex | null = null;
-  /** Everything with a switch — bundled extensions and managed binaries in one
-   *  list, because rtk is both; [] outside global scope. */
+  /** The managed binaries; [] outside global scope. */
   let catalog: CatalogEntry[] = [];
   /** Why the list is missing, when it is — an empty section would read as
    *  "Pier ships none", which is a different fact. */
@@ -135,9 +131,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   };
   /** The custom blocks, as stored: what a save has to send back unchanged. */
   let customTools: { name: string; toml: string }[] = [];
-  const extensionEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "extension");
   /** A row the operator wrote, and may remove again. */
-  const isCustom = (entry: CatalogEntry): boolean => entry.source === "binary" && entry.custom === true;
+  const isCustom = (entry: CatalogEntry): boolean => entry.custom === true;
+  /** rtk is a binary too, but its row is the `pier` package's. */
   const toolEntries = (): CatalogEntry[] => catalog.filter((e) => e.kind === "tool");
 
   // --- static skeleton: header + (scope select ▸ nav) | pane -----------------
@@ -150,7 +146,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     closeSync();
     scope = scopeSelect.value;
     selection = null;
-    openDirs.clear();
     void load();
   };
   const scopeBox = h("div", `${BAND} flex-col items-stretch gap-1.5 px-3 py-2.5`);
@@ -163,6 +158,28 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   const body = h("div", "flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1 max-md:flex-col");
   body.append(nav, pane);
   root.append(body);
+
+  /** The pane's title bar: file name plus whatever the mode adds. */
+  const paneBar = (name: string, ...rest: HTMLElement[]): HTMLElement =>
+    h(
+      "div",
+      `${BAND} flex-wrap gap-3 px-4 py-2.5`,
+      h("span", "font-mono text-[12.5px] text-neutral-500", name),
+      ...rest,
+    );
+
+  const registry = createRegistry({
+    pane,
+    paneBar,
+    claim: () => ++paneRequest,
+    live: (ticket) => ticket === paneRequest,
+    cwd: () => (scope === "global" ? undefined : scope),
+    changed: () => renderNav(lastIndex),
+    select: (sel) => {
+      selection = sel;
+      renderNav(lastIndex);
+    },
+  });
 
   // --- data -------------------------------------------------------------------
 
@@ -206,19 +223,13 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return outcome;
   }
 
-  /** A delta, never the list this page computed: two quick clicks would each
-   *  send a list built a moment ago. */
-  function switchBody(name: string, checked: boolean): Record<string, unknown> {
-    const one = { name, on: checked };
-    return catalog.find((e) => e.name === name)?.source === "binary" ? { tool: one } : { extension: one };
-  }
-
   async function load(): Promise<void> {
     const request = ++loadRequest;
     paneRequest++;
     const [got] = await Promise.all([
       getJson<ConfigIndex>(`/api/config${q()}`, "failed to load config", { cache: "no-store" }),
       loadCatalog(),
+      registry.load(),
     ]);
     if (request !== loadRequest) return;
     if (!got.ok) {
@@ -239,20 +250,18 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
 
   // --- nav ---------------------------------------------------------------------
 
-  function navSection(title: string): HTMLElement {
-    return h("div", "px-3 pb-1 pt-3 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title);
+  /** `action`: the section's one primary action, at its right edge. */
+  function navSection(title: string, action?: HTMLElement): HTMLElement {
+    return h(
+      "div",
+      "flex items-center justify-between gap-2 px-3 pb-1 pt-3 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400",
+      h("span", "", title),
+      ...(action ? [action] : []),
+    );
   }
 
-  /** Symlinked resources are real config, just stored elsewhere — say so. */
-  const linkBadge = (): HTMLElement => {
-    const badge = h(
-      "span",
-      "flex-none rounded bg-neutral-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500",
-      "link",
-    );
-    badge.title = "Reached through a symlink";
-    return badge;
-  };
+  const navBadge = (text: string): HTMLElement =>
+    h("span", "flex-none rounded bg-neutral-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500", text);
 
   /** A switch that is on, said in the nav so the list can be scanned. */
   const onBadge = (): HTMLElement =>
@@ -268,8 +277,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     dim: boolean,
     onPick: () => void,
     depth = 0,
-    /** `linkBadge()` or `onBadge()` — one way to mark a row, not two. */
-    tag?: HTMLElement,
+    /** `navBadge()`s and `onBadge()`, trailing the label. */
+    ...tags: HTMLElement[]
   ): HTMLElement {
     const row = h(
       "button",
@@ -277,73 +286,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         active ? "bg-indigo-50 font-medium hover:bg-indigo-50" : ""
       } ${dim ? "text-neutral-400" : ""}`,
     );
-    row.append(h("span", "truncate", label));
-    if (tag) row.append(tag);
+    row.append(h("span", "truncate", label), ...tags);
     row.style.paddingLeft = `${20 + depth * 14}px`;
     row.title = label;
     row.onclick = onPick;
     return row;
-  }
-
-  // --- resource folder tree (folders collapsed by default) ---------------------
-
-  interface Tree {
-    files: ConfigResource[];
-    dirs: Map<string, Tree>;
-    /** A folder is a link when everything under it came through one. */
-    link: boolean;
-  }
-
-  function buildTree(resources: ConfigResource[]): Tree {
-    const root: Tree = { files: [], dirs: new Map(), link: true };
-    for (const res of resources) {
-      const parts = res.name.split("/");
-      let node = root;
-      for (const dir of parts.slice(0, -1)) {
-        let next = node.dirs.get(dir);
-        if (!next) node.dirs.set(dir, (next = { files: [], dirs: new Map(), link: true }));
-        next.link &&= res.link;
-        node = next;
-      }
-      node.files.push({ name: parts[parts.length - 1]!, link: res.link });
-    }
-    return root;
-  }
-
-  /** Folder open/close state survives re-renders; cleared on scope change. */
-  const openDirs = new Set<string>();
-
-  function renderTree(
-    kind: "extensions" | "skills",
-    tree: Tree,
-    prefix: string,
-    depth: number,
-    isActive: (sel: Selection) => boolean,
-    open: (sel: Selection) => void,
-  ): HTMLElement[] {
-    const rows: HTMLElement[] = [];
-    for (const [dir, sub] of tree.dirs) {
-      const path = prefix ? `${prefix}/${dir}` : dir;
-      const key = `${kind}:${path}`;
-      const el = document.createElement("details");
-      el.open = openDirs.has(key);
-      el.ontoggle = () => (el.open ? openDirs.add(key) : openDirs.delete(key));
-      const summary = h("summary", "flex cursor-pointer select-none items-center gap-1 truncate py-1 pr-3 hover:bg-neutral-100");
-      summary.style.paddingLeft = `${20 + depth * 14}px`;
-      summary.title = path;
-      summary.append(icon(ChevronRight, "chev h-3 w-3"), h("span", "truncate text-neutral-600", dir));
-      if (sub.link) summary.append(linkBadge());
-      el.append(summary, ...renderTree(kind, sub, path, depth + 1, isActive, open));
-      rows.push(el);
-    }
-    for (const file of tree.files) {
-      const name = prefix ? `${prefix}/${file.name}` : file.name;
-      const sel: Selection = { type: "resource", kind, name };
-      rows.push(
-        navRow(file.name, isActive(sel), false, () => open(sel), depth, file.link ? linkBadge() : undefined),
-      );
-    }
-    return rows;
   }
 
   function renderNav(index: ConfigIndex | null): void {
@@ -357,10 +304,11 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       selection = sel;
       renderNav(index); // re-highlight
       if (sel.type === "file") void openFile(sel.name, sel.readonly);
-      else if (sel.type === "bundled") openBundled(sel.name);
       else if (sel.type === "tools") openTools();
       else if (sel.type === "sync") openSync();
-      else void openResource(sel.kind, sel.name);
+      else if (sel.type === "package") registry.openPackage(sel.source, sel.scope);
+      else if (sel.type === "resource") void registry.openResource(sel.source, sel.kind, sel.path);
+      else registry.openAdd();
     };
     const rows: HTMLElement[] = [];
     if (scope === "global") {
@@ -372,32 +320,46 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       const sel: Selection = { type: "file", name: f.name, readonly: f.readonly };
       rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel)));
     }
-    if (scope === "global") {
-      rows.push(navSection("bundled with Pier"));
-      if (catalogError) {
-        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError));
-      } else if (!extensionEntries().length) {
-        rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
-      }
-      for (const ext of extensionEntries()) {
-        const sel: Selection = { type: "bundled", name: ext.name };
-        rows.push(
-          navRow(ext.name, isActive(sel), false, () => open(sel), 0, ext.enabled ? onBadge() : undefined),
-        );
-      }
-      // One row, not one per binary: the tools differ by name and version and
-      // nothing else, so a page each would say the same three facts four times.
-      if (!catalogError) {
-        const sel: Selection = { type: "tools" };
-        const on = toolEntries().filter((t) => t.enabled).length;
-        rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), 0, on ? onBadge() : undefined));
+    // Install, remove and update write the global settings.json only.
+    const addSel: Selection = { type: "add" };
+    const add = btn("Add package", `normal-case tracking-normal hover:underline ${isActive(addSel) ? "text-indigo-700" : "text-indigo-600"}`);
+    add.onclick = () => open(addSel);
+    rows.push(navSection("Packages", scope === "global" ? add : undefined));
+    const packages = registry.registry?.packages ?? [];
+    const busy = registry.registry?.busy ?? null;
+    if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", registry.error));
+    for (const pkg of packages) {
+      const sel: Selection = { type: "package", source: pkg.source, scope: pkg.scope };
+      const tags: HTMLElement[] = [];
+      if (busy === pkg.source || (busy === "every package" && pkg.kind !== "pier" && pkg.kind !== "local")) {
+        tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
+      } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
+      if (pkg.scope === "project") tags.push(navBadge("project"));
+      // Dim: configured, and not on disk. The built-ins have no install path to speak of.
+      const missing = pkg.installedPath === null && pkg.kind !== "pier" && pkg.kind !== "local";
+      rows.push(navRow(packageLabel(pkg.source), isActive(sel), missing, () => open(sel), 0, ...tags));
+    }
+    // Flat, across packages: a resource has one switch wherever it is shown.
+    for (const [title, kind] of [["Extensions", "extension"], ["Skills", "skill"]] as const) {
+      rows.push(navSection(title));
+      const found = packages.flatMap((pkg) => pkg.resources.filter((r) => r.kind === kind).map((r) => ({ pkg, r })));
+      if (!found.length && !registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
+      for (const { pkg, r } of found) {
+        const sel: Selection = { type: "resource", source: pkg.source, kind, path: r.path };
+        const tags = [navBadge(packageLabel(pkg.source)), ...(r.version ? [navBadge(r.version)] : [])];
+        rows.push(navRow(r.name, isActive(sel), !r.enabled, () => open(sel), 0, ...tags));
       }
     }
-    for (const kind of ["extensions", "skills"] as const) {
-      rows.push(navSection(`${kind} (read-only)`));
-      const items = index.resources[kind];
-      if (!items.length) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
-      rows.push(...renderTree(kind, buildTree(items), "", 0, isActive, open));
+    if (scope === "global") {
+      // One row, not one per binary: the tools differ by name and version and
+      // nothing else, so a page each would say the same three facts four times.
+      rows.push(navSection("Tools"));
+      if (catalogError) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", catalogError));
+      else {
+        const sel: Selection = { type: "tools" };
+        const on = toolEntries().filter((t) => t.enabled).length;
+        rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), 0, ...(on ? [onBadge()] : [])));
+      }
     }
     navList.replaceChildren(...rows);
   }
@@ -409,7 +371,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       h(
         "div",
         "flex min-h-0 flex-1 items-center justify-center p-6",
-        empty("Select a file to edit, or browse extensions and skills."),
+        empty("Select a file to edit, or a package, extension or skill to switch."),
       ),
     );
   }
@@ -417,15 +379,6 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
   function renderError(message: string): void {
     pane.replaceChildren(h("p", "px-4 py-3 text-[12.5px] leading-relaxed text-red-600", message));
   }
-
-  /** The pane's title bar: file name plus whatever the mode adds. */
-  const paneBar = (name: string, ...rest: HTMLElement[]): HTMLElement =>
-    h(
-      "div",
-      `${BAND} gap-3 px-4 py-2.5`,
-      h("span", "font-mono text-[12.5px] text-neutral-500", name),
-      ...rest,
-    );
 
   /** A `readonly` file is Pier's to write: the viewer, no editor, and one
    *  line on where its content comes from. */
@@ -535,74 +488,12 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     return link;
   };
 
-  /** What a binary is right now, in one line — the same line in both panes. */
+  /** What a binary is right now, in one line. */
   function binaryLine(entry: CatalogEntry): string {
-    if (entry.source !== "binary") return "";
     const { spec, error, installed, version, path } = entry.binary;
     if (error) return `${spec} — ${error}`;
     if (!installed) return `${spec} — not installed`;
     return `${spec} — ${version ?? "unknown version"} at ${path ?? "an unknown path"}`;
-  }
-
-  function openBundled(name: string, note?: SaveOutcome): void {
-    paneRequest++;
-    const ext = catalog.find((e) => e.name === name && e.kind === "extension");
-    if (!ext) return renderError(`unknown extension: ${name}`);
-    const status = h("span", "text-[11.5px] text-neutral-400", "");
-    if (note) setStatus(status, note.state, note.text);
-    const runs = taskLink("every run of the update task");
-    pane.replaceChildren(
-      paneBar(
-        ext.name,
-        h(
-          "span",
-          "ml-auto text-[11px] uppercase tracking-wide text-neutral-400",
-          ext.source === "binary" ? "installed by Pier" : "ships with Pier",
-        ),
-      ),
-      h(
-        "div",
-        "flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4",
-        h("p", "max-w-2xl text-[13px] leading-relaxed text-neutral-600", ext.summary),
-        // "Which providers" has no single answer for a whole extension.
-        h(
-          "dl",
-          "flex max-w-2xl flex-col gap-1.5",
-          ...(ext.source === "bundled" ? ext.adds : []).flatMap((tool) => [
-            h("dt", "font-mono text-[12px] text-neutral-700", tool.name),
-            h("dd", "text-[12px] leading-snug text-neutral-500", `needs ${tool.needs}`),
-          ]),
-          ...(ext.source === "binary"
-            ? [
-              h("dt", "font-mono text-[12px] text-neutral-700", "binary"),
-              h(
-                "dd",
-                `font-mono text-[12px] leading-snug ${ext.binary.error ? "text-red-600" : "text-neutral-500"}`,
-                binaryLine(ext),
-              ),
-            ]
-            : []),
-        ),
-        toggle(
-          "Enabled",
-          ext.source === "binary"
-            ? "Installed into Pier's own bin directory, first on the PATH every session and task "
-              + "inherits; it registers its own Pi extension. Switching it off uninstalls both."
-            : "Loaded from inside Pier — nothing is installed and no update touches your own extensions. "
-              + "A session mid-turn keeps the tools it started with; the next message picks this up.",
-          ext.enabled,
-          (checked) => void flip(ext.name, checked, (outcome) => openBundled(name, outcome)),
-        ),
-        h(
-          "p",
-          "max-w-2xl text-[12px] leading-snug text-neutral-400",
-          ...(ext.source === "binary"
-            ? runs ? ["A daily task installs and updates it — its history is ", runs, "."] : ["Its installs run as the daily update task."]
-            : ["An extension of your own that registers the same tool wins: this copy stands down and says so in the log."]),
-        ),
-        status,
-      ),
-    );
   }
 
   /** Every command-line tool in one pane: a row, a line and a switch each,
@@ -628,9 +519,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
         ...(tool.summary
           ? [h(
             "span",
-            `font-mono text-[11px] leading-snug ${
-              tool.source === "binary" && tool.binary.error ? "text-red-600" : "text-neutral-400"
-            }`,
+            `font-mono text-[11px] leading-snug ${tool.binary.error ? "text-red-600" : "text-neutral-400"}`,
             binaryLine(tool),
           )]
           : []),
@@ -726,37 +615,13 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     );
   }
 
-  /** One switch, flipped: write the set it belongs to, then redraw the pane it
-   *  was flipped in with what came back. */
+  /** One switch, flipped: a delta, never the list this page computed — two
+   *  quick clicks would each send a list built a moment ago. */
   async function flip(name: string, checked: boolean, redraw: (outcome: SaveOutcome) => void): Promise<void> {
-    const entry = catalog.find((e) => e.name === name);
     redraw(await save(
-      switchBody(name, checked),
-      entry?.source === "binary"
-        ? checked ? "Saved — installing now; watch the run." : "Saved — uninstalling in the next run."
-        : "Saved — sessions take it on their next message.",
+      { tool: { name, on: checked } },
+      checked ? "Saved — installing now; watch the run." : "Saved — uninstalling in the next run.",
     ));
-  }
-
-  async function openResource(kind: "extensions" | "skills", name: string): Promise<void> {
-    const request = ++paneRequest;
-    const got = await getJson<{ content: string }>(
-      `/api/config/resource${q(`&kind=${kind}&name=${encodeURIComponent(name)}`)}`,
-      `failed to load ${name}`,
-      { cache: "no-store" },
-    );
-    if (!got.ok) {
-      if (request === paneRequest) renderError(got.error);
-      return;
-    }
-    if (request !== paneRequest) return;
-    const { content } = got.value;
-    const lang = await langFor(name); // first file of the session waits for hljs
-    if (request !== paneRequest) return;
-    pane.replaceChildren(
-      paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only")),
-      h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(content), lang)),
-    );
   }
 
   function renderScopeOptions(): void {

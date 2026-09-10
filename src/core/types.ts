@@ -336,9 +336,6 @@ export interface AgentSession {
 /** Where agent configuration lives: Pi's global dir or a project checkout. */
 export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
 
-// stage 2: delete with web/ui/config.ts — the registry (`PackageStore`) replaces resource browsing.
-export type ConfigResourceKind = "extensions" | "skills";
-
 /** One whitelisted agent file. `readonly` marks the file Pier itself writes:
  *  the Console shows it and offers no editor. */
 export interface ConfigFile {
@@ -355,17 +352,6 @@ export interface AgentDefaults {
   defaultThinkingLevel: ThinkingLevel | null;
 }
 
-/**
- * One read-only resource file, by path relative to its resource dir. `link`
- * marks a file reached through a symlink (a skills repo checked out elsewhere
- * is the common case) — surfaces say so instead of pretending it lives here.
- * stage 2: delete with web/ui/config.ts.
- */
-export interface ConfigResource {
-  name: string;
-  link: boolean;
-}
-
 /** What a switch that installs something knows about the thing on disk. */
 export interface CatalogBinary {
   /** The `spec = "…"` line of its ubix block. */
@@ -380,48 +366,26 @@ export interface CatalogBinary {
 }
 
 /**
- * One switch in the Console: something this instance can turn on. Not a
- * `ConfigResource` — it is not a file anyone can open, and its state is an
- * instance setting rather than something on disk.
- *
- * One shape for extensions and command-line tools because they share the whole
- * vocabulary, and `rtk` is the proof: it is an extension *and* a binary. The
- * union is on `source`, which is the question every consumer actually asks —
- * which set the switch writes, and whether there is a version to show — so an
- * extension with a version or a tool without one cannot be spelled at all.
+ * One command-line tool the Console can switch on, installed by ubix into
+ * Pier's own bin (src/tools.ts). Its switch is an instance setting, not a file.
  */
-export type CatalogEntry =
-  | {
-    /** Loaded from inside Pier: nothing is installed, nothing to update.
-     *  stage 2: delete with web/ui/config.ts — the `pier` package row says this. */
-    source: "bundled";
-    kind: "extension";
-    name: string;
-    summary: string;
-    enabled: boolean;
-    /** The tools it adds, and what each needs — which providers an extension
-     *  works with is the question asked in front of its switch, and it does
-     *  not always have one answer for the whole extension. */
-    adds: { name: string; needs: string }[];
-  }
-  | {
-    /** Installed by ubix into Pier's own bin (src/tools.ts). */
-    source: "binary";
-    /** `extension` when the command *is* an extension (rtk registers its own
-     *  Pi extension); `tool` when it is just a command. */
-    kind: "extension" | "tool";
-    name: string;
-    summary: string;
-    enabled: boolean;
-    binary: CatalogBinary;
-    /** A block the operator wrote themselves, and may remove again. */
-    custom?: boolean;
-  };
+export interface CatalogEntry {
+  /** `extension` when the command *is* an extension (rtk registers its own Pi
+   *  extension, and is listed under the `pier` package); `tool` when it is
+   *  just a command, listed under Tools. */
+  kind: "extension" | "tool";
+  name: string;
+  summary: string;
+  enabled: boolean;
+  binary: CatalogBinary;
+  /** A block the operator wrote themselves, and may remove again. */
+  custom?: boolean;
+}
 
 /**
- * Core ↔ agent-config seam: whitelisted file editing plus read-only resource
- * browsing. Changes apply to sessions created afterwards — Pi reads these
- * files at session start, never mid-run.
+ * Core ↔ agent-config seam: whitelisted file editing. Changes apply to
+ * sessions created afterwards — Pi reads these files at session start, never
+ * mid-run.
  */
 export interface ConfigStore {
   /** The scope's files (fixed whitelist; missing files included). */
@@ -438,10 +402,6 @@ export interface ConfigStore {
   /** Absolute path of the global scope's directory — the UI shows where
    *  "Global" actually lives, which moves with PIER_HOME. */
   readonly globalDir: string;
-  /** Files under each resource dir, symlinks followed (read-only surface).
-   *  stage 2: delete with web/ui/config.ts; `PackageStore.list` is the registry. */
-  listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, ConfigResource[]>>;
-  readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string>;
 }
 
 /** `pier` is the built-in package (bundled extensions, Pier's own skills);

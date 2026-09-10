@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, promises as fs, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, promises as fs, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -402,57 +402,5 @@ describe("provider setup", () => {
       api: "openai-completions",
       models: [{ id: "chat", reasoning: false, effort: "max" }],
     })).rejects.toThrow(/effort requires reasoning/);
-  });
-});
-
-describe("resources", () => {
-  beforeEach(() => {
-    mkdirSync(join(agentDir, "extensions", "native-web"), { recursive: true });
-    writeFileSync(join(agentDir, "extensions", "quiet.ts"), "export {}");
-    writeFileSync(join(agentDir, "extensions", "native-web", "index.ts"), "// ext");
-    mkdirSync(join(cwd, ".pi", "skills", "greet"), { recursive: true });
-    writeFileSync(join(cwd, ".pi", "skills", "greet", "SKILL.md"), "# greet");
-  });
-
-  it("lists relative paths per scope; missing dirs are empty", async () => {
-    expect(await store.listResources(GLOBAL)).toEqual({
-      extensions: [
-        { name: "native-web/index.ts", link: false },
-        { name: "quiet.ts", link: false },
-      ],
-      skills: [],
-    });
-    expect(await store.listResources(project)).toEqual({
-      extensions: [],
-      skills: [{ name: "greet/SKILL.md", link: false }],
-    });
-  });
-
-  it("follows symlinked resources and flags them, skipping dangling ones", async () => {
-    const elsewhere = join(cwd, "shared-skills", "review");
-    mkdirSync(elsewhere, { recursive: true });
-    writeFileSync(join(elsewhere, "SKILL.md"), "# review");
-    const skills = join(agentDir, "skills");
-    mkdirSync(skills, { recursive: true });
-    symlinkSync(elsewhere, join(skills, "review")); // linked directory
-    symlinkSync(join(elsewhere, "SKILL.md"), join(skills, "solo.md")); // linked file
-    symlinkSync(join(cwd, "gone.md"), join(skills, "dangling.md"));
-
-    expect(await store.listResources(GLOBAL)).toMatchObject({
-      skills: [
-        { name: "review/SKILL.md", link: true },
-        { name: "solo.md", link: true },
-      ],
-    });
-    // A link is still readable through its listed path.
-    expect(await store.readResource(GLOBAL, "skills", "review/SKILL.md")).toBe("# review");
-  });
-
-  it("reads a resource and rejects path traversal", async () => {
-    expect(await store.readResource(GLOBAL, "extensions", "quiet.ts")).toBe("export {}");
-    expect(await store.readResource(project, "skills", "greet/SKILL.md")).toBe("# greet");
-    await expect(store.readResource(GLOBAL, "extensions", "../models.json")).rejects.toThrow(
-      /invalid resource path/,
-    );
   });
 });

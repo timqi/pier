@@ -769,7 +769,6 @@ describe("ManagedTools.status", () => {
     const entries = await tools.status(["rtk"]);
     expect(entries.map((e) => e.name)).toEqual(MANAGED.map((t) => t.name));
     expect(entries[0]).toEqual({
-      source: "binary",
       kind: "extension",
       name: "rtk",
       summary: expect.any(String),
@@ -801,7 +800,7 @@ describe("ManagedTools.status", () => {
         })),
     });
     const [rtk] = await r.tools.status(["rtk"]);
-    expect(rtk?.source === "binary" && rtk.binary).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
+    expect(rtk?.binary).toMatchObject({ installed: false, error: "installed but missing on disk: /abs/bin/rtk" });
   });
 
   it("says when a tool installed somewhere Pier's PATH does not point", async () => {
@@ -831,7 +830,7 @@ describe("ManagedTools.status", () => {
     });
     const custom = [{ name: "cc", toml: `spec = "npm:@anthropic-ai/claude-code"` }];
     const cc = (await r.tools.status(["cc"], custom)).find((e) => e.name === "cc");
-    const binary = cc?.source === "binary" ? cc.binary : null;
+    const binary = cc?.binary ?? null;
     expect(binary).toMatchObject({ installed: true, path: "/home/t/.local/share/fnm/aliases/default/bin/claude" });
     expect(binary?.error).toContain("installed outside Pier's bin");
   });
@@ -854,7 +853,7 @@ describe("ManagedTools.status", () => {
   it("answers with the reason rather than throwing when ubix cannot be read", async () => {
     const r = rig({ answer: () => ({ code: 1, stdout: "", stderr: "state.toml is locked" }) });
     const [rtk] = await r.tools.status([]);
-    expect(rtk?.source === "binary" && rtk.binary.error).toMatch(/state\.toml is locked/);
+    expect(rtk?.binary.error).toMatch(/state\.toml is locked/);
     expect(rtk?.enabled).toBe(false);
   });
 });

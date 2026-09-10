@@ -19,8 +19,8 @@ const UBIX_LATEST = "https://api.github.com/repos/timqi/ubix/releases/latest";
 
 /** One binary Pier will install and keep current on request. */
 export interface ManagedTool {
-  /** `rtk` is an extension that ships as a binary: listed with the extensions,
-   *  installed like a tool. */
+  /** `rtk` is an extension that ships as a binary: listed under the `pier`
+   *  package's extensions, installed like a tool. */
   kind: "extension" | "tool";
   name: string;
   /** One line, shown beside the switch that turns it on. */
@@ -647,7 +647,6 @@ export class ManagedTools {
    *  version is unknown (§5). */
   async status(enabled: readonly string[], custom: readonly CustomTool[] = []): Promise<CatalogEntry[]> {
     const base = rows(custom).map((tool): CatalogEntry => ({
-      source: "binary",
       kind: tool.kind,
       name: tool.name,
       summary: tool.summary,
@@ -791,7 +790,7 @@ export class ManagedTools {
 }
 
 const withBinary = (entry: CatalogEntry, patch: Partial<CatalogBinary>): CatalogEntry =>
-  entry.source === "binary" ? { ...entry, binary: { ...entry.binary, ...patch } } : entry;
+  ({ ...entry, binary: { ...entry.binary, ...patch } });
 
 /** Never empty: an exit code with no words is not a report. */
 const failedRun = (what: string, result: ExecResult): string =>

@@ -243,14 +243,15 @@ browser keeps no second session order.
   | ------- | ---- | ------- |
   | Instance | Configuration sync | |
   | Files | the whitelisted agent files; settings.json read-only | |
-  | **Packages** | one row per source: built-in `pier` (the bundled extensions `web` and `rtk`, Pier's own skills `pier-boards`, `pier-help`, `pier-slack`, `pier-tasks`; version = Pier's), `local` (`<agentDir>/extensions`, `<agentDir>/skills`), then each installed npm/git/path package | detail pane: source, version, install path, update available, the provided resources each with its switch; **Update**; **Remove**; header action **Add package**: spec input, Pi's security note (packages run with full system access; review the source first) with a confirm, then install with progress and the row appears |
-  | **Extensions** | flat, across packages; package as badge; `rtk` carries its binary version badge | the same switch; a shadowed built-in reads `stood down — <tool> from <path>` |
+  | **Packages** | one row per source: built-in `pier` (the bundled extensions `web` and `rtk`, Pier's own skills `pier-boards`, `pier-help`, `pier-slack`, `pier-tasks`; version = Pier's), `local` (`<agentDir>/extensions`, `<agentDir>/skills`), then each installed npm/git/path package; `on` when any resource is; `installing…`/`updating…` on the `busy` one; a configured-but-uninstalled source reads dim | detail pane: source, kind, version, install path, the provided resources each with its switch; for an installed npm/git/path package also **Updates** (checked-at, **Check for updates** — a failed check keeps the last answer), **Update** (npm/git), **Remove** (confirms); header action **Add package**: spec input, Pi's security note (packages run with full system access; review the source first), **Install** — the row appears as `installing…` at once and the list is refetched on the answer |
+  | **Extensions** | flat, across packages; package as badge; `rtk` carries its binary version badge; a switched-off resource reads dim | the same switch, the `state` line, and the file through `GET /api/fs/file` (a bundled extension has none) |
   | **Skills** | flat, across packages; package as badge; `pier-slack` reads `follows Channels → agent tool` when that tool is off | the same switch |
   | Tools | the managed binaries, unchanged; `rtk` is not repeated here | switch, custom block editor |
 
   Rules:
-  - Install, remove and update are global scope only; project scope
-    (`.pi/settings.json`) is view plus enable/disable.
+  - Install, remove, update and the check are global scope only; project
+    scope (`.pi/settings.json`) is view plus enable/disable, the project's
+    rows badged `project`.
   - A daily in-process check (`checkForAvailableUpdates`, at boot and every
     24h, the result cached for `GET`) reports updates; installing one is a
     Console click, never automatic for third-party code. Not a Task: the
@@ -278,8 +279,9 @@ browser keeps no second session order.
     not given; the switch is the operator's, the state line is the runtime's.
   - After any package or switch write, idle sessions are recycled as for an
     agent-file save; sessions mid-turn keep what they opened with.
-  - `ConfigStore.listResources` is replaced by the registry; `readResource`
-    stays, and opens a resource file in the viewer from the flat views.
+  - One switch, one write: the `pier` package's extensions flip through
+    `PUT /api/packages/resource` like every other resource; `PUT /api/settings`
+    carries no `extension` key.
 
 ## Tests
 

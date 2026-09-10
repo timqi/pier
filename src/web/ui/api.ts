@@ -19,17 +19,26 @@ export function coalesce(load: () => Promise<void>): () => Promise<void> {
   };
 }
 
+const jsonInit = (body: unknown, method: "POST" | "PUT" | "PATCH"): RequestInit => ({
+  method,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 /** POST (or PUT/PATCH) a JSON body; the caller owns the response. */
 export const sendJson = (
   url: string,
   body: unknown,
   method: "POST" | "PUT" | "PATCH" = "POST",
-): Promise<Response> =>
-  fetch(url, {
-    method,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+): Promise<Response> => fetch(url, jsonInit(body, method));
+
+/** `sendJson` whose answer is read like `getJson`'s: the value, or the sentence. */
+export const postJson = <T>(
+  url: string,
+  body: unknown,
+  fallback: string,
+  method: "POST" | "PUT" = "POST",
+): Promise<Fetched<T>> => getJson<T>(url, fallback, jsonInit(body, method));
 
 /** Read a failed response's `error`, whatever the server managed to send. */
 export async function failure(res: Response, fallback: string): Promise<string> {

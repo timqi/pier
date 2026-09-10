@@ -119,24 +119,14 @@ function fakeSession(id: string): AgentSession & {
   };
 }
 
-/** The bundled extensions this test pretends Pier ships with. */
-const CATALOG = [{
-  source: "bundled" as const,
-  kind: "extension" as const,
-  name: "web",
-  summary: "the provider's own web tools",
-  adds: [{ name: "web_search", needs: "an authenticated model" }],
-}];
-/** The managed CLI tools this test pretends Pier can install — one list with
- *  the extensions, exactly as main.ts assembles it. */
+/** The managed CLI tools this test pretends Pier can install, as main.ts
+ *  assembles them. */
 const TOOLS = [{
-  source: "binary" as const,
   kind: "tool" as const,
   name: "rg",
   summary: "searches a tree by content",
   binary: { spec: "github:BurntSushi/ripgrep", installed: false, version: null, path: null, error: null },
 }, {
-  source: "binary" as const,
   kind: "tool" as const,
   name: "fd",
   summary: "finds files by name",
@@ -151,7 +141,7 @@ const SETTINGS_JSON = {
   skillsOff: [],
   tools: [],
   customTools: [],
-  catalog: [...CATALOG, ...TOOLS].map((entry) => ({ ...entry, enabled: false })),
+  catalog: TOOLS.map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,
 };
 
@@ -180,14 +170,6 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
     },
     writeDefaults: async (defaults) => {
       calls.push(`writeDefaults:${JSON.stringify(defaults)}`);
-    },
-    listResources: async (s) => {
-      calls.push(`listResources:${at(s)}`);
-      return { extensions: [{ name: "quiet.ts", link: false }], skills: [] };
-    },
-    readResource: async (s, kind, name) => {
-      calls.push(`resource:${at(s)}/${kind}/${name}`);
-      return "// ext";
     },
   };
 }
@@ -341,20 +323,16 @@ function setup(
   };
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, packages: fakePackages(), providers, settings, updates, updater, secrets, onUnlocked,
-    // Composed like main.ts — a catalog of names, so this test never loads an
-    // extension or the SDK behind one.
-    // One list, assembled like main.ts does: data only, never a subprocess —
-    // loading an extension or spawning ubix is the instance layer's business.
+    // Assembled like main.ts does: data only, never a subprocess — spawning
+    // ubix is the instance layer's business.
     catalog: async () => {
       const answer = {
         entries: [
-          ...CATALOG.map((ext) => ({ ...ext, enabled: settings.get().extensions.includes(ext.name) })),
           ...TOOLS.map((tool) => ({ ...tool, enabled: settings.get().tools.includes(tool.name) })),
           // The blocks the operator declared are rows too, exactly as
           // ManagedTools.status lists them — a fake that leaves them out cannot
           // show what a request replacing them does.
           ...settings.get().customTools.map((tool) => ({
-            source: "binary" as const,
             kind: "tool" as const,
             name: tool.name,
             summary: "",
@@ -382,12 +360,12 @@ function setup(
     },
     // Composed like main.ts: names are code, and a switch is validated against
     // them rather than against a catalog the same request may be rewriting.
-    names: { extensions: CATALOG.map((ext) => ext.name), tools: TOOLS.map((tool) => tool.name) },
+    names: TOOLS.map((tool) => tool.name),
     onToolsChanged,
     // main.ts owns the rule (tools.ts) and the bundled names; the route only
     // gets an answer.
     validateCustomTools: (raw: unknown) => {
-      const tools = normalizeCustomTools(raw, CATALOG.map((ext) => ext.name));
+      const tools = normalizeCustomTools(raw, ["web"]);
       return tools ? { tools } : { error: CUSTOM_TOOL_RULES };
     },
     reload,
@@ -1076,28 +1054,6 @@ describe("workbench server", () => {
     expect(settings.get().titleModel).toBeUndefined();
   });
 
-  it("switches a bundled extension on, refuses a mis-shaped delta, and recycles", async () => {
-    const { app, settings } = setup();
-    const put = (extension: unknown) =>
-      app.request("/api/settings", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ extension }),
-      });
-    const ok = await put({ name: "web", on: true });
-    expect(ok.status).toBe(200);
-    expect(settings.get().extensions).toEqual(["web"]);
-    // The answer carries the switches back, already flipped.
-    expect(await ok.json()).toMatchObject({
-      catalog: [{ name: "web", enabled: true }, { name: "rg" }, { name: "fd" }],
-    });
-    expect((await put("web")).status).toBe(400);
-    expect((await put({ name: 42, on: true })).status).toBe(400);
-    expect(settings.get().extensions).toEqual(["web"]);
-    expect((await put({ name: "web", on: false })).status).toBe(200);
-    expect(settings.get().extensions).toEqual([]);
-  });
-
   it("switches a managed tool on, tells the instance layer, and refuses a bad delta", async () => {
     const { app, settings, onToolsChanged } = setup();
     const put = (tool: unknown) =>
@@ -1112,7 +1068,7 @@ describe("workbench server", () => {
     // The answer carries the switch back already flipped, so the Console never
     // draws a state nobody stored.
     expect(await ok.json()).toMatchObject({
-      catalog: [{ name: "web" }, { name: "rg", enabled: true }, { name: "fd" }],
+      catalog: [{ name: "rg", enabled: true }, { name: "fd" }],
     });
     expect(onToolsChanged).toHaveBeenCalledTimes(1);
 
@@ -1172,10 +1128,6 @@ describe("workbench server", () => {
     // Off is the same delta, and switching one off leaves the other alone.
     expect((await flip({ tool: { name: "rg", on: false } })).status).toBe(200);
     expect(settings.get().tools).toEqual(["fd"]);
-    // Extensions take the same shape, and never land in the tool set.
-    expect((await flip({ extension: { name: "web", on: true } })).status).toBe(200);
-    expect(settings.get().extensions).toEqual(["web"]);
-    expect(settings.get().tools).toEqual(["fd"]);
     // Mis-shaped deltas are refused, not guessed at.
     expect((await flip({ tool: { name: "rg" } })).status).toBe(400);
     expect((await flip({ tool: { on: true } })).status).toBe(400);
@@ -1209,17 +1161,14 @@ describe("workbench server", () => {
       });
     for (const [body, named] of [
       [{ tool: { name: "rgg", on: true } }, "rgg"],
-      // A bundled extension is not a binary, and neither is switched through
-      // the other's set.
+      // A bundled extension is the `pier` package's, not a binary.
       [{ tool: { name: "web", on: true } }, "web"],
-      [{ extension: { name: "rg", on: true } }, "rg"],
     ] as const) {
       const res = await put(body);
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: expect.stringContaining(named) });
     }
     expect(settings.get().tools).toEqual([]);
-    expect(settings.get().extensions).toEqual([]);
     expect(onToolsChanged).not.toHaveBeenCalled();
 
     // A name the catalog no longer has can still be taken *out* of the set it
@@ -1782,7 +1731,6 @@ describe("workbench server", () => {
     expect(await globalRes.json()).toEqual({
       dir: "/home/t/.pier/pi",
       files: [{ name: "SYSTEM.md", exists: true, readonly: false }],
-      resources: { extensions: [{ name: "quiet.ts", link: false }], skills: [] },
     });
     // /tmp is a session cwd (factory.list); anything else is rejected — and a
     // project scope's dir is its own cwd.
@@ -1843,16 +1791,6 @@ describe("workbench server", () => {
       "nope",
     ]) expect((await put(body)).status).toBe(400);
     expect(config.calls.length).toBe(before);
-  });
-
-  it("serves read-only resources and validates kind", async () => {
-    const { app, config } = setup();
-    const ok = await app.request("/api/config/resource?kind=extensions&name=quiet.ts");
-    expect(ok.headers.get("cache-control")).toBe("no-store");
-    expect(await ok.json()).toEqual({ content: "// ext" });
-    expect(config.calls).toContain("resource:global/extensions/quiet.ts");
-    expect((await app.request("/api/config/resource?kind=themes&name=x")).status).toBe(400);
-    expect((await app.request("/api/config/resource?kind=skills")).status).toBe(400);
   });
 
   it.each([0, 1, 20])("resets a foreign epoch even with a current server seq of %i", async (count) => {
@@ -2450,14 +2388,6 @@ describe("configuration reaching live sessions", () => {
     await recycled(
       "public URL",
       await app.request("/api/settings", { ...json({ publicUrl: "pier.example.com" }), method: "PUT" }),
-    );
-
-    // A bundled extension is read at session open like the rest: a session
-    // that kept running would keep the tool set it was created with.
-    attached(router, session);
-    await recycled(
-      "bundled extension",
-      await app.request("/api/settings", { ...json({ extension: { name: "web", on: true } }), method: "PUT" }),
     );
   });
 

@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { isProviderApi, isThinkingLevel, validateEndpoint, validateProviderSetup } from "../core/types.js";
 import { pierPath } from "../paths.js";
 import { mergeSnapshotProviders, normalizeAgentSnapshot, snapshotProviders } from "./config-sync.js";
@@ -13,8 +13,6 @@ import type {
   AgentConfigSync,
   AgentDefaults,
   ConfigFile,
-  ConfigResource,
-  ConfigResourceKind,
   ConfigScope,
   ConfigStore,
   ModelCapability,
@@ -31,7 +29,6 @@ const PROJECT_FILES = ["AGENTS.md"];
 // Console shows the file and never edits it; the rest of it is machine-local.
 const READONLY_FILES = ["settings.json"];
 const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
-const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
 /** Pier owns the Pi runtime dir; main.ts exports it as PI_CODING_AGENT_DIR. */
 export const defaultAgentDir = (): string =>
@@ -136,12 +133,6 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       throw new Error(`not an editable config file: ${name}`);
     }
     return scope.kind === "global" ? join(this.agentDir, name) : join(scope.cwd, name);
-  }
-
-  private resourceRoot(scope: ConfigScope, kind: ConfigResourceKind): string {
-    return scope.kind === "global"
-      ? join(this.agentDir, kind)
-      : join(scope.cwd, ".pi", kind);
   }
 
   async listFiles(scope: ConfigScope): Promise<ConfigFile[]> {
@@ -357,45 +348,6 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
     this.#writes = result.then(() => undefined, () => undefined);
     return result;
   }
-
-  async listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, ConfigResource[]>> {
-    return {
-      extensions: await listDir(this.resourceRoot(scope, "extensions")),
-      skills: await listDir(this.resourceRoot(scope, "skills")),
-    };
-  }
-
-  async readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string> {
-    const root = this.resourceRoot(scope, kind);
-    const path = resolve(root, name);
-    // Containment check — the listing is relative paths, reject anything else.
-    if (!path.startsWith(root + sep)) throw new Error(`invalid resource path: ${name}`);
-    return fs.readFile(path, "utf8");
-  }
-}
-
-/** Symlinks are followed (skills are routinely linked in from elsewhere) and
- *  flagged; the depth bound is also the cycle guard. */
-async function listDir(
-  root: string,
-  prefix = "",
-  depth = RESOURCE_DEPTH,
-  linked = false,
-): Promise<ConfigResource[]> {
-  if (depth === 0) return [];
-  const entries = await fs.readdir(join(root, prefix), { withFileTypes: true }).catch(() => []);
-  const out: ConfigResource[] = [];
-  for (const e of entries) {
-    const rel = prefix ? `${prefix}/${e.name}` : e.name;
-    const link = linked || e.isSymbolicLink();
-    // A Dirent for a symlink is neither file nor directory — stat through it.
-    const target = e.isSymbolicLink()
-      ? await fs.stat(join(root, rel)).catch(() => null) // dangling link → skip
-      : e;
-    if (target?.isDirectory()) out.push(...(await listDir(root, rel, depth - 1, link)));
-    else if (target?.isFile()) out.push({ name: rel, link });
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** models.json may contain legacy keys and literal headers. Only stable

@@ -87,7 +87,7 @@ export interface WebDeps {
   settings: SettingsStore;
   /** Passed straight to the instance routes, which document them. */
   catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-  names?: { extensions: readonly string[]; tools: readonly string[] };
+  names?: readonly string[];
   onToolsChanged?: () => Promise<ToolsSyncNote | null>;
   validateCustomTools?: (raw: unknown) => { tools: CustomTool[] } | { error: string };
   updates: UpdateCheck;

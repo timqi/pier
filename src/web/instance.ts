@@ -62,9 +62,9 @@ export function registerInstanceRoutes(
     /** Handed over as data by main.ts: the catalog imports the Pi SDK and
      *  spawns ubix, and web/ may do neither. */
     catalog?: () => Promise<{ entries: CatalogEntry[]; toolsTaskId: string | null }>;
-    /** Code, not state: a switch is validated against these, not against the
-     *  catalog, whose custom half the same request may be rewriting. */
-    names?: { extensions: readonly string[]; tools: readonly string[] };
+    /** Code, not state: a tool switch is validated against these names, not
+     *  against the catalog, whose custom half the same request may be rewriting. */
+    names?: readonly string[];
     /** What became of the install belongs on the switch, not only in the
      *  journal (§5). Reads the stored set itself. */
     onToolsChanged?: () => Promise<ToolsSyncNote | null>;
@@ -82,7 +82,7 @@ export function registerInstanceRoutes(
     updater = null,
     secrets,
     catalog,
-    names = { extensions: [], tools: [] },
+    names = [],
     onUnlocked,
     onSettingsChanged,
     onToolsChanged,
@@ -198,16 +198,15 @@ export function registerInstanceRoutes(
         titleModel?: unknown;
         autoUpdate?: unknown;
         customTools?: unknown;
-        extension?: unknown;
         tool?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.extension, body.tool]
+      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, extension or tool required",
+        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools or tool required",
       }, 400);
     }
     // One transaction: a new custom tool and the switch that turns it on must
@@ -254,13 +253,6 @@ export function registerInstanceRoutes(
       if (!name || name.length > 64 || typeof given?.on !== "boolean") return "expected {name, on}";
       return { name, on: given.on };
     };
-    let extensionOne: { name: string; on: boolean } | null = null;
-    if (body?.extension !== undefined) {
-      const one = delta(body.extension);
-      if (typeof one === "string") return refuse(`extension: ${one}`);
-      extensionOne = one;
-      writes.push(() => settings.setExtensions(withName(settings.get().extensions, one)));
-    }
     let toolsChanged = false;
     let toolOne: { name: string; on: boolean } | null = null;
     if (body?.tool !== undefined) {
@@ -276,8 +268,7 @@ export function registerInstanceRoutes(
       settings.get().customTools.some((tool) => !declared?.some((kept) => kept.name === tool.name));
     const shown = dropping ? await catalog?.() : undefined;
     const binaryOf = (name: string): CatalogBinary | null => {
-      const entry = shown?.entries.find((row) => row.source === "binary" && row.name === name);
-      return entry?.source === "binary" ? entry.binary : null;
+      return shown?.entries.find((row) => row.name === name)?.binary ?? null;
     };
 
     /** Inside the transaction, or two requests both pass and leave an enabled
@@ -288,10 +279,7 @@ export function registerInstanceRoutes(
       const current = settings.get();
       const after = (declared ?? current.customTools).map((tool) => tool.name);
       const toolsAfter = toolOne ? withName(current.tools, toolOne) : current.tools;
-      if (extensionOne?.on && !names.extensions.includes(extensionOne.name)) {
-        throw new Refusal(`extension: this Pier has no extension called ${extensionOne.name}`, 400);
-      }
-      if (toolOne?.on && !names.tools.includes(toolOne.name) && !after.includes(toolOne.name)) {
+      if (toolOne?.on && !names.includes(toolOne.name) && !after.includes(toolOne.name)) {
         throw new Refusal(`tool: this Pier manages no tool called ${toolOne.name}`, 400);
       }
       for (const gone of current.customTools.filter((tool) => !after.includes(tool.name))) {
@@ -320,7 +308,7 @@ export function registerInstanceRoutes(
     // cannot start, and then says why.
     const note = toolsChanged ? await onToolsChanged?.() : null;
     // Read when a session opens; the model menu is read per picker call.
-    if (body?.publicUrl !== undefined || body?.extension !== undefined) onSettingsChanged?.();
+    if (body?.publicUrl !== undefined) onSettingsChanged?.();
     return c.json({ ...(await instanceSettings()), ...(note ? { toolsSync: note } : {}) });
   });
 

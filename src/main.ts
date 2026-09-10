@@ -26,7 +26,7 @@ import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
-import { bundledInfo } from "./extensions/index.js";
+import { BUNDLED } from "./extensions/index.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
@@ -176,7 +176,7 @@ const packages = new PiPackageStore(piConfig, {
     version: async () => {
       const { tools, customTools } = settings.get();
       const row = (await managedTools.status(tools, customTools)).find((entry) => entry.name === "rtk");
-      return row?.source === "binary" ? row.binary.version : null;
+      return row?.binary.version ?? null;
     },
     set: async (on) => {
       const { tools } = settings.get();
@@ -345,21 +345,17 @@ app.route("/", createServer({
   packages,
   providers: factory,
   settings,
-  // Assembled here so web/ gets names and summaries, not a module that
-  // imports the Pi SDK; extensions and binaries are one kind of switch.
+  // Assembled here: the catalog spawns ubix, which web/ may not.
   catalog: async () => {
-    const { extensions, tools, customTools } = settings.get();
-    return {
-      entries: [...bundledInfo(extensions), ...await managedTools.status(tools, customTools)],
-      toolsTaskId: toolsUpdate.id(),
-    };
+    const { tools, customTools } = settings.get();
+    return { entries: await managedTools.status(tools, customTools), toolsTaskId: toolsUpdate.id() };
   },
   // A switch is validated against what this Pier *can* switch, never against
   // a catalog whose custom half the request may be rewriting.
-  names: { extensions: bundledInfo([]).map((entry) => entry.name), tools: MANAGED.map((tool) => tool.name) },
+  names: MANAGED.map((tool) => tool.name),
   onToolsChanged: toolsUpdate.changed,
   validateCustomTools: (raw: unknown) => {
-    const validated = normalizeCustomTools(raw, bundledInfo([]).map((entry) => entry.name));
+    const validated = normalizeCustomTools(raw, BUNDLED.map((ext) => ext.name));
     return validated ? { tools: validated } : { error: CUSTOM_TOOL_RULES };
   },
   secrets,
