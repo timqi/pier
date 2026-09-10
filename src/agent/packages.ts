@@ -81,10 +81,10 @@ const versionFile = async (dir: string | null): Promise<string | null> => {
 };
 
 /** Pi's own toggle rule (its config selector): one `+path`/`-path` per resource,
- *  any earlier pattern for the same path removed first. */
-const stripped = (p: string): string => (/^[!+-]/.test(p) ? p.slice(1) : p);
+ *  any earlier pattern for the same path removed first. A bare entry stays: it
+ *  is what lists the file, not a pattern on it. */
 const flip = (entries: readonly string[], pattern: string, enabled: boolean): string[] => [
-  ...entries.filter((p) => stripped(p) !== pattern),
+  ...entries.filter((p) => !(/^[!+-]/.test(p) && p.slice(1) === pattern)),
   `${enabled ? "+" : "-"}${pattern}`,
 ];
 
@@ -295,9 +295,10 @@ export class PiPackageStore implements PackageStore {
         const project = cwd !== undefined;
         const inherited = project && r.metadata.scope !== "project";
         const scoped = project ? settings.getProjectSettings() : settings.getGlobalSettings();
+        const projectDir = join(cwd ?? this.agentDir, ".pi");
         if (r.metadata.origin === "top-level") {
           // A global resource switched for one project is named by its absolute path there.
-          const pattern = inherited ? path : relative(r.metadata.baseDir ?? this.agentDir, path);
+          const pattern = inherited ? path : relative(r.metadata.baseDir ?? (project ? projectDir : this.agentDir), path);
           const next = flip(scoped[key] ?? [], pattern, enabled);
           if (inherited && !next.includes(path)) next.unshift(path);
           if (project) settings[key === "extensions" ? "setProjectExtensionPaths" : "setProjectSkillPaths"](next);
@@ -306,8 +307,12 @@ export class PiPackageStore implements PackageStore {
           const pattern = relative(r.metadata.baseDir ?? dirname(path), path);
           const packages = [...(scoped.packages ?? [])];
           let at = packages.findIndex((p) => (typeof p === "string" ? p : p.source) === source);
-          // A global package overridden for one project: Pi's delta entry.
-          if (at === -1 && inherited) at = packages.push({ source, autoload: false }) - 1;
+          // A global package overridden for one project: Pi's delta entry, a
+          // local path re-based on .pi/ because that is where Pi resolves it from.
+          if (at === -1 && inherited) {
+            const own = kindOf(source) === "path" ? relative(projectDir, resolve(this.agentDir, source)) || "." : source;
+            at = packages.push({ source: own, autoload: false }) - 1;
+          }
           if (at === -1) throw new PackageError("missing", `${source} is not in settings.json`);
           const entry = packages[at]!;
           const filtered: Exclude<PackageSource, string> = typeof entry === "string" ? { source: entry } : { ...entry };
@@ -318,7 +323,10 @@ export class PiPackageStore implements PackageStore {
         }
       }, cwd);
     }
-    return (await this.#find(change)).resource;
+    // By path, not source: an override moves the resource to the project's row.
+    const after = (await this.list(cwd)).packages.flatMap((p) => p.resources).find((r) => r.kind === kind && r.path === path);
+    if (!after) throw new PackageError("missing", `${path} is no longer loaded`);
+    return after;
   }
 
   async checkUpdates(): Promise<PackageRegistry> {

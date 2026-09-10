@@ -176,27 +176,36 @@ describe("switches", () => {
     const cwd = tmp("proj");
     writeSettings({ packages: [pkgDir] });
     file(join(cwd, ".pi", "extensions", "proj.ts"), "export default () => {}");
+    // Listed by the project itself, relative to .pi/ — Pi's base for a project's own entries.
+    file(join(cwd, "ext", "p.ts"), "export default () => {}");
+    file(join(cwd, ".pi", "settings.json"), JSON.stringify({ extensions: ["../ext/p.ts"] }));
     const { packages } = await store.list(cwd);
     expect(packages.map((p) => [p.source, p.scope])).toEqual([
       ["pier", "global"], ["local", "global"], [pkgDir, "global"], ["local", "project"],
     ]);
     const proj = join(cwd, ".pi", "extensions", "proj.ts");
     await store.setEnabled({ source: "local", kind: "extension", path: proj, enabled: false, cwd });
+    await store.setEnabled({ source: "local", kind: "extension", path: join(cwd, "ext", "p.ts"), enabled: false, cwd });
     const a = join(pkgDir, "extensions", "a.ts");
     await store.setEnabled({ source: pkgDir, kind: "extension", path: a, enabled: false, cwd });
     const mine = join(agentDir, "extensions", "mine.ts");
     const off = await store.setEnabled({ source: "local", kind: "extension", path: mine, enabled: false, cwd });
     expect(off.enabled).toBe(false);
     expect(JSON.parse(readFileSync(join(cwd, ".pi", "settings.json"), "utf8"))).toEqual({
-      extensions: [mine, "-extensions/proj.ts", `-${mine}`],
-      packages: [{ source: pkgDir, autoload: false, extensions: ["-extensions/a.ts"] }],
+      extensions: [mine, "../ext/p.ts", "-extensions/proj.ts", "-../ext/p.ts", `-${mine}`],
+      // Pi's delta entry names a local package from .pi/, where it resolves it.
+      packages: [{ source: relative(join(cwd, ".pi"), pkgDir), autoload: false, extensions: ["-extensions/a.ts"] }],
     });
     expect(settingsJson()).toEqual({ packages: [pkgDir] });
     // An overridden global resource is the project's row now (Pi: first scope wins).
     const after = await store.list(cwd);
     expect(row(after.packages, "local").resources.map((r) => r.name)).toEqual(["rtk", "x"]);
     expect(after.packages.find((p) => p.source === "local" && p.scope === "project")?.resources.map((r) => [r.name, r.enabled]))
-      .toEqual([["mine", false], ["proj", false]]);
+      .toEqual([["mine", false], ["p", false], ["proj", false]]);
+    // Pi's delta: the project's row holds the overridden resource, the global row the rest.
+    expect(after.packages.find((p) => p.scope === "project" && p.kind === "path")?.resources.map((r) => [r.name, r.enabled]))
+      .toEqual([["a", false]]);
+    expect(row(after.packages, pkgDir).resources.map((r) => r.name)).toEqual(["b", "s"]);
     // Global still reads the global answer.
     expect(row((await store.list()).packages, "local").resources.find((r) => r.name === "mine")?.enabled).toBe(true);
   });
