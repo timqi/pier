@@ -122,12 +122,10 @@ function fakeSession(id: string): AgentSession & {
 /** The managed CLI tools this test pretends Pier can install, as main.ts
  *  assembles them. */
 const TOOLS = [{
-  kind: "tool" as const,
   name: "rg",
   summary: "searches a tree by content",
   binary: { spec: "github:BurntSushi/ripgrep", installed: false, version: null, path: null, error: null },
 }, {
-  kind: "tool" as const,
   name: "fd",
   summary: "finds files by name",
   binary: { spec: "github:sharkdp/fd", installed: false, version: null, path: null, error: null },
@@ -333,7 +331,6 @@ function setup(
           // ManagedTools.status lists them — a fake that leaves them out cannot
           // show what a request replacing them does.
           ...settings.get().customTools.map((tool) => ({
-            kind: "tool" as const,
             name: tool.name,
             summary: "",
             enabled: settings.get().tools.includes(tool.name),
