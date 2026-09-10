@@ -30,6 +30,12 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5), automatic ones included |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
+| `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", scope: "global"\|"project", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, version: string \| null, state: string \| null}]}], checkedAt: iso \| null, busy: source \| null}`. `?cwd=` adds the project scope's packages and overrides as rows of their own; `state` is the one line a row shows instead of a plain switch reading (`stood down — web_search from <path>`, `follows Channels → agent tool`, `installing…`). 400 when settings.json is not valid JSON |
+| `POST /api/packages` | body `{source}` → `installAndPersist` into the global scope; answers `text/event-stream`: one `progress` event per Pi progress step (`{action, message}`), then one `done` event carrying the new package row, or one `error` event with `{error}` — the stream opens with 200, so a failed install is an event, never a dropped connection. 400 for a spec Pi does not parse, 409 when the source is already configured or another package operation is running. Idle sessions are recycled on `done`, like an agent-file save |
+| `POST /api/packages/remove` | body `{source}` → `removeAndPersist` (global scope), returns `{ok}`. 404 for a source not in settings.json, 409 for `pier` and `local` (built in, not removable) or while another operation runs |
+| `POST /api/packages/update` | body `{source?}` → `update(source)`; `source` absent updates every unpinned npm/git package. Same stream as install, `done` carrying the rows that changed. 404 unknown, 409 for a local/path or version-pinned source (nothing to move) or while another operation runs. Never called by anything but a Console click |
+| `POST /api/packages/check` | `checkForAvailableUpdates` now, returns the `GET` answer with `checkedAt` fresh. 502 with `{error}` when a registry or remote could not be reached; the previous answer stays shown |
+| `PUT /api/packages/resource` | body `{source, kind, path, enabled, cwd?}` → one switch. `pier` resources flip the pier.db lists (`extensions`, `skillsOff`); any other resource writes `+path` / `-path` into that package's filter arrays (or the top-level `extensions`/`skills` arrays for `local`) in the global settings.json, or in `.pi/settings.json` when `cwd` is given. Answers the resource row. 400 bad body, 404 unknown resource |
 | `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
@@ -40,7 +46,8 @@ surface owns its routes and is mounted beside it.
   session for itself. One flag, read by the dot, the badges and Web Push.
 
 Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`),
-`config.ts` (`/api/config*`), `fs.ts` (`/api/fs/{ls,file,mkdir}` and the
+`config.ts` (`/api/config*`), `packages.ts` (`/api/packages*`; a file of its
+own because the registry is not agent-file editing), `fs.ts` (`/api/fs/{ls,file,mkdir}` and the
 containment check; `/api/sessions/:id/files` shares only its size cap and
 headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
@@ -227,6 +234,52 @@ browser keeps no second session order.
   (settings.json, written by Pier) opens in the viewer alone with one line on
   where its keys are set. Models: Default model is the launch picker written on
   change, redrawn from the server's answer.
+
+  The Agent nav, drawn from one `GET /api/packages` answer. The management
+  unit is the **package** (a source); its resources are the extensions and
+  skills it provides; a resource has one switch wherever it is shown.
+
+  | Section | Rows | Actions |
+  | ------- | ---- | ------- |
+  | Instance | Configuration sync | |
+  | Files | the whitelisted agent files; settings.json read-only | |
+  | **Packages** | one row per source: built-in `pier` (the bundled extensions `web` and `rtk`, Pier's own skills `pier-boards`, `pier-help`, `pier-slack`, `pier-tasks`; version = Pier's), `local` (`<agentDir>/extensions`, `<agentDir>/skills`), then each installed npm/git/path package | detail pane: source, version, install path, update available, the provided resources each with its switch; **Update**; **Remove**; header action **Add package**: spec input, Pi's security note (packages run with full system access; review the source first) with a confirm, then install with progress and the row appears |
+  | **Extensions** | flat, across packages; package as badge; `rtk` carries its binary version badge | the same switch; a shadowed built-in reads `stood down — <tool> from <path>` |
+  | **Skills** | flat, across packages; package as badge; `pier-slack` reads `follows Channels → agent tool` when that tool is off | the same switch |
+  | Tools | the managed binaries, unchanged; `rtk` is not repeated here | switch, custom block editor |
+
+  Rules:
+  - Install, remove and update are global scope only; project scope
+    (`.pi/settings.json`) is view plus enable/disable.
+  - A daily in-process check (`checkForAvailableUpdates`, at boot and every
+    24h, the result cached for `GET`) reports updates; installing one is a
+    Console click, never automatic for third-party code. Not a Task: the
+    check is an SDK call, and the external `pi` CLI is forbidden.
+  - The `pier` package's switch state is pier.db settings (`extensions`: the
+    bundled extensions on; `skillsOff`: Pier's skills switched off — default
+    states differ, so one list would flip the other on upgrade). Every other
+    switch and every package is settings.json.
+  - settings.json has two writers: `ConfigStore.writeDefaults` (atomic whole
+    write of the defaults pair) and Pi's `SettingsManager` (merge-write of the
+    modified keys under its own lock). Every package operation runs inside
+    `ConfigStore`'s write queue with a `SettingsManager` created for that call,
+    so Pi reads Pier's latest defaults and touches only `packages`,
+    `extensions`, `skills`. The test: write defaults, install a package, read
+    both back unchanged.
+  - Console-only: no agent tool installs packages; one operation at a time
+    (`busy` names the source), 409 for a second.
+  - `rtk`'s switch is the tools switch: it installs the binary through the
+    tools task, whose `rtk init -g --agent pi` writes `<agentDir>/extensions/rtk.ts`;
+    that `local` file is folded into the `pier` row, never listed twice.
+  - Shadowing is known at session open, not at list time: `standDownShadowed`
+    records what it stood down, `GET` reports the last open's finding, and a
+    built-in no session has opened since reads no state.
+  - `standDownUndocumented` still removes a skill whose tool the session was
+    not given; the switch is the operator's, the state line is the runtime's.
+  - After any package or switch write, idle sessions are recycled as for an
+    agent-file save; sessions mid-turn keep what they opened with.
+  - `ConfigStore.listResources` is replaced by the registry; `readResource`
+    stays, and opens a resource file in the viewer from the flat views.
 
 ## Tests
 

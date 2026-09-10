@@ -39,7 +39,10 @@ scheduled tasks, live observability, and static Show pages.
 - `agent/` Pi SDK behind `AgentSession`
 - `extensions/` the extensions Pier ships with, loaded as Pi inline factories
   and switched on per instance from the Console — never copied to disk, and
-  standing down when a copy on disk already registers the same tools
+  standing down when a copy on disk already registers the same tools; the
+  Console shows them as the built-in `pier` package beside every package in
+  Pi's own registry (settings.json `packages`), which Pier writes and never
+  mirrors
 - `web/` chat + observability timeline, an event-stream consumer
 - `tasks/` scheduler; cron + prompt + session config; one custom tool is the
   entire agent-collaboration surface
@@ -124,11 +127,11 @@ exists to catch.
 | `core/` | 1.5k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate |
 | `channels/` | 5k | four adapters in one five-file shape; the shared layer holds only what would otherwise be copied |
 | `web/` | 13k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; the least tested area |
-| `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index |
+| `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry |
 | `tasks/` | 3.2k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam |
 | root `src/*.ts` | 3k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix |
 | one bundled extension | 500 | pays for itself or is not shipped |
-| one module | 750 | rule 2 before splitting; `agent/pi.ts` is the one file that may touch the Pi SDK, and every block in it does |
+| one module | 750 | rule 2 before splitting; `agent/pi.ts` (sessions) and `agent/packages.ts` (the package registry) are the two files that may touch the Pi SDK, and every block in each does |
 | channel adapter file | 400 | transport, render and panel counted separately |
 
 Non-blank, non-comment lines, tests excluded. No repo-wide number.

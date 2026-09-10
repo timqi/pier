@@ -28,12 +28,15 @@ Slack / Telegram / Lark          Web workbench (browser)       Tasks
 src/
   core/        types.ts (the seams), router.ts, hub.ts, queue.ts, reply.ts,
                identity.ts, inbox.ts, inbound-file.ts
-  agent/       pi.ts (the only file outside extensions/ importing
-               @earendil-works/pi-*), events.ts (Pi → Pier event translation),
-               listing.ts (on-disk sessions, indexed in pier.db), config.ts,
-               credentials.ts (sealed store + auth.json import), models.ts
-  extensions/  index.ts (the list Pier ships), web/ (web_search + web_fetch on
-               the provider's hosted tools)
+  agent/       pi.ts (sessions) and packages.ts (the package registry: Pi's
+               DefaultPackageManager behind `PackageStore`) — the two files
+               outside extensions/ importing @earendil-works/pi-*; events.ts
+               (Pi → Pier event translation), listing.ts (on-disk sessions,
+               indexed in pier.db), config.ts, credentials.ts (sealed store +
+               auth.json import), models.ts
+  extensions/  index.ts (the list Pier ships: the built-in `pier` package's
+               extensions), web/ (web_search + web_fetch on the provider's
+               hosted tools)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
                panel, runtime, routes; per platform: telegram / slack / lark
@@ -57,7 +60,7 @@ src/
   log.ts       what a log line looks like, and where it goes
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   settings.ts  instance facts a human owns (public URL, model menu, auto-update
-               switch, which bundled extensions are on)
+               switch, which of the built-in `pier` package's resources are on)
   update.ts    whether a newer release exists and when this instance may become
                it; the install is handed to service.ts's unit
   drain.ts     graceful restart: finish running turns and outbound sends,
@@ -82,7 +85,11 @@ Dependency rules:
   SDKs or Pi; runtime dependencies never go sideways.
 - `extensions/` takes an `ExtensionAPI` and is the second area allowed to
   import the SDK. Only `agent/pi.ts` registers one (inline factory); only
-  `main.ts` reads the catalog (`CatalogEntry` data for the Console).
+  `agent/packages.ts` lists them, as the resources of the `pier` package.
+- `agent/packages.ts` is the second SDK-importing file in `agent/` because the
+  registry is a second reason: `pi.ts` opens sessions, `packages.ts` changes
+  what they open with. Nothing else imports `DefaultPackageManager` or
+  `SettingsManager`.
 - The browser may import HTTP DTOs from `tasks/types.ts`, `channels/types.ts`
   and `web/types.ts` type-only.
 - Root leaves `paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`: every
@@ -138,6 +145,12 @@ seams:
   `seq`/`ts`/`sessionId`.
 - Pi → Pier event translation lives in `src/agent/events.ts` with golden-table
   tests; changing a mapping is a design decision.
+- `PackageStore` — core ↔ Pi's package registry: `list` (every package with
+  its resources and switch state, the project scope as view when a `cwd` is
+  given), `install`, `remove`, `update` (global scope, progress as a
+  callback), `setEnabled`, `checkUpdates`. One package operation at a time;
+  Pi's `ProgressEvent` is translated at the seam like every other Pi type.
+  Wire shapes and rules: `docs/design/03-web-workbench.md`.
 
 ## Fixed Behavioral Rules
 
@@ -208,9 +221,11 @@ One line each; the reasoning is in the commit that made it.
 - Loopback bind, reached over a tunnel or reverse proxy. Updates run in the
   updater's own cgroup, never from a timer (`docs/deploy.md`).
 - Pi **SDK** over RPC; the seam stays RPC-compatible (no Pi types leave `agent/`).
-- Standalone program, not a Pi extension. Bundled extensions load as inline
-  factories, never copied to disk, and stand down when a copy on disk registers
-  the same tools. Pier is not an extension manager.
+- Standalone program, not a Pi extension. Pier is the Console over Pi's
+  package manager: one registry (settings.json `packages` plus Pi's local
+  `extensions`/`skills` dirs), Pier writes it, never a second list; built-ins
+  stay inline factories, never copied to disk, and stand down when a copy on
+  disk registers the same tools.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
 - **One writer per instance directory**, enforced before the database opens:
