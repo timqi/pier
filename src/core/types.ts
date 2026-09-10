@@ -456,7 +456,8 @@ export interface PackageSwitch {
 /** `busy`: another operation runs. `refused`: the operation makes no sense for
  *  this source (a built-in, a pinned version). `missing`: no such package or
  *  resource. `invalid`: the request or settings.json cannot be read as asked.
- *  `unreachable`: a registry or remote did not answer. */
+ *  `unreachable`: a registry or remote did not answer, or npm, git or Pi's
+ *  manifest refused the install, remove or update. */
 export type PackageErrorReason = "busy" | "refused" | "missing" | "invalid" | "unreachable";
 
 export class PackageError extends Error {

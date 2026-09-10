@@ -137,7 +137,7 @@ const factory = new PiAgentFactory(
   new CredentialStore(db, secrets),
   piConfig,
   () => settings.get().modelMenu,
-  () => ({ extensions: settings.get().extensions, skillsOff: settings.get().skillsOff }),
+  () => settings.get(),
   () => settings.get().titleModel,
   // Transcripts carry the speaker header core wrote for the model.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),

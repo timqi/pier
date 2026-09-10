@@ -88,6 +88,17 @@ const flip = (entries: readonly string[], pattern: string, enabled: boolean): st
   `${enabled ? "+" : "-"}${pattern}`,
 ];
 
+/** What npm, git or Pi's manifest refused is the upstream's failure, answered
+ *  as such (502) with Pi's own sentence; a PackageError passes through. */
+const upstream = async <T>(what: string, run: () => Promise<T>): Promise<T> => {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof PackageError) throw err;
+    throw new PackageError("unreachable", `${what} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+};
+
 const resourceRow = (kind: PackageResourceKind, r: ResolvedResource): PackageResource => ({
   kind, name: nameOf(kind, r.path), path: r.path, enabled: r.enabled, state: null,
 });
@@ -244,7 +255,7 @@ export class PiPackageStore implements PackageStore {
     const stored = await this.#operate(spec, async (manager) => {
       const sources = (): string[] => manager.listConfiguredPackages().filter((p) => p.scope === "user").map((p) => p.source);
       const before = new Set(sources());
-      await manager.installAndPersist(spec);
+      await upstream(`installing ${spec}`, () => manager.installAndPersist(spec));
       const added = sources().find((s) => !before.has(s));
       if (!added) throw new PackageError("refused", `${spec} is already configured`);
       return added;
@@ -258,7 +269,7 @@ export class PiPackageStore implements PackageStore {
       if (!manager.listConfiguredPackages().some((p) => p.scope === "user" && p.source === source)) {
         throw new PackageError("missing", `${source} is not in settings.json`);
       }
-      await manager.removeAndPersist(source);
+      await upstream(`removing ${source}`, () => manager.removeAndPersist(source));
     });
   }
 
@@ -271,7 +282,7 @@ export class PiPackageStore implements PackageStore {
       if (!movable(source)) throw new PackageError("refused", `${source} is pinned or local — nothing to move`);
     }
     const targets = source === undefined ? configured.map((p) => p.source).filter(movable) : [source];
-    await this.#operate(source ?? "every package", (manager) => manager.update(source));
+    await this.#operate(source ?? "every package", (manager) => upstream(`updating ${source ?? "every package"}`, () => manager.update(source)));
     for (const s of targets) this.#updates.delete(s);
     const { packages } = await this.list();
     return packages.filter((p) => p.scope === "global" && targets.includes(p.source));
@@ -331,12 +342,8 @@ export class PiPackageStore implements PackageStore {
 
   async checkUpdates(): Promise<PackageRegistry> {
     const { manager } = this.#open();
-    try {
-      const found = await manager.checkForAvailableUpdates();
-      this.#updates = new Set(found.filter((u) => u.scope === "user").map((u) => u.source));
-    } catch (err) {
-      throw new PackageError("unreachable", `update check failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const found = await upstream("update check", () => manager.checkForAvailableUpdates());
+    this.#updates = new Set(found.filter((u) => u.scope === "user").map((u) => u.source));
     this.#checkedAt = new Date().toISOString();
     if (this.#updates.size) log.info(`package updates available: ${[...this.#updates].join(", ")}`);
     return this.list();

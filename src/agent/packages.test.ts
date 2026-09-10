@@ -267,8 +267,11 @@ describe("install, remove, update", () => {
     expect((await store.list()).busy).toBeNull();
   });
 
-  it("surfaces the seam's reason as a PackageError", async () => {
+  it("surfaces the seam's reason as a PackageError, Pi's own failure as unreachable", async () => {
     await expect(store.remove("npm:none")).rejects.toBeInstanceOf(PackageError);
+    // A git clone of nowhere: Pi's error, not this file's, and the row is not written.
+    await expect(store.install("git:localhost/nobody/nothing")).rejects.toMatchObject({ reason: "unreachable" });
+    expect(settingsJson).toThrow();
   });
 });
 
