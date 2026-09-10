@@ -3,7 +3,7 @@
 // Pi SDK. No Pi type may appear in an exported signature.
 
 import { realpathSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import {
   createAgentSession,
   CredentialSynchronizationError,
@@ -172,20 +172,32 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
   });
 };
 
+/** What the last session open stood down, by bundled extension name: the
+ *  registry (agent/packages.ts) shows it as the row's state. Known only at
+ *  open, so a built-in no session has loaded since reads nothing. */
+const shadowed = new Map<string, string>();
+export const shadowedBuiltin = (name: string): string | null => shadowed.get(name) ?? null;
+
 /** Pi loads a bundled extension and its on-disk twin both, leaving two tools
  *  of one name; the copy the user put there wins, and the journal says so (§5). */
 export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsResult => {
   const inline = (ext: Extension): boolean => ext.path.startsWith("<inline:");
-  const onDisk = new Set(
-    base.extensions.filter((ext) => !inline(ext)).flatMap((ext) => [...ext.tools.keys()]),
+  const onDisk = new Map(
+    base.extensions.filter((ext) => !inline(ext)).flatMap((ext) => [...ext.tools.keys()].map((tool) => [tool, ext.path])),
   );
-  if (!onDisk.size) return base;
   return {
     ...base,
     extensions: base.extensions.filter((ext) => {
-      const clash = inline(ext) && [...ext.tools.keys()].filter((tool) => onDisk.has(tool));
-      if (!clash || !clash.length) return true;
-      log.info(`bundled ${ext.path} stood down — ${clash.join(", ")} already loaded from disk`);
+      if (!inline(ext)) return true;
+      const name = ext.path.slice("<inline:".length, -1);
+      const clash = [...ext.tools.keys()].filter((tool) => onDisk.has(tool));
+      if (!clash.length) {
+        shadowed.delete(name);
+        return true;
+      }
+      const from = onDisk.get(clash[0]!)!;
+      shadowed.set(name, `stood down — ${clash.join(", ")} from ${from}`);
+      log.info(`bundled ${ext.path} stood down — ${clash.join(", ")} already loaded from ${from}`);
       return false;
     }),
   };
@@ -495,7 +507,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     private readonly credentials?: CredentialStore,
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
     private readonly pinned: () => ModelRef[] = () => [],
-    private readonly enabledExtensions: () => string[] = () => [],
+    /** The built-in `pier` package's switches: bundled extensions on, Pier's own skills off. */
+    private readonly pier: () => { extensions: string[]; skillsOff: string[] } = () => ({ extensions: [], skillsOff: [] }),
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -711,19 +724,26 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   private async resourceLoader(cwd: string): Promise<DefaultResourceLoader> {
+    const { extensions, skillsOff } = this.pier();
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(),
       // The user's SYSTEM.md is appended after Pier's baseline, so it still wins.
       systemPromptOverride: pierSystemPrompt,
       additionalSkillPaths: this.skillPaths,
+      // Only Pier's own skills answer to the off-list; a user's skill of the
+      // same name is Pi's to switch (settings.json).
       skillsOverride: (base) => ({
         ...base,
-        skills: standDownUndocumented(this.extraTools, base.skills),
+        skills: standDownUndocumented(
+          this.extraTools,
+          base.skills.filter((skill) =>
+            !skillsOff.includes(skill.name) || !this.skillPaths.some((dir) => skill.filePath.startsWith(dir + sep))),
+        ),
       }),
       extensionFactories: [
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
-        ...inlineExtensions(this.enabledExtensions()),
+        ...inlineExtensions(extensions),
       ],
       extensionsOverride: standDownShadowed,
       agentsFilesOverride: (current) => {
@@ -740,7 +760,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   private open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
-    return this.providerConfig.withSnapshot(() => this.openSnapshot(cwd, sessionManager, opts));
+    return this.providerConfig.withWrite(() => this.openSnapshot(cwd, sessionManager, opts));
   }
 
   private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {

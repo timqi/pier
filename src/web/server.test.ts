@@ -22,6 +22,7 @@ import type {
   ConfigScope,
   ConfigStore,
   ModelRef,
+  PackageStore,
   ProviderManager,
   SessionEventPayload,
   QueueRecovery,
@@ -147,6 +148,7 @@ const SETTINGS_JSON = {
   modelMenu: [],
   autoUpdate: false,
   extensions: [],
+  skillsOff: [],
   tools: [],
   customTools: [],
   catalog: [...CATALOG, ...TOOLS].map((entry) => ({ ...entry, enabled: false })),
@@ -189,6 +191,13 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
     },
   };
 }
+
+/** An empty registry; the route contract itself is packages.test.ts. */
+const fakePackages = (): PackageStore => {
+  const registry = { packages: [], checkedAt: null, busy: null };
+  const refuse = async (): Promise<never> => { throw new Error("not in this test"); };
+  return { list: async () => registry, install: refuse, remove: refuse, update: refuse, setEnabled: refuse, checkUpdates: refuse };
+};
 
 /** Provider-owned prompts/events without a Pi runtime or real credentials. */
 function fakeProviders(): ProviderManager & { calls: string[] } {
@@ -331,7 +340,7 @@ function setup(
     return { release };
   };
   app.route("/", createServer({
-    factory, router, hub, sessions: state, config, providers, settings, updates, updater, secrets, onUnlocked,
+    factory, router, hub, sessions: state, config, packages: fakePackages(), providers, settings, updates, updater, secrets, onUnlocked,
     // Composed like main.ts — a catalog of names, so this test never loads an
     // extension or the SDK behind one.
     // One list, assembled like main.ts does: data only, never a subprocess —
@@ -658,6 +667,7 @@ describe("workbench server", () => {
       hub,
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
+      packages: fakePackages(),
       providers: fakeProviders(),
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
@@ -1424,6 +1434,7 @@ describe("workbench server", () => {
       hub,
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
+      packages: fakePackages(),
       providers: fakeProviders(),
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
@@ -1451,6 +1462,7 @@ describe("workbench server", () => {
       hub,
       sessions: state,
       config: fakeConfig(),
+      packages: fakePackages(),
       providers: fakeProviders(),
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),

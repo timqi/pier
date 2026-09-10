@@ -336,6 +336,7 @@ export interface AgentSession {
 /** Where agent configuration lives: Pi's global dir or a project checkout. */
 export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
 
+// stage 2: delete with web/ui/config.ts — the registry (`PackageStore`) replaces resource browsing.
 export type ConfigResourceKind = "extensions" | "skills";
 
 /** One whitelisted agent file. `readonly` marks the file Pier itself writes:
@@ -358,6 +359,7 @@ export interface AgentDefaults {
  * One read-only resource file, by path relative to its resource dir. `link`
  * marks a file reached through a symlink (a skills repo checked out elsewhere
  * is the common case) — surfaces say so instead of pretending it lives here.
+ * stage 2: delete with web/ui/config.ts.
  */
 export interface ConfigResource {
   name: string;
@@ -390,7 +392,8 @@ export interface CatalogBinary {
  */
 export type CatalogEntry =
   | {
-    /** Loaded from inside Pier: nothing is installed, nothing to update. */
+    /** Loaded from inside Pier: nothing is installed, nothing to update.
+     *  stage 2: delete with web/ui/config.ts — the `pier` package row says this. */
     source: "bundled";
     kind: "extension";
     name: string;
@@ -435,9 +438,93 @@ export interface ConfigStore {
   /** Absolute path of the global scope's directory — the UI shows where
    *  "Global" actually lives, which moves with PIER_HOME. */
   readonly globalDir: string;
-  /** Files under each resource dir, symlinks followed (read-only surface). */
+  /** Files under each resource dir, symlinks followed (read-only surface).
+   *  stage 2: delete with web/ui/config.ts; `PackageStore.list` is the registry. */
   listResources(scope: ConfigScope): Promise<Record<ConfigResourceKind, ConfigResource[]>>;
   readResource(scope: ConfigScope, kind: ConfigResourceKind, name: string): Promise<string>;
+}
+
+/** `pier` is the built-in package (bundled extensions, Pier's own skills);
+ *  `local` is the agent dir's own `extensions/` and `skills/`; the rest are
+ *  Pi's three source syntaxes. */
+export type PackageKind = "pier" | "local" | "npm" | "git" | "path";
+export type PackageScope = "global" | "project";
+export type PackageResourceKind = "extension" | "skill";
+
+/** One extension or skill a package provides, with its one switch. */
+export interface PackageResource {
+  kind: PackageResourceKind;
+  name: string;
+  /** The file Pi loads; `<inline:name>` for a bundled extension, which is no file. */
+  path: string;
+  /** What the switch says. What the runtime did with it is `state`. */
+  enabled: boolean;
+  version: string | null;
+  /** The one line a row shows instead of a plain switch reading (`stood down —
+   *  web_search from <path>`, `follows Channels → agent tool`), or null. */
+  state: string | null;
+}
+
+/** One row of the registry: a source and what it provides. */
+export interface Package {
+  source: string;
+  kind: PackageKind;
+  scope: PackageScope;
+  version: string | null;
+  /** null: configured but not on disk (`pier` and `local` always are). */
+  installedPath: string | null;
+  updateAvailable: boolean;
+  resources: PackageResource[];
+}
+
+export interface PackageRegistry {
+  packages: Package[];
+  /** When updates were last checked; null before the first check. */
+  checkedAt: string | null;
+  /** The source an install, remove or update is running for; null when idle. */
+  busy: string | null;
+}
+
+/** One switch: the resource is named by its package and path, as `list` gave them. */
+export interface PackageSwitch {
+  source: string;
+  kind: PackageResourceKind;
+  path: string;
+  enabled: boolean;
+  /** Write the override into this project's `.pi/settings.json` instead of the global file. */
+  cwd?: string;
+}
+
+/** `busy`: another operation runs. `refused`: the operation makes no sense for
+ *  this source (a built-in, a pinned version). `missing`: no such package or
+ *  resource. `invalid`: the request or settings.json cannot be read as asked.
+ *  `unreachable`: a registry or remote did not answer. */
+export type PackageErrorReason = "busy" | "refused" | "missing" | "invalid" | "unreachable";
+
+export class PackageError extends Error {
+  constructor(readonly reason: PackageErrorReason, message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Core ↔ Pi's package registry: one list of everything a session loads, and
+ * the operations that change it. Install, remove and update work the global
+ * scope only, one at a time; a project (`cwd`) is a view plus its switches.
+ * Changes reach sessions opened afterwards. Must stay implementable over RPC.
+ */
+export interface PackageStore {
+  /** Every package with its resources; with `cwd`, the project scope's rows too. */
+  list(cwd?: string): Promise<PackageRegistry>;
+  /** Install into the global scope and record it; resolves with the new row. */
+  install(source: string): Promise<Package>;
+  remove(source: string): Promise<void>;
+  /** One source, or every unpinned npm/git package when none is named; the rows touched. */
+  update(source?: string): Promise<Package[]>;
+  /** Flip one resource; answers the resource as `list` would now show it. */
+  setEnabled(change: PackageSwitch): Promise<PackageResource>;
+  /** Ask registries and remotes now; the answer is cached for `list`. */
+  checkUpdates(): Promise<PackageRegistry>;
 }
 
 /**

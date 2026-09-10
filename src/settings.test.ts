@@ -16,6 +16,7 @@ const EMPTY = {
   modelMenu: [],
   autoUpdate: false,
   extensions: [],
+  skillsOff: [],
   tools: [],
   customTools: [],
 };

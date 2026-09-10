@@ -31,7 +31,7 @@ describe("snapshot export", () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     let entered = false;
-    const opened = store.withSnapshot(async () => {
+    const opened = store.withWrite(async () => {
       entered = true;
       const first = read("SYSTEM.md");
       await held;
@@ -369,7 +369,7 @@ describe("snapshot apply", () => {
       message: "configuration import rollback failed",
       errors: [expect.objectContaining({ message: "commit failed" }), expect.objectContaining({ message: "restore failed" })],
     });
-    await expect(store.withSnapshot(async () => "SDK read")).rejects.toThrow("rollback failed");
+    await expect(store.withWrite(async () => "SDK read")).rejects.toThrow("rollback failed");
     await expect(store.exportSnapshot()).rejects.toThrow("rollback failed");
   });
 

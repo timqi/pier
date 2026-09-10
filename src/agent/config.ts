@@ -167,7 +167,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
     if (READONLY_FILES.includes(name)) {
       throw new Error(`${name} is written by Pier; edit it on disk, then run pier reload`);
     }
-    return this.#withWrite(async () => {
+    return this.withWrite(async () => {
       const current = await readOptional(path);
       const visible = name === "models.json" ? maskModels(current) : current;
       if (expected !== undefined && visible !== expected) throw new Error(`${name} changed on disk; reopen it`);
@@ -212,7 +212,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
 
   async setupProvider(input: ProviderSetup, verify?: () => Promise<void>): Promise<void> {
     validateProviderSetup(input);
-    await this.#withWrite(async () => {
+    await this.withWrite(async () => {
       const path = join(this.agentDir, "models.json");
       const raw = await readNullable(path);
       const parsed = raw?.trim() ? parseModels(raw) : {};
@@ -275,7 +275,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
   }
 
   writeDefaults(defaults: AgentDefaults): Promise<void> {
-    return this.#withWrite(async () => {
+    return this.withWrite(async () => {
       const path = join(this.agentDir, "settings.json");
       const raw = await readNullable(path);
       const next = withDefaults(raw, defaults);
@@ -286,7 +286,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
   }
 
   exportSnapshot(): Promise<AgentConfigSnapshot> {
-    return this.#withWrite(async () => {
+    return this.withWrite(async () => {
       const [system, agents, raw, rawSettings] = await Promise.all(
         SNAPSHOT_FILES.map((name) => readNullable(join(this.agentDir, name))),
       );
@@ -302,7 +302,7 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
 
   async applySnapshot(snapshot: AgentConfigSnapshot, commit?: (changed: boolean) => void): Promise<void> {
     const incoming = normalizeAgentSnapshot(snapshot);
-    await this.#withWrite(async () => {
+    await this.withWrite(async () => {
       const names = SNAPSHOT_FILES;
       const before = await Promise.all(names.map((name) => readNullable(join(this.agentDir, name))));
       const raw = before[2];
@@ -349,12 +349,10 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
     });
   }
 
-  /** Pi loads several files directly; hold the same queue while it opens a session. */
-  withSnapshot<T>(read: () => Promise<T>): Promise<T> {
-    return this.#withWrite(read);
-  }
-
-  #withWrite<T>(write: () => Promise<T>): Promise<T> {
+  /** The one queue every writer of this directory holds: settings.json has two
+   *  writers (writeDefaults and Pi's SettingsManager in agent/packages.ts),
+   *  and Pi reads several files directly when it opens a session. */
+  withWrite<T>(write: () => Promise<T>): Promise<T> {
     const result = this.#writes.then(() => { this.#assertSnapshot(); return write(); });
     this.#writes = result.then(() => undefined, () => undefined);
     return result;

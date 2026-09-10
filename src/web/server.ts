@@ -15,6 +15,7 @@ import { logger } from "../log.js";
 import { QueueOperationError, Router } from "../core/router.js";
 import { registerConfigRoutes } from "./config.js";
 import { registerExplorerRoutes } from "./explorer.js";
+import { registerPackageRoutes } from "./packages.js";
 import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
 import type {
@@ -25,6 +26,7 @@ import type {
   ChatTurn,
   ConfigStore,
   InboundMessage,
+  PackageStore,
   ProviderManager,
   SessionEvent,
   SessionSummary,
@@ -80,6 +82,7 @@ export interface WebDeps {
   hub: EventHub;
   sessions: SessionStateStore;
   config: ConfigStore;
+  packages: PackageStore;
   providers: ProviderManager;
   settings: SettingsStore;
   /** Passed straight to the instance routes, which document them. */
@@ -139,6 +142,7 @@ export function createServer(
     hub,
     sessions: state,
     config,
+    packages,
     providers,
     settings,
     catalog,
@@ -615,6 +619,7 @@ export function createServer(
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));
   registerConfigRoutes(app, { factory, config, onConfigWritten: () => recycle("an agent file") });
+  registerPackageRoutes(app, { factory, packages, onConfigWritten: () => recycle("the package registry") });
   registerFsRoutes(app);
   registerExplorerRoutes(app);
 

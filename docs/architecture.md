@@ -147,10 +147,11 @@ seams:
   tests; changing a mapping is a design decision.
 - `PackageStore` — core ↔ Pi's package registry: `list` (every package with
   its resources and switch state, the project scope as view when a `cwd` is
-  given), `install`, `remove`, `update` (global scope, progress as a
-  callback), `setEnabled`, `checkUpdates`. One package operation at a time;
-  Pi's `ProgressEvent` is translated at the seam like every other Pi type.
-  Wire shapes and rules: `docs/design/03-web-workbench.md`.
+  given), `install`, `remove`, `update` (global scope, answering when done;
+  Pi's progress steps are logged at the seam), `setEnabled`, `checkUpdates`.
+  One package operation at a time, named by `busy`; refusals are a
+  `PackageError` with a reason the route maps to a status. Wire shapes and
+  rules: `docs/design/03-web-workbench.md`.
 
 ## Fixed Behavioral Rules
 

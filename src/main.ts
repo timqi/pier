@@ -10,6 +10,7 @@ import { ConfigSync } from "./config-sync.js";
 import { configSyncTask } from "./config-sync-task.js";
 import { CredentialStore } from "./agent/credentials.js";
 import { IndexedListing } from "./agent/listing.js";
+import { PiPackageStore } from "./agent/packages.js";
 import { PiAgentFactory } from "./agent/pi.js";
 import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
@@ -41,7 +42,7 @@ import { toolsTask } from "./tools-task.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
-import { startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
+import { currentVersion, startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config-sync.js";
 import { PushStore, registerPushRoutes } from "./web/push.js";
@@ -99,40 +100,42 @@ const configSync = new ConfigSync({
   db, settings, config: piConfig, normalizeAgent: normalizeAgentSnapshot,
   reload: () => readyForConfigReload ? reloadInstance() : Promise.resolve(),
 });
+const skillsDir = fileURLToPath(new URL("../skills", import.meta.url));
+const agentTools = [
+  taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
+  slackToolSpec(
+    (params, callerSessionId) =>
+      handleSlackTool({
+        store: channelStore,
+        directory: slackDirectory,
+        // Per call: the Console can change the token underneath us.
+        client: () => {
+          const config = channelStore.get("slack");
+          return config.token ? new SlackApi(config.token, config.appToken) : null;
+        },
+        // Per call: the mapping is durable, the session is not.
+        here: (sessionId) => {
+          const key = router.conversationOf(sessionId);
+          if (key?.channelId !== "slack") return null;
+          const { channel, threadTs } = parseSlackConversation(key.conversationId);
+          return channel && threadTs ? { channel, threadTs } : null;
+        },
+        log: (m) => logger("slack.tool").warn(m),
+      }, params, callerSessionId),
+    () => slackToolAvailable(channelStore),
+  ),
+];
 const factory = new PiAgentFactory(
-  [
-    taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
-    slackToolSpec(
-      (params, callerSessionId) =>
-        handleSlackTool({
-          store: channelStore,
-          directory: slackDirectory,
-          // Per call: the Console can change the token underneath us.
-          client: () => {
-            const config = channelStore.get("slack");
-            return config.token ? new SlackApi(config.token, config.appToken) : null;
-          },
-          // Per call: the mapping is durable, the session is not.
-          here: (sessionId) => {
-            const key = router.conversationOf(sessionId);
-            if (key?.channelId !== "slack") return null;
-            const { channel, threadTs } = parseSlackConversation(key.conversationId);
-            return channel && threadTs ? { channel, threadTs } : null;
-          },
-          log: (m) => logger("slack.tool").warn(m),
-        }, params, callerSessionId),
-      () => slackToolAvailable(channelStore),
-    ),
-  ],
+  agentTools,
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
   () => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }),
   // Documents Pier's own tools, so it loads only inside a Pier session.
-  [fileURLToPath(new URL("../skills", import.meta.url))],
+  [skillsDir],
   new CredentialStore(db, secrets),
   piConfig,
   () => settings.get().modelMenu,
-  () => settings.get().extensions,
+  () => ({ extensions: settings.get().extensions, skillsOff: settings.get().skillsOff }),
   () => settings.get().titleModel,
   // Transcripts carry the speaker header core wrote for the model.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),
@@ -159,6 +162,33 @@ const toolsUpdate = toolsTask(tasks);
 // Before any route exists: two first flips could otherwise both create a task.
 const reconciled = await toolsUpdate.reconcile();
 if ("problem" in reconciled) log.error(`tools cannot be managed: ${reconciled.problem}`);
+
+// The built-in `pier` package's switches live in pier.db and the tools switch;
+// the registry gets them as data, so agent/ stays blind to tools.ts.
+const packages = new PiPackageStore(piConfig, {
+  version: currentVersion(),
+  extensions: () => settings.get().extensions,
+  setExtensions: (names) => void settings.setExtensions(names),
+  skillsOff: () => settings.get().skillsOff,
+  setSkillsOff: (names) => void settings.setSkillsOff(names),
+  rtk: {
+    enabled: () => settings.get().tools.includes("rtk"),
+    version: async () => {
+      const { tools, customTools } = settings.get();
+      const row = (await managedTools.status(tools, customTools)).find((entry) => entry.name === "rtk");
+      return row?.source === "binary" ? row.binary.version : null;
+    },
+    set: async (on) => {
+      const { tools } = settings.get();
+      settings.setTools(on ? [...new Set([...tools, "rtk"])] : tools.filter((name) => name !== "rtk"));
+      const note = await toolsUpdate.changed();
+      if (note?.state === "refused") log.error(`rtk switched ${on ? "on" : "off"} but the tools sync was refused: ${note.reason}`);
+    },
+  },
+  tools: agentTools,
+}, [skillsDir]);
+// At boot, not lazily: the answer waits for the next Console open (update.ts).
+packages.watchUpdates();
 
 channelStore = new ChannelStore(db, secrets);
 const control = createControl({ router, factory, conversations, store: channelStore });
@@ -312,6 +342,7 @@ app.route("/", createServer({
   hub,
   sessions: sessionState,
   config: piConfig,
+  packages,
   providers: factory,
   settings,
   // Assembled here so web/ gets names and summaries, not a module that

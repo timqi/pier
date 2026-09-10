@@ -33,6 +33,9 @@ export interface Settings {
   autoUpdate: boolean;
   /** Bundled extensions switched on (src/extensions); an unknown name is simply not found. */
   extensions: string[];
+  /** Pier's own skills switched off. An off-list, not a second on-list: skills
+   *  default on and extensions default off, so one list would flip the other on upgrade. */
+  skillsOff: string[];
   /** Managed CLI tools switched on (src/tools.ts). */
   tools: string[];
   /** Beside the enabled set, not inside it: a tool switched off must not lose its spec. */
@@ -100,6 +103,11 @@ export function normalizeTools(raw: unknown): string[] | null {
   return normalizeNames(raw);
 }
 
+/** Shape only: the skills directory is the catalog. */
+export function normalizeSkillsOff(raw: unknown): string[] | null {
+  return normalizeNames(raw);
+}
+
 function normalizeNames(raw: unknown): string[] | null {
   if (!Array.isArray(raw) || raw.length > 32) return null;
   const names = new Set<string>();
@@ -127,6 +135,7 @@ export class SettingsStore {
       ...(titleModel ? { titleModel } : {}),
       autoUpdate: this.#value("autoUpdate") === "1",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
+      skillsOff: this.#json("skillsOff", normalizeSkillsOff, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
       // `"drop"`: a row the bundled catalog has since taken is redundant, not malformed.
       customTools: this.#json(
@@ -177,6 +186,11 @@ export class SettingsStore {
 
   setExtensions(names: string[]): Settings {
     this.#set("extensions", JSON.stringify(names));
+    return this.get();
+  }
+
+  setSkillsOff(names: string[]): Settings {
+    this.#set("skillsOff", JSON.stringify(names));
     return this.get();
   }
 
