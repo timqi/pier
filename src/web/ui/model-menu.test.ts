@@ -5,12 +5,15 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { ModelRef, ThinkingLevel } from "../../core/types.js";
 import { getJson, sendJson } from "./api.js";
 import { openPanel } from "./menu.js";
-import { modelPicker } from "./model-picker.js";
+import { launchField, modelPicker } from "./model-picker.js";
 import { createModelMenuPane } from "./model-menu.js";
 
 vi.mock("./api.js", () => ({ failure: vi.fn(async () => "failed"), getJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./menu.js", () => ({ closeMenu: vi.fn(), openPanel: vi.fn() }));
-vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => new Element("div")) }));
+vi.mock("./model-picker.js", () => ({
+  modelPicker: vi.fn(() => new Element("div")),
+  launchField: vi.fn(() => new Element("div")),
+}));
 vi.mock("./icons.js", () => ({ icon: () => new Element("svg") }));
 
 class Element {
@@ -69,7 +72,11 @@ beforeEach(() => {
   });
   vi.mocked(getJson).mockImplementation((url: string) =>
     Promise.resolve(
-      url.startsWith("/api/models") ? { ok: true, value: [pinned, free] } : { ok: true, value: { modelMenu: [stored] } },
+      url.startsWith("/api/models")
+        ? { ok: true, value: [pinned, free] }
+        : url.startsWith("/api/config/defaults")
+        ? { ok: true, value: { defaultModel: pinned, defaultThinkingLevel: null } }
+        : { ok: true, value: { modelMenu: [stored] } },
     ) as never
   );
 });
@@ -77,7 +84,7 @@ beforeEach(() => {
 async function pane(): Promise<Element> {
   const built = createModelMenuPane();
   built.load();
-  await vi.waitFor(() => expect(getJson).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(getJson).toHaveBeenCalledTimes(3));
   await Promise.resolve();
   return built.el as unknown as Element;
 }
@@ -121,9 +128,37 @@ it("has nothing to pin once every model is pinned", async () => {
     Promise.resolve(
       url.startsWith("/api/models")
         ? { ok: true, value: [pinned] }
+        : url.startsWith("/api/config/defaults")
+        ? { ok: true, value: { defaultModel: null, defaultThinkingLevel: null } }
         : { ok: true, value: { modelMenu: [stored] } },
     ) as never
   );
   const el = await pane();
   expect(button(el, "Pin model").disabled).toBe(true);
+});
+
+it("draws the default model from settings.json, writes a change at once and redraws from the answer", async () => {
+  const el = await pane();
+  const drawn = vi.mocked(launchField).mock.lastCall!;
+  expect(drawn[0]).toBe("Default model");
+  expect(drawn[1]).toEqual({ model: pinned, thinking: null });
+  expect(drawn[2]).toEqual([pinned, free]);
+
+  vi.mocked(sendJson).mockResolvedValue(
+    { ok: true, json: async () => ({ defaultModel: free, defaultThinkingLevel: "low" }) } as unknown as Response,
+  );
+  drawn[3]({ model: free, thinking: "low" });
+  await vi.waitFor(() => expect(el.textContent).toContain("Saved"));
+  expect(vi.mocked(sendJson).mock.lastCall).toEqual([
+    "/api/config/defaults",
+    { defaultModel: free, defaultThinkingLevel: "low" },
+    "PUT",
+  ]);
+  expect(vi.mocked(launchField).mock.lastCall![1]).toEqual({ model: free, thinking: "low" });
+
+  // A refused write draws what is stored, not what was asked for.
+  vi.mocked(sendJson).mockResolvedValue({ ok: false } as unknown as Response);
+  vi.mocked(launchField).mock.lastCall![3]({ model: null, thinking: null });
+  await vi.waitFor(() => expect(el.textContent).toContain("failed"));
+  expect(vi.mocked(launchField).mock.lastCall![1]).toEqual({ model: free, thinking: "low" });
 });

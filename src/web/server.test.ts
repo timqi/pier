@@ -162,7 +162,7 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
     globalDir: "/home/t/.pier/pi",
     listFiles: async (s) => {
       calls.push(`listFiles:${at(s)}`);
-      return [{ name: "SYSTEM.md", exists: true }];
+      return [{ name: "SYSTEM.md", exists: true, readonly: false }];
     },
     readFile: async (s, name) => {
       calls.push(`read:${at(s)}/${name}`);
@@ -171,6 +171,13 @@ function fakeConfig(): ConfigStore & { calls: string[] } {
     },
     writeFile: async (s, name, content) => {
       calls.push(`write:${at(s)}/${name}=${content}`);
+    },
+    readDefaults: async () => {
+      calls.push("readDefaults");
+      return { defaultModel: { provider: "anthropic", id: "claude" }, defaultThinkingLevel: "high" };
+    },
+    writeDefaults: async (defaults) => {
+      calls.push(`writeDefaults:${JSON.stringify(defaults)}`);
     },
     listResources: async (s) => {
       calls.push(`listResources:${at(s)}`);
@@ -1762,7 +1769,7 @@ describe("workbench server", () => {
     expect(globalRes.headers.get("cache-control")).toBe("no-store");
     expect(await globalRes.json()).toEqual({
       dir: "/home/t/.pier/pi",
-      files: [{ name: "SYSTEM.md", exists: true }],
+      files: [{ name: "SYSTEM.md", exists: true, readonly: false }],
       resources: { extensions: [{ name: "quiet.ts", link: false }], skills: [] },
     });
     // /tmp is a session cwd (factory.list); anything else is rejected — and a
@@ -1794,6 +1801,36 @@ describe("workbench server", () => {
       body: "{}",
     });
     expect(noBody.status).toBe(400);
+  });
+
+  it("reads and writes the session defaults as a unit, answering with the stored state", async () => {
+    const { app, config } = setup();
+    const read = await app.request("/api/config/defaults");
+    expect(read.headers.get("cache-control")).toBe("no-store");
+    expect(await read.json()).toEqual({
+      defaultModel: { provider: "anthropic", id: "claude" }, defaultThinkingLevel: "high",
+    });
+    const put = (body: unknown) => app.request("/api/config/defaults", { method: "PUT", body: JSON.stringify(body) });
+    const cleared = await put({ defaultModel: null, defaultThinkingLevel: null });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toEqual({
+      defaultModel: { provider: "anthropic", id: "claude" }, defaultThinkingLevel: "high",
+    });
+    expect(config.calls).toContain('writeDefaults:{"defaultModel":null,"defaultThinkingLevel":null}');
+    await put({ defaultModel: { provider: "openai", id: "o" }, defaultThinkingLevel: "low" });
+    expect(config.calls).toContain(
+      'writeDefaults:{"defaultModel":{"provider":"openai","id":"o"},"defaultThinkingLevel":"low"}',
+    );
+    // Half a body, a half pair or an unknown level never reaches the store.
+    const before = config.calls.length;
+    for (const body of [
+      {},
+      { defaultModel: null },
+      { defaultModel: { provider: "openai" }, defaultThinkingLevel: null },
+      { defaultModel: null, defaultThinkingLevel: "deep" },
+      "nope",
+    ]) expect((await put(body)).status).toBe(400);
+    expect(config.calls.length).toBe(before);
   });
 
   it("serves read-only resources and validates kind", async () => {
@@ -2384,6 +2421,15 @@ describe("configuration reaching live sessions", () => {
       "agent file",
       await app.request("/api/config/files/SYSTEM.md?scope=global", {
         ...json({ content: "new", expected: "content" }),
+        method: "PUT",
+      }),
+    );
+
+    attached(router, session);
+    await recycled(
+      "session defaults",
+      await app.request("/api/config/defaults", {
+        ...json({ defaultModel: null, defaultThinkingLevel: "low" }),
         method: "PUT",
       }),
     );

@@ -5,12 +5,14 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { isProviderApi, validateEndpoint, validateProviderSetup } from "../core/types.js";
+import { isProviderApi, isThinkingLevel, validateEndpoint, validateProviderSetup } from "../core/types.js";
 import { pierPath } from "../paths.js";
 import { mergeSnapshotProviders, normalizeAgentSnapshot, snapshotProviders } from "./config-sync.js";
 import type {
   AgentConfigSnapshot,
   AgentConfigSync,
+  AgentDefaults,
+  ConfigFile,
   ConfigResource,
   ConfigResourceKind,
   ConfigScope,
@@ -24,8 +26,10 @@ import type {
 
 const GLOBAL_FILES = ["SYSTEM.md", "AGENTS.md", "settings.json", "models.json"];
 const PROJECT_FILES = ["AGENTS.md"];
-// settings.json is on the list for two fields: the default model and its
-// reasoning effort. Everything else in it is machine-local.
+// settings.json is Pier's to write: the default model and its reasoning effort
+// go through writeDefaults, and are the only fields a snapshot carries. The
+// Console shows the file and never edits it; the rest of it is machine-local.
+const READONLY_FILES = ["settings.json"];
 const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
 const RESOURCE_DEPTH = 3; // extensions/skills nest at most a couple of levels
 
@@ -140,11 +144,12 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       : join(scope.cwd, ".pi", kind);
   }
 
-  async listFiles(scope: ConfigScope): Promise<{ name: string; exists: boolean }[]> {
+  async listFiles(scope: ConfigScope): Promise<ConfigFile[]> {
     return Promise.all(
       this.fileNames(scope).map(async (name) => ({
         name,
         exists: await pathExists(this.filePath(scope, name)),
+        readonly: READONLY_FILES.includes(name),
       })),
     );
   }
@@ -159,6 +164,9 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
 
   async writeFile(scope: ConfigScope, name: string, content: string, expected?: string): Promise<void> {
     const path = this.filePath(scope, name);
+    if (READONLY_FILES.includes(name)) {
+      throw new Error(`${name} is written by Pier; edit it on disk, then run pier reload`);
+    }
     return this.#withWrite(async () => {
       const current = await readOptional(path);
       const visible = name === "models.json" ? maskModels(current) : current;
@@ -260,6 +268,23 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
     });
   }
 
+  async readDefaults(): Promise<AgentDefaults> {
+    await this.#writes;
+    this.#assertSnapshot();
+    return settingsDefaults(readSettings(await readNullable(join(this.agentDir, "settings.json"))));
+  }
+
+  writeDefaults(defaults: AgentDefaults): Promise<void> {
+    return this.#withWrite(async () => {
+      const path = join(this.agentDir, "settings.json");
+      const raw = await readNullable(path);
+      const next = withDefaults(raw, defaults);
+      if (typeof next !== "string" || next === raw) return;
+      await fs.mkdir(this.agentDir, { recursive: true });
+      await atomicWrite(path, next);
+    });
+  }
+
   exportSnapshot(): Promise<AgentConfigSnapshot> {
     return this.#withWrite(async () => {
       const [system, agents, raw, rawSettings] = await Promise.all(
@@ -267,14 +292,10 @@ export class PiConfigStore implements ConfigStore, AgentConfigSync {
       );
       const parsed = raw?.trim() ? parseModels(raw) : {};
       if (!parsed) throw new Error("models.json must be valid JSON before exporting configuration");
-      const settings = readSettings(rawSettings);
       return normalizeAgentSnapshot({
         files: { "SYSTEM.md": system, "AGENTS.md": agents },
         providers: snapshotProviders(parsed.providers),
-        defaultModel: defaultModelRef(settings),
-        // Unlike the pair, a lone level needs no reading of its own; the
-        // snapshot boundary is the one place that says which ones exist.
-        defaultThinkingLevel: settings.defaultThinkingLevel ?? null,
+        ...settingsDefaults(readSettings(rawSettings)),
       });
     });
   }
@@ -520,11 +541,19 @@ function defaultModelRef(settings: Record<string, unknown>): ModelRef | null {
   return { provider, id };
 }
 
+function settingsDefaults(settings: Record<string, unknown>): AgentDefaults {
+  const level = settings.defaultThinkingLevel;
+  if (level !== undefined && !isThinkingLevel(level)) {
+    throw new Error("settings.json default reasoning effort must be a level Pi accepts");
+  }
+  return { defaultModel: defaultModelRef(settings), defaultThinkingLevel: level ?? null };
+}
+
 /** The incoming defaults replace their own fields and nothing else; a field
  *  the source never states (an older one) leaves the local settings.json
  *  alone, and `null` is a stated "no default" that clears it. Unchanged
  *  content returns the original bytes so the import stays a no-op. */
-function withDefaults(raw: string | null | undefined, incoming: AgentConfigSnapshot): string | null | undefined {
+function withDefaults(raw: string | null | undefined, incoming: Partial<AgentDefaults>): string | null | undefined {
   if (incoming.defaultModel === undefined && incoming.defaultThinkingLevel === undefined) return raw;
   const settings = readSettings(raw);
   const next = { ...settings };

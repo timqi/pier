@@ -42,12 +42,20 @@ describe("config files", () => {
   it("lists the whitelist per scope, with existence", async () => {
     writeFileSync(join(agentDir, "SYSTEM.md"), "be nice");
     expect(await store.listFiles(GLOBAL)).toEqual([
-      { name: "SYSTEM.md", exists: true },
-      { name: "AGENTS.md", exists: false },
-      { name: "settings.json", exists: false },
-      { name: "models.json", exists: false },
+      { name: "SYSTEM.md", exists: true, readonly: false },
+      { name: "AGENTS.md", exists: false, readonly: false },
+      { name: "settings.json", exists: false, readonly: true },
+      { name: "models.json", exists: false, readonly: false },
     ]);
-    expect(await store.listFiles(project)).toEqual([{ name: "AGENTS.md", exists: false }]);
+    expect(await store.listFiles(project)).toEqual([{ name: "AGENTS.md", exists: false, readonly: false }]);
+  });
+
+  it("shows settings.json but refuses to write it as a file", async () => {
+    writeFileSync(join(agentDir, "settings.json"), '{"shellPath":"/bin/zsh"}');
+    expect(await store.readFile(GLOBAL, "settings.json")).toBe('{"shellPath":"/bin/zsh"}');
+    await expect(store.writeFile(GLOBAL, "settings.json", "{}", '{"shellPath":"/bin/zsh"}'))
+      .rejects.toThrow(/written by Pier.*pier reload/);
+    expect(readFileSync(join(agentDir, "settings.json"), "utf8")).toBe('{"shellPath":"/bin/zsh"}');
   });
 
   it("round-trips global and project files; missing reads as empty", async () => {
@@ -83,6 +91,56 @@ describe("config files", () => {
     expect(writes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(writes.filter((result) => result.status === "rejected")).toHaveLength(1);
     expect(["first", "second"]).toContain(await store.readFile(GLOBAL, "SYSTEM.md"));
+  });
+});
+
+describe("session defaults", () => {
+  const read = (): unknown => JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
+
+  it("reads Pi defaults from a missing or empty settings.json", async () => {
+    expect(await store.readDefaults()).toEqual({ defaultModel: null, defaultThinkingLevel: null });
+    writeFileSync(join(agentDir, "settings.json"), "");
+    expect(await store.readDefaults()).toEqual({ defaultModel: null, defaultThinkingLevel: null });
+  });
+
+  it("writes the pair and the level around every other key, and clears them with null", async () => {
+    writeFileSync(join(agentDir, "settings.json"), '{"shellPath":"/bin/zsh","defaultThinkingLevel":"low"}');
+    await store.writeDefaults({ defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: "high" });
+    expect(read()).toEqual({ shellPath: "/bin/zsh", defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "high" });
+    expect(await store.readDefaults()).toEqual({
+      defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: "high",
+    });
+    await store.writeDefaults({ defaultModel: null, defaultThinkingLevel: null });
+    expect(read()).toEqual({ shellPath: "/bin/zsh" });
+    expect(await store.readDefaults()).toEqual({ defaultModel: null, defaultThinkingLevel: null });
+  });
+
+  it("creates settings.json when there is none", async () => {
+    await store.writeDefaults({ defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: null });
+    expect(read()).toEqual({ defaultProvider: "proxy", defaultModel: "m" });
+  });
+
+  it("refuses a settings.json it cannot read as a whole rather than reading no default", async () => {
+    writeFileSync(join(agentDir, "settings.json"), "not json");
+    await expect(store.readDefaults()).rejects.toThrow(/settings.json must be valid JSON/);
+    await expect(store.writeDefaults({ defaultModel: null, defaultThinkingLevel: null }))
+      .rejects.toThrow(/settings.json must be valid JSON/);
+    expect(readFileSync(join(agentDir, "settings.json"), "utf8")).toBe("not json");
+    writeFileSync(join(agentDir, "settings.json"), '{"defaultModel":"m"}');
+    await expect(store.readDefaults()).rejects.toThrow(/defaultProvider and defaultModel together/);
+    writeFileSync(join(agentDir, "settings.json"), '{"defaultThinkingLevel":"deep"}');
+    await expect(store.readDefaults()).rejects.toThrow(/reasoning effort must be a level/);
+  });
+
+  it("queues behind a snapshot import so neither write lands on the other's bytes", async () => {
+    writeFileSync(join(agentDir, "settings.json"), '{"defaultThinkingLevel":"low"}');
+    const importing = store.applySnapshot({
+      files: { "SYSTEM.md": null, "AGENTS.md": null }, providers: {},
+      defaultModel: { provider: "proxy", id: "from-sync" },
+    });
+    const editing = store.writeDefaults({ defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: "high" });
+    await Promise.all([importing, editing]);
+    expect(read()).toEqual({ defaultProvider: "proxy", defaultModel: "m", defaultThinkingLevel: "high" });
   });
 });
 

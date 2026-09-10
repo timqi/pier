@@ -2,7 +2,8 @@
 // web/fs.ts: a scope is "global" or a cwd Pi already knows, never a browser path.
 
 import type { Hono } from "hono";
-import type { AgentFactory, ConfigScope, ConfigStore } from "../core/types.js";
+import { isThinkingLevel, type AgentDefaults, type AgentFactory, type ConfigScope, type ConfigStore } from "../core/types.js";
+import { normalizeModelRef } from "../settings.js";
 import { guarded } from "./route.js";
 
 export interface ConfigRouteDeps {
@@ -55,6 +56,22 @@ export function registerConfigRoutes(
     return c.json({ ok: true, content: await config.readFile(scope, name) });
   });
 
+  // settings.json is read-only as a file; its two deployment keys go through here.
+  guarded(app, "GET", "/api/config/defaults", 400, async (c) => {
+    c.header("cache-control", "no-store");
+    return c.json(await config.readDefaults());
+  });
+
+  guarded(app, "PUT", "/api/config/defaults", 400, async (c) => {
+    const defaults = parseDefaults(await c.req.json().catch(() => null));
+    if (!defaults) {
+      return c.json({ error: "defaultModel must be {provider, id} or null; defaultThinkingLevel a reasoning level or null" }, 400);
+    }
+    await config.writeDefaults(defaults);
+    onConfigWritten?.();
+    return c.json(await config.readDefaults());
+  });
+
   // Resource names may contain slashes — query params, not path params.
   guarded(app, "GET", "/api/config/resource", 400, async (c) => {
     c.header("cache-control", "no-store");
@@ -67,4 +84,14 @@ export function registerConfigRoutes(
     }
     return c.json({ content: await config.readResource(scope, kind, name) });
   });
+}
+
+/** Both fields, each stated: null is "Pi's own default", absent is a malformed body. */
+function parseDefaults(body: unknown): AgentDefaults | null {
+  if (typeof body !== "object" || body === null) return null;
+  const { defaultModel, defaultThinkingLevel } = body as Record<string, unknown>;
+  const model = defaultModel === null ? null : normalizeModelRef(defaultModel);
+  if (model === null && defaultModel !== null) return null;
+  if (defaultThinkingLevel !== null && !isThinkingLevel(defaultThinkingLevel)) return null;
+  return { defaultModel: model, defaultThinkingLevel };
 }

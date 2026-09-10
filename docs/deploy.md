@@ -123,6 +123,8 @@ All three signal the installed service.
 - `pier tools sync`: converges the tools switched on in Console → Settings into
   `~/.pier/tools/bin` (first on every session's PATH); one sync at a time per
   machine.
+- `~/.pier/pi/settings.json` is Pier's: the default model is set in Console →
+  Settings → Models; any other key is edited on disk, then `pier reload`.
 - `systemctl --user restart pier` and `pier update` are hard stops.
 - One Pier per `$PIER_HOME`: a start whose directory another live Pier holds
   logs `another Pier (pid N) owns …` and exits before opening the database. Kept

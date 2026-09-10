@@ -1,15 +1,16 @@
 // Settings → Models: the operator's pinned menu, read by agents through the
-// task tool and listed first in every picker, and the title model Pier itself calls.
+// task tool and listed first in every picker, the model every new session
+// starts on, and the title model Pier itself calls.
 
 import { Plus } from "lucide";
 import { icon } from "./icons.js";
-import { THINKING_LEVELS, type ModelRef, type ThinkingLevel } from "../../core/types.js";
+import { THINKING_LEVELS, type AgentDefaults, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
 import { btn, button, card, CONTROL, empty, field, input, select, setStatus } from "./form.js";
 import { closeMenu, openPanel } from "./menu.js";
-import { modelPicker } from "./model-picker.js";
+import { launchField, modelPicker, type LaunchChoice } from "./model-picker.js";
 
 interface MenuEntry extends ModelRef {
   thinking: ThinkingLevel;
@@ -21,6 +22,8 @@ interface MenuEntry extends ModelRef {
 const DEFAULT_THINKING: ThinkingLevel = "medium";
 
 const key = (m: ModelRef): string => `${m.provider}/${m.id}`;
+
+const asChoice = (d: AgentDefaults): LaunchChoice => ({ model: d.defaultModel, thinking: d.defaultThinkingLevel });
 
 /** What no title model means, on the trigger and on the row that clears it. */
 const TITLE_OFF = "Off — the first message is the title";
@@ -40,10 +43,13 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   let catalog: ModelRef[] = [];
   let dirty = false;
   let titleModel: ModelRef | undefined;
+  let defaults: LaunchChoice = { model: null, thinking: null };
 
   const status = h("span", "text-[11.5px]", "");
   const titleStatus = h("span", "text-[11.5px]", "");
   const titleBox = h("div", "flex items-center gap-3");
+  const defaultStatus = h("span", "text-[11.5px]", "");
+  const defaultBox = h("div", "flex flex-col gap-1.5");
   const save = button("Save menu", true);
   const listBox = h("div", "flex min-w-0 flex-col gap-2");
   const adder = h("div", "flex items-center gap-2");
@@ -183,6 +189,35 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     titleBox.replaceChildren(open, titleStatus);
   }
 
+  /** The launch picker, written on change like the title model: what is shown
+   *  is always what settings.json holds, redrawn from the server's answer. */
+  function renderDefaults(): void {
+    defaultBox.replaceChildren(
+      launchField("Default model", defaults, catalog, (next) => void saveDefaults(next)),
+      defaultStatus,
+    );
+  }
+
+  async function saveDefaults(next: LaunchChoice): Promise<void> {
+    setStatus(defaultStatus, "saving", "saving…");
+    const res = await sendJson(
+      "/api/config/defaults",
+      { defaultModel: next.model, defaultThinkingLevel: next.thinking },
+      "PUT",
+    );
+    if (!res.ok) {
+      setStatus(defaultStatus, "failed", await failure(res, "Could not save"));
+      return renderDefaults(); // back to what is stored
+    }
+    defaults = asChoice((await res.json()) as AgentDefaults);
+    setStatus(
+      defaultStatus,
+      "saved",
+      defaults.model || defaults.thinking ? "Saved — the next new session starts on it." : "Pi default.",
+    );
+    renderDefaults();
+  }
+
   function render(): void {
     listBox.replaceChildren(
       ...(entries.length
@@ -190,6 +225,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         : [empty("Nothing pinned — every picker shows the curated catalog as is.")]),
     );
     renderAdder();
+    renderDefaults();
     renderTitleModel();
   }
 
@@ -213,14 +249,19 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   function load(): void {
     if (dirty) return; // an unsaved edit survives tab hops; reload happens on save
     void (async () => {
-      const [settings, models] = await Promise.all([
+      const [settings, models, stored] = await Promise.all([
         getJson<{ modelMenu: MenuEntry[]; titleModel?: ModelRef }>("/api/settings", "Could not load the menu"),
         getJson<ModelRef[]>("/api/models", "Could not load the model catalog"),
+        getJson<AgentDefaults>("/api/config/defaults", "Could not read the default model"),
       ]);
       if (!settings.ok) return setStatus(status, "failed", settings.error);
       entries = settings.value.modelMenu;
       titleModel = settings.value.titleModel;
       catalog = models.ok ? models.value : [];
+      if (stored.ok) {
+        defaults = asChoice(stored.value);
+        defaultStatus.textContent = "";
+      } else setStatus(defaultStatus, "failed", stored.error);
       status.textContent = "";
       render();
     })();
@@ -242,6 +283,12 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
       field("Add", adder, { hint: "The list is the live catalog — only models that exist right now can be pinned." }),
       h("div", "flex items-center gap-3", save, status),
       presets,
+    ),
+    card(
+      "New sessions",
+      "The model and reasoning effort a session starts on when nothing names one — a channel, chat or task with " +
+        "its own launch choice overrides it. Pi default leaves the pick to Pi. Stored in settings.json; applies to sessions opened from now on.",
+      defaultBox,
     ),
     card(
       "Session titles",

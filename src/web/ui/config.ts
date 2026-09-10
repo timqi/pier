@@ -4,7 +4,7 @@
 
 import { ChevronRight } from "lucide";
 import { icon } from "./icons.js";
-import type { CatalogEntry, ConfigResource } from "../../core/types.js";
+import type { CatalogEntry, ConfigFile, ConfigResource } from "../../core/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
@@ -22,12 +22,12 @@ const BAND = `${PANEL_HEAD} flex flex-none items-center`;
 
 interface ConfigIndex {
   dir: string;
-  files: { name: string; exists: boolean }[];
+  files: ConfigFile[];
   resources: { extensions: ConfigResource[]; skills: ConfigResource[] };
 }
 
 type Selection =
-  | { type: "file"; name: string }
+  | { type: "file"; name: string; readonly: boolean }
   | { type: "resource"; kind: "extensions" | "skills"; name: string }
   | { type: "bundled"; name: string }
   /** One pane for every command-line tool: a row and a switch each, because a
@@ -356,7 +356,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       closeSync();
       selection = sel;
       renderNav(index); // re-highlight
-      if (sel.type === "file") void openFile(sel.name);
+      if (sel.type === "file") void openFile(sel.name, sel.readonly);
       else if (sel.type === "bundled") openBundled(sel.name);
       else if (sel.type === "tools") openTools();
       else if (sel.type === "sync") openSync();
@@ -369,7 +369,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     }
     rows.push(navSection("Files"));
     for (const f of index.files) {
-      const sel: Selection = { type: "file", name: f.name };
+      const sel: Selection = { type: "file", name: f.name, readonly: f.readonly };
       rows.push(navRow(f.name, isActive(sel), !f.exists, () => open(sel)));
     }
     if (scope === "global") {
@@ -427,7 +427,9 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       ...rest,
     );
 
-  async function openFile(name: string): Promise<void> {
+  /** A `readonly` file is Pier's to write: the viewer, no editor, and one
+   *  line on where its content comes from. */
+  async function openFile(name: string, readonly: boolean): Promise<void> {
     const request = ++paneRequest;
     const got = await getJson<{ content: string }>(
       `/api/config/files/${encodeURIComponent(name)}${q()}`,
@@ -489,7 +491,13 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       const lang = await langFor(name); // first file of the session waits for hljs
       if (request !== paneRequest) return;
       pane.replaceChildren(
-        paneBar(name, status, actions(edit)),
+        readonly
+          ? paneBar(name, h("span", "ml-auto text-[11px] uppercase tracking-wide text-neutral-400", "read-only"))
+          : paneBar(name, status, actions(edit)),
+        ...(readonly
+          ? [h("p", "border-b border-neutral-200 px-4 py-2 text-[12.5px] leading-relaxed text-neutral-500",
+            "Pier manages this file: the default model is set in Settings → Models; other keys are edited on disk, then pier reload.")]
+          : []),
         h("div", "min-h-0 flex-1 overflow-auto", codePane(fileRows(editor.value), lang)),
       );
     };

@@ -338,6 +338,22 @@ export type ConfigScope = { kind: "global" } | { kind: "project"; cwd: string };
 
 export type ConfigResourceKind = "extensions" | "skills";
 
+/** One whitelisted agent file. `readonly` marks the file Pier itself writes:
+ *  the Console shows it and offers no editor. */
+export interface ConfigFile {
+  name: string;
+  exists: boolean;
+  readonly: boolean;
+}
+
+/** The two settings.json keys that are a deployment decision rather than a
+ *  machine one: the model a new session starts on when its caller names none,
+ *  and its reasoning effort. `null` is "Pi's own default". */
+export interface AgentDefaults {
+  defaultModel: ModelRef | null;
+  defaultThinkingLevel: ThinkingLevel | null;
+}
+
 /**
  * One read-only resource file, by path relative to its resource dir. `link`
  * marks a file reached through a symlink (a skills repo checked out elsewhere
@@ -405,12 +421,17 @@ export type CatalogEntry =
  * files at session start, never mid-run.
  */
 export interface ConfigStore {
-  /** The scope's editable files (fixed whitelist; missing files included). */
-  listFiles(scope: ConfigScope): Promise<{ name: string; exists: boolean }[]>;
+  /** The scope's files (fixed whitelist; missing files included). */
+  listFiles(scope: ConfigScope): Promise<ConfigFile[]>;
   /** Whitelisted file content, "" if absent. Secrets arrive masked. */
   readFile(scope: ConfigScope, name: string): Promise<string>;
-  /** Compare-and-write when `expected` is present; unchanged masks restore stored secrets. */
+  /** Compare-and-write when `expected` is present; unchanged masks restore
+   *  stored secrets. Refused for a `readonly` file. */
   writeFile(scope: ConfigScope, name: string, content: string, expected?: string): Promise<void>;
+  /** The global settings.json defaults; the model pair is written whole or not
+   *  at all, and every other key in the file is left as it is. */
+  readDefaults(): Promise<AgentDefaults>;
+  writeDefaults(defaults: AgentDefaults): Promise<void>;
   /** Absolute path of the global scope's directory — the UI shows where
    *  "Global" actually lives, which moves with PIER_HOME. */
   readonly globalDir: string;
