@@ -51,9 +51,10 @@ export const packageLabel = (source: string): string =>
 
 /** Mirrors agent/packages.ts `kindOf`, for the row drawn before the server answers. */
 const kindOf = (source: string): Package["kind"] =>
-  source.startsWith("npm:") ? "npm" : /^(git:|\w+:\/\/)/.test(source) ? "git" : "path";
+  source.startsWith("npm:") ? "npm" : /^(git:|(https?|ssh|git):\/\/)/.test(source) ? "git" : "path";
 
-const isBuiltIn = (pkg: Package): boolean => pkg.kind === "pier" || pkg.kind === "local";
+/** Not installable, removable or updatable: `pier` ships with Pier, `local` is the agent dir. */
+export const isBuiltIn = (pkg: Package): boolean => pkg.kind === "pier" || pkg.kind === "local";
 
 const dirOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || "/";
 
@@ -148,7 +149,7 @@ export function createRegistry(deps: RegistryDeps) {
     if (!pkg) return renderError(`unknown package: ${source}`);
     const status = h("span", STATUS, "");
     if (note) setStatus(status, note.state, note.text);
-    const busy = registry?.busy === pkg.source || (registry?.busy === "every package" && !isBuiltIn(pkg));
+    const busy = registry?.busy === pkg.source;
     if (busy && !note) setStatus(status, "saving", `${pkg.installedPath ? "updating" : "installing"}…`);
     const redraw = (outcome: Outcome): void => {
       if (deps.live(ticket)) openPackage(source, scope, outcome);

@@ -60,7 +60,7 @@ export function createSettingsView(
   /** Tab clicks route (#/settings/<topic>) so refresh and Back keep the tab. */
   onTopic: (topic: string) => void,
   /** Agent → Packages' Browse files: the Files overlay on a package directory. */
-  openFiles: (dir: string, select: string) => void,
+  openFiles: (dir: string, select?: string) => void,
 ): ConsoleView {
   const stored = localStorage.getItem(TOPIC_KEY) ?? undefined;
   let topic: Topic = isTopic(stored) ? stored : "models";

@@ -13,7 +13,7 @@ import { badge, BAND, btn, CONTROL, empty, field, PANE, setStatus, textInput, to
 import { langFor } from "./highlight.js";
 import { icon } from "./icons.js";
 import { configSyncPane } from "./config-sync.js";
-import { createRegistry, packageLabel, type RegistrySelection } from "./packages-pane.js";
+import { createRegistry, isBuiltIn, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
 interface ConfigIndex {
   dir: string;
@@ -102,7 +102,7 @@ export function removalStep(
 export function createConfigView(
   root: HTMLElement,
   getCwds: () => string[],
-  openFiles: (dir: string, select: string) => void,
+  openFiles: (dir: string, select?: string) => void,
 ): ConsoleView {
   let scope = "global";
   let selection: Selection | null = null;
@@ -308,15 +308,14 @@ export function createConfigView(
 
   /** A package and, when open, its resources grouped by kind under it. */
   function packageRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
-    const busy = registry.registry?.busy ?? null;
     const sel: Selection = { type: "package", source: pkg.source, scope: pkg.scope };
     const tags: HTMLElement[] = [];
-    if (busy === pkg.source || (busy === "every package" && pkg.kind !== "pier" && pkg.kind !== "local")) {
+    if (registry.registry?.busy === pkg.source) {
       tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
     } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
     if (pkg.scope === "project") tags.push(navBadge("project"));
     // Dim: configured, and not on disk. The built-ins have no install path to speak of.
-    const missing = pkg.installedPath === null && pkg.kind !== "pier" && pkg.kind !== "local";
+    const missing = pkg.installedPath === null && !isBuiltIn(pkg);
     const isOpen = isExpanded(pkg);
     const chevron = h("button", "flex w-5 flex-none cursor-pointer items-center justify-center self-stretch text-neutral-500 hover:bg-neutral-100", icon(ChevronRight, "chev h-3 w-3"));
     if (isOpen) chevron.classList.add("chev-open");

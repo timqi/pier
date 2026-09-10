@@ -19,7 +19,7 @@ const git = async (root: string, ...args: string[]): Promise<string> =>
   (await run("git", ["-C", root, ...args], { maxBuffer: MAX_DIFF_BYTES })).stdout;
 
 export function registerExplorerRoutes(app: Hono): void {
-  // Not a repo → { branch: null }, which the UI renders as "no git".
+  // Not a repo → { branch: null }: the Files view draws no compare, no filter.
   guarded(app, "GET", "/api/explorer/git", 404, async (c) => {
     c.header("cache-control", "no-store");
     const root = await scoped(c.req.query("root"));

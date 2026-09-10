@@ -103,11 +103,6 @@ export function normalizeTools(raw: unknown): string[] | null {
   return normalizeNames(raw);
 }
 
-/** Shape only: the skills directory is the catalog. */
-export function normalizeSkillsOff(raw: unknown): string[] | null {
-  return normalizeNames(raw);
-}
-
 function normalizeNames(raw: unknown): string[] | null {
   if (!Array.isArray(raw) || raw.length > 32) return null;
   const names = new Set<string>();
@@ -135,7 +130,7 @@ export class SettingsStore {
       ...(titleModel ? { titleModel } : {}),
       autoUpdate: this.#value("autoUpdate") === "1",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
-      skillsOff: this.#json("skillsOff", normalizeSkillsOff, "a list of names") ?? [],
+      skillsOff: this.#json("skillsOff", normalizeNames, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
       // `"drop"`: a row the bundled catalog has since taken is redundant, not malformed.
       customTools: this.#json(
