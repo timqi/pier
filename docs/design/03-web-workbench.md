@@ -136,7 +136,8 @@ browser keeps no second session order.
 
 ### Search palette (`palette.ts`, ⌘K)
 
-- Empty: Running, the first seven of the rail as Recent, Actions (New session
+- Empty: Running (streaming, unread or subagents in flight — everything the
+  rail's dot marks), the first seven of the rest as Recent, Actions (New session
   here; New session in… → the rail's directory menu), Console destinations.
 - Typed: Actions (matching directories, Console entries) and one Sessions
   list — title/directory/channel matches from the list in hand, then content

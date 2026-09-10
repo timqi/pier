@@ -119,18 +119,20 @@ const waitingForYou = (s: SessionInfo): boolean => s.unread;
 /** One wording for the dot's title and the chat header's running chip. */
 export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
 
+/** A session with something going on in it: running, waiting for a look, or
+ *  subagents in flight — what the dot marks, and what the palette lists first. */
+export const isLive = (s: SessionInfo): boolean => s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0;
+
 /** Green = running, amber = waiting for a look, sky = subagents in flight.
  *  Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
-  const mark: [string, string] | null =
+  if (!isLive(s)) return [];
+  const mark: [string, string] =
     s.state === "streaming"
       ? ["bg-green-500 animate-pulse", "working…"]
       : waitingForYou(s)
         ? ["bg-amber-500", "turn finished — not viewed yet"]
-        : s.activeRuns > 0
-          ? ["bg-sky-500", runsLabel(s.activeRuns)]
-          : null;
-  if (!mark) return [];
+        : ["bg-sky-500", runsLabel(s.activeRuns)];
   const dot = h("span", `h-2 w-2 flex-none rounded-full ${mark[0]}`);
   dot.title = mark[1];
   return [dot];

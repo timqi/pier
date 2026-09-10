@@ -7,7 +7,7 @@ import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
 import { listStep, menuOpen } from "./menu.js";
-import { openNewSession, orderSessions, projectCwds, stateDot, type SessionInfo } from "./sidebar.js";
+import { isLive, openNewSession, orderSessions, projectCwds, stateDot, type SessionInfo } from "./sidebar.js";
 import { shortcut } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
 import type { SearchHit } from "../../core/types.js";
@@ -229,11 +229,10 @@ function render(): void {
 
   const sections: [string, (Target | HTMLElement)[]][] = [];
   if (!q) {
-    const running = ordered.filter((s) => s.state === "streaming");
     const current = byId.get(deps.currentId() ?? "");
     sections.push(
-      ["Running", running.map(sessionRow)],
-      ["Recent", ordered.filter((s) => s.state !== "streaming").slice(0, RECENT).map(sessionRow)],
+      ["Running", ordered.filter(isLive).map(sessionRow)],
+      ["Recent", ordered.filter((s) => !isLive(s)).slice(0, RECENT).map(sessionRow)],
       ["Actions", [...(current ? [newIn(current.cwd)] : []), newAnywhere]],
       ["Console", consoleRows],
     );
