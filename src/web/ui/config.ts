@@ -2,7 +2,8 @@
 // to act on the selected item. The agent files and the command-line tools are
 // drawn here; the package registry's panes are packages-pane.ts.
 
-import type { CatalogEntry, ConfigFile } from "../../core/types.js";
+import { ChevronRight } from "lucide";
+import type { CatalogEntry, ConfigFile, Package } from "../../core/types.js";
 // Type-only, erased at build: web's own wire vocabulary (architecture.md).
 import type { ToolsSyncNote } from "../types.js";
 import { failure, getJson, sendJson } from "./api.js";
@@ -10,6 +11,7 @@ import { codePane, fileRows } from "./code.js";
 import { basename, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, btn, CONTROL, empty, field, PANEL, PANEL_HEAD, setStatus, textInput, toggle } from "./form.js";
 import { langFor } from "./highlight.js";
+import { icon } from "./icons.js";
 import { configSyncPane } from "./config-sync.js";
 import { createRegistry, packageLabel, type RegistrySelection } from "./packages-pane.js";
 
@@ -175,6 +177,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     changed: () => renderNav(lastIndex),
     select: (sel) => {
       selection = sel;
+      // A resource picked from its package's pane is shown where it sits.
+      if (sel?.type === "resource") expanded.set(sel.source, true);
       renderNav(lastIndex);
     },
   });
@@ -269,26 +273,81 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       "on",
     );
 
-  function navRow(
-    label: string,
-    active: boolean,
-    dim: boolean,
-    onPick: () => void,
-    depth = 0,
+  interface RowOptions {
+    depth?: number;
     /** `navBadge()`s and `onBadge()`, trailing the label. */
-    ...tags: HTMLElement[]
-  ): HTMLElement {
+    tags?: HTMLElement[];
+    /** The resource's `state`, as a second line: visible, not a hover tooltip (phones have none). */
+    note?: string | null;
+    /** No left gutter: a chevron already sits there. */
+    flush?: boolean;
+  }
+
+  function navRow(label: string, active: boolean, dim: boolean, onPick: () => void, opts: RowOptions = {}): HTMLElement {
     const row = h(
       "button",
       `config-row flex w-full cursor-pointer items-center gap-1.5 py-1.5 pr-3 text-left transition-colors hover:bg-neutral-100 ${
         active ? "bg-indigo-50 font-medium hover:bg-indigo-50" : ""
       } ${dim ? "text-neutral-400" : ""}`,
     );
-    row.append(h("span", "truncate", label), ...tags);
-    row.style.paddingLeft = `${20 + depth * 14}px`;
+    const text = h("span", "truncate", label);
+    if (opts.note) {
+      const note = h("span", "truncate text-[11px] font-normal leading-4 text-amber-700", opts.note);
+      note.title = opts.note;
+      row.append(h("span", "flex min-w-0 flex-1 flex-col", text, note));
+    } else row.append(text);
+    row.append(...(opts.tags ?? []));
+    row.style.paddingLeft = `${opts.flush ? 0 : 20 + (opts.depth ?? 0) * 14}px`;
     row.title = label;
     row.onclick = onPick;
     return row;
+  }
+
+  /** Which package rows are open; a redraw keeps them. Pier's own two start open. */
+  const expanded = new Map<string, boolean>();
+  const isExpanded = (pkg: Package): boolean => expanded.get(pkg.source) ?? (pkg.kind === "pier" || pkg.kind === "local");
+
+  /** A package and, when open, its resources grouped by kind under it. */
+  function packageRows(pkg: Package, isActive: (sel: Selection) => boolean, open: (sel: Selection) => void): HTMLElement[] {
+    const busy = registry.registry?.busy ?? null;
+    const sel: Selection = { type: "package", source: pkg.source, scope: pkg.scope };
+    const tags: HTMLElement[] = [];
+    if (busy === pkg.source || (busy === "every package" && pkg.kind !== "pier" && pkg.kind !== "local")) {
+      tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
+    } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
+    if (pkg.scope === "project") tags.push(navBadge("project"));
+    // Dim: configured, and not on disk. The built-ins have no install path to speak of.
+    const missing = pkg.installedPath === null && pkg.kind !== "pier" && pkg.kind !== "local";
+    const isOpen = isExpanded(pkg);
+    const chevron = h("button", "flex w-5 flex-none cursor-pointer items-center justify-center self-stretch text-neutral-500 hover:bg-neutral-100", icon(ChevronRight, "chev h-3 w-3"));
+    if (isOpen) chevron.classList.add("chev-open");
+    chevron.title = `${isOpen ? "Collapse" : "Expand"} ${packageLabel(pkg.source)}`;
+    chevron.setAttribute("aria-label", chevron.title);
+    chevron.setAttribute("aria-expanded", String(isOpen));
+    chevron.onclick = () => {
+      expanded.set(pkg.source, !isOpen);
+      renderNav(lastIndex);
+    };
+    const label = navRow(packageLabel(pkg.source), isActive(sel), missing, () => open(sel), { tags, flush: true });
+    const rows = [h("div", `flex items-stretch ${isActive(sel) ? "bg-indigo-50" : ""}`, chevron, label)];
+    if (!isOpen) return rows;
+    // A kind badge only where the name alone does not say which resource this is.
+    const names = pkg.resources.map((r) => r.name);
+    const ambiguous = new Set(names.filter((n, i) => names.indexOf(n) !== i));
+    for (const [title, kind] of [["extensions", "extension"], ["skills", "skill"]] as const) {
+      const found = pkg.resources.filter((r) => r.kind === kind);
+      if (!found.length) continue;
+      const group = h("div", "py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-400", title);
+      group.style.paddingLeft = "34px";
+      rows.push(group);
+      for (const r of found) {
+        const rsel: Selection = { type: "resource", source: pkg.source, kind, path: r.path };
+        rows.push(navRow(r.name, isActive(rsel), !r.enabled, () => open(rsel), {
+          depth: 2, note: r.state, tags: ambiguous.has(r.name) ? [navBadge(kind)] : [],
+        }));
+      }
+    }
+    return rows;
   }
 
   function renderNav(index: ConfigIndex | null): void {
@@ -323,30 +382,8 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
     const add = btn("Add package", `normal-case tracking-normal hover:underline ${isActive(addSel) ? "text-indigo-700" : "text-indigo-600"}`);
     add.onclick = () => open(addSel);
     rows.push(navSection("Packages", scope === "global" ? add : undefined));
-    const packages = registry.registry?.packages ?? [];
-    const busy = registry.registry?.busy ?? null;
     if (registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-red-600", registry.error));
-    for (const pkg of packages) {
-      const sel: Selection = { type: "package", source: pkg.source, scope: pkg.scope };
-      const tags: HTMLElement[] = [];
-      if (busy === pkg.source || (busy === "every package" && pkg.kind !== "pier" && pkg.kind !== "local")) {
-        tags.push(h("span", "flex-none text-[11px] text-neutral-400", pkg.installedPath ? "updating…" : "installing…"));
-      } else if (pkg.resources.some((r) => r.enabled)) tags.push(onBadge());
-      if (pkg.scope === "project") tags.push(navBadge("project"));
-      // Dim: configured, and not on disk. The built-ins have no install path to speak of.
-      const missing = pkg.installedPath === null && pkg.kind !== "pier" && pkg.kind !== "local";
-      rows.push(navRow(packageLabel(pkg.source), isActive(sel), missing, () => open(sel), 0, ...tags));
-    }
-    // Flat, across packages: a resource has one switch wherever it is shown.
-    for (const [title, kind] of [["Extensions", "extension"], ["Skills", "skill"]] as const) {
-      rows.push(navSection(title));
-      const found = packages.flatMap((pkg) => pkg.resources.filter((r) => r.kind === kind).map((r) => ({ pkg, r })));
-      if (!found.length && !registry.error) rows.push(h("p", "py-1 pl-5 pr-3 text-[12.5px] text-neutral-400", "none"));
-      for (const { pkg, r } of found) {
-        const sel: Selection = { type: "resource", source: pkg.source, kind, path: r.path };
-        rows.push(navRow(r.name, isActive(sel), !r.enabled, () => open(sel), 0, navBadge(packageLabel(pkg.source))));
-      }
-    }
+    for (const pkg of registry.registry?.packages ?? []) rows.push(...packageRows(pkg, isActive, open));
     if (scope === "global") {
       // One row, not one per binary: the tools differ by name and version and
       // nothing else, so a page each would say the same three facts four times.
@@ -355,7 +392,7 @@ export function createConfigView(root: HTMLElement, getCwds: () => string[]): Co
       else {
         const sel: Selection = { type: "tools" };
         const on = catalog.filter((t) => t.enabled).length;
-        rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), 0, ...(on ? [onBadge()] : [])));
+        rows.push(navRow("command-line tools", isActive(sel), false, () => open(sel), { tags: on ? [onBadge()] : [] }));
       }
     }
     navList.replaceChildren(...rows);

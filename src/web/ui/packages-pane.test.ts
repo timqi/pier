@@ -19,7 +19,10 @@ class Element {
   onchange: (() => void) | null = null;
   oninput: (() => void) | null = null;
   onkeydown: ((ev: { key: string }) => void) | null = null;
+  attrs: Record<string, string> = {};
   constructor(readonly tag: string) {}
+  setAttribute(name: string, value: string) { this.attrs[name] = value; }
+  querySelectorAll(selector: string): Element[] { return walk(this).filter((el) => el.tag === selector); }
   get options(): Element[] { return this.children.filter((c): c is Element => typeof c !== "string"); }
   append(...children: (Element | string)[]) { this.children.push(...children); }
   replaceChildren(...children: (Element | string)[]) { this.children = children; }
@@ -51,12 +54,13 @@ vi.mock("./form.js", () => ({
   textInput: (value: string, _ph: string, onInput: (v: string) => void) => {
     const el = make("input"); el.value = value; el.oninput = () => onInput(el.value); return el;
   },
-  toggle: (label: string, _hint: string, checked: boolean, onChange: (v: boolean) => void) => {
+  toggle: (label: string, hint: string, checked: boolean, onChange: (v: boolean) => void) => {
     const box = make("input"); box.type = "checkbox"; box.checked = checked; box.onchange = () => onChange(box.checked);
-    return make("label", "", box, label);
+    return make("label", "", box, label, make("span", "hint", hint));
   },
 }));
 vi.mock("./code.js", () => ({ fileRows: (text: string) => text, codePane: (text: string) => make("pre", "", text) }));
+vi.mock("./icons.js", () => ({ icon: () => make("svg", "chev") }));
 vi.mock("./highlight.js", () => ({ langFor: async () => null }));
 vi.mock("./config-sync.js", () => ({ configSyncPane: () => ({ el: make("div"), dispose() {} }) }));
 
@@ -86,15 +90,18 @@ let fetcher: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promis
 let install: () => Promise<Response>;
 const settled = async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); };
 const rows = () => walk(root).filter((el) => el.className.includes("config-row"));
-const row = (label: string) => rows().find((el) => (el.children[0] as Element).textContent === label);
+const row = (label: string) => rows().find((el) => el.title === label);
 const rowText = (label: string) => row(label)!.textContent;
 const button = (text: string) => walk(root).find((el) => el.tag === "button" && el.textContent === text);
+const chevron = (label: string) => walk(root).find((el) => el.attrs["aria-label"]?.endsWith(` ${label}`))!;
+const checkbox = () => walk(root).find((el) => el.type === "checkbox")!;
 const sent = (method: string) =>
   fetcher.mock.calls.filter(([, init]) => init?.method === method).map(([url, init]) => [url, JSON.parse(String(init?.body))]);
 const status = () => walk(root).find((el) => el.className === "saved" || el.className === "failed" || el.className === "saving");
 
 beforeEach(async () => {
-  registry = { packages: [pier, local, demo], checkedAt: null, busy: null };
+  // A copy: the fetcher's PUT mutates the row it answers with.
+  registry = structuredClone({ packages: [pier, local, demo], checkedAt: null, busy: null });
   root = new Element("div");
   vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
   vi.stubGlobal("Option", class extends Element {
@@ -124,19 +131,45 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Settings → Agent", () => {
-  it("draws the nav from the registry: packages, then extensions and skills across them", () => {
+  it("draws one tree from the registry: a package row, its resources grouped by kind under it", () => {
     const sections = walk(root).filter((el) => el.className.includes("uppercase") && el.tag === "div").map((el) => el.textContent);
-    expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "Extensions", "Skills", "Tools"]);
+    expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "extensions", "skills", "extensions", "Tools"]);
+    // pier and local open by default, a third-party package closed.
     expect(rows().map((el) => el.textContent)).toEqual([
       "Configuration sync", "SYSTEM.md",
-      "pieron", "localon", "demoon",
-      "webpier", "rtklocal", "hellodemo",
-      "pier-helppier",
+      "pieron", "web", "pier-help",
+      "localon", "rtkinstalled by the rtk tool",
+      "demoon",
       "command-line tools",
     ]);
-    // A switched-off resource reads dim; a package with none on carries no badge.
+    expect(chevron("demo").attrs["aria-expanded"]).toBe("false");
+    // A switched-off resource reads dim; its state is a line in the row, not a tooltip.
     expect(row("web")!.className).toContain("text-neutral-400");
     expect(row("rtk")!.className).not.toContain("text-neutral-400");
+  });
+
+  it("expands and collapses a package from its chevron, and keeps that across redraws", async () => {
+    chevron("demo").onclick!();
+    expect(rowText("hello")).toBe("hello");
+    expect(chevron("demo").attrs["aria-expanded"]).toBe("true");
+    chevron("pier").onclick!();
+    expect(row("web")).toBeUndefined();
+    // A switch elsewhere redraws the nav; the fold state is the operator's.
+    row("hello")!.onclick!();
+    await settled();
+    checkbox().checked = false;
+    checkbox().onchange!();
+    await settled();
+    expect(row("web")).toBeUndefined();
+    expect(row("hello")!.className).toContain("text-neutral-400");
+    expect(rowText("demo")).toBe("demo"); // nothing on any more
+  });
+
+  it("draws a locked switch disabled and says whose it is", async () => {
+    row("rtk")!.onclick!();
+    await settled();
+    expect(checkbox().disabled).toBe(true);
+    expect(walk(root).some((el) => el.textContent.startsWith("Switch it under Tools"))).toBe(true);
   });
 
   it("flips one switch: the PUT names the resource, and both views redraw from the answer", async () => {

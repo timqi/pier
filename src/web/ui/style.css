@@ -854,7 +854,8 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   .chev {
     @apply inline-block flex-none text-[10px] transition-transform duration-150;
   }
-  details[open] > summary .chev {
+  details[open] > summary .chev,
+  .chev-open .chev {
     transform: rotate(90deg);
   }
   .spinner {

@@ -233,7 +233,7 @@ export function createRegistry(deps: RegistryDeps) {
 
   /** What flipping this switch writes, in one line under it. */
   const hintFor = (pkg: Package, r: PackageResource): string => {
-    if (r.locked) return `${r.state} — switch it under Tools; the tool's install writes this file and its uninstall removes it.`;
+    if (r.locked) return "Switch it under Tools: the tool's install writes this file and its uninstall removes it.";
     if (pkg.kind === "pier") {
       return r.kind === "skill"
         ? "Pier's own skill. Off, no session is offered it."
