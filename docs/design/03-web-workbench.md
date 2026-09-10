@@ -136,6 +136,9 @@ browser keeps no second session order.
   hits from `GET /api/search?q=` (user messages and replies, never steps;
   indexed by `agent/listing.ts`; one hit per session; matched line under the
   name).
+- Whitespace splits the query into terms, both locally and on the server:
+  every term must be there, in any order, within the one row or message.
+  Each term is marked in the snippet.
 - Local rows render on the keystroke; the server is asked after 80ms with the
   previous request aborted. States: `Searching messages…`, `No sessions match`,
   `Message search unavailable` (reason on hover).

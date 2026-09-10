@@ -153,17 +153,33 @@ const SEARCH_LIMIT = 8;
  *  of 64 tokens; the default 12 fits one word. */
 const SNIPPET_CHARS = 64;
 
+/** Whitespace splits a query: a space is "and this too", not a character to
+ *  find. A term is quoted where it has to be, so a phrase is still findable. */
+const termsOf = (query: string): string[] => query.split(/\s+/).filter(Boolean);
+
 /** Delimited like `snippet()` (\u0001 … \u0002, `…` for a cut), so a surface
- *  draws one shape for both paths. ASCII case folding: LIKE found the row by
- *  the same rule. */
-function around(text: string, query: string): string {
-  const hit = text.toLowerCase().indexOf(query.toLowerCase());
-  if (hit < 0) return text.slice(0, SNIPPET_CHARS);
-  const start = Math.max(0, hit - SNIPPET_CHARS / 2);
-  const end = Math.min(text.length, hit + query.length + SNIPPET_CHARS / 2);
-  return `${start ? "…" : ""}${text.slice(start, hit)}\u0001${text.slice(hit, hit + query.length)}\u0002${
-    text.slice(hit + query.length, end)
-  }${end < text.length ? "…" : ""}`;
+ *  draws one shape for both paths. Every term is marked where it first
+ *  appears inside the window, as `snippet()` marks every phrase it kept.
+ *  ASCII case folding: LIKE found the row by the same rule. */
+function around(text: string, terms: string[]): string {
+  const lower = text.toLowerCase();
+  const found = terms
+    .map((term) => ({ at: lower.indexOf(term.toLowerCase()), length: term.length }))
+    .filter((mark) => mark.at >= 0)
+    .sort((a, b) => a.at - b.at);
+  const first = found[0];
+  if (!first) return text.slice(0, SNIPPET_CHARS);
+  const start = Math.max(0, first.at - SNIPPET_CHARS / 2);
+  const end = Math.min(text.length, first.at + first.length + SNIPPET_CHARS / 2);
+  let out = start ? "…" : "";
+  let at = start;
+  for (const mark of found) {
+    // Terms that overlap one another, or reach past the window, mark once.
+    if (mark.at < at || mark.at + mark.length > end) continue;
+    out += `${text.slice(at, mark.at)}\u0001${text.slice(mark.at, mark.at + mark.length)}\u0002`;
+    at = mark.at + mark.length;
+  }
+  return `${out}${text.slice(at, end)}${end < text.length ? "…" : ""}`;
 }
 
 interface FtsRow {
@@ -293,19 +309,25 @@ export class IndexedListing implements SessionListing {
     return stale.length;
   }
 
-  /** Under three code points the trigram tokenizer has nothing to match, and a
-   *  two-character query is what a CJK word often is: substring scan instead. */
+  /** Every term must appear, in any order, anywhere in the one message. Under
+   *  three code points the trigram tokenizer has nothing to match, and a
+   *  two-character term is what a CJK word often is: substring scan instead —
+   *  one short term puts the whole query on that path. */
   search(query: string, limit = SEARCH_LIMIT): SearchHit[] {
     const sql = this.#sql();
-    const rows = [...query].length >= 3
-      // Quoted: the query is a string to find, never FTS syntax.
+    const terms = termsOf(query);
+    if (!terms.length) return [];
+    const rows = terms.every((term) => [...term].length >= 3)
+      // Quoted: a term is a string to find, never FTS syntax.
       ? sql(
         `SELECT session_id, role, at, snippet(session_fts, 0, char(1), char(2), '…', ${SNIPPET_CHARS}) AS snippet
          FROM session_fts WHERE text MATCH ? ORDER BY bm25(session_fts), at DESC`,
-      ).iterate(`"${query.replaceAll('"', '""')}"`)
+      ).iterate(terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND "))
       : sql(
-        `SELECT session_id, role, at, text FROM session_fts WHERE text LIKE ? ESCAPE '\\' ORDER BY at DESC`,
-      ).iterate(`%${query.replaceAll(/[\\%_]/g, "\\$&")}%`);
+        `SELECT session_id, role, at, text FROM session_fts WHERE ${
+          terms.map(() => "text LIKE ? ESCAPE '\\'").join(" AND ")
+        } ORDER BY at DESC`,
+      ).iterate(...terms.map((term) => `%${term.replaceAll(/[\\%_]/g, "\\$&")}%`));
     const hits: SearchHit[] = [];
     const seen = new Set<string>();
     // Walked, not fetched: a chatty session has hundreds of rows for one hit.
@@ -316,7 +338,7 @@ export class IndexedListing implements SessionListing {
         sessionId: row.session_id,
         role: row.role,
         at: row.at,
-        snippet: row.snippet ?? around(row.text ?? "", query),
+        snippet: row.snippet ?? around(row.text ?? "", terms),
       });
       if (hits.length >= limit) break;
     }

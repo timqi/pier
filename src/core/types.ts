@@ -487,8 +487,8 @@ export interface SessionSummary {
 }
 
 /** One place a search found its query: the best-ranked message of a session,
- *  with the match delimited by \u0001…\u0002 inside `snippet` so a surface can
- *  mark it without searching again. `at` names the turn — `ChatTurn.at` for a
+ *  with each match delimited by \u0001…\u0002 inside `snippet` so a surface can
+ *  mark them without searching again. `at` names the turn — `ChatTurn.at` for a
  *  user turn, `meta.completedAt` for a reply. */
 export interface SearchHit {
   sessionId: string;

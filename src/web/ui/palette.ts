@@ -121,13 +121,16 @@ function setActive(index: number): void {
 /** The row's own age: when a hit was said, else when the session was born. */
 const ageOf = (t: Target): number | undefined => t.hit?.at ?? t.session?.createdAt;
 
-/** A snippet the way the server marks it — \u0001…\u0002 around the match —
- *  drawn as text with the match in weight and ink, never a highlighter. */
+/** A snippet the way the server marks it — \u0001…\u0002 around each match —
+ *  drawn as text with the matches in weight and ink, never a highlighter. */
 function snippet(text: string): HTMLElement {
   const line = h("span", "min-w-0 flex-1 truncate text-neutral-500");
-  const [before = "", rest = ""] = text.replaceAll(/\s+/g, " ").split("\u0001", 2);
-  const [match = "", after = ""] = rest.split("\u0002", 2);
-  line.append(before, h("span", "font-medium text-neutral-800", match), after);
+  for (const part of text.replaceAll(/\s+/g, " ").split("\u0001")) {
+    const [match = "", after] = part.split("\u0002", 2);
+    // The head of the line, before any mark, is text like any unmarked tail.
+    if (after === undefined) line.append(match);
+    else line.append(h("span", "font-medium text-neutral-800", match), after);
+  }
   return line;
 }
 
@@ -190,8 +193,13 @@ const chatOf = (s: SessionInfo): string => (s.channel && s.channel !== "web" ? s
 
 function render(): void {
   const q = input.value.trim();
-  const needle = q.toLowerCase();
-  const hit = (text: string): boolean => text.toLowerCase().includes(needle);
+  // Whitespace splits the query the way the server splits it: every term has
+  // to be in the row, in any order and any of the fields joined into it.
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (text: string): boolean => {
+    const haystack = text.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  };
   const open = (run: () => void) => () => {
     dialog.close();
     run();

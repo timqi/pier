@@ -357,8 +357,15 @@ describe("the on-disk index", () => {
     const s1 = hits.find((h) => h.sessionId === "s1");
     expect(s1?.snippet).toContain("\u0001parser\u0002");
     expect(s1?.at).toBe(61_000); // the reply that says it twice outranks the prompt
-    // Case folds, and a phrase is a phrase: FTS syntax in the query is text.
+    // Case folds, and a space is "and this too": both terms, in any order.
     expect(listing.search("the parser")).toHaveLength(1);
+    expect(listing.search("parser today").map((h) => h.sessionId)).toEqual(["s1"]);
+    expect(listing.search("today please").map((h) => h.sessionId)).toEqual(["s1"]);
+    expect(listing.search("parser unrelated")).toEqual([]); // one message, not one session
+    // Each term is marked where it lands, and FTS syntax in a term is text.
+    expect(listing.search("please today")[0]?.snippet).toBe(
+      "\u0001please\u0002 fix the Parser \u0001today\u0002",
+    );
     expect(listing.search('fix "OR" nothing')).toEqual([]);
     expect(listing.search("parser", 1)).toHaveLength(1);
   });
@@ -373,7 +380,13 @@ describe("the on-disk index", () => {
     ]);
     // Three characters is a phrase again.
     expect(listing.search("解析器").map((h) => h.sessionId)).toEqual(["s1"]);
+    // One short term puts every term on the substring path, and each is marked.
+    expect(listing.search("解析 失败")).toEqual([
+      { sessionId: "s2", role: "user", at: 70_000, snippet: "\u0001解析\u0002\u0001失败\u0002了" },
+    ]);
+    expect(listing.search("解析 修好")).toEqual([]); // one message, not one session
     // LIKE's wildcards are characters here, not patterns.
     expect(listing.search("%")).toEqual([]);
+    expect(listing.search("   ")).toEqual([]);
   });
 });
