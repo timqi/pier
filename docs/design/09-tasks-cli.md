@@ -11,6 +11,11 @@ unchanged and stay in `tasks/`.
 | --- | --- | --- |
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) | run · steer · follow_up · resume |
 | `save` | files or updates an operator-visible definition — cron, watch, or a role run more than once | create · update |
+
+`handleTaskTool` speaks the same six words — `run`, `message`, `save`, `list`,
+`cancel`, `recover` — so the tool, while it lasts, and the CLI are one
+vocabulary. `save` with `task_id` updates. `message` is the one operation
+that did not exist: see below.
 | `list` | definitions, one line each | list |
 | `cancel` | `--run <id>` or `--group <id>`, cascades to descendants | cancel |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check | recover |
@@ -36,16 +41,24 @@ pier task run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>]
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
   caller's), or `--task-id` (a saved definition), or `--session <id>`
   (continue an idle session with `--prompt`).
-- **Existing run** `--run <id>`: running → steer; `--after` → follow-up
-  queued behind its current turn; terminal → resumed as a new run on the
-  same session, which takes `--callback*` like any new run. The receipt
-  says which of the three happened. `--callback*` with steer/follow-up is
-  an argv error, not silently ignored.
+- **Existing run** `--run <id>`: one request, `message {run_id, message,
+  after?, callback?, callback_session_id?}`. The server picks by
+  `isTerminal(run.state)`: running → steer; `--after` → follow-up queued
+  behind its current turn; terminal → resumed as a new run on the same
+  session, which takes `--callback*` like any new run. The receipt is
+  `{delivery: "steer" | "follow_up", message}` or `{delivery: "resume",
+  run}`. `--callback*` on a run that is not terminal is refused by the
+  server (`task: run <id> is running: callback options apply to a resumed
+  run only …`, exit 1), never silently dropped — the CLI cannot know the
+  state, and asking would be the status query this surface refuses.
+  `--run` takes nothing but `--prompt`, `--after` and `--callback*`.
 - **Batch**: the first `--member` switches `run` to a group. Flags before it
   are every member's defaults; each `--member` opens one member whose flags
-  override them. `--join` (default `all`) is the group's. Members are
-  ordinary argv — no quoting inside quoting — and at most one may read
-  `--prompt -`. Admission is all-or-nothing, as today.
+  override them; a `--task-id` member runs its definition as is, taking no
+  defaults. `--join`, `--callback`, `--callback-session` (default `all`) are
+  the group's and belong before the first `--member`. Members are ordinary
+  argv — no quoting inside quoting — and at most one may read `--prompt -`.
+  Admission is all-or-nothing, as today.
 
 `run` never reads a JSON draft: the flags cover what `parseDraft` accepts
 for an agent action, and `parseDraft` stays the one validator on the server.
@@ -67,13 +80,19 @@ no invoker to return to. Archiving stays in the Console.
 
 ## Models
 
-`--model <name>` is matched by Pier against the operator's menu
-(`settings.modelMenu`): case-insensitive substring over `provider`, `id` and
-`note`. One hit → that pin, `--thinking` defaulting to the pin's. No hit or
-several → `task: model "<name>" matches <n> of the menu: <one line per pin>`,
-exit 1, and the agent picks. A full `provider/id` is always accepted as
-written. `--model ?` prints the menu and exits 0. No standing prompt cost,
-no lookup call in the common case; "let gpt review it" is `--model gpt`.
+`--model <name>` rides as `launch.model`, a string, and is matched by Pier
+in `expandDraft` — the one door every draft passes — against the operator's
+menu (`settings.modelMenu`; the live catalog when no pin exists):
+case-insensitive substring over `provider/id` and `note`. An exact
+`provider/id` on the menu is its pin even where the substring is ambiguous.
+One hit → that pin, `--thinking` defaulting to the pin's. No hit or several →
+`task: model "<name>" matches <n> of the menu:` then one line per pin
+(`provider/id · thinking — note`; the hits when several, the whole menu when
+none), exit 1, and the agent picks. A `provider/id` nobody pinned is
+accepted as written, no thinking implied. `--model ?` posts `run` with
+`launch.model: "?"` and prints the menu the server answers with, exit 0. No
+standing prompt cost, no lookup call in the common case; "let gpt review it"
+is `--model gpt`.
 
 ## Decisions
 
