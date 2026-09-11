@@ -46,8 +46,8 @@ commands; posting in a Slack channel's main flow; editing a live session's cwd
 
 File list: `docs/architecture.md`; each file's header comment names its one
 reason. Everything but the per-platform files (`<platform>.ts`, `-api`,
-`-render`, `-panel`, and `-outbound` / `-tool` / `-directory` where present) is
-shared. A fourth adapter adds four or five files and touches only `runtime.ts`
+`-render`, `-panel`, and `-outbound` / `-directory` / `-thread` / `-cli` /
+`-transcript` where present) is shared. A fourth adapter adds four or five files and touches only `runtime.ts`
 (one entry in `ADAPTERS`) and the Console copy in `web/ui/channel-help.ts`.
 
 Shared: `Gatekeeper`, `Chains` (a `catch` on every link, bounded drain),

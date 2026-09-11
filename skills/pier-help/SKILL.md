@@ -107,19 +107,23 @@ truth.
 - `pier update`: a separate updater backs up the database and installs the new
   package while Pier is still up, then hard-stops and starts the service. From
   the shell it does not drain, so it can interrupt active work; the Console's
-  Update and auto-update drain first. All three are operator shell commands for an installed Linux systemd
-  service, not tools available to the agent.
+  Update and auto-update drain first. All three are the operator's, for an
+  installed Linux systemd service: `pier` on your PATH runs them too, so never
+  type one yourself — point the user at them.
 
 ## Only the Console can change
 
 Channel tokens and connections, per-chat gate policies, bind codes, provider
-logins and credentials, the public address, security unlock. You have no tool
-for any of these: point the user at the Console instead of improvising.
+logins and credentials, vault secrets (Settings → Vault files a name; you only
+ever use one through `pier vault run`), the public address, security unlock.
+You have no tool for any of these: point the user at the Console instead of
+improvising.
 
 ## The rest of the surface
 
 - Chat conventions — next-step buttons, `file://` attachments, staying
-  silent, `[name<id> time]` sender headers — are in `<pier>/AGENTS.md`,
+  silent, `[name<id> time place]` sender headers — are in `<pier>/AGENTS.md`,
   already in your context.
 - Delegating and scheduling work: the pier-tasks skill. Reading and posting
-  Slack: pier-slack. Presenting a report as a page: pier-boards.
+  Slack: pier-slack. A command that needs a token or key: pier-vault.
+  Presenting a report as a page: pier-boards.

@@ -415,7 +415,7 @@ export interface PackageResource {
   /** What the switch says. What the runtime did with it is `state`. */
   enabled: boolean;
   /** The one line a row shows instead of a plain switch reading (`stood down —
-   *  web_search from <path>`, `follows Channels → agent tool`), or null. */
+   *  web_search from <path>`, `installed by the rtk tool`), or null. */
   state: string | null;
   /** The switch is another surface's (rtk.ts: the rtk tool's, under Tools);
    *  drawn disabled, `state` names whose. */

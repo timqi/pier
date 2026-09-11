@@ -65,9 +65,9 @@ journalctl --user -u pier | grep 'client:'              # browser-side errors
 ```
 
 Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
-`lark`, `channels`, `slack.tool`, `auth`, `boards`, `client`, `db`, `drain`,
-`secrets`, `settings`, `credentials`, `update`, `tools`, `push`, `web`,
-`web.providers`, `pier`. Level: a syslog priority prefix under
+`lark`, `channels`, `auth`, `boards`, `client`, `db`, `drain`, `secrets`,
+`vault`, `socket`, `settings`, `credentials`, `packages`, `config-sync`,
+`update`, `tools`, `push`, `web`, `web.providers`, `pier`. Level: a syslog priority prefix under
 `$JOURNAL_STREAM`, a level word in a terminal. `client:` is posted back by
 signed-in workbench tabs (`ui/report.ts`): script errors, unhandled rejections,
 a dead SSE stream, with view and user agent.
@@ -121,8 +121,8 @@ All three signal the installed service.
   the same, also takes the asking tab's session (unless mid-turn or holding a
   queue), and answers `recycled` / `busy`.
 - `pier tools sync`: converges the tools switched on in Console → Settings into
-  `~/.pier/tools/bin` (first on every session's PATH); one sync at a time per
-  machine.
+  `~/.pier/tools/bin` (first on every session's PATH, beside the `pier` shim
+  Pier writes there at every start); one sync at a time per machine.
 - `~/.pier/pi/settings.json` is Pier's: the default model is set in Console →
   Settings → Models, packages in Console → Settings → Agent; any other key is
   edited on disk, then `pier reload`. A first boot with no file writes one:
@@ -218,9 +218,8 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
   `approve`: a `vt://` record; every use asks through `vt`, which must be on
   the PATH of the machine running the command.
 - The CLI reaches the running Pier through `~/.pier/pier.sock` (mode 0600,
-  created at start, removed at exit), naming its session (`PIER_SESSION_ID`,
-  set by the `pier` shim on an agent's PATH); a failure is one `vault:` or
-  `pier:` line and exit 2.
+  created at start, removed at exit): `docs/design/08-cli-socket.md` has the
+  protocol and every failure line.
 - `approve` secrets in cron tasks wait on the approval like any other `vt` use.
 - Channel tokens are vault rows too (`SLACK_TOKEN`, `TELEGRAM_TOKEN`,
   `LARK_APP_ID`, …): removing one there empties that channel's credential.

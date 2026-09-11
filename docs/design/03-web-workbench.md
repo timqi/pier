@@ -27,10 +27,13 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
+| `POST /api/sessions/:id/queue/recovery/:batchId/ack` | acknowledge a failed promotion batch (architecture.md, queue promotion recovery): the copy leaves the history snapshot; returns `{ok}`, 404 for an unknown batch, 409 while its submission has not settled |
+| `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's previews and attachment cards; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
+| `GET /api/search?q=` | content hits for the palette (below): `{hits}`, empty for an empty query |
 | `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5), automatic ones included |
 | `POST /api/reload` | `pier reload` from the Console: re-read channel configuration, then let go of idle sessions (watched included) so the next message opens them with the current agent files, skills and credentials. Returns `{recycled, busy}` — `busy` counts the sessions mid-turn that keep what they opened with. 500 when the adapters could not be re-read. |
 | `GET/PUT /api/config/defaults` | *(served by `config.ts`)* the model and reasoning effort a new session starts on — settings.json's `defaultProvider`+`defaultModel` pair and `defaultThinkingLevel`, as `{defaultModel: {provider, id} \| null, defaultThinkingLevel: level \| null}`; PUT takes both fields, writes the pair whole and leaves every other key alone, then answers with the stored state and recycles idle sessions like an agent-file save. 400 for a half body or a settings.json that is not valid JSON |
-| `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", scope: "global"\|"project", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null, locked?: true}]}], checkedAt: iso \| null, busy: source \| null}`. `?cwd=` adds the project scope's packages and overrides as rows of their own; `state` is the one line a row shows instead of a plain switch reading (`stood down — web_search from <path>`, `follows Channels → agent tool`, `installed by the rtk tool`); `locked` marks a switch that is another surface's (`<agentDir>/extensions/rtk.ts` is the rtk tool's under Tools; `PUT` on it is 409); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
+| `GET /api/packages` | *(served by `packages.ts`, as are the five below)* the whole Settings → Agent registry in one answer: `{packages: [{source, kind: "pier"\|"local"\|"npm"\|"git"\|"path", scope: "global"\|"project", version: string \| null, installedPath: string \| null, updateAvailable: boolean, resources: [{kind: "extension"\|"skill", name, path, enabled, state: string \| null, locked?: true}]}], checkedAt: iso \| null, busy: source \| null}`. `?cwd=` adds the project scope's packages and overrides as rows of their own; `state` is the one line a row shows instead of a plain switch reading (`stood down — web_search from <path>`, `installed by the rtk tool`); `locked` marks a switch that is another surface's (`<agentDir>/extensions/rtk.ts` is the rtk tool's under Tools; `PUT` on it is 409); `busy` is the source an install, remove or update is running for, so the UI draws its "installing…" row and refetches. 400 when settings.json is not valid JSON |
 | `POST /api/packages` | body `{source}` → `installAndPersist` into the global scope; answers `{package}` (the new row) when the install finishes; Pi's progress steps go to the log. 400 for an empty source or a local path that does not exist, 409 when the source is already configured or another package operation is running, 502 when the install itself fails. Idle sessions are recycled on success, like an agent-file save |
 | `POST /api/packages/remove` | body `{source}` → `removeAndPersist` (global scope), returns `{ok}`. 404 for a source not in settings.json, 409 for `pier` and `local` (built in, not removable) or while another operation runs, 502 when the remove itself fails |
 | `POST /api/packages/update` | body `{source?}` → `update(source)`; `source` absent updates every unpinned npm/git package (`busy` reads `every package` meanwhile; the Console never sends this form). Answers `{packages}`, the rows it moved, when done. 404 unknown, 409 for a local/path or version-pinned source (nothing to move) or while another operation runs, 502 when the update itself fails. Never called by anything but a Console click |
@@ -48,8 +51,10 @@ surface owns its routes and is mounted beside it.
   conversation row exists (`conversations.channelOf`) and no task run made the
   session for itself. One flag, read by the dot, the badges and Web Push.
 
-Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`),
-`config.ts` (`/api/config*`), `packages.ts` (`/api/packages*`; a file of its
+Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`,
+`/api/devices*`), `config.ts` (`/api/config*`), `config-sync.ts`
+(`/api/config-sync`; `/config-sync/:token` is served before the password, the
+token being its guard), `packages.ts` (`/api/packages*`; a file of its
 own because the registry is not agent-file editing), `fs.ts` (`/api/fs/{ls,file,mkdir}` and the
 containment check; `/api/sessions/:id/files` shares only its size cap and
 headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
@@ -192,8 +197,8 @@ browser keeps no second session order.
   text; expanded logs scroll independently; simple replies leave no empty log;
   interrupted work stays visible. System input cards: four-line preview,
   type/status chips, expandable.
-- **Task communication**: detached task calls create Background Run rows,
-  updated from `task-status` events; the header's running chip (`activeRuns`
+- **Task communication**: runs launched by `pier task run` create Background
+  Run rows, updated from `task-status` events; the header's running chip (`activeRuns`
   from the session list) reveals the newest one still in flight. Delegation and
   callback inputs render as System input rows with Session and Run links, never
   as user messages.
