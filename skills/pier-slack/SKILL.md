@@ -77,7 +77,8 @@ speaker header, `--ids` or `user`; never ask a human for theirs. A plain
 - **Reply in the thread you were reached in** (`--thread <thread_ts>`); a
   top-level post is a stated choice.
 - **Edit and delete only what you posted** (`whoami`); `edit` replaces the
-  whole text, `delete` has no undo.
+  whole text, `delete` has no undo. Your chat reply is itself a new message in
+  this thread: after cleaning one up, confirm with `react` or `<silent>`, not text.
 - **In a busy thread say nothing unless needed**: `<silent>why</silent>`.
 - Never post credentials or file contents you were not asked to share: a
   channel is wider than this conversation.
