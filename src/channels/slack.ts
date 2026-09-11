@@ -464,7 +464,7 @@ export class SlackChannel implements Channel {
     const thread = parent && parent.replies <= INLINE_REPLY_MAX
       ? await this.sharedThread(parent.channel, parent.ts, parent.replies)
       : { transcript: false, lines: [] };
-    // The coordinates in the skill script's own words (skills/pier-slack).
+    // The coordinates in `pier slack`'s own words (skills/pier-slack).
     const hint = parent && !thread.transcript
       ? `[thread: ${parent.replies} replies — channel ${parent.channel}, thread_ts ${parent.ts}]`
       : "";

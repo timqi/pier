@@ -188,8 +188,12 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./fetch_weekly.py --out raw/weekly
 ## First consumer: Slack
 
 There is no `slack` tool. Every operation — reads, `post`, `edit`, `delete`,
-`file` — is a subcommand of `skills/pier-slack/scripts/slack.py`, run as
-`pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- …`; a task fetches a week of
+`file` — is a subcommand of `pier slack` (`channels/slack-cli.ts`), which
+resolves the token itself: `$SLACK_BOT_TOKEN` when set, otherwise
+`SLACK_TOKEN` over the vault socket through the same `resolveSecrets` as
+`vault run`. An `approve` record cannot be swapped in-process, so the command
+prints the exact `pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- pier slack …`
+line and exits 2 rather than spawning `vt` itself. A task fetches a week of
 history in one process and writes it to disk (`--out`) instead of paging it
 through context one call per turn. The one thing a shell cannot know — which
 conversation the session is in — arrives as the `place` token of the speaker

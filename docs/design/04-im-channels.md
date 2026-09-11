@@ -100,16 +100,21 @@ the same request.
 
 ## Agent access: the platform from a shell
 
-`skills/pier-slack/scripts/slack.py` run through `pier vault run
-SLACK_BOT_TOKEN=SLACK_TOKEN -- …` (07-vault.md): Pier's only Slack-facing
-responsibility toward a session is the `place` token of the speaker header,
-which names the channel and thread. There is no tool, no Console switch and no
-ownership guard — the vault level of `SLACK_TOKEN` is the operator's switch,
-and Slack refuses `chat.update`/`chat.delete` on anyone else's message itself.
+`pier slack <subcommand> …` (`channels/slack-cli.ts`, dispatched from
+`cli.ts`), the token `$SLACK_BOT_TOKEN` or the vault's `SLACK_TOKEN` resolved
+over the vault socket (07-vault.md): Pier's only Slack-facing responsibility
+toward a session is the `place` token of the speaker header, which names the
+channel and thread. There is no tool, no Console switch and no ownership
+guard — the vault level of `SLACK_TOKEN` is the operator's switch, and Slack
+refuses `chat.update`/`chat.delete` on anyone else's message itself.
 
-- The script is stdlib Python; every former tool operation is a subcommand.
-  A read paginates fully and can write to disk (`--out`) so a week of history
-  never pages through the context one call per turn.
+- The CLI runs on the adapter's own `SlackApi` (a public `read` for the long
+  tail, five rate-limit waits instead of the adapter's one), `SlackDirectory`
+  for names and `slack-render`'s markdown block; every former tool operation
+  is a subcommand. A read paginates fully and can write to disk (`--out`) so
+  a week of history never pages through the context one call per turn.
+  `skills/pier-slack/SKILL.md` describes the transcript format once; no
+  header repeats it.
 - The adapter keeps one read of its own, `slack-thread.ts`: a forwarded
   thread parent with `reply_count <= 30` is inlined into the prompt through
   `slack-transcript.ts`, the renderer `pier slack` prints with, ts and ids on:
@@ -125,7 +130,7 @@ name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time place]` only on
 a different speaker, a 10-minute gap, a new day, or a different conversation.
 `place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`,
 `telegram:-100/7`), so a session can hand its own channel and thread to a
-script (`skills/pier-slack`); a session never changes conversation, so it is
+command (`pier slack`); a session never changes conversation, so it is
 said once, on the first message, and again only after `forgetSender`. Alias
 keys (`web:`, `task:`) name no place. `sanitizeIdentity` strips `[`, `]`,
 `<`, `>` and newlines so a display name cannot forge a second speaker.
@@ -295,7 +300,7 @@ Answer these first.
   `subtype: "message_share"`; never detect by `is_msg_unfurl`, which a pasted
   permalink also sets. A shared thread parent is read eagerly when
   `reply_count <= 30` (token budget) through `slack-thread.ts`; otherwise the
-  coordinates are given for the skill script.
+  coordinates are given for `pier slack`.
 - **Reactions are short names** (`eyes`); `already_reacted` / `no_reaction`
   are successes.
 - **`ts` is an opaque string**, never a number: 16 significant digits do not

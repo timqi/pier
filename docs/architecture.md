@@ -72,7 +72,9 @@ src/
                it; the install is handed to service.ts's unit
   drain.ts     graceful restart: finish running turns and outbound sends,
                ledger what the deadline cut off for the next boot to deliver
-  cli.ts       what `pier` does when typed; service.ts is the unit it writes
+  cli.ts       what `pier` does when typed; service.ts is the unit it writes;
+               `pier slack` is dispatched to channels/slack-cli.ts with the
+               token resolved here (env, or the vault socket)
   tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);
