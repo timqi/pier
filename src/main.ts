@@ -50,6 +50,7 @@ import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config
 import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
 import { createServer } from "./web/server.js";
+import { registerVaultRoutes } from "./web/vault.js";
 
 const log = logger("pier");
 
@@ -308,6 +309,7 @@ registerConfigSyncRoutes(app, {
 });
 registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels);
+registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);
 registerPushRoutes(app, {

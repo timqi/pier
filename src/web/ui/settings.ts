@@ -10,14 +10,17 @@ import { badge, button, card, empty, field, input, pageTitle, PANEL, pill, setSt
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
+import { createVaultPane } from "./vault.js";
 
-type Topic = "instance" | "models" | "channels" | "files" | "security";
+type Topic = "instance" | "models" | "channels" | "vault" | "files" | "security";
 // Setup order: what you need first sits first — what to run on, then what the
-// agent is made of, then where it talks, then the instance's own facts.
+// agent is made of, then where it talks and what it may use, then the
+// instance's own facts.
 const TOPICS: [Topic, string][] = [
   ["models", "Models"],
   ["files", "Agent"],
   ["channels", "Channels"],
+  ["vault", "Vault"],
   ["instance", "Instance"],
   ["security", "Security"],
 ];
@@ -287,6 +290,7 @@ export function createSettingsView(
 
   const channelsHost = h("section", "hidden min-h-0 flex-1 flex-col");
   const channelsChild = createChannelsView(channelsHost);
+  const vaultPane = createVaultPane();
   const filesHost = h("section", "hidden min-h-0 flex-1 flex-col");
   const filesChild = createConfigView(filesHost, getCwds, openFiles);
 
@@ -431,25 +435,28 @@ export function createSettingsView(
   const instancePane = wrap(instanceColumn);
   const modelsPane = wrap(h("div", "flex flex-col gap-6", providersBox, modelMenu.el));
   const securityPane = wrap(securityColumn);
-  const simplePanes: [Topic, HTMLElement, () => void][] = [
+  const vaultHost = wrap(vaultPane.el);
+  // The query is the route's: only Vault reads one (`?name=X` prefills its add row).
+  const simplePanes: [Topic, HTMLElement, (query?: string) => void][] = [
     ["instance", instancePane, loadInstance],
     ["models", modelsPane, () => {
       void openProviders(providersBox);
       modelMenu.load();
     }],
+    ["vault", vaultHost, (query) => vaultPane.show(query)],
     ["security", securityPane, () => void loadSecurity()],
   ];
 
-  root.append(head, instancePane, modelsPane, channelsHost, filesHost, securityPane);
+  root.append(head, instancePane, modelsPane, channelsHost, vaultHost, filesHost, securityPane);
 
-  function show(arg?: string): void {
+  function show(arg?: string, query?: string): void {
     if (isTopic(arg)) topic = arg;
     localStorage.setItem(TOPIC_KEY, topic);
     renderTabs();
     for (const [id, pane, load] of simplePanes) {
       const active = id === topic;
       pane.classList.toggle("hidden", !active);
-      if (active) load();
+      if (active) load(query);
     }
     if (topic === "channels") channelsChild.show();
     else channelsChild.hide();

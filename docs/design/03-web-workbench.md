@@ -36,6 +36,9 @@ surface owns its routes and is mounted beside it.
 | `POST /api/packages/update` | body `{source?}` → `update(source)`; `source` absent updates every unpinned npm/git package (`busy` reads `every package` meanwhile; the Console never sends this form). Answers `{packages}`, the rows it moved, when done. 404 unknown, 409 for a local/path or version-pinned source (nothing to move) or while another operation runs, 502 when the update itself fails. Never called by anything but a Console click |
 | `POST /api/packages/check` | `checkForAvailableUpdates` now, returns the `GET` answer with `checkedAt` fresh. 502 with `{error}` when a registry or remote could not be reached; the previous answer stays shown |
 | `PUT /api/packages/resource` | body `{source, kind, path, enabled, cwd?}` → one switch. `pier` resources flip the pier.db lists (`extensions`, `skillsOff`); any other resource writes `+path` / `-path` into that package's filter arrays (or the top-level `extensions`/`skills` arrays for `local`) in the global settings.json, or in `.pi/settings.json` when `cwd` is given. Answers the resource row. 400 bad body, 404 unknown resource |
+| `GET /api/vault` | *(served by `web/vault.ts`, as are the two below; [07-vault.md](07-vault.md) owns the store)* `[{name, level: "auto"\|"approve", updatedAt}]` — names and levels, never values |
+| `PUT /api/vault/:name` | body `{level, value}` → `Vault.put`; answers the row. 400 for a name that is not `^[A-Z][A-Z0-9_]{0,63}$`, a level that is neither, or an empty value; 423 when `auto` cannot seal because the store is locked; 503 when `approve` could not create its `vt://` record, the error carrying `vt doctor`'s report |
+| `DELETE /api/vault/:name` | remove; 204, or 404 `{error: "no secret named X"}` |
 | `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
@@ -53,7 +56,7 @@ headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below), `tasks/routes.ts`,
-`channels/routes.ts`, `boards/boards.ts` (`/boards/*`, `/p/*`).
+`channels/routes.ts`, `vault.ts` (`/api/vault*`), `boards/boards.ts` (`/boards/*`, `/p/*`).
 
 ## Notifications (`src/web/push.ts` + `src/web/webpush.ts`)
 
@@ -238,7 +241,12 @@ browser keeps no second session order.
   keeps unmatched probes in its filter group; date fields start collapsed
   unless active; Reset covers all active filters.
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
-  switch, sticky in the topic's scroller. Agent: two panels (what a session is
+  switch, sticky in the topic's scroller. Vault (`#/settings/vault`): the
+  rows `name · level · updated` with Remove (confirms), and the add row —
+  name, `auto|approve` segmented with its one-line note, a password field;
+  no reveal, filing an existing name replaces it. `?name=X` opens with the
+  name filled and the value field focused: the link an agent's `no secret
+  named X` error carries. Agent: two panels (what a session is
   made of / what the selected item affords), Scope in the Console's control
   skin. An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
   rendering the editor's own text; Save keeps `expected` for the conflict check
