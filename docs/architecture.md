@@ -44,7 +44,8 @@ src/
                -directory; lark also -outbound)
   boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
-               server.ts (sessions + events), instance.ts, providers.ts +
+               server.ts (sessions + events), instance.ts, vault.ts (the
+               three /api/vault routes), providers.ts +
                provider-flows.ts, auth.ts, config.ts (scoped agent-file
                editing), fs.ts (confined resolver + ls/file/mkdir), explorer.ts
                (git refs, worktrees, diffs), session-state.ts (unread, working
@@ -59,6 +60,11 @@ src/
   db.ts        the one connection, and the migration list that owns the schema
   log.ts       what a log line looks like, and where it goes
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
+  vault.ts     named secrets for `pier vault run`: the vault table and its
+               resolution; the value's shape is the level (sealed = auto,
+               vt:// = approve)
+  vault-socket.ts the Unix socket (`$PIER_HOME/vault.sock`, 0600) the CLI
+               resolves names through; its permission bits are the auth
   settings.ts  instance facts a human owns (public URL, model menu, auto-update
                switch, which of the built-in `pier` package's resources are on)
   update.ts    whether a newer release exists and when this instance may become

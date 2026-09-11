@@ -202,6 +202,22 @@ kills. `pier update` records the service's effective `PIER_HOME` in a runtime
 drop-in, then starts it; starting the unit directly is unsupported. No
 `systemd.timer`: only Pier starts an update, so it can drain first.
 
+## Secrets for commands
+
+Console → Settings → Vault files a secret by name; an agent's command gets it
+with
+
+```sh
+pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
+```
+
+- `auto`: sealed in `pier.db`, resolved for any local process of Pier's user.
+  `approve`: a `vt://` record; every use asks through `vt`, which must be on
+  the PATH of the machine running the command.
+- The CLI reaches the running Pier through `~/.pier/vault.sock` (mode 0600,
+  created at start, removed at exit); a failure is one `vault:` line and exit 2.
+- `approve` secrets in cron tasks wait on the approval like any other `vt` use.
+
 ## Remote access
 
 Loopback bind; reach it over a tunnel, not a wider bind:
@@ -226,7 +242,7 @@ Loopback bind; reach it over a tunnel, not a wider bind:
 - `~/.pier/db/pier.db` — tasks, channels, chat → session map, workbench state,
   settings, password hash, sealed credentials and tokens. Off-machine: `sqlite3
   ... "VACUUM INTO '…'"`, not `cp` (WAL can miss the latest commits).
-- `~/.pier/master.key` — seals the database's credentials.
+- `~/.pier/master.key` — seals the database's credentials and the vault's `auto` rows.
 - `~/.pier/boards/`.
 - `~/.pier/db/backups/` — the automatic pre-update and pre-migration copies.
 - `~/.pier/pi` — Pi's session history (unless `PI_CODING_AGENT_DIR` names
