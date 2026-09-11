@@ -146,6 +146,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   if (name === "list") return { operation: "list" };
   if (name === "cancel" || name === "recover") {
     if ((values.run === undefined) === (values.group === undefined)) refuse(`${name} takes exactly one of --run or --group`);
+    if (name === "recover" && values.reason === undefined) refuse("recover needs --reason");
     return compact({ operation: name, run_id: values.run, group_id: values.group, reason: values.reason });
   }
   if (name === "save") return saveParams(values, text);

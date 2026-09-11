@@ -133,6 +133,7 @@ describe("pier task", () => {
       [["cancel", "r1"], expect.stringMatching(/^task: Unexpected argument 'r1'/)],
       [["cancel"], "task: cancel takes exactly one of --run or --group"],
       [["recover", "--run", "r", "--group", "g", "--reason", "x"], "task: recover takes exactly one of --run or --group"],
+      [["recover", "--run", "r"], "task: recover needs --reason"],
       [["run", "--prompt", "x", "--timeout", "soon"], "task: --timeout must be a whole number of seconds"],
       [["run"], "task: a new run needs --prompt or --task-id"],
       [["run", "--task-id", "t1", "--prompt", "x"], "task: --prompt does not apply to a saved definition (--task-id)"],
