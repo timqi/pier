@@ -227,6 +227,39 @@ describe("pier vault run", () => {
     expect(asked).toEqual([]);
   });
 
+  it("resolves the token for `pier slack` the same way, and names the vault line for an approve record", async () => {
+    const record = await fakeVault(200, { values: { SLACK_TOKEN: { kind: "record", value: "vt://rec" } } });
+    const env: NodeJS.ProcessEnv = { ...process.env, PIER_HOME: record.home, SLACK_BOT_TOKEN: undefined };
+    const refused = await run(["slack", "post", "C1", "hello world", "--thread", "1700.1"], { env });
+    expect(refused.code).toBe(2);
+    expect(refused.stderr).toBe(
+      "slack: SLACK_TOKEN is an approve-level secret — run: pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- pier slack post C1 'hello world' --thread 1700.1\n",
+    );
+    expect(record.asked).toEqual([{ method: "POST", url: "/resolve", body: { names: ["SLACK_TOKEN"], pid: expect.any(Number) } }]);
+
+    const missing = await fakeVault(404, { error: "no secret named SLACK_TOKEN", file: "https://pier.example/#/settings/vault?name=SLACK_TOKEN" });
+    const unfiled = await run(["slack", "whoami"], { env: { ...env, PIER_HOME: missing.home } });
+    expect(unfiled.code).toBe(2);
+    expect(unfiled.stderr).toBe("vault: no secret named SLACK_TOKEN — file it at https://pier.example/#/settings/vault?name=SLACK_TOKEN\n");
+
+    const down = await run(["slack", "whoami"], { env: { ...env, PIER_HOME: join(record.home, "none") } });
+    expect(down.code).toBe(2);
+    expect(down.stderr).toBe(`vault: Pier is not running (no ${join(record.home, "none", "vault.sock")})\n`);
+  });
+
+  it("hands `pier slack` its own options, and asks the vault nothing for usage", async () => {
+    const { home, asked } = await fakeVault(200, { values: {} });
+    const env: NodeJS.ProcessEnv = { ...process.env, PIER_HOME: home, SLACK_BOT_TOKEN: undefined };
+    const help = await run(["slack", "--help"], { env });
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain("history <channel> [--since X]");
+    // `--since` is not a `pier` option; it must reach the subcommand untouched.
+    const stray = await run(["slack", "history", "C1", "--since", "2024-01-01", "--dir", "x"], { env });
+    expect(stray.code).toBe(2);
+    expect(stray.stderr).toContain("--dir is not an option of history");
+    expect(asked).toEqual([]);
+  });
+
   it("forwards SIGTERM to the command and exits with its signal status", async () => {
     const { home } = await fakeVault(200, { values: { A: { kind: "plain", value: "a" } } });
     const proc = spawn(process.execPath, [

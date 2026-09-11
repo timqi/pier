@@ -51,7 +51,7 @@ export class SlackOutbound {
     }
     const lost = await sendAttachments(
       paths,
-      (file) => this.api.uploadFile(channel, threadTs, file),
+      async (file) => void await this.api.uploadFile(channel, threadTs, file),
       this.log,
     );
     if (lost) await this.post(channel, threadTs, lost, []);

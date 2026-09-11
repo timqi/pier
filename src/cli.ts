@@ -28,6 +28,7 @@ Usage
   pier backup                 snapshot pier.db before a manual update
   pier vault run [ENV=NAME | NAME]... -- <command> [args...]
                               run a command with named secrets in its env
+  pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
   pier --version | --help
 
 Options for "service install"
@@ -47,9 +48,18 @@ const fail = (message: string): never => {
   process.exit(2);
 };
 
+/** Typed on the binding: only then does a call narrow the code after it. */
+const die: (message: string) => never = (message) => {
+  process.stderr.write(`${message}\n`);
+  process.exit(2);
+};
+
+const argv = process.argv.slice(2);
 const parsed = (() => {
   try {
     return parseArgs({
+      // `slack` owns its own options; only the name is parsed here.
+      args: argv[0] === "slack" ? ["slack"] : argv,
       allowPositionals: true,
       strict: true,
       options: {
@@ -99,7 +109,9 @@ if (values.help || command === "help") {
 } else if (command === "tools") {
   await tools(subcommand);
 } else if (command === "vault") {
-  await vault(subcommand, process.argv.slice(2));
+  await vault(subcommand, argv);
+} else if (command === "slack") {
+  await slack(argv.slice(1));
 } else if (command === "restart" || command === "reload") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], `pier ${command}`);
@@ -202,11 +214,6 @@ async function backup(): Promise<void> {
  *  operator's approval. Nothing here prints a value; every failure is one
  *  stderr line and exit 2, so an agent reads words, not an empty variable. */
 async function vault(action: string | undefined, argv: string[]): Promise<void> {
-  // Typed on the binding: only then does a call narrow the code after it.
-  const die: (message: string) => never = (message) => {
-    process.stderr.write(`${message}\n`);
-    process.exit(2);
-  };
   const usage = "usage: pier vault run [ENV=NAME | NAME]... -- <command> [args...]";
   const split = argv.indexOf("--");
   const cmd = argv.slice(split + 1);
@@ -219,39 +226,12 @@ async function vault(action: string | undefined, argv: string[]): Promise<void> 
     return [env!, name!] as const;
   });
   if (!wanted.length) die(usage);
-
-  const { VAULT_SOCK } = await import("./paths.js");
-  type Answer = { values?: Record<string, { kind: "plain" | "record"; value: string }>; error?: string; file?: string };
-  const answer = await new Promise<{ status: number; body: Answer }>((done, reject) => {
-    const req = request(
-      { socketPath: VAULT_SOCK, method: "POST", path: "/resolve", headers: { "content-type": "application/json" } },
-      (res) => {
-        let raw = "";
-        res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
-        res.on("end", () => {
-          try {
-            done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as Answer });
-          } catch (err) {
-            reject(err);
-          }
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end(JSON.stringify({ names: [...new Set(wanted.map(([, name]) => name))], pid: process.pid }));
-  }).catch((err: NodeJS.ErrnoException) =>
-    // A crash leaves the file with nobody behind it: that is "not running" too.
-    err.code === "ENOENT" || err.code === "ECONNREFUSED"
-      ? die(`vault: Pier is not running (no ${VAULT_SOCK})`)
-      : die(`vault: ${err.message}`));
-  const { status, body } = answer;
-  if (status === 404) die(`vault: ${body.error ?? "unknown name"} — file it at ${body.file ?? "the Console (Settings → Vault)"}`);
-  if (status !== 200 || !body.values) die(`vault: ${body.error ?? `vault socket answered ${String(status)}`}`);
+  const values = await resolveSecrets([...new Set(wanted.map(([, name]) => name))]);
 
   const env = { ...process.env };
   const records: string[] = [];
   for (const [envName, name] of wanted) {
-    const hit = body.values[name];
+    const hit = values[name];
     if (!hit) die(`vault: no secret named ${name}`);
     env[envName] = hit.value;
     if (hit.kind === "record") records.push(envName);
@@ -272,6 +252,60 @@ async function vault(action: string | undefined, argv: string[]): Promise<void> 
     // The shell's convention for a signal death, so a caller sees the same number it would without us.
     process.exit(code ?? 128 + (signal ? osConstants.signals[signal] : 0));
   });
+}
+
+type Secret = { kind: "plain" | "record"; value: string };
+
+/** The running Pier's answer for `names` over the vault socket; any failure is
+ *  one `vault:` line and exit 2, so an agent reads words, not an empty variable. */
+async function resolveSecrets(names: string[]): Promise<Record<string, Secret>> {
+  const { VAULT_SOCK } = await import("./paths.js");
+  type Answer = { values?: Record<string, Secret>; error?: string; file?: string };
+  const answer = await new Promise<{ status: number; body: Answer }>((done, reject) => {
+    const req = request(
+      { socketPath: VAULT_SOCK, method: "POST", path: "/resolve", headers: { "content-type": "application/json" } },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
+        res.on("end", () => {
+          try {
+            done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as Answer });
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(JSON.stringify({ names, pid: process.pid }));
+  }).catch((err: NodeJS.ErrnoException) =>
+    // A crash leaves the file with nobody behind it: that is "not running" too.
+    err.code === "ENOENT" || err.code === "ECONNREFUSED"
+      ? die(`vault: Pier is not running (no ${VAULT_SOCK})`)
+      : die(`vault: ${err.message}`));
+  const { status, body } = answer;
+  if (status === 404) die(`vault: ${body.error ?? "unknown name"} — file it at ${body.file ?? "the Console (Settings → Vault)"}`);
+  if (status !== 200 || !body.values) die(`vault: ${body.error ?? `vault socket answered ${String(status)}`}`);
+  return body.values;
+}
+
+/** `$SLACK_BOT_TOKEN` when set (a `pier vault run` wrapper, or a test);
+ *  otherwise the vault's `SLACK_TOKEN`. An `approve` record cannot be read
+ *  here — only `vt inject` swaps it — so the fix is printed, not attempted. */
+async function slack(args: string[]): Promise<void> {
+  const token = async (): Promise<string> => {
+    const given = process.env.SLACK_BOT_TOKEN;
+    if (given) return given;
+    const hit = (await resolveSecrets(["SLACK_TOKEN"])).SLACK_TOKEN;
+    if (!hit) die("vault: no secret named SLACK_TOKEN");
+    if (hit.kind === "record") {
+      const quoted = args.map((arg) => (/^[\w@#%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", String.raw`'\''`)}'`));
+      die(`slack: SLACK_TOKEN is an approve-level secret — run: pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- pier slack ${quoted.join(" ")}`);
+    }
+    return hit.value;
+  };
+  const { runSlackCli } = await import("./channels/slack-cli.js");
+  process.exitCode = await runSlackCli(args, token);
 }
 
 /** Resolved through every PATH entry: version managers put several prefixes on it. */

@@ -111,9 +111,9 @@ and Slack refuses `chat.update`/`chat.delete` on anyone else's message itself.
   A read paginates fully and can write to disk (`--out`) so a week of history
   never pages through the context one call per turn.
 - The adapter keeps one read of its own, `slack-thread.ts`: a forwarded
-  thread parent with `reply_count <= 30` is inlined into the prompt as
-  transcript lines, `<ts> | <time, UTC> | <name>[<id>] | <text>` plus
-  `[thread: N replies]` and `[file: <name> <F… id> <size>]`.
+  thread parent with `reply_count <= 30` is inlined into the prompt through
+  `slack-transcript.ts`, the renderer `pier slack` prints with, ts and ids on:
+  `<ts> HH:MM name[id]: text` plus the markers the pier-slack skill lists.
 - A `ts` stays TEXT everywhere (16 significant digits; REAL loses them).
 - Markdown is not Slack syntax: a mention is `<@U04B7Q2>`, a channel
   `<#C0123456>`, a broadcast `<!here>`.

@@ -120,15 +120,15 @@ class FakeClient implements SlackClient {
     return Promise.reject(new Error(`unexpected files.info for ${id}`));
   }
 
-  readonly uploads: { channel: string; threadTs: string; name: string; size: number }[] = [];
+  readonly uploads: { channel: string; threadTs: string | undefined; name: string; size: number }[] = [];
 
   uploadFile(
     channel: string,
-    threadTs: string,
+    threadTs: string | undefined,
     file: { name: string; bytes: Uint8Array },
-  ): Promise<void> {
+  ): Promise<{ id: string }> {
     this.uploads.push({ channel, threadTs, name: file.name, size: file.bytes.length });
-    return Promise.resolve();
+    return Promise.resolve({ id: `F${this.uploads.length}` });
   }
 
   // Only the agent-facing tool reads a channel; the adapter never does.
@@ -606,12 +606,15 @@ describe("shared messages", () => {
     // The transcript opens with the shared message itself, so its text is not
     // repeated above the thread.
     expect(lines[1]).toBe(
-      "[thread: 5 replies, oldest first \u2014 <ts> | <time, UTC> | <name>[<id>] | <text>,"
-        + " then \u2014 when there are any \u2014 [thread: <n> replies] and one"
-        + " [file: <name> <F\u2026 id> <size>] per upload]",
+      "[thread: 5 replies, oldest first \u2014 <ts> HH:MM name[id]: text, local time,"
+        + " a date line when the day changes; [thread N \u00b7 <ts>] marks a parent,"
+        + " [file <name> <F\u2026> <size>] an upload]",
     );
-    expect(lines[2]).toContain("Dana[U7] | the db is on fire");
-    expect(lines[3]).toContain("Q[U42] | restarting it");
+    // The one format `pier slack` prints, with ts and ids on: a date line, then
+    // the lines the skill describes.
+    expect(lines[2]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(lines[3]).toMatch(/^1699\.000100 \d\d:\d\d Dana\[U7\]: the db is on fire \[thread 5 \u00b7 1699\.000100\]$/);
+    expect(lines[4]).toMatch(/^1699\.000200 \d\d:\d\d Q\[U42\]: restarting it$/);
     // At the shared message's coordinates, not the current channel's.
     expect(client.repliesCalls).toEqual([{ channel: "C900", ts: "1699.000100" }]);
   });

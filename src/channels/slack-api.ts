@@ -44,6 +44,7 @@ export interface SlackAttachment extends SharedMessage {
   channel_name?: string;
   /** A plain-text rendering of the message, when `text` is empty. */
   fallback?: string;
+  title?: string;
   original_message?: SharedMessage;
 }
 
@@ -55,11 +56,17 @@ export interface SlackMessageEvent {
   channel_type?: string; // "im" | "mpim" | "channel" | "group"
   user?: string;
   bot_id?: string;
+  /** A bot's name lives here, not in users.info. */
+  bot_profile?: { name?: string };
+  username?: string;
   text?: string;
   ts?: string;
   thread_ts?: string;
   /** Only on a thread parent in `conversations.history`. */
   reply_count?: number;
+  edited?: { user?: string; ts?: string };
+  reactions?: { name: string; count?: number }[];
+  blocks?: unknown[];
   files?: SlackFile[];
   /** Secondary attachments; a forwarded message arrives as one of these. */
   attachments?: SlackAttachment[];
@@ -174,15 +181,16 @@ export interface SlackClient {
   /** Needs the `files:read` scope. */
   filesInfo(id: string): Promise<SlackFile>;
   downloadFile(file: SlackFile, maxBytes: number): Promise<{ bytes: Uint8Array; mimeType: string }>;
-  /** Needs the `files:write` scope. */
+  /** Needs the `files:write` scope. No thread posts to the channel itself. */
   uploadFile(
     channel: string,
-    threadTs: string,
+    threadTs: string | undefined,
     file: { name: string; bytes: Uint8Array },
-  ): Promise<void>;
+    comment?: string,
+  ): Promise<{ id: string }>;
 }
 
-interface SlackResponse {
+export interface SlackResponse {
   ok: boolean;
   error?: string;
   [key: string]: unknown;
@@ -211,12 +219,16 @@ export class SlackApi implements SlackClient {
     private readonly log: (message: string) => void = () => {},
     /** Injected in tests. */
     private readonly openSocket: SocketFactory = (url) => new WebSocket(url) as SocketLike,
+    /** How many rate-limit waits one call sits through. The adapter takes one:
+     *  a turn must not hang for minutes. A batch process (`pier slack`) takes more. */
+    private readonly retries: number = 1,
   ) {}
 
   /** Slack accepts a JSON body only on write methods; a read method silently
    *  ignores it and reports the parameter missing (`users.info` answers
-   *  `user_not_found`). So reads go form-encoded. */
-  private async read<T extends SlackResponse>(
+   *  `user_not_found`). So reads go form-encoded. Public for the long tail of
+   *  read methods `pier slack` needs and the adapter never calls. */
+  async read<T extends SlackResponse>(
     method: string,
     params: Record<string, string | number | boolean | undefined>,
   ): Promise<T> {
@@ -231,7 +243,7 @@ export class SlackApi implements SlackClient {
     method: string,
     payload: unknown,
     token = this.token,
-    retry = true,
+    tries = this.retries,
   ): Promise<T> {
     const form = payload instanceof URLSearchParams;
     const res = await fetch(`${BASE}/${method}`, {
@@ -245,16 +257,17 @@ export class SlackApi implements SlackClient {
       body: form ? payload.toString() : JSON.stringify(payload),
       signal: AbortSignal.timeout(30_000),
     });
+    const body = (await res.json().catch(() => null)) as T | null;
     // A long turn split into chunks hits ~1 msg/s per channel; the header
-    // carries the exact wait. Obeyed once; a second 429 throws.
-    if (res.status === 429 && retry) {
+    // carries the exact wait. Some methods say `ratelimited` in a 200 body
+    // instead. Obeyed `retries` times; the next one throws.
+    if ((res.status === 429 || body?.error === "ratelimited") && tries > 0) {
       const after = Number(res.headers.get("retry-after") ?? "1");
       if (Number.isFinite(after) && after <= 60) {
         await new Promise((r) => setTimeout(r, (after + 1) * 1000));
-        return this.call<T>(method, payload, token, false);
+        return this.call<T>(method, payload, token, tries - 1);
       }
     }
-    const body = (await res.json().catch(() => null)) as T | null;
     if (!body) throw new Error(`slack ${method}: ${res.status} with no JSON body`);
     if (!body.ok) throw new Error(`slack ${method}: ${body.error ?? res.status}`);
     return body;
@@ -470,9 +483,10 @@ export class SlackApi implements SlackClient {
    *  upload host is not the Web API and answers plain text. */
   async uploadFile(
     channel: string,
-    threadTs: string,
+    threadTs: string | undefined,
     file: { name: string; bytes: Uint8Array },
-  ): Promise<void> {
+    comment?: string,
+  ): Promise<{ id: string }> {
     const slot = await this.read<SlackResponse & { upload_url?: string; file_id?: string }>(
       "files.getUploadURLExternal",
       { filename: file.name, length: file.bytes.length },
@@ -495,10 +509,12 @@ export class SlackApi implements SlackClient {
       signal: AbortSignal.timeout(120_000),
     });
     if (!put.ok) throw new Error(`slack file upload: ${put.status}`);
-    await this.call("files.completeUploadExternal", {
+    const done = await this.call<SlackResponse & { files?: { id?: string }[] }>("files.completeUploadExternal", {
       files: [{ id: slot.file_id, title: file.name }],
       channel_id: channel,
-      thread_ts: threadTs,
+      thread_ts: threadTs || undefined,
+      initial_comment: comment,
     });
+    return { id: done.files?.[0]?.id ?? slot.file_id };
   }
 }
