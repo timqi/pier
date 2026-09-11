@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ import {
   SyncLock,
   ubixAsset,
   ubixConfigToml,
+  writePierShim,
 } from "./tools.js";
 
 // --- fixtures: the documents ubix actually emits (ubix src/report.rs) --------
@@ -265,6 +266,31 @@ describe("the release asset for this machine", () => {
   it("says so rather than guessing where there is no build", () => {
     expect(() => ubixAsset("v1", "win32", "x64")).toThrow(/no build for win32\/x64/);
     expect(() => ubixAsset("v1", "linux", "s390x")).toThrow(/no build for linux\/s390x/);
+  });
+});
+
+describe("the pier shim", () => {
+  it("execs this process's own cli with the same node and loader flags", () => {
+    const bin = mkdtempSync(join(tmpdir(), "pier-shim-"));
+    const path = writePierShim(bin, {
+      execPath: "/opt/node/bin/node",
+      execArgv: ["--import", "file:///repo/node_modules/tsx/dist/loader.mjs"],
+      argv: ["/opt/node/bin/node", "/repo/src/main.ts"],
+    });
+    expect(path).toBe(join(bin, "pier"));
+    expect(readFileSync(path, "utf8")).toBe(
+      "#!/bin/sh\nexec '/opt/node/bin/node' '--import' 'file:///repo/node_modules/tsx/dist/loader.mjs' '/repo/src/cli.ts' \"$@\"\n",
+    );
+    expect(statSync(path).mode & 0o111).toBe(0o111);
+    // The built layout: dist/main.js beside dist/cli.js, no loader.
+    writePierShim(bin, { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/lib/pier/dist/main.js"] });
+    expect(readFileSync(path, "utf8")).toContain("'/lib/pier/dist/cli.js' \"$@\"");
+  });
+
+  it("refuses an entry point it cannot place a cli beside", () => {
+    const bin = mkdtempSync(join(tmpdir(), "pier-shim-"));
+    expect(() => writePierShim(bin, { execPath: "node", execArgv: [], argv: ["node", "/x/server.js"] }))
+      .toThrow(/cannot place a pier shim beside \/x\/server.js/);
   });
 });
 

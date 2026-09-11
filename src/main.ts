@@ -33,7 +33,7 @@ import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { taskToolSpec } from "./tasks/tool.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
-import { CUSTOM_TOOL_RULES, MANAGED, ManagedTools, normalizeCustomTools, prependPath } from "./tools.js";
+import { CUSTOM_TOOL_RULES, MANAGED, ManagedTools, normalizeCustomTools, prependPath, writePierShim } from "./tools.js";
 import { toolsTask } from "./tools-task.js";
 import { Secrets } from "./secrets.js";
 import { startUpdate, unitPath, updaterProblem } from "./service.js";
@@ -58,6 +58,7 @@ process.env.PI_CODING_AGENT_DIR = resolveAgentDir(process.env);
 process.env.PIER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 
 prependPath(process.env);
+writePierShim();
 
 // Before the database and before task recovery, which would mark the running
 // instance's queued and active runs interrupted; the port is discovered far too

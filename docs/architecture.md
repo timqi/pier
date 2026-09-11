@@ -79,7 +79,8 @@ src/
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);
                a custom tool is the body of its ubix block. `~/.pier/tools/bin` goes first on the PATH everything
-               Pier spawns inherits. One sync per machine: a lock row in pier.db
+               Pier spawns inherits; at start Pier writes a `pier` shim there that execs its own
+               cli (same node, same loader), so `pier vault run`/`pier slack` are the running build. One sync per machine: a lock row in pier.db
                (BEGIN IMMEDIATE), re-checked before every mutating step
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns, coalescing a burst of switches into a single run

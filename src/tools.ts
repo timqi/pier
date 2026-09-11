@@ -161,6 +161,27 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
   env.PATH = current ? `${bin}${delimiter}${current}` : bin;
 }
 
+/** `pier` on an agent's PATH is this process's own cli — the same source, the
+ *  same loader (`tsx` in dev) — not whichever install `npm i -g` left behind.
+ *  Derived from argv: main.* and cli.* are siblings in src/ and in dist/. */
+export function writePierShim(
+  bin: string = toolsBin(),
+  proc: { execPath: string; execArgv: readonly string[]; argv: readonly string[] } = process,
+): string {
+  const main = proc.argv[1] ?? "";
+  const cli = main.replace(/main(\.[cm]?[jt]s)$/, "cli$1");
+  if (cli === main) throw new Error(`cannot place a pier shim beside ${main || "(no argv[1])"}`);
+  const quote = (s: string): string => `'${s.replaceAll("'", String.raw`'\''`)}'`;
+  const script = `#!/bin/sh\nexec ${[proc.execPath, ...proc.execArgv, cli].map(quote).join(" ")} "$@"\n`;
+  mkdirSync(bin, { recursive: true });
+  const path = join(bin, "pier");
+  const tmp = `${path}.${randomUUID()}`;
+  writeFileSync(tmp, script);
+  chmodSync(tmp, 0o755);
+  renameSync(tmp, path); // a shell mid-exec never sees a half-written file
+  return path;
+}
+
 /** Structural rather than the settings type: settings.ts imports this file. */
 export interface EnabledTools {
   tools: readonly string[];
