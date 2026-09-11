@@ -456,7 +456,8 @@ export function createServer(
     return c.json({ sessionId }, 202);
   });
 
-  // Edit a user turn: rewind to just before it, then re-dispatch the edited text.
+  // Edit a user turn: rewind to just before it — dropping every turn after it —
+  // then re-dispatch the edited text.
   guarded(app, "POST", "/api/sessions/:id/turns/:index/edit", 400, async (c) => {
     const id = c.req.param("id");
     const index = Number(c.req.param("index"));
@@ -468,8 +469,8 @@ export function createServer(
     if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-    const latest = (await session.history()).filter((turn) => turn.role === "user").length - 1;
-    if (index !== latest) return c.json({ error: "only the latest user message can be edited — refresh and try again" }, 409);
+    const users = (await session.history()).filter((turn) => turn.role === "user").length;
+    if (index >= users) return c.json({ error: "that message is gone — refresh and try again" }, 409);
     if (session.state !== "idle") return c.json({ error: "busy — stop the turn first" }, 409);
     await session.rewindToUserTurn(index);
     // The rewind took the speaker headers out of the context too.

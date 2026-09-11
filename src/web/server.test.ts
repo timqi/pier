@@ -2047,7 +2047,7 @@ describe("workbench server", () => {
     );
   });
 
-  it("rejects historical edits and accepts only the latest user message", async () => {
+  it("edits an older user turn, and refuses one the transcript no longer has", async () => {
     const { app, session } = setup();
     session.history = async () => [
       { role: "user", text: "first" }, { role: "assistant", text: "reply" },
@@ -2056,10 +2056,10 @@ describe("workbench server", () => {
     const edit = (index: number) => app.request(`/api/sessions/s1/turns/${index}/edit`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "fixed" }),
     });
-    expect((await edit(0)).status).toBe(409);
+    expect((await edit(2)).status).toBe(409);
     expect(session.calls).toEqual([]);
-    expect((await edit(1)).status).toBe(202);
-    expect(session.calls[0]).toBe("rewind:1");
+    expect((await edit(0)).status).toBe(202);
+    expect(session.calls[0]).toBe("rewind:0");
   });
 
   it("rechecks idle state after reading the edit target", async () => {

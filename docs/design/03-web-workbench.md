@@ -15,7 +15,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
-| `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind the latest user turn and re-dispatch the new text; 409 for older user turns or while streaming, rechecked after history loads |
+| `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here |
 | `GET /api/sessions/:id/turns/:index/steps` | one turn's thinking/progress/tool steps; tool args and output are fetched when its Activity group opens, while progress text and step identities remain in the snapshot |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
@@ -216,9 +216,10 @@ browser keeps no second session order.
   from the session list) reveals the newest one still in flight. Delegation and
   callback inputs render as System input rows with Session and Run links, never
   as user messages.
-- **Edit**: latest user message only; Esc cancels, Enter submits, Shift+Enter
-  newline; new input cancels a stale editor; the API rejects older or busy
-  edits.
+- **Edit**: any user message; sending rewinds the transcript to it and the
+  editor says how many messages that drops. Esc cancels, Enter submits,
+  Shift+Enter newline; new input cancels a stale editor; the API rejects a busy
+  session and an index the transcript no longer holds.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during
   IME composition (`isComposing`/229).

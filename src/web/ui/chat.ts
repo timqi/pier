@@ -244,9 +244,8 @@ export function appendTurn(
   }
   if (kind === "user") {
     cancelEdit?.();
-    turnsPane.querySelector(".message-edit")?.remove();
     const edit = h("button", "message-edit absolute right-full top-1 flex h-8 w-8 items-center justify-center rounded-full");
-    edit.title = "Edit latest message — resends it and replaces the reply";
+    edit.title = "Edit message — resends it and drops everything after it";
     edit.setAttribute("type", "button");
     edit.setAttribute("aria-label", "Edit message");
     edit.append(icon(Pencil));
@@ -326,25 +325,50 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
 // --- edit user message ------------------------------------------------------------
 
 let cancelEdit: (() => void) | null = null;
-const isLatestUser = (row: HTMLElement): boolean =>
-  row.isConnected && turnsPane.querySelector(".message-edit")?.parentElement === row;
+/** Any user row in the pane: the send rewinds the transcript to it, so the
+ *  turns under it leave with it. */
+const editable = (row: HTMLElement): boolean => row.isConnected && row.dataset.kind === "user";
+
+/** What the rewind takes with the edited row — invisible from the row itself,
+ *  and the whole difference between editing the last message and an older one. */
+function droppedAfter(row: HTMLElement): number {
+  let n = 0;
+  for (let el = row.nextElementSibling as HTMLElement | null; el; el = el.nextElementSibling as HTMLElement | null) {
+    const kind = el.dataset.kind;
+    if (kind === "user" || kind === "assistant" || kind === "system") n++;
+  }
+  return n;
+}
 
 function startEdit(row: HTMLElement, node: HTMLElement): void {
-  if (!isLatestUser(row)) return;
+  if (!editable(row)) return;
+  if (row.querySelector("textarea")) return;
+  // One editor at a time: every row has a pencil, and the open one is only
+  // reachable through the closure `cancelEdit` holds.
+  cancelEdit?.();
   if (deps.sessionState() !== "idle") {
     appendTurn("error", "can't edit while streaming — stop the turn first");
     return;
   }
-  if (row.querySelector("textarea")) return;
   const area = document.createElement("textarea");
   area.value = node.dataset.raw ?? node.textContent ?? ""; // user turns are plain text
   area.className =
     "block w-full resize-none rounded-xl border border-indigo-300 bg-white px-3 py-2 text-neutral-900 focus:outline-none";
   // Grow with content like the composer does; same 192px cap (max-h-48).
-  area.setAttribute("aria-label", "Edit latest message");
+  area.setAttribute("aria-label", "Edit message");
   const submit = button("Send edit", true);
   const dismiss = button("Cancel");
-  const editor = h("div", "message-editor", area, h("div", "mt-2 flex flex-wrap justify-end gap-2", dismiss, submit));
+  const dropped = droppedAfter(row);
+  const controls = h("div", "mt-2 flex flex-wrap items-center justify-end gap-2");
+  if (dropped) {
+    controls.append(h(
+      "div",
+      "mr-auto text-[11.5px] text-neutral-500",
+      `sending drops the ${dropped} message${dropped === 1 ? "" : "s"} after this one`,
+    ));
+  }
+  controls.append(dismiss, submit);
+  const editor = h("div", "message-editor", area, controls);
   const grow = (): void => {
     area.style.height = "auto";
     area.style.height = `${Math.min(area.scrollHeight, 192)}px`;
@@ -388,7 +412,7 @@ function startEdit(row: HTMLElement, node: HTMLElement): void {
 
 async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   const id = deps.sessionId();
-  if (!id || !isLatestUser(row)) return;
+  if (!id || !editable(row)) return;
   if (deps.sessionState() !== "idle") {
     appendTurn("error", "can't edit while streaming — stop the turn first");
     return;
@@ -397,8 +421,9 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   // The Nth user row on screen is the Nth user turn of history() — plus the
   // ones the trim took off the top, which history() still holds.
   const users = [...turnsPane.querySelectorAll<HTMLElement>('[data-kind="user"]')];
-  const index = trimmedUserTurns + users.indexOf(row);
-  const previousTime = users[users.length - 2]?.dataset.at;
+  const at = users.indexOf(row);
+  const index = trimmedUserTurns + at;
+  const previousTime = users[at - 1]?.dataset.at;
   lastStampAt = previousTime === undefined ? null : Number(previousTime);
   const separator = row.previousElementSibling as HTMLElement | null;
   if (separator?.dataset.kind === "time") separator.remove();
