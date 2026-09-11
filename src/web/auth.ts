@@ -198,7 +198,8 @@ const hash = (password: string, salt: string): string =>
 const digest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 /** The login form and `/p/*` — published boards and their stylesheet — are the
- *  single exempt prefix docs/architecture.md reserves; `/boards/*` stays behind. */
+ *  one exempt prefix here (`/config-sync/:token` is mounted before this
+ *  middleware, docs/architecture.md names both); `/boards/*` stays behind. */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
   if (method !== "GET" && method !== "HEAD") return false;

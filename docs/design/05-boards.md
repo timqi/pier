@@ -2,8 +2,9 @@
 
 A **Board** is a folder of static files an agent writes to present something at
 a stable URL, readable on a phone, with no server-side runtime. Every surface
-is behind the instance password (`src/web/auth.ts`); `/p/*` (published boards plus the
-stylesheet they link) is the only exemption, so `public` is a security boundary.
+is behind the instance password (`src/web/auth.ts`); `/p/*` (published boards
+plus the stylesheet they link) is exempt — the other exemption is
+`/config-sync/:token`, not a board — so `public` is a security boundary.
 
 ## Product decisions
 

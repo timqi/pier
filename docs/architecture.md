@@ -41,7 +41,9 @@ src/
                chunk, dedup, lines, commands, control, conversations, receipts,
                panel, runtime, routes; per platform: telegram / slack / lark
                (+ -api, -render, -panel; slack also -outbound, -directory,
-               -thread; lark also -outbound)
+               -thread, -cli (`pier slack`) and -transcript (the one
+               transcript renderer, for the CLI and the inlined thread); lark
+               also -outbound)
   boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
@@ -82,10 +84,12 @@ src/
   tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);
-               a custom tool is the body of its ubix block. `~/.pier/tools/bin` goes first on the PATH everything
-               Pier spawns inherits; at start Pier writes a `pier` shim there that execs its own
-               cli (same node, same loader), so `pier vault run`/`pier slack`/`pier task` are the running build. One sync per machine: a lock row in pier.db
-               (BEGIN IMMEDIATE), re-checked before every mutating step
+               a custom tool is the body of its ubix block. `~/.pier/tools/bin`
+               goes first on the PATH everything Pier spawns inherits; at start
+               Pier writes a `pier` shim there that execs its own cli (same
+               node, same loader), so `pier vault run`/`pier slack`/`pier task`
+               are the running build. One sync per machine: a lock row in
+               pier.db (BEGIN IMMEDIATE), re-checked before every mutating step
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns, coalescing a burst of switches into a single run
   service.ts   the systemd units `pier service install` writes
@@ -107,9 +111,9 @@ Dependency rules:
   `SettingsManager`.
 - The browser may import HTTP DTOs from `tasks/types.ts`, `channels/types.ts`
   and `web/types.ts` type-only.
-- Root leaves `paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`: every
-  area may import them; they import nothing outside the root layer
-  (`settings.ts` names `core/types.ts` types, type-only).
+- Root leaves `paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`,
+  `vault.ts`: every area may import them; they import nothing outside the root
+  layer (`settings.ts` names `core/types.ts` types, type-only).
 - Logging goes to stdout/stderr only (docs/deploy.md). `PIER_LOG=debug` adds
   per-message tracing; `PIER_LOG=silent` is what test runs use.
 - `tools.ts` is reached only by `main.ts`, `cli.ts`, `tools-task.ts` and
@@ -231,9 +235,10 @@ seams:
 
 One line each; the reasoning is in the commit that made it.
 
-- One shared password guards every HTTP surface (`web/auth.ts`); `/p/*` is the
-  only exemption, so a board's `public` flag is a real boundary. Single-account
-  on purpose: Pier has one workspace.
+- One shared password guards every HTTP surface (`web/auth.ts`); the exemptions
+  are `/p/*`, so a board's `public` flag is a real boundary, and
+  `/config-sync/:token`, guarded by its token. Single-account on purpose: Pier
+  has one workspace.
 - Loopback bind, reached over a tunnel or reverse proxy. Updates run in the
   updater's own cgroup, never from a timer (`docs/deploy.md`).
 - Pi **SDK** over RPC; the seam stays RPC-compatible (no Pi types leave `agent/`).
