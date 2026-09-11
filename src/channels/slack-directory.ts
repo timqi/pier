@@ -1,5 +1,5 @@
-// User display names and channel kind/name, cached for the process and shared
-// by the adapter and the agent-facing tool. Failures fall back to the id and
+// User display names and channel kind/name, cached for the process so a name
+// is looked up once. Failures fall back to the id and
 // are logged: without `users:read` every lookup fails, and the symptom is
 // otherwise a scope problem wearing a product problem's clothes.
 

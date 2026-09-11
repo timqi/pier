@@ -27,7 +27,7 @@ Platform adapters in front of Pi sessions: Telegram, Slack and Lark (Feishu).
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ | ✅ |
 | Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ | ✅ |
-| Agent access (platform as a tool) | An agent session reads/posts through the platform | adapter + skill (`slack-tool.ts`) | — | ✅ | —¹ |
+| Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | skill + script (`skills/pier-slack/`), no Pier code | — | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
 
@@ -98,35 +98,22 @@ the same request.
   Slack: a modal with the conversation id in `private_metadata`. Prefer a modal
   wherever the platform has one.
 
-## Agent access: the platform as a tool
+## Agent access: the platform from a shell
 
-`slack-tool.ts` + `ChannelConfig.agentTool` + `skills/pier-slack/`: an agent
-session asking Pier to read or write Slack.
+`skills/pier-slack/scripts/slack.py` run through `pier vault run
+SLACK_BOT_TOKEN=SLACK_TOKEN -- …` (07-vault.md): Pier's only Slack-facing
+responsibility toward a session is the `place` token of the speaker header,
+which names the channel and thread. There is no tool, no Console switch and no
+ownership guard — the vault level of `SLACK_TOKEN` is the operator's switch,
+and Slack refuses `chat.update`/`chat.delete` on anyone else's message itself.
 
-- The agent states an intent (`#name`, ISO time); Pier does the API work
-  (paging, cursors, ordering, dedup, caps). The bot token never reaches the
-  model.
-- Omitting `channel` acts on the calling session's conversation, resolved
-  **per call** through `Router.conversationOf(sessionId)`, never captured at
-  creation. `context` reports it. `thread_ts: "none"` starts a top-level
-  message; a `thread_ts` is never inherited across a `channel` change.
-- A transcript is lines: `<ts> | <time, UTC> | <name>[<id>] | <text>`
-  (`format` field). `threadTs` is hoisted; parents carry `[thread: N replies]`;
-  an upload is `[file: <name> <F… id> <size>]`.
-- `fetch_file` takes the `F…` id, resolves via `files.info` (the bot's own
-  visibility is the gate; no channel needed), saves into
-  `$PIER_HOME/inbox/slack/`, answers with the marker line alone; refused or over
-  the cap → `[attachment lost: … ]`.
-- `after` filters strictly newer. A failed page returns what came before it
-  with `incomplete` and a reason; Slack error codes become the action they
-  imply (`not_in_channel` → invite the bot).
-- Every read goes to Slack; nothing is cached; writes are never cached or
-  rate-limited by us. Reads are Tier 3 (~50+ req/min) as a workspace-internal
-  app; **if Pier is ever distributed as a non-Marketplace app** (1 req/min, 15
-  objects per response) a cache has to come back, with invalidation.
-- `agentTool` defaults on (missing reads as on) and is separate from `enabled`
-  (inbound). No second ACL: Slack enforces channel membership; the switch covers
-  task and subagent sessions.
+- The script is stdlib Python; every former tool operation is a subcommand.
+  A read paginates fully and can write to disk (`--out`) so a week of history
+  never pages through the context one call per turn.
+- The adapter keeps one read of its own, `slack-thread.ts`: a forwarded
+  thread parent with `reply_count <= 30` is inlined into the prompt as
+  transcript lines, `<ts> | <time, UTC> | <name>[<id>] | <text>` plus
+  `[thread: N replies]` and `[file: <name> <F… id> <size>]`.
 - A `ts` stays TEXT everywhere (16 significant digits; REAL loses them).
 - Markdown is not Slack syntax: a mention is `<@U04B7Q2>`, a channel
   `<#C0123456>`, a broadcast `<!here>`.
@@ -307,8 +294,8 @@ Answer these first.
   `channel_id`, `ts`, `reply_count`, its own `files`), with or without
   `subtype: "message_share"`; never detect by `is_msg_unfurl`, which a pasted
   permalink also sets. A shared thread parent is read eagerly when
-  `reply_count <= 30` (token budget) through `readThread`; otherwise the
-  coordinates are given, naming the slack tool only when `agentTool` is on.
+  `reply_count <= 30` (token budget) through `slack-thread.ts`; otherwise the
+  coordinates are given for the skill script.
 - **Reactions are short names** (`eyes`); `already_reacted` / `no_reaction`
   are successes.
 - **`ts` is an opaque string**, never a number: 16 significant digits do not

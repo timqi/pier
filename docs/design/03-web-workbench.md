@@ -308,8 +308,6 @@ browser keeps no second session order.
   - Shadowing is known at session open, not at list time: `standDownShadowed`
     records what it stood down, `GET` reports the last open's finding, and a
     built-in no session has opened since reads no state.
-  - `standDownUndocumented` still removes a skill whose tool the session was
-    not given; the switch is the operator's, the state line is the runtime's.
   - After any package or switch write, idle sessions are recycled as for an
     agent-file save; sessions mid-turn keep what they opened with.
   - One switch, one write: the `pier` package's extensions flip through

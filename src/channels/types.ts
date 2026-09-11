@@ -67,13 +67,6 @@ export interface ChannelConfig {
    * Telegram leaves this empty.
    */
   appToken: string;
-  /**
-   * May agent sessions read and post through this platform's tool? Separate
-   * from `enabled`, which only governs whether the adapter answers inbound
-   * messages: this one decides whether an agent can reach *out*. Default on,
-   * and moot until the platform has a token.
-   */
-  agentTool: boolean;
   requireMention: boolean;
   requireBind: boolean;
   topicMode: boolean;
@@ -93,7 +86,6 @@ export const defaultChannelConfig = (): ChannelConfig => ({
   enabled: false,
   token: "",
   appToken: "",
-  agentTool: true,
   requireMention: true,
   requireBind: true,
   topicMode: true,

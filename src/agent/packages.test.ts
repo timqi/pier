@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeF
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PackageError, type AgentCustomTool, type Package } from "../core/types.js";
+import { PackageError, type Package } from "../core/types.js";
 import { openDb } from "../db.js";
 import { SettingsStore } from "../settings.js";
 import { PiConfigStore } from "./config.js";
@@ -53,13 +53,9 @@ beforeEach(() => {
   file(join(agentDir, "extensions", "mine.ts"), "export default () => {}");
   file(join(agentDir, "extensions", "rtk.ts"), "export default () => {}");
   skill(join(agentDir, "skills"), "x");
-  const slack: AgentCustomTool = {
-    name: "slack", label: "Slack", description: "", parameters: {}, execute: async () => null,
-    skill: "pier-slack", available: () => false,
-  };
   settings = new SettingsStore(openDb(":memory:"));
   settings.setExtensions(["web"]);
-  store = new PiPackageStore(config, { version: "0.1.2", settings, tools: [slack] }, [skills], agentDir);
+  store = new PiPackageStore(config, { version: "0.1.2", settings }, [skills], agentDir);
 });
 
 afterEach(() => {
@@ -95,7 +91,7 @@ describe("the registry", () => {
     expect(pierRow.resources).toEqual([
       { kind: "extension", name: "web", path: "<inline:web>", enabled: true, state: null },
       { kind: "skill", name: "pier-help", path: join(skills, "pier-help", "SKILL.md"), enabled: true, state: null },
-      { kind: "skill", name: "pier-slack", path: join(skills, "pier-slack", "SKILL.md"), enabled: true, state: "follows Channels → agent tool" },
+      { kind: "skill", name: "pier-slack", path: join(skills, "pier-slack", "SKILL.md"), enabled: true, state: null },
     ]);
 
     const local = row(packages, "local");

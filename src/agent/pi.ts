@@ -203,19 +203,6 @@ export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsRes
   };
 };
 
-/** A skill's description is resident in every prompt; one pointing at a tool
- *  this session was not given is a route the agent cannot take. */
-export const standDownUndocumented = <S extends { name: string }>(
-  tools: AgentCustomTool[],
-  skills: S[],
-): S[] => {
-  const gone = new Set(
-    tools.filter((tool) => tool.skill && !(tool.available?.() ?? true)).map((tool) => tool.skill!),
-  );
-  if (!gone.size) return skills;
-  return skills.filter((skill) => !gone.has(skill.name));
-};
-
 /** Read per request by the runtime wrapper in `open()`, so a task can
  *  downgrade the cache TTL after the session is open. */
 type CacheRetentionBox = { value: "short" | "long" };
@@ -735,11 +722,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
       // same name is Pi's to switch (settings.json).
       skillsOverride: (base) => ({
         ...base,
-        skills: standDownUndocumented(
-          this.extraTools,
-          base.skills.filter((skill) =>
-            !skillsOff.includes(skill.name) || !this.skillPaths.some((dir) => skill.filePath.startsWith(dir + sep))),
-        ),
+        skills: base.skills.filter((skill) =>
+          !skillsOff.includes(skill.name) || !this.skillPaths.some((dir) => skill.filePath.startsWith(dir + sep))),
       }),
       extensionFactories: [
         { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
@@ -765,9 +749,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
     let live: PiAgentSession | undefined;
-    // Per open: an unconfigured tool would cost context on every turn and answer nothing.
-    const active = this.extraTools.filter((tool) => tool.available?.() ?? true);
-    const customTools = active.map((tool) =>
+    const customTools = this.extraTools.map((tool) =>
       defineTool({
         name: tool.name,
         label: tool.label,

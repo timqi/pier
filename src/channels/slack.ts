@@ -38,8 +38,8 @@ import {
   type SlackSocket,
 } from "./slack-api.js";
 import { SlackOutbound } from "./slack-outbound.js";
-import { readThread, slackToolAvailable } from "./slack-tool.js";
 import { SlackPanel } from "./slack-panel.js";
+import { readThread } from "./slack-thread.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const WORKING = "eyes";
@@ -111,8 +111,6 @@ export interface SlackDeps {
   client?: SlackClient;
   /** Injected in tests. */
   receipts?: ReceiptLedger;
-  /** Shared with the agent-facing tool so a name is looked up once per process. */
-  directory?: SlackDirectory;
   /** Wired by runtime.ts, so `stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
 }
@@ -141,7 +139,7 @@ export class SlackChannel implements Channel {
     const config = deps.store.get("slack");
     this.log = deps.log ?? ((m) => logger("slack").warn(m));
     this.chains = new Chains(this.log, MAX_ACTIVE_CHATS);
-    this.directory = deps.directory ?? new SlackDirectory(this.log);
+    this.directory = new SlackDirectory(this.log);
     this.gate = new Gatekeeper(deps.store, "slack", this.log, "channel");
     this.seen = new Dedup(this.log, DEDUP_TTL_MS, DEDUP_MAX);
     this.api = deps.client ?? new SlackApi(config.token, config.appToken, this.log);
@@ -436,10 +434,8 @@ export class SlackChannel implements Channel {
     return name ?? channel;
   }
 
-  /** The eager thread read runs whether or not `agentTool` is on: a human
-   *  handing the agent a message is the same act as an upload, which nothing
-   *  gates. `agentTool` only changes the hint, which must not name a tool this
-   *  session does not have. */
+  /** The eager thread read is not gated: a human handing the agent a message
+   *  is the same act as an upload. */
   private async sharedBlock(share: SlackAttachment): Promise<string> {
     const source = share.original_message;
     const ts = share.ts ?? source?.ts;
@@ -468,37 +464,31 @@ export class SlackChannel implements Channel {
     const thread = parent && parent.replies <= INLINE_REPLY_MAX
       ? await this.sharedThread(parent.channel, parent.ts, parent.replies)
       : { transcript: false, lines: [] };
-    // The coordinates carry the tool's own parameter names; naming the tool is
-    // a lie when the Console has switched agent access off.
-    const how = slackToolAvailable(this.deps.store) ? "read with the slack tool: " : "";
+    // The coordinates in the skill script's own words (skills/pier-slack).
     const hint = parent && !thread.transcript
-      ? `[thread: ${parent.replies} replies — ${how}channel ${parent.channel}, thread_ts ${parent.ts}]`
+      ? `[thread: ${parent.replies} replies — channel ${parent.channel}, thread_ts ${parent.ts}]`
       : "";
     // The transcript opens with the shared message itself.
     return [`[${head}]`, thread.transcript ? "" : body, ...thread.lines, hint]
       .filter(Boolean).join("\n");
   }
 
-  /** Through the slack tool's own read, so paging and dedup exist once. A read
-   *  that fails or comes back cut says so in the prompt (§5). */
+  /** A read that fails or comes back cut says so in the prompt (§5). */
   private async sharedThread(
     channel: string,
     ts: string,
     replies: number,
   ): Promise<{ transcript: boolean; lines: string[] }> {
-    const deps = { directory: this.directory, log: this.log };
     try {
       // One over the budget, so an undercounting reply_count still reports as cut.
-      const read = await readThread(deps, this.api, channel, ts, undefined, INLINE_REPLY_MAX + 2);
+      const read = await readThread(this.directory, this.api, channel, ts, INLINE_REPLY_MAX + 2);
       if (!read.messages.length) return { transcript: false, lines: [] };
       return {
         transcript: true,
         lines: [
           `[thread: ${replies} replies, oldest first — ${read.format}]`,
           ...read.messages,
-          ...(read.incomplete || read.truncated
-            ? [`[thread partly read: ${read.incomplete ?? `cut at ${read.count} lines`}]`]
-            : []),
+          ...(read.truncated ? [`[thread partly read: cut at ${read.count} lines]`] : []),
         ],
       };
     } catch (err) {

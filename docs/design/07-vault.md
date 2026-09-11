@@ -7,13 +7,14 @@ the injector; `vt` stays the approval gate for the secrets that need one.
 
 ## Why
 
-Today a token reaches a command one of two ways. Either Pier holds it and a
-tool call spends it (`slack`), which means one operation per turn and every
-result in context; or a task repo carries a `vt://` record in a file and
-wraps its scripts by hand (`SLACK_BOT_TOKEN="$(cat slack-token.vt)" vt inject
---only-env …`), which works and leaks nothing, but every task reinvents the
-line, the record lives in git, and rotation is a hunt through repos. The
-vault keeps the second shape and takes the bookkeeping off the task.
+Before the vault a token reached a command one of two ways. Either Pier held
+it and a tool call spent it (the former `slack` tool), which meant one
+operation per turn and every result in context; or a task repo carried a
+`vt://` record in a file and wrapped its scripts by hand
+(`SLACK_BOT_TOKEN="$(cat slack-token.vt)" vt inject --only-env …`), which
+worked and leaked nothing, but every task reinvented the line, the record
+lived in git, and rotation was a hunt through repos. The vault keeps the
+second shape and takes the bookkeeping off the task.
 
 ## Two levels, one column
 
@@ -186,14 +187,17 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./fetch_weekly.py --out raw/weekly
 
 ## First consumer: Slack
 
-Reads (`read_channel`, `read_thread`, `read_message`, `fetch_file`,
-`channels`) move to `pier-slack` as `curl` lines through `pier vault run`;
-a task fetches a week of history in one process and writes it to disk
-instead of paging it through context one tool call per turn. The `slack`
-tool keeps what a shell cannot know or must not be trusted with: `context`
-(the session → conversation mapping only the router has), `post` into the
-current thread, and `edit`/`delete` with the "Pier's own messages only"
-guard. That split is its own change after the vault lands.
+There is no `slack` tool. Every operation — reads, `post`, `edit`, `delete`,
+`file` — is a subcommand of `skills/pier-slack/scripts/slack.py`, run as
+`pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- …`; a task fetches a week of
+history in one process and writes it to disk (`--out`) instead of paging it
+through context one call per turn. The one thing a shell cannot know — which
+conversation the session is in — arrives as the `place` token of the speaker
+header (`slack:<channel>/<thread_ts>`, core/identity.ts). The "Pier's own
+messages only" guard and the Console's agent-access switch went with the
+tool: with the token in the vault both were bypassable, so the vault level of
+`SLACK_TOKEN` is the switch, and Slack's own `cant_update_message` /
+`cant_delete_message` are the guard.
 
 ## Not in scope
 

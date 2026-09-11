@@ -40,8 +40,8 @@ src/
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
                panel, runtime, routes; per platform: telegram / slack / lark
-               (+ -api, -render, -panel; slack also -tool, -outbound,
-               -directory; lark also -outbound)
+               (+ -api, -render, -panel; slack also -outbound, -directory,
+               -thread; lark also -outbound)
   boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the

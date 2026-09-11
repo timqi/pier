@@ -591,24 +591,11 @@ describe("shared messages", () => {
     expect(inbound[0]!.text).toBe("what is this about");
   });
 
-  /**
-   * The tool's availability rule reads the token, which the injected client
-   * makes unnecessary everywhere else in this file.
-   */
-  const agentTool = (on: boolean): void => {
-    const config = store.get("slack");
-    config.enabled = true;
-    config.token = "xoxb-test";
-    config.agentTool = on;
-    store.save("slack", config);
-  };
-
   const shared = (over: Partial<SlackMessageEvent> = {}): SlackEnvelope =>
     message({ text: "", ts: "1713.000100", subtype: "message_share", ...over });
 
-  it("inlines a small shared thread as the tool's own lines", async () => {
+  it("inlines a small shared thread as transcript lines", async () => {
     openGates();
-    agentTool(true);
     client.threadReplies = [
       { type: "message", user: "U7", ts: "1699.000100", text: "the db is on fire", reply_count: 5 },
       { type: "message", user: "U42", ts: "1699.000200", thread_ts: "1699.000100", text: "restarting it" },
@@ -625,27 +612,16 @@ describe("shared messages", () => {
     );
     expect(lines[2]).toContain("Dana[U7] | the db is on fire");
     expect(lines[3]).toContain("Q[U42] | restarting it");
-    // Read through the tool's own path, at the shared message's coordinates.
+    // At the shared message's coordinates, not the current channel's.
     expect(client.repliesCalls).toEqual([{ channel: "C900", ts: "1699.000100" }]);
   });
 
   it("does not read a big thread, and says where it is instead", async () => {
     openGates();
-    agentTool(true);
     await feed(shared({ attachments: [share({ reply_count: 200 })] }));
-    // Two hundred replies is not worth the tokens uninvited.
+    // Two hundred replies is not worth the tokens uninvited; the coordinates
+    // are what the pier-slack script takes.
     expect(client.repliesCalls).toEqual([]);
-    expect(inbound[0]!.text.split("\n").at(-1)).toBe(
-      "[thread: 200 replies \u2014 read with the slack tool: channel C900, thread_ts 1699.000100]",
-    );
-  });
-
-  it("names the tool only when the agent has it", async () => {
-    openGates();
-    agentTool(false);
-    await feed(shared({ attachments: [share({ reply_count: 200 })] }));
-    // The coordinates stay true with agent access off; the instruction to use
-    // a tool this session was never given does not.
     expect(inbound[0]!.text.split("\n").at(-1)).toBe(
       "[thread: 200 replies \u2014 channel C900, thread_ts 1699.000100]",
     );
@@ -653,12 +629,10 @@ describe("shared messages", () => {
 
   it("says why a thread is missing rather than dropping it silently", async () => {
     openGates();
-    agentTool(true);
     client.replies = () =>
       Promise.reject(new Error("slack conversations.replies: not_in_channel"));
     await feed(shared({ attachments: [share({ reply_count: 5 })] }));
-    // The turn still runs, and the reason is the action it implies — the
-    // translation the tool already owns.
+    // The turn still runs, and the reason is the action it implies.
     expect(inbound).toHaveLength(1);
     const lines = inbound[0]!.text.split("\n");
     expect(lines[1]).toBe("the db is on fire");
@@ -672,7 +646,6 @@ describe("shared messages", () => {
 
   it("reads nothing for a shared reply, which is not a thread parent", async () => {
     openGates();
-    agentTool(true);
     await feed(shared({
       attachments: [share({ ts: "1699.000900", thread_ts: "1699.000100", reply_count: 5 })],
     }));
@@ -682,7 +655,6 @@ describe("shared messages", () => {
 
   it("says an inlined thread was cut rather than reading as complete", async () => {
     openGates();
-    agentTool(true);
     // `reply_count` undercounted: more came back than the budget allows, so the
     // transcript has to admit it stops short of the end.
     client.threadReplies = Array.from({ length: 40 }, (_, i) => ({

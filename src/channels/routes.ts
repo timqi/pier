@@ -85,9 +85,6 @@ export function registerChannelRoutes(
       enabled: asBool(body.enabled),
       token: kept(asString(body.token), current.token),
       appToken: kept(asString(body.appToken), current.appToken),
-      // Absent means "on": a client that predates the field must not silently
-      // switch off a capability the operator never touched.
-      agentTool: body.agentTool === undefined ? current.agentTool : asBool(body.agentTool),
       requireMention: asBool(body.requireMention),
       requireBind: asBool(body.requireBind),
       topicMode: asBool(body.topicMode),

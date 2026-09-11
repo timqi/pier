@@ -18,10 +18,6 @@ import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
-import { SlackApi } from "./channels/slack-api.js";
-import { SlackDirectory } from "./channels/slack-directory.js";
-import { handleSlackTool, slackToolAvailable, slackToolSpec } from "./channels/slack-tool.js";
-import { parseConversation as parseSlackConversation } from "./channels/slack.js";
 import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
@@ -96,8 +92,6 @@ let tasks: TaskService;
 const conversations = new ConversationStore(db);
 let resolveIm: (key: ConversationKey) => Promise<AgentSession>;
 let channelStore: ChannelStore;
-// Shared by the adapter and the tool: one display-name lookup per process.
-const slackDirectory = new SlackDirectory((m) => logger("slack").warn(m));
 let readyForConfigReload = false;
 const piConfig = new PiConfigStore();
 // Before anything reads settings.json: a first boot gets Pier's seed file.
@@ -109,27 +103,6 @@ const configSync = new ConfigSync({
 const skillsDir = fileURLToPath(new URL("../skills", import.meta.url));
 const agentTools = [
   taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
-  slackToolSpec(
-    (params, callerSessionId) =>
-      handleSlackTool({
-        store: channelStore,
-        directory: slackDirectory,
-        // Per call: the Console can change the token underneath us.
-        client: () => {
-          const config = channelStore.get("slack");
-          return config.token ? new SlackApi(config.token, config.appToken) : null;
-        },
-        // Per call: the mapping is durable, the session is not.
-        here: (sessionId) => {
-          const key = router.conversationOf(sessionId);
-          if (key?.channelId !== "slack") return null;
-          const { channel, threadTs } = parseSlackConversation(key.conversationId);
-          return channel && threadTs ? { channel, threadTs } : null;
-        },
-        log: (m) => logger("slack.tool").warn(m),
-      }, params, callerSessionId),
-    () => slackToolAvailable(channelStore),
-  ),
 ];
 const factory = new PiAgentFactory(
   agentTools,
@@ -169,7 +142,7 @@ const toolsUpdate = toolsTask(tasks);
 const reconciled = await toolsUpdate.reconcile();
 if ("problem" in reconciled) log.error(`tools cannot be managed: ${reconciled.problem}`);
 
-const packages = new PiPackageStore(piConfig, { version: currentVersion(), settings, tools: agentTools }, [skillsDir]);
+const packages = new PiPackageStore(piConfig, { version: currentVersion(), settings }, [skillsDir]);
 // At boot, not lazily: the answer waits for the next Console open (update.ts).
 packages.watchUpdates();
 

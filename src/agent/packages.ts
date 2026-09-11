@@ -13,7 +13,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   PackageError,
-  type AgentCustomTool,
   type Package,
   type PackageKind,
   type PackageRegistry,
@@ -34,8 +33,6 @@ const log = logger("packages");
 const CHECK_EVERY_MS = 24 * 60 * 60_000;
 const KINDS = { extensions: "extension", skills: "skill" } as const;
 type ArrayKey = keyof typeof KINDS;
-/** The state line for a skill whose tool this instance is not given (docs/design/03). */
-const FOLLOWS_TOOL = "follows Channels → agent tool";
 /** Written by `rtk init -g --agent pi` (the rtk block's `post_install` hook): a `local` file whose
  *  switch is the rtk tool's, so a settings.json pattern would fight the tool. */
 const RTK_FILE = join("extensions", "rtk.ts");
@@ -45,8 +42,6 @@ const RTK_STATE = "installed by the rtk tool";
 export interface PierPackage {
   version: string;
   settings: Pick<SettingsStore, "get" | "setExtensions" | "setSkillsOff">;
-  /** Whose skills stand down with them (pi.ts standDownUndocumented). */
-  tools: AgentCustomTool[];
 }
 
 export const kindOf = (source: string): PackageKind =>
@@ -186,15 +181,11 @@ export class PiPackageStore implements PackageStore {
       kind: "extension", name, path: `<inline:${name}>`, enabled: on.includes(name),
       state: on.includes(name) ? shadowedBuiltin(name) : null,
     }));
-    const gone = new Set(this.pier.tools.filter((t) => t.skill && !(t.available?.() ?? true)).map((t) => t.skill));
     for (const dir of this.skillDirs) {
       for (const entry of (await fs.readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory())) {
         const path = join(dir, entry.name, "SKILL.md");
         if (!existsSync(path)) continue;
-        pkg.resources.push({
-          kind: "skill", name: entry.name, path, enabled: !off.includes(entry.name),
-          state: gone.has(entry.name) ? FOLLOWS_TOOL : null,
-        });
+        pkg.resources.push({ kind: "skill", name: entry.name, path, enabled: !off.includes(entry.name), state: null });
       }
     }
   }

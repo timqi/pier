@@ -9,7 +9,6 @@ import { getJson, sendJson } from "./api.js";
 import {
   larkThreadHelp,
   larkTokenHelp,
-  slackAgentToolHelp,
   slackThreadHelp,
   slackTokenHelp,
   telegramTokenHelp,
@@ -187,16 +186,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         help: platform === "telegram" ? telegramTokenHelp() : slack ? slackTokenHelp() : larkTokenHelp(),
       }),
       ...(slack
-        ? [
-          field("App-level token", appToken, { hint: "Opens the Socket Mode connection. Needs connections:write." }),
-          toggle(
-            "Agent access",
-            "Let agent sessions read channel history and post through the slack tool. Off makes the tool refuse; inbound messages are unaffected.",
-            cfg.agentTool,
-            set((v) => (cfg.agentTool = v)),
-            slackAgentToolHelp(),
-          ),
-        ]
+        ? [field("App-level token", appToken, { hint: "Opens the Socket Mode connection. Needs connections:write." })]
         : []),
       ...(lark
         ? [field("App Secret", appToken, { hint: "From Credentials & Basic Info, beside the App ID." })]
