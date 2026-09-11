@@ -30,6 +30,7 @@ Usage
   pier vault run [ENV=NAME | NAME]... -- <command> [args...]
                               run a command with named secrets in its env
   pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
+  pier task <operation> ...   subagents and scheduled tasks from a shell (pier task --help)
   pier --version | --help
 
 Options for "service install"
@@ -55,8 +56,8 @@ const argv = process.argv.slice(2);
 const parsed = (() => {
   try {
     return parseArgs({
-      // `slack` owns its own options; only the name is parsed here.
-      args: argv[0] === "slack" ? ["slack"] : argv,
+      // `slack` and `task` own their options; only the name is parsed here.
+      args: argv[0] === "slack" || argv[0] === "task" ? [argv[0]] : argv,
       allowPositionals: true,
       strict: true,
       options: {
@@ -109,6 +110,9 @@ if (values.help || command === "help") {
   await vault(subcommand, argv);
 } else if (command === "slack") {
   await slack(argv.slice(1));
+} else if (command === "task") {
+  const { runTaskCli } = await import("./tasks/cli.js");
+  process.exitCode = await runTaskCli(argv.slice(1), (params) => askPier("/task", { params }));
 } else if (command === "restart" || command === "reload") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], `pier ${command}`);

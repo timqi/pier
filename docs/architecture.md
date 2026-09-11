@@ -53,7 +53,8 @@ src/
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,
-               messages, command, service, store, tool, routes
+               messages, command, service, store, tool, routes, cli (`pier
+               task`: argv → the tool's params object over the socket)
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME
@@ -75,13 +76,14 @@ src/
                ledger what the deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes;
                `pier slack` is dispatched to channels/slack-cli.ts with the
-               token resolved here (env, or the CLI socket)
+               token resolved here (env, or the CLI socket), `pier task` to
+               tasks/cli.ts with the socket request
   tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);
                a custom tool is the body of its ubix block. `~/.pier/tools/bin` goes first on the PATH everything
                Pier spawns inherits; at start Pier writes a `pier` shim there that execs its own
-               cli (same node, same loader), so `pier vault run`/`pier slack` are the running build. One sync per machine: a lock row in pier.db
+               cli (same node, same loader), so `pier vault run`/`pier slack`/`pier task` are the running build. One sync per machine: a lock row in pier.db
                (BEGIN IMMEDIATE), re-checked before every mutating step
   tools-task.ts a tools switch becomes exactly one run of the one task Pier
                owns, coalescing a burst of switches into a single run

@@ -266,6 +266,26 @@ describe("pier vault run", () => {
     expect(down.stderr).toBe(`pier: Pier is not running (no ${join(record.home, "none", "pier.sock")})\n`);
   });
 
+  it("drives `pier task` over the same socket: the params object under the session, the result as one JSON line", async () => {
+    const { home, asked } = await fakeVault(200, { result: { runId: "r1", state: "cancelled" } });
+    const env: NodeJS.ProcessEnv = { ...process.env, ...SESSION, PIER_HOME: home };
+    const done = await run(["task", "cancel", "--run", "r1"], { env });
+    expect(done.stderr).toBe("");
+    expect(done.stdout).toBe('{"runId":"r1","state":"cancelled"}\n');
+    expect(done.code).toBe(0);
+    expect(asked).toEqual([{ method: "POST", url: "/task", body: { params: { operation: "cancel", run_id: "r1" }, sessionId: "sess-1" } }]);
+    // `--run` is `pier task`'s option, not `pier`'s; usage never touches the socket.
+    const stray = await run(["task", "list", "--run", "r1"], { env });
+    expect(stray.code).toBe(2);
+    expect(stray.stderr).toContain("--run is not an option of list");
+    expect(asked).toHaveLength(1);
+
+    const refused = await fakeVault(422, { error: "session does not own this run" });
+    const denied = await run(["task", "cancel", "--run", "r1"], { env: { ...env, PIER_HOME: refused.home } });
+    expect(denied.code).toBe(1);
+    expect(denied.stderr).toBe("task: session does not own this run\n");
+  });
+
   it("hands `pier slack` its own options, and asks the vault nothing for usage", async () => {
     const { home, asked } = await fakeVault(200, { values: {} });
     const env: NodeJS.ProcessEnv = { ...process.env, PIER_HOME: home, SLACK_BOT_TOKEN: undefined };
