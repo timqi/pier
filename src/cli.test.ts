@@ -118,7 +118,7 @@ describe("pier vault run", () => {
   const SESSION = { PIER_SESSION_ID: "sess-1" };
 
   /** A cli socket answering one scripted response; records what it was asked. */
-  async function fakeVault(status: number, body: unknown): Promise<{ home: string; asked: unknown[] }> {
+  async function fakePier(status: number, body: unknown): Promise<{ home: string; asked: unknown[] }> {
     // Short: a Unix socket path is capped near 108 bytes.
     const home = mkdtempSync(join(tmpdir(), "pv-"));
     const asked: unknown[] = [];
@@ -148,7 +148,7 @@ describe("pier vault run", () => {
   const child = (script: string): string[] => [process.execPath, "-e", script];
 
   it("puts plain values in the command's env and passes its exit code through", async () => {
-    const { home, asked } = await fakeVault(200, {
+    const { home, asked } = await fakePier(200, {
       values: { SLACK_TOKEN: { kind: "plain", value: "xoxb-1" }, OTHER: { kind: "plain", value: "o" } },
     });
     const result = await run(
@@ -168,7 +168,7 @@ describe("pier vault run", () => {
   });
 
   it("wraps the command in vt inject for record values, naming only their variables", async () => {
-    const { home } = await fakeVault(200, {
+    const { home } = await fakePier(200, {
       values: { DEPLOY: { kind: "record", value: "vt://rec" }, PLAIN: { kind: "plain", value: "p" } },
     });
     const bin = fakeVt(home);
@@ -182,7 +182,7 @@ describe("pier vault run", () => {
   });
 
   it("stops before running anything when a record needs a vt that is not there", async () => {
-    const { home } = await fakeVault(200, { values: { DEPLOY: { kind: "record", value: "vt://rec" } } });
+    const { home } = await fakePier(200, { values: { DEPLOY: { kind: "record", value: "vt://rec" } } });
     const empty = join(home, "empty");
     mkdirSync(empty);
     const result = await run(
@@ -201,31 +201,31 @@ describe("pier vault run", () => {
   });
 
   it("relays an unknown name with its filing link, and a locked store with its reason", async () => {
-    const missing = await fakeVault(404, { error: "no secret named A", file: "https://pier.example/#/settings/vault?name=A" });
+    const missing = await fakePier(404, { error: "no secret named A", file: "https://pier.example/#/settings/vault?name=A" });
     const unknown = await run(["vault", "run", "A", "--", "true"], { env: { ...process.env, ...SESSION, PIER_HOME: missing.home } });
     expect(unknown.code).toBe(2);
     expect(unknown.stderr).toBe("vault: no secret named A — file it at https://pier.example/#/settings/vault?name=A\n");
 
-    const sealed = await fakeVault(423, { error: "locked — unlock() has not run" });
+    const sealed = await fakePier(423, { error: "locked — unlock() has not run" });
     const locked = await run(["vault", "run", "A", "--", "true"], { env: { ...process.env, ...SESSION, PIER_HOME: sealed.home } });
     expect(locked.code).toBe(2);
     expect(locked.stderr).toBe("vault: locked — unlock() has not run\n");
   });
 
   it("relays a refused identity as one pier: line, and sends none when the env has none", async () => {
-    const refused = await fakeVault(403, { error: "sess-1 is not a session of this Pier" });
+    const refused = await fakePier(403, { error: "sess-1 is not a session of this Pier" });
     const foreign = await run(["vault", "run", "A", "--", "true"], { env: { ...process.env, ...SESSION, PIER_HOME: refused.home } });
     expect(foreign.code).toBe(2);
     expect(foreign.stderr).toBe("pier: sess-1 is not a session of this Pier\n");
 
-    const required = await fakeVault(400, { error: "PIER_SESSION_ID is required" });
+    const required = await fakePier(400, { error: "PIER_SESSION_ID is required" });
     const bare = await run(["vault", "run", "A", "--", "true"], { env: { ...process.env, PIER_SESSION_ID: undefined, PIER_HOME: required.home } });
     expect(bare.stderr).toBe("pier: PIER_SESSION_ID is required\n");
     expect(required.asked).toEqual([{ method: "POST", url: "/resolve", body: { names: ["A"] } }]);
   });
 
   it("prints the usage for bad syntax, never asking the socket", async () => {
-    const { home, asked } = await fakeVault(200, { values: {} });
+    const { home, asked } = await fakePier(200, { values: {} });
     const env = { ...process.env, ...SESSION, PIER_HOME: home };
     for (const args of [
       ["vault"],
@@ -244,7 +244,7 @@ describe("pier vault run", () => {
   });
 
   it("resolves the token for `pier slack` the same way, re-running itself under vt inject for an approve record", async () => {
-    const record = await fakeVault(200, { values: { SLACK_TOKEN: { kind: "record", value: "vt://rec" } } });
+    const record = await fakePier(200, { values: { SLACK_TOKEN: { kind: "record", value: "vt://rec" } } });
     const bin = fakeVt(record.home, "SLACK_BOT_TOKEN");
     const env: NodeJS.ProcessEnv = { ...process.env, ...SESSION, PIER_HOME: record.home, SLACK_BOT_TOKEN: undefined, PATH: `${bin}:${process.env.PATH ?? ""}` };
     const wrapped = await run(["slack", "post", "C1", "hello world", "--thread", "1700.1"], { env });
@@ -256,7 +256,7 @@ describe("pier vault run", () => {
     );
     expect(record.asked).toEqual([{ method: "POST", url: "/resolve", body: { names: ["SLACK_TOKEN"], sessionId: "sess-1" } }]);
 
-    const missing = await fakeVault(404, { error: "no secret named SLACK_TOKEN", file: "https://pier.example/#/settings/vault?name=SLACK_TOKEN" });
+    const missing = await fakePier(404, { error: "no secret named SLACK_TOKEN", file: "https://pier.example/#/settings/vault?name=SLACK_TOKEN" });
     const unfiled = await run(["slack", "whoami"], { env: { ...env, PIER_HOME: missing.home } });
     expect(unfiled.code).toBe(2);
     expect(unfiled.stderr).toBe("vault: no secret named SLACK_TOKEN — file it at https://pier.example/#/settings/vault?name=SLACK_TOKEN\n");
@@ -267,7 +267,7 @@ describe("pier vault run", () => {
   });
 
   it("drives `pier task` over the same socket: the params object under the session, the result as one JSON line", async () => {
-    const { home, asked } = await fakeVault(200, { result: { runId: "r1", state: "cancelled" } });
+    const { home, asked } = await fakePier(200, { result: { runId: "r1", state: "cancelled" } });
     const env: NodeJS.ProcessEnv = { ...process.env, ...SESSION, PIER_HOME: home };
     const done = await run(["task", "cancel", "--run", "r1"], { env });
     expect(done.stderr).toBe("");
@@ -280,14 +280,14 @@ describe("pier vault run", () => {
     expect(stray.stderr).toContain("--run is not an option of list");
     expect(asked).toHaveLength(1);
 
-    const refused = await fakeVault(422, { error: "session does not own this run" });
+    const refused = await fakePier(422, { error: "session does not own this run" });
     const denied = await run(["task", "cancel", "--run", "r1"], { env: { ...env, PIER_HOME: refused.home } });
     expect(denied.code).toBe(1);
     expect(denied.stderr).toBe("task: session does not own this run\n");
   });
 
   it("hands `pier slack` its own options, and asks the vault nothing for usage", async () => {
-    const { home, asked } = await fakeVault(200, { values: {} });
+    const { home, asked } = await fakePier(200, { values: {} });
     const env: NodeJS.ProcessEnv = { ...process.env, PIER_HOME: home, SLACK_BOT_TOKEN: undefined };
     const help = await run(["slack", "--help"], { env });
     expect(help.code).toBe(0);
@@ -300,7 +300,7 @@ describe("pier vault run", () => {
   });
 
   it("forwards SIGTERM to the command and exits with its signal status", async () => {
-    const { home } = await fakeVault(200, { values: { A: { kind: "plain", value: "a" } } });
+    const { home } = await fakePier(200, { values: { A: { kind: "plain", value: "a" } } });
     const proc = spawn(process.execPath, [
       "--import", tsx, cli, "vault", "run", "A", "--",
       ...child('process.stdout.write("up"); setTimeout(() => {}, 30_000)'),

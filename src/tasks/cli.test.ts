@@ -1,5 +1,5 @@
 // Argv → the exact params object posted, and the answer's two shapes; the
-// socket is a recorder, as cli.test.ts's fakeVault is for `vault run`.
+// socket is a recorder, as cli.test.ts's fakePier is for `vault run`.
 
 import { describe, expect, it } from "vitest";
 import { runTaskCli, type TaskCliIo, type TaskPost } from "./cli.js";

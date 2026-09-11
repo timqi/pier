@@ -130,7 +130,7 @@ const settled = (callback: CallbackFields): boolean =>
   callback.callbackState === null || callback.callbackState === "delivered" || callback.callbackState === "abandoned";
 
 /** The same words for queued, running, pending and retrying: a refusal that
- *  named the state would be the status query this operation replaced. */
+ *  named the state would be the status query this surface refuses. */
 const notRecoverable = (what: string, callback: { callbackSessionId: string | null }): never => {
   throw new Error(callback.callbackSessionId === null
     ? `${what} is not recoverable yet: it was launched with callback none, so nothing will be delivered; recover reads finished results only and cannot wait for work`
@@ -177,7 +177,6 @@ export async function handleTask(
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
-      if (input.session_mode !== undefined) throw new Error("session_mode applies to a single run only");
       if (input.callback_session_id !== undefined) throw new Error("callback_session_id applies to a single run only");
       if (input.tasks.length < 2) throw new Error("tasks[] needs at least 2 entries; use task for a single run");
       const resolved: TaskDefinition[] = [];
@@ -202,20 +201,13 @@ export async function handleTask(
     const task = draft
       ? await resolveDraft(definitions, menu, draft, callerSessionId)
       : definitions.get(requiredString(input.task_id, "task_id"));
-    // Same as the HTTP route: a named mode the schema no longer offers is
-    // answered, not quietly swapped for the definition's own policy.
-    if (input.session_mode !== undefined && input.session_mode !== "fresh") {
-      throw new Error(`unsupported session_mode: ${String(input.session_mode)}`);
-    }
-    const sessionMode = input.session_mode;
     const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
-    const run = host.run(task.id, input.input, "agent", null, {
+    const run = host.run(task.id, null, "agent", null, {
       invokedBySessionId: callerSessionId,
       sourceSessionId: callerSessionId,
       callbackSessionId,
       callbackMode,
       background: true,
-      sessionMode,
     });
     return receipt(summarize(run), callbackSessionId, callbackMode, callerSessionId);
   }
@@ -298,11 +290,9 @@ function nameFromPrompt(prompt: string): string {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
 }
 
-/** `launch.model` by name (docs/design/09-tasks-cli.md §Models): an exact
- *  `provider/id` on the menu is that pin; one case-insensitive substring hit
- *  over provider, id and note is that pin, its thinking the default; a
- *  `provider/id` nobody pinned is taken as written. Anything else is refused
- *  with the lines to pick from, so the agent never guesses an id. */
+/** `launch.model` by name (docs/design/09-tasks-cli.md §Models). Anything but
+ *  one pin or an unpinned `provider/id` is refused with the lines to pick
+ *  from, so the agent never guesses an id. */
 function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;

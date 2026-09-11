@@ -109,8 +109,7 @@ their status codes are in [03-web-workbench.md](03-web-workbench.md).
 
 `ChannelConfig.token`/`appToken` keep their meaning in memory; `ChannelStore`
 fills them from the vault on read and files them on save, and the `channels`
-row holds neither. Fixed names (`CREDENTIAL_NAMES`, `channels/config.ts`;
-migration 24 moved the sealed blobs over verbatim):
+row holds neither. Fixed names (`CREDENTIAL_NAMES`, `channels/config.ts`):
 
 | Platform | `token` | `appToken` |
 | --- | --- | --- |

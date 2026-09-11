@@ -3,9 +3,8 @@
 `$PIER_HOME/pier.sock` is how the `pier` CLI reaches the running instance:
 `pier vault run`, `pier slack` (a vault resolve) and `pier task`. `node:http`
 on a Unix socket, mode `0600`, unlinked on start and on exit; the permission
-bits are the whole auth (`src/socket.ts`). Not a workbench route: that server
-sits behind a reverse proxy at a public hostname, and plaintext crosses this
-socket into a local process of Pier's user and nowhere else.
+bits are the whole auth (`src/socket.ts`). Not a workbench route: plaintext
+crosses this socket into a local process of Pier's user and nowhere else.
 
 ## Identity
 

@@ -1150,11 +1150,6 @@ describe("task service", () => {
     expect(run.state).toBe("failed");
     expect(run.error).toContain("removed fork session mode");
     expect(factory.create).not.toHaveBeenCalled();
-
-    // Naming the mode as an override is answered too: dropping it would run
-    // the definition's own policy under the caller's word for something else.
-    await expect(service.handle({ operation: "run", task_id: legacy.id, session_mode: "fork" }, "s1"))
-      .rejects.toThrow("unsupported session_mode");
   });
 
   it("allows concurrent interactive fresh runs of one role", async () => {
