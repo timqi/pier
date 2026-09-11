@@ -151,8 +151,8 @@ const MAX_SUGGESTIONS = 5;
 /** A deliberate non-answer. Stripped here so an adapter needs no new concept:
  *  an empty turn already posts nothing and retires its per-turn UI. The reason
  *  stays in the transcript, auditable without being broadcast. */
-// A model has been seen emitting `<s​​ilent>`: zero-width characters inside the
-// tag, which would post the literal tag to a channel instead of silence.
+// A model has been seen emitting `<s<U+200B>ilent>`: zero-width characters inside
+// the tag, which would post the literal tag to a channel instead of silence.
 const ZW = String.raw`[\u200B-\u200D\u2060\uFEFF]*`;
 const tag = (literal: string): string => literal.split("").join(ZW);
 const SILENT = new RegExp(`${tag("<silent>")}([\\s\\S]*?)${tag("</silent>")}`, "gi");

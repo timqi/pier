@@ -91,6 +91,21 @@ describe("vault socket", () => {
     expect(calls).toEqual([]);
   });
 
+  it("drops a body past 64 KB without reading it, and is 500 for a failure that is neither name nor lock", async () => {
+    const path = sockPath();
+    const server = serveVault({
+      resolve() {
+        throw new Error("disk gone");
+      },
+    }, () => "", path);
+    servers.push(server);
+    await listening(server);
+    await expect(call(path, JSON.stringify({ names: ["A".repeat(64), "B".repeat(64), "C"], pad: "x".repeat(70_000) })))
+      .rejects.toThrow(/socket hang up|ECONNRESET|EPIPE/);
+    const answer = await call(path, JSON.stringify({ names: ["A"] }));
+    expect(answer).toEqual({ status: 500, body: { error: "Error: disk gone" } });
+  });
+
   it("is 0600, replaces a stale socket file, and goes when the server closes", async () => {
     const path = sockPath();
     writeFileSync(path, "stale");

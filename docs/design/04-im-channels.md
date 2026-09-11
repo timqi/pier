@@ -108,7 +108,7 @@ and Slack refuses `chat.update`/`chat.delete` on anyone else's message. The
 session learns its own channel and thread from the `place` token of the
 speaker header.
 
-- The CLI runs on the adapter's `SlackApi` (public `read`; five rate-limit
+- The CLI runs on the adapter's `SlackApi` (public `read`; four rate-limit
   waits where the adapter takes one), `SlackDirectory` for names and
   `slack-render`'s markdown block. A read paginates fully and can write to
   disk (`--out`). `skills/pier-slack/SKILL.md` describes the transcript
