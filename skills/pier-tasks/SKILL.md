@@ -6,8 +6,9 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 # Pier tasks
 
 `pier task --help` lists the five commands and their flags. Each prints one
-JSON receipt, exit 0; a refusal is one `task:` line, exit 1. `--prompt -`
-reads stdin.
+JSON receipt, exit 0; a refusal is a `task:` line, exit 1 (`--model` with no
+or several hits lists the menu under it); a bad flag is `task:` plus the
+usage, exit 2. `--prompt -` reads stdin.
 
 ## Delegate, then end your turn
 
@@ -59,8 +60,9 @@ reveals no state.
 pier task save --name nightly --bash "make check" --cwd /repo --cron "0 3 * * *" --tz UTC
 ```
 
-Only for schedules or roles run more than once; `--task-id` updates; results
-reach a session only via `--callback-session`. `pier task list` shows them.
+Only for schedules or roles run more than once; `--task-id` updates. A
+schedule's results reach nobody unless `--callback-session <id>` names a
+session; `pier task list` shows definitions, never runs.
 
 ## Limits
 

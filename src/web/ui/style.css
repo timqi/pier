@@ -326,6 +326,16 @@ main > section, #turns { grid-row: 1 / -1; }
   #session-list {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
   }
+  /* Installed on iOS the top inset is paid twice: the web view is the whole
+     screen and still reports a `dvh` short of it by `safe-area-inset-top`, so
+     the workbench ends above the screen's bottom edge and leaves a strip of
+     canvas under the dock. Without browser chrome there is no gap between the
+     large viewport and the visible one, which is what `dvh` was guarding. */
+  @media (display-mode: standalone) {
+    body {
+      height: 100vh;
+    }
+  }
   /* Keyboard up (composer.ts sets it): the indicator is behind the keyboard,
      and the inset iOS still reports for it would sit as a blank strip between
      the input and the keyboard's accessory bar. */
@@ -691,7 +701,9 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
      than as a utility on the element — and declared, not measured, so --head-h
      can be too: the transcript pads by what covers it. */
   main { --bar-h: 3rem; --head-h: calc(var(--bar-h) + 8px); }
-  main:has(#chat-header:not(.hidden)):has(#session-meta[data-urgent]:not(.hidden)) { --bar-h: 4.5rem; }
+  /* The chips' own line, and no more: the strip's controls (2.75rem) plus the
+     chip row — slack above the chips reads as the strip having lost its title. */
+  main:has(#chat-header:not(.hidden)):has(#session-meta[data-urgent]:not(.hidden)) { --bar-h: 4rem; }
   #mobile-bar {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -701,7 +713,10 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
     row-gap: 0;
     height: var(--bar-h);
   }
-  #mobile-bar #session-meta { grid-row: 2; grid-column: 2 / -1; height: 1.5rem; }
+  /* `min-width: 0`: a grid item's automatic minimum is its content, which here
+     is a row of chips wider than the strip — it would hang off the bar's edge
+     instead of making the model chip give up characters (session-header.ts). */
+  #mobile-bar #session-meta { grid-row: 2; grid-column: 2 / -1; height: 1.25rem; min-width: 0; }
   /* A Console view hides the chat heading (views.ts), and the chips are the
      chat's: they leave with it rather than sitting under the view's name. */
   main:has(#chat-header.hidden) #session-meta { display: none; }

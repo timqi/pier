@@ -21,9 +21,11 @@ without it, name a channel explicitly.
 - A wide range belongs on disk: `history … --threads --out raw.txt`, then
   read pieces. `--json` is for scripts, not for you.
 - 11 000 chars per message; split across replies in one thread.
-- Errors are one `slack: <method>: <code>` line: `not_in_channel` → someone
-  `/invite`s the bot; `channel_not_found` → see `channels`; `missing_scope`
-  → the operator reinstalls the app; `cant_update_message` → not yours.
+- Slack's failures are one `slack: <method>: <code>` line: `not_in_channel` →
+  someone `/invite`s the bot; `channel_not_found` → see `channels`;
+  `missing_scope` → the operator reinstalls the app (on `channels` it means no
+  `im:read`/`mpim:read`; ids still work); `cant_update_message` → not yours.
+  Pier's own checks are `slack: channel|ts|time|user: <why>`.
 
 ## Transcript format
 

@@ -158,6 +158,16 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[]): GroupSummary => d
   next: null,
 });
 
+const CANCEL_WAIT_MS = 2000;
+
+/** The run once terminal, or as it stands after `ms`. */
+function cancelledOrCurrent(host: TaskService, id: string, ms: number): Promise<TaskRun> {
+  return Promise.race([
+    host.waitForRun(id),
+    new Promise<TaskRun>((resolve) => setTimeout(() => resolve(host.getRun(id)), ms).unref()),
+  ]);
+}
+
 export async function handleTask(
   host: TaskService,
   definitions: TaskDefinitions,
@@ -260,8 +270,10 @@ export async function handleTask(
     }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
     assertOwns(callerSessionId, run);
-    const cancelled = host.cancel(run.id);
-    return summarize(cancelled);
+    // cancel() only aborts; the row flips ~100 ms later. A receipt still saying
+    // `running` reads as "cancel failed", so wait for the flip, briefly.
+    host.cancel(run.id);
+    return summarize(await cancelledOrCurrent(host, run.id, CANCEL_WAIT_MS));
   }
   if (input.operation === "message") {
     // The one request `pier task run --run` sends: the run's state, not the

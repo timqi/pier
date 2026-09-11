@@ -1,7 +1,8 @@
 // `pier slack <subcommand> …`: Slack from a shell for an agent session, with
 // the bot token handed in by cli.ts (env or vault) and never printed. Reads
-// paginate fully and can land on disk (`--out`); every failure is one
-// `slack: <method>: <code>` line on stderr, Slack's own code verbatim.
+// paginate fully and can land on disk (`--out`); every failure is one line on
+// stderr: `slack: <method>: <code>` with Slack's own code verbatim, or
+// `slack: <check>: <why>` for what this file refuses before asking Slack.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
@@ -168,7 +169,7 @@ class Client {
       types: "public_channel,private_channel",
     });
     const hit = convs.find((c) => (c.name ?? "").toLowerCase() === wanted);
-    if (!hit) throw new SlackCliError("channel", `no channel named #${wanted} — see \`channels\``);
+    if (!hit) throw new SlackCliError("channel", `no channel named ${given} — see \`channels\``);
     return hit.id;
   }
 

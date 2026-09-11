@@ -467,9 +467,9 @@ describe("channels and users", () => {
     expect(code).toBe(0);
     expect(fake.forms("conversations.history")[0]!.channel).toBe("C2");
     expect(fake.forms("conversations.list")[0]).toMatchObject({ types: "public_channel,private_channel", exclude_archived: "true" });
-    const nowhere = await run(["history", "nowhere"], { "conversations.list": listing });
+    const nowhere = await run(["history", "NoWhere"], { "conversations.list": listing });
     expect(nowhere.code).toBe(1);
-    expect(nowhere.err).toBe("slack: channel: no channel named #nowhere — see `channels`\n");
+    expect(nowhere.err).toBe("slack: channel: no channel named NoWhere — see `channels`\n");
   });
 
   it("looks a user up by id or by name, and refuses an ambiguous name", async () => {

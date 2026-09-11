@@ -177,19 +177,22 @@ function renderSessionMeta(): void {
   }
   if (id) {
     const pickerButton = (text: string, cls: string): HTMLElement => {
-      const button = h("button", `flex-none cursor-pointer font-mono ${cls}`, text);
+      const button = h("button", `cursor-pointer font-mono ${cls}`, text);
       button.title = "Change model or reasoning";
       button.onclick = () => void pickModel(button, id);
       return button;
     };
     if (currentModel) {
+      // The only chip of open-ended length, so it is the one that gives up
+      // characters when the row cannot fit — the readings after it are short,
+      // and dropping off the strip's edge is not a reading at all.
       items.push(pickerButton(
         currentModel.id,
-        "rounded bg-indigo-50 px-1.5 py-px font-medium text-indigo-700 hover:bg-indigo-100",
+        "min-w-0 truncate rounded bg-indigo-50 px-1.5 py-px font-medium text-indigo-700 hover:bg-indigo-100",
       ));
     }
     if (currentThinking) {
-      items.push(pickerButton(currentThinking, "text-neutral-500 hover:text-indigo-700"));
+      items.push(pickerButton(currentThinking, "flex-none text-neutral-500 hover:text-indigo-700"));
     }
   }
   // Context pressure decides two things: the chip's tone, and — below md —
@@ -201,7 +204,7 @@ function renderSessionMeta(): void {
     items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
   }
   const children = items.flatMap((item, i) =>
-    i === 0 ? [item] : [h("span", "text-neutral-300", "·"), item],
+    i === 0 ? [item] : [h("span", "flex-none text-neutral-300", "·"), item],
   );
   sessionMeta.replaceChildren(...children);
   sessionMeta.classList.toggle("hidden", items.length === 0);

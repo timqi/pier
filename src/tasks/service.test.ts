@@ -1342,6 +1342,17 @@ describe("task service", () => {
     expect(session.systemInputs).toHaveLength(0);
   });
 
+  it("answers `pier task cancel` with the cancelled state, not the instant before the flip", async () => {
+    const { cwd, service } = setup();
+    const task = await service.create({
+      name: "cancel receipt", trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" },
+    });
+    const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "s1", sourceSessionId: "s1" });
+    const receipt = await service.handle({ operation: "cancel", run_id: run.id }, "s1") as RunSummary;
+    expect(receipt.state).toBe("cancelled");
+  });
+
   it.each([
     { mode: "fresh", resolveBeforeCancel: false },
     { mode: "reuse", resolveBeforeCancel: false },
