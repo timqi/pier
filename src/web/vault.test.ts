@@ -1,15 +1,19 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
-import type { VaultEntry } from "../vault.js";
+import type { VtClient } from "../secrets.js";
+import { Vault, type VaultEntry } from "../vault.js";
 import { AuthStore, requireAuth } from "./auth.js";
 import { registerVaultRoutes } from "./vault.js";
 
-/** A scripted vault: put fails with `failure`; the entries are the table. */
-function rig(opts: { failure?: string; doctor?: string | Error } = {}) {
+/** A scripted vault: put fails with `failure`; the entries are the table. With
+ *  `vt`, the real Vault over that client instead — approve rows need no key. */
+function rig(opts: { failure?: string; doctor?: string | Error; vt?: VtClient } = {}) {
   const rows = new Map<string, VaultEntry>();
   const calls: string[] = [];
-  const vault = {
+  const db = openDb(":memory:");
+  const locked = { encrypt: () => "", decrypt: () => "", state: "locked" as const, lockedReason: "test" };
+  const vault = opts.vt ? new Vault(locked, db, opts.vt) : {
     list: () => [...rows.values()],
     async put(name: string, level: "auto" | "approve", plaintext: string) {
       calls.push(`put ${name} ${level} ${plaintext.length}`);
@@ -25,7 +29,6 @@ function rig(opts: { failure?: string; doctor?: string | Error } = {}) {
     if (opts.doctor instanceof Error) throw opts.doctor;
     return opts.doctor ?? "vt doctor — fine";
   };
-  const db = openDb(":memory:");
   const auth = new AuthStore(db, () => {});
   const cookie = `pier_session=${auth.open("10.0.0.9", "a browser")}`;
   const app = new Hono();
@@ -37,7 +40,7 @@ function rig(opts: { failure?: string; doctor?: string | Error } = {}) {
       headers: { "content-type": "application/json", ...(signedIn ? { cookie } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  return { app, rows, calls, send };
+  return { app, rows, calls, send, vault };
 }
 
 describe("/api/vault", () => {
@@ -89,6 +92,34 @@ describe("/api/vault", () => {
     expect(error).toContain("vt could not create the record (spawn vt ENOENT)");
     expect(error).toContain("vt doctor: Error: spawn vt ENOENT");
     expect(error).not.toContain("value");
+  });
+
+  it("is 504 after 15s when vt create is still waiting for an approval, and files the row once it comes", async () => {
+    vi.useFakeTimers();
+    try {
+      let approve!: (record: string) => void;
+      const vt: VtClient = {
+        create: () => new Promise<string>((resolve) => (approve = resolve)),
+        read: () => Promise.reject(new Error("not in this test")),
+        doctor: async () => "vt doctor — fine",
+      };
+      const r = rig({ vt });
+      const pending = r.send("PUT", "/api/vault/DEPLOY_KEY", { level: "approve", value: "x" });
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(r.vault.list()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const res = await pending;
+      expect(res.status).toBe(504);
+      expect(await res.json()).toEqual({
+        error: "vt is waiting for approval of the new record — approve it and retry, or file the name as auto",
+      });
+      // The put was left running: the approval that comes later still lands.
+      approve("vt://late");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(r.vault.list()).toEqual([{ name: "DEPLOY_KEY", level: "approve", updatedAt: expect.any(Number) }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is 423 when an auto row cannot be sealed because the store is locked", async () => {

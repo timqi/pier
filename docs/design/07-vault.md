@@ -147,7 +147,7 @@ Routes mounted beside the settings routes, behind the Console password:
 | Route | Behavior |
 | --- | --- |
 | `GET /api/vault` | `Vault.list()` — names and levels, never values |
-| `PUT /api/vault/:name` | body `{level, value}` → `put`; 400 on a bad name or empty value; `approve` while `vt` is unavailable is 503 with `vt doctor`'s line |
+| `PUT /api/vault/:name` | body `{level, value}` → `put`; 400 on a bad name or empty value; `approve` while `vt` is unavailable is 503 with `vt doctor`'s line; `vt create` still waiting on an approval after 15s is 504 (approve and retry, or file as `auto`) — the put keeps running and a late approval still files the row |
 | `DELETE /api/vault/:name` | remove; 404 if unknown |
 
 No reveal, no edit-in-place: a secret is replaced, not read back.
