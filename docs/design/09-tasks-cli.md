@@ -105,13 +105,30 @@ suppressed-completion rule and the open-question state are deleted from
 timeline labels (`originLabel`), the Runs filter and 03-web-workbench.md.
 Pier adds no turn for one workflow's sake.
 
+## Two levels, no tree
+
+A run that has a supervisor (a `callbackSessionId`) may not call `pier task`
+at all: `task: a delegated run cannot delegate; ask in your result and let
+your supervisor run it`, exit 1. A top-level session, and a run nobody is
+waiting on (cron, watch, manual from the Console), may. So delegation is at
+most session → run, and a scheduled task can still fan out.
+
+The reason is the run boundary: a run is one turn of its session, so a child
+that launched work and ended its turn is finished; its children's callbacks
+would land in a session no run owns and no supervisor hears. With the tree
+gone, so is the machinery for it: depth (0–2) and the 16-descendant limit in
+`runs.ts`, descendant ownership in `assertOwns`, the subagent callback
+redirect rule, every `active`-run branch in `handleTaskTool`, and the skill's
+nesting section. Ownership becomes: the session that launched a run controls
+it. A human turn in a run's session after it finished is that human's
+business and reports to nobody.
+
 ## Skill
 
 `skills/pier-tasks/SKILL.md` describes these five commands and keeps every
 rule that governs behaviour: end the turn after launching; callbacks are the
-only delivery; ownership (your trees; descendants only when you are a
-subagent); depth and instance limits; `recover` only for lost text; models
-by name. Target under 1 500 tokens (o200k); measured in the commit.
+only delivery; ownership (the runs you launched); the instance limit;
+delegated runs do not delegate; `recover` only for lost text; models by name. Target under 1 500 tokens (o200k); measured in the commit.
 
 ## Deleting the tool call
 
