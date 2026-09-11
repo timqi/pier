@@ -114,6 +114,10 @@ describe("pier task", () => {
     expect(await twice.run("run", "--member", "--prompt", "-", "--member", "--prompt", "-")).toBe(2);
     expect(twice.err[0]).toMatch(/^task: only one --prompt may read stdin/);
     expect(twice.posted).toEqual([]);
+    const empty = rig(undefined, "");
+    expect(await empty.run("run", "--prompt", "-")).toBe(2);
+    expect(empty.err[0]).toMatch(/^task: --prompt - read nothing from stdin/);
+    expect(empty.posted).toEqual([]);
   });
 
   it("asks the server for the menu on --model ?, whatever else was said", async () => {

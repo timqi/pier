@@ -234,6 +234,19 @@ describe("pier vault run", () => {
     const unreadable = await run(["task", "list"], { env: { ...process.env, ...SESSION, PIER_HOME: garbled.home } });
     expect(unreadable.code).toBe(2);
     expect(unreadable.stderr).toBe(`pier: unreadable answer from ${join(garbled.home, "pier.sock")} (status 200)\n`);
+
+    // The status arrived, the body never finished: the same line, not a hang.
+    const home = mkdtempSync(join(tmpdir(), "pv-"));
+    const cut = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json", "content-length": "100" });
+      res.write('{"result"');
+      setTimeout(() => res.destroy(), 50);
+    });
+    servers.push(cut);
+    await new Promise<void>((done) => cut.listen(join(home, "pier.sock"), done));
+    const half = await run(["task", "list"], { env: { ...process.env, ...SESSION, PIER_HOME: home } });
+    expect(half.code).toBe(2);
+    expect(half.stderr).toBe(`pier: unreadable answer from ${join(home, "pier.sock")} (status 200)\n`);
   });
 
   it("prints the usage for bad syntax, never asking the socket", async () => {

@@ -138,7 +138,8 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   const text = (raw: string | boolean | undefined): string | undefined => {
     if (raw !== "-") return raw === undefined ? undefined : String(raw);
     if (stdinReads++) refuse("only one --prompt may read stdin (-)");
-    return io.stdin();
+    // An agent's shell has no TTY: a `-` with nothing piped is an empty prompt, named here rather than by the server.
+    return io.stdin() || refuse("--prompt - read nothing from stdin");
   };
   if (parsed.some((v) => v.model === "?")) return { operation: "run", launch: { model: "?" } };
   const [values, ...members] = parsed as [Values, ...Values[]];

@@ -176,9 +176,11 @@ export async function handleTask(
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
   if (input.operation === "save") {
     const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
-    return input.task_id === undefined
-      ? definitions.create(draft, `session:${callerSessionId}`)
-      : definitions.update(requiredString(input.task_id, "task_id"), draft);
+    if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);
+    const id = requiredString(input.task_id, "task_id");
+    // A one-shot's hidden definition is a run's record, not a task anyone filed.
+    if (definitions.get(id).kind === "subagent") throw new Error(`${id} is a one-shot run's own definition; save without --task-id to file a task`);
+    return definitions.update(id, draft);
   }
   if (input.operation === "run") {
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.

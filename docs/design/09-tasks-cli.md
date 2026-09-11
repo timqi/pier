@@ -2,8 +2,8 @@
 
 The whole agent-collaboration surface: five shell commands over the CLI
 socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
-(`tasks/operations.ts`). There is no task tool call. Scheduling, delivery,
-limits and callbacks are `tasks/`'s and unchanged by this surface.
+(`tasks/operations.ts`). Scheduling, delivery, limits and callbacks are
+`tasks/`'s and unchanged by this surface.
 
 ## Commands
 
@@ -18,7 +18,8 @@ limits and callbacks are `tasks/`'s and unchanged by this surface.
 Every command returns at once and prints the receipt as compact JSON on
 stdout, exit 0. A refusal is one `task: <reason>` line on stderr, exit 1;
 argv errors are the usage line, exit 2, before the socket is touched.
-`--prompt -` reads stdin; nothing else does.
+`--prompt -` reads stdin, and an empty one is an argv error; nothing else
+reads it.
 
 The CLI checks argv shape only; the server (`handleTask` → `parseDraft`) is
 the one validator of the params object.
@@ -38,7 +39,8 @@ pier task run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>] [--ses
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
   turn; terminal → resumed as a new run on the same session, taking
-  `--callback*` like any new run. Receipt: `{delivery: "steer" | "follow_up",
+  `--callback*` like any new run (`--after` has no turn to wait for and
+  changes nothing). Receipt: `{delivery: "steer" | "follow_up",
   message}` or `{delivery: "resume", run}`. `--callback*` on a run that is not
   terminal is refused (`task: run <id> is <state>: callback options apply to a
   resumed run only …`). `--run` takes nothing but `--prompt`, `--after` and
@@ -58,10 +60,11 @@ pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <scrip
         [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id>]
 ```
 
-`--task-id` updates, otherwise creates. No trigger means `manual`. `--bash`
-is a script action, `--prompt` an agent action; exactly one. A saved task's
-callback is a session (`--callback-session`) or nothing. Archiving is the
-Console's.
+`--task-id` updates, otherwise creates; an archived task or a one-shot's
+hidden definition (`kind: subagent`) is refused. No trigger means `manual`.
+`--bash` is a script action, `--prompt` an agent action; exactly one. A saved
+task's callback is a session (`--callback-session`) or nothing. Archiving is
+the Console's.
 
 ## Models
 
@@ -92,7 +95,8 @@ A run with a supervisor (a `callbackSessionId` — its own, or its group's) may
 not call `pier task` while it is `running` on the caller's session: `task: a
 delegated run cannot delegate; ask in your result and let your supervisor run
 it`, exit 1. A queued run gates nothing. A top-level session, and a run nobody
-waits on (cron, watch, manual from the Console, `--callback none`), may.
+waits on (`--callback none`; a cron, watch or Console run whose definition
+names no `--callback-session`), may.
 
 Ownership: the session that launched a run controls it, and so does the run's
 own session. `parentRunId` links only a `task` action's child, which a cancel

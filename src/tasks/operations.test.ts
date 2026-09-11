@@ -296,6 +296,12 @@ describe("task operations", () => {
     await expect(ask({ operation: "recover", task_id: task.id, reason: "x" })).rejects.toThrow(/run_id/);
   });
 
+  it("save --task-id cannot rewrite a one-shot's hidden definition", async () => {
+    const ask = rig([]);
+    await expect(ask({ operation: "save", task_id: task.id, task: { name: "nightly", action: { type: "bash", script: "true", cwd: "/tmp" } } }))
+      .rejects.toThrow("t1 is a one-shot run's own definition; save without --task-id to file a task");
+  });
+
   it("rejects the removed operations without returning state", async () => {
     const ask = rig([run("r1", { state: "running", callbackState: null, result: null })]);
     for (const operation of ["get", "steer", "follow_up", "resume", "contact", "reply", "models", "create", "update"]) {

@@ -276,12 +276,15 @@ async function askPier<T extends { error?: string }>(path: string, body: Record<
       (res) => {
         responded = true;
         let raw = "";
+        const unreadable = (): void => reject(new Error(`unreadable answer from ${PIER_SOCK} (status ${String(res.statusCode ?? 0)})`));
         res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
+        // A connection cut mid-body reports on the response, and `end` never comes.
+        res.on("error", unreadable);
         res.on("end", () => {
           try {
             done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as T });
           } catch {
-            reject(new Error(`unreadable answer from ${PIER_SOCK} (status ${String(res.statusCode ?? 0)})`));
+            unreadable();
           }
         });
       },
