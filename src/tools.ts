@@ -7,6 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import type { CatalogBinary, CatalogEntry } from "./core/types.js";
 import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
@@ -163,14 +164,12 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
 
 /** `pier` on an agent's PATH is this process's own cli — the same source, the
  *  same loader (`tsx` in dev) — not whichever install `npm i -g` left behind.
- *  Derived from argv: main.* and cli.* are siblings in src/ and in dist/. */
+ *  Placed from this module, not argv[1]: `pier serve` enters through cli.*. */
 export function writePierShim(
   bin: string = toolsBin(),
-  proc: { execPath: string; execArgv: readonly string[]; argv: readonly string[] } = process,
+  proc: { execPath: string; execArgv: readonly string[] } = process,
+  cli: string = fileURLToPath(import.meta.url).replace(/tools(\.[cm]?[jt]s)$/, "cli$1"),
 ): string {
-  const main = proc.argv[1] ?? "";
-  const cli = main.replace(/main(\.[cm]?[jt]s)$/, "cli$1");
-  if (cli === main) throw new Error(`cannot place a pier shim beside ${main || "(no argv[1])"}`);
   const quote = (s: string): string => `'${s.replaceAll("'", String.raw`'\''`)}'`;
   const script = `#!/bin/sh\nexec ${[proc.execPath, ...proc.execArgv, cli].map(quote).join(" ")} "$@"\n`;
   mkdirSync(bin, { recursive: true });

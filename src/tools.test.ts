@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { openDb } from "./db.js";
 import { resolveAgentDir } from "./paths.js";
@@ -275,22 +276,19 @@ describe("the pier shim", () => {
     const path = writePierShim(bin, {
       execPath: "/opt/node/bin/node",
       execArgv: ["--import", "file:///repo/node_modules/tsx/dist/loader.mjs"],
-      argv: ["/opt/node/bin/node", "/repo/src/main.ts"],
-    });
+    }, "/repo/src/cli.ts");
     expect(path).toBe(join(bin, "pier"));
     expect(readFileSync(path, "utf8")).toBe(
       "#!/bin/sh\nexec '/opt/node/bin/node' '--import' 'file:///repo/node_modules/tsx/dist/loader.mjs' '/repo/src/cli.ts' \"$@\"\n",
     );
     expect(statSync(path).mode & 0o111).toBe(0o111);
-    // The built layout: dist/main.js beside dist/cli.js, no loader.
-    writePierShim(bin, { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/lib/pier/dist/main.js"] });
-    expect(readFileSync(path, "utf8")).toContain("'/lib/pier/dist/cli.js' \"$@\"");
   });
 
-  it("refuses an entry point it cannot place a cli beside", () => {
+  it("places the cli beside this module, whichever entry point the process came in through", () => {
+    // `pier serve` enters through cli.*, so argv[1] cannot say where main is.
     const bin = mkdtempSync(join(tmpdir(), "pier-shim-"));
-    expect(() => writePierShim(bin, { execPath: "node", execArgv: [], argv: ["node", "/x/server.js"] }))
-      .toThrow(/cannot place a pier shim beside \/x\/server.js/);
+    const path = writePierShim(bin, { execPath: "/usr/bin/node", execArgv: [] });
+    expect(readFileSync(path, "utf8")).toBe(`#!/bin/sh\nexec '/usr/bin/node' '${fileURLToPath(new URL("./cli.ts", import.meta.url))}' "$@"\n`);
   });
 });
 
