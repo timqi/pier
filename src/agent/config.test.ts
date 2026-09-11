@@ -121,12 +121,17 @@ describe("session defaults", () => {
   });
 
   it("seeds a first boot's settings.json with exactly the keys Pier owns, and never an existing one", async () => {
+    const seeded = {
+      packages: [],
+      enableInstallTelemetry: false,
+      retry: { maxRetries: 5, baseDelayMs: 5000 },
+    };
     await store.seedSettings();
-    expect(read()).toEqual({ packages: [], enableInstallTelemetry: false });
+    expect(read()).toEqual(seeded);
     expect(await store.readDefaults()).toEqual({ defaultModel: null, defaultThinkingLevel: null });
     // Pi's merge-write and Pier's defaults both find the list they write into.
     await store.writeDefaults({ defaultModel: { provider: "proxy", id: "m" }, defaultThinkingLevel: null });
-    expect(read()).toEqual({ packages: [], enableInstallTelemetry: false, defaultProvider: "proxy", defaultModel: "m" });
+    expect(read()).toEqual({ ...seeded, defaultProvider: "proxy", defaultModel: "m" });
 
     const theirs = '{"shellPath":"/bin/zsh",\n  "enableInstallTelemetry": true}';
     writeFileSync(join(agentDir, "settings.json"), theirs);

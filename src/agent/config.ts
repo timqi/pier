@@ -30,9 +30,15 @@ const PROJECT_FILES = ["AGENTS.md"];
 const READONLY_FILES = ["settings.json"];
 const SNAPSHOT_FILES = ["SYSTEM.md", "AGENTS.md", "models.json", "settings.json"] as const;
 /** What a first boot writes (docs/deploy.md says why each key): the list the
- *  Console installs into, and Pi's attribution headers off — a server is not a
- *  person to survey. Every other key stays Pi's default by omission. */
-const SEED_SETTINGS = { packages: [], enableInstallTelemetry: false };
+ *  Console installs into, Pi's attribution headers off — a server is not a
+ *  person to survey — and a retry budget of minutes, because an unattended
+ *  instance has nobody to re-ask after Pi's 14-second default gives up. Every
+ *  other key stays Pi's default by omission. */
+const SEED_SETTINGS = {
+  packages: [],
+  enableInstallTelemetry: false,
+  retry: { maxRetries: 5, baseDelayMs: 5000 },
+};
 
 /** Pier owns the Pi runtime dir; main.ts exports it as PI_CODING_AGENT_DIR. */
 export const defaultAgentDir = (): string =>

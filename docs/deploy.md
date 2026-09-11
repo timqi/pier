@@ -131,8 +131,11 @@ All three signal the installed service.
     to stamp attribution headers on OpenRouter, NVIDIA and Cloudflare requests;
     a server instance is not a person to survey. (`enableAnalytics` is not
     written: nothing on the SDK path reads it, and its default is already off.)
-  - The default model trio is left to Settings → Models; compaction, retries
-    and every other key stay at Pi's defaults by omission, on purpose.
+  - `retry: { maxRetries: 5, baseDelayMs: 5000 }` — Pi's default (3 retries,
+    2s base) gives up on a provider 503 after ~14s; an unattended instance
+    has nobody to re-ask, so the backoff runs ~155s instead.
+  - The default model trio is left to Settings → Models; compaction and every
+    other key stay at Pi's defaults by omission, on purpose.
   An existing file is never touched, whatever it holds.
 - `systemctl --user restart pier` and `pier update` are hard stops.
 - One Pier per `$PIER_HOME`: a start whose directory another live Pier holds
