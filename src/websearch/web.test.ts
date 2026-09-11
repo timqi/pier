@@ -1,6 +1,7 @@
-// Backend resolution, the audit rule, HTTP policy, the OpenAI wire format and
-// artifact housekeeping — the four places this extension can be wrong without
-// anyone noticing until a search comes back in the wrong language, twice.
+// Backend resolution, the audit rule, HTTP policy, the OpenAI wire format,
+// artifact housekeeping and the `/web` validator — the places this area can be
+// wrong without anyone noticing until a search comes back in the wrong
+// language, twice.
 //
 // Every module here reads its configuration at import time, so the env is set
 // before the imports and the imports are dynamic.
@@ -317,14 +318,8 @@ describe("auditing every query, not just the pinned one", () => {
     ],
   });
   const search = async (params: { query: string; language_mode?: string }) => {
-    const { webSearch } = await import("./tools.js");
-    return webSearch.execute(
-      "c",
-      params as never,
-      undefined as never,
-      (() => {}) as never,
-      ctx([haiku], haiku),
-    );
+    const { webSearch } = await import("./run.js");
+    return webSearch({ op: "search", ...params } as never, ctx([haiku], haiku), () => {});
   };
 
   it("retries in preserve mode when a later search left the language", async () => {
@@ -339,7 +334,7 @@ describe("auditing every query, not just the pinned one", () => {
     }) as never;
 
     const result = await search({ query: "阿里巴巴 股价", language_mode: "preserve" });
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const { text } = result;
     // The first query was verbatim, so the old first-query-only audit passed here.
     expect(call).toBe(2);
     expect(text).not.toContain("translated the query out of");
@@ -369,7 +364,7 @@ describe("auditing every query, not just the pinned one", () => {
     }) as never;
 
     const result = await search({ query: "阿里巴巴 股价", language_mode: "preserve" });
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const { text } = result;
     expect(call, "nothing to re-audit, so no retry").toBe(1);
     expect(text).toContain("could not be audited");
     expect(result.details).toMatchObject({ queryLanguagePreserved: undefined });
@@ -383,7 +378,7 @@ describe("auditing every query, not just the pinned one", () => {
     }) as never;
 
     const result = await search({ query: "阿里巴巴 股价" });
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const { text } = result;
     expect(call, "supplementary English is not worth a second search").toBe(1);
     expect(text).not.toContain("translated the query out of");
     expect(result.details).toMatchObject({
@@ -395,7 +390,7 @@ describe("auditing every query, not just the pinned one", () => {
 
 describe("the search tool end to end", () => {
   it("reports a briefing that stopped at the output limit, and what it cost", async () => {
-    const { webSearch } = await import("./tools.js");
+    const { webSearch } = await import("./run.js");
     globalThis.fetch = (async () =>
       ok({
         model: "claude-haiku-4-5-20251001",
@@ -413,16 +408,8 @@ describe("the search tool end to end", () => {
       })) as never;
 
     const notes: string[] = [];
-    const result = await webSearch.execute(
-      "call-1",
-      { query: "pier docs" },
-      undefined as never,
-      ((update: { content: { text?: string }[] }) => {
-        notes.push(update.content[0]?.text ?? "");
-      }) as never,
-      ctx([haiku], haiku),
-    );
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const result = await webSearch({ op: "search", query: "pier docs" }, ctx([haiku], haiku), (text) => notes.push(text));
+    const { text } = result;
     expect(text).toContain("hit the search model's output limit");
     expect(text).toContain("A briefing that ends mid-sen");
     expect(text).toContain("[A page](https://a.example/x)");
@@ -441,7 +428,7 @@ describe("the search tool end to end", () => {
 
 describe("the fetch tool end to end", () => {
   it("in full mode pays for no digest and returns the document", async () => {
-    const { webFetch } = await import("./tools.js");
+    const { webFetch } = await import("./run.js");
     const document = "THE WHOLE DOCUMENT".repeat(20);
     const bodies: Record<string, unknown>[] = [];
     globalThis.fetch = (async (_url: string, init: { body: string }) => {
@@ -467,14 +454,8 @@ describe("the fetch tool end to end", () => {
       });
     }) as never;
 
-    const result = await webFetch.execute(
-      "call-2",
-      { url: "https://x.example/a", mode: "full" },
-      undefined as never,
-      (() => {}) as never,
-      ctx([haiku], haiku),
-    );
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const result = await webFetch({ op: "fetch", url: "https://x.example/a", mode: "full" }, ctx([haiku], haiku), () => {});
+    const { text } = result;
     // The document, not a summary of it — and not the "OK" that acknowledged it.
     expect(text).toContain(document);
     expect(text).not.toMatch(/^OK/);
@@ -501,7 +482,7 @@ describe("a call that partly failed", () => {
   };
 
   it("keeps the answer and reports what failed beside it", async () => {
-    const { webSearch } = await import("./tools.js");
+    const { webSearch } = await import("./run.js");
     globalThis.fetch = (async () =>
       ok(searchBody([
         { type: "server_tool_use", id: "s1", name: "web_search", input: { query: "pier docs" } },
@@ -514,14 +495,8 @@ describe("a call that partly failed", () => {
         { type: "text", text: "A briefing." },
       ]))) as never;
 
-    const result = await webSearch.execute(
-      "c",
-      { query: "pier docs" },
-      undefined as never,
-      (() => {}) as never,
-      ctx([haiku], haiku),
-    );
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const result = await webSearch({ op: "search", query: "pier docs" }, ctx([haiku], haiku), () => {});
+    const { text } = result;
     expect(text).toContain("A briefing.");
     expect(text).toContain("max_uses_exceeded");
     expect(result.details).toMatchObject({
@@ -530,26 +505,21 @@ describe("a call that partly failed", () => {
   });
 
   it("fails by throwing when nothing usable came back", async () => {
-    const { webSearch } = await import("./tools.js");
+    const { webSearch } = await import("./run.js");
     globalThis.fetch = (async () =>
       ok(searchBody([
         { type: "server_tool_use", id: "s2", name: "web_search", input: { query: "pier docs" } },
         refused,
       ]))) as never;
 
-    // Throwing is the only thing Pi records as a failed tool call; a returned
-    // isError is dropped, and this used to return one.
-    await expect(webSearch.execute(
-      "c",
-      { query: "pier docs" },
-      undefined as never,
-      (() => {}) as never,
-      ctx([haiku], haiku),
-    )).rejects.toThrow("max_uses_exceeded");
+    // A thrown error is the 422 the CLI prints as `web:`; a result with an
+    // apology inside would read as an answer.
+    await expect(webSearch({ op: "search", query: "pier docs" }, ctx([haiku], haiku), () => {}))
+      .rejects.toThrow("max_uses_exceeded");
   });
 
   it("keeps the first search when the language retry does not fix the language", async () => {
-    const { webSearch } = await import("./tools.js");
+    const { webSearch } = await import("./run.js");
     let call = 0;
     globalThis.fetch = (async () => {
       call++;
@@ -565,14 +535,8 @@ describe("a call that partly failed", () => {
       ]));
     }) as never;
 
-    const result = await webSearch.execute(
-      "c",
-      { query: "阿里巴巴 股价" },
-      undefined as never,
-      (() => {}) as never,
-      ctx([haiku], haiku),
-    );
-    const text = result.content.map((part) => ("text" in part ? part.text : "")).join("\n");
+    const result = await webSearch({ op: "search", query: "阿里巴巴 股价" }, ctx([haiku], haiku), () => {});
+    const { text } = result;
     expect(call).toBe(2);
     // The retry ran, did not preserve Chinese either, and was discarded: a
     // narrowed single search is not an upgrade on three rounds.
@@ -597,15 +561,26 @@ describe("a deadline during backoff", () => {
 
 describe("a rejected URL", () => {
   it("throws rather than answering with an apology", async () => {
-    const { webFetch } = await import("./tools.js");
+    const { webFetch } = await import("./run.js");
     for (const url of ["ftp://x.example/a", "https://user:pw@x.example/a", "not a url"]) {
-      await expect(webFetch.execute(
-        "c",
-        { url },
-        undefined as never,
-        (() => {}) as never,
-        ctx([haiku], haiku),
-      )).rejects.toThrow();
+      await expect(webFetch({ op: "fetch", url }, ctx([haiku], haiku), () => {})).rejects.toThrow();
     }
+  });
+});
+
+describe("the /web validator", () => {
+  it("accepts the two shapes and names the field it refuses", async () => {
+    const { parseWebParams } = await import("./run.js");
+    expect(parseWebParams({ op: "search", query: "pier", language_mode: "preserve", allowed_domains: ["a.example"] }))
+      .toEqual({ op: "search", query: "pier", language_mode: "preserve", allowed_domains: ["a.example"], blocked_domains: undefined, backend: undefined });
+    expect(parseWebParams({ op: "fetch", url: "https://x.example", mode: "full" }))
+      .toEqual({ op: "fetch", url: "https://x.example", prompt: undefined, mode: "full" });
+    expect(() => parseWebParams({ op: "search", query: "p" })).toThrow("query must be at least 2 characters");
+    expect(() => parseWebParams({ op: "search", query: "pier", backend: "google" })).toThrow("backend must be one of anthropic, openai");
+    expect(() => parseWebParams({ op: "search", query: "pier", allowed_domains: ["a"], blocked_domains: ["b"] }))
+      .toThrow("mutually exclusive");
+    expect(() => parseWebParams({ op: "fetch", url: "https://x.example", mode: "brief" })).toThrow("mode must be one of concise, thorough, full");
+    expect(() => parseWebParams({ op: "grep" })).toThrow("op must be search or fetch");
+    expect(() => parseWebParams(null)).toThrow("params must be an object");
   });
 });

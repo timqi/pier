@@ -111,8 +111,6 @@ export const CUSTOM_TOOL_RULES =
  *  depends on which ran last. Key validity is ubix's to report. */
 export function normalizeCustomTools(
   raw: unknown,
-  /** Names this file cannot see: the bundled extensions, handed in by main.ts. */
-  reserved: readonly string[] = [],
   /** `"drop"` when reading a stored row: the catalog may have grown into that
    *  name after it was written, and the bundled row installs the same binary.
    *  The declaration stays in the row for a Pier that stops bundling it. */
@@ -120,7 +118,7 @@ export function normalizeCustomTools(
 ): CustomTool[] | null {
   // Case-insensitively: one filename on a case-insensitive filesystem.
   const taken = new Set(
-    [...MANAGED.map((tool) => tool.name), ...reserved, "ubix"].map((name) => name.toLowerCase()),
+    [...MANAGED.map((tool) => tool.name), "ubix"].map((name) => name.toLowerCase()),
   );
   if (!Array.isArray(raw) || raw.length > MAX_CUSTOM) return null;
   const tools: CustomTool[] = [];

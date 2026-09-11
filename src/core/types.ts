@@ -414,8 +414,8 @@ export interface PackageResource {
   path: string;
   /** What the switch says. What the runtime did with it is `state`. */
   enabled: boolean;
-  /** The one line a row shows instead of a plain switch reading (`stood down —
-   *  web_search from <path>`, `installed by the rtk tool`), or null. */
+  /** The one line a row shows instead of a plain switch reading (`installed
+   *  by the rtk tool`), or null. */
   state: string | null;
   /** The switch is another surface's (rtk.ts: the rtk tool's, under Tools);
    *  drawn disabled, `state` names whose. */
@@ -674,6 +674,38 @@ export interface ProviderCheck {
   request: string;
   /** The answer's text when there was one, otherwise the refusal verbatim. */
   response: string;
+}
+
+/** The slice of a Pi model `websearch/` reads; structural, so Pi's
+ *  `ModelRegistry` is handed in as is and the area imports no SDK. */
+export interface RegistryModel {
+  id: string;
+  provider: string;
+  api: string;
+  baseUrl?: string;
+  headers?: unknown;
+  maxTokens?: number;
+}
+
+export type RequestAuth =
+  | { ok: true; apiKey?: string; headers?: unknown; baseUrl?: string }
+  | { ok: false; error: string };
+
+/** What `pier web` searches with: the instance's model auth, and the caller's
+ *  active model as a candidate when it is on the backend's API. */
+export interface WebContext {
+  modelRegistry: {
+    getAll(): readonly RegistryModel[];
+    hasConfiguredAuth(model: RegistryModel): boolean;
+    getApiKeyAndHeaders(model: RegistryModel): Promise<RequestAuth>;
+  };
+  model?: RegistryModel;
+}
+
+/** Core ↔ Pi auth seam for `pier web`: the instance's model auth as
+ *  `websearch/` reads it, the caller's active model included when given. */
+export interface WebAuth {
+  webContext(active?: ModelRef): Promise<WebContext>;
 }
 
 /** Core ↔ Pi provider seam: structural setup plus provider-owned auth flows. */

@@ -44,11 +44,11 @@ describe("configuration subscription", () => {
   it("downloads on enable, persists state/ETag, and keeps unrelated settings", async () => {
     const r = rig();
     r.settings.setPublicUrl("https://local.example");
-    r.settings.setExtensions(["web"]);
+    r.settings.setTools(["rtk"]);
     expect(r.sync.status().enabled).toBe(false);
     await r.enable();
     expect(r.local()).toEqual(agent("remote"));
-    expect(r.settings.get()).toMatchObject({ publicUrl: "https://local.example", extensions: ["web"], modelMenu: document().modelMenu });
+    expect(r.settings.get()).toMatchObject({ publicUrl: "https://local.example", tools: ["rtk"], modelMenu: document().modelMenu });
     expect(r.reload).toHaveBeenCalledTimes(1);
     expect(new ConfigSync(r.deps).status()).toMatchObject({ enabled: true, sourceUrl: SOURCE });
     expect(r.state().etag).toBe('"one"');

@@ -61,7 +61,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   },
 }));
 
-const { PiAgentFactory, PiSession, shadowedBuiltin, standDownShadowed, titleFromAnswer } = await import("./pi.js");
+const { PiAgentFactory, PiSession, titleFromAnswer } = await import("./pi.js");
 
 /** Only what PiSession touches on these paths. */
 function fakePi() {
@@ -143,13 +143,6 @@ function session() {
   return { fake, session: new PiSession(fake.pi as never) };
 }
 
-/** Only the two fields the rule reads. */
-const ext = (path: string, ...tools: string[]) =>
-  ({ path, tools: new Map(tools.map((t) => [t, {}])) }) as never;
-const shadow = (...extensions: unknown[]): string[] =>
-  standDownShadowed({ extensions, errors: [], runtime: {} } as never)
-    .extensions.map((e) => e.path);
-
 describe("session model runtimes", () => {
   it("keeps extension providers and cache retention private to one session", async () => {
     const factory = new PiAgentFactory();
@@ -179,36 +172,10 @@ describe("session model runtimes", () => {
   });
 });
 
-describe("a bundled extension shadowed by a copy on disk", () => {
-  it("stands down, so one name never means two tools, and the registry can say so", () => {
-    expect(shadow(
-      ext("/home/u/.pier/pi/extensions/web", "web_search", "web_fetch"),
-      ext("<inline:web>", "web_search", "web_fetch"),
-    )).toEqual(["/home/u/.pier/pi/extensions/web"]);
-    expect(shadowedBuiltin("web")).toBe("stood down — web_search, web_fetch from /home/u/.pier/pi/extensions/web");
-    // The next open without the twin clears it: the state is the last open's finding.
-    shadow(ext("<inline:web>", "web_search"));
-    expect(shadowedBuiltin("web")).toBeNull();
-  });
-
-  it("stands down on a single shared tool, whatever the extension is called", () => {
-    expect(shadow(ext("/x/mine.ts", "web_search"), ext("<inline:web>", "web_fetch", "web_search")))
-      .toEqual(["/x/mine.ts"]);
-  });
-
-  it("leaves the bundled one alone when nothing on disk claims its tools", () => {
-    expect(shadow(
-      ext("/x/quiet.ts", "be_quiet"),
-      ext("<inline:web>", "web_search"),
-      ext("<inline:pier-bash-timeout>"),
-    )).toEqual(["/x/quiet.ts", "<inline:web>", "<inline:pier-bash-timeout>"]);
-  });
-});
-
 describe("the pier package's skills off-list", () => {
   it("drops only Pier's own skill of that name, at session open", async () => {
     const factory = new PiAgentFactory(undefined, ["/pier/skills"], undefined, undefined, undefined,
-      () => ({ extensions: [], skillsOff: ["pier-help"] }));
+      () => ({ skillsOff: ["pier-help"] }));
     await (await factory.create({ cwd: "/tmp/off" })).dispose();
     const skills = [
       { name: "pier-help", filePath: "/pier/skills/pier-help/SKILL.md" },

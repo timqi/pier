@@ -22,11 +22,11 @@ import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
-import { BUNDLED } from "./extensions/index.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
+import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
@@ -308,7 +308,7 @@ app.route("/", createServer({
   names: MANAGED.map((tool) => tool.name),
   onToolsChanged: toolsUpdate.changed,
   validateCustomTools: (raw: unknown) => {
-    const validated = normalizeCustomTools(raw, BUNDLED.map((ext) => ext.name));
+    const validated = normalizeCustomTools(raw);
     return validated ? { tools: validated } : { error: CUSTOM_TOOL_RULES };
   },
   secrets,
@@ -331,6 +331,14 @@ servePier({
   // no public URL is set, since nothing in the process can discover one.
   fileUrl: (name) => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/#/settings/vault?name=${name}`,
   task: (params, callerSessionId) => tasks.handle(params, callerSessionId),
+  // Progress and cost go to the log: the CLI's answer is the text alone.
+  web: async (params, callerSessionId) => {
+    const parsed = parseWebParams(params);
+    const note = (text: string): void => log.info(`web ${callerSessionId}: ${text}`);
+    const result = await runWeb(parsed, await factory.webContext(router.modelOf(callerSessionId)), note);
+    note(`done ${JSON.stringify(result.details)}`);
+    return result;
+  },
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
 });

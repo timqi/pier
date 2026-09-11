@@ -1,4 +1,4 @@
-// The only file outside src/extensions allowed to import @earendil-works/pi-*.
+// One of the two files (with packages.ts) allowed to import @earendil-works/pi-*.
 // Implements the AgentFactory/AgentSession seam from src/core/types.ts on the
 // Pi SDK. No Pi type may appear in an exported signature.
 
@@ -8,12 +8,11 @@ import {
   createAgentSession,
   CredentialSynchronizationError,
   DefaultResourceLoader,
+  ModelRegistry,
   ModelRuntime,
   SessionManager,
   type AgentSession as PiAgentSession,
-  type Extension,
   type ExtensionAPI,
-  type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import type {
   AgentFactory,
@@ -36,8 +35,9 @@ import type {
   SystemInputOrigin,
   ThinkingLevel,
   TurnMeta,
+  WebAuth,
+  WebContext,
 } from "../core/types.js";
-import { inlineExtensions } from "../extensions/index.js";
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import {
@@ -167,37 +167,6 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
       event.input.timeout = BASH_DEFAULT_TIMEOUT_SECONDS;
     }
   });
-};
-
-/** What the last session open stood down, by bundled extension name: the
- *  registry (agent/packages.ts) shows it as the row's state. Known only at
- *  open, so a built-in no session has loaded since reads nothing. */
-const shadowed = new Map<string, string>();
-export const shadowedBuiltin = (name: string): string | null => shadowed.get(name) ?? null;
-
-/** Pi loads a bundled extension and its on-disk twin both, leaving two tools
- *  of one name; the copy the user put there wins, and the journal says so (§5). */
-export const standDownShadowed = (base: LoadExtensionsResult): LoadExtensionsResult => {
-  const inline = (ext: Extension): boolean => ext.path.startsWith("<inline:");
-  const onDisk = new Map(
-    base.extensions.filter((ext) => !inline(ext)).flatMap((ext) => [...ext.tools.keys()].map((tool) => [tool, ext.path])),
-  );
-  return {
-    ...base,
-    extensions: base.extensions.filter((ext) => {
-      if (!inline(ext)) return true;
-      const name = ext.path.slice("<inline:".length, -1);
-      const clash = [...ext.tools.keys()].filter((tool) => onDisk.has(tool));
-      if (!clash.length) {
-        shadowed.delete(name);
-        return true;
-      }
-      const from = onDisk.get(clash[0]!)!;
-      shadowed.set(name, `stood down — ${clash.join(", ")} from ${from}`);
-      log.info(`bundled ${ext.path} stood down — ${clash.join(", ")} already loaded from ${from}`);
-      return false;
-    }),
-  };
 };
 
 /** Read per request by the runtime wrapper in `open()`, so a task can
@@ -477,7 +446,7 @@ export class PiSession implements AgentSession {
   }
 }
 
-export class PiAgentFactory implements AgentFactory, ProviderManager {
+export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   constructor(
     /** Read per session open, so a Console change reaches the next session
      *  without a restart; appended as a context file so the user's own
@@ -490,8 +459,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     private readonly credentials?: CredentialStore,
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
     private readonly pinned: () => ModelRef[] = () => [],
-    /** The built-in `pier` package's switches: bundled extensions on, Pier's own skills off. */
-    private readonly pier: () => { extensions: string[]; skillsOff: string[] } = () => ({ extensions: [], skillsOff: [] }),
+    /** The built-in `pier` package's one switch list: Pier's own skills switched off. */
+    private readonly pier: () => { skillsOff: string[] } = () => ({ skillsOff: [] }),
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -706,8 +675,15 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     await (await this.authRuntime()).logout(providerId, { signal: AbortSignal.timeout(15_000) });
   }
 
+  /** Pi's registry over the shared runtime, so an OAuth refresh lands in the
+   *  credential store like every other request's. */
+  async webContext(active?: ModelRef): Promise<WebContext> {
+    const modelRegistry = new ModelRegistry(await this.refreshedRuntime());
+    return { modelRegistry, model: active && modelRegistry.find(active.provider, active.id) };
+  }
+
   private async resourceLoader(cwd: string): Promise<DefaultResourceLoader> {
-    const { extensions, skillsOff } = this.pier();
+    const { skillsOff } = this.pier();
     const loader = new DefaultResourceLoader({
       cwd,
       agentDir: defaultAgentDir(),
@@ -721,11 +697,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
         skills: base.skills.filter((skill) =>
           !skillsOff.includes(skill.name) || !this.skillPaths.some((dir) => skill.filePath.startsWith(dir + sep))),
       }),
-      extensionFactories: [
-        { name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true },
-        ...inlineExtensions(extensions),
-      ],
-      extensionsOverride: standDownShadowed,
+      extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
       agentsFilesOverride: (current) => {
         const content = this.instructions();
         return {

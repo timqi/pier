@@ -1,15 +1,11 @@
-import type { ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { isObject } from "./json.js";
 
-/** Not `ctx.modelRegistry.complete()`: a hosted server tool is a *provider*
- *  feature declared in the request body, which Pi's tool abstraction cannot
- *  express, so Messages/Responses are spoken here. A gateway serving Messages
- *  off `<base>/v1/messages` breaks in `endpoint()` first. */
+/** Not `registry.complete()`: a hosted server tool is a *provider* feature
+ *  declared in the request body, which Pi's tool abstraction cannot express,
+ *  so Messages/Responses are spoken here. A gateway serving Messages off
+ *  `<base>/v1/messages` breaks in `endpoint()` first. */
 
-// Taken from the registry rather than imported from pi-ai: the model type is
-// whatever the SDK we are loaded by hands out, and Pier does not depend on
-// pi-ai directly.
-type RegistryModel = ReturnType<ModelRegistry["getAll"]>[number];
+import type { RegistryModel, WebContext } from "../core/types.js";
 
 export type Backend = "anthropic" | "openai";
 
@@ -36,7 +32,7 @@ const CONFIGURED_MODEL = process.env.PIER_WEB_MODEL?.trim();
 
 /** Every candidate is a model somebody named; no "any other model on this API"
  *  step, or a search ends up on whatever unreleased id a gateway listed first. */
-function candidates(ctx: ExtensionContext, backend: Backend): RegistryModel[] {
+function candidates(ctx: WebContext, backend: Backend): RegistryModel[] {
   const api = BACKEND_API[backend];
   const registry = ctx.modelRegistry;
   const onApi = registry.getAll().filter((model) => model.api === api);
@@ -73,7 +69,7 @@ function endpoint(backend: Backend, baseUrl: string): string {
 }
 
 async function target(
-  ctx: ExtensionContext,
+  ctx: WebContext,
   backend: Backend,
   model: RegistryModel,
   outputTokens: number,
@@ -111,7 +107,7 @@ async function target(
 
 /** `capable`: web_fetch is an Anthropic-only server tool. */
 export async function resolveTarget(
-  ctx: ExtensionContext,
+  ctx: WebContext,
   outputTokens: number,
   capable: Backend[] = ["anthropic", "openai"],
   requested?: Backend,

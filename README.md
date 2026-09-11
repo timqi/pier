@@ -62,9 +62,9 @@ Console → Settings:
   `models.json` structure, globally or per project scope (with that project's
   `.pi/skills` and `.pi/extensions` listed). Changes apply when a session next
   opens; saving recycles idle sessions; **Settings → Instance → Reload** does
-  the same for files changed elsewhere. Also here: the bundled extensions
-  (`web`: `web_search` on Anthropic or OpenAI, `web_fetch` on Anthropic; a
-  copy of yours registering the same tool makes Pier's stand down) and the
+  the same for files changed elsewhere. Also here: Pier's own skills
+  (`pier web search|fetch` reaches the web through the provider's hosted
+  tools — Anthropic or OpenAI, no key of your own) and the
   managed CLI tools (`rtk`, `rg`, `fd`, `wt`, `jq`, or your own as a
   [ubix](https://github.com/timqi/ubix) block), installed into
   `~/.pier/tools/bin`, first on every session's PATH beside the `pier` shim

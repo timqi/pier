@@ -30,13 +30,15 @@ src/
                identity.ts, inbox.ts, inbound-file.ts
   agent/       pi.ts (sessions) and packages.ts (the package registry: Pi's
                DefaultPackageManager behind `PackageStore`) — the two files
-               outside extensions/ importing @earendil-works/pi-*; events.ts
+               importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, credentials.ts (sealed store +
                auth.json import), models.ts
-  extensions/  index.ts (the list Pier ships: the built-in `pier` package's
-               extensions), web/ (web_search + web_fetch on the provider's
-               hosted tools)
+  websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
+               operations and the validator), cli.ts (argv), provider.ts
+               (backend + auth over core's `WebContext`), anthropic.ts /
+               openai.ts (the hosted-tool wire formats), content.ts,
+               language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
                panel, runtime, routes; per platform: telegram / slack / lark
@@ -100,11 +102,11 @@ src/
 
 Dependency rules:
 
-- `channels | web | tasks | boards → core → agent`. Core never imports platform
+- `channels | web | tasks | boards | websearch → core → agent`. Core never imports platform
   SDKs or Pi; runtime dependencies never go sideways.
-- `extensions/` takes an `ExtensionAPI` and is the second area allowed to
-  import the SDK. Only `agent/pi.ts` registers one (inline factory); only
-  `agent/packages.ts` lists them, as the resources of the `pier` package.
+- `websearch/` imports no SDK: it speaks Messages/Responses itself over the
+  `WebAuth` seam (`core/types.ts`), which `agent/pi.ts` implements with
+  Pi's `ModelRegistry`; `main.ts` joins the two on the `/web` socket route.
 - `agent/packages.ts` is the second SDK-importing file in `agent/` because the
   registry is a second reason: `pi.ts` opens sessions, `packages.ts` changes
   what they open with. Nothing else imports `DefaultPackageManager` or
@@ -244,9 +246,9 @@ One line each; the reasoning is in the commit that made it.
 - Pi **SDK** over RPC; the seam stays RPC-compatible (no Pi types leave `agent/`).
 - Standalone program, not a Pi extension. Pier is the Console over Pi's
   package manager: one registry (settings.json `packages` plus Pi's local
-  `extensions`/`skills` dirs), Pier writes it, never a second list; built-ins
-  stay inline factories, never copied to disk, and stand down when a copy on
-  disk registers the same tools.
+  `extensions`/`skills` dirs), Pier writes it, never a second list; Pier
+  ships no extension of its own — its tools are CLIs (`pier slack`, `pier
+  task`, `pier web`) documented by skills, so no tool schema rides in context.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
 - **One writer per instance directory**, enforced before the database opens:
