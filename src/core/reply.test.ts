@@ -93,6 +93,12 @@ describe("staying silent", () => {
   it("leaves an unclosed tag alone rather than eating the reply", () => {
     expect(splitReply("<silent>oops").text).toBe("<silent>oops");
   });
+
+  it("still reads a tag the model salted with zero-width characters", () => {
+    const mangled = "<s\u200B\u200Bilent>two humans</sil\uFEFFent>";
+    expect(splitReply(mangled)).toMatchObject({ text: "", silence: "two humans" });
+    expect(stableBlockEnd(`${mangled}\n\nOn it.\n\n`)).toBeGreaterThan(0);
+  });
 });
 
 describe("silentReason", () => {

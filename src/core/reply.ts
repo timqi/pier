@@ -151,7 +151,12 @@ const MAX_SUGGESTIONS = 5;
 /** A deliberate non-answer. Stripped here so an adapter needs no new concept:
  *  an empty turn already posts nothing and retires its per-turn UI. The reason
  *  stays in the transcript, auditable without being broadcast. */
-const SILENT = /<silent>([\s\S]*?)<\/silent>/gi;
+// A model has been seen emitting `<s​​ilent>`: zero-width characters inside the
+// tag, which would post the literal tag to a channel instead of silence.
+const ZW = String.raw`[\u200B-\u200D\u2060\uFEFF]*`;
+const tag = (literal: string): string => literal.split("").join(ZW);
+const SILENT = new RegExp(`${tag("<silent>")}([\\s\\S]*?)${tag("</silent>")}`, "gi");
+const SILENT_TAG = new RegExp(`<(\\/?)${tag("silent>")}`, "gi");
 
 /** Why the agent stayed quiet; hidden from the chat, shown on the workbench,
  *  where a silent turn must not look like a broken one. */
@@ -213,7 +218,7 @@ export function stableBlockEnd(markdown: string, from = 0): number {
     if (!open && run && !silent) open = run;
     else if (open && run[0] === open[0] && run.length >= open.length && !fence?.[2]?.trim()) open = "";
     if (!open && (!run || silent)) {
-      for (const tag of line.matchAll(/<(\/?)silent>/gi)) silent = !tag[1];
+      for (const t of line.matchAll(SILENT_TAG)) silent = !t[1];
     }
     pending = -1;
     prev = line;
