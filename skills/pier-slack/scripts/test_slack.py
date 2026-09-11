@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -179,6 +180,40 @@ class Rendering(unittest.TestCase):
         self.assertEqual([m for m, _ in fake.calls if m.startswith("conversations")],
                          ["conversations.history", "conversations.replies"])
 
+    def test_markers_for_edits_broadcasts_attachments_blocks_and_reactions(self):
+        client = slack.Slack("t")
+        client._names = {"U1": "ada"}
+        base = {"ts": "1700.000100", "user": "U1"}
+        self.assertTrue(slack.line(client, base | {"text": "hi", "edited": {"user": "U1", "ts": "1700.5"}}).endswith("| hi [edited]"))
+        self.assertTrue(slack.line(client, base | {"text": "also here", "thread_ts": "1700.000050"}).endswith("| also here [in thread 1700.000050]"))
+        # Under its parent the same reply carries no marker: the indent already says where it is.
+        self.assertTrue(slack.line(client, base | {"text": "also here", "thread_ts": "1700.000050"}, "  ").endswith("| also here"))
+        self.assertTrue(slack.line(client, base | {"text": "", "attachments": [{"title": "Build #42 failed"}, {"fallback": "PR opened"}]})
+                        .endswith("| [attachment: Build #42 failed] [attachment: PR opened]"))
+        self.assertTrue(slack.line(client, base | {"text": "", "blocks": [{"type": "section"}]}).endswith("| [blocks]"))
+        self.assertTrue(slack.line(client, base | {"text": "ship it", "reactions": [{"name": "+1", "count": 3}, {"name": "eyes", "count": 1}]})
+                        .endswith("| ship it [:+1: 3, :eyes: 1]"))
+
+    def test_json_is_the_raw_api_object_with_replies_nested(self):
+        fake = FakeSlack({
+            "conversations.history": {"ok": True, "messages": [{"ts": "1700.000100", "user": "U1", "text": "p", "reply_count": 1}]},
+            "conversations.replies": {"ok": True, "messages": [
+                {"ts": "1700.000100", "user": "U1", "text": "p", "reply_count": 1},
+                {"ts": "1700.000150", "user": "U2", "thread_ts": "1700.000100", "text": "c"}]},
+        })
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "raw.json")
+            code, out, _ = run(["history", "C1", "--threads", "--json", "--out", path], fake)
+            self.assertEqual((code, out), (0, f"wrote 1 messages, 1 threads expanded to {path}\n"))
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        self.assertEqual(data[0]["replies"][0]["text"], "c")
+        # No users.list: JSON is for a second script, names are not resolved.
+        self.assertNotIn("users.list", [m for m, _ in fake.calls])
+        code, out, _ = run(["thread", "C1", "1700.000100", "--json"], fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)[1]["text"], "c")
+
     def test_channels_lists_id_kind_and_name(self):
         fake = FakeSlack({
             "users.list": USERS,
@@ -199,6 +234,74 @@ class Rendering(unittest.TestCase):
             "C2  private   #ops  (not a member)",
         ])
         self.assertEqual(fake.calls[1][1]["cursor"], "c2")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ch.txt")
+            code, out, _ = run(["channels", "--out", path], FakeSlack({"conversations.list": {"ok": True, "channels": [{"id": "C1", "name": "dev"}]}}))
+            self.assertEqual((code, out), (0, f"wrote 1 conversations to {path}\n"))
+
+    def test_a_channel_may_be_named(self):
+        listing = {"ok": True, "channels": [{"id": "C1", "name": "dev"}, {"id": "C2", "name": "Ops", "is_private": True}]}
+        fake = FakeSlack({"conversations.list": listing, "conversations.history": {"ok": True, "messages": []}})
+        code, _, _ = run(["history", "#ops"], fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.calls[-1][1]["channel"], "C2")
+        code, _, err = run(["history", "nowhere"], FakeSlack({"conversations.list": listing}))
+        self.assertEqual((code, err), (1, "slack: channel: no channel named #nowhere — see `channels`\n"))
+
+    def test_user_by_id_and_by_name(self):
+        info = {"ok": True, "user": {"id": "U1", "real_name": "Ada Lovelace", "tz": "Europe/London",
+                                     "profile": {"display_name": "ada", "title": "CTO"}}}
+        code, out, _ = run(["user", "U1"], FakeSlack({"users.info": info}))
+        self.assertEqual((code, out), (0, "U1 ada (Ada Lovelace) CTO Europe/London\n"))
+        code, out, _ = run(["user", "@Bob"], FakeSlack({"users.list": USERS}))
+        self.assertEqual((code, out), (0, "U2 Bob\n"))
+        code, _, err = run(["user", "nobody"], FakeSlack({"users.list": USERS}))
+        self.assertEqual((code, err), (1, "slack: user: 0 users named nobody\n"))
+        code, out, _ = run(["user", "U1", "--json"], FakeSlack({"users.info": info}))
+        self.assertEqual(json.loads(out)["tz"], "Europe/London")
+
+
+class Links(unittest.TestCase):
+    URL = "https://acme.slack.com/archives/C079TC7GUBG/p1712345600123456"
+    REPLY = URL + "?thread_ts=1712345500.000100&cid=C079TC7GUBG"
+
+    def test_permalink_parses_channel_ts_and_thread(self):
+        self.assertEqual(slack.permalink(self.URL), ("C079TC7GUBG", "1712345600.123456", None))
+        self.assertEqual(slack.permalink(self.REPLY), ("C079TC7GUBG", "1712345600.123456", "1712345500.000100"))
+        self.assertIsNone(slack.permalink("C079TC7GUBG"))
+        self.assertIsNone(slack.permalink("https://example.com/archives/C1/p1"))
+
+    def test_a_link_stands_in_for_channel_and_ts(self):
+        fake = FakeSlack({"users.list": USERS, "conversations.replies": {"ok": True, "messages": [
+            {"ts": "1712345600.123456", "user": "U1", "thread_ts": "1712345500.000100", "text": "the reply"}]}})
+        # A link to a reply: `message` looks inside its thread, `thread` opens the whole thread.
+        code, out, _ = run(["message", self.REPLY], fake)
+        self.assertEqual(code, 0)
+        self.assertIn("| the reply", out)
+        self.assertEqual((fake.calls[0][1]["ts"], fake.calls[0][1]["oldest"]), ("1712345500.000100", "1712345600.123456"))
+        code, _, _ = run(["thread", self.REPLY], fake)
+        self.assertEqual([f["ts"] for m, f in fake.calls if m == "conversations.replies"][-1], "1712345500.000100")
+        fake = FakeSlack({"chat.delete": {"ok": True}, "chat.update": {"ok": True}})
+        code, out, _ = run(["delete", self.URL], fake)
+        self.assertEqual((code, out), (0, "deleted 1712345600.123456\n"))
+        code, out, _ = run(["edit", self.URL, "new text"], fake)
+        self.assertEqual((code, out), (0, "1712345600.123456\n"))
+        self.assertEqual((fake.calls[-1][1]["channel"], fake.calls[-1][1]["text"]), ("C079TC7GUBG", "new text"))
+        code, _, err = run(["delete", "C1"], fake)
+        self.assertEqual((code, err), (1, "slack: ts: required — a message ts, or a Slack link in place of <channel> <ts>\n"))
+
+    def test_posting_to_a_link_replies_in_its_thread(self):
+        fake = FakeSlack({"chat.postMessage": {"ok": True, "ts": "9"}})
+        run(["post", self.URL, "hi"], fake)
+        self.assertEqual(fake.calls[0][1]["thread_ts"], "1712345600.123456")
+        run(["post", self.REPLY, "hi"], fake)
+        self.assertEqual(fake.calls[1][1]["thread_ts"], "1712345500.000100")
+
+    def test_permalink_command(self):
+        fake = FakeSlack({"chat.getPermalink": {"ok": True, "permalink": self.URL}})
+        code, out, _ = run(["permalink", "C079TC7GUBG", "1712345600.123456"], fake)
+        self.assertEqual((code, out), (0, self.URL + "\n"))
+        self.assertEqual(fake.calls[0][1]["message_ts"], "1712345600.123456")
 
 
 class Pagination(unittest.TestCase):
@@ -287,6 +390,22 @@ class Writes(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("split it across replies", err)
 
+    def test_a_plain_mention_is_reported_not_refused(self):
+        fake = FakeSlack({"chat.postMessage": {"ok": True, "ts": "3"}, "chat.update": {"ok": True}})
+        code, out, err = run(["post", "C1", "thanks @alice, see #ops"], fake)
+        self.assertEqual((code, out), (0, "3\n"))
+        self.assertEqual(err, "slack: note: @alice is plain text and notified nobody — Slack needs <@U…>; edit this ts if it was meant to reach someone\n")
+        code, _, err = run(["edit", "C1", "3", "@here deploy done"], fake)
+        self.assertIn("Slack needs <!here>", err)
+        _, _, err = run(["post", "C1", "<@U1> `@alice` ```#ops``` a@b.c"], fake)
+        self.assertEqual(err, "")
+
+    def test_react_adds_the_named_emoji(self):
+        fake = FakeSlack({"reactions.add": {"ok": True}})
+        code, out, _ = run(["react", "C1", "1700.000500", ":eyes:"], fake)
+        self.assertEqual((code, out), (0, ":eyes: on 1700.000500\n"))
+        self.assertEqual(fake.calls[0][1], {"channel": "C1", "timestamp": "1700.000500", "name": "eyes"})
+
     def test_edit_and_delete_pass_slacks_refusal_through(self):
         fake = FakeSlack({"chat.update": {"ok": True}, "chat.delete": {"ok": False, "error": "cant_delete_message"}})
         code, out, _ = run(["edit", "C1", "1700.000500", "new text"], fake)
@@ -308,6 +427,23 @@ class Files(unittest.TestCase):
             self.assertEqual(path, os.path.join(d, "F1-post_mortem.pdf"))
             self.assertEqual(open(path, "rb").read(), b"%PDF")
             self.assertEqual(dl.call_args.args, ("https://files.slack.com/x", "xoxb-test"))
+
+    def test_upload_is_ticket_bytes_then_complete(self):
+        fake = FakeSlack({
+            "files.getUploadURLExternal": {"ok": True, "upload_url": "https://files.slack.com/up/1", "file_id": "F9"},
+            "files.completeUploadExternal": {"ok": True, "files": [{"id": "F9", "title": "report.md"}]},
+        })
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(slack, "_upload") as up:
+            path = os.path.join(d, "report.md")
+            with open(path, "w") as fh:
+                fh.write("# weekly\n")
+            code, out, err = run(["upload", "C1", path, "--thread", "1700.000100", "--comment", "this week"], fake)
+        self.assertEqual((code, err, out), (0, "", "F9 report.md → C1 thread 1700.000100\n"))
+        ticket, complete = fake.calls[0][1], fake.calls[1][1]
+        self.assertEqual((ticket["filename"], ticket["length"]), ("report.md", 9))
+        self.assertEqual(up.call_args.args, ("https://files.slack.com/up/1", b"# weekly\n"))
+        self.assertEqual((complete["channel_id"], complete["thread_ts"], complete["initial_comment"]), ("C1", "1700.000100", "this week"))
+        self.assertEqual(json.loads(complete["files"]), [{"id": "F9", "title": "report.md"}])
 
 
 if __name__ == "__main__":

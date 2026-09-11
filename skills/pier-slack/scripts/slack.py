@@ -67,10 +67,19 @@ def _download(url: str, token: str) -> bytes:
         return res.read()
 
 
+def _upload(url: str, data: bytes) -> None:
+    """The pre-signed upload URL takes the raw bytes; no token, no form."""
+    req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
+    with urllib.request.urlopen(req, timeout=300) as res:
+        if res.status >= 300:
+            raise SlackError("upload", f"http {res.status}")
+
+
 class Slack:
     def __init__(self, token: str):
         self.token = token
-        self._users: dict[str, str] | None = None
+        self._users: list[dict] | None = None
+        self._names: dict[str, str] | None = None
 
     def api(self, method: str, **params) -> dict:
         for attempt in range(RETRIES):
@@ -107,13 +116,66 @@ class Slack:
         return (msg.get("bot_profile") or {}).get("name") or msg.get("username") or uid, uid
 
     def users(self) -> dict[str, str]:
+        if self._names is None:
+            self._names = {u["id"]: display_name(u) for u in self.members()}
+        return self._names
+
+    def members(self) -> list[dict]:
         # Once per invocation: one users.list is cheaper than users.info per speaker.
         if self._users is None:
-            self._users = {}
-            for u in self.pages("users.list", "members", limit=PAGE):
-                p = u.get("profile") or {}
-                self._users[u["id"]] = p.get("display_name") or u.get("real_name") or u.get("name") or u["id"]
+            self._users = self.pages("users.list", "members", limit=PAGE)
         return self._users
+
+    def channel(self, given: str) -> str:
+        """An id as is; `#name` or `name` looked up, since people say channels by name."""
+        if re.fullmatch(r"[CDG][A-Z0-9]+", given):
+            return given
+        wanted = given.lstrip("#").lower()
+        for c in self.pages("conversations.list", "channels", limit=PAGE, exclude_archived="true",
+                            types="public_channel,private_channel"):
+            if (c.get("name") or "").lower() == wanted:
+                return c["id"]
+        raise SlackError("channel", f"no channel named #{wanted} — see `channels`")
+
+
+def display_name(u: dict) -> str:
+    p = u.get("profile") or {}
+    return p.get("display_name") or u.get("real_name") or u.get("name") or u["id"]
+
+
+PERMALINK = re.compile(r"https://[\w.-]+\.slack\.com/archives/([A-Z0-9]+)/p(\d{6,})")
+
+
+def permalink(url: str) -> tuple[str, str, str | None] | None:
+    """(channel, ts, thread_ts) from a pasted message link; `p<digits>` is the ts without its dot."""
+    m = PERMALINK.match(url)
+    if not m:
+        return None
+    channel, digits = m.group(1), m.group(2)
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    thread = (query.get("thread_ts") or [None])[0]
+    return channel, f"{digits[:-6]}.{digits[-6:]}", thread
+
+
+def target(client: Slack, a: argparse.Namespace, link_is: str = "message") -> None:
+    """Resolve `channel` (id, #name or permalink) in place; a permalink also fills `ts`/`thread`.
+
+    `link_is`: what a pasted link stands for — the `message` itself, the `thread`
+    it belongs to, or the place a `reply` goes."""
+    link = permalink(a.channel)
+    if link:
+        channel, ts, thread = link
+        a.channel = channel
+        if link_is == "reply":
+            a.thread = a.thread or thread or ts
+        elif getattr(a, "ts", None) is None:
+            a.ts = (thread or ts) if link_is == "thread" else ts
+            if hasattr(a, "thread") and a.thread is None and thread and thread != ts:
+                a.thread = thread
+    else:
+        a.channel = client.channel(a.channel)
+    if hasattr(a, "ts") and a.ts is None:
+        raise SlackError("ts", "required — a message ts, or a Slack link in place of <channel> <ts>")
 
 
 # --- time ------------------------------------------------------------------
@@ -155,16 +217,36 @@ def size_label(n: int) -> str:
     return f"{n / (1024 * 1024):.1f}MB"
 
 
+def body(msg: dict) -> str:
+    """The text, or a stand-in for a message whose content is only blocks or attachments."""
+    text = msg.get("text") or ""
+    if text:
+        return text
+    titles = [a.get("title") or a.get("fallback") or a.get("text") for a in msg.get("attachments") or []]
+    if titles:
+        return " ".join(f"[attachment: {t}]" if t else "[attachment]" for t in titles)
+    if msg.get("blocks"):
+        return "[blocks]"
+    return ""
+
+
 def line(client: Slack, msg: dict, indent: str = "") -> str:
     name, uid = client.name(msg)
     who = f"{name}[{uid}]" if name and name != uid else (f"[{uid}]" if uid else "[unknown]")
-    text = (msg.get("text") or "").replace("\n", "\n" + indent + "    ")
+    text = body(msg).replace("\n", "\n" + indent + "    ")
     out = f"{indent}{msg['ts']} | {local(msg['ts'])} | {who} | {text}"
+    if msg.get("edited"):
+        out += " [edited]"
     if msg.get("reply_count") and msg.get("thread_ts", msg["ts"]) == msg["ts"]:
         out += f" [thread: {msg['reply_count']} replies]"
+    elif not indent and msg.get("thread_ts") and msg["thread_ts"] != msg["ts"]:
+        # A reply also sent to the channel; the same line shows up under its parent.
+        out += f" [in thread {msg['thread_ts']}]"
     for f in msg.get("files") or []:
         size = f" {size_label(f['size'])}" if "size" in f else ""
         out += f" [file: {f.get('name') or f.get('mimetype') or 'file'} {f['id']}{size}]"
+    if msg.get("reactions"):
+        out += " [" + ", ".join(f":{r['name']}: {r.get('count', 1)}" for r in msg["reactions"]) + "]"
     return out
 
 
@@ -179,6 +261,17 @@ def transcript_header(what: str) -> str:
     return f"# {what} — <ts> | <local time {tz_label()}> | <name>[<id>] | <text>; [thread: N replies] marks a parent, [file: name F… size] an upload"
 
 
+def warn_inert_mention(text: str) -> None:
+    """A plain `@alice` looks like it worked and notifies nobody; said, not refused — a name in prose is fine."""
+    prose = re.sub(r"```[\s\S]*?```|`[^`]*`|<[^>]*>", "", text)
+    hit = re.search(r"(?:^|\s)([@#][A-Za-z][\w.-]*)", prose)
+    if not hit:
+        return
+    word = hit.group(1)
+    needs = "<#C…>" if word[0] == "#" else (f"<!{word[1:]}>" if word[1:] in ("here", "channel", "everyone") else "<@U…>")
+    print(f"slack: note: {word} is plain text and notified nobody — Slack needs {needs}; edit this ts if it was meant to reach someone", file=sys.stderr)
+
+
 # --- subcommands -----------------------------------------------------------
 
 def cmd_whoami(client: Slack, _: argparse.Namespace) -> None:
@@ -186,11 +279,15 @@ def cmd_whoami(client: Slack, _: argparse.Namespace) -> None:
     print(f"user {a.get('user_id')} bot {a.get('bot_id', '')} team {a.get('team_id')} ({a.get('user')} @ {a.get('team')})")
 
 
-def cmd_channels(client: Slack, _: argparse.Namespace) -> None:
+def cmd_channels(client: Slack, a: argparse.Namespace) -> None:
     convs = client.pages("conversations.list", "channels", limit=PAGE, exclude_archived="true",
-                         types="public_channel,private_channel,mpim,im")
+                        types="public_channel,private_channel,mpim,im")
     # Channels the bot is in first, DMs last, names alphabetical.
-    for c in sorted(convs, key=lambda c: (not c.get("is_member", True), bool(c.get("is_im") or c.get("is_mpim")), c.get("name") or "")):
+    convs.sort(key=lambda c: (not c.get("is_member", True), bool(c.get("is_im") or c.get("is_mpim")), c.get("name") or ""))
+    if a.json:
+        return emit_json(convs, a.out, f"{len(convs)} conversations")
+    lines = []
+    for c in convs:
         if c.get("is_im"):
             kind, name = "dm", client.users().get(c.get("user", ""), c.get("user", ""))
         elif c.get("is_mpim"):
@@ -198,34 +295,63 @@ def cmd_channels(client: Slack, _: argparse.Namespace) -> None:
         else:
             kind, name = ("private" if c.get("is_private") else "channel"), f"#{c.get('name', '')}"
         member = "" if c.get("is_member", True) else "  (not a member)"
-        print(f"{c['id']}  {kind:9s} {name}{member}")
+        lines.append(f"{c['id']}  {kind:9s} {name}{member}")
+    emit(lines, a.out, f"{len(convs)} conversations")
+
+
+def cmd_user(client: Slack, a: argparse.Namespace) -> None:
+    if re.fullmatch(r"[UW][A-Z0-9]+", a.who):
+        u = client.api("users.info", user=a.who).get("user") or {}
+    else:
+        wanted = a.who.lstrip("@").lower()
+        hits = [u for u in client.members() if wanted in {
+            (u.get("profile") or {}).get("display_name", "").lower(), (u.get("real_name") or "").lower(), (u.get("name") or "").lower()}]
+        if len(hits) != 1:
+            raise SlackError("user", f"{len(hits)} users named {a.who}" + (": " + ", ".join(f"{h['id']} {display_name(h)}" for h in hits) if hits else ""))
+        u = hits[0]
+    if a.json:
+        return emit_json(u, None, "")
+    p = u.get("profile") or {}
+    bits = [u["id"], display_name(u), f"({u.get('real_name')})" if u.get("real_name") and u.get("real_name") != display_name(u) else "",
+            p.get("title") or "", u.get("tz") or "", "bot" if u.get("is_bot") else "", "deleted" if u.get("deleted") else ""]
+    print(" ".join(b for b in bits if b))
 
 
 def cmd_history(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a)
     after = to_ts(a.after)
     since = after or to_ts(a.since)
     until = to_ts(a.until)
     msgs = ordered(client.pages("conversations.history", "messages", channel=a.channel,
                                 oldest=since, latest=until, limit=PAGE, inclusive="true"), after)
-    lines = [transcript_header(f"{a.channel} {local(since) if since else 'start'} → {local(until) if until else 'now'}")]
     threads = 0
     for m in msgs:
-        lines.append(line(client, m))
         if a.threads and m.get("reply_count"):
             threads += 1
             replies = ordered(client.pages("conversations.replies", "messages", channel=a.channel, ts=m["ts"], limit=PAGE))
-            lines.extend(line(client, r, "  ") for r in replies if r["ts"] != m["ts"])
-    emit(lines, a.out, f"{len(msgs)} messages" + (f", {threads} threads expanded" if a.threads else ""))
+            m["replies"] = [r for r in replies if r["ts"] != m["ts"]]
+    summary = f"{len(msgs)} messages" + (f", {threads} threads expanded" if a.threads else "")
+    if a.json:
+        return emit_json(msgs, a.out, summary)
+    lines = [transcript_header(f"{a.channel} {local(since) if since else 'start'} → {local(until) if until else 'now'}")]
+    for m in msgs:
+        lines.append(line(client, m))
+        lines.extend(line(client, r, "  ") for r in m.get("replies", []))
+    emit(lines, a.out, summary)
 
 
 def cmd_thread(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a, "thread")
     after = to_ts(a.after)
     msgs = ordered(client.pages("conversations.replies", "messages", channel=a.channel, ts=a.ts,
                                 oldest=after, limit=PAGE, inclusive="true"), after)
+    if a.json:
+        return emit_json(msgs, a.out, f"{len(msgs)} messages")
     emit([transcript_header(f"thread {a.channel}/{a.ts}")] + [line(client, m) for m in msgs], a.out, f"{len(msgs)} messages")
 
 
 def cmd_message(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a)
     # A reply lives only in its thread: history cannot see it, replies can.
     if a.thread:
         page = client.api("conversations.replies", channel=a.channel, ts=a.thread, oldest=a.ts, inclusive="true", limit=20)
@@ -237,7 +363,32 @@ def cmd_message(client: Slack, a: argparse.Namespace) -> None:
         found = next((m for m in page.get("messages", []) if m.get("ts") == a.ts), None)
     if found is None:
         raise SlackError("message", f"no message {a.ts} in {a.channel}" + ("" if a.thread else " — a reply inside a thread may need --thread"))
-    print(line(client, found))
+    emit_json(found, None, "") if a.json else print(line(client, found))
+
+
+def cmd_permalink(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a)
+    print(client.api("chat.getPermalink", channel=a.channel, message_ts=a.ts)["permalink"])
+
+
+def cmd_react(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a)
+    name = a.emoji.strip(":")
+    client.api("reactions.add", channel=a.channel, timestamp=a.ts, name=name)
+    print(f":{name}: on {a.ts}")
+
+
+def cmd_upload(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a, "reply")
+    with open(a.path, "rb") as fh:
+        data = fh.read()
+    name = os.path.basename(a.path)
+    ticket = client.api("files.getUploadURLExternal", filename=name, length=len(data))
+    _upload(ticket["upload_url"], data)
+    done = client.api("files.completeUploadExternal", files=json.dumps([{"id": ticket["file_id"], "title": name}]),
+                      channel_id=a.channel, thread_ts=a.thread, initial_comment=a.comment)
+    shared = (done.get("files") or [{}])[0]
+    print(f"{shared.get('id', ticket['file_id'])} {name} → {a.channel}" + (f" thread {a.thread}" if a.thread else ""))
 
 
 def cmd_file(client: Slack, a: argparse.Namespace) -> None:
@@ -273,17 +424,24 @@ def send(client: Slack, method: str, text: str, **params) -> dict:
 
 
 def cmd_post(client: Slack, a: argparse.Namespace) -> None:
-    sent = send(client, "chat.postMessage", read_text(a.text), channel=a.channel, thread_ts=a.thread,
+    target(client, a, "reply")
+    text = read_text(a.text)
+    sent = send(client, "chat.postMessage", text, channel=a.channel, thread_ts=a.thread,
                 unfurl_links="false", unfurl_media="false")
     print(sent.get("ts", ""))
+    warn_inert_mention(text)
 
 
 def cmd_edit(client: Slack, a: argparse.Namespace) -> None:
-    send(client, "chat.update", read_text(a.text), channel=a.channel, ts=a.ts)
+    target(client, a)
+    text = read_text(a.text)
+    send(client, "chat.update", text, channel=a.channel, ts=a.ts)
     print(a.ts)
+    warn_inert_mention(text)
 
 
 def cmd_delete(client: Slack, a: argparse.Namespace) -> None:
+    target(client, a)
     client.api("chat.delete", channel=a.channel, ts=a.ts)
     print(f"deleted {a.ts}")
 
@@ -297,48 +455,57 @@ def emit(lines: list[str], out: str | None, summary: str) -> None:
         print("\n".join(lines))
 
 
+def emit_json(data, out: str | None, summary: str) -> None:
+    """Raw API objects for a second script to process, so the model never reads them."""
+    emit([json.dumps(data, ensure_ascii=False)], out, summary)
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="slack.py", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("whoami", help="auth.test: your own user id, so you can tell your messages apart").set_defaults(fn=cmd_whoami)
-    sub.add_parser("channels", help="conversations the bot can reach: id, kind, name").set_defaults(fn=cmd_channels)
-    h = sub.add_parser("history", help="a channel's top-level messages, oldest first")
-    h.add_argument("channel")
-    h.add_argument("--since", help="ISO 8601, epoch seconds or a ts")
-    h.add_argument("--until")
-    h.add_argument("--after", help="strictly newer than this ts")
-    h.add_argument("--threads", action="store_true", help="expand each thread's replies under its parent")
-    h.add_argument("--out", help="write the transcript here and print one summary line")
-    h.set_defaults(fn=cmd_history)
-    t = sub.add_parser("thread", help="one thread, oldest first")
-    t.add_argument("channel")
-    t.add_argument("ts")
-    t.add_argument("--after", help="strictly newer than this ts")
-    t.add_argument("--out")
-    t.set_defaults(fn=cmd_thread)
-    m = sub.add_parser("message", help="one message")
-    m.add_argument("channel")
-    m.add_argument("ts")
-    m.add_argument("--thread", help="the thread_ts, when the message is a reply")
-    m.set_defaults(fn=cmd_message)
-    f = sub.add_parser("file", help="download a file by its F… id, prints the path")
+
+    def cmd(name: str, fn, help: str, *, ts: bool = False, out: bool = False, js: bool = False, thread: str | None = None):
+        sp = sub.add_parser(name, help=help)
+        sp.add_argument("channel", help="id, #name, or a Slack message link")
+        if ts:
+            sp.add_argument("ts", nargs="?", help="omit when <channel> is a message link")
+        if thread:
+            sp.add_argument("--thread", metavar="TS", help=thread)
+        if out:
+            sp.add_argument("--out", metavar="FILE", help="write to disk, print one summary line")
+        if js:
+            sp.add_argument("--json", action="store_true", help="raw API JSON instead of transcript lines")
+        sp.set_defaults(fn=fn)
+        return sp
+
+    sub.add_parser("whoami", help="your own user id").set_defaults(fn=cmd_whoami)
+    c = sub.add_parser("channels", help="conversations the bot can reach")
+    c.add_argument("--out", metavar="FILE")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=cmd_channels)
+    u = sub.add_parser("user", help="one user by id or name: id, name, title, tz")
+    u.add_argument("who")
+    u.add_argument("--json", action="store_true")
+    u.set_defaults(fn=cmd_user)
+    h = cmd("history", cmd_history, "top-level messages, oldest first", out=True, js=True)
+    h.add_argument("--since", metavar="T", help="ISO 8601, epoch seconds or a ts")
+    h.add_argument("--until", metavar="T")
+    h.add_argument("--after", metavar="TS", help="strictly newer")
+    h.add_argument("--threads", action="store_true", help="replies under each parent")
+    cmd("thread", cmd_thread, "one thread, oldest first", ts=True, out=True, js=True).add_argument("--after", metavar="TS")
+    cmd("message", cmd_message, "one message", ts=True, js=True, thread="its thread_ts, when it is a reply")
+    cmd("permalink", cmd_permalink, "a message's link", ts=True)
+    f = sub.add_parser("file", help="download an upload by F… id, prints the path")
     f.add_argument("file_id")
     f.add_argument("--dir", default=".")
     f.set_defaults(fn=cmd_file)
-    po = sub.add_parser("post", help="post markdown; `-` reads stdin; prints the ts")
-    po.add_argument("channel")
-    po.add_argument("text")
-    po.add_argument("--thread", help="reply in this thread")
-    po.set_defaults(fn=cmd_post)
-    e = sub.add_parser("edit", help="replace a message you posted")
-    e.add_argument("channel")
-    e.add_argument("ts")
-    e.add_argument("text")
-    e.set_defaults(fn=cmd_edit)
-    d = sub.add_parser("delete", help="delete a message you posted")
-    d.add_argument("channel")
-    d.add_argument("ts")
-    d.set_defaults(fn=cmd_delete)
+    cmd("post", cmd_post, "post markdown (`-` = stdin), prints the ts", thread="reply in this thread").add_argument("text")
+    cmd("edit", cmd_edit, "replace a message outright", ts=True).add_argument("text")
+    cmd("delete", cmd_delete, "delete a message, no undo", ts=True)
+    cmd("react", cmd_react, "add an emoji reaction", ts=True).add_argument("emoji", help="`+1` or `:+1:`")
+    up = cmd("upload", cmd_upload, "upload a file, prints its F… id", thread="share into this thread")
+    up.add_argument("path")
+    up.add_argument("--comment", metavar="TEXT", help="message posted with the file")
     return p
 
 

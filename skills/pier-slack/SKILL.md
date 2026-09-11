@@ -29,22 +29,38 @@ Slack — name a channel explicitly.
 | Command | Does |
 | --- | --- |
 | `whoami` | your bot's user id and team — the id your own messages carry |
-| `channels` | every conversation the bot can reach: `id kind name`, non-members marked |
-| `history <channel> [--since T] [--until T] [--after TS] [--threads] [--out FILE]` | top-level messages, oldest first, all pages; `--threads` expands replies under each parent; `--out` writes to disk and prints one summary line |
-| `thread <channel> <ts> [--after TS] [--out FILE]` | one thread, oldest first |
-| `message <channel> <ts> [--thread TS]` | one message; a reply inside a thread is found through its thread |
+| `channels [--out FILE] [--json]` | every conversation the bot can reach: `id kind name`, non-members marked |
+| `user <id \| name> [--json]` | one person: id, display name, real name, title, timezone — the sanctioned way to get an id for a mention |
+| `history <channel> [--since T] [--until T] [--after TS] [--threads] [--out FILE] [--json]` | top-level messages, oldest first, all pages; `--threads` expands replies under each parent; `--out` writes to disk and prints one summary line |
+| `thread <channel> <ts> [--after TS] [--out FILE] [--json]` | one thread, oldest first |
+| `message <channel> <ts> [--thread TS] [--json]` | one message; a reply inside a thread is found through its thread |
+| `permalink <channel> <ts>` | the message's link, for citing it in a digest |
 | `file <F…id> [--dir DIR]` | download an upload by id, prints the path (default: cwd) |
+| `upload <channel> <path> [--thread TS] [--comment TEXT]` | share a file from disk, prints its `F…` id |
 | `post <channel> <text \| -> [--thread TS]` | post markdown, prints the `ts`; `-` reads stdin |
 | `edit <channel> <ts> <text \| ->` | replace a message outright |
 | `delete <channel> <ts>` | delete a message — no undo |
+| `react <channel> <ts> <emoji>` | add a reaction (`+1`, `:eyes:`) — the cheapest acknowledgement in a group |
+
+- `<channel>` is an id, a `#name`, or a pasted Slack message link; a link
+  also supplies `<ts>` (and the thread, for `message`/`thread`/`post`), so
+  `thread <link>` or `post <link> "text"` needs nothing else.
+- `--json` writes Slack's raw objects (with `replies` nested under each
+  parent when `--threads`) for a second script; never read it yourself.
 
 - Times (`--since`, `--until`, `--after`): ISO 8601 (naive = local), epoch
   seconds, or a Slack `ts`. `--after` is strictly newer — re-read without
   seeing what you already saw.
 - A transcript line is `<ts> | <local time> | <name>[<id>] | <text>`, then
-  `[thread: N replies]` on a parent and `[file: <name> <F…> <size>]` per
-  upload; the first line names the format and the timezone. The `ts` is the
-  id: pass it back to `thread`, `message`, `--after`, `edit`, `delete`.
+  `[thread: N replies]` on a parent, `[in thread TS]` on a reply broadcast
+  to the channel, `[edited]`, `[file: <name> <F…> <size>]` per upload,
+  `[:emoji: N]` per reaction; a message with no text shows `[attachment:
+  title]` or `[blocks]`. The first line names the format and the timezone.
+  The `ts` is the id: pass it back to `thread`, `message`, `--after`,
+  `edit`, `delete`, `react`.
+- A plain `@alice` or `#ops` in what you post is reported on stderr after
+  the post: it notified nobody. Search is not available — `search.messages`
+  needs a user token, the bot's cannot call it; read a range instead.
 - A wide range belongs on disk: `history … --threads --out raw.txt`, then
   read the file in pieces. Never page a week through your context.
 - Text that starts with `-`, or is long: pipe it, `… post C1 - <<'EOF'`.
