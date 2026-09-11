@@ -27,7 +27,7 @@ follow-ups once your turn ends, batched when several are due — so **end your
 turn after launching**. `--callback steer` interrupts your running turn
 instead, for work needed mid-turn; `--callback none` means you do not want
 the result; `--callback-session <id>` delivers to another existing session
-(top-level only, never inside a run or with `none`/a batch).
+(never with `none` or a batch).
 
 - `--task-id <id>`: run a saved definition as is (archived ones refuse).
 - `--session <id> --prompt …`: continue an idle session with its history;
@@ -36,8 +36,8 @@ the result; `--callback-session <id>` delivers to another existing session
 ## Existing run: `--run <id> --prompt …`
 
 Running → steers it now; `--after` → queued after its current turn;
-finished → resumed on the same session as a new run (same depth, own
-callback: `--callback*` is accepted only here). The receipt says which
+finished → resumed on the same session as a new run (own callback:
+`--callback*` is accepted only here). The receipt says which
 (`delivery`). Undelivered guidance expires when the run ends. A child that
 needs your answer ends its turn with the question as its result — answer it
 with this command. Never spin or poll.
@@ -71,9 +71,8 @@ model id from memory.
 
 ## Cancel · recover
 
-`pier task cancel --run <id> | --group <id>`: descendants included; finished
-runs unchanged. You control your own trees; inside a run, only your
-descendants.
+`pier task cancel --run <id> | --group <id>`: finished runs unchanged. You
+control the runs you launched.
 
 `pier task recover (--run <id> | --group <id>) --reason <text>`: the full
 result after its callback settled (delivered, abandoned or `none`), for text
@@ -90,14 +89,13 @@ pier task save --name watcher --prompt "Triage" --watch "test -f new" --every 60
 Only for schedules or roles run more than once; the operator sees and
 archives them. `--task-id <id>` updates (whole definition again). `--prompt`
 xor `--bash`; one trigger group or none (manual). Notification only via
-`--callback-session <id>` — scheduled runs have no invoker. Not inside a run.
-`pier task list` shows them.
+`--callback-session <id>` — scheduled runs have no invoker. `pier task list`
+shows them.
 
 ## Limits
 
-- Inside a run: agent actions only, fresh sessions only, no `save`.
-- Depth 0–2 below the invoking session; 16 descendant runs per root
-  (resumes count). Your direct children are separate roots.
+- A delegated run does not delegate: `pier task` is refused inside a run
+  someone waits on; ask in your result and your supervisor runs it.
 - 6 agent runs execute instance-wide; the rest queue, unbounded, until
   cancelled or a restart marks them `interrupted` (callbacks still apply).
 - While Pier drains for a restart, new roots are refused: retry after.
