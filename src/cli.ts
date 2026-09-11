@@ -223,7 +223,12 @@ async function vault(action: string | undefined, argv: string[]): Promise<void> 
   });
   if (!wanted.length) die(usage);
   const values = await resolveSecrets([...new Set(wanted.map(([, name]) => name))]);
+  return inject(wanted, values, cmd);
+}
 
+/** `cmd` with each secret in its env; `approve` records go through `vt inject`,
+ *  which swaps them after approval. Never returns: the child's exit is ours. */
+function inject(wanted: readonly (readonly [string, string])[], values: Resolved, cmd: readonly string[]): Promise<never> {
   const env = { ...process.env };
   const records: string[] = [];
   for (const [envName, name] of wanted) {
@@ -247,6 +252,7 @@ async function vault(action: string | undefined, argv: string[]): Promise<void> 
     // The shell's convention for a signal death, so a caller sees the same number it would without us.
     process.exit(code ?? 128 + (signal ? osConstants.signals[signal] : 0));
   });
+  return new Promise<never>(() => {});
 }
 
 /** The running Pier's answer for `names` over the vault socket, every name
@@ -286,19 +292,19 @@ async function resolveSecrets(names: string[]): Promise<Resolved> {
   return values;
 }
 
-/** `$SLACK_BOT_TOKEN` when set (a `pier vault run` wrapper, or a test);
- *  otherwise the vault's `SLACK_TOKEN`. An `approve` record cannot be read
- *  here — only `vt inject` swaps it — so the fix is printed, not attempted. */
+/** `$SLACK_BOT_TOKEN` when set (the re-exec below, or a test); otherwise the
+ *  vault's `SLACK_TOKEN`. An `approve` record is only readable inside `vt
+ *  inject`, so the command re-runs itself under it — the agent never sees
+ *  the vault. Lazy: `--help` and usage errors never touch the socket. */
 async function slack(args: string[]): Promise<void> {
   const token = async (): Promise<string> => {
     const given = process.env.SLACK_BOT_TOKEN;
     if (given) return given;
-    const hit = (await resolveSecrets(["SLACK_TOKEN"])).SLACK_TOKEN!;
-    if (hit.kind === "record") {
-      const quoted = args.map((arg) => (/^[\w@#%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", String.raw`'\''`)}'`));
-      die(`slack: SLACK_TOKEN is an approve-level secret — run: pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- pier slack ${quoted.join(" ")}`);
-    }
-    return hit.value;
+    const values = await resolveSecrets(["SLACK_TOKEN"]);
+    const hit = values.SLACK_TOKEN!;
+    if (hit.kind === "plain") return hit.value;
+    // argv[1], not `pier` on PATH: the same build that is running answers.
+    return inject([["SLACK_BOT_TOKEN", "SLACK_TOKEN"]], values, [process.execPath, ...process.execArgv, process.argv[1]!, "slack", ...args]);
   };
   const { runSlackCli } = await import("./channels/slack-cli.js");
   process.exitCode = await runSlackCli(args, token);

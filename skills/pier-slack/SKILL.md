@@ -6,9 +6,9 @@ description: Slack from the shell with `pier slack` — history, threads, post, 
 # Slack from the shell
 
 Every operation is `pier slack <subcommand> …`; there is no Slack tool. The
-bot token comes from Pier's vault, never from you. If stderr says
-`SLACK_TOKEN is an approve-level secret`, run the `pier vault run …` line it
-prints; any other `vault:` line is the pier-vault skill's.
+bot token comes from Pier's vault, never from you; an `approve`-level token
+may pause the command until the operator approves. A `vault:` line on stderr
+is the pier-vault skill's.
 
 Where you are: the first speaker header ends `slack:<channel>/<thread_ts>`,
 said once; without it name a channel explicitly.

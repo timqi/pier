@@ -133,10 +133,10 @@ describe("pier vault run", () => {
   }
 
   /** A `vt` that prints its arguments and the variable it was asked to swap. */
-  function fakeVt(home: string): string {
+  function fakeVt(home: string, envName = "DEPLOY_KEY"): string {
     const bin = join(home, "bin");
     mkdirSync(bin);
-    writeFileSync(join(bin, "vt"), '#!/bin/sh\necho "vt $*"\necho "env $DEPLOY_KEY"\n');
+    writeFileSync(join(bin, "vt"), `#!/bin/sh\necho "vt $*"\necho "env $${envName}"\n`);
     chmodSync(join(bin, "vt"), 0o755);
     return bin;
   }
@@ -227,13 +227,16 @@ describe("pier vault run", () => {
     expect(asked).toEqual([]);
   });
 
-  it("resolves the token for `pier slack` the same way, and names the vault line for an approve record", async () => {
+  it("resolves the token for `pier slack` the same way, re-running itself under vt inject for an approve record", async () => {
     const record = await fakeVault(200, { values: { SLACK_TOKEN: { kind: "record", value: "vt://rec" } } });
-    const env: NodeJS.ProcessEnv = { ...process.env, PIER_HOME: record.home, SLACK_BOT_TOKEN: undefined };
-    const refused = await run(["slack", "post", "C1", "hello world", "--thread", "1700.1"], { env });
-    expect(refused.code).toBe(2);
-    expect(refused.stderr).toBe(
-      "slack: SLACK_TOKEN is an approve-level secret — run: pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- pier slack post C1 'hello world' --thread 1700.1\n",
+    const bin = fakeVt(record.home, "SLACK_BOT_TOKEN");
+    const env: NodeJS.ProcessEnv = { ...process.env, PIER_HOME: record.home, SLACK_BOT_TOKEN: undefined, PATH: `${bin}:${process.env.PATH ?? ""}` };
+    const wrapped = await run(["slack", "post", "C1", "hello world", "--thread", "1700.1"], { env });
+    expect(wrapped.stderr).toBe("");
+    expect(wrapped.code).toBe(0);
+    // The fake vt prints its argv: the same node, loader and cli file, then the slack arguments verbatim.
+    expect(wrapped.stdout).toBe(
+      `vt inject --only-env SLACK_BOT_TOKEN -- ${process.execPath} --import ${tsx} ${cli} slack post C1 hello world --thread 1700.1\nenv vt://rec\n`,
     );
     expect(record.asked).toEqual([{ method: "POST", url: "/resolve", body: { names: ["SLACK_TOKEN"], pid: expect.any(Number) } }]);
 

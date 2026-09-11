@@ -142,8 +142,8 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./fetch_weekly.py --out raw/weekly
 
 `pier slack` (`skills/pier-slack/SKILL.md`, [04-im-channels.md](04-im-channels.md))
 resolves `SLACK_TOKEN` through the same socket client as `vault run` and, for
-an `approve` record, prints the `pier vault run … -- pier slack …` line and
-exits 2 instead of spawning `vt` itself.
+an `approve` record, re-runs itself under `vt inject` with `SLACK_BOT_TOKEN`
+set — the agent types the same line either way.
 
 ## Not in scope
 
