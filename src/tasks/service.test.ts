@@ -667,7 +667,7 @@ describe("task service", () => {
 
   it("tracks the invoking session and durably calls back for background work", async () => {
     const { cwd, service, session, hub, store, factory, router } = setup();
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo delegated") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo delegated") }, "s1") as TaskDefinition;
     expect(task.createdBySessionId).toBe("s1");
     const statuses: string[] = [];
     hub.subscribe("s1", (event) => {
@@ -765,7 +765,7 @@ describe("task service", () => {
       session.systemInputs.push({ text, origin, mode });
       await new Promise<void>((resolve) => { release = resolve; });
     };
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo accepted") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo accepted") }, "s1") as TaskDefinition;
     const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     const done = await service.waitForRun(queued.runId);
 
@@ -790,7 +790,7 @@ describe("task service", () => {
     const { cwd, service } = setup(amnesiac);
     const advance = skewClock();
     service.start(20);
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo lost") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo lost") }, "s1") as TaskDefinition;
     const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     const done = await service.waitForRun(queued.runId);
 
@@ -1015,7 +1015,7 @@ describe("task service", () => {
     const { cwd, service, session } = setup();
     const advance = skewClock();
     service.start(20);
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     session.setState("streaming");
     const queued = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     const done = await service.waitForRun(queued.runId);
@@ -1041,7 +1041,7 @@ describe("task service", () => {
     const { cwd, service } = setup(session);
     const advance = skewClock();
     service.start(20);
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     session.setState("streaming");
     const waiting = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     const urgent = await service.tool({ operation: "run", task_id: task.id, callback: "steer" }, "s1") as RunSummary;
@@ -1078,7 +1078,7 @@ describe("task service", () => {
     const { cwd, service, store } = setup(busy.session);
     const advance = skewClock();
     service.start(20);
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     const urgent = await service.tool({ operation: "run", task_id: task.id, callback: "steer" }, "s1") as RunSummary;
     await service.waitForRun(urgent.runId);
 
@@ -1510,13 +1510,13 @@ describe("task service", () => {
     }, "s1")).rejects.toThrow("timeoutSeconds must be between 1 and 86400");
   });
 
-  it("defaults a trigger-less create to manual but keeps update strict", async () => {
+  it("defaults a trigger-less save to manual but keeps an update strict", async () => {
     const { cwd, service } = setup();
     const { trigger: _trigger, ...noTrigger } = bashDraft(cwd, "echo untriggered");
-    const task = await service.tool({ operation: "create", task: noTrigger }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: noTrigger }, "s1") as TaskDefinition;
     expect(task).toMatchObject({ kind: "task", trigger: { type: "manual" }, nextRunAt: null });
 
-    await expect(service.tool({ operation: "update", task_id: task.id, task: noTrigger }, "s1"))
+    await expect(service.tool({ operation: "save", task_id: task.id, task: noTrigger }, "s1"))
       .rejects.toThrow("trigger required");
   });
 
@@ -1798,7 +1798,7 @@ describe("task service", () => {
 
   it("batches pending callbacks for one session into a single input", async () => {
     const { cwd, service, session } = setup();
-    const task = await service.tool({ operation: "create", task: bashDraft(cwd, "echo done") }, "s1") as TaskDefinition;
+    const task = await service.tool({ operation: "save", task: bashDraft(cwd, "echo done") }, "s1") as TaskDefinition;
     session.setState("streaming");
     const first = await service.tool({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     await service.waitForRun(first.runId);
@@ -2170,12 +2170,12 @@ describe("owned system actions", () => {
       });
       expect(response.status).toBe(400);
     }
-    for (const operation of ["create", "run"]) {
+    for (const operation of ["save", "run"]) {
       await expect(service.tool({ operation, task: { ...spoofed, trigger: { type: "manual" } }, creator: "config-sync" }, "s1")).rejects.toThrow(/trusted owner/);
       await expect(service.tool({ operation, task: { ...draft("unknown"), trigger: { type: "manual" } } }, "s1")).rejects.toThrow(/trusted owner/);
     }
-    await expect(service.tool({ operation: "update", task_id: task.id, task: bashDraft(cwd, "echo spoof"), by: "config-sync" }, "s1")).rejects.toThrow(/reconciled by Pier/);
-    await expect(service.tool({ operation: "update", task_id: publicTask.id, task: spoofed }, "s1")).rejects.toThrow(/trusted owner/);
+    await expect(service.tool({ operation: "save", task_id: task.id, task: bashDraft(cwd, "echo spoof"), by: "config-sync" }, "s1")).rejects.toThrow(/reconciled by Pier/);
+    await expect(service.tool({ operation: "save", task_id: publicTask.id, task: spoofed }, "s1")).rejects.toThrow(/trusted owner/);
     await expect(service.update(publicTask.id, draft(), "config-sync")).rejects.toThrow(/trusted owner/);
     await expect(service.update(task.id, draft(), "other")).rejects.toThrow(/reconciled by Pier/);
     await expect(service.update(task.id, draft("unknown"), "config-sync")).rejects.toThrow(/trusted owner/);
@@ -2289,7 +2289,7 @@ describe("a definition Pier's own code created", () => {
     }
     // The other way in: the task tool, which has no owner to name either.
     await expect(service.tool({
-      operation: "update",
+      operation: "save",
       task_id: owned.id,
       task: bashDraft(cwd, "echo something else"),
     }, "s1")).rejects.toThrow(/reconciled by Pier/);

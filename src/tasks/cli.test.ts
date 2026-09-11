@@ -82,18 +82,18 @@ describe("pier task", () => {
     }]);
   });
 
-  it("saves a definition: create without --task-id, update with it; one action, one trigger", async () => {
+  it("saves a definition, --task-id naming the one to update; one action, one trigger", async () => {
     const { run, posted } = rig();
     expect(await run("save", "--name", "nightly", "--bash", "make", "--cwd", "/repo", "--cron", "0 3 * * *", "--tz", "UTC", "--timeout", "900")).toBe(0);
     expect(await run("save", "--task-id", "t1", "--name", "watcher", "--prompt", "Look", "--watch", "test -f flag", "--every", "30", "--repeat", "--cwd", "/repo", "--model", "gpt", "--callback-session", "s9")).toBe(0);
     expect(await run("save", "--name", "role", "--prompt", "Do the thing")).toBe(0);
     expect(posted).toEqual([
-      { operation: "create", task: { name: "nightly", timeoutSeconds: 900, trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, action: { type: "bash", script: "make", cwd: "/repo" } } },
-      { operation: "update", task_id: "t1", task: {
+      { operation: "save", task: { name: "nightly", timeoutSeconds: 900, trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, action: { type: "bash", script: "make", cwd: "/repo" } } },
+      { operation: "save", task_id: "t1", task: {
         name: "watcher", trigger: { type: "watch", script: "test -f flag", cwd: "/repo", intervalSeconds: 30, mode: "repeat" },
         callback: { type: "session", sessionId: "s9" }, prompt: "Look", cwd: "/repo", launch: { model: "gpt" },
       } },
-      { operation: "create", task: { name: "role", trigger: { type: "manual" }, prompt: "Do the thing" } },
+      { operation: "save", task: { name: "role", trigger: { type: "manual" }, prompt: "Do the thing" } },
     ]);
   });
 
@@ -106,7 +106,7 @@ describe("pier task", () => {
     expect(posted).toEqual([
       { operation: "message", run_id: "r1", message: "multi\nline\n" },
       { operation: "run", prompt: "multi\nline\n" },
-      { operation: "create", task: { name: "n", trigger: { type: "manual" }, prompt: "multi\nline\n" } },
+      { operation: "save", task: { name: "n", trigger: { type: "manual" }, prompt: "multi\nline\n" } },
       { operation: "run", tasks: [{ prompt: "a" }, { prompt: "multi\nline\n" }] },
     ]);
     expect(reads()).toBe(4);

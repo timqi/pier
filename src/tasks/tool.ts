@@ -102,7 +102,7 @@ const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: str
 const SUBAGENT_REDIRECT = "subagents cannot redirect callbacks (callback_session_id)";
 
 /** Who a new run's result goes to — the caller, nobody, or a named session that
- *  must exist. Shared by `run` and `resume`: a resumed run is a new run. */
+ *  must exist. Shared by `run` and `message` on a finished run: a resumed run is a new run. */
 const callbackTarget = async (
   input: Record<string, unknown>,
   definitions: TaskDefinitions,
@@ -153,7 +153,7 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[]): GroupSummary => d
 });
 
 const LaunchSchema = Type.Object({
-  model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() })),
+  model: Type.Optional(Type.String({ description: "A name matched against the operator's menu (provider, id or note), a full provider/id, or ? for the menu." })),
   thinking: Type.Optional(Type.String()),
 });
 
@@ -200,16 +200,14 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
     name: "task",
     label: "Pier Task",
     description:
-      "Manage durable Pier tasks and subagents. Agent tasks run in a fresh session or a reused one. create files a definition the operator sees in the Console — only for schedules or roles you will run again; a one-off is run with a prompt. Run executes a stored task by task_id, a one-shot subagent from a prompt (shorthand: prompt + optional cwd/launch/name/timeoutSeconds — cwd defaults to your own directory, relative paths resolve against it, name comes from the prompt) or from a full inline task draft, or a core-joined fan-out via tasks[] with join all|first. Every operation returns immediately: results and group joins arrive as callback messages once your turn ends — there is no status query; pass callback 'steer' to have a result interrupt your running turn instead, or 'none' for no callback at all. recover (run_id or group_id, plus a reason) re-reads a finished result after its callback has settled — for truncated text or lost context, never to check progress. Use steer/follow_up/resume for child control. A subagent that needs an answer ends its turn with the question as its result; resume it with the answer.",
+      "Pier subagents and scheduled tasks — the same surface as `pier task` in a shell. run: a one-shot subagent from prompt (+ cwd/launch/name/timeoutSeconds; cwd defaults to your directory, name to the prompt's first line), a stored task_id, a task draft, or tasks[] (2+) joined all|first. Every operation returns at once; results arrive as callback messages after your turn ends — there is no status query. callback 'steer' interrupts your running turn instead, 'none' delivers nowhere. message: text for an existing run — running: steers it, after:true queues it behind the turn, finished: resumes it (only then do callback options apply); the result says which. save: a definition the operator sees, for schedules and roles run again (task_id updates). recover (run_id|group_id + reason): a finished result after its callback settled, never progress. A subagent that needs an answer ends its turn with the question as its result; message it the answer.",
     parameters: Type.Object({
-      operation: strEnum(
-        "list", "create", "update", "run", "recover", "cancel",
-        "steer", "follow_up", "resume", "message",
-      ),
+      operation: strEnum("run", "message", "save", "list", "cancel", "recover"),
       task_id: Type.Optional(Type.String()),
       run_id: Type.Optional(Type.String()),
       group_id: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
+      after: Type.Optional(Type.Boolean()),
       reason: Type.Optional(Type.String({ description: "recover: why the delivered callback is not enough (required)." })),
       session_mode: Type.Optional(strEnum("fresh")),
       prompt: Type.Optional(Type.String()),
@@ -254,13 +252,12 @@ export async function handleTaskTool(
   const active = store.findActiveRunForTarget(callerSessionId);
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
-  if (input.operation === "create") {
-    if (active) throw new Error("subagents cannot create task definitions");
-    return definitions.create(await expandDraft(definitions, menu, input.task, callerSessionId), `session:${callerSessionId}`);
-  }
-  if (input.operation === "update") {
-    if (active) throw new Error("subagents cannot update task definitions");
-    return definitions.update(requiredString(input.task_id, "task_id"), await expandDraft(definitions, menu, input.task, callerSessionId));
+  if (input.operation === "save") {
+    if (active) throw new Error("subagents cannot save task definitions");
+    const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
+    return input.task_id === undefined
+      ? definitions.create(draft, `session:${callerSessionId}`)
+      : definitions.update(requiredString(input.task_id, "task_id"), draft);
   }
   if (input.operation === "run") {
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
@@ -355,27 +352,6 @@ export async function handleTaskTool(
     const cancelled = host.cancel(run.id);
     return summarize(cancelled);
   }
-  if (input.operation === "steer" || input.operation === "follow_up") {
-    const run = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(store, callerSessionId, active, run);
-    return host.control(run.id, callerSessionId, input.operation, requiredString(input.message, "message"));
-  }
-  if (input.operation === "resume") {
-    const prior = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(store, callerSessionId, active, prior);
-    // The resumed run is a new run, so it carries its own callback options,
-    // under the same rule as `run`: a subagent may not redirect them.
-    if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
-    const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
-    const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
-    const run = host.resume(prior.id, requiredString(input.message, "message"), {
-      invokedBySessionId: callerSessionId,
-      callbackSessionId,
-      callbackMode,
-      background: true,
-    });
-    return receipt(summarize(run), callbackSessionId, callbackMode, callerSessionId);
-  }
   if (input.operation === "message") {
     // The one request `pier task run --run` sends: the run's state, not the
     // caller, decides whether the text steers, queues or resumes, so a status
@@ -384,6 +360,8 @@ export async function handleTaskTool(
     assertOwns(store, callerSessionId, active, run);
     const message = requiredString(input.message, "message");
     if (isTerminal(run.state)) {
+      // A resumed run is a new run with its own callback, under `run`'s rule:
+      // a subagent may not redirect it.
       if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
       const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
       const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);

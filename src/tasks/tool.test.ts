@@ -182,15 +182,13 @@ describe("task tool recover", () => {
       .rejects.toThrow(/inline task draft cannot set callback/);
   });
 
-  it("resume honours its callback options under the same subagent rule as run", async () => {
+  it("a message on a finished run honours its callback options under the same subagent rule as run", async () => {
     const tool = rig([run("r1")]);
-    const steer = await tool({ operation: "resume", run_id: "r1", message: "go on", callback: "steer" }) as RunSummary;
-    expect(steer.callbackMode).toBe("steer");
-    expect(steer.next).toMatch(/interrupts your running turn/);
-    const none = await tool({ operation: "resume", run_id: "r1", message: "go on", callback: "none" }) as RunSummary;
+    const resumed = async (input: Record<string, unknown>) => (await tool({ operation: "message", run_id: "r1", message: "go on", ...input }) as { run: RunSummary }).run;
+    const none = await resumed({ callback: "none" });
     expect(none.callbackSessionId).toBeUndefined();
     expect(none.next).toBe("callback none: the result is not delivered to anyone");
-    const remote = await tool({ operation: "resume", run_id: "r1", message: "go on", callback_session_id: "other" }) as RunSummary;
+    const remote = await resumed({ callback_session_id: "other" });
     expect(remote.callbackSessionId).toBe("other");
     expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
 
@@ -199,7 +197,7 @@ describe("task tool recover", () => {
       run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null }),
       run("grandchild", { parentRunId: "child", rootRunId: "child", depth: 1 }),
     ]);
-    await expect(child({ operation: "resume", run_id: "grandchild", message: "go on", callback_session_id: "other" }))
+    await expect(child({ operation: "message", run_id: "grandchild", message: "go on", callback_session_id: "other" }))
       .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
   });
 
@@ -258,9 +256,11 @@ describe("task tool recover", () => {
     await expect(tool({ operation: "recover", task_id: task.id, reason: "x" })).rejects.toThrow(/run_id/);
   });
 
-  it("rejects the removed get operation without returning state", async () => {
+  it("rejects the removed operations without returning state", async () => {
     const tool = rig([run("r1", { state: "running", callbackState: null, result: null })]);
-    await expect(tool({ operation: "get", run_id: "r1" })).rejects.toThrow("unknown task operation");
+    for (const operation of ["get", "steer", "follow_up", "resume", "contact", "reply", "models", "create", "update"]) {
+      await expect(tool({ operation, run_id: "r1", message: "x" })).rejects.toThrow("unknown task operation");
+    }
   });
 
   it("a session opens with the task tool while the switch is on, and without it once off", () => {

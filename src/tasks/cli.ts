@@ -211,5 +211,5 @@ function saveParams(v: Values, text: (raw: string | boolean | undefined) => stri
       ? { prompt: text(v.prompt), cwd: v.cwd, launch }
       : { action: compact({ type: "bash", script: v.bash, cwd: v.cwd }) }),
   });
-  return compact({ operation: v["task-id"] === undefined ? "create" : "update", task_id: v["task-id"], task });
+  return compact({ operation: "save", task_id: v["task-id"], task });
 }
