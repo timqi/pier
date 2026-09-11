@@ -6,12 +6,10 @@
 import { chmodSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { logger } from "./log.js";
-import { pierPath } from "./paths.js";
+import { VAULT_SOCK } from "./paths.js";
 import { isVaultName, UnknownSecret, VaultLocked, type Vault } from "./vault.js";
 
 const log = logger("vault");
-
-export const VAULT_SOCK = pierPath("vault.sock");
 
 /** Generous for a list of names; anything past it is not a client of ours. */
 const MAX_BODY = 64 * 1024;

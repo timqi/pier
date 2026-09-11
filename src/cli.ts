@@ -2,8 +2,10 @@
 // What `pier` does when typed. Dispatch only, and no server imports until a
 // command needs them: `pier service install` must not open a database.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants, realpathSync } from "node:fs";
+import { request } from "node:http";
+import { constants as osConstants } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -24,6 +26,8 @@ Usage
   pier restart                finish running turns first, then restart the service
   pier reload                 re-read channel config and recycle idle sessions
   pier backup                 snapshot pier.db before a manual update
+  pier vault run [ENV=NAME | NAME]... -- <command> [args...]
+                              run a command with named secrets in its env
   pier --version | --help
 
 Options for "service install"
@@ -64,7 +68,8 @@ const parsed = (() => {
 })();
 const { values, positionals } = parsed;
 const [command, subcommand, ...extra] = positionals;
-if (extra.length) fail(`unexpected argument "${extra[0]}"`);
+// `vault run` reads process.argv itself: parseArgs cannot say where the `--` was.
+if (command !== "vault" && extra.length) fail(`unexpected argument "${extra[0]}"`);
 const allowOnly = (allowed: string[], usage: string): void => {
   const invalid = Object.keys(values).find((key) => !allowed.includes(key));
   if (invalid) fail(`--${invalid} is not valid for ${usage}`);
@@ -93,6 +98,8 @@ if (values.help || command === "help") {
   await update(values.check === true);
 } else if (command === "tools") {
   await tools(subcommand);
+} else if (command === "vault") {
+  await vault(subcommand, process.argv.slice(2));
 } else if (command === "restart" || command === "reload") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], `pier ${command}`);
@@ -190,17 +197,99 @@ async function backup(): Promise<void> {
   process.stdout.write(path ? `backed up ${path}\n` : `no database yet — nothing to back up.\n`);
 }
 
-function commandPath(name: string): string {
+/** Everything after `--` runs with the named secrets in its env — plain values
+ *  directly, `vt://` records through `vt inject`, which swaps them after the
+ *  operator's approval. Nothing here prints a value; every failure is one
+ *  stderr line and exit 2, so an agent reads words, not an empty variable. */
+async function vault(action: string | undefined, argv: string[]): Promise<void> {
+  // Typed on the binding: only then does a call narrow the code after it.
+  const die: (message: string) => never = (message) => {
+    process.stderr.write(`${message}\n`);
+    process.exit(2);
+  };
+  const usage = "usage: pier vault run [ENV=NAME | NAME]... -- <command> [args...]";
+  const split = argv.indexOf("--");
+  const cmd = argv.slice(split + 1);
+  if (action !== "run" || split < 2 || !cmd.length) die(usage);
+  // `NAME` alone is `NAME=NAME`: names are env-var shaped so the common case needs no mapping.
+  const wanted = argv.slice(2, split).map((spec) => {
+    const parts = spec.split("=");
+    const [env, name = env] = parts;
+    if (parts.length > 2 || !env || !name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(env)) die(usage);
+    return [env!, name!] as const;
+  });
+  if (!wanted.length) die(usage);
+
+  const { VAULT_SOCK } = await import("./paths.js");
+  type Answer = { values?: Record<string, { kind: "plain" | "record"; value: string }>; error?: string; file?: string };
+  const answer = await new Promise<{ status: number; body: Answer }>((done, reject) => {
+    const req = request(
+      { socketPath: VAULT_SOCK, method: "POST", path: "/resolve", headers: { "content-type": "application/json" } },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
+        res.on("end", () => {
+          try {
+            done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as Answer });
+          } catch (err) {
+            reject(err);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(JSON.stringify({ names: [...new Set(wanted.map(([, name]) => name))], pid: process.pid }));
+  }).catch((err: NodeJS.ErrnoException) =>
+    // A crash leaves the file with nobody behind it: that is "not running" too.
+    err.code === "ENOENT" || err.code === "ECONNREFUSED"
+      ? die(`vault: Pier is not running (no ${VAULT_SOCK})`)
+      : die(`vault: ${err.message}`));
+  const { status, body } = answer;
+  if (status === 404) die(`vault: ${body.error ?? "unknown name"} — file it at ${body.file ?? "the Console (Settings → Vault)"}`);
+  if (status !== 200 || !body.values) die(`vault: ${body.error ?? `vault socket answered ${String(status)}`}`);
+
+  const env = { ...process.env };
+  const records: string[] = [];
+  for (const [envName, name] of wanted) {
+    const hit = body.values[name];
+    if (!hit) die(`vault: no secret named ${name}`);
+    env[envName] = hit.value;
+    if (hit.kind === "record") records.push(envName);
+  }
+  let [file, ...args] = cmd as [string, ...string[]];
+  if (records.length) {
+    if (!findCommand("vt")) {
+      const names = wanted.filter(([envName]) => records.includes(envName)).map(([, name]) => name);
+      die(`vault: vt is required for ${names.join(", ")} (approve level) and was not found`);
+    }
+    // Only the record-carrying variables are swapped; everything else passes through untouched.
+    [file, ...args] = ["vt", "inject", "--only-env", records.join(","), "--", ...cmd];
+  }
+  const child = spawn(file, args, { stdio: "inherit", env });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
+  child.on("error", (err) => die(`vault: ${cmd[0]}: ${err.message}`));
+  child.on("exit", (code, signal) => {
+    // The shell's convention for a signal death, so a caller sees the same number it would without us.
+    process.exit(code ?? 128 + (signal ? osConstants.signals[signal] : 0));
+  });
+}
+
+/** Resolved through every PATH entry: version managers put several prefixes on it. */
+function findCommand(name: string): string | undefined {
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     const path = join(dir || ".", name);
     try {
       accessSync(path, constants.X_OK);
       return realpathSync(path);
     } catch {
-      // Keep looking: version managers put several prefixes on PATH.
+      // Keep looking.
     }
   }
-  return fail(`${name} is not executable on PATH`);
+  return undefined;
+}
+
+function commandPath(name: string): string {
+  return findCommand(name) ?? fail(`${name} is not executable on PATH`);
 }
 
 async function service(action = "status"): Promise<void> {
