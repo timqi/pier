@@ -37,8 +37,8 @@ otherwise).
 **The first start generates a password and prints it once.** Lost it?
 `sqlite3 ~/.pier/db/pier.db 'DELETE FROM auth'` and restart. Open
 `http://localhost:3141`, sign in; **Console → Settings** configures Models,
-Agent, Channels, the public URL, password and master key; **New session** picks
-the directory the agent's shell runs in.
+Agent, Channels, Vault, the public URL, password and master key; **New session**
+picks the directory the agent's shell runs in.
 
 ## Configure Pi
 
@@ -67,7 +67,12 @@ Console → Settings:
   copy of yours registering the same tool makes Pier's stand down) and the
   managed CLI tools (`rtk`, `rg`, `fd`, `wt`, `jq`, or your own as a
   [ubix](https://github.com/timqi/ubix) block), installed into
-  `~/.pier/tools/bin`, first on every session's PATH.
+  `~/.pier/tools/bin`, first on every session's PATH beside the `pier` shim
+  Pier writes there at start.
+- **Vault** — named secrets an agent's commands receive through `pier vault
+  run` without the value entering its context (`docs/design/07-vault.md`);
+  `pier slack` and `pier task` reach the running Pier the same way
+  (`docs/design/08-cli-socket.md`).
 
 On first credential access an existing `auth.json` is imported into the sealed
 store and renamed `auth.json.imported`; literal keys in `models.json` likewise

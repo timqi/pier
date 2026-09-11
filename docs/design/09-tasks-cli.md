@@ -43,8 +43,8 @@ pier task run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>] [--ses
   changes nothing). Receipt: `{delivery: "steer" | "follow_up",
   message}` or `{delivery: "resume", run}`. `--callback*` on a run that is not
   terminal is refused (`task: run <id> is <state>: callback options apply to a
-  resumed run only …`). `--run` takes nothing but `--prompt`, `--after` and
-  `--callback*`.
+  resumed run only; drop them to steer or follow up`). `--run` takes nothing
+  but `--prompt`, `--after` and `--callback*`.
 - **Batch**: the first `--member` switches `run` to a group. Flags before it
   are every member's defaults; each `--member` opens one member whose flags
   override them; a `--task-id` member takes no defaults and refuses its own

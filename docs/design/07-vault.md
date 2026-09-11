@@ -41,13 +41,19 @@ Root instance leaf beside `secrets.ts`; imports `db.ts`, `secrets.ts`,
 `log.ts`, nothing from `core/`, `agent/` or a platform SDK.
 
 ```ts
-class Vault {
-  list(): { name: string; level: "auto" | "approve"; updatedAt: number }[];
-  put(name: string, level: "auto" | "approve", plaintext: string): Promise<void>;
+export type VaultLevel = "auto" | "approve";
+export interface VaultEntry { name: string; level: VaultLevel; updatedAt: number }
+export type Resolved = Record<string, { kind: "plain" | "record"; value: string }>;
+export const isVaultName = (name: string): boolean;   // ^[A-Z][A-Z0-9_]{0,63}$
+export class UnknownSecret extends Error { readonly secret: string }
+export class VaultLocked extends Error {}
+export class Vault {
+  list(): VaultEntry[];
+  put(name: string, level: VaultLevel, plaintext: string): Promise<void>;
   seal(name: string, plaintext: string): void;      // put at auto, synchronous
   remove(name: string): boolean;                    // false when there was no row
   get(name: string): string | undefined;            // one of Pier's own credentials
-  resolve(names: string[], by?: string): Record<string, { kind: "plain" | "record"; value: string }>;
+  resolve(names: string[], by = "unknown"): Resolved;
 }
 ```
 
@@ -63,12 +69,9 @@ class Vault {
 
 ## Socket
 
-`POST /resolve` on Pier's CLI socket, `$PIER_HOME/pier.sock`; the protocol,
-the `sessionId` every request carries and the failure lines are in
-[08-cli-socket.md](08-cli-socket.md). `file` in the `404` is
-`<publicUrl>/#/settings/vault?name=X` (`publicUrl` from settings, else
-`http://127.0.0.1:<port>`); the Vault topic opens with `name` filled and the
-value field focused.
+`POST /resolve` on Pier's CLI socket, `$PIER_HOME/pier.sock`: the protocol,
+the `sessionId` every request carries, the `file` deep link in the `404` and
+the failure lines are in [08-cli-socket.md](08-cli-socket.md).
 
 ## CLI: `pier vault run`
 
