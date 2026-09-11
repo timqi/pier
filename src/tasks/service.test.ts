@@ -683,19 +683,19 @@ describe("task service", () => {
     expect(run.result).toEqual({ type: "agent", text: "Done.", sessionId: "s1" });
   });
 
-  it("models: the operator's menu when set, the catalog otherwise", async () => {
+  it("--model ?: the operator's menu when set, the catalog otherwise", async () => {
     const { factory } = setup();
     (factory.availableModels as ReturnType<typeof vi.fn>).mockResolvedValue([
       { provider: "test", id: "model" },
     ]);
     const menu: { provider: string; id: string; note?: string }[] = [];
     const service = new TaskService(new TaskStore(openDb(":memory:")), factory, new Router(new EventHub(), () => factory.resume("s1")), new EventHub(), { modelMenu: () => menu });
-    expect(await service.tool({ operation: "models" }, "s1")).toEqual({
+    expect(await service.tool({ operation: "run", launch: { model: "?" } }, "s1")).toEqual({
       source: "catalog",
       models: [{ provider: "test", id: "model" }],
     });
     menu.push({ provider: "test", id: "model", note: "the one we pay for" });
-    expect(await service.tool({ operation: "models" }, "s1")).toEqual({ source: "menu", models: menu });
+    expect(await service.tool({ operation: "run", launch: { model: "?" } }, "s1")).toEqual({ source: "menu", models: menu });
   });
 
   it("caps a chatty callback but recovers the full result", async () => {

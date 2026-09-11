@@ -39,6 +39,12 @@ const group = (id: string, memberRunIds: string[], over: Partial<TaskGroup> = {}
   callbackNextAttemptAt: null, ...over,
 });
 
+const menu = [
+  { provider: "anthropic", id: "claude-opus-4", thinking: "high", note: "hardest reasoning" },
+  { provider: "openai", id: "gpt-5", thinking: "medium", note: "second opinion" },
+  { provider: "openai", id: "gpt-5-mini", thinking: "low", note: "cheap bulk" },
+];
+
 /** A store with these rows and a host that only knows how to read them: the
  *  recover branch touches nothing else on the service. */
 function rig(runs: TaskRun[], groups: TaskGroup[] = [], decisions = new Map<string, string>()) {
@@ -60,15 +66,25 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], decisions = new Map<stri
       return { group: found, members: found.memberRunIds.map((m) => store.getRun(m)!) };
     },
     control: async (id: string, _from: string, kind: string, message: string) => ({ id: "m1", runId: id, kind, content: message }),
+    models: async () => ({ source: "menu", models: menu }),
     run: (_taskId: string, _input: unknown, _source: string, _parent: null, prov: Partial<TaskRun>) =>
       run("new", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
     resume: (_id: string, _message: string, prov: Partial<TaskRun>) =>
       run("resumed", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
   } as unknown as TaskService;
-  const definitions = { get: () => task, sessionExists: async () => true } as unknown as TaskDefinitions;
+  const created: Record<string, unknown>[] = [];
+  const definitions = {
+    get: () => task,
+    sessionExists: async () => true,
+    sessionCwd: async () => "/tmp",
+    create: async (draft: Record<string, unknown>) => {
+      created.push(draft);
+      return task;
+    },
+  } as unknown as TaskDefinitions;
   const messages = { openDecisionId: (runId: string) => decisions.get(runId) ?? null } as unknown as TaskMessenger;
-  return (input: Record<string, unknown>) =>
-    handleTaskTool(host, definitions, store, messages, input, "s1");
+  const tool = (input: Record<string, unknown>) => handleTaskTool(host, definitions, store, messages, input, "s1");
+  return Object.assign(tool, { created });
 }
 
 const notYet = /not recoverable yet/;
@@ -216,6 +232,35 @@ describe("task tool recover", () => {
     await expect(tool({ operation: "message", run_id: "live", message: "x", callback_session_id: "other" }))
       .rejects.toThrow(/callback options apply to a resumed run only/);
     await expect(tool({ operation: "message", run_id: "live" })).rejects.toThrow("message required");
+  });
+
+  it("resolves launch.model by name against the menu, defaulting thinking to the pin's", async () => {
+    const tool = rig([]);
+    const launchOf = async (launch: Record<string, unknown>) => {
+      await tool({ operation: "run", prompt: "Work", launch });
+      return (tool.created.at(-1)!.action as { launch: unknown }).launch;
+    };
+    // One hit: id, provider or note, any case.
+    expect(await launchOf({ model: "Opus" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
+    expect(await launchOf({ model: "anthropic" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
+    expect(await launchOf({ model: "cheap bulk" })).toEqual({ model: { provider: "openai", id: "gpt-5-mini" }, thinking: "low" });
+    // The caller's thinking wins over the pin's.
+    expect(await launchOf({ model: "mini", thinking: "off" })).toEqual({ model: { provider: "openai", id: "gpt-5-mini" }, thinking: "off" });
+    // An exact provider/id is its pin even where the substring would be ambiguous.
+    expect(await launchOf({ model: "openai/gpt-5" })).toEqual({ model: { provider: "openai", id: "gpt-5" }, thinking: "medium" });
+    // A provider/id nobody pinned is taken as written, no thinking implied.
+    expect(await launchOf({ model: "openrouter/meta/llama-4" })).toEqual({ model: { provider: "openrouter", id: "meta/llama-4" } });
+    // Many or none: the lines to pick from, and the run does not start.
+    await expect(launchOf({ model: "gpt" })).rejects.toThrow(
+      'model "gpt" matches 2 of the menu:\nopenai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk',
+    );
+    await expect(launchOf({ model: "gemini" })).rejects.toThrow(/model "gemini" matches 0 of the menu:\nanthropic\/claude-opus-4 · high — hardest reasoning\n/);
+    // `?` is the menu itself, in place of a run.
+    expect(await tool({ operation: "run", prompt: "Work", launch: { model: "?" } })).toEqual({ source: "menu", models: menu });
+    // An object passes through as it always did.
+    expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });
+    expect(tool.created).toHaveLength(7);
+    await expect(tool({ operation: "models" })).rejects.toThrow("unknown task operation");
   });
 
   it("does not take task_id", async () => {

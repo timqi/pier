@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { Type } from "typebox";
-import type { AgentCustomTool } from "../core/types.js";
+import type { AgentCustomTool, ModelRef } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskMessenger } from "./messages.js";
@@ -9,6 +9,9 @@ import type { TaskStore } from "./store.js";
 import { isTerminal, type CallbackFields, type CallbackMode, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
 
 const log = logger("tasks");
+
+type MenuEntry = Awaited<ReturnType<TaskService["models"]>>["models"][number];
+type Menu = () => Promise<MenuEntry[]>;
 
 // JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
 const strEnum = <const T extends readonly string[]>(...values: T) =>
@@ -254,17 +257,19 @@ export async function handleTaskTool(
   const input = record(raw);
   if (!input) throw new Error("task tool parameters required");
   const active = store.findActiveRunForTarget(callerSessionId);
+  const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
-  if (input.operation === "models") return host.models();
   if (input.operation === "create") {
     if (active) throw new Error("subagents cannot create task definitions");
-    return definitions.create(await expandDraft(definitions, input.task, callerSessionId), `session:${callerSessionId}`);
+    return definitions.create(await expandDraft(definitions, menu, input.task, callerSessionId), `session:${callerSessionId}`);
   }
   if (input.operation === "update") {
     if (active) throw new Error("subagents cannot update task definitions");
-    return definitions.update(requiredString(input.task_id, "task_id"), await expandDraft(definitions, input.task, callerSessionId));
+    return definitions.update(requiredString(input.task_id, "task_id"), await expandDraft(definitions, menu, input.task, callerSessionId));
   }
   if (input.operation === "run") {
+    // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
+    if (record(input.launch)?.model === "?") return host.models();
     const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
     // A run's own callback is its parent's link back; a child that could point
     // it elsewhere would strand the supervisor waiting for a result.
@@ -280,7 +285,7 @@ export async function handleTaskTool(
         const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
         resolved.push(entry.task_id === undefined
-          ? await resolveDraft(definitions, entry, active, callerSessionId)
+          ? await resolveDraft(definitions, menu, entry, active, callerSessionId)
           : resolveStored(definitions, entry.task_id, active));
       }
       const groupCallbackSessionId = input.callback === "none" ? null : callerSessionId;
@@ -296,7 +301,7 @@ export async function handleTaskTool(
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
     const task = draft
-      ? await resolveDraft(definitions, draft, active, callerSessionId)
+      ? await resolveDraft(definitions, menu, draft, active, callerSessionId)
       : resolveStored(definitions, input.task_id, active);
     // Same as the HTTP route: a named mode the schema no longer offers is
     // answered, not quietly swapped for the definition's own policy.
@@ -433,9 +438,26 @@ function nameFromPrompt(prompt: string): string {
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
 }
 
+/** `launch.model` by name (docs/design/09-tasks-cli.md §Models): an exact
+ *  `provider/id` on the menu is that pin; one case-insensitive substring hit
+ *  over provider, id and note is that pin, its thinking the default; a
+ *  `provider/id` nobody pinned is taken as written. Anything else is refused
+ *  with the lines to pick from, so the agent never guesses an id. */
+function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
+  const needle = name.trim().toLowerCase();
+  const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
+  const line = (pin: MenuEntry): string => `${full(pin)}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`;
+  const exact = menu.find((pin) => full(pin).toLowerCase() === needle);
+  const hits = exact ? [exact] : menu.filter((pin) => `${full(pin)} ${pin.note ?? ""}`.toLowerCase().includes(needle));
+  if (hits.length === 1) return { model: { provider: hits[0]!.provider, id: hits[0]!.id }, thinking: hits[0]!.thinking };
+  const slash = name.indexOf("/");
+  if (!hits.length && slash > 0 && slash < name.length - 1) return { model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } };
+  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${(hits.length ? hits : menu).map(line).join("\n")}`);
+}
+
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own
  *  directory; everything the caller did spell out passes through to parseDraft. */
-async function expandDraft(definitions: TaskDefinitions, raw: unknown, callerSessionId: string): Promise<unknown> {
+async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknown, callerSessionId: string): Promise<unknown> {
   let draft = record(raw);
   if (!draft) return raw;
   if (typeof draft.prompt === "string") {
@@ -451,6 +473,12 @@ async function expandDraft(definitions: TaskDefinitions, raw: unknown, callerSes
     draft = { ...draft, action: { ...action, session: { ...session, cwd: resolve(base, session.cwd ?? ".") } } };
   }
   if (draft.name === undefined && typeof action?.prompt === "string") draft = { ...draft, name: nameFromPrompt(action.prompt) };
+  const launch = record(action?.launch);
+  if (typeof launch?.model === "string") {
+    const { model, thinking } = resolveModel(launch.model, await menu());
+    const resolved = { ...launch, model, ...(launch.thinking === undefined && thinking ? { thinking } : {}) };
+    draft = { ...draft, action: { ...record(draft.action), launch: resolved } };
+  }
   return draft;
 }
 
@@ -458,11 +486,12 @@ async function expandDraft(definitions: TaskDefinitions, raw: unknown, callerSes
  *  runs stay auditable and resumable. */
 async function resolveDraft(
   definitions: TaskDefinitions,
+  menu: Menu,
   raw: unknown,
   active: TaskRun | undefined,
   callerSessionId: string,
 ): Promise<TaskDefinition> {
-  const draft = record(await expandDraft(definitions, raw, callerSessionId));
+  const draft = record(await expandDraft(definitions, menu, raw, callerSessionId));
   if (!draft) throw new Error("task definition required");
   if (draft.trigger !== undefined && record(draft.trigger)?.type !== "manual") {
     throw new Error("inline subagent tasks must use a manual trigger");
