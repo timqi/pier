@@ -42,7 +42,21 @@ surface owns its routes and is mounted beside it.
 | `GET /api/vault` | *(served by `web/vault.ts`, as are the two below; [07-vault.md](07-vault.md) owns the store)* `[{name, level: "auto"\|"approve", updatedAt}]` — names and levels, never values |
 | `PUT /api/vault/:name` | body `{level, value}` → `Vault.put`; answers the row. 400 for a name that is not `^[A-Z][A-Z0-9_]{0,63}$`, a level that is neither, or an empty value; 423 when `auto` cannot seal because the store is locked; 503 when `approve` could not create its `vt://` record, the error carrying `vt doctor`'s report; 504 when `vt create` is still waiting on an approval after 15s — the put keeps running and a late approval still files the row |
 | `DELETE /api/vault/:name` | remove; 204, or 404 `{error: "no secret named X"}` |
-| `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and control message (steer / follow-up) edges |
+| `GET /api/activity` | *(served by `tasks/routes.ts`, as is every `/api/task*` row below; the Console's Tasks, Runs and Activity views are their only client — agents use `pier task`)* active or last-24h sessions, task runs, and control message (steer / follow-up) edges |
+| `GET /api/tasks` | definitions of `?kind=` (default `task`; `subagent` one-shots only when asked), filtered by `?trigger=` and `?state=active\|archived`, each with `lastRun` |
+| `POST /api/tasks` | body: a definition, or `{task, runNow?}`; 201 `{task, runId}`; 400 `{error}` from `parseDraft` |
+| `GET /api/tasks/:id` | one definition; 404 |
+| `PATCH /api/tasks/:id` | body: the whole draft, incl. `trigger`; 400 |
+| `POST /api/tasks/:id/run` | body `{input?, sessionMode?: "fresh", sourceSessionId?}` → 202 `{runId}`, trigger `manual`; any other `sessionMode` is 400 (a reuse definition would otherwise inject into a live session) |
+| `POST /api/tasks/:id/pause` · `/resume` · `/archive` | `enabled` false / true; archived; 400 |
+| `GET /api/tasks/:id/runs` | `?limit=` (50) `?offset=`; 404 unknown task |
+| `GET /api/task-runs` | `queryRuns` over `?state= ?source= ?taskId=` and the date/probe filters; 400 `{error}` on an unknown state or source |
+| `GET /api/task-runs/:id` | the run view (definition, provenance, result, messages summary); 404 |
+| `GET /api/task-runs/:id/messages` | steer / follow-up records with delivery state; 404 |
+| `POST /api/task-runs/:id/steer` | body `{message, mode?: "followUp", sourceSessionId?}` (default `console`) → 202 the message; 400 on a terminal run |
+| `POST /api/task-runs/:id/resume` | body `{message, wait?, sourceSessionId?}`; 202 the new run, or with `wait` 200 its finished view; 400 |
+| `POST /api/task-runs/:id/cancel` | 202 the run, descendants included; 404 |
+| `GET /api/task-groups/:id` | a batch and its members; 404 |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
