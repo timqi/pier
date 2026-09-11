@@ -59,6 +59,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], decisions = new Map<stri
       if (!found) throw new Error(`unknown task group: ${id}`);
       return { group: found, members: found.memberRunIds.map((m) => store.getRun(m)!) };
     },
+    control: async (id: string, _from: string, kind: string, message: string) => ({ id: "m1", runId: id, kind, content: message }),
     run: (_taskId: string, _input: unknown, _source: string, _parent: null, prov: Partial<TaskRun>) =>
       run("new", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
     resume: (_id: string, _message: string, prov: Partial<TaskRun>) =>
@@ -194,6 +195,27 @@ describe("task tool recover", () => {
     ]);
     await expect(child({ operation: "resume", run_id: "grandchild", message: "go on", callback_session_id: "other" }))
       .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
+  });
+
+  it("message picks steer, follow-up or resume from the run's state and says which", async () => {
+    const tool = rig([
+      run("live", { state: "running", callbackState: null, finishedAt: null, result: null }),
+      run("done"),
+    ]);
+    expect(await tool({ operation: "message", run_id: "live", message: "stop" }))
+      .toEqual({ delivery: "steer", message: { id: "m1", runId: "live", kind: "steer", content: "stop" } });
+    expect(await tool({ operation: "message", run_id: "live", message: "then", after: true }))
+      .toMatchObject({ delivery: "follow_up", message: { kind: "follow_up" } });
+    const resumed = await tool({ operation: "message", run_id: "done", message: "go on", callback: "steer" }) as { delivery: string; run: RunSummary };
+    expect(resumed.delivery).toBe("resume");
+    expect(resumed.run.callbackMode).toBe("steer");
+    expect(resumed.run.next).toMatch(/interrupts your running turn/);
+    // Only a resume is a new run with its own callback; on a live run the option would be dropped, so it is refused.
+    await expect(tool({ operation: "message", run_id: "live", message: "x", callback: "steer" }))
+      .rejects.toThrow("run live is running: callback options apply to a resumed run only");
+    await expect(tool({ operation: "message", run_id: "live", message: "x", callback_session_id: "other" }))
+      .rejects.toThrow(/callback options apply to a resumed run only/);
+    await expect(tool({ operation: "message", run_id: "live" })).rejects.toThrow("message required");
   });
 
   it("does not take task_id", async () => {

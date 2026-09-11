@@ -26,83 +26,141 @@ function rig(answer: { status: number; body: { result?: unknown; error?: string 
 }
 
 describe("pier task", () => {
-  it("maps every flag operation onto the tool's parameter names", async () => {
+  it("maps every command onto the tool's parameter names", async () => {
     const { run, posted, out } = rig();
     const cases: [string[], Record<string, unknown>][] = [
       [["list"], { operation: "list" }],
-      [["models"], { operation: "models" }],
       [["cancel", "--run", "r1"], { operation: "cancel", run_id: "r1" }],
       [["cancel", "--group", "g1"], { operation: "cancel", group_id: "g1" }],
-      [["steer", "--run", "r1", "--message", "stop"], { operation: "steer", run_id: "r1", message: "stop" }],
-      [["follow_up", "--run", "r1", "--message", "then this"], { operation: "follow_up", run_id: "r1", message: "then this" }],
-      [["resume", "--run", "r1", "--message", "again", "--callback", "steer", "--callback-session", "s9"],
-        { operation: "resume", run_id: "r1", message: "again", callback: "steer", callback_session_id: "s9" }],
-      [["contact", "--reason", "decision", "--message", "A or B?"], { operation: "contact", reason: "decision", message: "A or B?" }],
-      [["contact", "--message", "halfway"], { operation: "contact", message: "halfway" }],
-      [["reply", "--message-id", "m1", "--message", "A"], { operation: "reply", message_id: "m1", message: "A" }],
       [["recover", "--run", "r1", "--reason", "truncated"], { operation: "recover", run_id: "r1", reason: "truncated" }],
       [["recover", "--group", "g1", "--reason", "lost"], { operation: "recover", group_id: "g1", reason: "lost" }],
       [["run", "--prompt", "Review", "--cwd", "/repo", "--name", "rev", "--timeout", "600", "--callback", "none"],
         { operation: "run", prompt: "Review", cwd: "/repo", name: "rev", timeoutSeconds: 600, callback: "none" }],
+      [["run", "--prompt", "Review", "--model", "gpt", "--thinking", "high", "--callback-session", "s9"],
+        { operation: "run", prompt: "Review", launch: { model: "gpt", thinking: "high" }, callback_session_id: "s9" }],
+      [["run", "--task-id", "t1", "--callback", "steer"], { operation: "run", task_id: "t1", callback: "steer" }],
+      [["run", "--session", "s2", "--prompt", "Check the result", "--timeout", "60"],
+        { operation: "run", task: { timeoutSeconds: 60, action: { type: "agent", session: { mode: "reuse", sessionId: "s2" }, prompt: "Check the result" } } }],
     ];
     for (const [argv] of cases) expect(await run(...argv), argv.join(" ")).toBe(0);
     expect(posted).toEqual(cases.map(([, params]) => params));
     expect(out).toEqual(cases.map(() => '{"ok":true}'));
   });
 
-  it("reads `-` from stdin for message and prompt, once", async () => {
-    const { run, posted, reads } = rig(undefined, "multi\nline\n");
-    expect(await run("steer", "--run", "r1", "--message", "-")).toBe(0);
-    expect(await run("run", "--prompt", "-")).toBe(0);
+  it("puts a prompt on an existing run as one message request; the server picks steer, follow-up or resume", async () => {
+    const { run, posted, out } = rig({ status: 200, body: { result: { delivery: "steer" } } });
+    expect(await run("run", "--run", "r1", "--prompt", "stop")).toBe(0);
+    expect(await run("run", "--run", "r1", "--prompt", "then this", "--after")).toBe(0);
+    expect(await run("run", "--run", "r1", "--prompt", "again", "--callback", "steer", "--callback-session", "s9")).toBe(0);
     expect(posted).toEqual([
-      { operation: "steer", run_id: "r1", message: "multi\nline\n" },
-      { operation: "run", prompt: "multi\nline\n" },
+      { operation: "message", run_id: "r1", message: "stop" },
+      { operation: "message", run_id: "r1", message: "then this", after: true },
+      { operation: "message", run_id: "r1", message: "again", callback: "steer", callback_session_id: "s9" },
     ]);
-    expect(reads()).toBe(2);
+    expect(out).toEqual(['{"delivery":"steer"}', '{"delivery":"steer"}', '{"delivery":"steer"}']);
+    // The run's state lives on the server: callback options on a running run are its refusal, exit 1.
+    const running = rig({ status: 422, body: { error: "run r1 is running: callback options apply to a resumed run only; drop them to steer or follow up" } });
+    expect(await running.run("run", "--run", "r1", "--prompt", "again", "--callback", "steer")).toBe(1);
+    expect(running.err).toEqual(["task: run r1 is running: callback options apply to a resumed run only; drop them to steer or follow up"]);
   });
 
-  it("passes a JSON params object on stdin through untouched for run, create and update, the operation being argv's", async () => {
-    const draft = { task: { name: "nightly", trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, action: { type: "bash", script: "make", cwd: "/repo" } } };
-    const { run, posted } = rig(undefined, JSON.stringify({ ...draft, operation: "run" }));
-    expect(await run("create")).toBe(0);
-    expect(await run("update")).toBe(0);
-    expect(await run("run")).toBe(0);
+  it("turns --member into tasks[]: flags before the first are every member's defaults, each member overrides them", async () => {
+    const { run, posted } = rig();
+    expect(await run("run", "--cwd", "/repo", "--model", "gpt", "--join", "first", "--callback", "steer",
+      "--member", "--prompt", "Review correctness",
+      "--member", "--prompt", "Review tests", "--cwd", "/repo/tests", "--thinking", "low", "--name", "tests",
+      "--member", "--task-id", "t1")).toBe(0);
+    expect(posted).toEqual([{
+      operation: "run",
+      join: "first",
+      callback: "steer",
+      tasks: [
+        { prompt: "Review correctness", cwd: "/repo", launch: { model: "gpt" } },
+        { prompt: "Review tests", cwd: "/repo/tests", launch: { model: "gpt", thinking: "low" }, name: "tests" },
+        { task_id: "t1" },
+      ],
+    }]);
+  });
+
+  it("saves a definition: create without --task-id, update with it; one action, one trigger", async () => {
+    const { run, posted } = rig();
+    expect(await run("save", "--name", "nightly", "--bash", "make", "--cwd", "/repo", "--cron", "0 3 * * *", "--tz", "UTC", "--timeout", "900")).toBe(0);
+    expect(await run("save", "--task-id", "t1", "--name", "watcher", "--prompt", "Look", "--watch", "test -f flag", "--every", "30", "--repeat", "--cwd", "/repo", "--model", "gpt", "--callback-session", "s9")).toBe(0);
+    expect(await run("save", "--name", "role", "--prompt", "Do the thing")).toBe(0);
     expect(posted).toEqual([
-      { ...draft, operation: "create" },
-      { ...draft, operation: "update" },
-      { ...draft, operation: "run" },
+      { operation: "create", task: { name: "nightly", timeoutSeconds: 900, trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, action: { type: "bash", script: "make", cwd: "/repo" } } },
+      { operation: "update", task_id: "t1", task: {
+        name: "watcher", trigger: { type: "watch", script: "test -f flag", cwd: "/repo", intervalSeconds: 30, mode: "repeat" },
+        callback: { type: "session", sessionId: "s9" }, prompt: "Look", cwd: "/repo", launch: { model: "gpt" },
+      } },
+      { operation: "create", task: { name: "role", trigger: { type: "manual" }, prompt: "Do the thing" } },
     ]);
-    const fanout = rig(undefined, JSON.stringify({ tasks: ["a", { prompt: "b", launch: { thinking: "high" } }], join: "first" }));
-    expect(await fanout.run("run")).toBe(0);
-    expect(fanout.posted).toEqual([{ tasks: ["a", { prompt: "b", launch: { thinking: "high" } }], join: "first", operation: "run" }]);
+  });
+
+  it("reads `-` from stdin for --prompt, once per command", async () => {
+    const { run, posted, reads } = rig(undefined, "multi\nline\n");
+    expect(await run("run", "--run", "r1", "--prompt", "-")).toBe(0);
+    expect(await run("run", "--prompt", "-")).toBe(0);
+    expect(await run("save", "--name", "n", "--prompt", "-")).toBe(0);
+    expect(await run("run", "--member", "--prompt", "a", "--member", "--prompt", "-")).toBe(0);
+    expect(posted).toEqual([
+      { operation: "message", run_id: "r1", message: "multi\nline\n" },
+      { operation: "run", prompt: "multi\nline\n" },
+      { operation: "create", task: { name: "n", trigger: { type: "manual" }, prompt: "multi\nline\n" } },
+      { operation: "run", tasks: [{ prompt: "a" }, { prompt: "multi\nline\n" }] },
+    ]);
+    expect(reads()).toBe(4);
+    const twice = rig(undefined, "x");
+    expect(await twice.run("run", "--member", "--prompt", "-", "--member", "--prompt", "-")).toBe(2);
+    expect(twice.err[0]).toMatch(/^task: only one --prompt may read stdin/);
+    expect(twice.posted).toEqual([]);
+  });
+
+  it("asks the server for the menu on --model ?, whatever else was said", async () => {
+    const { run, posted } = rig();
+    expect(await run("run", "--prompt", "Review", "--model", "?")).toBe(0);
+    expect(await run("save", "--name", "n", "--prompt", "x", "--model", "?")).toBe(0);
+    expect(posted).toEqual([{ operation: "run", launch: { model: "?" } }, { operation: "run", launch: { model: "?" } }]);
   });
 
   it("exits 2 on argv it cannot shape, without posting", async () => {
-    const { run, posted, err, out } = rig(undefined, "[1]");
-    expect(await run()).toBe(2);
-    expect(await run("frobnicate")).toBe(2);
-    expect(await run("list", "--run", "r1")).toBe(2);
-    expect(await run("cancel", "--porrt", "1")).toBe(2);
-    expect(await run("cancel", "r1")).toBe(2);
-    expect(await run("run", "--prompt", "x", "--timeout", "soon")).toBe(2);
-    expect(await run("create")).toBe(2);
+    const { run, posted, err, out } = rig();
+    const bad: [string[], unknown][] = [
+      [[], "usage"],
+      [["frobnicate"], 'task: unknown command "frobnicate"'],
+      [["list", "--run", "r1"], "task: --run is not an option of list"],
+      [["cancel", "--porrt", "1"], expect.stringMatching(/^task: Unknown option '--porrt'/)],
+      [["cancel", "r1"], expect.stringMatching(/^task: Unexpected argument 'r1'/)],
+      [["cancel"], "task: cancel takes exactly one of --run or --group"],
+      [["recover", "--run", "r", "--group", "g", "--reason", "x"], "task: recover takes exactly one of --run or --group"],
+      [["run", "--prompt", "x", "--timeout", "soon"], "task: --timeout must be a whole number of seconds"],
+      [["run"], "task: a new run needs --prompt or --task-id"],
+      [["run", "--task-id", "t1", "--prompt", "x"], "task: --prompt does not apply to a saved definition (--task-id)"],
+      [["run", "--session", "s1", "--prompt", "x", "--cwd", "/x"], "task: --cwd applies to a fresh session, not --session"],
+      [["run", "--run", "r1"], "task: --run needs --prompt"],
+      [["run", "--run", "r1", "--prompt", "x", "--cwd", "/x"], "task: --cwd does not apply to an existing run (--run)"],
+      [["run", "--run", "r1", "--prompt", "x", "--member", "--prompt", "y"], "task: --run addresses one existing run; --member starts new ones"],
+      [["run", "--prompt", "x", "--after"], "task: --after applies to --run only"],
+      [["run", "--prompt", "x", "--join", "first"], "task: --join applies to a batch (--member)"],
+      [["run", "--member", "--prompt", "x"], "task: a batch needs at least two --member"],
+      [["run", "--member", "--prompt", "x", "--member", "--prompt", "y", "--join", "all"], "task: --join belongs before the first --member"],
+      [["save", "--name", "n"], "task: save takes exactly one of --prompt or --bash"],
+      [["save", "--name", "n", "--prompt", "x", "--bash", "y"], "task: save takes exactly one of --prompt or --bash"],
+      [["save", "--name", "n", "--prompt", "x", "--cron", "* * * * *"], "task: --cron and --tz go together"],
+      [["save", "--name", "n", "--prompt", "x", "--watch", "true"], "task: --watch and --every go together"],
+      [["save", "--name", "n", "--prompt", "x", "--cron", "* * * * *", "--tz", "UTC", "--every", "5"], "task: a task has one trigger: --cron/--tz or --watch/--every/--repeat"],
+      [["save", "--name", "n", "--bash", "x", "--model", "gpt"], "task: --model/--thinking apply to a prompt, not --bash"],
+      [["save", "--name", "n", "--prompt", "x", "--watch", "true", "--every", "soon"], "task: --every must be a whole number of seconds"],
+    ];
+    for (const [argv] of bad) expect(await run(...argv), argv.join(" ")).toBe(2);
     expect(posted).toEqual([]);
-    expect(err.map((line) => line.split("\n")[0])).toEqual([
-      "task: unknown operation \"frobnicate\"",
-      "task: --run is not an option of list",
-      expect.stringMatching(/^task: Unknown option '--porrt'/),
-      expect.stringMatching(/^task: Unexpected argument 'r1'/),
-      "task: --timeout must be a whole number of seconds",
-      "task: stdin must be a JSON object",
-    ]);
-    // Bare `pier task` is the usage on stdout, exit 2; `--help` is the same text, exit 0.
-    expect(out[0]).toContain("pier task <operation>");
+    // Bare `pier task` is the usage on stdout; every other refusal is a task: line plus the command's usage on stderr.
+    expect(out[0]).toContain("pier task <command>");
+    expect(err.map((line) => line.split("\n")[0])).toEqual(bad.slice(1).map(([, first]) => first));
+    expect(err[1]).toContain("\npier task list");
     expect(await run("--help")).toBe(0);
-    expect(await run("steer", "-h")).toBe(0);
-    expect(out.at(-1)).toContain("pier task steer [--run <id>] [--message <text|->]");
-    const bad = rig(undefined, "{not json");
-    expect(await bad.run("run")).toBe(2);
-    expect(bad.err[0]).toMatch(/^task: stdin must be the JSON params object: /);
+    expect(await run("save", "-h")).toBe(0);
+    expect(out.at(-1)).toContain("pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)");
   });
 
   it("prints the tool's refusal as one task: line, exit 1", async () => {

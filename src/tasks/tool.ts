@@ -383,6 +383,26 @@ export async function handleTaskTool(
     });
     return receipt(summarize(run, null), callbackSessionId, callbackMode, callerSessionId);
   }
+  if (input.operation === "message") {
+    // The one request `pier task run --run` sends: the run's state, not the
+    // caller, decides whether the text steers, queues or resumes, so a status
+    // query never has to exist.
+    const run = host.getRun(requiredString(input.run_id, "run_id"));
+    assertOwns(store, callerSessionId, active, run);
+    const message = requiredString(input.message, "message");
+    if (isTerminal(run.state)) {
+      if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
+      const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
+      const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
+      const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true });
+      return { delivery: "resume", run: receipt(summarize(resumed, null), callbackSessionId, callbackMode, callerSessionId) };
+    }
+    if (input.callback !== undefined || input.callback_session_id !== undefined) {
+      throw new Error(`run ${run.id} is ${run.state}: callback options apply to a resumed run only; drop them to steer or follow up`);
+    }
+    const delivery = input.after === true ? "follow_up" : "steer";
+    return { delivery, message: await host.control(run.id, callerSessionId, delivery, message) };
+  }
   if (input.operation === "contact") {
     if (!active) throw new Error("contact is only available inside an active Agent run");
     // The schema no longer narrows `reason` (recover shares the field), so the
