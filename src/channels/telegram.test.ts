@@ -7,8 +7,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
-import { Secrets } from "../secrets.js";
-import { Vault } from "../vault.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import { ReceiptLedger } from "./receipts.js";
@@ -227,10 +225,8 @@ const FORUM = { ...GROUP, is_forum: true };
 const DM = { id: 42, type: "private" as const };
 
 beforeEach(async () => {
-  const secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-tg-")), "master.key"));
-  await secrets.unlock();
-  const db = openDb(":memory:");
-  store = new ChannelStore(db, new Vault(secrets, db));
+  const vault = new Map<string, string>();
+  store = new ChannelStore(openDb(":memory:"), { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
   client = new FakeClient();
   inbound = [];
   dropped = [];

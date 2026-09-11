@@ -31,9 +31,9 @@ A message may start with \`[name<id> time place]\` — the sender and the chat,
 added by Pier, not typed by them. It appears only on a change — new speaker, a
 ~10-minute gap, a new day — so the last one still applies; a gap alone shows as
 time only, like \`[14:23]\`. Use that \`id\` to mention someone; never ask for
-their own. \`place\` is \`<platform>:<conversation>\` — on Slack
-\`slack:<channel>/<thread_ts>\` — told once per session, on the first message;
-it is what a skill's script takes as the current channel and thread.
+their own. \`place\` is \`<platform>:<conversation>\` (Slack:
+\`slack:<channel>/<thread_ts>\`), said once per session: the channel and thread a
+script takes.
 `;
 
 /** Deployment facts an agent cannot discover: a guessed path is wrong wherever

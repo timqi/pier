@@ -26,11 +26,13 @@ type CredentialKey = "token" | "appToken";
 /** Where each platform's credentials live in the vault — fixed names, so a
  *  skill and the Console agree without a setting. Migration 24 spells the same
  *  table in SQL. Telegram authenticates with one token. */
-export const CREDENTIAL_NAMES: Record<ChannelPlatform, Partial<Record<CredentialKey, string>>> = {
+const CREDENTIAL_NAMES: Record<ChannelPlatform, Partial<Record<CredentialKey, string>>> = {
   telegram: { token: "TELEGRAM_TOKEN" },
   slack: { token: "SLACK_TOKEN", appToken: "SLACK_APP_TOKEN" },
   lark: { token: "LARK_APP_ID", appToken: "LARK_APP_SECRET" },
 };
+const credentials = (platform: ChannelPlatform): [CredentialKey, string][] =>
+  Object.entries(CREDENTIAL_NAMES[platform]) as [CredentialKey, string][];
 
 export class ChannelStore {
   private readonly cache = new Map<ChannelPlatform, ChannelConfig>();
@@ -50,7 +52,7 @@ export class ChannelStore {
     const config = row
       ? { ...defaultChannelConfig(), ...(JSON.parse(row.json) as Partial<ChannelConfig>) }
       : defaultChannelConfig();
-    for (const [key, name] of Object.entries(CREDENTIAL_NAMES[platform]) as [CredentialKey, string][]) {
+    for (const [key, name] of credentials(platform)) {
       config[key] = this.vault.get(name) ?? "";
     }
     this.cache.set(platform, config);
@@ -66,7 +68,7 @@ export class ChannelStore {
     // credential touches the vault, so its `updated` is the rotation, not the
     // last chat discovered; an emptied field removes the row.
     const before = this.cached(platform);
-    for (const [key, name] of Object.entries(CREDENTIAL_NAMES[platform]) as [CredentialKey, string][]) {
+    for (const [key, name] of credentials(platform)) {
       if (config[key] === before[key]) continue;
       if (config[key]) this.vault.seal(name, config[key]);
       else this.vault.remove(name);

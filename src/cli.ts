@@ -9,6 +9,7 @@ import { constants as osConstants } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import type { Resolved } from "./vault.js";
 import { currentVersion, UpdateCheck } from "./update.js";
 
 const version = currentVersion();
@@ -43,16 +44,12 @@ Under systemd that print lands in the journal: journalctl --user -u pier -e
 
 const say = (message: string): void => void process.stdout.write(`${message}\n`);
 
-const fail = (message: string): never => {
-  process.stderr.write(`pier: ${message}\n`);
-  process.exit(2);
-};
-
 /** Typed on the binding: only then does a call narrow the code after it. */
 const die: (message: string) => never = (message) => {
   process.stderr.write(`${message}\n`);
   process.exit(2);
 };
+const fail = (message: string): never => die(`pier: ${message}`);
 
 const argv = process.argv.slice(2);
 const parsed = (() => {
@@ -211,8 +208,7 @@ async function backup(): Promise<void> {
 
 /** Everything after `--` runs with the named secrets in its env — plain values
  *  directly, `vt://` records through `vt inject`, which swaps them after the
- *  operator's approval. Nothing here prints a value; every failure is one
- *  stderr line and exit 2, so an agent reads words, not an empty variable. */
+ *  operator's approval. Nothing here prints a value. */
 async function vault(action: string | undefined, argv: string[]): Promise<void> {
   const usage = "usage: pier vault run [ENV=NAME | NAME]... -- <command> [args...]";
   const split = argv.indexOf("--");
@@ -231,8 +227,7 @@ async function vault(action: string | undefined, argv: string[]): Promise<void> 
   const env = { ...process.env };
   const records: string[] = [];
   for (const [envName, name] of wanted) {
-    const hit = values[name];
-    if (!hit) die(`vault: no secret named ${name}`);
+    const hit = values[name]!;
     env[envName] = hit.value;
     if (hit.kind === "record") records.push(envName);
   }
@@ -254,13 +249,12 @@ async function vault(action: string | undefined, argv: string[]): Promise<void> 
   });
 }
 
-type Secret = { kind: "plain" | "record"; value: string };
-
-/** The running Pier's answer for `names` over the vault socket; any failure is
- *  one `vault:` line and exit 2, so an agent reads words, not an empty variable. */
-async function resolveSecrets(names: string[]): Promise<Record<string, Secret>> {
+/** The running Pier's answer for `names` over the vault socket, every name
+ *  present; any failure is one `vault:` line and exit 2, so an agent reads
+ *  words, not an empty variable. */
+async function resolveSecrets(names: string[]): Promise<Resolved> {
   const { VAULT_SOCK } = await import("./paths.js");
-  type Answer = { values?: Record<string, Secret>; error?: string; file?: string };
+  type Answer = { values?: Resolved; error?: string; file?: string };
   const answer = await new Promise<{ status: number; body: Answer }>((done, reject) => {
     const req = request(
       { socketPath: VAULT_SOCK, method: "POST", path: "/resolve", headers: { "content-type": "application/json" } },
@@ -285,8 +279,11 @@ async function resolveSecrets(names: string[]): Promise<Record<string, Secret>> 
       : die(`vault: ${err.message}`));
   const { status, body } = answer;
   if (status === 404) die(`vault: ${body.error ?? "unknown name"} — file it at ${body.file ?? "the Console (Settings → Vault)"}`);
-  if (status !== 200 || !body.values) die(`vault: ${body.error ?? `vault socket answered ${String(status)}`}`);
-  return body.values;
+  const values = body.values;
+  if (status !== 200 || !values) die(`vault: ${body.error ?? `vault socket answered ${String(status)}`}`);
+  const missing = names.find((name) => !values[name]);
+  if (missing) die(`vault: no secret named ${missing}`);
+  return values;
 }
 
 /** `$SLACK_BOT_TOKEN` when set (a `pier vault run` wrapper, or a test);
@@ -296,8 +293,7 @@ async function slack(args: string[]): Promise<void> {
   const token = async (): Promise<string> => {
     const given = process.env.SLACK_BOT_TOKEN;
     if (given) return given;
-    const hit = (await resolveSecrets(["SLACK_TOKEN"])).SLACK_TOKEN;
-    if (!hit) die("vault: no secret named SLACK_TOKEN");
+    const hit = (await resolveSecrets(["SLACK_TOKEN"])).SLACK_TOKEN!;
     if (hit.kind === "record") {
       const quoted = args.map((arg) => (/^[\w@#%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", String.raw`'\''`)}'`));
       die(`slack: SLACK_TOKEN is an approve-level secret — run: pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- pier slack ${quoted.join(" ")}`);

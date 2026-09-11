@@ -1,13 +1,8 @@
 // The settings panel, once for the shared behaviour and once per platform's
 // rendering. Hermetic — in-memory store, a recording control, fake clients.
 
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { Secrets } from "../secrets.js";
-import { Vault } from "../vault.js";
 import type { ConversationKey, ModelRef } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl, ConversationStatus } from "./control.js";
@@ -62,11 +57,9 @@ let store: ChannelStore;
 let control: FakeControl;
 let logs: string[];
 
-beforeEach(async () => {
-  const secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-panel-")), "master.key"));
-  await secrets.unlock();
-  const db = openDb(":memory:");
-  store = new ChannelStore(db, new Vault(secrets, db));
+beforeEach(() => {
+  const vault = new Map<string, string>();
+  store = new ChannelStore(openDb(":memory:"), { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
   store.discoverChat("telegram", { id: "100", name: "Ops", kind: "group" });
   store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
   control = new FakeControl();

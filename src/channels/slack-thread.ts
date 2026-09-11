@@ -3,27 +3,25 @@
 // the adapter only inlines a thread it already knows to be short; anything
 // longer is the pier-slack skill's business, in a shell.
 
-import type { SlackClient, SlackMessageEvent } from "./slack-api.js";
+import type { SlackClient } from "./slack-api.js";
 import type { SlackDirectory } from "./slack-directory.js";
 import { ordered, transcript } from "./slack-transcript.js";
 
-export interface SlackThreadRead {
+interface SlackThreadRead {
   count: number;
   truncated?: boolean;
   format: string;
   messages: string[];
 }
 
-/** slack-transcript.ts with ts and ids on: the id is the only thing `<@…>`
- *  can be built from. Terse: this string goes in a prompt, so every word is
- *  paid for per read. */
-export const LINE_FORMAT =
+/** Terse: this string goes in a prompt, so every word is paid for per read. */
+const LINE_FORMAT =
   "<ts> HH:MM name[id]: text, local time, a date line when the day changes;"
   + " [thread N · <ts>] marks a parent, [file <name> <F…> <size>] an upload";
 
 /** Error codes an agent can act on become the action; the rest keep their
  *  searchable raw code. */
-export function explain(err: unknown): string {
+function explain(err: unknown): string {
   const code = /slack [\w.]+: (\w+)/.exec(String(err))?.[1] ?? "";
   return {
     channel_not_found: "no such channel, or Pier's bot cannot see it",
@@ -50,8 +48,7 @@ export async function readThread(
     throw new Error(explain(err));
   }
   const all = ordered(page.messages);
-  const window: SlackMessageEvent[] = all.slice(0, limit);
-  // The store is not consulted: a member need not be bound to have spoken.
+  const window = all.slice(0, limit);
   // Only users: a bot names itself, and users.info on a `B…` id fails.
   const ids = window.map((msg) => msg.user ?? "").filter(Boolean);
   const names = await directory.names(client, ids);

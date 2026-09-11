@@ -7,8 +7,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
-import { Secrets } from "../secrets.js";
-import { Vault } from "../vault.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -219,10 +217,8 @@ function fakeControl() {
 }
 
 beforeEach(async () => {
-  const secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-lark-")), "master.key"));
-  await secrets.unlock();
-  const db = openDb(":memory:");
-  store = new ChannelStore(db, new Vault(secrets, db));
+  const vault = new Map<string, string>();
+  store = new ChannelStore(openDb(":memory:"), { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
   client = new FakeClient();
   inbound = [];
   dropped = [];

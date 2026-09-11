@@ -76,9 +76,9 @@ const PERMALINK = /^https:\/\/[\w.-]+\.slack\.com\/archives\/([A-Z0-9]+)\/p(\d{6
 export function permalink(url: string): { channel: string; ts: string; thread?: string } | undefined {
   const m = PERMALINK.exec(url);
   if (!m) return undefined;
-  const [, channel, digits] = m as unknown as [string, string, string];
+  const digits = m[2]!;
   const thread = new URL(url).searchParams.get("thread_ts") ?? undefined;
-  return { channel, ts: `${digits.slice(0, -6)}.${digits.slice(-6)}`, ...(thread ? { thread } : {}) };
+  return { channel: m[1]!, ts: `${digits.slice(0, -6)}.${digits.slice(-6)}`, ...(thread ? { thread } : {}) };
 }
 
 // --- time ------------------------------------------------------------------
@@ -521,7 +521,7 @@ const usageOf = (name: string, cmd: Command): string => {
   return [`pier slack ${name}`, ...cmd.args.map((p) => (p.endsWith("?") ? `[<${p.slice(0, -1)}>]` : `<${p}>`)), ...flags].join(" ");
 };
 
-export const USAGE = [
+const USAGE = [
   "usage: pier slack <subcommand> … — Slack from a shell (skills/pier-slack)",
   ...Object.entries(COMMANDS).map(([name, cmd]) => `  ${usageOf(name, cmd).slice("pier slack ".length)}\n      ${cmd.help}`),
 ].join("\n");

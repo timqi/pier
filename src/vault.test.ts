@@ -34,6 +34,9 @@ let vault: Vault;
 const stored = (name: string): string | undefined =>
   (db.prepare("SELECT value FROM vault WHERE name = ?").get(name) as { value: string } | undefined)?.value;
 
+/** The same table under a store whose key was never unlocked. */
+const locked = (): Vault => new Vault(new Secrets(join(mkdtempSync(join(tmpdir(), "pier-vault-")), "master.key"), vt), db, vt);
+
 beforeEach(async () => {
   db = openDb(":memory:");
   vt = fakeVt();
@@ -102,9 +105,9 @@ describe("get", () => {
 
   it("throws the locked reason for a sealed row, and nothing for an unfiled name", async () => {
     await vault.put("A", "auto", "plain-a");
-    const locked = new Vault(new Secrets(join(mkdtempSync(join(tmpdir(), "pier-vault-")), "master.key"), vt), db, vt);
-    expect(() => locked.get("A")).toThrow(/secrets locked/);
-    expect(locked.get("MISSING")).toBeUndefined();
+    const cold = locked();
+    expect(() => cold.get("A")).toThrow(/secrets locked/);
+    expect(cold.get("MISSING")).toBeUndefined();
   });
 });
 
@@ -128,23 +131,16 @@ describe("resolve", () => {
       caught = err;
     }
     expect(caught).toBeInstanceOf(UnknownSecret);
-    expect((caught as UnknownSecret).secret).toBe("MISSING");
-    expect((caught as Error).message).toBe("no secret named MISSING");
+    expect(caught).toMatchObject({ secret: "MISSING", message: "no secret named MISSING" });
   });
 
   it("refuses sealed rows while locked, with the reason, and still serves records", async () => {
     await vault.put("A", "auto", "plain-a");
     await vault.put("B", "approve", "plain-b");
-    const locked = new Vault(new Secrets(join(mkdtempSync(join(tmpdir(), "pier-vault-")), "master.key"), vt), db, vt);
-    expect(locked.resolve(["B"])).toEqual({ B: { kind: "record", value: stored("B") } });
-    let caught: unknown;
-    try {
-      locked.resolve(["B", "A"]);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(VaultLocked);
-    expect((caught as Error).message).toBe("locked — unlock() has not run");
+    const cold = locked();
+    expect(cold.resolve(["B"])).toEqual({ B: { kind: "record", value: stored("B") } });
+    expect(() => cold.resolve(["B", "A"])).toThrow(VaultLocked);
+    expect(() => cold.resolve(["B", "A"])).toThrow("locked — unlock() has not run");
   });
 });
 
