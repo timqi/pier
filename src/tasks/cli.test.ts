@@ -99,7 +99,7 @@ describe("pier task", () => {
     expect(out[0]).toContain("pier task <operation>");
     expect(await run("--help")).toBe(0);
     expect(await run("steer", "-h")).toBe(0);
-    expect(out.at(-1)).toContain("pier task steer [--run <run>] [--message <text|->]");
+    expect(out.at(-1)).toContain("pier task steer [--run <id>] [--message <text|->]");
     const bad = rig(undefined, "{not json");
     expect(await bad.run("run")).toBe(2);
     expect(bad.err[0]).toMatch(/^task: stdin must be the JSON params object: /);

@@ -53,8 +53,12 @@ const COMMANDS: Record<string, { flags: Flag[]; json?: true; help: string }> = {
   reply: { flags: ["message-id", "message"], help: "answer a child's decision" },
 };
 
+const HINT: Partial<Record<Flag, string>> = {
+  run: "id", group: "id", message: "text|-", "message-id": "id", reason: "text", prompt: "text|-",
+  timeout: "seconds", callback: "origin|none|steer", "callback-session": "id",
+};
 const usageOf = (name: string): string =>
-  [`pier task ${name}`, ...COMMANDS[name]!.flags.map((f) => (f === "timeout" ? "[--timeout <seconds>]" : `[--${f} <${f === "message" || f === "prompt" ? "text|-" : f}>]`))].join(" ");
+  [`pier task ${name}`, ...COMMANDS[name]!.flags.map((f) => `[--${f} <${HINT[f] ?? f}>]`)].join(" ");
 
 const USAGE = [
   "usage: pier task <operation> … — subagents and scheduled tasks (skills/pier-tasks)",
