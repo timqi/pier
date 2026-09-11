@@ -357,7 +357,7 @@ export function createActivityView(
       "flex flex-wrap gap-x-5 gap-y-1.5 border-t border-neutral-200 bg-neutral-50/60 px-4 py-2 text-[11px] text-neutral-500",
       h("span", "inline-flex items-center gap-2", legendLine("border-solid border-neutral-400"), "task invocation"),
       h("span", "inline-flex items-center gap-2 text-cyan-700", legendLine("border-dashed border-cyan-500"), "callback"),
-      h("span", "inline-flex items-center gap-2 text-amber-700", legendLine("border-dotted border-amber-500"), "supervisor / control"),
+      h("span", "inline-flex items-center gap-2 text-amber-700", legendLine("border-dotted border-amber-500"), "control message"),
       h("span", "inline-flex items-center gap-1.5", legendDot("bg-emerald-500"), "streaming"),
       h("span", "inline-flex items-center gap-1.5", legendDot("bg-neutral-300"), "idle"),
     ));

@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { THINKING_LEVELS } from "../core/types.js";
 import { openDb } from "../db.js";
-import type { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import { agentTaskTools, handleTaskTool, type GroupSummary, type RunSummary } from "./tool.js";
@@ -47,7 +46,7 @@ const menu = [
 
 /** A store with these rows and a host that only knows how to read them: the
  *  recover branch touches nothing else on the service. */
-function rig(runs: TaskRun[], groups: TaskGroup[] = [], decisions = new Map<string, string>()) {
+function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
   const db = openDb(":memory:");
   onTestFinished(() => db.close());
   const store = new TaskStore(db);
@@ -82,8 +81,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], decisions = new Map<stri
       return task;
     },
   } as unknown as TaskDefinitions;
-  const messages = { openDecisionId: (runId: string) => decisions.get(runId) ?? null } as unknown as TaskMessenger;
-  const tool = (input: Record<string, unknown>) => handleTaskTool(host, definitions, store, messages, input, "s1");
+  const tool = (input: Record<string, unknown>) => handleTaskTool(host, definitions, store, input, "s1");
   return Object.assign(tool, { created });
 }
 
@@ -133,11 +131,6 @@ describe("task tool recover", () => {
     await expect(tool({ operation: "recover", run_id: "n", reason: "x" })).rejects.toThrow(/callback none.*cannot wait/);
   });
 
-  it("points a run with an open decision at reply", async () => {
-    const tool = rig([run("d", { callbackState: null })], [], new Map([["d", "m1"]]));
-    await expect(tool({ operation: "recover", run_id: "d", reason: "x" })).rejects.toThrow(/decision m1; reply/);
-  });
-
   it("checks a member through its group, so a member cannot bypass the group callback", async () => {
     const member = (id: string, over: Partial<TaskRun> = {}) => run(id, { groupId: "g", callbackSessionId: null, callbackState: null, ...over });
     const pending = rig([member("a"), member("b")], [group("g", ["a", "b"], { callbackState: "pending" })]);
@@ -152,9 +145,6 @@ describe("task tool recover", () => {
     await expect(losing({ operation: "recover", group_id: "g", reason: "x" })).rejects.toThrow(/recover its winning result with run_id w/);
     expect((await losing({ operation: "recover", run_id: "w", reason: "winner callback was truncated" }) as RunSummary).runId).toBe("w");
     await expect(losing({ operation: "recover", run_id: "l", reason: "x" })).rejects.toThrow(/cannot wait for this member/);
-
-    const asking = rig([member("a"), member("b")], [group("g", ["a", "b"])], new Map([["b", "m2"]]));
-    await expect(asking({ operation: "recover", group_id: "g", reason: "x" })).rejects.toThrow(/decision m2/);
 
     const done = rig([member("a"), member("b")], [group("g", ["a", "b"])]);
     const got = await done({ operation: "recover", group_id: "g", reason: "x" }) as GroupSummary;
@@ -271,11 +261,6 @@ describe("task tool recover", () => {
   it("rejects the removed get operation without returning state", async () => {
     const tool = rig([run("r1", { state: "running", callbackState: null, result: null })]);
     await expect(tool({ operation: "get", run_id: "r1" })).rejects.toThrow("unknown task operation");
-  });
-
-  it("contact still accepts only progress or decision as reason", async () => {
-    const tool = rig([run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null })]);
-    await expect(tool({ operation: "contact", reason: "recover", message: "hi" })).rejects.toThrow(/progress or decision/);
   });
 
   it("a session opens with the task tool while the switch is on, and without it once off", () => {

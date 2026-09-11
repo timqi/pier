@@ -118,11 +118,10 @@ export function definitionView(task: TaskDefinition, openSession: (id: string) =
   return content;
 }
 
-/** What still needs a human or a retry: an unanswered decision, a callback
- *  (the run's own or its group's) that has not landed. */
+/** What still needs a retry: a callback (the run's own or its group's) that
+ *  has not landed. */
 export function runAttention(run: RunView): string {
-  return [run.pendingDecisionId ? "Awaiting decision" : "",
-    run.callbackState && run.callbackState !== "delivered" ? `Callback not delivered (${run.callbackState})` : "",
+  return [run.callbackState && run.callbackState !== "delivered" ? `Callback not delivered (${run.callbackState})` : "",
     run.groupCallbackState && run.groupCallbackState !== "delivered" ? `Group callback not delivered (${run.groupCallbackState})` : ""].filter(Boolean).join(" · ");
 }
 
@@ -208,9 +207,9 @@ export async function openRun(pane: HTMLElement, id: string, backToList: () => v
     open.onclick = () => deps.openSession(run.targetSessionId!);
     actions.append(open);
   }
-  // Stop is the only control here. Steering a run, continuing it and answering
-  // its decision are messages to an agent, and the session that delegated it is
-  // where a message to an agent is typed — the task tool carries it from there.
+  // Stop is the only control here. Steering a run and continuing it are
+  // messages to an agent, and the session that delegated it is where a message
+  // to an agent is typed — `pier task run --run` carries it from there.
   if (run.state === "queued" || run.state === "running") {
     const cancel = button("Stop run");
     // It ends a running agent in one click, so it asks first.

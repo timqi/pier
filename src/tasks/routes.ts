@@ -189,16 +189,6 @@ export function registerTaskRoutes(
     }
   });
 
-  app.post("/api/task-messages/:id/reply", async (c) => {
-    const body = record(await jsonBody(c.req));
-    try {
-      const source = requiredString(body?.sourceSessionId, "sourceSessionId");
-      return c.json(await tasks.reply(c.req.param("id"), source, requiredString(body?.message, "message")), 202);
-    } catch (err) {
-      return c.json({ error: String(err) }, 400);
-    }
-  });
-
   app.post("/api/task-runs/:id/cancel", (c) => {
     try {
       return c.json(tasks.cancel(c.req.param("id")), 202);

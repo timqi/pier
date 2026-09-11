@@ -30,7 +30,7 @@ Usage
   pier vault run [ENV=NAME | NAME]... -- <command> [args...]
                               run a command with named secrets in its env
   pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
-  pier task <operation> ...   subagents and scheduled tasks from a shell (pier task --help)
+  pier task <command> ...     subagents and scheduled tasks from a shell (pier task --help)
   pier --version | --help
 
 Options for "service install"

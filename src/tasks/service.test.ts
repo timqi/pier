@@ -27,7 +27,6 @@ import {
   MAX_DELIVERY_ATTEMPTS,
   retryDelay,
   type TaskDefinition,
-  type TaskMessage,
   type TaskRun,
 } from "./types.js";
 
@@ -163,54 +162,6 @@ function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<
   };
 }
 
-/** A supervisor session and the child it delegates to on one service: the rig
- *  every decision/reply path needs, and the only one where `resume` has to
- *  answer with a different session than `create`. */
-function supervised() {
-  const cwd = mkdtempSync(join(tmpdir(), "pier-supervisor-"));
-  const parent = fakeSession("parent");
-  const child = fakeSession("child");
-  const sessions = new Map([[parent.id, parent], [child.id, child]]);
-  const factory: AgentFactory = {
-    availableModels: vi.fn(async () => []),
-    create: vi.fn(async () => child),
-    resume: vi.fn(async (id: string) => sessions.get(id) ?? child),
-    list: vi.fn(async () => [...sessions.values()].map((session) => ({ id: session.id, cwd, createdAt: 1 }))),
-    find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
-    search: vi.fn(async () => []),
-  };
-  const hub = new EventHub();
-  const router = new Router(hub, (key) => factory.resume(key.conversationId));
-  const store = new TaskStore(openDb(":memory:"));
-  return { cwd, parent, child, hub, router, store, service: new TaskService(store, factory, router, hub) };
-}
-
-/** Where every reply path starts: a background run on the child that asked its
- *  supervisor a question and then ended its turn with the question open. */
-async function askedAndFinished(rig: ReturnType<typeof supervised>) {
-  const { service, child, parent } = rig;
-  child.setState("streaming");
-  const task = await service.create({
-    name: "worker",
-    trigger: { type: "manual" },
-    action: { type: "agent", session: { mode: "reuse", sessionId: child.id }, prompt: "Work" },
-  });
-  const run = service.run(task.id, null, "agent", null, {
-    invokedBySessionId: parent.id,
-    sourceSessionId: parent.id,
-    callbackSessionId: parent.id,
-    background: true,
-  });
-  const question = await service.tool({
-    operation: "contact",
-    reason: "decision",
-    message: "Use API A or B?",
-  }, child.id) as TaskMessage;
-  child.setState("idle");
-  await service.waitForRun(run.id);
-  return { task, run, question };
-}
-
 /** Moves the sweep's clock past a backoff instead of sleeping it out. */
 function skewClock(): (ms: number) => void {
   const real = Date.now;
@@ -266,7 +217,7 @@ describe("global run queries", () => {
     expect(service.queryRuns({ state: "failed" }).runs).toHaveLength(1);
   });
 
-  it("joins the unresolved decision, not an arbitrary recent message, beside the group's callback state", async () => {
+  it("joins the group's callback state beside a member", async () => {
     const { cwd, service, store } = setup();
     const task = await service.create(bashDraft(cwd, "true"));
     store.saveRun(storedRun("run", task, 1, { callbackState: "failed", callbackError: "unreachable" }));
@@ -275,24 +226,14 @@ describe("global run queries", () => {
     store.saveGroup({ id: "group", join: "all", invokedBySessionId: "supervisor", callbackSessionId: "supervisor",
       memberRunIds: ["member"], winnerRunId: null, createdAt: 1, finishedAt: 2,
       callbackState: "failed", callbackAttempts: 1, callbackError: "unreachable", callbackNextAttemptAt: 3 });
-    const message = (id: string, state: TaskMessage["state"], kind: TaskMessage["kind"], runId = "run"): TaskMessage => ({
-      id, runId, kind, state, fromSessionId: "child", toSessionId: "supervisor", replyTo: null,
-      content: id, createdAt: 1, deliveredAt: null, answeredAt: null, error: null, attempts: 0, nextAttemptAt: null,
-    });
-    store.saveMessage(message("answered", "answered", "decision"));
-    store.saveMessage(message("progress", "pending", "progress"));
-    store.saveMessage(message("question", "delivered", "decision"));
-    store.saveMessage(message("expired", "expired", "decision", "other"));
     const page = service.queryRuns();
-    expect(page.runs.find((r) => r.id === "run")).toMatchObject({ pendingDecisionId: "question", callbackState: "failed" });
-    expect(page.runs.find((r) => r.id === "other")!.pendingDecisionId).toBeNull();
+    expect(page.runs.find((r) => r.id === "run")).toMatchObject({ callbackState: "failed", groupCallbackState: null });
+    expect(page.runs.find((r) => r.id === "other")!.groupCallbackState).toBeNull();
     expect(page.runs.find((r) => r.id === "member")!.groupCallbackState).toBe("failed");
     expect(service.getRunView("member").groupCallbackState).toBe("failed");
     const app = new Hono(); registerTaskRoutes(app, service);
-    const detail = await (await app.request("/api/task-runs/run")).json();
-    expect(detail.pendingDecisionId).toBe("question");
-    store.saveMessage(message("question", "answered", "decision"));
-    expect(service.queryRuns().runs.find((r) => r.id === "run")!.pendingDecisionId).toBeNull();
+    const detail = await (await app.request("/api/task-runs/member")).json();
+    expect(detail.groupCallbackState).toBe("failed");
   });
 
   it("validates HTTP filters and leaves the Activity snapshot as it was", async () => {
@@ -572,9 +513,9 @@ describe("task service", () => {
     }
     // The oldest probe still carries a message, so retention has to keep it.
     store.saveMessage({
-      id: "m1", runId: "probe-0", kind: "decision", fromSessionId: "child", toSessionId: "parent",
-      replyTo: null, state: "delivered", content: "?", createdAt: now - 60_000,
-      deliveredAt: now - 60_000, answeredAt: null, error: null, attempts: 1, nextAttemptAt: null,
+      id: "m1", runId: "probe-0", kind: "steer", fromSessionId: "parent", toSessionId: "child",
+      state: "delivered", content: "look again", createdAt: now - 60_000,
+      deliveredAt: now - 60_000, error: null, attempts: 1, nextAttemptAt: null,
     });
     const run = await service.waitForRun(service.run(task.id, null, "watch").id);
     expect(run.matched).toBe(false);
@@ -651,7 +592,7 @@ describe("task service", () => {
     });
   });
 
-  it("prefixes delegation with the run contract, naming contact only when supervised", async () => {
+  it("prefixes every agent run with the run contract and its audience", async () => {
     const { cwd, service, session } = setup();
     const task = await service.create({
       name: "review",
@@ -661,7 +602,7 @@ describe("task service", () => {
     const manual = await service.waitForRun(service.run(task.id).id);
     expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
     expect(manual.context.renderedPrompt).toContain("read by the operator");
-    expect(manual.context.renderedPrompt).not.toContain("contact");
+    expect(manual.context.renderedPrompt).toContain("the answer resumes this session");
 
     const delegated = await service.tool({
       operation: "run",
@@ -669,7 +610,6 @@ describe("task service", () => {
     }, "s9") as RunSummary;
     const done = await service.waitForRun(delegated.runId);
     expect(done.context.renderedPrompt).toContain("read by the agent that delegated this run");
-    expect(done.context.renderedPrompt).toContain("contact");
   });
 
   it("strips chat-only markup from a child result", async () => {
@@ -936,7 +876,7 @@ describe("task service", () => {
     // transcript until the turn drains it. Re-sending it there is a duplicate.
     const busy = streamingRecipient("busy");
     const { cwd, service, store, router, hub } = setup(busy.session);
-    const messenger = new TaskMessenger(store, router, hub, () => { throw new Error("no resume"); }, () => {}, () => {});
+    const messenger = new TaskMessenger(store, router, hub, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("steered", task, now, {
@@ -968,12 +908,7 @@ describe("task service", () => {
     const busy = streamingRecipient("long-turn");
     const { cwd, service, store, router, hub } = setup(busy.session);
     const told: string[] = [];
-    const messenger = new TaskMessenger(
-      store, router, hub,
-      () => { throw new Error("no resume"); },
-      (...args) => told.push(args.join("|")),
-      () => {},
-    );
+    const messenger = new TaskMessenger(store, router, hub, (...args) => told.push(args.join("|")));
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("guided", task, now, {
@@ -1022,14 +957,7 @@ describe("task service", () => {
 
   it("counts a message pass that dies before the send, so its ceiling arrives too", async () => {
     const { cwd, service, store, hub } = setup();
-    const messenger = new TaskMessenger(
-      store,
-      new Router(hub, () => Promise.reject(new Error("unknown session"))),
-      hub,
-      () => { throw new Error("no resume"); },
-      () => {},
-      () => {},
-    );
+    const messenger = new TaskMessenger(store, new Router(hub, () => Promise.reject(new Error("unknown session"))), hub, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("gone", task, now, {
@@ -1053,14 +981,7 @@ describe("task service", () => {
     amnesiac.systemInput = async () => {};
     const { cwd, service, store, router, hub } = setup(amnesiac);
     const told: string[] = [];
-    const messenger = new TaskMessenger(
-      store,
-      router,
-      hub,
-      () => { throw new Error("no resume in this test"); },
-      (sessionId, what, why) => told.push(`${sessionId}|${what}|${why}`),
-      () => {},
-    );
+    const messenger = new TaskMessenger(store, router, hub, (sessionId, what, why) => told.push(`${sessionId}|${what}|${why}`));
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("live", task, now, {
@@ -1490,155 +1411,6 @@ describe("task service", () => {
       sessionMode: "reuse",
     });
     expect(resumed.context.renderedPrompt).toBe("Check one more edge case");
-  });
-
-  it("routes supervisor decisions asynchronously: receipt, suppressed callback, reply auto-resume", async () => {
-    const { cwd, parent, child, service } = supervised();
-    child.setState("streaming");
-    const task = await service.create({
-      name: "worker",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "reuse", sessionId: child.id }, prompt: "Work" },
-    });
-    const run = service.run(task.id, null, "agent", null, {
-      invokedBySessionId: parent.id,
-      sourceSessionId: parent.id,
-      callbackSessionId: parent.id,
-      background: true,
-    });
-    // contact never blocks: the receipt returns once the question lands on
-    // the parent. A decision steers — a follow-up would make the blocked child
-    // wait out the parent's whole turn; progress stays a follow-up.
-    const receipt = await service.tool({
-      operation: "contact",
-      reason: "decision",
-      message: "Use API A or B?",
-    }, child.id) as TaskMessage;
-    expect(receipt).toMatchObject({ kind: "decision", state: "pending" });
-    await vi.waitFor(() => expect(service.listMessages(run.id)[0]?.state).toBe("delivered"));
-    expect(parent.systemInputs.at(-1)).toMatchObject({ text: expect.stringContaining("Use API A or B?"), mode: "steer" });
-    await expect(service.tool({ operation: "contact", reason: "decision", message: "again?" }, child.id))
-      .rejects.toThrow("pending supervisor decision");
-    await service.tool({ operation: "contact", reason: "progress", message: "Halfway done" }, child.id);
-    await vi.waitFor(() => expect(parent.systemInputs.at(-1))
-      .toMatchObject({ text: expect.stringContaining("Halfway done"), mode: "followUp" }));
-
-    const bash = await service.create(bashDraft(cwd, "true"));
-    await expect(service.tool({ operation: "run", task_id: bash.id }, child.id)).rejects.toThrow("only invoke Agent tasks");
-    await expect(service.tool({
-      operation: "run",
-      task: { name: "inline bash", action: { type: "bash", cwd, script: "true" } },
-    }, child.id)).rejects.toThrow("only inline Agent tasks");
-    await expect(service.tool({
-      operation: "run",
-      task: { name: "inline reuse", action: { type: "agent", session: { mode: "reuse", sessionId: parent.id }, prompt: "p" } },
-    }, child.id)).rejects.toThrow("cannot reuse an existing session");
-
-    // Ending the turn with the question open finishes the run but suppresses
-    // its completion callback: the pending question is the notification.
-    child.setState("idle");
-    const done = await service.waitForRun(run.id);
-    expect(done.state).toBe("succeeded");
-    expect(done.callbackState).toBeNull();
-    expect(service.getRunView(run.id).pendingDecisionId).toBe(receipt.id);
-    await expect(service.tool({ operation: "recover", run_id: run.id, reason: "lost the result" }, parent.id))
-      .rejects.toThrow(/decision/);
-
-    // The reply resumes the terminal child with the answer as its prompt and
-    // calls back to the replier.
-    await service.tool({ operation: "reply", message_id: receipt.id, message: "Use API A" }, parent.id);
-    expect(service.listMessages(run.id).find((message) => message.id === receipt.id)?.state).toBe("answered");
-    const resumed = service.listRuns(task.id).find((row) => row.resumedFromRunId === run.id);
-    expect(resumed).toBeDefined();
-    expect((await service.waitForRun(resumed!.id)).context.renderedPrompt).toContain("Use API A");
-    await vi.waitFor(() => expect(service.getRun(resumed!.id).callbackState).toBe("delivered"));
-    expect(parent.systemInputs.at(-1)).toMatchObject({
-      origin: { kind: "task-callback", runId: resumed!.id },
-      mode: "followUp",
-    });
-  });
-
-  it("holds a reply undelivered until the continuation that carries it starts", async () => {
-    const rig = supervised();
-    rig.service.start(20);
-    onTestFinished(() => rig.service.stop());
-    const { run, question } = await askedAndFinished(rig);
-
-    const reply = await rig.service.tool({
-      operation: "reply",
-      message_id: question.id,
-      message: "Use API A",
-    }, rig.parent.id) as TaskMessage;
-    // Creating the continuation is not delivering: its prompt is the only copy
-    // of the text, and a restart or a cancel before it starts loses it.
-    expect(reply).toMatchObject({ kind: "reply", state: "pending", deliveredAt: null });
-    expect(reply.resumeRunId).toBeDefined();
-    expect(rig.service.getRun(reply.resumeRunId!).resumedFromRunId).toBe(run.id);
-
-    // `startedAt` is written one statement before the prompt reaches the
-    // session, so it is the proof: handed to the run that reports for it.
-    await vi.waitFor(() => expect(rig.service.listMessages(run.id)
-      .find((m) => m.id === reply.id)).toMatchObject({ state: "delivered" }));
-    expect(rig.service.getRun(reply.resumeRunId!).startedAt).toBeTruthy();
-    expect(rig.child.systemInputs.at(-1)?.text).toContain("Use API A");
-    // ...and the sweep never *also* injects it: that would be a second copy of
-    // the same text, starting a turn no run owns.
-    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
-  });
-
-  it("reports a reply whose continuation was cancelled before it started, to both ends", async () => {
-    const rig = supervised();
-    const errors = new Map<string, string[]>([[rig.parent.id, []], [rig.child.id, []]]);
-    for (const [id, sink] of errors) {
-      rig.hub.subscribe(id, (event) => { if (event.type === "error") sink.push(event.message); });
-    }
-    rig.service.start(20);
-    onTestFinished(() => rig.service.stop());
-    const { run, question } = await askedAndFinished(rig);
-
-    // The child is busy with something else, so the continuation sits queued.
-    rig.child.setState("streaming");
-    const reply = await rig.service.tool({
-      operation: "reply",
-      message_id: question.id,
-      message: "Use API A",
-    }, rig.parent.id) as TaskMessage;
-    expect(rig.service.getRun(reply.resumeRunId!).startedAt).toBeNull();
-    // Sweeps while it waits must leave it alone: re-injecting it would put a
-    // second copy of the resume prompt's text into the child and start a turn
-    // no run owns.
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id)?.state).toBe("pending");
-    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
-
-    rig.service.cancel(reply.resumeRunId!);
-
-    // Nothing will ever carry the text now, so the sweep says so rather than
-    // retrying to a ceiling four minutes away — on both ends (§5).
-    await vi.waitFor(() => expect(rig.service.listMessages(run.id).find((m) => m.id === reply.id))
-      .toMatchObject({ state: "expired", error: expect.stringContaining(reply.resumeRunId!) }));
-    for (const [, sink] of errors) {
-      expect(sink.some((message) => message.includes("cancelled before it started"))).toBe(true);
-    }
-    expect(rig.child.systemInputs.filter((input) => input.origin.kind === "task-message")).toEqual([]);
-  });
-
-  it("expires an open decision when the run is manually resumed", async () => {
-    const { service, session } = setup();
-    const task = await service.create({
-      name: "superseded",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "reuse", sessionId: session.id }, prompt: "Work" },
-    });
-    session.setState("streaming");
-    const run = service.run(task.id, null, "agent", null, { invokedBySessionId: "owner", background: true });
-    const receipt = await service.tool({ operation: "contact", reason: "decision", message: "A or B?" }, session.id) as TaskMessage;
-    session.setState("idle");
-    await service.waitForRun(run.id);
-    await service.waitForRun(service.resume(run.id, "Just continue").id);
-    expect(service.listMessages(run.id).find((message) => message.id === receipt.id)?.state).toBe("expired");
-    await expect(service.tool({ operation: "reply", message_id: receipt.id, message: "A" }, "owner"))
-      .rejects.toThrow("decision is expired");
   });
 
   it("runs inline subagent drafts atomically and filters them from lists", async () => {
@@ -2224,62 +1996,6 @@ describe("task admission and delivery regressions", () => {
     expect(store.listOpenGroups()).toEqual([]);
     expect(errors.join(" ")).toContain("admission failed");
     expect(session.systemInputs).toEqual([]);
-  });
-
-  it.each(["paused", "save"] as const)("keeps a decision answerable when continuation admission fails: %s", async (failure) => {
-    const rig = supervised();
-    const { service, store, hub, parent, child } = rig;
-    const { run, question, task } = await askedAndFinished(rig);
-    await vi.waitFor(() => expect(store.getMessage(question.id)?.state).toBe("delivered"));
-    const before = child.systemInputs.length;
-    const changes: string[] = [];
-    hub.subscribeWorkspace((event) => changes.push(event.type));
-    const save = store.saveMessage.bind(store);
-    const injected = vi.spyOn(store, "saveMessage").mockImplementation((message) => {
-      save(message);
-      if (failure === "save" && message.resumeRunId) throw new Error("fixture reply save failed");
-    });
-    if (failure === "paused") service.pause();
-    await expect(service.tool({ operation: "reply", message_id: question.id, message: "Use A" }, parent.id))
-      .rejects.toThrow(failure === "paused" ? "restarting" : "fixture reply save failed");
-    expect(store.getMessage(question.id)).toMatchObject({ state: "delivered", answeredAt: null });
-    expect(service.openDecisionId(run.id)).toBe(question.id);
-    expect(service.listMessages(run.id).filter((m) => m.kind === "reply")).toEqual([]);
-    expect(service.listRuns(task.id)).toHaveLength(1);
-    expect(child.systemInputs).toHaveLength(before);
-    expect(changes).toEqual([]);
-    injected.mockRestore();
-    service.unpause(60_000);
-    onTestFinished(() => service.stop());
-    const reply = await service.tool({ operation: "reply", message_id: question.id, message: "Use A" }, parent.id) as TaskMessage;
-    expect(reply.resumeRunId).toBeDefined();
-    expect(await service.waitForRun(reply.resumeRunId!)).toMatchObject({ state: "succeeded", resumedFromRunId: run.id });
-    await vi.waitFor(() => expect(service.getRun(reply.resumeRunId!).callbackState).toBe("delivered"));
-    const repeated = await service.tool({ operation: "reply", message_id: question.id, message: "Use A" }, parent.id) as TaskMessage;
-    expect(repeated.id).toBe(reply.id);
-    expect(service.listRuns(task.id)).toHaveLength(2);
-    expect(child.systemInputs).toHaveLength(before + 1);
-  });
-
-  it("rolls back a manual continuation when superseding its decision cannot be saved", async () => {
-    const rig = supervised();
-    const { service, store, child } = rig;
-    const { run, question, task } = await askedAndFinished(rig);
-    await vi.waitFor(() => expect(store.getMessage(question.id)?.state).toBe("delivered"));
-    const before = child.systemInputs.length;
-    const save = store.saveMessage.bind(store);
-    const injected = vi.spyOn(store, "saveMessage").mockImplementation((message) => {
-      save(message);
-      if (message.state === "expired") throw new Error("fixture decision save failed");
-    });
-    expect(() => service.resume(run.id, "continue without the question")).toThrow("fixture decision save failed");
-    expect(store.getMessage(question.id)?.state).toBe("delivered");
-    expect(service.listRuns(task.id)).toHaveLength(1);
-    expect(child.systemInputs).toHaveLength(before);
-    injected.mockRestore();
-    const resumed = service.resume(run.id, "continue without the question");
-    expect(await service.waitForRun(resumed.id)).toMatchObject({ state: "succeeded" });
-    expect(store.getMessage(question.id)?.state).toBe("expired");
   });
 
   it("refuses an edit archived while its draft was still being validated", async () => {

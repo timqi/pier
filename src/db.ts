@@ -303,6 +303,8 @@ const MIGRATIONS: readonly string[] = [
     ON CONFLICT(name) DO NOTHING;
   UPDATE channels SET json = json_remove(json, '$.token', '$.appToken');
   `,
+  // 25 — the mid-run decision channel is gone; a control message is steer or follow_up.
+  `DELETE FROM task_messages WHERE json_extract(json, '$.kind') IN ('progress', 'decision', 'reply');`,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

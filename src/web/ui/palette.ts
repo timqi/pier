@@ -49,7 +49,7 @@ interface Target {
 // and "channel" are how someone looks for Settings.
 const CONSOLE_TARGETS: { name: ConsoleName; icon: IconNode; label: string; detail: string }[] = [
   { name: "tasks", icon: ListTodo, label: "Tasks", detail: "Automation — task definitions and schedules" },
-  { name: "runs", icon: ListTodo, label: "Runs", detail: "Automation — executions, subagents, decisions and callbacks" },
+  { name: "runs", icon: ListTodo, label: "Runs", detail: "Automation — executions, subagents and callbacks" },
   { name: "activity", icon: ListTodo, label: "Activity", detail: "Automation — sessions and relationships" },
   { name: "boards", icon: LayoutDashboard, label: "Boards", detail: "Console — the static pages Pier publishes" },
   { name: "settings", icon: Settings, label: "Settings", detail: "Console — models and providers, agent files and extensions, channels, password, sign out, security" },

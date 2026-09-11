@@ -109,7 +109,7 @@ export type SystemInputOrigin = {
   runId: string;
   sourceSessionId: string;
   messageId: string;
-  messageKind: "steer" | "follow_up" | "progress" | "decision" | "reply";
+  messageKind: "steer" | "follow_up";
   source?: SystemInputSource;
 };
 

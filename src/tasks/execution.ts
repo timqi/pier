@@ -17,7 +17,6 @@ interface ExecutionHost {
   cancel(id: string): void;
   settled(run: TaskRun): void;
   changed(run: TaskRun): void;
-  openDecisionId(runId: string): string | null;
 }
 
 export class TaskExecution {
@@ -98,9 +97,7 @@ export class TaskExecution {
       if (run.state === "failed") log.error(settled, cause);
       else if (run.matched === false) log.debug(`${settled} (watch did not match)`);
       else log.info(settled);
-      // A run that ends awaiting a supervisor decision suppresses its
-      // completion callback: the pending question is the notification.
-      if (run.callbackSessionId && !this.host.openDecisionId(run.id)) run.callbackState = "pending";
+      if (run.callbackSessionId) run.callbackState = "pending";
       this.controllers.delete(run.id);
       try {
         this.store.saveRun(run);

@@ -154,7 +154,6 @@ export interface RunQuery {
 }
 
 export interface RunView extends TaskRun {
-  pendingDecisionId: string | null;
   groupCallbackState: CallbackFields["callbackState"];
 }
 
@@ -178,8 +177,11 @@ export interface TaskGroup extends CallbackFields {
   finishedAt: number | null;
 }
 
-export type TaskMessageKind = "steer" | "follow_up" | "progress" | "decision" | "reply";
-export type TaskMessageState = "pending" | "delivered" | "answered" | "failed" | "expired";
+/** A control message is a parent's word to a running child; nothing flows the
+ *  other way mid-run — a child that needs an answer ends its turn with the
+ *  question as its result, and the answer resumes it. */
+export type TaskMessageKind = "steer" | "follow_up";
+export type TaskMessageState = "pending" | "delivered" | "failed" | "expired";
 
 export interface TaskMessage {
   id: string;
@@ -187,20 +189,15 @@ export interface TaskMessage {
   kind: TaskMessageKind;
   fromSessionId: string;
   toSessionId: string;
-  replyTo: string | null;
   state: TaskMessageState;
   content: string;
   createdAt: number;
   deliveredAt: number | null;
-  answeredAt: number | null;
   error: string | null;
-  /** Persisted, not in memory: a decision outlives restarts, and an attempt
-   *  counter that resets with the process is a ceiling that never arrives. */
+  /** Persisted, not in memory: an attempt counter that resets with the
+   *  process is a ceiling that never arrives. */
   attempts: number;
   nextAttemptAt: number | null;
-  /** A reply that resumed a terminal run: the continuation that carries it,
-   *  which is the only delivery proof — the resume prompt is the message. */
-  resumeRunId?: string;
 }
 
 /** The delivery record runs and groups share (their callback* columns are the

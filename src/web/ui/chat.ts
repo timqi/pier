@@ -1,7 +1,7 @@
 // The turns pane: chat rows, markdown, streaming text, system-input rows and
 // inline user-message edit. Renders into #turns only.
 
-import { ArrowUpRight, CircleQuestionMark, CornerDownLeft, Pencil, type IconNode } from "lucide";
+import { ArrowUpRight, CornerDownLeft, Pencil, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -281,12 +281,10 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
   return line;
 }
 
-/** Glyph and caption per input kind; the decision is the one that wants a
- *  look, so it alone carries a colour. */
+/** Glyph and caption per input kind. */
 const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> = {
   "task-delegation": [ArrowUpRight, "delegated", "text-cyan-700"],
   "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
-  decision: [CircleQuestionMark, "decision needed", "text-amber-700"],
 };
 
 /** Every task text opens with `Key: value` lines naming the run, which the
@@ -305,7 +303,7 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
   sealActivity();
   const state = origin.kind === "task-callback" ? origin.state : undefined;
-  const row = runCard(state ? STATE_STYLE[state].edge : kindKey === "decision" ? "border-l-amber-400" : "border-l-cyan-500");
+  const row = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   row.dataset.kind = "system";
   const [meta, body] = splitMetaBlock(text);
   const head = runHead({

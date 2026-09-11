@@ -55,15 +55,12 @@ export class TaskService {
   ) {
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
-    this.messages = new TaskMessenger(store, router, hub, (runId, prompt, fromSessionId) =>
-      this.prepareResume(runId, prompt, { invokedBySessionId: fromSessionId, callbackSessionId: fromSessionId, background: true }),
-      unreachable, (run) => this.runs.start(run));
+    this.messages = new TaskMessenger(store, router, hub, unreachable);
     this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },
-      openDecisionId: (runId) => this.messages.openDecisionId(runId),
       prepareMember: (taskId, groupId, callerSessionId, parentRunId) => this.prepareRun(taskId, null, "agent", parentRunId, {
         invokedBySessionId: callerSessionId,
         sourceSessionId: callerSessionId,
@@ -85,7 +82,6 @@ export class TaskService {
       cancel: (id) => { this.cancel(id); },
       settled: (run) => this.settled(run),
       changed: (run) => this.changed(run),
-      openDecisionId: (runId) => this.messages.openDecisionId(runId),
     });
     this.runs = new TaskRunQueue(
       store,
@@ -202,17 +198,13 @@ export class TaskService {
 
   getRunView(id: string): RunView {
     const run = this.getRun(id);
-    return { ...run, pendingDecisionId: this.openDecisionId(id),
+    return { ...run,
       groupCallbackState: run.groupId ? this.store.getGroup(run.groupId)?.callbackState ?? null : null };
   }
 
   listMessages(runId: string): TaskMessage[] {
     this.getRun(runId);
     return this.messages.list(runId);
-  }
-
-  openDecisionId(runId: string): string | null {
-    return this.messages.openDecisionId(runId);
   }
 
   queryRuns(query: RunQuery = {}): RunPage {
@@ -336,28 +328,10 @@ export class TaskService {
     return this.messages.control(run, fromSessionId, mode, message);
   }
 
-  reply(messageId: string, fromSessionId: string, message: string): Promise<TaskMessage> {
-    return this.messages.reply(messageId, fromSessionId, message);
-  }
-
   resume(
     id: string,
     message: string,
     provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background"> = {},
-  ): TaskRun {
-    const { run, expired } = this.store.transact(() => ({
-      run: this.prepareResume(id, message, provenance),
-      expired: this.messages.expireDecisions(id, "superseded by a manual resume"),
-    }));
-    for (const message of expired) this.messages.changed(message);
-    this.runs.start(run);
-    return run;
-  }
-
-  private prepareResume(
-    id: string,
-    message: string,
-    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">,
   ): TaskRun {
     this.refusePaused();
     const prior = this.getRun(id);
@@ -366,7 +340,7 @@ export class TaskService {
       throw new Error("only persisted Agent runs can be resumed");
     }
     const prompt = requiredString(message, "message");
-    return this.runs.prepare(prior.context.definition, null, "agent", null, {
+    const run = this.runs.prepare(prior.context.definition, null, "agent", null, {
       ...provenance,
       sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId,
       targetSessionId: prior.targetSessionId,
@@ -376,10 +350,12 @@ export class TaskService {
       depth: prior.depth,
       resumePrompt: prompt,
     });
+    this.runs.start(run);
+    return run;
   }
 
   tool(raw: unknown, callerSessionId: string): Promise<unknown> {
-    return handleTaskTool(this, this.definitions, this.store, this.messages, raw, callerSessionId);
+    return handleTaskTool(this, this.definitions, this.store, raw, callerSessionId);
   }
 
   /** An agent picks from names that exist right now, never from memory. */

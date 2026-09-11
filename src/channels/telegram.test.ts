@@ -949,9 +949,9 @@ describe("system notes", () => {
   it("names which kind of subagent message it was", async () => {
     await channel.notify("42", {
       text: "need a call",
-      origin: { ...ORIGIN, kind: "task-message", messageKind: "decision", messageId: "m1", sourceSessionId: "s2" },
+      origin: { ...ORIGIN, kind: "task-message", messageKind: "steer", messageId: "m1", sourceSessionId: "s2" },
     });
-    expect(client.sent[0]?.text).toContain("decision needed");
+    expect(client.sent[0]?.text).toContain("steer");
   });
 
   it("hands the note the 👀 for the turn it triggers, and the turn-end clears it", async () => {

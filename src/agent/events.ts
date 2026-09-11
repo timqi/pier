@@ -88,8 +88,7 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   if (
     origin.kind === "task-message" &&
     typeof origin.messageId === "string" &&
-    (origin.messageKind === "steer" || origin.messageKind === "follow_up" ||
-      origin.messageKind === "progress" || origin.messageKind === "decision" || origin.messageKind === "reply")
+    (origin.messageKind === "steer" || origin.messageKind === "follow_up")
   ) return shape as SystemInputOrigin;
   return null;
 }

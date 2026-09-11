@@ -131,16 +131,13 @@ export class TaskStore {
     }
     const limit = clamp(query.limit ?? 50, 200);
     const rows = this.db.prepare(`
-      SELECT r.json, g.callback_state AS group_callback_state,
-        (SELECT m.id FROM task_messages m WHERE m.run_id = r.id
-          AND m.state IN ('pending', 'delivered') AND json_extract(m.json, '$.kind') = 'decision'
-          ORDER BY m.created_at, m.id LIMIT 1) AS decision_id
+      SELECT r.json, g.callback_state AS group_callback_state
       FROM task_runs r LEFT JOIN task_groups g ON g.id = json_extract(r.json, '$.groupId')
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY r.queued_at DESC, r.id DESC LIMIT ?
-    `).all(...params, limit + 1) as unknown as { json: string; decision_id: string | null; group_callback_state: RunView["groupCallbackState"] }[];
+    `).all(...params, limit + 1) as unknown as { json: string; group_callback_state: RunView["groupCallbackState"] }[];
     const runs: RunView[] = rows.slice(0, limit).map((row) => ({
-      ...JSON.parse(row.json) as TaskRun, pendingDecisionId: row.decision_id, groupCallbackState: row.group_callback_state,
+      ...JSON.parse(row.json) as TaskRun, groupCallbackState: row.group_callback_state,
     }));
     const last = runs.at(-1);
     return {
@@ -289,13 +286,8 @@ export class TaskStore {
     }));
   }
 
-  /** Decisions are excluded: they have no timeout and stay answerable across
-   * restarts — a reply to a terminal run resumes it. */
   expirePendingMessages(): TaskMessage[] {
-    return this.#many<TaskMessage>(`
-      SELECT json FROM task_messages
-      WHERE state = 'pending' AND json_extract(json, '$.kind') != 'decision'
-    `).map((message) => {
+    return this.#many<TaskMessage>("SELECT json FROM task_messages WHERE state = 'pending'").map((message) => {
       message.state = "expired";
       // "Confirmed", not "completed": the proof lives in a transcript this
       // layer cannot see.

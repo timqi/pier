@@ -108,7 +108,7 @@ beforeEach(async () => {
     targetSessionId: null, parentRunId: null, rootRunId: "run-a", resumedFromRunId: null, groupId: null, depth: 0,
     sourceSessionId: null, invokedBySessionId: null, sessionMode: null, callbackSessionId: null, callbackState: null,
     callbackError: null, callbackAttempts: 0, callbackNextAttemptAt: null, background: false, input: null,
-    context: { definition: task }, probe: null, matched: null, error: null, skipReason: null, pendingDecisionId: null, groupCallbackState: null };
+    context: { definition: task }, probe: null, matched: null, error: null, skipReason: null, groupCallbackState: null };
   page = { runs: [run], nextCursor: null };
   group = { id: "group-a", join: "all", invokedBySessionId: "s1", callbackSessionId: "s1", memberRunIds: [run.id, "run-c"],
     winnerRunId: null, callbackState: "delivered", callbackError: null, callbackAttempts: 1, callbackNextAttemptAt: null,
@@ -427,10 +427,10 @@ describe("Runs", () => {
   });
 
   it("shows flat children and attention, preserves filters across keyset pages, toggles probes", async () => {
-    run.parentRunId = "parent"; run.pendingDecisionId = "decision"; run.callbackState = "failed"; run.groupCallbackState = "abandoned";
+    run.parentRunId = "parent"; run.callbackState = "failed"; run.groupCallbackState = "abandoned";
     page.nextCursor = { queuedAt: 1, id: run.id };
     openRuns({ taskId: task.id }); await settled();
-    expect(root.text).toContain("Awaiting decision"); expect(root.text).toContain("Callback not delivered (failed)");
+    expect(root.text).toContain("Callback not delivered (failed)");
     expect(root.text).toContain("Group callback not delivered (abandoned)");
     expect(root.text).toContain("Parent parent"); expect(root.text).toContain("Show unmatched probes");
     expect(root.text).not.toContain("hidden"); expect(root.text).not.toContain("included");
@@ -491,12 +491,11 @@ describe("Runs", () => {
     await click("Stop run");
     expect(fetcher).toHaveBeenCalledWith("/api/task-runs/run-a/cancel", expect.objectContaining({ method: "POST" }));
   });
-  it("reports an unresolved decision without offering to answer it here", async () => {
-    run.pendingDecisionId = "question";
-    messages = [{ id: "question", runId: run.id, kind: "decision", toSessionId: "supervisor", fromSessionId: "child", state: "pending", content: "Choose?" } as TaskMessage];
+  it("lists a run's control messages without offering to send one here", async () => {
+    messages = [{ id: "m1", runId: run.id, kind: "steer", toSessionId: "child", fromSessionId: "supervisor", state: "pending", content: "Change course" } as TaskMessage];
     currentSession = "supervisor"; openRuns({}, run.id); await settled();
-    expect(root.text).toContain("Awaiting decision"); expect(root.text).toContain("Choose?");
-    expect(button("Reply to decision")).toBeUndefined();
+    expect(root.text).toContain("steer"); expect(root.text).toContain("Change course");
+    expect(button("Steer")).toBeUndefined();
   });
   it("links parent, resume and wrapper child, and names the group without a page for it", async () => {
     run.parentRunId = "parent"; run.resumedFromRunId = "prior"; run.groupId = "group"; run.result = { type: "task", runId: "child", result: null };

@@ -63,14 +63,7 @@ export function originLabel(origin: NoteOrigin): string {
   if (origin.kind !== "task-message") {
     return origin.kind === "task-delegation" ? "\u25b6 delegated task" : "\u21a9 task callback";
   }
-  const kinds: Record<string, string> = {
-    steer: "\u270e steer",
-    follow_up: "\uff0b follow-up",
-    progress: "\u25c7 progress",
-    decision: "\u2753 decision needed",
-    reply: "\u21a9 reply",
-  };
-  return `from a subagent \u00b7 ${kinds[origin.messageKind] ?? origin.messageKind}`;
+  return `from a supervisor \u00b7 ${origin.messageKind === "steer" ? "\u270e steer" : "\uff0b follow-up"}`;
 }
 
 /** Is a turn coming once this note is posted? On IM the note is the only

@@ -15,7 +15,6 @@ const log = logger("tasks");
 interface GroupHost {
   getRun(id: string): TaskRun;
   cancel(id: string): void;
-  openDecisionId(runId: string): string | null;
   prepareMember(taskId: string, groupId: string, callerSessionId: string, parentRunId: string | null): TaskRun;
   startMember(run: TaskRun): void;
 }
@@ -171,8 +170,6 @@ export class TaskGroups {
         `- "${run.context.definition.name}" \u2014 state: ${run.state}`,
         `  ${runRef(run)}`,
       ];
-      const decision = this.host.openDecisionId(run.id);
-      if (decision) head.push(`  Needs a decision: reply to message ${decision}`);
       if (group.join === "first" && run.id !== group.winnerRunId) {
         head.push("  Cancelled after the winning run; resume its session to recover partial work.");
         return head.join("\n");

@@ -25,12 +25,9 @@ const preamble = (run: TaskRun): string => {
     : run.callbackSessionId
       ? "read by the agent session it is delivered to"
       : "read by the operator";
-  const contact = run.invokedBySessionId
-    ? ' Mid-run, the task tool\'s contact operation reaches that agent: reason "progress" is fire-and-forget, "decision" waits for a reply — state what you await and end your turn.'
-    : "";
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there.${contact}\n\n`;
+    `next-step buttons and file:// attachments do not render there. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.\n\n`;
 };
 
 export class AgentTaskRunner {

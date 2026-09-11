@@ -39,7 +39,7 @@ surface owns its routes and is mounted beside it.
 | `GET /api/vault` | *(served by `web/vault.ts`, as are the two below; [07-vault.md](07-vault.md) owns the store)* `[{name, level: "auto"\|"approve", updatedAt}]` — names and levels, never values |
 | `PUT /api/vault/:name` | body `{level, value}` → `Vault.put`; answers the row. 400 for a name that is not `^[A-Z][A-Z0-9_]{0,63}$`, a level that is neither, or an empty value; 423 when `auto` cannot seal because the store is locked; 503 when `approve` could not create its `vt://` record, the error carrying `vt doctor`'s report; 504 when `vt create` is still waiting on an approval after 15s — the put keeps running and a late approval still files the row |
 | `DELETE /api/vault/:name` | remove; 204, or 404 `{error: "no secret named X"}` |
-| `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and Subagent control/supervisor message edges |
+| `GET /api/activity` | *(served by `tasks/routes.ts`, drawn by the Console)* active or last-24h sessions, task runs, and control message (steer / follow-up) edges |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
@@ -231,7 +231,7 @@ browser keeps no second session order.
 ### Console views
 
 - **Activity**: Session table + directed task graph. Invocation edges solid,
-  callbacks dashed, Subagent control/supervisor messages dotted; Session nodes
+  callbacks dashed, control messages dotted; Session nodes
   open chat, run edges open Runs. Active and last-24h include every queued or
   running task regardless of age; last-24h adds up to 200 terminal runs,
   excluding successful unmatched watch probes.

@@ -100,13 +100,13 @@ updates this document.
   before the reply; after it, the final text is the reply — not duplicated, no
   empty activity groups.
 - Live rendering, restored history and reconnection replay tell one story.
-- Aborted work keeps its unfinished text; errors, pending decisions and states
-  without a reply stay explicit. Nothing that happened may disappear.
+- Aborted work keeps its unfinished text; errors and states without a reply
+  stay explicit. Nothing that happened may disappear.
 - Activity history limits never displace queued or running work.
 - System notices: wide neutral panels with visible outlines; topic first; four
   rendered lines by default, expandable; IDs are supporting details.
-- Status colors: cyan delegation/callbacks, amber decisions, clear
-  success/failure/interruption for results. Accents small.
+- Status colors: cyan delegation/callbacks, amber for attention (a callback
+  not yet landed), clear success/failure/interruption for results. Accents small.
 - Time separators at the first user message, after a ten-minute gap, across
   dates; absolute plus relative. Essential context never depends on hover.
 
