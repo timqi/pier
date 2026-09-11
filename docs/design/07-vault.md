@@ -58,26 +58,17 @@ class Vault {
 - `resolve` decrypts sealed rows, so a locked store throws `VaultLocked` with
   `Secrets.lockedReason`; `approve` rows resolve while locked. An unknown name
   throws `UnknownSecret` naming it, and nothing partial is returned.
-- The one log line is `vault resolve NAME,NAME by <by>`; values appear at no
-  level.
+- The one log line is `vault resolve NAME,NAME by session <id>`; values appear
+  at no level.
 
-## Socket: `$PIER_HOME/vault.sock`
+## Socket
 
-`node:http` on a Unix socket, mode `0600`, unlinked on start and on exit; the
-permission bits are the whole auth. One route:
-
-`POST /resolve` body `{ names: string[], pid?: number }` → `200 {values}`,
-`404 {error: "no secret named X", file}`, `423 {error: "locked — <reason>"}`;
-`400 {error}` for a body that is not a list of vault names, `404` for any
-other method or path.
-
-`file` is `<publicUrl>/#/settings/vault?name=X` (`publicUrl` from settings,
-else `http://127.0.0.1:<port>`); the Vault topic opens with `name` filled and
-the value field focused.
-
-Not a workbench route: that server sits behind a reverse proxy at a public
-hostname. Plaintext crosses this socket into a local process of Pier's user
-and nowhere else.
+`POST /resolve` on Pier's CLI socket, `$PIER_HOME/pier.sock`; the protocol,
+the `sessionId` every request carries and the failure lines are in
+[08-cli-socket.md](08-cli-socket.md). `file` in the `404` is
+`<publicUrl>/#/settings/vault?name=X` (`publicUrl` from settings, else
+`http://127.0.0.1:<port>`); the Vault topic opens with `name` filled and the
+value field focused.
 
 ## CLI: `pier vault run`
 
@@ -89,18 +80,19 @@ pier vault run [ENV=NAME | NAME]... -- <command> [args...]
 exit code passed through (`128 + signal` for a signal death), `SIGINT`/`SIGTERM`
 forwarded.
 
-1. `POST /resolve` on `vault.sock` with the names.
+1. `POST /resolve` on `pier.sock` with the names and the session's id.
 2. `plain` values go into the child's env under `ENV`.
 3. `record` values go into the env too, and the command becomes
    `vt inject --only-env <those ENVs, comma-joined> -- <command> [args...]`;
    variables not listed pass through untouched.
 4. No `record` values → the command runs directly, no `vt` in the path.
 
-Every failure is one stderr line and exit `2`; the CLI prints no value:
+Every failure is one stderr line and exit `2`; the CLI prints no value. A
+socket failure — not running, no or unknown `PIER_SESSION_ID` — is a `pier:`
+line ([08-cli-socket.md](08-cli-socket.md)); the vault's own are:
 
 | Condition | stderr |
 | --- | --- |
-| socket missing | `vault: Pier is not running (no $PIER_HOME/vault.sock)` |
 | unknown name | `vault: no secret named X — file it at <publicUrl>/#/settings/vault?name=X` |
 | store locked | `vault: locked — unlock() has not run` |
 | `vt` not on PATH with `record` values | `vault: vt is required for X (approve level) and was not found` |

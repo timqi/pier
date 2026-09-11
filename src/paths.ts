@@ -20,9 +20,9 @@ export const PIER_DB = pierPath("db", "pier.db");
  *  database (lock.ts). */
 export const PIER_LOCK = pierPath("pier.lock");
 
-/** Where `pier vault run` reaches the running Pier; the CLI needs the name
- *  without opening the vault (vault-socket.ts). */
-export const VAULT_SOCK = pierPath("vault.sock");
+/** Where the `pier` CLI reaches the running Pier; the CLI needs the name
+ *  without opening the database (socket.ts). */
+export const PIER_SOCK = pierPath("pier.sock");
 
 /** `PI_CODING_AGENT_DIR` is an operator override — unless it equals
  *  `PIER_AGENT_DIR`, the value Pier itself set: then a Pier spawned from inside

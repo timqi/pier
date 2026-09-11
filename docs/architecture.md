@@ -64,8 +64,9 @@ src/
                resolution; the value's shape is the level (sealed = auto,
                vt:// = approve); channel tokens are rows here too
                (channels/config.ts)
-  vault-socket.ts the Unix socket (`$PIER_HOME/vault.sock`, 0600) the CLI
-               resolves names through; its permission bits are the auth
+  socket.ts    the Unix socket (`$PIER_HOME/pier.sock`, 0600) the `pier` CLI
+               reaches the running instance through — `/resolve`, `/task` —
+               every request naming its session; the bits are the auth
   settings.ts  instance facts a human owns (public URL, model menu, auto-update
                switch, which of the built-in `pier` package's resources are on)
   update.ts    whether a newer release exists and when this instance may become
@@ -74,7 +75,7 @@ src/
                ledger what the deadline cut off for the next boot to deliver
   cli.ts       what `pier` does when typed; service.ts is the unit it writes;
                `pier slack` is dispatched to channels/slack-cli.ts with the
-               token resolved here (env, or the vault socket)
+               token resolved here (env, or the CLI socket)
   tools.ts     managed CLI binaries via ubix (install, update, PATH); a tool
                that registers with Pi does so from its block's `post_install` /
                `pre_remove` hooks, which ubix runs (rtk writes its extension);

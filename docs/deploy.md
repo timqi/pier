@@ -217,8 +217,10 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
 - `auto`: sealed in `pier.db`, resolved for any local process of Pier's user.
   `approve`: a `vt://` record; every use asks through `vt`, which must be on
   the PATH of the machine running the command.
-- The CLI reaches the running Pier through `~/.pier/vault.sock` (mode 0600,
-  created at start, removed at exit); a failure is one `vault:` line and exit 2.
+- The CLI reaches the running Pier through `~/.pier/pier.sock` (mode 0600,
+  created at start, removed at exit), naming its session (`PIER_SESSION_ID`,
+  set by the `pier` shim on an agent's PATH); a failure is one `vault:` or
+  `pier:` line and exit 2.
 - `approve` secrets in cron tasks wait on the approval like any other `vt` use.
 - Channel tokens are vault rows too (`SLACK_TOKEN`, `TELEGRAM_TOKEN`,
   `LARK_APP_ID`, …): removing one there empties that channel's credential.

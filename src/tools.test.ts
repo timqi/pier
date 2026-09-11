@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -279,7 +279,8 @@ describe("the pier shim", () => {
     }, "/repo/src/cli.ts");
     expect(path).toBe(join(bin, "pier"));
     expect(readFileSync(path, "utf8")).toBe(
-      "#!/bin/sh\nexec '/opt/node/bin/node' '--import' 'file:///repo/node_modules/tsx/dist/loader.mjs' '/repo/src/cli.ts' \"$@\"\n",
+      "#!/bin/sh\nexport PIER_SESSION_ID=\"${PIER_SESSION_ID:-$PI_SESSION_ID}\"\n" +
+        "exec '/opt/node/bin/node' '--import' 'file:///repo/node_modules/tsx/dist/loader.mjs' '/repo/src/cli.ts' \"$@\"\n",
     );
     expect(statSync(path).mode & 0o111).toBe(0o111);
   });
@@ -288,7 +289,18 @@ describe("the pier shim", () => {
     // `pier serve` enters through cli.*, so argv[1] cannot say where main is.
     const bin = mkdtempSync(join(tmpdir(), "pier-shim-"));
     const path = writePierShim(bin, { execPath: "/usr/bin/node", execArgv: [] });
-    expect(readFileSync(path, "utf8")).toBe(`#!/bin/sh\nexec '/usr/bin/node' '${fileURLToPath(new URL("./cli.ts", import.meta.url))}' "$@"\n`);
+    expect(readFileSync(path, "utf8")).toContain(`\nexec '/usr/bin/node' '${fileURLToPath(new URL("./cli.ts", import.meta.url))}' "$@"\n`);
+  });
+
+  it("hands the cli the harness's session as PIER_SESSION_ID, an explicit one winning", () => {
+    const bin = mkdtempSync(join(tmpdir(), "pier-shim-"));
+    // A cli that prints the one variable the shim is there to set.
+    const path = writePierShim(bin, { execPath: "/bin/sh", execArgv: ["-c", 'echo "$PIER_SESSION_ID"'] }, "sh");
+    const see = (env: Record<string, string>): string =>
+      execFileSync("sh", [path], { env: { PATH: process.env.PATH ?? "", ...env }, encoding: "utf8" }).trim();
+    expect(see({ PI_SESSION_ID: "x" })).toBe("x");
+    expect(see({ PI_SESSION_ID: "x", PIER_SESSION_ID: "mine" })).toBe("mine");
+    expect(see({})).toBe("");
   });
 });
 

@@ -102,7 +102,7 @@ the same request.
 
 `pier slack <subcommand> …` (`channels/slack-cli.ts`, dispatched from
 `cli.ts`), the token `$SLACK_BOT_TOKEN` or the vault's `SLACK_TOKEN` over the
-vault socket ([07-vault.md](07-vault.md)). No tool, no Console switch, no
+CLI socket ([08-cli-socket.md](08-cli-socket.md)). No tool, no Console switch, no
 ownership guard: the vault level of `SLACK_TOKEN` is the operator's switch,
 and Slack refuses `chat.update`/`chat.delete` on anyone else's message. The
 session learns its own channel and thread from the `place` token of the

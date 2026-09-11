@@ -164,14 +164,16 @@ export function prependPath(env: NodeJS.ProcessEnv = process.env, bin: string = 
 
 /** `pier` on an agent's PATH is this process's own cli — the same source, the
  *  same loader (`tsx` in dev) — not whichever install `npm i -g` left behind.
- *  Placed from this module, not argv[1]: `pier serve` enters through cli.*. */
+ *  Placed from this module, not argv[1]: `pier serve` enters through cli.*.
+ *  The one line naming the harness variable: the cli reads `PIER_SESSION_ID`
+ *  only, and an explicit one wins. */
 export function writePierShim(
   bin: string = toolsBin(),
   proc: { execPath: string; execArgv: readonly string[] } = process,
   cli: string = fileURLToPath(import.meta.url).replace(/tools(\.[cm]?[jt]s)$/, "cli$1"),
 ): string {
   const quote = (s: string): string => `'${s.replaceAll("'", String.raw`'\''`)}'`;
-  const script = `#!/bin/sh\nexec ${[proc.execPath, ...proc.execArgv, cli].map(quote).join(" ")} "$@"\n`;
+  const script = `#!/bin/sh\nexport PIER_SESSION_ID="\${PIER_SESSION_ID:-$PI_SESSION_ID}"\nexec ${[proc.execPath, ...proc.execArgv, cli].map(quote).join(" ")} "$@"\n`;
   mkdirSync(bin, { recursive: true });
   const path = join(bin, "pier");
   const tmp = `${path}.${randomUUID()}`;

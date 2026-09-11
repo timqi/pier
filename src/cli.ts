@@ -255,21 +255,21 @@ function inject(wanted: readonly (readonly [string, string])[], values: Resolved
   return new Promise<never>(() => {});
 }
 
-/** The running Pier's answer for `names` over the vault socket, every name
- *  present; any failure is one `vault:` line and exit 2, so an agent reads
- *  words, not an empty variable. */
-async function resolveSecrets(names: string[]): Promise<Resolved> {
-  const { VAULT_SOCK } = await import("./paths.js");
-  type Answer = { values?: Resolved; error?: string; file?: string };
-  const answer = await new Promise<{ status: number; body: Answer }>((done, reject) => {
+/** One request to the running Pier over its socket, signed with the caller's
+ *  session (`PIER_SESSION_ID`, the harness variable mapped by the shim). Not
+ *  running, or an identity Pier refuses, is one `pier:` line and exit 2 before
+ *  any route reads the answer. */
+async function askPier<T extends { error?: string }>(path: string, body: Record<string, unknown>): Promise<{ status: number; body: T }> {
+  const { PIER_SOCK } = await import("./paths.js");
+  const answer = await new Promise<{ status: number; body: T }>((done, reject) => {
     const req = request(
-      { socketPath: VAULT_SOCK, method: "POST", path: "/resolve", headers: { "content-type": "application/json" } },
+      { socketPath: PIER_SOCK, method: "POST", path, headers: { "content-type": "application/json" } },
       (res) => {
         let raw = "";
         res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
         res.on("end", () => {
           try {
-            done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as Answer });
+            done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as T });
           } catch (err) {
             reject(err);
           }
@@ -277,16 +277,23 @@ async function resolveSecrets(names: string[]): Promise<Resolved> {
       },
     );
     req.on("error", reject);
-    req.end(JSON.stringify({ names, pid: process.pid }));
+    req.end(JSON.stringify({ ...body, sessionId: process.env.PIER_SESSION_ID }));
   }).catch((err: NodeJS.ErrnoException) =>
     // A crash leaves the file with nobody behind it: that is "not running" too.
     err.code === "ENOENT" || err.code === "ECONNREFUSED"
-      ? die(`vault: Pier is not running (no ${VAULT_SOCK})`)
-      : die(`vault: ${err.message}`));
-  const { status, body } = answer;
+      ? fail(`Pier is not running (no ${PIER_SOCK})`)
+      : fail(err.message));
+  if (answer.status === 400 || answer.status === 403) fail(answer.body.error ?? `socket answered ${String(answer.status)}`);
+  return answer;
+}
+
+/** The running Pier's answer for `names`, every name present; any failure is
+ *  one `vault:` line and exit 2, so an agent reads words, not an empty variable. */
+async function resolveSecrets(names: string[]): Promise<Resolved> {
+  const { status, body } = await askPier<{ values?: Resolved; error?: string; file?: string }>("/resolve", { names });
   if (status === 404) die(`vault: ${body.error ?? "unknown name"} — file it at ${body.file ?? "the Console (Settings → Vault)"}`);
   const values = body.values;
-  if (status !== 200 || !values) die(`vault: ${body.error ?? `vault socket answered ${String(status)}`}`);
+  if (status !== 200 || !values) die(`vault: ${body.error ?? `socket answered ${String(status)}`}`);
   const missing = names.find((name) => !values[name]);
   if (missing) die(`vault: no secret named ${missing}`);
   return values;

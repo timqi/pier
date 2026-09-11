@@ -40,7 +40,7 @@ import { startUpdate, unitPath, updaterProblem } from "./service.js";
 import { SettingsStore } from "./settings.js";
 import { currentVersion, startAutoUpdate, UpdateCheck, type UpdateStart } from "./update.js";
 import { Vault } from "./vault.js";
-import { serveVault } from "./vault-socket.js";
+import { servePier } from "./socket.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
 import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config-sync.js";
 import { PushStore, registerPushRoutes } from "./web/push.js";
@@ -330,10 +330,15 @@ app.route("/", createServer({
 const port = Number(process.env.PORT ?? 3141);
 const hostname = process.env.HOST ?? "127.0.0.1";
 
-// The deep link an agent's "no secret named X" error carries; loopback when no
-// public URL is set, since nothing in the process can discover one.
-serveVault(vault, (name) =>
-  `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/#/settings/vault?name=${name}`);
+servePier({
+  vault,
+  // The deep link an agent's "no secret named X" error carries; loopback when
+  // no public URL is set, since nothing in the process can discover one.
+  fileUrl: (name) => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/#/settings/vault?name=${name}`,
+  task: (params, callerSessionId) => tasks.tool(params, callerSessionId),
+  // Live in the router, or on disk: the same two places a callback target is looked for.
+  knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
+});
 
 // Every command a turn runs inherits this env: `NODE_ENV=production` makes an
 // agent's `npm install` skip devDependencies, and PORT/HOST would aim its dev

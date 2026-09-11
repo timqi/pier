@@ -37,13 +37,13 @@ waiting; do not retry in a loop.
 
 ## When it fails
 
-Every failure is one `vault:` line on stderr and exit code 2 — the command did
-not run.
+Every failure is one line on stderr and exit code 2 — the command did not run.
 
 | stderr | What to do |
 | --- | --- |
 | `vault: no secret named X — file it at <link>` | Stop. Hand the operator that exact link (it opens the Console with the name filled in) and ask them to paste the value there — never to you. |
 | `vault: locked — <reason>` | The operator has to unlock Pier's key store (Console → Settings → Security). Tell them; nothing you run will help. |
 | `vault: vt is required for X (approve level) and was not found` | `vt` is not on this machine's PATH. Tell the operator; you cannot change the level. |
-| `vault: Pier is not running (no …/vault.sock)` | Only Pier's own machine has the socket. Report it. |
+| `pier: Pier is not running (no …/pier.sock)` | Only Pier's own machine has the socket. Report it. |
+| `pier: PIER_SESSION_ID is required` / `pier: … is not a session of this Pier` | You are not running inside a Pier session, or through Pier's own `pier` on PATH. Report it. |
 | `usage: pier vault run …` | Malformed command line: check `--` is present and each name is `ENV=NAME` or `NAME`. |
