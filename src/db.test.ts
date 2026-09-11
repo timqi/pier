@@ -45,10 +45,13 @@ const UNDO_20 = "ALTER TABLE session_state ADD COLUMN pinned INTEGER NOT NULL DE
 /** Winds one back past 22, whose CREATE would otherwise collide with itself. */
 const UNDO_22 = "DROP TABLE session_fts;";
 
+/** Winds one back past 23, the vault table. */
+const UNDO_23 = "DROP TABLE vault;";
+
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -73,6 +76,7 @@ describe("openDb", () => {
       "task_runs",
       "tasks",
       "tools_sync_lock",
+      "vault",
       "web_sessions",
     ]);
     expect(
@@ -100,7 +104,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(22);
+    expect(version(second)).toBe(23);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -113,7 +117,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 22/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 23/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -291,7 +295,7 @@ describe("openDb", () => {
   it("indexes the global run list, on a database that predates it", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 16");
+    before.exec(UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 16");
     const insert = before.prepare("INSERT INTO task_runs VALUES (?, ?, ?, ?, ?, ?)");
     insert.run("probe", "t", 3, "succeeded", null, JSON.stringify({ matched: false }));
     insert.run("failed", "t", 2, "failed", null, JSON.stringify({ matched: false }));
@@ -299,7 +303,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -325,12 +329,12 @@ describe("openDb", () => {
     before.exec(
       "DROP INDEX task_runs_callback_state; DROP INDEX task_messages_state;" +
         " DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 14",
+        UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 14",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -352,7 +356,7 @@ describe("openDb", () => {
     const before = openDb(path);
     before.exec(
       "DROP INDEX tasks_due; ALTER TABLE tasks DROP COLUMN next_run_at;" +
-        UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 15",
+        UNDO_23 + UNDO_22 + UNDO_20 + UNDO_17 + " PRAGMA user_version = 15",
     );
     // Three rows the upgrade has to tell apart: one due, two that never are.
     before.prepare("INSERT INTO tasks(id, updated_at, json) VALUES (?, ?, ?)")
@@ -364,7 +368,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -397,14 +401,14 @@ describe("openDb", () => {
     // them; what this test is about is the pins.
     const before = openDb(path);
     before.exec(
-      UNDO_22 + UNDO_20 +
+      UNDO_23 + UNDO_22 + UNDO_20 +
         "INSERT INTO session_state(session_id, pinned, unread, cwd, sort, project_sort)" +
         " VALUES ('s1', 1, 1, '/a', 2, 0), ('s2', 1, 0, '/b', NULL, 1); PRAGMA user_version = 18",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
       .toEqual([
         { session_id: "s1", unread: 0, sort: null },
@@ -421,12 +425,12 @@ describe("openDb", () => {
     const before = openDb(path);
     before.exec(
       "INSERT INTO session_state(session_id, unread, sort) VALUES ('im', 1, NULL), ('own', 1, 0);" +
-        UNDO_22 + " PRAGMA user_version = 20",
+        UNDO_23 + UNDO_22 + " PRAGMA user_version = 20",
     );
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     // The row itself stays: its place in the working set is not a mark.
     expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
       .toEqual([
@@ -442,7 +446,7 @@ describe("openDb", () => {
   it("seeds the working set from the pinned rows, and drops the rest of the pins", () => {
     const path = dbPath();
     const before = openDb(path);
-    before.exec(UNDO_22 + UNDO_20);
+    before.exec(UNDO_23 + UNDO_22 + UNDO_20);
     const insert = before.prepare(
       "INSERT INTO session_state(session_id, pinned, unread, sort) VALUES (?, ?, ?, ?)",
     );
@@ -457,7 +461,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(22);
+    expect(version(db)).toBe(23);
     expect(
       db.prepare("SELECT session_id FROM session_state WHERE sort IS NOT NULL ORDER BY sort, session_id")
         .all().map((row) => (row as unknown as { session_id: string }).session_id),

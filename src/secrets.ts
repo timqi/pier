@@ -175,7 +175,8 @@ function open(key: Buffer, sealed: string, aad: string): Buffer {
   return Buffer.concat([decipher.update(ct), decipher.final()]);
 }
 
-const vtCli: VtClient = {
+/** The real vt; vault.ts creates its `approve` records through the same client. */
+export const vtCli: VtClient = {
   read: (record) => run("vt", ["read", record]),
   create: async (plaintext) => {
     const out = await run("vt", ["create"], plaintext);

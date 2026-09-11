@@ -277,6 +277,16 @@ const MIGRATIONS: readonly string[] = [
   -- Every row goes so the next scan re-reads each transcript and fills the table above.
   DELETE FROM session_index;
   `,
+  // 23 — the vault: named secrets `pier vault run` injects into one command.
+  `
+  -- name is an env-var name (^[A-Z][A-Z0-9_]{0,63}$). value is a sealed
+  -- envelope (auto) or a vt:// record (approve): the shape is the level.
+  CREATE TABLE vault (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another
