@@ -27,7 +27,7 @@ Platform adapters in front of Pi sessions: Telegram, Slack and Lark (Feishu).
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ | ✅ |
 | Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ | ✅ |
-| Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | skill + script (`skills/pier-slack/`), no Pier code | — | ✅ | —¹ |
+| Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | — | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
 
@@ -101,24 +101,22 @@ the same request.
 ## Agent access: the platform from a shell
 
 `pier slack <subcommand> …` (`channels/slack-cli.ts`, dispatched from
-`cli.ts`), the token `$SLACK_BOT_TOKEN` or the vault's `SLACK_TOKEN` resolved
-over the vault socket (07-vault.md): Pier's only Slack-facing responsibility
-toward a session is the `place` token of the speaker header, which names the
-channel and thread. There is no tool, no Console switch and no ownership
-guard — the vault level of `SLACK_TOKEN` is the operator's switch, and Slack
-refuses `chat.update`/`chat.delete` on anyone else's message itself.
+`cli.ts`), the token `$SLACK_BOT_TOKEN` or the vault's `SLACK_TOKEN` over the
+vault socket ([07-vault.md](07-vault.md)). No tool, no Console switch, no
+ownership guard: the vault level of `SLACK_TOKEN` is the operator's switch,
+and Slack refuses `chat.update`/`chat.delete` on anyone else's message. The
+session learns its own channel and thread from the `place` token of the
+speaker header.
 
-- The CLI runs on the adapter's own `SlackApi` (a public `read` for the long
-  tail, five rate-limit waits instead of the adapter's one), `SlackDirectory`
-  for names and `slack-render`'s markdown block; every former tool operation
-  is a subcommand. A read paginates fully and can write to disk (`--out`) so
-  a week of history never pages through the context one call per turn.
-  `skills/pier-slack/SKILL.md` describes the transcript format once; no
-  header repeats it.
-- The adapter keeps one read of its own, `slack-thread.ts`: a forwarded
-  thread parent with `reply_count <= 30` is inlined into the prompt through
-  `slack-transcript.ts`, the renderer `pier slack` prints with, ts and ids on:
-  `<ts> HH:MM name[id]: text` plus the markers the pier-slack skill lists.
+- The CLI runs on the adapter's `SlackApi` (public `read`; five rate-limit
+  waits where the adapter takes one), `SlackDirectory` for names and
+  `slack-render`'s markdown block. A read paginates fully and can write to
+  disk (`--out`). `skills/pier-slack/SKILL.md` describes the transcript
+  format; no header repeats it.
+- The adapter's one read, `slack-thread.ts`: a forwarded thread parent with
+  `reply_count <= 30` is inlined into the prompt through
+  `slack-transcript.ts` — the renderer `pier slack` prints with, ts and ids
+  on.
 - A `ts` stays TEXT everywhere (16 significant digits; REAL loses them).
 - Markdown is not Slack syntax: a mention is `<@U04B7Q2>`, a channel
   `<#C0123456>`, a broadcast `<!here>`.
@@ -129,10 +127,8 @@ refuses `chat.update`/`chat.delete` on anyone else's message itself.
 name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time place]` only on
 a different speaker, a 10-minute gap, a new day, or a different conversation.
 `place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`,
-`telegram:-100/7`), so a session can hand its own channel and thread to a
-command (`pier slack`); a session never changes conversation, so it is
-said once, on the first message, and again only after `forgetSender`. Alias
-keys (`web:`, `task:`) name no place. `sanitizeIdentity` strips `[`, `]`,
+`telegram:-100/7`), said once per session and again only after `forgetSender`;
+alias keys (`web:`, `task:`) name no place. `sanitizeIdentity` strips `[`, `]`,
 `<`, `>` and newlines so a display name cannot forge a second speaker.
 Identity is **per-turn, never baked into a session**: a thread is shared.
 `splitSpeaker` reads every shape back for the web bubble and the listing index.
