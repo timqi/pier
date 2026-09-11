@@ -373,8 +373,8 @@ describe("markers", () => {
     })).toBe(`${at} ada: all\n    of it [edited] [thread 2 · 1700.000100] [file image/png F2] [:eyes: 1]`);
   });
 
-  it("does not mark a reply as a thread parent", async () => {
-    expect(await one({ text: "hi", thread_ts: "1700.000050", reply_count: 0 }, "--ts")).toBe(
+  it("does not mark a reply as a thread parent, whatever reply_count says", async () => {
+    expect(await one({ text: "hi", thread_ts: "1700.000050", reply_count: 2 }, "--ts")).toBe(
       `1700.000100 ${t("1700.000100")} ada: hi [in thread 1700.000050]`,
     );
   });

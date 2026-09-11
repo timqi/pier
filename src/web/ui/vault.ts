@@ -64,16 +64,12 @@ export function createVaultPane(): { el: HTMLElement; show(query?: string): void
     return h("div", "flex items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2", line, remove);
   }
 
-  function render(rows: VaultRow[]): void {
-    listBox.replaceChildren(...(rows.length
-      ? rows.map(row)
-      : [empty("No secrets yet. File one below; a skill names it by this name.")]));
-  }
-
   async function load(): Promise<void> {
     const got = await getJson<VaultRow[]>("/api/vault", "Could not load the vault");
     if (!got.ok) return void listBox.replaceChildren(empty(got.error));
-    render(got.value);
+    listBox.replaceChildren(...(got.value.length
+      ? got.value.map(row)
+      : [empty("No secrets yet. File one below; a skill names it by this name.")]));
   }
 
   const listCard = card(

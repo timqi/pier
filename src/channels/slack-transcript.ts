@@ -19,12 +19,8 @@ export interface TranscriptOptions {
   thread?: boolean;
 }
 
-/** A `ts` is `<epoch seconds>.<microseconds>`: sorts as a number, not as a
- *  string. Never rewritten — it is the id a reply must match exactly. */
-const tsToNumber = (ts: string): number => Number(ts);
-
 const pad = (n: number): string => String(n).padStart(2, "0");
-const local = (ts: string): Date => new Date(Math.floor(tsToNumber(ts) * 1000));
+const local = (ts: string): Date => new Date(Math.floor(Number(ts) * 1000));
 
 export const localDate = (ts: string): string => {
   const d = local(ts);
@@ -53,12 +49,13 @@ const sizeLabel = (bytes: number): string =>
 
 const speaker = (msg: SlackMessageEvent): string | undefined => msg.user ?? msg.bot_id;
 
-/** Oldest first, one per ts (page seams repeat), strictly newer than `after`. */
+/** Oldest first, one per ts (page seams repeat), strictly newer than `after`.
+ *  Compared as numbers: a `ts` is `<epoch seconds>.<microseconds>`. */
 export function ordered<T extends SlackMessageEvent>(messages: T[], after?: string): T[] {
   const byTs = new Map<string, T>();
   for (const msg of messages) if (msg.ts) byTs.set(msg.ts, msg);
-  const all = [...byTs.values()].sort((a, b) => tsToNumber(a.ts!) - tsToNumber(b.ts!));
-  return after ? all.filter((m) => tsToNumber(m.ts!) > tsToNumber(after)) : all;
+  const all = [...byTs.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
+  return after ? all.filter((m) => Number(m.ts) > Number(after)) : all;
 }
 
 /** The text, or a stand-in for a message whose content is only blocks or attachments. */
