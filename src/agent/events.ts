@@ -257,8 +257,13 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       if (isAnswer(final)) return [];
       // Carried twice: on turn-end because it is how the turn ended (what a
       // task run settles on), and as the error event every chat surface reports.
+      // `toolUse` without a tool call is a provider protocol violation (the
+      // block was billed but never delivered); Pi ends the run on it, so it
+      // reaches the conversation as the failure it is, not as an empty turn.
       const failure = final?.stopReason === "error"
         ? final.errorMessage || "unknown agent error"
+        : final?.stopReason === "toolUse" && !hasToolCalls(final)
+        ? "the provider stopped on tool_use but sent no tool call"
         : undefined;
       const out: SessionEventPayload[] = [
         { type: "turn-end", text: hasToolCalls(final) ? "" : textOf(final?.content), ...(failure ? { error: failure } : {}) },
