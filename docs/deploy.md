@@ -217,6 +217,8 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
 - The CLI reaches the running Pier through `~/.pier/vault.sock` (mode 0600,
   created at start, removed at exit); a failure is one `vault:` line and exit 2.
 - `approve` secrets in cron tasks wait on the approval like any other `vt` use.
+- Channel tokens are vault rows too (`SLACK_TOKEN`, `TELEGRAM_TOKEN`,
+  `LARK_APP_ID`, …): removing one there empties that channel's credential.
 
 ## Remote access
 

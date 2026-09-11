@@ -51,7 +51,7 @@ const UNDO_23 = "DROP TABLE vault;";
 describe("openDb", () => {
   it("creates the whole schema and stamps the version it created", () => {
     const db = openDb(":memory:");
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     expect(tables(db)).toEqual([
       "auth",
       "channels",
@@ -104,7 +104,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(version(second)).toBe(23);
+    expect(version(second)).toBe(24);
     // A re-run of migration 1 would have hit "table auth already exists"; the
     // row proves the schema was left alone rather than recreated.
     expect(second.prepare("SELECT value FROM settings").get()).toEqual({ value: "https://x" });
@@ -117,7 +117,7 @@ describe("openDb", () => {
     db.exec("PRAGMA user_version = 99");
     db.close();
 
-    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 23/);
+    expect(() => openDb(path)).toThrow(/at schema 99, this Pier speaks 24/);
   });
 
   it("tells a pre-versioning database what it is instead of colliding with it", () => {
@@ -303,7 +303,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     expect(db.prepare("SELECT id, json FROM task_runs ORDER BY queued_at DESC").all()).toEqual([
       { id: "probe", json: JSON.stringify({ matched: false }) },
       { id: "failed", json: JSON.stringify({ matched: false }) },
@@ -334,7 +334,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     expect(indexes(db)).toContain("task_runs_callback_state");
     expect(indexes(db)).toContain("task_messages_state");
     // And the planner uses them rather than scanning, which is the point.
@@ -368,7 +368,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     expect(
       db.prepare("SELECT id, next_run_at FROM tasks ORDER BY id").all(),
     ).toEqual([
@@ -408,7 +408,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
       .toEqual([
         { session_id: "s1", unread: 0, sort: null },
@@ -430,7 +430,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     // The row itself stays: its place in the working set is not a mark.
     expect(db.prepare("SELECT session_id, unread, sort FROM session_state ORDER BY session_id").all())
       .toEqual([
@@ -461,7 +461,7 @@ describe("openDb", () => {
     before.close();
 
     const db = openDb(path);
-    expect(version(db)).toBe(23);
+    expect(version(db)).toBe(24);
     expect(
       db.prepare("SELECT session_id FROM session_state WHERE sort IS NOT NULL ORDER BY sort, session_id")
         .all().map((row) => (row as unknown as { session_id: string }).session_id),
@@ -471,6 +471,33 @@ describe("openDb", () => {
     expect(db.prepare("SELECT sort FROM session_state WHERE session_id = 'p5'").get()).toEqual({ sort: null });
     expect(db.prepare("SELECT sort, unread FROM session_state WHERE session_id = 'unpinned'").get())
       .toEqual({ sort: null, unread: 0 });
+    db.close();
+  });
+
+  it("moves channel credentials into the vault verbatim, and a name filed first stays", () => {
+    const path = dbPath();
+    const before = openDb(path);
+    before.exec("PRAGMA user_version = 23");
+    const insert = before.prepare("INSERT INTO channels(platform, json) VALUES (?, ?)");
+    insert.run("slack", JSON.stringify({ enabled: true, token: "v1:aa:bot", appToken: "v1:aa:app", users: [] }));
+    insert.run("telegram", JSON.stringify({ enabled: false, token: "", appToken: "" }));
+    insert.run("lark", JSON.stringify({ token: "v1:aa:id" }));
+    before.prepare("INSERT INTO vault VALUES (?, ?, ?)").run("SLACK_TOKEN", "v1:aa:filed", 1);
+    before.close();
+
+    const db = openDb(path);
+    expect(version(db)).toBe(24);
+    expect(db.prepare("SELECT name, value FROM vault ORDER BY name").all()).toEqual([
+      { name: "LARK_APP_ID", value: "v1:aa:id" },
+      { name: "SLACK_APP_TOKEN", value: "v1:aa:app" },
+      { name: "SLACK_TOKEN", value: "v1:aa:filed" },
+    ]);
+    // Neither key survives in any row, filled or empty.
+    expect(db.prepare("SELECT platform, json FROM channels ORDER BY platform").all()).toEqual([
+      { platform: "lark", json: "{}" },
+      { platform: "slack", json: JSON.stringify({ enabled: true, users: [] }) },
+      { platform: "telegram", json: JSON.stringify({ enabled: false }) },
+    ]);
     db.close();
   });
 

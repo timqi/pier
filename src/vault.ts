@@ -41,6 +41,11 @@ export class VaultLocked extends Error {
 
 const levelOf = (value: string): VaultLevel => (isSealed(value) ? "auto" : "approve");
 
+function check(name: string, plaintext: string): void {
+  if (!isVaultName(name)) throw new Error(`${name} is not a vault name (A-Z, 0-9, _; starts with a letter)`);
+  if (!plaintext) throw new Error("empty value");
+}
+
 export class Vault {
   constructor(
     private readonly secrets: Pick<Secrets, "encrypt" | "decrypt" | "state" | "lockedReason">,
@@ -60,10 +65,21 @@ export class Vault {
   /** Overwrite by name is rotation: a command already running keeps the env it
    *  was given, the next `run` gets the new value. */
   async put(name: string, level: VaultLevel, plaintext: string): Promise<void> {
-    if (!isVaultName(name)) throw new Error(`${name} is not a vault name (A-Z, 0-9, _; starts with a letter)`);
-    if (!plaintext) throw new Error("empty value");
-    const value = level === "auto" ? this.secrets.encrypt(plaintext) : await this.vt.create(plaintext);
-    if (level === "approve" && !value.startsWith("vt://")) throw new Error("vt create did not return a vt:// record");
+    if (level === "auto") return this.seal(name, plaintext);
+    check(name, plaintext);
+    const record = await this.vt.create(plaintext);
+    if (!record.startsWith("vt://")) throw new Error("vt create did not return a vt:// record");
+    this.#store(name, level, record);
+  }
+
+  /** The `auto` half of put, synchronous: a channel save runs on the message
+   *  path and cannot await. */
+  seal(name: string, plaintext: string): void {
+    check(name, plaintext);
+    this.#store(name, "auto", this.secrets.encrypt(plaintext));
+  }
+
+  #store(name: string, level: VaultLevel, value: string): void {
     this.db.prepare(`
       INSERT INTO vault(name, value, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
@@ -76,6 +92,14 @@ export class Vault {
     const removed = this.db.prepare("DELETE FROM vault WHERE name = ?").run(name).changes > 0;
     if (removed) log.info(`vault remove ${name}`);
     return removed;
+  }
+
+  /** One of Pier's own credentials, `undefined` when unfiled — a state there,
+   *  not an error. A sealed row still needs the key. */
+  get(name: string): string | undefined {
+    const row = this.db.prepare("SELECT value FROM vault WHERE name = ?").get(name) as { value: string } | undefined;
+    if (!row) return undefined;
+    return isSealed(row.value) ? this.secrets.decrypt(row.value) : row.value;
   }
 
   /** `by` names the caller in the one log line a resolve leaves; values never

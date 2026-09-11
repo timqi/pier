@@ -1,62 +1,79 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
 import { Secrets } from "../secrets.js";
+import { Vault } from "../vault.js";
 import { ChannelStore, gate } from "./config.js";
 import type { ChatPolicy } from "./types.js";
 
+let db: DatabaseSync;
+let secrets: Secrets;
 let store: ChannelStore;
 
-beforeEach(() => {
-  store = new ChannelStore(openDb(":memory:"));
+beforeEach(async () => {
+  db = openDb(":memory:");
+  secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-ch-")), "master.key"));
+  await secrets.unlock();
+  store = new ChannelStore(db, new Vault(secrets, db));
 });
 
-describe("sealed tokens", () => {
-  let secrets: Secrets;
+describe("credentials in the vault", () => {
+  const rowJson = (platform: string): string =>
+    (db.prepare("SELECT json FROM channels WHERE platform = ?").get(platform) as { json: string }).json;
 
-  beforeEach(async () => {
-    secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-ch-")), "master.key"));
-    await secrets.unlock();
-  });
-
-  it("seals tokens in the row, serves plaintext from get()", () => {
-    const db = openDb(":memory:");
-    const sealed = new ChannelStore(db, secrets);
-    const config = sealed.get("slack");
+  it("files tokens under their fixed names, serves plaintext from get(), and keeps the row free of them", () => {
+    const config = store.get("slack");
     config.token = "xoxb-bot";
     config.appToken = "xapp-socket";
-    sealed.save("slack", config);
-    const row = db.prepare("SELECT json FROM channels WHERE platform = 'slack'").get() as { json: string };
-    expect(row.json).not.toContain("xoxb-bot");
-    expect(row.json).not.toContain("xapp-socket");
+    store.save("slack", config);
+    expect(JSON.parse(rowJson("slack"))).not.toHaveProperty("token");
+    expect(JSON.parse(rowJson("slack"))).not.toHaveProperty("appToken");
+    expect(new Vault(secrets, db).list().map((e) => [e.name, e.level])).toEqual([
+      ["SLACK_APP_TOKEN", "auto"],
+      ["SLACK_TOKEN", "auto"],
+    ]);
     // The same store and a fresh one (cold cache) both serve plaintext.
-    expect(sealed.get("slack").token).toBe("xoxb-bot");
-    const fresh = new ChannelStore(db, secrets);
+    expect(store.get("slack").token).toBe("xoxb-bot");
+    const fresh = new ChannelStore(db, new Vault(secrets, db));
     expect(fresh.get("slack")).toMatchObject({ token: "xoxb-bot", appToken: "xapp-socket" });
   });
 
-  it("honors a legacy plaintext row and re-seals it on the next save", () => {
-    const db = openDb(":memory:");
-    const plain = new ChannelStore(db); // pre-secrets Pier wrote plaintext
-    const config = plain.get("telegram");
-    config.token = "12345:legacy";
-    plain.save("telegram", config);
-    const sealed = new ChannelStore(db, secrets);
-    expect(sealed.get("telegram").token).toBe("12345:legacy");
-    sealed.save("telegram", sealed.get("telegram"));
-    const row = db.prepare("SELECT json FROM channels WHERE platform = 'telegram'").get() as { json: string };
-    expect(row.json).not.toContain("12345:legacy");
+  it("an emptied field removes the vault row; a removed row empties the field", () => {
+    const vault = new Vault(secrets, db);
+    const config = store.get("telegram");
+    config.token = "12345:bot";
+    store.save("telegram", config);
+    expect(vault.get("TELEGRAM_TOKEN")).toBe("12345:bot");
+    config.token = "";
+    store.save("telegram", config);
+    expect(vault.get("TELEGRAM_TOKEN")).toBeUndefined();
+    // Filed in the Vault topic, read by the channel; removed there, gone here.
+    vault.seal("TELEGRAM_TOKEN", "67890:bot");
+    expect(new ChannelStore(db, vault).get("telegram").token).toBe("67890:bot");
+    vault.remove("TELEGRAM_TOKEN");
+    expect(new ChannelStore(db, vault).get("telegram").token).toBe("");
+  });
+
+  it("only a changed credential touches the vault, so its updated_at is the rotation", () => {
+    const vault = new Vault(secrets, db);
+    const config = store.get("slack");
+    config.token = "xoxb-bot";
+    store.save("slack", config);
+    const filed = db.prepare("SELECT value, updated_at FROM vault WHERE name = 'SLACK_TOKEN'").get();
+    store.discoverChat("slack", { id: "C1", name: "ops", kind: "group" });
+    store.save("slack", store.get("slack"));
+    expect(db.prepare("SELECT value, updated_at FROM vault WHERE name = 'SLACK_TOKEN'").get()).toEqual(filed);
+    expect(vault.list().map((e) => e.name)).toEqual(["SLACK_TOKEN"]);
   });
 
   it("a locked store refuses rather than serving ciphertext", () => {
-    const db = openDb(":memory:");
-    const sealed = new ChannelStore(db, secrets);
-    const config = sealed.get("slack");
+    const config = store.get("slack");
     config.token = "xoxb-bot";
-    sealed.save("slack", config);
-    const locked = new ChannelStore(db, new Secrets(join(tmpdir(), "nonexistent", "master.key")));
+    store.save("slack", config);
+    const locked = new ChannelStore(db, new Vault(new Secrets(join(tmpdir(), "nonexistent", "master.key")), db));
     expect(() => locked.get("slack")).toThrow(/secrets locked/);
   });
 });

@@ -81,6 +81,31 @@ describe("put", () => {
     await expect(vault.put("X", "approve", "v")).rejects.toThrow(/vt:\/\/ record/);
     expect(vault.list()).toEqual([]);
   });
+
+  it("seal is put at auto, synchronous, under the same rules", () => {
+    vault.seal("SLACK_TOKEN", "xoxb-secret");
+    expect(stored("SLACK_TOKEN")).toMatch(/^v1:[0-9a-f]{8}:/);
+    expect(vault.list()[0]!.level).toBe("auto");
+    expect(() => vault.seal("lower", "x")).toThrow(/not a vault name/);
+    expect(() => vault.seal("EMPTY", "")).toThrow(/empty value/);
+  });
+});
+
+describe("get", () => {
+  it("answers one name with its plaintext or record, undefined when unfiled", async () => {
+    await vault.put("A", "auto", "plain-a");
+    await vault.put("B", "approve", "plain-b");
+    expect(vault.get("A")).toBe("plain-a");
+    expect(vault.get("B")).toBe(stored("B"));
+    expect(vault.get("MISSING")).toBeUndefined();
+  });
+
+  it("throws the locked reason for a sealed row, and nothing for an unfiled name", async () => {
+    await vault.put("A", "auto", "plain-a");
+    const locked = new Vault(new Secrets(join(mkdtempSync(join(tmpdir(), "pier-vault-")), "master.key"), vt), db, vt);
+    expect(() => locked.get("A")).toThrow(/secrets locked/);
+    expect(locked.get("MISSING")).toBeUndefined();
+  });
 });
 
 describe("resolve", () => {

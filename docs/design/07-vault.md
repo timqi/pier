@@ -59,14 +59,20 @@ resolution. Imports `db.ts`, `secrets.ts`, `log.ts`; nothing from `core/`,
 interface Vault {
   list(): { name: string; level: "auto" | "approve"; updatedAt: number }[];
   put(name: string, level: "auto" | "approve", plaintext: string): Promise<void>;
+  seal(name: string, plaintext: string): void;
   remove(name: string): void;
   resolve(names: string[]): Record<string, { kind: "plain" | "record"; value: string }>;
+  get(name: string): string | undefined;
 }
 ```
 
 - `put` with `auto` seals via `Secrets.encrypt`; with `approve` runs
   `VtClient.create(plaintext)` and stores the record. Plaintext is a parameter
   and a local; it is not logged, not echoed, not kept.
+- `seal` is `put` at `auto`, synchronous: `ChannelStore.save` runs on the
+  message path and cannot await.
+- `get` is one name for Pier's own reads, `undefined` when unfiled; a sealed
+  row still needs the key.
 - `resolve` for a sealed row calls `Secrets.decrypt`, so a locked store
   refuses with `assertUnlocked`'s reason — `approve` rows still resolve while
   locked, they need no key. An unknown name is an error naming it. Nothing
@@ -145,6 +151,26 @@ Routes mounted beside the settings routes, behind the Console password:
 | `DELETE /api/vault/:name` | remove; 404 if unknown |
 
 No reveal, no edit-in-place: a secret is replaced, not read back.
+
+## Channel credentials
+
+The vault is the one place a channel credential is stored and rotated.
+`ChannelConfig.token`/`appToken` keep their meaning in memory; `ChannelStore`
+fills them from the vault on read and files them on save, and the `channels`
+row holds neither. Fixed names, `CREDENTIAL_NAMES` in `channels/config.ts`:
+
+| Platform | `token` | `appToken` |
+| --- | --- | --- |
+| Telegram | `TELEGRAM_TOKEN` | — |
+| Slack | `SLACK_TOKEN` | `SLACK_APP_TOKEN` |
+| Lark | `LARK_APP_ID` | `LARK_APP_SECRET` |
+
+The Console's Channels form and the Vault topic are two views of the same
+row: saving an empty field removes the row; removing or filing the row in the
+Vault topic reaches the channel when `ChannelStore` next reads it (restart) —
+the store caches what it read. Only a changed credential is re-filed, so
+`updated` is the rotation. An `approve` row under one of these names is not a
+token the adapter can use. Migration 24 moved the sealed blobs over verbatim.
 
 ## Skill: `skills/pier-vault/SKILL.md`
 

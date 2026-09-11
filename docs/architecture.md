@@ -62,7 +62,8 @@ src/
   secrets.ts   layer-1 credential encryption (master.key wraps the DEK)
   vault.ts     named secrets for `pier vault run`: the vault table and its
                resolution; the value's shape is the level (sealed = auto,
-               vt:// = approve)
+               vt:// = approve); channel tokens are rows here too
+               (channels/config.ts)
   vault-socket.ts the Unix socket (`$PIER_HOME/vault.sock`, 0600) the CLI
                resolves names through; its permission bits are the auth
   settings.ts  instance facts a human owns (public URL, model menu, auto-update

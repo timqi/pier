@@ -1,10 +1,13 @@
 // The agent-facing Slack tool: live reads, and the gates in front of them.
 // Hermetic — in-memory store, a scripted client.
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { Secrets } from "../secrets.js";
+import { Vault } from "../vault.js";
 import { MAX_INBOUND_BYTES, splitInboundFiles } from "../core/inbound-file.js";
 import { ChannelStore } from "./config.js";
 import { MARKDOWN_MAX } from "./slack-render.js";
@@ -161,8 +164,11 @@ const column = (out: unknown, index: number): string[] =>
 const texts = (out: unknown): string[] =>
   (out as { messages: string[] }).messages.map((line) => line.split(" | ").slice(3).join(" | "));
 
-beforeEach(() => {
-  store = new ChannelStore(openDb(":memory:"));
+beforeEach(async () => {
+  const secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-slack-tool-")), "master.key"));
+  await secrets.unlock();
+  const db = openDb(":memory:");
+  store = new ChannelStore(db, new Vault(secrets, db));
   client = new FakeClient();
   logs = [];
   at = null;

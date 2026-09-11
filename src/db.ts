@@ -287,6 +287,22 @@ const MIGRATIONS: readonly string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // 24 — channel credentials move into the vault under fixed names (channels/config.ts).
+  `
+  -- The blob moves verbatim: same DEK, no decrypt, so this runs locked like
+  -- every migration. A name filed in the vault first wins (DO NOTHING); the
+  -- channel copy is dropped either way.
+  WITH moved(platform, path, name) AS (VALUES
+    ('telegram', '$.token', 'TELEGRAM_TOKEN'),
+    ('slack', '$.token', 'SLACK_TOKEN'), ('slack', '$.appToken', 'SLACK_APP_TOKEN'),
+    ('lark', '$.token', 'LARK_APP_ID'), ('lark', '$.appToken', 'LARK_APP_SECRET'))
+  INSERT INTO vault(name, value, updated_at)
+    SELECT moved.name, json_extract(channels.json, moved.path), CAST(strftime('%s', 'now') AS INTEGER) * 1000
+    FROM moved JOIN channels ON channels.platform = moved.platform
+    WHERE json_extract(channels.json, moved.path) <> ''
+    ON CONFLICT(name) DO NOTHING;
+  UPDATE channels SET json = json_remove(json, '$.token', '$.appToken');
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

@@ -3,8 +3,7 @@
 
 import { randomInt } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { pierDb } from "../db.js";
-import { isSealed, type Secrets } from "../secrets.js";
+import type { Vault } from "../vault.js";
 import {
   type BindCode,
   type BindOutcome,
@@ -22,15 +21,24 @@ const BIND_CODE_TTL_MS = 10 * 60_000;
 const BIND_CODE_TRIES = 5;
 const BIND_CODE_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+type CredentialKey = "token" | "appToken";
+
+/** Where each platform's credentials live in the vault — fixed names, so a
+ *  skill and the Console agree without a setting. Migration 24 spells the same
+ *  table in SQL. Telegram authenticates with one token. */
+export const CREDENTIAL_NAMES: Record<ChannelPlatform, Partial<Record<CredentialKey, string>>> = {
+  telegram: { token: "TELEGRAM_TOKEN" },
+  slack: { token: "SLACK_TOKEN", appToken: "SLACK_APP_TOKEN" },
+  lark: { token: "LARK_APP_ID", appToken: "LARK_APP_SECRET" },
+};
+
 export class ChannelStore {
-  private readonly db: DatabaseSync;
   private readonly cache = new Map<ChannelPlatform, ChannelConfig>();
 
-  /** Without `secrets` (tests), tokens persist as given. A locked store throws
-   *  rather than serving a token it cannot read. */
-  constructor(db: DatabaseSync = pierDb(), private readonly secrets?: Secrets) {
-    this.db = db;
-  }
+  /** The row never holds a credential: `token`/`appToken` are filled from the
+   *  vault on read and filed there on save. A locked vault throws rather than
+   *  serving a token it cannot read. */
+  constructor(private readonly db: DatabaseSync, private readonly vault: Pick<Vault, "get" | "seal" | "remove">) {}
 
   /** Private: handed out, a caller could mutate config without saving. */
   private cached(platform: ChannelPlatform): ChannelConfig {
@@ -42,10 +50,8 @@ export class ChannelStore {
     const config = row
       ? { ...defaultChannelConfig(), ...(JSON.parse(row.json) as Partial<ChannelConfig>) }
       : defaultChannelConfig();
-    if (this.secrets) {
-      for (const key of ["token", "appToken"] as const) {
-        if (isSealed(config[key])) config[key] = this.secrets.decrypt(config[key]);
-      }
+    for (const [key, name] of Object.entries(CREDENTIAL_NAMES[platform]) as [CredentialKey, string][]) {
+      config[key] = this.vault.get(name) ?? "";
     }
     this.cache.set(platform, config);
     return config;
@@ -56,15 +62,18 @@ export class ChannelStore {
   }
 
   save(platform: ChannelPlatform, config: ChannelConfig): void {
+    // The cache holds plaintext; the row holds neither key. Only a changed
+    // credential touches the vault, so its `updated` is the rotation, not the
+    // last chat discovered; an emptied field removes the row.
+    const before = this.cached(platform);
+    for (const [key, name] of Object.entries(CREDENTIAL_NAMES[platform]) as [CredentialKey, string][]) {
+      if (config[key] === before[key]) continue;
+      if (config[key]) this.vault.seal(name, config[key]);
+      else this.vault.remove(name);
+    }
     // Cloned, so the caller's object cannot reach into the cache later.
     this.cache.set(platform, structuredClone(config));
-    // The cache holds plaintext; only the row is sealed.
-    const stored = this.secrets ? structuredClone(config) : config;
-    if (this.secrets) {
-      for (const key of ["token", "appToken"] as const) {
-        if (stored[key]) stored[key] = this.secrets.encrypt(stored[key]);
-      }
-    }
+    const { token: _token, appToken: _appToken, ...stored } = config;
     this.db.prepare(`
       INSERT INTO channels(platform, json) VALUES (?, ?)
       ON CONFLICT(platform) DO UPDATE SET json = excluded.json

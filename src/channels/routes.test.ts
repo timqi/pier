@@ -1,6 +1,11 @@
 import { Hono } from "hono";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
+import { Secrets } from "../secrets.js";
+import { Vault } from "../vault.js";
 import { ChannelStore } from "./config.js";
 import { registerChannelRoutes } from "./routes.js";
 import type { ChannelRuntime } from "./runtime.js";
@@ -10,8 +15,11 @@ let store: ChannelStore;
 let app: Hono;
 let reloads: number;
 
-beforeEach(() => {
-  store = new ChannelStore(openDb(":memory:"));
+beforeEach(async () => {
+  const secrets = new Secrets(join(mkdtempSync(join(tmpdir(), "pier-routes-")), "master.key"));
+  await secrets.unlock();
+  const db = openDb(":memory:");
+  store = new ChannelStore(db, new Vault(secrets, db));
   reloads = 0;
   app = new Hono();
   const runtime = {

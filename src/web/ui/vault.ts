@@ -78,7 +78,7 @@ export function createVaultPane(): { el: HTMLElement; show(query?: string): void
 
   const listCard = card(
     "Secrets",
-    "Named values `pier vault run` puts into one command's environment. The agent's context never holds them; a name it cannot find fails with a link back here.",
+    "Named values `pier vault run` puts into one command's environment. The agent's context never holds them; a name it cannot find fails with a link back here. Channel tokens live here too (SLACK_TOKEN, TELEGRAM_TOKEN, LARK_APP_ID…): removing one empties that channel's credential.",
     listBox,
     listStatus,
   );

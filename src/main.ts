@@ -173,7 +173,7 @@ const packages = new PiPackageStore(piConfig, { version: currentVersion(), setti
 // At boot, not lazily: the answer waits for the next Console open (update.ts).
 packages.watchUpdates();
 
-channelStore = new ChannelStore(db, secrets);
+channelStore = new ChannelStore(db, vault);
 const control = createControl({ router, factory, conversations, store: channelStore });
 const channels = new ChannelRuntime(channelStore, router, control);
 resolveIm = resolveConversation(

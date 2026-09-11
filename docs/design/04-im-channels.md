@@ -214,7 +214,9 @@ and `sweep`:
 ## Console surface
 
 One tab and one document per platform: token, defaults, bound users, discovered
-chats.
+chats. The token fields save through `ChannelStore` into the vault under fixed
+names (`CREDENTIAL_NAMES` in `config.ts`, [07-vault.md](07-vault.md)); the
+channel row holds no credential.
 
 | Route | Behavior |
 | ----- | -------- |
