@@ -441,7 +441,7 @@ describe("workbench server", () => {
     const store = new TaskStore(db);
     const run = (id: string, over: Partial<TaskRun>): TaskRun => ({
       id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      rootRunId: id, depth: 0, resumedFromRunId: null, triggerSource: "agent",
+      resumedFromRunId: null, triggerSource: "agent",
       invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
       sessionMode: null, callbackSessionId: null, background: true, callbackState: null,
       callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
@@ -476,7 +476,7 @@ describe("workbench server", () => {
     const store = new TaskStore(db);
     const run = (id: string, over: Partial<TaskRun>): TaskRun => ({
       id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      rootRunId: id, depth: 0, resumedFromRunId: null, triggerSource: "agent",
+      resumedFromRunId: null, triggerSource: "agent",
       invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
       sessionMode: "fresh", callbackSessionId: null, background: true, callbackState: null,
       callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
@@ -572,7 +572,7 @@ describe("workbench server", () => {
     });
     new TaskStore(db).saveRun({
       id: "made-one", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      rootRunId: "made-one", depth: 0, resumedFromRunId: null, triggerSource: "agent",
+      resumedFromRunId: null, triggerSource: "agent",
       invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: "child",
       sessionMode: "fresh", callbackSessionId: null, background: true, callbackState: null,
       callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,

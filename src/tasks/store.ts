@@ -161,12 +161,20 @@ export class TaskStore {
     return [...active, ...recent].sort((a, b) => b.queuedAt - a.queuedAt || b.id.localeCompare(a.id));
   }
 
-  listRunsByRoot(rootRunId: string, limit = 100): TaskRun[] {
+  /** A `task` action's child runs; a cancel walks them. */
+  listChildRuns(parentRunId: string): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs
-      WHERE json_extract(json, '$.rootRunId') = ?
-      ORDER BY queued_at LIMIT ?
-    `, rootRunId, clamp(limit, 500));
+      WHERE json_extract(json, '$.parentRunId') = ?
+      ORDER BY queued_at LIMIT 500
+    `, parentRunId);
+  }
+
+  /** Someone waits on this run's result — its own callback or its group's — so
+   *  the run is one turn of its session and may not delegate (design 09). */
+  supervised(run: TaskRun): boolean {
+    if (run.callbackSessionId !== null) return true;
+    return run.groupId !== null && (this.getGroup(run.groupId)?.callbackSessionId ?? null) !== null;
   }
 
   countActiveRuns(): number {

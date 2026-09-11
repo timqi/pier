@@ -42,7 +42,7 @@ export interface RunHead {
   taskName?: string;
   model?: ModelRef;
   thinking?: string;
-  /** Plain facts between the name and the ids: mode, depth, duration. */
+  /** Plain facts between the name and the ids: mode, duration. */
   note?: string;
   runId: string;
   /** The session doing the work when it is not this one; "console" is nobody. */
@@ -171,7 +171,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     label: `run · ${run.state}`,
     labelCls: STATE_STYLE[run.state].label,
     taskName: run.taskName,
-    note: `${run.sessionMode ?? "task"} · depth ${String(run.depth)} · ${String(seconds)}s`,
+    note: `${run.sessionMode ?? "task"} · ${String(seconds)}s`,
     runId: run.runId,
     sessionId: run.targetSessionId,
   });

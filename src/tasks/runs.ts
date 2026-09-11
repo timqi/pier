@@ -1,5 +1,5 @@
-// A definition plus an input becomes a queued run. The depth and per-root
-// limits are decided here because every caller enqueues through this one door.
+// A definition plus an input becomes a queued run; every caller enqueues
+// through this one door.
 
 import { logger } from "../log.js";
 import type { TaskCallbacks } from "./callbacks.js";
@@ -8,9 +8,6 @@ import type { TaskStore } from "./store.js";
 import type { CallbackMode, TaskDefinition, TaskRun } from "./types.js";
 
 const log = logger("tasks");
-
-const MAX_DEPTH = 2;
-const MAX_CHILDREN_PER_ROOT = 16;
 
 export interface RunProvenance {
   invokedBySessionId?: string | null;
@@ -22,8 +19,6 @@ export interface RunProvenance {
   sessionMode?: "reuse" | "fresh";
   groupId?: string | null;
   resumedFromRunId?: string | null;
-  rootRunId?: string;
-  depth?: number;
   resumePrompt?: string;
 }
 
@@ -31,7 +26,6 @@ export class TaskRunQueue {
   constructor(
     private readonly store: TaskStore,
     private readonly callbacks: TaskCallbacks,
-    private readonly getRun: (id: string) => TaskRun,
     private readonly execute: (run: TaskRun) => void,
     private readonly changed: (run: TaskRun) => void,
   ) {}
@@ -45,13 +39,6 @@ export class TaskRunQueue {
     provenance: RunProvenance,
   ): TaskRun {
     const id = newId();
-    const parent = parentRunId ? this.getRun(parentRunId) : null;
-    const depth = provenance.depth ?? (parent ? parent.depth + 1 : 0);
-    const rootRunId = provenance.rootRunId ?? parent?.rootRunId ?? id;
-    if (depth > MAX_DEPTH) throw new Error(`subagent depth limit is ${MAX_DEPTH}`);
-    if (depth > 0 && this.store.listRunsByRoot(rootRunId, MAX_CHILDREN_PER_ROOT + 1).filter((run) => run.depth > 0).length >= MAX_CHILDREN_PER_ROOT) {
-      throw new Error(`subagent child limit is ${MAX_CHILDREN_PER_ROOT} per root run`);
-    }
     const invokedBySessionId = provenance.invokedBySessionId ?? null;
     const sourceSessionId = provenance.sourceSessionId ?? invokedBySessionId;
     const sessionMode = definition.action.type === "agent"
@@ -75,8 +62,6 @@ export class TaskRunQueue {
       taskRevision: definition.revision,
       parentRunId,
       groupId: provenance.groupId ?? null,
-      rootRunId,
-      depth,
       resumedFromRunId: provenance.resumedFromRunId ?? null,
       triggerSource: source,
       invokedBySessionId,
@@ -112,13 +97,12 @@ export class TaskRunQueue {
   /** Publish and execute only after all records this run relies on committed. */
   start(run: TaskRun): void {
     this.changed(run);
-    const { id, depth, triggerSource: source } = run;
+    const { id, triggerSource: source } = run;
     const overlapped = run.skipReason === "overlap";
     const definition = run.context.definition;
     // Why a run exists is answerable only here: the row keeps the ids, not the
     // reason. A watch probe queues every interval, so it logs at debug.
-    const queued = `run ${id} ${run.state}: ${definition.name} via ${source}` +
-      `${overlapped ? " (overlapped)" : ""}${depth > 0 ? ` depth ${String(depth)}` : ""}`;
+    const queued = `run ${id} ${run.state}: ${definition.name} via ${source}${overlapped ? " (overlapped)" : ""}`;
     if (source === "watch" && !overlapped) log.debug(queued);
     else log.info(queued);
     if (run.state === "queued") this.execute(run);

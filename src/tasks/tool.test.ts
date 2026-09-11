@@ -22,7 +22,7 @@ const task: TaskDefinition = {
 };
 
 const run = (id: string, over: Partial<TaskRun> = {}): TaskRun => ({
-  id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null, rootRunId: id, depth: 0,
+  id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
   resumedFromRunId: null, triggerSource: "agent", invokedBySessionId: "s1", sourceSessionId: "s1",
   targetSessionId: `session-${id}`, sessionMode: "fresh", callbackSessionId: "s1", background: true,
   callbackState: "delivered", callbackAttempts: 1, callbackError: null, callbackNextAttemptAt: null,
@@ -74,6 +74,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
   const created: Record<string, unknown>[] = [];
   const definitions = {
     get: () => task,
+    list: () => [],
     sessionExists: async () => true,
     sessionCwd: async () => "/tmp",
     create: async (draft: Record<string, unknown>) => {
@@ -165,14 +166,7 @@ describe("task tool recover", () => {
     expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
   });
 
-  it("refuses every delivery redirect a subagent or a fan-out cannot honour", async () => {
-    // A running child whose target session is the caller: `active` is truthy.
-    const child = rig([run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null })]);
-    await expect(child({ operation: "run", task_id: task.id, callback_session_id: "other" }))
-      .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
-    await expect(child({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }], callback_session_id: "other" }))
-      .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
-
+  it("refuses every delivery redirect a fan-out cannot honour", async () => {
     const top = rig([]);
     await expect(top({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }], callback_session_id: "other" }))
       .rejects.toThrow("callback_session_id applies to a single run only");
@@ -191,14 +185,54 @@ describe("task tool recover", () => {
     const remote = await resumed({ callback_session_id: "other" });
     expect(remote.callbackSessionId).toBe("other");
     expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
+  });
 
-    // A subagent's own callback is its parent's link back, resume included.
-    const child = rig([
-      run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null }),
-      run("grandchild", { parentRunId: "child", rootRunId: "child", depth: 1 }),
-    ]);
-    await expect(child({ operation: "message", run_id: "grandchild", message: "go on", callback_session_id: "other" }))
-      .rejects.toThrow("subagents cannot redirect callbacks (callback_session_id)");
+  // The caller is the run's own session (`targetSessionId: "s1"`), still running.
+  const REFUSAL = "a delegated run cannot delegate; ask in your result and let your supervisor run it";
+  const live = (id: string, over: Partial<TaskRun> = {}) =>
+    run(id, { state: "running", targetSessionId: "s1", callbackState: null, finishedAt: null, result: null, ...over });
+
+  it("a supervised run is refused every operation, save and list included", async () => {
+    const own = rig([live("child", { callbackSessionId: "parent" }), run("sibling")]);
+    for (const input of [
+      { operation: "run", prompt: "Work" },
+      { operation: "run", task_id: task.id },
+      { operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }] },
+      { operation: "message", run_id: "sibling", message: "go on" },
+      { operation: "save", task: { name: "nightly", action: { type: "bash", script: "true", cwd: "/tmp" } } },
+      { operation: "list" },
+      { operation: "cancel", run_id: "sibling" },
+      { operation: "recover", run_id: "sibling", reason: "x" },
+    ]) await expect(own(input)).rejects.toThrow(REFUSAL);
+    expect(own.created).toEqual([]);
+
+    // A group member has no callback of its own; its group's is the supervisor.
+    const member = rig([live("m", { groupId: "g", callbackSessionId: null })], [group("g", ["m"], { callbackState: "pending" })]);
+    await expect(member({ operation: "list" })).rejects.toThrow(REFUSAL);
+  });
+
+  it("a run nobody waits on may delegate, and a top-level session always may", async () => {
+    const scheduled = rig([live("cron", { triggerSource: "cron", invokedBySessionId: null, callbackSessionId: null })]);
+    expect(await scheduled({ operation: "list" })).toEqual([]);
+    expect((await scheduled({ operation: "run", prompt: "Work" }) as RunSummary).runId).toBe("new");
+    const detached = rig([live("m", { groupId: "g", callbackSessionId: null })], [group("g", ["m"], { callbackSessionId: null, callbackState: null })]);
+    expect(await detached({ operation: "list" })).toEqual([]);
+    // A finished run's session is nobody's turn any more.
+    const after = rig([run("done", { targetSessionId: "s1" })]);
+    expect(await after({ operation: "list" })).toEqual([]);
+  });
+
+  it("ownership is the launching session or the run's own; anyone else is refused", async () => {
+    const tool = rig([
+      run("mine", { state: "running", callbackState: null, finishedAt: null, result: null }),
+      run("self", { state: "running", invokedBySessionId: null, callbackSessionId: null, callbackState: null, targetSessionId: "s1", finishedAt: null, result: null, triggerSource: "cron" }),
+      run("theirs", { invokedBySessionId: "s2", callbackSessionId: "s2" }),
+    ], [group("g", ["theirs"], { invokedBySessionId: "s2", callbackSessionId: "s2" })]);
+    expect(await tool({ operation: "message", run_id: "mine", message: "x" })).toMatchObject({ delivery: "steer" });
+    expect(await tool({ operation: "message", run_id: "self", message: "x" })).toMatchObject({ delivery: "steer" });
+    await expect(tool({ operation: "message", run_id: "theirs", message: "x" })).rejects.toThrow("session does not own this run");
+    await expect(tool({ operation: "cancel", run_id: "theirs" })).rejects.toThrow("session does not own this run");
+    await expect(tool({ operation: "cancel", group_id: "g" })).rejects.toThrow("session does not own this run");
   });
 
   it("message picks steer, follow-up or resume from the run's state and says which", async () => {

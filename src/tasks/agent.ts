@@ -18,7 +18,7 @@ const log = logger("tasks");
 
 /** Every session gets the chat-surface contract, task runs included, so the
  *  delegation prompt says which of it does not apply. Skipped on resume. */
-const preamble = (run: TaskRun): string => {
+const preamble = (run: TaskRun, supervised: boolean): string => {
   // A cron/watch task with a session callback is read by an agent too.
   const audience = run.invokedBySessionId
     ? "read by the agent that delegated this run"
@@ -27,7 +27,9 @@ const preamble = (run: TaskRun): string => {
       : "read by the operator";
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.\n\n`;
+    `next-step buttons and file:// attachments do not render there. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.` +
+    (supervised ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +
+    "\n\n";
 };
 
 export class AgentTaskRunner {
@@ -69,7 +71,7 @@ export class AgentTaskRunner {
         const input = run.input === undefined || run.input === null
           ? ""
           : `\n\n<task_input>\n${JSON.stringify(run.input).replaceAll("</task_input>", "<\\/task_input>")}\n</task_input>`;
-        const prompt = run.context.resumePrompt ?? `${preamble(run)}${action.prompt}${input}`;
+        const prompt = run.context.resumePrompt ?? `${preamble(run, this.store.supervised(run))}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
         // The level the session settled on: an unspecified effort inherits the caller's.

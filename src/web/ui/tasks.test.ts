@@ -105,7 +105,7 @@ beforeEach(async () => {
     timeoutSeconds: 60, revision: 1, creator: "console", createdBySessionId: null, nextRunAt: null, createdAt: 1, updatedAt: 1 };
   run = { id: "run-a", taskId: task.id, taskRevision: 1, state: "running", queuedAt: 1, startedAt: 2, finishedAt: null, triggerSource: "manual",
     result: { type: "bash", exitCode: 0, stdout: "result text", stderr: "", stdoutTruncated: false, stderrTruncated: false },
-    targetSessionId: null, parentRunId: null, rootRunId: "run-a", resumedFromRunId: null, groupId: null, depth: 0,
+    targetSessionId: null, parentRunId: null, resumedFromRunId: null, groupId: null,
     sourceSessionId: null, invokedBySessionId: null, sessionMode: null, callbackSessionId: null, callbackState: null,
     callbackError: null, callbackAttempts: 0, callbackNextAttemptAt: null, background: false, input: null,
     context: { definition: task }, probe: null, matched: null, error: null, skipReason: null, groupCallbackState: null };

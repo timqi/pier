@@ -61,7 +61,7 @@ export class TaskService {
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },
-      prepareMember: (taskId, groupId, callerSessionId, parentRunId) => this.prepareRun(taskId, null, "agent", parentRunId, {
+      prepareMember: (taskId, groupId, callerSessionId) => this.prepareRun(taskId, null, "agent", null, {
         invokedBySessionId: callerSessionId,
         sourceSessionId: callerSessionId,
         callbackSessionId: null,
@@ -86,7 +86,6 @@ export class TaskService {
     this.runs = new TaskRunQueue(
       store,
       this.callbacks,
-      (id) => this.getRun(id),
       (run) => this.execution.start(run),
       (run) => this.changed(run),
     );
@@ -273,7 +272,8 @@ export class TaskService {
     });
   }
 
-  /** Cascades: orphans must not outlive the delegation that wanted them. */
+  /** Cascades down a `task` action's chain: a child must not outlive the run
+   *  that waits on it. */
   cancel(id: string): TaskRun {
     const run = this.getRun(id);
     for (const target of [run, ...this.descendants(run)]) {
@@ -294,26 +294,18 @@ export class TaskService {
     definitions: TaskDefinition[],
     join: GroupJoinMode,
     callerSessionId: string,
-    parentRunId: string | null,
     callbackSessionId: string | null,
     callbackMode: CallbackMode,
   ): { group: TaskGroup; runs: TaskRun[] } {
-    this.refusePaused(parentRunId);
-    return this.groups.runAll(definitions, join, callerSessionId, parentRunId, callbackSessionId, callbackMode);
+    this.refusePaused();
+    return this.groups.runAll(definitions, join, callerSessionId, callbackSessionId, callbackMode);
   }
 
   private descendants(run: TaskRun): TaskRun[] {
-    const byParent = new Map<string, TaskRun[]>();
-    for (const member of this.store.listRunsByRoot(run.rootRunId, 500)) {
-      if (!member.parentRunId) continue;
-      const siblings = byParent.get(member.parentRunId) ?? [];
-      siblings.push(member);
-      byParent.set(member.parentRunId, siblings);
-    }
     const collected: TaskRun[] = [];
     const queue = [run.id];
     while (queue.length > 0) {
-      for (const child of byParent.get(queue.shift()!) ?? []) {
+      for (const child of this.store.listChildRuns(queue.shift()!)) {
         collected.push(child);
         queue.push(child.id);
       }
@@ -346,8 +338,6 @@ export class TaskService {
       targetSessionId: prior.targetSessionId,
       sessionMode: "reuse",
       resumedFromRunId: prior.id,
-      rootRunId: prior.rootRunId,
-      depth: prior.depth,
       resumePrompt: prompt,
     });
     this.runs.start(run);
@@ -426,7 +416,6 @@ export class TaskService {
       state: run.state,
       targetSessionId: run.targetSessionId,
       sessionMode: run.sessionMode,
-      depth: run.depth,
       prompt: runPrompt(run),
       queuedAt: run.queuedAt,
       startedAt: run.startedAt,

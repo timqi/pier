@@ -15,7 +15,7 @@ const log = logger("tasks");
 interface GroupHost {
   getRun(id: string): TaskRun;
   cancel(id: string): void;
-  prepareMember(taskId: string, groupId: string, callerSessionId: string, parentRunId: string | null): TaskRun;
+  prepareMember(taskId: string, groupId: string, callerSessionId: string): TaskRun;
   startMember(run: TaskRun): void;
 }
 
@@ -53,7 +53,6 @@ export class TaskGroups {
     definitions: TaskDefinition[],
     join: GroupJoinMode,
     callerSessionId: string,
-    parentRunId: string | null,
     callbackSessionId: string | null,
     callbackMode: CallbackMode,
   ): { group: TaskGroup; runs: TaskRun[] } {
@@ -61,7 +60,7 @@ export class TaskGroups {
     const { group, runs } = this.store.transact(() => {
       const group = this.create(join, callerSessionId, callbackSessionId, callbackMode);
       const runs = definitions.map((definition) =>
-        this.host.prepareMember(definition.id, group.id, callerSessionId, parentRunId));
+        this.host.prepareMember(definition.id, group.id, callerSessionId));
       group.memberRunIds = runs.map((run) => run.id);
       this.store.saveGroup(group);
       return { group, runs };

@@ -107,8 +107,9 @@ Pier adds no turn for one workflow's sake.
 
 ## Two levels, no tree
 
-A run that has a supervisor (a `callbackSessionId`) may not call `pier task`
-at all: `task: a delegated run cannot delegate; ask in your result and let
+A run that has a supervisor (a `callbackSessionId` — its own, or its
+group's, since a group member reports through the group) may not call
+`pier task` at all: `task: a delegated run cannot delegate; ask in your result and let
 your supervisor run it`, exit 1. A top-level session, and a run nobody is
 waiting on (cron, watch, manual from the Console), may. So delegation is at
 most session → run, and a scheduled task can still fan out.
@@ -120,8 +121,11 @@ gone, so is the machinery for it: depth (0–2) and the 16-descendant limit in
 `runs.ts`, descendant ownership in `assertOwns`, the subagent callback
 redirect rule, every `active`-run branch in `handleTaskTool`, and the skill's
 nesting section. Ownership becomes: the session that launched a run controls
-it. A human turn in a run's session after it finished is that human's
-business and reports to nobody.
+it, and so does the run's own session; `parentRunId` stays for the one chain
+that remains, a `task` action's child, which a cancel still walks. A human
+turn in a run's session after it finished is that human's business and
+reports to nobody. The run preamble (`tasks/agent.ts`) tells a supervised run
+so in one sentence; an unsupervised run's preamble is unchanged.
 
 ## Skill
 

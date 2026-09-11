@@ -12,7 +12,7 @@ socket into a local process of Pier's user and nowhere else.
 Every request body carries `sessionId`, the calling session. It is identity,
 not authentication — the `0600` bits are the boundary; the id is the audit
 key (`vault resolve NAME by session <id>`) and the caller `pier task`
-operates as (ownership, depth, callback target).
+operates as (ownership, the supervised-run refusal, callback target).
 
 - The CLI reads `PIER_SESSION_ID` and nothing else. The shim Pier writes to
   `~/.pier/tools/bin/pier` (`writePierShim`, `src/tools.ts`) is the one line

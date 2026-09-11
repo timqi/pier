@@ -121,7 +121,6 @@ export interface BackgroundRun {
   targetSessionId: string | null;
   /** `"fork"` exists only in stored runs; the timeline prints what it reads. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
-  depth: number;
   /** What the run was asked to do — the card in the delegating session sits
    *  where the message was sent, so it shows the message. Null when the
    *  action has no text of its own (a task that runs another task). */

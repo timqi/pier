@@ -110,10 +110,9 @@ export interface TaskRun extends CallbackFields {
   id: string;
   taskId: string;
   taskRevision: number;
+  /** The run of a `task` action that waits on this one; a cancel walks the chain. */
   parentRunId: string | null;
   groupId: string | null;
-  rootRunId: string;
-  depth: number;
   resumedFromRunId: string | null;
   triggerSource: "manual" | "cron" | "watch" | "agent" | "task";
   invokedBySessionId: string | null;

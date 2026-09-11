@@ -231,8 +231,9 @@ browser keeps no second session order.
 ### Console views
 
 - **Activity**: Session table + directed task graph. Invocation edges solid,
-  callbacks dashed, control messages dotted; Session nodes
-  open chat, run edges open Runs. Active and last-24h include every queued or
+  from the launching session (the scheduler when none) to the run's session
+  or process — never run to run; callbacks dashed, control messages dotted;
+  Session nodes open chat, run edges open Runs. Active and last-24h include every queued or
   running task regardless of age; last-24h adds up to 200 terminal runs,
   excluding successful unmatched watch probes.
 - **Automation**: Tasks, Runs, Activity share the head's tabs; New task is a

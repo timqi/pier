@@ -308,7 +308,7 @@ const processScript = `
       router.attach({ channelId: "slack", conversationId: "source-thread" }, source);
       // Six slots total: the root plus five members run, the sixth member
       // is durably queued. The unfinished join must be evaluated at next boot.
-      tasks.runGroup([task, task, task, task, task, task], "all", "parent", null, "parent");
+      tasks.runGroup([task, task, task, task, task, task], "all", "parent", "parent", "followUp");
     }
     const beginDrain = once(process, "message");
     await send({ phase: "ready", rootId: root.id });

@@ -33,7 +33,6 @@ export interface RunSummary {
   /** Echoed only when it is not the default: the one confirmation the caller
    *  gets that its result will interrupt rather than wait. */
   callbackMode?: TaskRun["callbackMode"];
-  depth: number;
   queuedAt: number;
   startedAt?: number;
   finishedAt?: number;
@@ -76,7 +75,6 @@ const summarize = (run: TaskRun): RunSummary => defined<RunSummary>({
   callbackSessionId: run.callbackSessionId,
   callbackState: run.callbackState,
   callbackMode: run.callbackMode ?? null,
-  depth: run.depth,
   queuedAt: run.queuedAt,
   startedAt: run.startedAt,
   finishedAt: run.finishedAt,
@@ -98,8 +96,6 @@ const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: str
         ? "the result interrupts your running turn as a steer message; nothing to query"
         : "the result arrives as a callback message once your turn ends; nothing to query",
 });
-
-const SUBAGENT_REDIRECT = "subagents cannot redirect callbacks (callback_session_id)";
 
 /** Who a new run's result goes to — the caller, nobody, or a named session that
  *  must exist. Shared by `run` and `message` on a finished run: a resumed run is a new run. */
@@ -249,11 +245,13 @@ export async function handleTaskTool(
 ): Promise<unknown> {
   const input = record(raw);
   if (!input) throw new Error("task tool parameters required");
+  // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
+  // what a supervised run launched would report to a session no run owns.
   const active = store.findActiveRunForTarget(callerSessionId);
+  if (active && store.supervised(active)) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
   if (input.operation === "save") {
-    if (active) throw new Error("subagents cannot save task definitions");
     const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
     return input.task_id === undefined
       ? definitions.create(draft, `session:${callerSessionId}`)
@@ -263,9 +261,6 @@ export async function handleTaskTool(
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
     if (record(input.launch)?.model === "?") return host.models();
     const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
-    // A run's own callback is its parent's link back; a child that could point
-    // it elsewhere would strand the supervisor waiting for a result.
-    if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
@@ -277,15 +272,14 @@ export async function handleTaskTool(
         const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
         resolved.push(entry.task_id === undefined
-          ? await resolveDraft(definitions, menu, entry, active, callerSessionId)
-          : resolveStored(definitions, entry.task_id, active));
+          ? await resolveDraft(definitions, menu, entry, callerSessionId)
+          : definitions.get(requiredString(entry.task_id, "task_id")));
       }
       const groupCallbackSessionId = input.callback === "none" ? null : callerSessionId;
       const { group, runs } = host.runGroup(
         resolved,
         input.join === "first" ? "first" : "all",
         callerSessionId,
-        active?.id ?? null,
         groupCallbackSessionId,
         callbackMode,
       );
@@ -293,8 +287,8 @@ export async function handleTaskTool(
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
     const task = draft
-      ? await resolveDraft(definitions, menu, draft, active, callerSessionId)
-      : resolveStored(definitions, input.task_id, active);
+      ? await resolveDraft(definitions, menu, draft, callerSessionId)
+      : definitions.get(requiredString(input.task_id, "task_id"));
     // Same as the HTTP route: a named mode the schema no longer offers is
     // answered, not quietly swapped for the definition's own policy.
     if (input.session_mode !== undefined && input.session_mode !== "fresh") {
@@ -302,7 +296,7 @@ export async function handleTaskTool(
     }
     const sessionMode = input.session_mode;
     const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
-    const run = host.run(task.id, input.input, "agent", active?.id ?? null, {
+    const run = host.run(task.id, input.input, "agent", null, {
       invokedBySessionId: callerSessionId,
       sourceSessionId: callerSessionId,
       callbackSessionId,
@@ -343,12 +337,12 @@ export async function handleTaskTool(
   if (input.operation === "cancel") {
     if (typeof input.group_id === "string") {
       const { group, members } = host.getGroup(input.group_id);
-      for (const member of members) assertOwns(store, callerSessionId, active, member);
+      for (const member of members) assertOwns(callerSessionId, member);
       const cancelled = host.cancelGroup(group.id);
       return summarizeGroup(cancelled, cancelled.memberRunIds.map((id) => host.getRun(id)));
     }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(store, callerSessionId, active, run);
+    assertOwns(callerSessionId, run);
     const cancelled = host.cancel(run.id);
     return summarize(cancelled);
   }
@@ -357,12 +351,10 @@ export async function handleTaskTool(
     // caller, decides whether the text steers, queues or resumes, so a status
     // query never has to exist.
     const run = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(store, callerSessionId, active, run);
+    assertOwns(callerSessionId, run);
     const message = requiredString(input.message, "message");
     if (isTerminal(run.state)) {
-      // A resumed run is a new run with its own callback, under `run`'s rule:
-      // a subagent may not redirect it.
-      if (active && input.callback_session_id !== undefined) throw new Error(SUBAGENT_REDIRECT);
+      // A resumed run is a new run with its own callback.
       const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
       const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
       const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true });
@@ -443,7 +435,6 @@ async function resolveDraft(
   definitions: TaskDefinitions,
   menu: Menu,
   raw: unknown,
-  active: TaskRun | undefined,
   callerSessionId: string,
 ): Promise<TaskDefinition> {
   const draft = record(await expandDraft(definitions, menu, raw, callerSessionId));
@@ -456,34 +447,13 @@ async function resolveDraft(
   if (draft.callback !== undefined || draft.callback_session_id !== undefined) {
     throw new Error("an inline task draft cannot set callback; use the top-level callback / callback_session_id");
   }
-  if (active) {
-    const action = record(draft.action);
-    if (action?.type !== "agent") throw new Error("subagents may only inline Agent tasks");
-    if (record(action.session)?.mode === "reuse") throw new Error("subagent inline tasks cannot reuse an existing session");
-  }
   return definitions.create({ ...draft, trigger: { type: "manual" } }, `session:${callerSessionId}`, "subagent");
 }
 
-function resolveStored(definitions: TaskDefinitions, taskId: unknown, active: TaskRun | undefined): TaskDefinition {
-  const task = definitions.get(requiredString(taskId, "task_id"));
-  if (active && task.action.type !== "agent") throw new Error("subagents may only invoke Agent tasks");
-  return task;
-}
-
-function assertOwns(store: TaskStore, callerSessionId: string, active: TaskRun | undefined, target: TaskRun): void {
-  if (active) {
-    let cursor: TaskRun | undefined = target;
-    while (cursor?.parentRunId) {
-      if (cursor.parentRunId === active.id) return;
-      cursor = store.getRun(cursor.parentRunId);
-    }
-    throw new Error("subagent may only control descendant runs");
+/** The session that launched a run controls it, and so does the run's own
+ *  session; a `task` action's child inherits its parent's launcher. */
+function assertOwns(callerSessionId: string, target: TaskRun): void {
+  if (target.invokedBySessionId !== callerSessionId && target.targetSessionId !== callerSessionId) {
+    throw new Error("session does not own this run");
   }
-  let root = target;
-  while (root.parentRunId) {
-    const parent = store.getRun(root.parentRunId);
-    if (!parent) throw new Error(`unknown parent run: ${root.parentRunId}`);
-    root = parent;
-  }
-  if (root.invokedBySessionId !== callerSessionId) throw new Error("session does not own this run");
 }

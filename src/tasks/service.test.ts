@@ -149,7 +149,7 @@ function setup(session = fakeSession(), instance?: ConstructorParameters<typeof 
 function storedRun(id: string, task: TaskDefinition, now: number, over: Partial<TaskRun> = {}): TaskRun {
   return {
     id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-    rootRunId: id, depth: 0, resumedFromRunId: null,
+    resumedFromRunId: null,
     triggerSource: "agent", invokedBySessionId: null, sourceSessionId: null,
     targetSessionId: null, sessionMode: null,
     callbackSessionId: null, background: false, callbackState: null,
@@ -443,7 +443,7 @@ describe("callback recovery across database connections", () => {
     });
     const id = kind === "run"
       ? first.service.run(task.id, null, "agent", null, { callbackSessionId: "parent" }).id
-      : first.service.runGroup([task, task], "all", "parent", null, "parent", "followUp").group.id;
+      : first.service.runGroup([task, task], "all", "parent", "parent", "followUp").group.id;
     const record = () => kind === "run" ? first.store.getRun(id)! : first.store.getGroup(id)!;
     await vi.waitFor(() => expect(record().callbackState).toBe("delivered"));
     expect(disk.history()).toHaveLength(1);
@@ -603,6 +603,8 @@ describe("task service", () => {
     expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
     expect(manual.context.renderedPrompt).toContain("read by the operator");
     expect(manual.context.renderedPrompt).toContain("the answer resumes this session");
+    // Nobody waits on a manual run, so it may delegate and is not told otherwise.
+    expect(manual.context.renderedPrompt).not.toContain("You cannot delegate from here");
 
     const delegated = await service.tool({
       operation: "run",
@@ -610,6 +612,7 @@ describe("task service", () => {
     }, "s9") as RunSummary;
     const done = await service.waitForRun(delegated.runId);
     expect(done.context.renderedPrompt).toContain("read by the agent that delegated this run");
+    expect(done.context.renderedPrompt).toContain("session. You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it.\n\nReview the PR");
   });
 
   it("strips chat-only markup from a child result", async () => {
@@ -1122,8 +1125,6 @@ describe("task service", () => {
     }));
     expect(freshRun).toMatchObject({
       state: "succeeded",
-      rootRunId: freshRun.id,
-      depth: 0,
       sourceSessionId: "s1",
       targetSessionId: "fresh-child",
       sessionMode: "fresh",
@@ -1176,11 +1177,9 @@ describe("task service", () => {
   });
 
   it.each([
-    { sameRoot: true, cancelQueued: false },
-    { sameRoot: false, cancelQueued: false },
-    { sameRoot: true, cancelQueued: true },
-    { sameRoot: false, cancelQueued: true },
-  ])("keeps six agent slots across roots: $sameRoot, queued cancellation: $cancelQueued", async ({ sameRoot, cancelQueued }) => {
+    { cancelQueued: false },
+    { cancelQueued: true },
+  ])("keeps six agent slots instance-wide, queued cancellation: $cancelQueued", async ({ cancelQueued }) => {
     const { cwd, service, factory } = setup();
     onTestFinished(() => service.stop());
     const sessions: ReturnType<typeof hangingSession>[] = [];
@@ -1194,9 +1193,7 @@ describe("task service", () => {
       trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" },
     });
-    const runs = Array.from({ length: 7 }, () => service.run(task.id, null, "agent", null,
-      sameRoot ? { rootRunId: "shared-root" } : {}));
-    expect(new Set(runs.map((run) => run.rootRunId)).size).toBe(sameRoot ? 1 : 7);
+    const runs = Array.from({ length: 7 }, () => service.run(task.id, null, "agent"));
     await vi.waitFor(() => expect(runs.slice(0, 6).map((run) => service.getRun(run.id).state))
       .toEqual(Array.from({ length: 6 }, () => "running")));
     expect(factory.create).toHaveBeenCalledTimes(6);
@@ -1206,7 +1203,7 @@ describe("task service", () => {
     if (cancelQueued) {
       service.cancel(waiting.id);
       expect(await service.waitForRun(waiting.id)).toMatchObject({ state: "cancelled", startedAt: null, targetSessionId: null });
-      waiting = service.run(task.id, null, "agent", null, sameRoot ? { rootRunId: "shared-root" } : {});
+      waiting = service.run(task.id, null, "agent");
       runs.push(waiting);
       expect(factory.create).toHaveBeenCalledTimes(6);
       expect(service.getRun(waiting.id)).toMatchObject({ state: "queued", startedAt: null, targetSessionId: null });
@@ -1406,7 +1403,6 @@ describe("task service", () => {
     expect(resumed).toMatchObject({
       state: "succeeded",
       resumedFromRunId: done.id,
-      rootRunId: done.rootRunId,
       targetSessionId: session.id,
       sessionMode: "reuse",
     });
@@ -1476,6 +1472,9 @@ describe("task service", () => {
     // Fan-out members may be bare prompts.
     const group = await service.tool({ operation: "run", tasks: ["angle a", { prompt: "angle b", cwd: "./sub" }] }, "s1") as GroupSummary;
     expect(group.members.map((m) => m.taskName)).toEqual(["angle a", "angle b"]);
+    // The fake factory hands every fresh run the session "s1": while one of
+    // them still runs, "s1" is a supervised run and refused as one.
+    for (const id of [summary.runId, nested.runId, full.runId, ...group.members.map((m) => m.runId)]) await service.waitForRun(id);
 
     await expect(service.tool({ operation: "run", prompt: "x", task: { name: "y", action: { type: "bash", cwd, script: "true" } } }, "s1"))
       .rejects.toThrow("either prompt or task");
@@ -1766,7 +1765,7 @@ describe("task service", () => {
     const slowB = await service.create({ ...bashDraft(cwd, "sleep 5"), name: "slow-b" });
     const parent = service.run(slowA.id);
     const child = service.run(slowB.id, null, "task", parent.id);
-    expect(child.rootRunId).toBe(parent.id);
+    expect(child.parentRunId).toBe(parent.id);
     service.cancel(parent.id);
     expect((await service.waitForRun(parent.id)).state).toBe("cancelled");
     expect((await service.waitForRun(child.id)).state).toBe("cancelled");
@@ -1930,20 +1929,6 @@ describe("task admission and delivery regressions", () => {
     expect(session.systemInputs).toEqual([]);
   });
 
-  it("rolls back admitted siblings when a group exceeds the root's child limit", async () => {
-    const { cwd, service, store, factory } = setup();
-    const task = await service.create({ name: "member", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
-    store.saveRun(storedRun("root", task, 1, { rootRunId: "root", state: "running", targetSessionId: "s1" }));
-    for (let i = 0; i < 15; i++) store.saveRun(storedRun(`child-${i}`, task, i + 2, {
-      parentRunId: "root", rootRunId: "root", depth: 1,
-    }));
-    await expect(service.tool({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }] }, "s1"))
-      .rejects.toThrow("child limit");
-    expect(store.listRunsByRoot("root", 100)).toHaveLength(16);
-    expect(store.listOpenGroups()).toEqual([]);
-    expect(factory.create).not.toHaveBeenCalled();
-  });
-
   it("does not execute a group when persisting a later member fails", async () => {
     const { cwd, service, store, factory } = setup();
     const task = await service.create({ name: "member", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
@@ -1953,7 +1938,7 @@ describe("task admission and delivery regressions", () => {
       save(run);
       if (++attempts === 2) throw new Error("fixture disk failure");
     });
-    expect(() => service.runGroup([task, task], "all", "s1", null, "s1", "followUp"))
+    expect(() => service.runGroup([task, task], "all", "s1", "s1", "followUp"))
       .toThrow("fixture disk failure");
     expect(store.queryRuns({ showUnmatched: true }).runs).toEqual([]);
     expect(store.listOpenGroups()).toEqual([]);
@@ -1964,7 +1949,7 @@ describe("task admission and delivery regressions", () => {
     const { cwd, service, store } = setup();
     const task = await service.create(bashDraft(cwd, "true"));
     store.saveRun(storedRun("already-going", task, 1, { state: "running" }));
-    const { group, runs } = service.runGroup([task, task], "all", "s1", null, null, "followUp");
+    const { group, runs } = service.runGroup([task, task], "all", "s1", null, "followUp");
     expect(runs.map((run) => run.state)).toEqual(["skipped", "skipped"]);
     expect(group.finishedAt).not.toBeNull();
     expect(group.memberRunIds).toEqual(runs.map((run) => run.id));
@@ -1976,7 +1961,7 @@ describe("task admission and delivery regressions", () => {
     const busy = await service.create(bashDraft(cwd, "true"));
     store.saveRun(storedRun("already-going", busy, 1, { state: "running" }));
     const worker = await service.create({ name: "worker", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "work" } });
-    const { group, runs } = service.runGroup([worker, busy], "first", "s1", null, null, "followUp");
+    const { group, runs } = service.runGroup([worker, busy], "first", "s1", null, "followUp");
     expect(group.winnerRunId).toBe(runs[1]!.id);
     expect(runs[1]!.state).toBe("skipped");
     expect(await service.waitForRun(runs[0]!.id)).toMatchObject({ state: "cancelled" });
