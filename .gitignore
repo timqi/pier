@@ -1,6 +1,5 @@
 node_modules/
 dist/
-__pycache__/
 *.local
 .env
 src/web/public/

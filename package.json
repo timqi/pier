@@ -15,8 +15,6 @@
     "dist",
     "!dist/**/*.test.js",
     "skills",
-    "!skills/**/test_*.py",
-    "!skills/**/__pycache__",
     "docs/deploy.md"
   ],
   "publishConfig": {
