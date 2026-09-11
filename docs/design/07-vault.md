@@ -103,10 +103,9 @@ line ([08-cli-socket.md](08-cli-socket.md)); the vault's own are:
 
 ## Console
 
-Settings → **Vault** (`#/settings/vault`): the rows `name · level · updated`
-with Remove, and an add row (`name`, `auto|approve`, a password field). No
-reveal, no edit-in-place: a secret is replaced or removed. The routes and
-their status codes are in [03-web-workbench.md](03-web-workbench.md).
+Settings → **Vault** (`#/settings/vault`) files, replaces and removes a row
+and never reveals one; the pane and the three `/api/vault` routes are
+[03-web-workbench.md](03-web-workbench.md)'s.
 
 ## Channel credentials
 

@@ -138,8 +138,9 @@ All three signal the installed service.
     other key stay at Pi's defaults by omission, on purpose.
   An existing file is never touched, whatever it holds.
 - `systemctl --user restart pier` and `pier update` are hard stops.
-- One Pier per `$PIER_HOME`: a start whose directory another live Pier holds
-  logs `another Pier (pid N) owns …` and exits before opening the database. Kept
+- One Pier per `$PIER_HOME` (the pid in `~/.pier/pier.lock`): a start whose
+  directory another live Pier holds logs `another Pier (pid N) owns …` and
+  exits before opening the database. Kept
   under `Restart=always` on purpose — the service takes the directory back by
   itself once the other process (usually a hand-typed `pier serve`) is gone, at
   one refused start every `RestartSec=2` until then.
