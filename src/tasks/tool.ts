@@ -246,9 +246,10 @@ export async function handleTaskTool(
   const input = record(raw);
   if (!input) throw new Error("task tool parameters required");
   // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
-  // what a supervised run launched would report to a session no run owns.
+  // what a supervised run launched would report to a session no run owns. A
+  // queued run has not taken the session's turn, so it gates nothing yet.
   const active = store.findActiveRunForTarget(callerSessionId);
-  if (active && store.supervised(active)) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
+  if (active?.state === "running" && store.supervised(active)) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
   if (input.operation === "save") {

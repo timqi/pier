@@ -1,5 +1,5 @@
-// The recover boundary of the task tool: what a caller may read back, and the
-// one refusal everything else gets. Service-level behaviour lives in
+// The task tool's boundary: who may call it, what a caller owns and may read
+// back, how a model name resolves. Service-level behaviour lives in
 // service.test.ts; here the host is a stub over a real in-memory store.
 
 import { readFileSync } from "node:fs";
@@ -217,9 +217,11 @@ describe("task tool recover", () => {
     expect((await scheduled({ operation: "run", prompt: "Work" }) as RunSummary).runId).toBe("new");
     const detached = rig([live("m", { groupId: "g", callbackSessionId: null })], [group("g", ["m"], { callbackSessionId: null, callbackState: null })]);
     expect(await detached({ operation: "list" })).toEqual([]);
-    // A finished run's session is nobody's turn any more.
+    // A finished run's session is nobody's turn any more; a queued one has not taken it yet.
     const after = rig([run("done", { targetSessionId: "s1" })]);
     expect(await after({ operation: "list" })).toEqual([]);
+    const queued = rig([live("waiting", { state: "queued", startedAt: null, callbackSessionId: "parent" })]);
+    expect(await queued({ operation: "list" })).toEqual([]);
   });
 
   it("ownership is the launching session or the run's own; anyone else is refused", async () => {

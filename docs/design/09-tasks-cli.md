@@ -11,14 +11,14 @@ unchanged and stay in `tasks/`.
 | --- | --- | --- |
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) | run · steer · follow_up · resume |
 | `save` | files or updates an operator-visible definition — cron, watch, or a role run more than once | create · update |
+| `list` | definitions, one line each | list |
+| `cancel` | `--run <id>` or `--group <id>`, cascades to descendants | cancel |
+| `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check | recover |
 
 `handleTaskTool` speaks the same six words — `run`, `message`, `save`, `list`,
 `cancel`, `recover` — so the tool, while it lasts, and the CLI are one
 vocabulary. `save` with `task_id` updates. `message` is the one operation
 that did not exist: see below.
-| `list` | definitions, one line each | list |
-| `cancel` | `--run <id>` or `--group <id>`, cascades to descendants | cancel |
-| `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check | recover |
 
 Deleted with no replacement: `models` (see Models), `contact`, `reply` (see
 Decisions).
@@ -31,11 +31,9 @@ argv errors are the usage line, exit 2, before the socket is touched.
 ## `run`
 
 ```
-pier task run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>]
-              [--session <id>] [--model <name>] [--thinking <level>]
-              [--cwd <dir>] [--name <text>] [--timeout <seconds>]
-              [--callback origin|none|steer] [--callback-session <id>]
-              [--join all|first] [--member <flags…>]…
+pier task run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>] [--session <id>]
+              [--model <name|?>] [--thinking <level>] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
+              [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
@@ -66,11 +64,9 @@ for an agent action, and `parseDraft` stays the one validator on the server.
 ## `save`
 
 ```
-pier task save [--task-id <id>] --name <text>
-               (--prompt <text|-> | --bash <script>)
-               [--cron "<expr>" --tz <zone> | --watch <script> --every <s> [--repeat]]
-               [--cwd <dir>] [--timeout <seconds>] [--model] [--thinking]
-               [--callback-session <id>]
+pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)
+               [--cron "<expr>" --tz <zone> | --watch <script> --every <seconds> [--repeat]]
+               [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id>]
 ```
 
 `--task-id` updates, otherwise creates. No trigger means `manual`. `--bash`
@@ -111,7 +107,8 @@ A run that has a supervisor (a `callbackSessionId` — its own, or its
 group's, since a group member reports through the group) may not call
 `pier task` at all: `task: a delegated run cannot delegate; ask in your result and let
 your supervisor run it`, exit 1. A top-level session, and a run nobody is
-waiting on (cron, watch, manual from the Console), may. So delegation is at
+waiting on (cron, watch, manual from the Console), may. The gate is the run
+*running* on the caller's session; a queued one has not taken its turn. So delegation is at
 most session → run, and a scheduled task can still fan out.
 
 The reason is the run boundary: a run is one turn of its session, so a child
