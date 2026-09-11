@@ -125,11 +125,11 @@ class Client {
   }
 
   /** Every page of a cursor-paginated list. */
-  async pages<T>(fetch: (cursor?: string) => Promise<{ items: T[]; next?: string }>): Promise<T[]> {
+  async pages<T>(load: (cursor?: string) => Promise<{ items: T[]; next?: string }>): Promise<T[]> {
     const out: T[] = [];
     let cursor: string | undefined;
     do {
-      const page = await fetch(cursor);
+      const page = await load(cursor);
       out.push(...page.items);
       cursor = page.next;
     } while (cursor);
@@ -146,9 +146,9 @@ class Client {
     });
   }
 
-  messages(fetch: (cursor?: string) => Promise<SlackHistoryPage>): Promise<SlackMessageEvent[]> {
+  messages(load: (cursor?: string) => Promise<SlackHistoryPage>): Promise<SlackMessageEvent[]> {
     return this.pages(async (cursor) => {
-      const page = await fetch(cursor);
+      const page = await load(cursor);
       return { items: page.messages, next: page.nextCursor };
     });
   }
