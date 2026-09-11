@@ -20,7 +20,7 @@ export interface SocketHosts {
   /** The Console deep link for a name nobody has filed yet: the agent's error
    *  carries it, so the operator's path is one click and one paste. */
   fileUrl: (name: string) => string;
-  /** The task tool, exactly as a session's tool call reaches it. */
+  /** `pier task`'s operation, under the caller's session. */
   task: (params: unknown, callerSessionId: string) => Promise<unknown>;
   /** Identity, not authentication: the 0600 bits are the boundary, this is the
    *  audit key. A session Pier can locate is known; nothing else is. */
@@ -43,8 +43,8 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
       answer(500, { error: String(err) });
     }
   },
-  // 422, not 400: the request was well-formed; what the tool refused is the
-  // caller's to read, the same text a tool call would have been handed.
+  // 422, not 400: the request was well-formed; what the operation refused is
+  // the caller's to read.
   async "/task"({ task }, { params }, sessionId, answer) {
     try {
       answer(200, { result: await task(params, sessionId) });

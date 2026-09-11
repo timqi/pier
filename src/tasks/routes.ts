@@ -1,5 +1,5 @@
 // The area's HTTP surface. A route names the caller and hands the decision to
-// TaskService: policy here would be policy the task tool does not get.
+// TaskService: policy here would be policy `pier task` does not get.
 
 import type { Hono } from "hono";
 import type { AgentFactory } from "../core/types.js";

@@ -1,7 +1,6 @@
-// `pier task <command> …`: the task tool from a shell, so a session pays for
-// its schema only when it reaches for it. Argv shape is the only thing checked
-// here; the params object goes to the tool over the socket, which validates
-// it as it would a tool call, and the tool's answer comes back verbatim.
+// `pier task <command> …`: argv → the params object `/task` takes. Argv shape
+// is the only thing checked here; the server validates the operation, and its
+// answer comes back verbatim.
 
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -80,7 +79,7 @@ const seconds = (flag: Flag, raw: string | boolean | undefined): number | undefi
   return Number.isInteger(n) ? n : refuse(`--${flag} must be a whole number of seconds`);
 };
 
-/** `launch` as the tool takes it: `model` is a menu name the server resolves. */
+/** `launch` as the server takes it: `model` is a menu name it resolves. */
 const launchOf = (v: Values): Params | undefined =>
   v.model === undefined && v.thinking === undefined ? undefined : compact({ model: v.model, thinking: v.thinking });
 
@@ -151,7 +150,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   }
   if (name === "save") return saveParams(values, text);
 
-  /** One new run, in the three shapes the tool's `tasks[]` accepts. A saved
+  /** One new run, in the three shapes `tasks[]` accepts. A saved
    *  definition runs as is: batch defaults pass it by, its own flags are refused. */
   const entry = (v: Values, own = v): Params => {
     const launch = launchOf(v);

@@ -1,5 +1,5 @@
-// The task tool's boundary: who may call it, what a caller owns and may read
-// back, how a model name resolves. Service-level behaviour lives in
+// The `/task` route's boundary: who may call it, what a caller owns and may
+// read back, how a model name resolves. Service-level behaviour lives in
 // service.test.ts; here the host is a stub over a real in-memory store.
 
 import { readFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { THINKING_LEVELS } from "../core/types.js";
 import { openDb } from "../db.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import { agentTaskTools, handleTaskTool, type GroupSummary, type RunSummary } from "./tool.js";
+import { handleTask, type GroupSummary, type RunSummary } from "./operations.js";
 import type { TaskDefinition, TaskGroup, TaskRun } from "./types.js";
 import type { TaskDefinitions } from "./definitions.js";
 
@@ -82,37 +82,37 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
       return task;
     },
   } as unknown as TaskDefinitions;
-  const tool = (input: Record<string, unknown>) => handleTaskTool(host, definitions, store, input, "s1");
-  return Object.assign(tool, { created });
+  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1");
+  return Object.assign(ask, { created });
 }
 
 const notYet = /not recoverable yet/;
 
-describe("task tool recover", () => {
+describe("task operations", () => {
   it("needs a reason", async () => {
-    const tool = rig([run("r1")]);
-    await expect(tool({ operation: "recover", run_id: "r1" })).rejects.toThrow(/reason/);
+    const ask = rig([run("r1")]);
+    await expect(ask({ operation: "recover", run_id: "r1" })).rejects.toThrow(/reason/);
   });
 
   it("returns a delivered result whole, with no truncation note", async () => {
-    const tool = rig([run("r1")]);
-    const got = await tool({ operation: "recover", run_id: "r1", reason: "callback text was truncated" }) as RunSummary;
+    const ask = rig([run("r1")]);
+    const got = await ask({ operation: "recover", run_id: "r1", reason: "callback text was truncated" }) as RunSummary;
     expect(got.runId).toBe("r1");
     expect(got.result?.type === "agent" && got.result.text.length).toBe(2500);
     expect(got.next).toBeUndefined();
   });
 
   it("allows abandoned and none callbacks once the run is terminal", async () => {
-    const tool = rig([
+    const ask = rig([
       run("r1", { callbackState: "abandoned", callbackError: "undeliverable after 8 attempts" }),
       run("r2", { callbackSessionId: null, callbackState: null }),
     ]);
-    expect(((await tool({ operation: "recover", run_id: "r1", reason: "callback abandoned" })) as RunSummary).state).toBe("succeeded");
-    expect(((await tool({ operation: "recover", run_id: "r2", reason: "launched with none" })) as RunSummary).state).toBe("succeeded");
+    expect(((await ask({ operation: "recover", run_id: "r1", reason: "callback abandoned" })) as RunSummary).state).toBe("succeeded");
+    expect(((await ask({ operation: "recover", run_id: "r2", reason: "launched with none" })) as RunSummary).state).toBe("succeeded");
   });
 
   it("refuses queued, running, pending and failed with the same words — no state leaks", async () => {
-    const tool = rig([
+    const ask = rig([
       run("q1", { state: "queued", callbackState: null, finishedAt: null, startedAt: null, result: null }),
       run("r2", { state: "running", callbackState: null, finishedAt: null, result: null }),
       run("p3", { callbackState: "pending" }),
@@ -120,7 +120,7 @@ describe("task tool recover", () => {
     ]);
     const errors: string[] = [];
     for (const id of ["q1", "r2", "p3", "f4"]) {
-      errors.push(await tool({ operation: "recover", run_id: id, reason: "checking" }).then(() => "resolved", (e: Error) => e.message.replace(`run ${id}`, "run <id>")));
+      errors.push(await ask({ operation: "recover", run_id: id, reason: "checking" }).then(() => "resolved", (e: Error) => e.message.replace(`run ${id}`, "run <id>")));
     }
     expect(new Set(errors).size).toBe(1);
     expect(errors[0]).toMatch(notYet);
@@ -128,8 +128,8 @@ describe("task tool recover", () => {
   });
 
   it("tells a callback:none caller nothing will be delivered instead of promising a callback", async () => {
-    const tool = rig([run("n", { state: "running", callbackSessionId: null, callbackState: null, finishedAt: null, result: null })]);
-    await expect(tool({ operation: "recover", run_id: "n", reason: "x" })).rejects.toThrow(/callback none.*cannot wait/);
+    const ask = rig([run("n", { state: "running", callbackSessionId: null, callbackState: null, finishedAt: null, result: null })]);
+    await expect(ask({ operation: "recover", run_id: "n", reason: "x" })).rejects.toThrow(/callback none.*cannot wait/);
   });
 
   it("checks a member through its group, so a member cannot bypass the group callback", async () => {
@@ -143,26 +143,26 @@ describe("task tool recover", () => {
       [member("w"), member("l", { state: "running", finishedAt: null, result: null })],
       [group("g", ["w", "l"], { join: "first", winnerRunId: "w" })],
     );
-    await expect(losing({ operation: "recover", group_id: "g", reason: "x" })).rejects.toThrow(/recover its winning result with run_id w/);
+    await expect(losing({ operation: "recover", group_id: "g", reason: "x" })).rejects.toThrow(/recover its winning result with --run w/);
     expect((await losing({ operation: "recover", run_id: "w", reason: "winner callback was truncated" }) as RunSummary).runId).toBe("w");
     await expect(losing({ operation: "recover", run_id: "l", reason: "x" })).rejects.toThrow(/cannot wait for this member/);
 
     const done = rig([member("a"), member("b")], [group("g", ["a", "b"])]);
     const got = await done({ operation: "recover", group_id: "g", reason: "x" }) as GroupSummary;
     expect(got.members.map((m) => m.runId)).toEqual(["a", "b"]);
-    expect(got.members[0]!.result?.type === "agent" && got.members[0]!.result.text).toContain("recover run_id a with a reason");
+    expect(got.members[0]!.result?.type === "agent" && got.members[0]!.result.text).toContain("pier task recover --run a --reason");
     expect(((await done({ operation: "recover", run_id: "a", reason: "x" })) as RunSummary).result?.type === "agent").toBe(true);
   });
 
   it("run receipts say how the result arrives, and none promises nothing", async () => {
-    const tool = rig([]);
-    const followUp = await tool({ operation: "run", task_id: task.id }) as RunSummary;
+    const ask = rig([]);
+    const followUp = await ask({ operation: "run", task_id: task.id }) as RunSummary;
     expect(followUp.next).toMatch(/callback message once your turn ends; nothing to query/);
-    const steer = await tool({ operation: "run", task_id: task.id, callback: "steer" }) as RunSummary;
+    const steer = await ask({ operation: "run", task_id: task.id, callback: "steer" }) as RunSummary;
     expect(steer.next).toMatch(/interrupts your running turn/);
-    const none = await tool({ operation: "run", task_id: task.id, callback: "none" }) as RunSummary;
+    const none = await ask({ operation: "run", task_id: task.id, callback: "none" }) as RunSummary;
     expect(none.next).toBe("callback none: the result is not delivered to anyone");
-    const remote = await tool({ operation: "run", task_id: task.id, callback_session_id: "other" }) as RunSummary;
+    const remote = await ask({ operation: "run", task_id: task.id, callback_session_id: "other" }) as RunSummary;
     expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
   });
 
@@ -177,8 +177,8 @@ describe("task tool recover", () => {
   });
 
   it("a message on a finished run honours its callback options under the same subagent rule as run", async () => {
-    const tool = rig([run("r1")]);
-    const resumed = async (input: Record<string, unknown>) => (await tool({ operation: "message", run_id: "r1", message: "go on", ...input }) as { run: RunSummary }).run;
+    const ask = rig([run("r1")]);
+    const resumed = async (input: Record<string, unknown>) => (await ask({ operation: "message", run_id: "r1", message: "go on", ...input }) as { run: RunSummary }).run;
     const none = await resumed({ callback: "none" });
     expect(none.callbackSessionId).toBeUndefined();
     expect(none.next).toBe("callback none: the result is not delivered to anyone");
@@ -225,44 +225,44 @@ describe("task tool recover", () => {
   });
 
   it("ownership is the launching session or the run's own; anyone else is refused", async () => {
-    const tool = rig([
+    const ask = rig([
       run("mine", { state: "running", callbackState: null, finishedAt: null, result: null }),
       run("self", { state: "running", invokedBySessionId: null, callbackSessionId: null, callbackState: null, targetSessionId: "s1", finishedAt: null, result: null, triggerSource: "cron" }),
       run("theirs", { invokedBySessionId: "s2", callbackSessionId: "s2" }),
     ], [group("g", ["theirs"], { invokedBySessionId: "s2", callbackSessionId: "s2" })]);
-    expect(await tool({ operation: "message", run_id: "mine", message: "x" })).toMatchObject({ delivery: "steer" });
-    expect(await tool({ operation: "message", run_id: "self", message: "x" })).toMatchObject({ delivery: "steer" });
-    await expect(tool({ operation: "message", run_id: "theirs", message: "x" })).rejects.toThrow("session does not own this run");
-    await expect(tool({ operation: "cancel", run_id: "theirs" })).rejects.toThrow("session does not own this run");
-    await expect(tool({ operation: "cancel", group_id: "g" })).rejects.toThrow("session does not own this run");
+    expect(await ask({ operation: "message", run_id: "mine", message: "x" })).toMatchObject({ delivery: "steer" });
+    expect(await ask({ operation: "message", run_id: "self", message: "x" })).toMatchObject({ delivery: "steer" });
+    await expect(ask({ operation: "message", run_id: "theirs", message: "x" })).rejects.toThrow("session does not own this run");
+    await expect(ask({ operation: "cancel", run_id: "theirs" })).rejects.toThrow("session does not own this run");
+    await expect(ask({ operation: "cancel", group_id: "g" })).rejects.toThrow("session does not own this run");
   });
 
   it("message picks steer, follow-up or resume from the run's state and says which", async () => {
-    const tool = rig([
+    const ask = rig([
       run("live", { state: "running", callbackState: null, finishedAt: null, result: null }),
       run("done"),
     ]);
-    expect(await tool({ operation: "message", run_id: "live", message: "stop" }))
+    expect(await ask({ operation: "message", run_id: "live", message: "stop" }))
       .toEqual({ delivery: "steer", message: { id: "m1", runId: "live", kind: "steer", content: "stop" } });
-    expect(await tool({ operation: "message", run_id: "live", message: "then", after: true }))
+    expect(await ask({ operation: "message", run_id: "live", message: "then", after: true }))
       .toMatchObject({ delivery: "follow_up", message: { kind: "follow_up" } });
-    const resumed = await tool({ operation: "message", run_id: "done", message: "go on", callback: "steer" }) as { delivery: string; run: RunSummary };
+    const resumed = await ask({ operation: "message", run_id: "done", message: "go on", callback: "steer" }) as { delivery: string; run: RunSummary };
     expect(resumed.delivery).toBe("resume");
     expect(resumed.run.callbackMode).toBe("steer");
     expect(resumed.run.next).toMatch(/interrupts your running turn/);
     // Only a resume is a new run with its own callback; on a live run the option would be dropped, so it is refused.
-    await expect(tool({ operation: "message", run_id: "live", message: "x", callback: "steer" }))
+    await expect(ask({ operation: "message", run_id: "live", message: "x", callback: "steer" }))
       .rejects.toThrow("run live is running: callback options apply to a resumed run only");
-    await expect(tool({ operation: "message", run_id: "live", message: "x", callback_session_id: "other" }))
+    await expect(ask({ operation: "message", run_id: "live", message: "x", callback_session_id: "other" }))
       .rejects.toThrow(/callback options apply to a resumed run only/);
-    await expect(tool({ operation: "message", run_id: "live" })).rejects.toThrow("message required");
+    await expect(ask({ operation: "message", run_id: "live" })).rejects.toThrow("message required");
   });
 
   it("resolves launch.model by name against the menu, defaulting thinking to the pin's", async () => {
-    const tool = rig([]);
+    const ask = rig([]);
     const launchOf = async (launch: Record<string, unknown>) => {
-      await tool({ operation: "run", prompt: "Work", launch });
-      return (tool.created.at(-1)!.action as { launch: unknown }).launch;
+      await ask({ operation: "run", prompt: "Work", launch });
+      return (ask.created.at(-1)!.action as { launch: unknown }).launch;
     };
     // One hit: id, provider or note, any case.
     expect(await launchOf({ model: "Opus" })).toEqual({ model: { provider: "anthropic", id: "claude-opus-4" }, thinking: "high" });
@@ -280,33 +280,23 @@ describe("task tool recover", () => {
     );
     await expect(launchOf({ model: "gemini" })).rejects.toThrow(/model "gemini" matches 0 of the menu:\nanthropic\/claude-opus-4 · high — hardest reasoning\n/);
     // `?` is the menu itself, in place of a run.
-    expect(await tool({ operation: "run", prompt: "Work", launch: { model: "?" } })).toEqual({ source: "menu", models: menu });
+    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toEqual({ source: "menu", models: menu });
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });
-    expect(tool.created).toHaveLength(7);
-    await expect(tool({ operation: "models" })).rejects.toThrow("unknown task operation");
+    expect(ask.created).toHaveLength(7);
+    await expect(ask({ operation: "models" })).rejects.toThrow("unknown task operation");
   });
 
   it("does not take task_id", async () => {
-    const tool = rig([run("r1")]);
-    await expect(tool({ operation: "recover", task_id: task.id, reason: "x" })).rejects.toThrow(/run_id/);
+    const ask = rig([run("r1")]);
+    await expect(ask({ operation: "recover", task_id: task.id, reason: "x" })).rejects.toThrow(/run_id/);
   });
 
   it("rejects the removed operations without returning state", async () => {
-    const tool = rig([run("r1", { state: "running", callbackState: null, result: null })]);
+    const ask = rig([run("r1", { state: "running", callbackState: null, result: null })]);
     for (const operation of ["get", "steer", "follow_up", "resume", "contact", "reply", "models", "create", "update"]) {
-      await expect(tool({ operation, run_id: "r1", message: "x" })).rejects.toThrow("unknown task operation");
+      await expect(ask({ operation, run_id: "r1", message: "x" })).rejects.toThrow("unknown task operation");
     }
-  });
-
-  it("a session opens with the task tool while the switch is on, and without it once off", () => {
-    let on = true;
-    const tools = agentTaskTools(() => on, async () => null);
-    expect(tools().map((tool) => tool.name)).toEqual(["task"]);
-    on = false;
-    expect(tools()).toEqual([]);
-    on = true;
-    expect(tools()).toHaveLength(1);
   });
 
   // The skill is what the agent acts on; a level added here and not there is a

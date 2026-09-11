@@ -135,7 +135,6 @@ const SETTINGS_JSON = {
   publicUrl: "",
   modelMenu: [],
   autoUpdate: false,
-  taskTool: true,
   extensions: [],
   skillsOff: [],
   tools: [],
@@ -1033,22 +1032,6 @@ describe("workbench server", () => {
     expect(settings.get().autoUpdate).toBe(true);
     expect((await put(false)).status).toBe(200);
     expect(settings.get().autoUpdate).toBe(false);
-  });
-
-  it("stores the task tool switch and rejects a non-boolean", async () => {
-    const { app, settings } = setup();
-    const put = (taskTool: unknown) =>
-      app.request("/api/settings", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ taskTool }),
-      });
-    expect((await put(false)).status).toBe(200);
-    expect(settings.get().taskTool).toBe(false);
-    expect((await put("off")).status).toBe(400);
-    expect(settings.get().taskTool).toBe(false);
-    expect((await put(true)).status).toBe(200);
-    expect(settings.get().taskTool).toBe(true);
   });
 
   it("stores the title model, clears it with null, and rejects anything else", async () => {

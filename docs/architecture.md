@@ -10,7 +10,7 @@ emits one ordered event stream that all surfaces consume.
 
 ```
 Slack / Telegram / Lark          Web workbench (browser)       Tasks
-        │ Channel seam                  │ HTTP + SSE          HTTP / timer / tool
+        │ Channel seam                  │ HTTP + SSE          HTTP / timer / socket
         ▼                               ▼                         ▼
 ┌──────────────────────────── core ──────────────────────────────┐
 │ router (conversation → session)                                │
@@ -53,8 +53,9 @@ src/
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,
-               messages, command, service, store, tool, routes, cli (`pier
-               task`: argv → the tool's params object over the socket)
+               messages, command, service, store, operations (the `/task`
+               route: who may ask for what), routes, cli (`pier task`: argv →
+               the params object over the socket)
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME

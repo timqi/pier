@@ -1,6 +1,10 @@
+// The `/task` socket route: every `pier task` operation — run, message, save,
+// list, cancel, recover — validated here once, answered with the summaries a
+// model reads. Scheduling and delivery stay in the service; this file decides
+// who may ask for what.
+
 import { isAbsolute, resolve } from "node:path";
-import { Type } from "typebox";
-import type { AgentCustomTool, ModelRef } from "../core/types.js";
+import type { ModelRef } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskService } from "./service.js";
@@ -11,10 +15,6 @@ const log = logger("tasks");
 
 type MenuEntry = Awaited<ReturnType<TaskService["models"]>>["models"][number];
 type Menu = () => Promise<MenuEntry[]>;
-
-// JSON-Schema enum emits ~1/3 the tokens of typebox's anyOf-of-consts.
-const strEnum = <const T extends readonly string[]>(...values: T) =>
-  Type.Unsafe<T[number]>({ type: "string", enum: [...values] });
 
 /** Model-facing run shape: everything the caller can act on, none of the
  * context echo (definition, renderedPrompt, probe) that wastes its tokens. */
@@ -119,7 +119,7 @@ const trimResult = (summary: RunSummary): RunSummary => {
     ...summary,
     result: {
       ...summary.result,
-      text: `${summary.result.text.slice(0, 2000)}\n[truncated — recover run_id ${summary.runId} with a reason for the full text]`,
+      text: `${summary.result.text.slice(0, 2000)}\n[truncated — pier task recover --run ${summary.runId} --reason … for the full text]`,
     },
   };
 };
@@ -148,95 +148,7 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[]): GroupSummary => d
   next: null,
 });
 
-const LaunchSchema = Type.Object({
-  model: Type.Optional(Type.String({ description: "A name matched against the operator's menu (provider, id or note), a full provider/id, or ? for the menu." })),
-  thinking: Type.Optional(Type.String()),
-});
-
-// Guidance only: runtime truth stays in parseDraft, so schema drift cannot
-// loosen boundary validation.
-const DraftSchema = Type.Object({
-  name: Type.Optional(Type.String({ description: "Defaults to the prompt's first line." })),
-  description: Type.Optional(Type.String()),
-  trigger: Type.Optional(Type.Union([
-    Type.Object({ type: Type.Literal("manual") }),
-    Type.Object({ type: Type.Literal("cron"), expression: Type.String(), timezone: Type.String() }),
-    Type.Object({
-      type: Type.Literal("watch"),
-      script: Type.String(),
-      cwd: Type.String(),
-      intervalSeconds: Type.Number(),
-      mode: strEnum("once", "repeat"),
-    }),
-  ])),
-  action: Type.Union([
-    Type.Object({
-      type: Type.Literal("agent"),
-      session: Type.Union([
-        Type.Object({ mode: Type.Literal("fresh"), cwd: Type.Optional(Type.String({ description: "Absolute, or relative to your session's directory; omitted = your directory." })) }),
-        Type.Object({ mode: Type.Literal("reuse"), sessionId: Type.String() }),
-      ]),
-      prompt: Type.String(),
-      launch: Type.Optional(LaunchSchema),
-    }),
-    Type.Object({ type: Type.Literal("bash"), script: Type.String(), cwd: Type.String() }),
-    Type.Object({ type: Type.Literal("task"), taskId: Type.String() }),
-  ]),
-  callback: Type.Optional(Type.Union([
-    Type.Object({ type: Type.Literal("none") }),
-    Type.Object({ type: Type.Literal("origin") }),
-    Type.Object({ type: Type.Literal("session"), sessionId: Type.String() }),
-  ])),
-  timeoutSeconds: Type.Optional(Type.Number()),
-});
-
-/** The model-facing `task` tool contract, injected into the agent seam as data. */
-export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTool {
-  return {
-    name: "task",
-    label: "Pier Task",
-    description:
-      "Pier subagents and scheduled tasks — the same surface as `pier task` in a shell. run: a one-shot subagent from prompt (+ cwd/launch/name/timeoutSeconds; cwd defaults to your directory, name to the prompt's first line), a stored task_id, a task draft, or tasks[] (2+) joined all|first. Every operation returns at once; results arrive as callback messages after your turn ends — there is no status query. callback 'steer' interrupts your running turn instead, 'none' delivers nowhere. message: text for an existing run — running: steers it, after:true queues it behind the turn, finished: resumes it (only then do callback options apply); the result says which. save: a definition the operator sees, for schedules and roles run again (task_id updates). recover (run_id|group_id + reason): a finished result after its callback settled, never progress. A subagent that needs an answer ends its turn with the question as its result; message it the answer.",
-    parameters: Type.Object({
-      operation: strEnum("run", "message", "save", "list", "cancel", "recover"),
-      task_id: Type.Optional(Type.String()),
-      run_id: Type.Optional(Type.String()),
-      group_id: Type.Optional(Type.String()),
-      message: Type.Optional(Type.String()),
-      after: Type.Optional(Type.Boolean()),
-      reason: Type.Optional(Type.String({ description: "recover: why the delivered callback is not enough (required)." })),
-      session_mode: Type.Optional(strEnum("fresh")),
-      prompt: Type.Optional(Type.String()),
-      cwd: Type.Optional(Type.String()),
-      launch: Type.Optional(LaunchSchema),
-      name: Type.Optional(Type.String()),
-      timeoutSeconds: Type.Optional(Type.Number({ description: "1–86400; defaults to 3600." })),
-      task: Type.Optional(DraftSchema),
-      // Spelled out, the draft schema costs more tokens per session than the
-      // rest of this contract; `parseDraft` validates either shape.
-      tasks: Type.Optional(Type.Unsafe<unknown[]>({
-        type: "array",
-        description: "2+ entries, each a prompt string, {prompt, cwd?, launch?, name?, timeoutSeconds?}, a task draft shaped exactly like `task`, or {task_id}.",
-        items: { type: "object" },
-      })),
-      join: Type.Optional(strEnum("all", "first")),
-      input: Type.Optional(Type.Unknown()),
-      callback: Type.Optional(strEnum("origin", "none", "steer")),
-      callback_session_id: Type.Optional(Type.String()),
-    }),
-    execute,
-  };
-}
-
-/** What a session opens with: the tool, or nothing — `pier task` covers the
- *  same surface without the schema's per-turn cost. `enabled` is read per
- *  open, so the Console switch reaches the next session, never a running one. */
-export function agentTaskTools(enabled: () => boolean, execute: AgentCustomTool["execute"]): () => AgentCustomTool[] {
-  const spec = taskToolSpec(execute);
-  return () => (enabled() ? [spec] : []);
-}
-
-export async function handleTaskTool(
+export async function handleTask(
   host: TaskService,
   definitions: TaskDefinitions,
   store: TaskStore,
@@ -244,7 +156,7 @@ export async function handleTaskTool(
   callerSessionId: string,
 ): Promise<unknown> {
   const input = record(raw);
-  if (!input) throw new Error("task tool parameters required");
+  if (!input) throw new Error("task parameters required");
   // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
   // what a supervised run launched would report to a session no run owns. A
   // queued run has not taken the session's turn, so it gates nothing yet.
@@ -319,7 +231,7 @@ export async function handleTaskTool(
       const { group, members } = host.getGroup(input.group_id);
       groupReady(group);
       if (!members.every((run) => isTerminal(run.state))) {
-        throw new Error(`recover cannot inspect active members; the race has settled — recover its winning result with run_id ${group.winnerRunId ?? "from the callback"} and a reason`);
+        throw new Error(`recover cannot inspect active members; the race has settled — recover its winning result with --run ${group.winnerRunId ?? "<id from the callback>"} and a reason`);
       }
       log.info(`recover group ${group.id} by ${callerSessionId}: ${reason}`);
       return summarizeGroup(group, members);

@@ -44,8 +44,8 @@ scheduled tasks, live observability, and static Show pages.
   Pi's own registry (settings.json `packages`), which Pier writes and never
   mirrors
 - `web/` chat + observability timeline, an event-stream consumer
-- `tasks/` scheduler; cron + prompt + session config; one custom tool is the
-  entire agent-collaboration surface
+- `tasks/` scheduler; cron + prompt + session config; `pier task` over the CLI
+  socket is the entire agent-collaboration surface
 - `boards/` static Show pages: a filesystem scan plus a file handler
 - Root `src/*.ts` is the instance layer — entry points (`main.ts`, `cli.ts`),
   ops (`service.ts`, `update.ts`, `drain.ts`) and the leaves any area may import

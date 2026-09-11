@@ -26,7 +26,7 @@ function rig(answer: { status: number; body: { result?: unknown; error?: string 
 }
 
 describe("pier task", () => {
-  it("maps every command onto the tool's parameter names", async () => {
+  it("maps every command onto the server's parameter names", async () => {
     const { run, posted, out } = rig();
     const cases: [string[], Record<string, unknown>][] = [
       [["list"], { operation: "list" }],
@@ -164,7 +164,7 @@ describe("pier task", () => {
     expect(out.at(-1)).toContain("pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)");
   });
 
-  it("prints the tool's refusal as one task: line, exit 1", async () => {
+  it("prints the server's refusal as one task: line, exit 1", async () => {
     const { run, err, out } = rig({ status: 422, body: { error: "session does not own this run" } });
     expect(await run("cancel", "--run", "r1")).toBe(1);
     expect(err).toEqual(["task: session does not own this run"]);

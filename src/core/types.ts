@@ -485,18 +485,6 @@ export interface PackageStore {
   checkUpdates(): Promise<PackageRegistry>;
 }
 
-/**
- * Backend-neutral custom tool: schema as plain data, owned by the feature
- * that defines the contract (tasks/), translated to the backend by agent/.
- */
-export interface AgentCustomTool {
-  name: string;
-  label: string;
-  description: string;
-  parameters: object; // JSON Schema
-  execute(params: unknown, callerSessionId: string, signal?: AbortSignal): Promise<unknown>;
-}
-
 export interface AgentLaunchOptions {
   cwd: string;
   name?: string;

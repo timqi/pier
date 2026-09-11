@@ -197,17 +197,16 @@ export function registerInstanceRoutes(
         modelMenu?: unknown;
         titleModel?: unknown;
         autoUpdate?: unknown;
-        taskTool?: unknown;
         customTools?: unknown;
         tool?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.taskTool, body.customTools, body.tool]
+      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, titleModel, autoUpdate, taskTool, customTools or tool required",
+        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools or tool required",
       }, 400);
     }
     // One transaction: a new custom tool and the switch that turns it on must
@@ -235,11 +234,6 @@ export function registerInstanceRoutes(
       const { autoUpdate } = body;
       if (typeof autoUpdate !== "boolean") return refuse("autoUpdate must be a boolean");
       writes.push(() => settings.setAutoUpdate(autoUpdate));
-    }
-    if (body?.taskTool !== undefined) {
-      const { taskTool } = body;
-      if (typeof taskTool !== "boolean") return refuse("taskTool must be a boolean");
-      writes.push(() => settings.setTaskTool(taskTool));
     }
     /** Null when the request does not touch them; a name declared here is
      *  switchable in the same write. */

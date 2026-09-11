@@ -8,7 +8,7 @@ import type { TaskStore } from "./store.js";
 import type { TaskCallback, TaskRun } from "./types.js";
 
 /** The run id and the session that did the work: a relayer's next move is a
- *  deep link to it, and without this that costs a second tool call. */
+ *  deep link to it, and without this that costs a second call. */
 export const runRef = (run: TaskRun): string =>
   `Run: ${run.id}${run.targetSessionId ? ` / Session: ${run.targetSessionId}` : ""}`;
 
@@ -25,7 +25,7 @@ export function runResultText(run: TaskRun): string {
   if (run.result?.type === "bash") result = run.result.stdout || run.result.stderr || `exit ${String(run.result.exitCode)}`;
   if (run.result?.type === "task") result = JSON.stringify(run.result.result);
   if (run.result?.type === "watch") result = "Watch condition did not match";
-  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated — task tool recover run_id ${run.id} with a reason returns the full text]`;
+  if (result.length > 8000) result = `${result.slice(0, 8000)}\n[truncated — pier task recover --run ${run.id} --reason … returns the full text]`;
   return result;
 }
 

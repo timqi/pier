@@ -14,7 +14,7 @@ import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import type { TaskStore } from "./store.js";
-import { handleTaskTool } from "./tool.js";
+import { handleTask } from "./operations.js";
 import type { CallbackMode, GroupJoinMode, RunPage, RunQuery, RunView, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
@@ -171,7 +171,7 @@ export class TaskService {
     return this.definitions.create(raw, creator);
   }
 
-  /** `by` is how owning code says so; the routes and the tool have none (definitions.ts). */
+  /** `by` is how owning code says so; the routes and `pier task` have none (definitions.ts). */
   update(id: string, raw: unknown, by?: string): Promise<TaskDefinition> {
     return this.definitions.update(id, raw, by);
   }
@@ -344,8 +344,9 @@ export class TaskService {
     return run;
   }
 
-  tool(raw: unknown, callerSessionId: string): Promise<unknown> {
-    return handleTaskTool(this, this.definitions, this.store, raw, callerSessionId);
+  /** What `pier task` asks, under the calling session's identity. */
+  handle(raw: unknown, callerSessionId: string): Promise<unknown> {
+    return handleTask(this, this.definitions, this.store, raw, callerSessionId);
   }
 
   /** An agent picks from names that exist right now, never from memory. */

@@ -207,7 +207,7 @@ describe("a bundled extension shadowed by a copy on disk", () => {
 
 describe("the pier package's skills off-list", () => {
   it("drops only Pier's own skill of that name, at session open", async () => {
-    const factory = new PiAgentFactory(() => [], undefined, ["/pier/skills"], undefined, undefined, undefined,
+    const factory = new PiAgentFactory(undefined, ["/pier/skills"], undefined, undefined, undefined,
       () => ({ extensions: [], skillsOff: ["pier-help"] }));
     await (await factory.create({ cwd: "/tmp/off" })).dispose();
     const skills = [
@@ -588,7 +588,7 @@ describe("a directory reached through a symlink", () => {
 
   /** A factory whose disk is one session in `cwd`. */
   const listing = (cwd: string) =>
-    new PiAgentFactory(() => [], undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+    new PiAgentFactory(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
       scan: async () => [{ id: "s", path: `${cwd}/f.jsonl`, cwd, created: 1, modified: 2 }],
     });
 

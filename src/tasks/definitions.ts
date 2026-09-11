@@ -1,6 +1,6 @@
 // What a task *is* before it ever runs: the id it is minted with, the draft
 // validated into a definition, and when its trigger is next due. Every way a
-// definition can be created — HTTP, the task tool, Pier's own owned task —
+// definition can be created — HTTP, `pier task`, Pier's own owned task —
 // arrives here, so a field is checked in one place or nowhere.
 
 import { randomBytes } from "node:crypto";
@@ -42,7 +42,7 @@ export const idSymbol = (byte: number): string => ID_ALPHABET.charAt(byte & 31);
 export const newId = (): string => Array.from(randomBytes(16), idSymbol).join("");
 
 /** A definition Pier's own code created is reconciled by that code and edited
- *  by nobody: `creator` is `"http"` (Console) or `session:<id>` (task tool);
+ *  by nobody: `creator` is `"http"` (Console) or `session:<id>` (`pier task`);
  *  anything else is an instance-layer owner, which names itself in `by`.
  *  Otherwise a public surface could repoint the tools task while its switch
  *  went on claiming Pier keeps the tools current. */
@@ -273,7 +273,7 @@ export class TaskDefinitions {
     const trigger = parseTrigger(value.trigger);
     if (trigger.type === "watch") await this.assertDirectory(trigger.cwd);
     const actionRaw = record(value.action);
-    // Self-documenting: tool callers (models) recover from this in one retry.
+    // Self-documenting: a model recovers from this in one retry.
     if (!actionRaw) {
       throw new Error('action required, e.g. {"type":"agent","session":{"mode":"fresh","cwd":"/abs/path"},"prompt":"..."}');
     }

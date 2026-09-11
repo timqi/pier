@@ -31,7 +31,6 @@ import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
-import { agentTaskTools } from "./tasks/tool.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
 import { CUSTOM_TOOL_RULES, MANAGED, ManagedTools, normalizeCustomTools, prependPath, writePierShim } from "./tools.js";
 import { toolsTask } from "./tools-task.js";
@@ -105,7 +104,6 @@ const skillsDir = fileURLToPath(new URL("../skills", import.meta.url));
 const factory = new PiAgentFactory(
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
-  agentTaskTools(() => settings.get().taskTool, (params, callerSessionId) => tasks.tool(params, callerSessionId)),
   () => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }),
   // Documents Pier's own tools, so it loads only inside a Pier session.
   [skillsDir],
@@ -332,7 +330,7 @@ servePier({
   // The deep link an agent's "no secret named X" error carries; loopback when
   // no public URL is set, since nothing in the process can discover one.
   fileUrl: (name) => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/#/settings/vault?name=${name}`,
-  task: (params, callerSessionId) => tasks.tool(params, callerSessionId),
+  task: (params, callerSessionId) => tasks.handle(params, callerSessionId),
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
 });

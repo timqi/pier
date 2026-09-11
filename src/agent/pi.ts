@@ -8,7 +8,6 @@ import {
   createAgentSession,
   CredentialSynchronizationError,
   DefaultResourceLoader,
-  defineTool,
   ModelRuntime,
   SessionManager,
   type AgentSession as PiAgentSession,
@@ -16,9 +15,7 @@ import {
   type ExtensionAPI,
   type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "typebox";
 import type {
-  AgentCustomTool,
   AgentFactory,
   AgentLaunchOptions,
   AgentSession,
@@ -482,10 +479,9 @@ export class PiSession implements AgentSession {
 
 export class PiAgentFactory implements AgentFactory, ProviderManager {
   constructor(
-    /** Getters are read per session open, so a Console change reaches the next
-     *  session without a restart. */
-    private readonly extraTools: () => AgentCustomTool[] = () => [],
-    /** Appended as a context file so the user's own instructions still win. */
+    /** Read per session open, so a Console change reaches the next session
+     *  without a restart; appended as a context file so the user's own
+     *  instructions still win. */
     private readonly instructions: () => string = () => "",
     /** Loaded per session, never installed into the user's skill directories. */
     private readonly skillPaths: string[] = [],
@@ -748,35 +744,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
   }
 
   private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
-    let live: PiAgentSession | undefined;
-    const customTools = this.extraTools().map((tool) =>
-      defineTool({
-        name: tool.name,
-        label: tool.label,
-        description: tool.description,
-        parameters: tool.parameters as TSchema,
-        execute: async (_id, params, signal) => {
-          const caller = live?.sessionId ?? "unknown";
-          log.debug(`tool ${tool.name} called by ${caller}`);
-          try {
-            return {
-              content: [
-                {
-                  type: "text",
-                  // Pretty-printing costs ~20% more tokens and buys the model nothing.
-                  text: JSON.stringify(await tool.execute(params, caller, signal)),
-                },
-              ],
-              details: {},
-            };
-          } catch (err) {
-            // Pi turns this into tool-result text: the right recovery, the wrong record.
-            log.warn(`tool ${tool.name} failed for ${caller}`, err);
-            throw err;
-          }
-        },
-      }),
-    );
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.
     this.credentials?.assertUnlocked();
@@ -792,11 +759,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
     const created = await createAgentSession({
       cwd,
       sessionManager,
-      customTools,
       modelRuntime: runtime,
       resourceLoader: await this.resourceLoader(cwd),
     });
-    live = created.session;
+    const live = created.session;
     // Pi defaults to one follow-up per turn boundary, so N queued messages cost
     // N turns. The agent's setter flips only the in-memory queue;
     // `session.setFollowUpMode` would persist it to Pi's settings.json.

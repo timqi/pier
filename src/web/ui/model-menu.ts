@@ -1,5 +1,5 @@
-// Settings → Models: the operator's pinned menu, read by agents through the
-// task tool and listed first in every picker, the model every new session
+// Settings → Models: the operator's pinned menu, matched by `pier task
+// --model` and listed first in every picker, the model every new session
 // starts on, and the title model Pier itself calls.
 
 import { Plus } from "lucide";
