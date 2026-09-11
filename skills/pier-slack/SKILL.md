@@ -1,12 +1,59 @@
 ---
 name: pier-slack
-description: Read and write Slack through Pier's slack tool, including the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
+description: Read and write Slack from the shell with this skill's script and a vault token — history, threads, files, post/edit/delete — plus the Slack-specific syntax for mentions and links. Read before answering questions about Slack conversations or posting anything to a workspace.
 ---
 
-# Writing Slack correctly
+# Slack from the shell
 
-The tool description lists the operations and parameters. This is what goes
-wrong without instructions.
+There is no Slack tool. Every operation is `scripts/slack.py` (relative to this
+file's directory), run with the bot token injected by Pier's vault:
+
+```
+pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- <skill dir>/scripts/slack.py <subcommand> …
+```
+
+Stdlib Python 3, no install. The token never prints and never enters your
+context; a `vault:` line on stderr means the secret is missing or locked —
+follow the pier-vault skill, never work around it.
+
+## Where you are
+
+The first message of a Slack session opens with a header like
+`[Dana<U7> 2024-06-01 14:23 slack:C079TC7GUBG/1712.345600]`:
+`slack:<channel>/<thread_ts>` is this conversation. It is said once; it does
+not change. A session without that token (web, task, subagent) is not in
+Slack — name a channel explicitly.
+
+## Subcommands
+
+| Command | Does |
+| --- | --- |
+| `whoami` | your bot's user id and team — the id your own messages carry |
+| `channels` | every conversation the bot can reach: `id kind name`, non-members marked |
+| `history <channel> [--since T] [--until T] [--after TS] [--threads] [--out FILE]` | top-level messages, oldest first, all pages; `--threads` expands replies under each parent; `--out` writes to disk and prints one summary line |
+| `thread <channel> <ts> [--after TS] [--out FILE]` | one thread, oldest first |
+| `message <channel> <ts> [--thread TS]` | one message; a reply inside a thread is found through its thread |
+| `file <F…id> [--dir DIR]` | download an upload by id, prints the path (default: cwd) |
+| `post <channel> <text \| -> [--thread TS]` | post markdown, prints the `ts`; `-` reads stdin |
+| `edit <channel> <ts> <text \| ->` | replace a message outright |
+| `delete <channel> <ts>` | delete a message — no undo |
+
+- Times (`--since`, `--until`, `--after`): ISO 8601 (naive = local), epoch
+  seconds, or a Slack `ts`. `--after` is strictly newer — re-read without
+  seeing what you already saw.
+- A transcript line is `<ts> | <local time> | <name>[<id>] | <text>`, then
+  `[thread: N replies]` on a parent and `[file: <name> <F…> <size>]` per
+  upload; the first line names the format and the timezone. The `ts` is the
+  id: pass it back to `thread`, `message`, `--after`, `edit`, `delete`.
+- A wide range belongs on disk: `history … --threads --out raw.txt`, then
+  read the file in pieces. Never page a week through your context.
+- Text that starts with `-`, or is long: pipe it, `… post C1 - <<'EOF'`.
+- 11,000 chars per message; longer is refused. Split across replies in one
+  thread rather than truncating.
+- Errors are one `slack: <method>: <error>` line, Slack's code verbatim:
+  `not_in_channel` → someone must `/invite` the bot; `missing_scope` → the
+  operator reinstalls the app; `cant_update_message` / `cant_delete_message`
+  → not your message.
 
 ## Markdown is not Slack syntax
 
@@ -25,64 +72,31 @@ Four things markdown cannot express:
 
 - **Never guess an id from a name.** A wrong `<@U…>` fails or pings a stranger,
   and both look like it worked. With no id, write the person's name as prose.
-- **You already have the ids** — the sender header on the message you are
-  answering, `name[id]` on every transcript line, `context` for this channel and
-  thread. Asking a human to paste their own user ID is never acceptable.
+- **You already have the ids** — the `name<id>` header on the message you are
+  answering, `name[id]` on every transcript line. Asking a human to paste their
+  own user id is never acceptable.
 - Escape `&` `<` `>` when they are text, not markup: `&amp;` `&lt;` `&gt;`.
 - Emoji as `:white_check_mark:`, not the raw glyph.
-- 11,000 chars per message; the tool refuses longer `text`. Split longer
-  content across replies in one thread rather than truncating.
-
-## Targeting
-
-- Omitting `channel`/`thread_ts` means "here" — the conversation that reached
-  you. `context` names it; `inSlack:false` means a task, subagent or web session
-  started this, so `channel` is required.
-- `channels` lists what Pier can reach; an id or a `#name` works anywhere a
-  channel is wanted.
-- `thread_ts:"none"` is the only way to a new top-level message — a channel's
-  main flow is wider than a thread. A `thread_ts` is never inherited across a
-  change of `channel`.
-- A `ts` means nothing outside the conversation it was read in, and `edit` /
-  `delete` always take it explicitly — no default from the thread you are in.
-
-## Reading
-
-- A channel read returns thread **parents** only; `[thread: N replies]` marks
-  the ones worth a `read_thread`.
-- `read_message` also needs `thread_ts` when the message was posted inside a
-  thread — a channel read cannot see thread replies.
-- The leading `ts` on a line is Slack's id: pass it back as `thread_ts` or
-  `after`. `after` is strictly newer, for re-reading without seeing what you
-  already saw.
-- `truncated` → narrow the range rather than raising `limit` (default and max
-  400). `incomplete` → the read stopped early for the reason given; work with a
-  partial answer, but never report it as everything.
-- Resolve a vague time ("yesterday") to an explicit ISO range and say which
-  range you used.
-
-## Files
-
-`[file: <name> <F… id> <size>]` on a line is an upload, never its bytes.
-`fetch_file` with that `F…` id (no `channel` needed) saves it and replies with a
-marker line — `[postmortem.pdf](file:///…)` — so you read it only if the
-question needs its contents. Over 32 MB or refused by Slack: `[attachment lost:
-<name> — <reason>]`.
 
 ## Rules
 
 - Read before you write. A summary of the wrong thread is worse than none.
-- **In a busy thread, say nothing unless you are needed.** You are handed every
-  message, including humans talking to each other. `<silent>why</silent>` sends
-  nothing at all — prefer it to acknowledging what was not addressed to you.
-- `edit` replaces `text` outright; read the message first if you are changing
-  part of it. Slack keeps no version a reader can open and may not mark the
-  message as edited, so when the previous wording mattered to people, say what
-  changed instead of quietly rewriting history. A running status or tally is
-  better as one message edited in place than one message per change.
-- `delete` cannot be undone, and deleting a thread parent leaves its replies.
-  Say what you removed; a message vanishing with no word looks like a bug.
+- **Reply in the thread you were reached in** (`--thread` with the header's
+  `thread_ts`); a channel's main flow is wider than the conversation, so a
+  top-level post is a deliberate choice, said out loud.
+- **Edit and delete only what you posted.** Nothing stops the command; Slack
+  refuses other people's messages, and a bot's own it does not. `whoami` tells
+  you which id is yours; a transcript line shows who posted each `ts`.
+- `edit` replaces the text outright; read the message first if you are
+  changing part of it. Slack keeps no version a reader can open, so when the
+  previous wording mattered, say what changed. A running status is better as
+  one message edited in place than one message per change.
+- `delete` cannot be undone, and deleting a parent leaves its replies. Say
+  what you removed; a message vanishing with no word looks like a bug.
+- **In a busy thread, say nothing unless you are needed.** You are handed
+  every message, including humans talking to each other; `<silent>why</silent>`
+  sends nothing at all.
 - Never post credentials, tokens or file contents you were not asked to share:
   a channel is usually wider than the conversation you are in.
-- "Slack agent access is switched off" means the operator disabled it on
-  purpose. Say so and stop; do not look for another route.
+- A `ts` means nothing outside the conversation it was read in; `edit` and
+  `delete` always take it explicitly.
