@@ -64,6 +64,25 @@ describe("when a speaker line is worth its tokens", () => {
     expect(new SenderPrefix().next("s1", undefined, noon)).toBe("");
   });
 
+  it("names the conversation once, with the first speaker", () => {
+    const p = new SenderPrefix();
+    const here = "slack:C079TC7GUBG/1712.345600";
+    expect(p.next("s1", ada, noon, here)).toBe(`[Ada<U1> 2024-06-01 12:00 ${here}]`);
+    // The session never moves, so the place is never news again — not on a new
+    // speaker, not after a gap.
+    expect(p.next("s1", bob, noon + 1000, here)).toBe("[Bob<U2>]");
+    expect(p.next("s1", bob, noon + 11 * 60_000, here)).toBe("[12:11]");
+    expect(p.next("s1", bob, noon + 12 * 60_000, here)).toBe("");
+  });
+
+  it("names the conversation again after a forget, and never for a surface without one", () => {
+    const p = new SenderPrefix();
+    p.next("s1", ada, noon, "telegram:-100/7");
+    p.forget("s1");
+    expect(p.next("s1", ada, noon, "telegram:-100/7")).toBe("[Ada<U1> 2024-06-01 12:00 telegram:-100/7]");
+    expect(new SenderPrefix().next("s2", ada, noon)).toBe("[Ada<U1> 2024-06-01 12:00]");
+  });
+
   it("introduces her again once the session is made to forget", () => {
     // What the tracker holds is "the model has already been told". A message
     // that never reached it — a failed dispatch, a recalled queue, a rewound
@@ -120,12 +139,18 @@ describe("splitSpeaker", () => {
       .toEqual({ name: "Bob", id: "U2", text: "yo" });
     // Unnamed speaker — the id is all there was.
     expect(splitSpeaker("[<U9>]\nyo")).toEqual({ id: "U9", text: "yo" });
+    // The conversation rides at the end, in every combination.
+    const q = new SenderPrefix();
+    expect(splitSpeaker(withPrefix(q.next("s2", ada, noon, "slack:C1/1712.5"), "hi")))
+      .toEqual({ name: "Ada", id: "U1", when: "2024-06-01 12:00", where: "slack:C1/1712.5", text: "hi" });
+    expect(splitSpeaker("[<U9> slack:C1/1712.5]\nyo")).toEqual({ id: "U9", where: "slack:C1/1712.5", text: "yo" });
+    expect(splitSpeaker("[lark:oc_1/om_2]\nyo")).toEqual({ where: "lark:oc_1/om_2", text: "yo" });
   });
 
   it("leaves body text that merely starts with a bracket alone", () => {
     // The inbound-file convention, any human typing brackets, and the one case
     // only the trailing newline rules out: a message that opens with a time.
-    for (const text of ["[report.md](file:///tmp/report.md)", "[TODO] fix it", "[]\nhi", "[14:23] on my way", "[Ada<U1>] said no", "plain"]) {
+    for (const text of ["[report.md](file:///tmp/report.md)", "[TODO] fix it", "[]\nhi", "[14:23] on my way", "[Ada<U1>] said no", "[note: see below]\nhi", "plain"]) {
       expect(splitSpeaker(text)).toEqual({ text });
     }
   });

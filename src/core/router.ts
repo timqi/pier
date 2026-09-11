@@ -609,7 +609,10 @@ export class Router {
     if (this.draining) this.refuseDraining(msg.key);
     this.spokenTo?.(session.id);
     const { action, text } = decide(msg, session.state);
-    const prompt = withPrefix(this.senders.next(session.id, msg.sender), text);
+    // A chat is named so the agent can hand it to a script (skills/pier-slack);
+    // an alias names nothing a shell could reach.
+    const where = isAlias(msg.key) ? undefined : keyOf(msg.key);
+    const prompt = withPrefix(this.senders.next(session.id, msg.sender, Date.now(), where), text);
     log.debug(
       `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );

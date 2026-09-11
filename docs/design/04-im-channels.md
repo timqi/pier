@@ -18,7 +18,7 @@ Platform adapters in front of Pi sessions: Telegram, Slack and Lark (Feishu).
 | System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers | shared (`Channel.notify`) | ✅ | ✅ | ✅ |
 | Failure notices | Any error reaches the conversation, not just the web timeline | shared (`Router.report`) | ✅ | ✅ | ✅ |
 | Visible empty turns | A turn with no text still posts one muted line saying why | shared (`AgentReply.silence`), adapter renders | ✅ | ✅ | ✅ |
-| Speaker identity | `[name<id> time]` above a message, only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ | ✅ |
+| Speaker identity | `[name<id> time place]` above a message, only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ | ✅ |
 | Deliberate silence | `<silent>` sends no reply, so a group thread is bearable | shared (`splitReply`) | ✅ | ✅ | ✅ |
 | Stop | Abort the conversation's running turn | shared (`runtime` → `abortConversation`) | ✅ | ✅ | ✅ |
 | Bind | Redeem a Console-issued single-use code in a DM | shared | ✅ | ✅ | ✅ |
@@ -134,11 +134,16 @@ session asking Pier to read or write Slack.
 ### Who is speaking
 
 `InboundMessage.sender` carries `{id, name}`: the adapter resolves the display
-name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time]` only on a
-different speaker, a 10-minute gap, or a new day. `sanitizeIdentity` strips
-`[`, `]`, `<`, `>` and newlines so a display name cannot forge a second
-speaker. Identity is **per-turn, never baked into a session**: a thread is
-shared. Session-stable facts (platform, channel, thread) may be baked in.
+name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time place]` only on
+a different speaker, a 10-minute gap, a new day, or a different conversation.
+`place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`,
+`telegram:-100/7`), so a session can hand its own channel and thread to a
+script (`skills/pier-slack`); a session never changes conversation, so it is
+said once, on the first message, and again only after `forgetSender`. Alias
+keys (`web:`, `task:`) name no place. `sanitizeIdentity` strips `[`, `]`,
+`<`, `>` and newlines so a display name cannot forge a second speaker.
+Identity is **per-turn, never baked into a session**: a thread is shared.
+`splitSpeaker` reads every shape back for the web bubble and the listing index.
 
 ## Conversation identity
 

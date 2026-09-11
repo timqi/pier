@@ -991,6 +991,15 @@ describe("the speaker a session has been told about", () => {
     expect(fake.prompts[1]).toBe("again");
   });
 
+  it("names the chat as the adapter spelled it, and no alias", async () => {
+    await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
+    // `<channelId>:<conversationId>` verbatim: a skill script takes it apart.
+    expect(fake.prompts[0]).toMatch(/^\[Ada<U1> [\d: -]+ telegram:-100\/7\]\nhi$/);
+    const web = { channelId: "web", conversationId: "s1" };
+    await router.dispatch({ key: web, senderId: "web", sender: { id: "web", name: "operator" }, text: "yo", mode: "auto" });
+    expect(fake.prompts[1]).not.toContain("web:");
+  });
+
   it("is dropped on demand, for a surface that took the message back", async () => {
     await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
     // A recalled queue or a rewound turn: the prefixed text is out of the

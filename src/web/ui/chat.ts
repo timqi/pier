@@ -226,7 +226,7 @@ export function appendTurn(
   // The speaker header (core/identity.ts) is written for the model; as body
   // text it buries the message under a raw platform id.
   const speaker = kind === "user" ? splitSpeaker(body) : null;
-  const named = speaker?.id || speaker?.when ? speaker : null;
+  const named = speaker?.id || speaker?.when || speaker?.where ? speaker : null;
   // Here the operator is the reader; their own name over every message is noise.
   const caption = named?.id && named.id !== "web" ? named : null;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
