@@ -45,6 +45,10 @@ Under systemd that print lands in the journal: journalctl --user -u pier -e
 
 const say = (message: string): void => void process.stdout.write(`${message}\n`);
 
+/** Every socket route answers from memory and the database, so a Pier that
+ *  takes longer than this is stuck, and an agent's shell must not hang with it. */
+const SOCKET_TIMEOUT_MS = 30_000;
+
 /** Typed on the binding: only then does a call narrow the code after it. */
 const die: (message: string) => never = (message) => {
   process.stderr.write(`${message}\n`);
@@ -261,33 +265,37 @@ function inject(wanted: readonly (readonly [string, string])[], values: Resolved
 
 /** One request to the running Pier over its socket, signed with the caller's
  *  session (`PIER_SESSION_ID`, the harness variable mapped by the shim). Not
- *  running, or an identity Pier refuses, is one `pier:` line and exit 2 before
- *  any route reads the answer. */
+ *  running, silent, unreadable, or an identity or body Pier refuses, is one
+ *  `pier:` line and exit 2 before any route reads the answer. */
 async function askPier<T extends { error?: string }>(path: string, body: Record<string, unknown>): Promise<{ status: number; body: T }> {
   const { PIER_SOCK } = await import("./paths.js");
   const answer = await new Promise<{ status: number; body: T }>((done, reject) => {
+    let responded = false;
     const req = request(
-      { socketPath: PIER_SOCK, method: "POST", path, headers: { "content-type": "application/json" } },
+      { socketPath: PIER_SOCK, method: "POST", path, headers: { "content-type": "application/json" }, timeout: SOCKET_TIMEOUT_MS },
       (res) => {
+        responded = true;
         let raw = "";
         res.on("data", (chunk: Buffer) => (raw += chunk.toString()));
         res.on("end", () => {
           try {
             done({ status: res.statusCode ?? 0, body: JSON.parse(raw) as T });
-          } catch (err) {
-            reject(err);
+          } catch {
+            reject(new Error(`unreadable answer from ${PIER_SOCK} (status ${String(res.statusCode ?? 0)})`));
           }
         });
       },
     );
-    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error(`Pier did not answer within ${String(SOCKET_TIMEOUT_MS / 1000)} s`)));
+    // A 413 arrives while the body is still being written; the EPIPE after it is not the news.
+    req.on("error", (err) => responded || reject(err));
     req.end(JSON.stringify({ ...body, sessionId: process.env.PIER_SESSION_ID }));
   }).catch((err: NodeJS.ErrnoException) =>
     // A crash leaves the file with nobody behind it: that is "not running" too.
     err.code === "ENOENT" || err.code === "ECONNREFUSED"
       ? fail(`Pier is not running (no ${PIER_SOCK})`)
       : fail(err.message));
-  if (answer.status === 400 || answer.status === 403) fail(answer.body.error ?? `socket answered ${String(answer.status)}`);
+  if (answer.status === 400 || answer.status === 403 || answer.status === 413) fail(answer.body.error ?? `socket answered ${String(answer.status)}`);
   return answer;
 }
 

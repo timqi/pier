@@ -43,7 +43,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
       "        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id>]",
     help: "file a definition the operator sees, or update one by --task-id; no trigger means manual",
   },
-  list: { usage: "list", help: "stored definitions, one line each" },
+  list: { usage: "list", help: "stored definitions, as JSON" },
   cancel: { usage: "cancel (--run <id> | --group <id>)", help: "a run or a group, descendants included" },
   recover: { usage: "recover (--run <id> | --group <id>) --reason <text>", help: "a finished result after its callback settled; never a progress check" },
 };
@@ -177,6 +177,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   if (values.after) refuse("--after applies to --run only");
   if (members.length) {
     if (members.length < 2) refuse("a batch needs at least two --member");
+    if (values["task-id"] !== undefined) refuse("--task-id names one member's definition; put it after a --member");
     const grouped = members.find((m) => flagsOf(m).some((flag) => GROUP_FLAGS.includes(flag)));
     if (grouped) refuse(`--${flagsOf(grouped).find((flag) => GROUP_FLAGS.includes(flag))!} belongs before the first --member`);
     const defaults = Object.fromEntries(Object.entries(values).filter(([flag]) => !GROUP_FLAGS.includes(flag as Flag)));

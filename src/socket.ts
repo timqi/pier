@@ -12,7 +12,7 @@ import { isVaultName, UnknownSecret, VaultLocked, type Vault } from "./vault.js"
 
 const log = logger("socket");
 
-/** Generous for a task draft; anything past it is not a client of ours. */
+/** Generous for a task draft; a `--prompt -` past it is told so, not hung up on. */
 const MAX_BODY = 64 * 1024;
 
 export interface SocketHosts {
@@ -86,7 +86,9 @@ async function handle(hosts: SocketHosts, req: IncomingMessage, res: ServerRespo
   let raw = "";
   for await (const chunk of req) {
     raw += (chunk as Buffer).toString();
-    if (raw.length > MAX_BODY) return void req.destroy();
+    // Answered before the body is drained: leaving the loop destroys the
+    // request stream, and the response already queued still reaches the client.
+    if (raw.length > MAX_BODY) return answer(413, { error: `body exceeds ${String(MAX_BODY / 1024)} KiB` });
   }
   let body: unknown;
   try {

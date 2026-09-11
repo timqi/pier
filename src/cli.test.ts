@@ -224,6 +224,18 @@ describe("pier vault run", () => {
     expect(required.asked).toEqual([{ method: "POST", url: "/resolve", body: { names: ["A"] } }]);
   });
 
+  it("relays a refused body and an unreadable answer as one pier: line", async () => {
+    const large = await fakePier(413, { error: "body exceeds 64 KiB" });
+    const refused = await run(["vault", "run", "A", "--", "true"], { env: { ...process.env, ...SESSION, PIER_HOME: large.home } });
+    expect(refused.code).toBe(2);
+    expect(refused.stderr).toBe("pier: body exceeds 64 KiB\n");
+
+    const garbled = await fakePier(200, undefined);
+    const unreadable = await run(["task", "list"], { env: { ...process.env, ...SESSION, PIER_HOME: garbled.home } });
+    expect(unreadable.code).toBe(2);
+    expect(unreadable.stderr).toBe(`pier: unreadable answer from ${join(garbled.home, "pier.sock")} (status 200)\n`);
+  });
+
   it("prints the usage for bad syntax, never asking the socket", async () => {
     const { home, asked } = await fakePier(200, { values: {} });
     const env = { ...process.env, ...SESSION, PIER_HOME: home };

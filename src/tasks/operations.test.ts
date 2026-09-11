@@ -166,14 +166,18 @@ describe("task operations", () => {
     expect(remote.next).toBe("the result is delivered to session other; this session will not receive a callback");
   });
 
-  it("refuses every delivery redirect a fan-out cannot honour", async () => {
-    const top = rig([]);
+  it("refuses every delivery option it cannot honour, misspelt ones included", async () => {
+    const top = rig([run("r1")]);
     await expect(top({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }], callback_session_id: "other" }))
       .rejects.toThrow("callback_session_id applies to a single run only");
     await expect(top({ operation: "run", task_id: task.id, callback: "none", callback_session_id: "other" }))
       .rejects.toThrow(/callback none and callback_session_id conflict/);
     await expect(top({ operation: "run", task: { action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "Work" }, callback: { type: "session", sessionId: "other" } } }))
       .rejects.toThrow(/inline task draft cannot set callback/);
+    // A misspelt mode is refused, never read as its default.
+    await expect(top({ operation: "run", task_id: task.id, callback: "later" })).rejects.toThrow("callback must be one of origin, none, steer");
+    await expect(top({ operation: "run", tasks: [{ task_id: task.id }, { task_id: task.id }], join: "sometimes" })).rejects.toThrow("join must be one of all, first");
+    await expect(top({ operation: "message", run_id: "r1", message: "x", callback: "later" })).rejects.toThrow(/callback must be one of/);
   });
 
   it("a message on a finished run honours its callback options under the same subagent rule as run", async () => {

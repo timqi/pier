@@ -144,6 +144,7 @@ describe("pier task", () => {
       [["run", "--prompt", "x", "--after"], "task: --after applies to --run only"],
       [["run", "--prompt", "x", "--join", "first"], "task: --join applies to a batch (--member)"],
       [["run", "--member", "--prompt", "x"], "task: a batch needs at least two --member"],
+      [["run", "--task-id", "t1", "--member", "--prompt", "x", "--member", "--prompt", "y"], "task: --task-id names one member's definition; put it after a --member"],
       [["run", "--member", "--prompt", "x", "--member", "--prompt", "y", "--join", "all"], "task: --join belongs before the first --member"],
       [["save", "--name", "n"], "task: save takes exactly one of --prompt or --bash"],
       [["save", "--name", "n", "--prompt", "x", "--bash", "y"], "task: save takes exactly one of --prompt or --bash"],

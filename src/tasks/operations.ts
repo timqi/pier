@@ -97,6 +97,16 @@ const receipt = <T extends { next?: string }>(summary: T, callbackSessionId: str
         : "the result arrives as a callback message once your turn ends; nothing to query",
 });
 
+/** A typo in an enum field must not silently mean its default. */
+const oneOf = <T extends string>(input: Record<string, unknown>, key: string, values: readonly T[]): T | undefined => {
+  const value = input[key];
+  if (value === undefined || values.includes(value as T)) return value as T | undefined;
+  throw new Error(`${key} must be one of ${values.join(", ")}`);
+};
+
+const callbackModeOf = (input: Record<string, unknown>): CallbackMode =>
+  oneOf(input, "callback", ["origin", "none", "steer"]) === "steer" ? "steer" : "followUp";
+
 /** Who a new run's result goes to — the caller, nobody, or a named session that
  *  must exist. Shared by `run` and `message` on a finished run: a resumed run is a new run. */
 const callbackTarget = async (
@@ -173,7 +183,7 @@ export async function handleTask(
   if (input.operation === "run") {
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
     if (record(input.launch)?.model === "?") return host.models();
-    const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
+    const callbackMode = callbackModeOf(input);
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
       if (input.task !== undefined || input.task_id !== undefined) throw new Error("use either task/task_id or tasks[]");
@@ -190,7 +200,7 @@ export async function handleTask(
       const groupCallbackSessionId = input.callback === "none" ? null : callerSessionId;
       const { group, runs } = host.runGroup(
         resolved,
-        input.join === "first" ? "first" : "all",
+        oneOf(input, "join", ["all", "first"]) ?? "all",
         callerSessionId,
         groupCallbackSessionId,
         callbackMode,
@@ -260,7 +270,7 @@ export async function handleTask(
     const message = requiredString(input.message, "message");
     if (isTerminal(run.state)) {
       // A resumed run is a new run with its own callback.
-      const callbackMode: CallbackMode = input.callback === "steer" ? "steer" : "followUp";
+      const callbackMode = callbackModeOf(input);
       const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
       const resumed = host.resume(run.id, message, { invokedBySessionId: callerSessionId, callbackSessionId, callbackMode, background: true });
       return { delivery: "resume", run: receipt(summarize(resumed), callbackSessionId, callbackMode, callerSessionId) };
@@ -302,7 +312,8 @@ function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; think
   if (hits.length === 1) return { model: { provider: hits[0]!.provider, id: hits[0]!.id }, thinking: hits[0]!.thinking };
   const slash = name.indexOf("/");
   if (!hits.length && slash > 0 && slash < name.length - 1) return { model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } };
-  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${(hits.length ? hits : menu).map(line).join("\n")}`);
+  const lines = (hits.length ? hits : menu).map(line).join("\n") || "(no model is pinned or available)";
+  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${lines}`);
 }
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own

@@ -136,7 +136,7 @@ describe("cli socket", () => {
     expect(calls).toEqual([]);
   });
 
-  it("drops a body past 64 KB without reading it, and is 500 for a failure that is neither name nor lock", async () => {
+  it("answers 413 to a body past 64 KiB, and 500 for a failure that is neither name nor lock", async () => {
     const { path } = start(sockPath(), {
       vault: {
         resolve() {
@@ -145,8 +145,8 @@ describe("cli socket", () => {
       },
     });
     await listening(servers[0]!);
-    await expect(call(path, JSON.stringify({ sessionId: "s1", names: ["A".repeat(64), "B".repeat(64), "C"], pad: "x".repeat(70_000) })))
-      .rejects.toThrow(/socket hang up|ECONNRESET|EPIPE/);
+    expect(await call(path, JSON.stringify({ sessionId: "s1", names: ["A"], pad: "x".repeat(70_000) })))
+      .toEqual({ status: 413, body: { error: "body exceeds 64 KiB" } });
     const answer = await call(path, JSON.stringify({ sessionId: "s1", names: ["A"] }));
     expect(answer).toEqual({ status: 500, body: { error: "Error: disk gone" } });
   });

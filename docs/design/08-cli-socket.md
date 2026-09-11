@@ -25,9 +25,10 @@ operates as (ownership, the supervised-run refusal, callback target).
 
 ## Protocol
 
-`POST <route>`, body a JSON object, ≤64 KiB (past that the connection is
-dropped unread). Any other method or path is `404`; a body that is not a JSON
-object is `400`.
+`POST <route>`, body a JSON object, ≤64 KiB (past that `413 {error: "body
+exceeds 64 KiB"}`, answered before the rest is read). Any other method or
+path is `404`; a body that is not a JSON object is `400`. The CLI waits 30 s
+for an answer.
 
 | Route | Body | Answers |
 | --- | --- | --- |
@@ -41,5 +42,8 @@ object is `400`.
 | `pier: Pier is not running (no $PIER_HOME/pier.sock)` | 2 | no socket, or nobody behind it |
 | `pier: PIER_SESSION_ID is required` | 2 | the env has no session |
 | `pier: <id> is not a session of this Pier` | 2 | a foreign or stale id |
+| `pier: body exceeds 64 KiB` | 2 | a `--prompt -` too large for one request |
+| `pier: Pier did not answer within 30 s` | 2 | Pier is up but stuck |
+| `pier: unreadable answer from $PIER_HOME/pier.sock (status N)` | 2 | something other than Pier answered |
 | `vault: …` | 2 | a `/resolve` route answer ([07-vault.md](07-vault.md)) |
 | `task: …` | 1 | a `/task` route answer (`skills/pier-tasks/SKILL.md`) |

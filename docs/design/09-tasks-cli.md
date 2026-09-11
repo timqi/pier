@@ -11,7 +11,7 @@ limits and callbacks are `tasks/`'s and unchanged by this surface.
 | --- | --- |
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
-| `list` | definitions, one line each |
+| `list` | stored definitions, as JSON |
 | `cancel` | `--run <id>` or `--group <id>`, descendants included |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
