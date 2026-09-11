@@ -129,7 +129,7 @@ exists to catch.
 | `web/` | 14k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; every pane is the only implementation of its surface — the Pi SDK ships no browser UI — and duplication across the area measures 0.4%; still the least tested area |
 | `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry |
 | `tasks/` | 3.2k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam |
-| root `src/*.ts` | 3k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix |
+| root `src/*.ts` | 3.2k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix, the vault — store, socket and injector |
 | one bundled extension | 500 | pays for itself or is not shipped |
 | one module | 750 | rule 2 before splitting; `agent/pi.ts` (sessions) and `agent/packages.ts` (the package registry) are the two files that may touch the Pi SDK, and every block in each does |
 | channel adapter file | 400 | transport, render and panel counted separately |
