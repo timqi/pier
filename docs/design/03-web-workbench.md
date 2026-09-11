@@ -253,7 +253,11 @@ browser keeps no second session order.
   and reports saved / unsaved / failed. A file the index marks `readonly`
   (settings.json, written by Pier) opens in the viewer alone with one line on
   where its keys are set. Models: Default model is the launch picker written on
-  change, redrawn from the server's answer.
+  change, redrawn from the server's answer. Instance: Public URL, the browser's
+  notification switch, **Task tool** (`PUT /api/settings {taskTool}`; off,
+  sessions opened after the next Reload have no `task` tool and reach the
+  same operations through `pier task`, [08-cli-socket.md](08-cli-socket.md)),
+  Reload.
 - **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
   was opened from): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to

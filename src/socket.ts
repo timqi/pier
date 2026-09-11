@@ -55,12 +55,10 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
 };
 
 export function servePier(hosts: SocketHosts, path: string = PIER_SOCK): Server {
-  const server = createServer((req, res) => {
-    handle(hosts, req, res).catch((err: unknown) => {
-      log.error(`${req.method ?? "?"} ${req.url ?? "?"} failed`, err);
-      if (!res.headersSent) res.writeHead(500).end(JSON.stringify({ error: String(err) }));
-    });
-  });
+  const server = createServer((req, res) => void handle(hosts, req, res).catch((err: unknown) => {
+    log.error(`${req.method ?? "?"} ${req.url ?? "?"} failed`, err);
+    if (!res.headersSent) res.writeHead(500).end(JSON.stringify({ error: String(err) }));
+  }));
   // A crash leaves the old socket file behind, and listen() on it is EADDRINUSE.
   rmSync(path, { force: true });
   // bind() runs inside listen(): the umask covers the instant the file exists
@@ -96,8 +94,7 @@ async function handle(hosts: SocketHosts, req: IncomingMessage, res: ServerRespo
   } catch {
     return answer(400, { error: "body must be a JSON object" });
   }
-  const fields = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
-  const { sessionId } = fields;
+  const { sessionId, ...fields } = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   if (typeof sessionId !== "string" || !sessionId) return answer(400, { error: "PIER_SESSION_ID is required" });
   if (!(await hosts.knows(sessionId))) return answer(403, { error: `${sessionId} is not a session of this Pier` });
   await route(hosts, fields, sessionId, answer);

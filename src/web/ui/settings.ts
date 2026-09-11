@@ -6,7 +6,7 @@ import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, empty, field, input, pageTitle, PANEL, pill, setStatus } from "./form.js";
+import { badge, button, card, empty, field, input, pageTitle, PANEL, pill, setStatus, toggle } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
@@ -155,6 +155,30 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", pwSave, pwStatus),
   );
 
+  // --- Instance: task tool ------------------------------------------------------------
+
+  const taskStatus = h("span", "text-[11.5px]", "");
+  const taskToggle = toggle(
+    "Offer the task tool",
+    "Sessions get the task tool for subagents and schedules. Off, they reach the same operations through `pier task` in the shell, and every turn is the tool's schema lighter. Takes effect for sessions opened after the next reload.",
+    true,
+    (on) => void (async () => {
+      const res = await sendJson("/api/settings", { taskTool: on }, "PUT");
+      if (res.ok) return setStatus(taskStatus, "saved", on ? "On — sessions opened from now on have it." : "Off — sessions opened from now on use `pier task`.");
+      // Reconcile: the server is the truth, and a switch that silently did
+      // not take is worse than one that visibly failed.
+      taskInput.checked = !on;
+      setStatus(taskStatus, "failed", await failure(res, "Could not save"));
+    })(),
+  );
+  const taskInput = taskToggle.querySelector("input")!;
+  const taskCard = card(
+    "Task tool",
+    "How a session reaches subagents and scheduled tasks: as a tool call, or only as the `pier task` command.",
+    taskToggle,
+    taskStatus,
+  );
+
   // --- Instance: reload ------------------------------------------------------------
   // For the changes the Console never saw: a file edited over ssh.
 
@@ -272,6 +296,7 @@ export function createSettingsView(
     // configure Pier, and a second place for one toggle would be a third copy
     // of the same vocabulary.
     createNotificationsCard(),
+    taskCard,
     reloadCard,
   );
 
@@ -296,10 +321,12 @@ export function createSettingsView(
 
   function loadInstance(): void {
     void (async () => {
-      const got = await getJson<{ publicUrl: string }>("/api/settings", "Could not load settings");
+      const got = await getJson<{ publicUrl: string; taskTool: boolean }>("/api/settings", "Could not load settings");
       if (!got.ok) return setStatus(urlStatus, "failed", got.error);
       urlInput.value = got.value.publicUrl;
       urlStatus.textContent = "";
+      taskInput.checked = got.value.taskTool;
+      taskStatus.textContent = "";
     })();
   }
 

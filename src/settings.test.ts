@@ -15,6 +15,7 @@ const EMPTY = {
   publicUrl: "",
   modelMenu: [],
   autoUpdate: false,
+  taskTool: true,
   extensions: [],
   skillsOff: [],
   tools: [],
@@ -56,6 +57,19 @@ describe("SettingsStore", () => {
       ...EMPTY,
       publicUrl: "https://pier.example.com",
     });
+    reopened.close();
+  });
+
+  it("offers the task tool until switched off, and remembers the switch", () => {
+    const path = dbPath();
+    const db = openDb(path);
+    const store = new SettingsStore(db);
+    expect(store.get().taskTool).toBe(true);
+    expect(store.setTaskTool(false).taskTool).toBe(false);
+    db.close();
+    const reopened = openDb(path);
+    expect(new SettingsStore(reopened).get().taskTool).toBe(false);
+    expect(new SettingsStore(reopened).setTaskTool(true).taskTool).toBe(true);
     reopened.close();
   });
 

@@ -9,7 +9,7 @@ import { openDb } from "../db.js";
 import type { TaskMessenger } from "./messages.js";
 import type { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
-import { handleTaskTool, type GroupSummary, type RunSummary } from "./tool.js";
+import { agentTaskTools, handleTaskTool, type GroupSummary, type RunSummary } from "./tool.js";
 import type { TaskDefinition, TaskGroup, TaskRun } from "./types.js";
 import type { TaskDefinitions } from "./definitions.js";
 
@@ -209,6 +209,16 @@ describe("task tool recover", () => {
   it("contact still accepts only progress or decision as reason", async () => {
     const tool = rig([run("child", { state: "running", targetSessionId: "s1", finishedAt: null, result: null })]);
     await expect(tool({ operation: "contact", reason: "recover", message: "hi" })).rejects.toThrow(/progress or decision/);
+  });
+
+  it("a session opens with the task tool while the switch is on, and without it once off", () => {
+    let on = true;
+    const tools = agentTaskTools(() => on, async () => null);
+    expect(tools().map((tool) => tool.name)).toEqual(["task"]);
+    on = false;
+    expect(tools()).toEqual([]);
+    on = true;
+    expect(tools()).toHaveLength(1);
   });
 
   // The skill is what the agent acts on; a level added here and not there is a

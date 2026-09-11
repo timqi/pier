@@ -235,6 +235,14 @@ export function taskToolSpec(execute: AgentCustomTool["execute"]): AgentCustomTo
   };
 }
 
+/** What a session opens with: the tool, or nothing — `pier task` covers the
+ *  same surface without the schema's per-turn cost. `enabled` is read per
+ *  open, so the Console switch reaches the next session, never a running one. */
+export function agentTaskTools(enabled: () => boolean, execute: AgentCustomTool["execute"]): () => AgentCustomTool[] {
+  const spec = taskToolSpec(execute);
+  return () => (enabled() ? [spec] : []);
+}
+
 export async function handleTaskTool(
   host: TaskService,
   definitions: TaskDefinitions,

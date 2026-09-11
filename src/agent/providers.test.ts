@@ -20,7 +20,7 @@ beforeAll(async () => {
   const secrets = new Secrets(join(dir, "master.key"));
   await secrets.unlock();
   credentials = new CredentialStore(openDb(":memory:"), secrets, dir);
-  factory = new PiAgentFactory([], () => "", [], credentials, new PiConfigStore(dir));
+  factory = new PiAgentFactory(() => [], () => "", [], credentials, new PiConfigStore(dir));
 });
 
 afterAll(() => {

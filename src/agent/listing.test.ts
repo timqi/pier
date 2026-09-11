@@ -57,7 +57,7 @@ beforeEach(() => {
   listAll.mockReset();
   created.mockReset();
   listAll.mockResolvedValue([info("s1")]);
-  factory = new PiAgentFactory([], undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
+  factory = new PiAgentFactory(() => [], undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
     scan: () => listAll(),
   });
 });

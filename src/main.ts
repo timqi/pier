@@ -31,7 +31,7 @@ import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
-import { taskToolSpec } from "./tasks/tool.js";
+import { agentTaskTools } from "./tasks/tool.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
 import { CUSTOM_TOOL_RULES, MANAGED, ManagedTools, normalizeCustomTools, prependPath, writePierShim } from "./tools.js";
 import { toolsTask } from "./tools-task.js";
@@ -102,13 +102,10 @@ const configSync = new ConfigSync({
   reload: () => readyForConfigReload ? reloadInstance() : Promise.resolve(),
 });
 const skillsDir = fileURLToPath(new URL("../skills", import.meta.url));
-const agentTools = [
-  taskToolSpec((params, callerSessionId) => tasks.tool(params, callerSessionId)),
-];
 const factory = new PiAgentFactory(
-  agentTools,
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
+  agentTaskTools(() => settings.get().taskTool, (params, callerSessionId) => tasks.tool(params, callerSessionId)),
   () => surfacePrompt({ boardsDir: defaultBoardsDir(), publicUrl: settings.get().publicUrl }),
   // Documents Pier's own tools, so it loads only inside a Pier session.
   [skillsDir],

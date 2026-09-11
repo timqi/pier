@@ -482,10 +482,10 @@ export class PiSession implements AgentSession {
 
 export class PiAgentFactory implements AgentFactory, ProviderManager {
   constructor(
-    private readonly extraTools: AgentCustomTool[] = [],
     /** Getters are read per session open, so a Console change reaches the next
-     *  session without a restart. Appended as a context file so the user's own
-     *  instructions still win. */
+     *  session without a restart. */
+    private readonly extraTools: () => AgentCustomTool[] = () => [],
+    /** Appended as a context file so the user's own instructions still win. */
     private readonly instructions: () => string = () => "",
     /** Loaded per session, never installed into the user's skill directories. */
     private readonly skillPaths: string[] = [],
@@ -749,7 +749,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager {
 
   private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
     let live: PiAgentSession | undefined;
-    const customTools = this.extraTools.map((tool) =>
+    const customTools = this.extraTools().map((tool) =>
       defineTool({
         name: tool.name,
         label: tool.label,

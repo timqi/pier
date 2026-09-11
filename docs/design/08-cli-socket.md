@@ -35,6 +35,11 @@ object is `400`.
 | `/resolve` | `{sessionId, names: string[]}` | `200 {values}` — `{NAME: {kind: "plain" \| "record", value}}`; `404 {error: "no secret named X", file}` where `file` is `<publicUrl>/#/settings/vault?name=X` (loopback when no public URL is set); `423 {error: "locked — <reason>"}`; `400` for names that are not a non-empty list of vault names; `500 {error}` for anything else ([07-vault.md](07-vault.md)) |
 | `/task` | `{sessionId, params}` — `params` exactly the object the `task` tool takes | `200 {result}`, the tool's return value; `422 {error}` with the tool's own message for anything it threw — `handleTaskTool` is the one validator, and the CLI does none |
 
+`pier task` works whether or not sessions carry the `task` tool: Console →
+Settings → Instance → **Task tool** (`settings.taskTool`, default on) is read
+at session open, so switching it off leaves the tool out of every session
+opened after the next Reload and saves its schema on each of their turns.
+
 ## Failure lines
 
 | stderr | exit | When |

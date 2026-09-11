@@ -31,6 +31,9 @@ export interface Settings {
   titleModel?: ModelRef;
   /** Off by default: replacing your own code is the operator's decision. */
   autoUpdate: boolean;
+  /** The `task` tool in every session; off, `pier task` is the only way in,
+   *  and each turn is the tool's schema lighter. Read at session open. */
+  taskTool: boolean;
   /** Bundled extensions switched on (src/extensions); an unknown name is simply not found. */
   extensions: string[];
   /** Pier's own skills switched off. An off-list, not a second on-list: skills
@@ -129,6 +132,7 @@ export class SettingsStore {
       modelMenu: this.#json("modelMenu", normalizeModelMenu, "a valid menu") ?? [],
       ...(titleModel ? { titleModel } : {}),
       autoUpdate: this.#value("autoUpdate") === "1",
+      taskTool: this.#value("taskTool") !== "0",
       extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       skillsOff: this.#json("skillsOff", normalizeNames, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
@@ -176,6 +180,11 @@ export class SettingsStore {
 
   setAutoUpdate(on: boolean): Settings {
     this.#set("autoUpdate", on ? "1" : "0");
+    return this.get();
+  }
+
+  setTaskTool(on: boolean): Settings {
+    this.#set("taskTool", on ? "1" : "0");
     return this.get();
   }
 
