@@ -80,6 +80,8 @@ export interface LarkDeps {
 
 export class LarkChannel implements Channel {
   readonly id = "lark";
+  /** No `pier lark` CLI and no mention syntax out: its ids buy the prompt nothing. */
+  readonly opaqueIds = true;
   private readonly api: LarkClient;
   private readonly log: (message: string) => void;
   private readonly receipts: Receipts;

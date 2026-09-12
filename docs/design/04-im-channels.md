@@ -18,7 +18,7 @@ Platform adapters in front of Pi sessions: Telegram, Slack and Lark (Feishu).
 | System notes | Task delegation / callback / supervisor input is posted to the same thread before the turn it triggers | shared (`Channel.notify`) | ✅ | ✅ | ✅ |
 | Failure notices | Any error reaches the conversation, not just the web timeline | shared (`Router.report`) | ✅ | ✅ | ✅ |
 | Visible empty turns | A turn with no text still posts one muted line saying why | shared (`AgentReply.silence`), adapter renders | ✅ | ✅ | ✅ |
-| Speaker identity | `[name<id> time place]` above a message, only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ | ✅ |
+| Speaker identity | `[name<id> time place]` above a message (`[name time platform]` where ids are opaque), only when it changes | shared (`core/identity.ts`), adapter resolves the name | ✅ | ✅ | ✅ |
 | Deliberate silence | `<silent>` sends no reply, so a group thread is bearable | shared (`splitReply`) | ✅ | ✅ | ✅ |
 | Stop | Abort the conversation's running turn | shared (`runtime` → `abortConversation`) | ✅ | ✅ | ✅ |
 | Bind | Redeem a Console-issued single-use code in a DM | shared | ✅ | ✅ | ✅ |
@@ -128,7 +128,10 @@ name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time place]` only on
 a different speaker, a 10-minute gap, a new day, or a different conversation.
 `place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`,
 `telegram:-100/7`), said once per session and again only after `forgetSender`;
-alias keys (`web:`, `task:`) name no place. `sanitizeIdentity` strips `[`, `]`,
+alias keys (`web:`, `task:`) name no place. A channel that declares
+`opaqueIds` — no `pier <platform>` CLI, no mention syntax out, so Lark and
+Telegram — gets `[name time platform]` instead: the name always beside the
+time, which is the only thing telling a bare name from body text. `sanitizeIdentity` strips `[`, `]`,
 `<`, `>` and newlines so a display name cannot forge a second speaker.
 Identity is **per-turn, never baked into a session**: a thread is shared.
 `splitSpeaker` reads every shape back for the web bubble and the listing index.

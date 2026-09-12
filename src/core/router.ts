@@ -612,7 +612,11 @@ export class Router {
     // A chat is named so the agent can hand it to a script (skills/pier-slack);
     // an alias names nothing a shell could reach.
     const where = isAlias(msg.key) ? undefined : keyOf(msg.key);
-    const prompt = withPrefix(this.senders.next(session.id, msg.sender, Date.now(), where), text);
+    const opaque = this.channels.get(msg.key.channelId)?.opaqueIds;
+    const prompt = withPrefix(
+      this.senders.next(session.id, msg.sender, Date.now(), where, opaque),
+      text,
+    );
     log.debug(
       `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );

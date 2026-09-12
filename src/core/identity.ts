@@ -45,8 +45,15 @@ export class SenderPrefix {
 
   /** The line to put above this message, or `""` when the session already
    *  knows. `conversation` is the chat's `<channelId>:<conversationId>`, told
-   *  once: a session never moves, but the rule stays the same as the rest. */
-  next(sessionId: string, sender: Sender | undefined, at = Date.now(), conversation?: string): string {
+   *  once: a session never moves, but the rule stays the same as the rest.
+   *  `opaqueIds` is the platform's (`core/types.ts`): its ids buy nothing. */
+  next(
+    sessionId: string,
+    sender: Sender | undefined,
+    at = Date.now(),
+    conversation?: string,
+    opaqueIds = false,
+  ): string {
     if (!sender?.id) return "";
     const last = this.seen.get(sessionId);
     this.seen.set(sessionId, { senderId: sender.id, at, conversation });
@@ -62,9 +69,14 @@ export class SenderPrefix {
     // is the id, and `U123<U123>` would read as a broken record.
     const id = sanitizeIdentity(sender.id);
     const label = sanitizeIdentity(sender.name);
-    const who = newSpeaker ? (label === id ? `<${id}>` : `${label}<${id}>`) : "";
-    const when = gap || newDay ? `${newDay ? `${day(now)} ` : ""}${hhmm(now)}` : "";
-    const where = newPlace ? sanitizePlace(conversation) : "";
+    const named = opaqueIds ? label : label === id ? `<${id}>` : `${label}<${id}>`;
+    const who = newSpeaker ? named : "";
+    // A bare name has no `<>` to be told apart by, so it is only unambiguous
+    // next to the time: with opaque ids the clock is written whenever it is.
+    const clock = gap || newDay || (opaqueIds && !!who);
+    const when = clock ? `${newDay ? `${day(now)} ` : ""}${hhmm(now)}` : "";
+    const place = opaqueIds ? conversation?.split(":")[0] : conversation;
+    const where = newPlace && place ? sanitizePlace(place) : "";
     return `[${[who, when, where].filter(Boolean).join(" ")}]`;
   }
 
@@ -83,7 +95,8 @@ export interface Speaker {
   id?: string;
   /** `2024-06-01 12:00` or `12:00`, exactly as it was written. */
   when?: string;
-  /** `slack:C0123/1712.345600` — platform, then the adapter's conversation id. */
+  /** `slack:C0123/1712.345600` — platform, then the adapter's conversation id,
+   *  which is absent on a platform whose ids the agent cannot use. */
   where?: string;
   /** The message with its header line removed. */
   text: string;
@@ -91,19 +104,29 @@ export interface Speaker {
 
 // Only the shapes `next()` emits, newline included: a human typing
 // `[14:23] on my way` is body text and must come back untouched.
-const HEADER =
-  /^\[(?:([^\n[\]<>]*)<([^\n[\]<>]+)>)? ?((?:\d{4}-\d{2}-\d{2} )?\d{1,2}:\d{2})? ?([a-z]+:[^\s[\]<>]+)?\]\n/;
+const TIME = String.raw`(?<when>(?:\d{4}-\d{2}-\d{2} )?\d{1,2}:\d{2})`;
+const WITH_ID = new RegExp(
+  String.raw`^\[(?:(?<name>[^\n[\]<>]*)<(?<id>[^\n[\]<>]+)>)? ?${TIME}? ?(?<where>[a-z]+:[^\s[\]<>]+)?\]\n`,
+);
+
+/** The opaque-ids shape: a name with no `<>`, told apart from body text by the
+ *  time that always follows it, and a platform with no conversation after it.
+ *  A line of its own reading `[meeting 14:23]` is the price. */
+const NAMED = new RegExp(String.raw`^\[(?<name>[^\n[\]<>]*?) ${TIME}(?: (?<where>[a-z]+))?\]\n`);
 
 /** Read back a header this module wrote: the prefix is for the model, and a
  *  surface showing a stored message renders the speaker its own way. */
 export function splitSpeaker(text: string): Speaker {
-  const m = HEADER.exec(text);
-  if (!m?.[2] && !m?.[3] && !m?.[4]) return { text };
+  const head = WITH_ID.exec(text);
+  const { id, when, where } = head?.groups ?? {};
+  // A name on its own proves nothing: try the shape that requires a time.
+  const m = id || when || where ? head : NAMED.exec(text);
+  if (!m?.groups) return { text };
   return {
-    ...(m[1] ? { name: m[1] } : {}),
-    ...(m[2] ? { id: m[2] } : {}),
-    ...(m[3] ? { when: m[3] } : {}),
-    ...(m[4] ? { where: m[4] } : {}),
+    ...(m.groups.name ? { name: m.groups.name } : {}),
+    ...(m.groups.id ? { id: m.groups.id } : {}),
+    ...(m.groups.when ? { when: m.groups.when } : {}),
+    ...(m.groups.where ? { where: m.groups.where } : {}),
     text: text.slice(m[0].length),
   };
 }

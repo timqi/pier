@@ -60,6 +60,20 @@ describe("when a speaker line is worth its tokens", () => {
     expect(p.next("s1", { id: "U1", name: "U1" }, noon)).toBe("[<U1> 2024-06-01 12:00]");
   });
 
+  it("spends nothing on ids the agent has no tool for", () => {
+    const p = new SenderPrefix();
+    const lark = { id: "ou_6823bea16e6f2da5fc4a78a2f137c870", name: "qiqi" };
+    // Name and platform; the open_id and the chat id would be 55 characters
+    // nothing in the session can act on.
+    expect(p.next("s1", lark, noon, "lark:oc_29115f94a301/om_2", true))
+      .toBe("[qiqi 2024-06-01 12:00 lark]");
+    expect(p.next("s1", lark, noon + 1000, "lark:oc_29115f94a301/om_2", true)).toBe("");
+    // A new speaker inside the same minute still gets the clock: a bare name
+    // alone would be indistinguishable from body text.
+    expect(p.next("s1", { id: "ou_2", name: "Bob" }, noon + 1000, "lark:oc_29115f94a301/om_2", true))
+      .toBe("[Bob 12:00]");
+  });
+
   it("emits nothing when the surface has no sender to name", () => {
     expect(new SenderPrefix().next("s1", undefined, noon)).toBe("");
   });
@@ -145,12 +159,18 @@ describe("splitSpeaker", () => {
       .toEqual({ name: "Ada", id: "U1", when: "2024-06-01 12:00", where: "slack:C1/1712.5", text: "hi" });
     expect(splitSpeaker("[<U9> slack:C1/1712.5]\nyo")).toEqual({ id: "U9", where: "slack:C1/1712.5", text: "yo" });
     expect(splitSpeaker("[lark:oc_1/om_2]\nyo")).toEqual({ where: "lark:oc_1/om_2", text: "yo" });
+    // The opaque-ids shape: a name, the time it needs to be told apart from
+    // body text, and the platform alone.
+    const r = new SenderPrefix();
+    expect(splitSpeaker(withPrefix(r.next("s3", { id: "ou_1", name: "qiqi" }, noon, "lark:oc_1/om_2", true), "hi")))
+      .toEqual({ name: "qiqi", when: "2024-06-01 12:00", where: "lark", text: "hi" });
+    expect(splitSpeaker("[Ada Lovelace 12:00]\nyo")).toEqual({ name: "Ada Lovelace", when: "12:00", text: "yo" });
   });
 
   it("leaves body text that merely starts with a bracket alone", () => {
     // The inbound-file convention, any human typing brackets, and the one case
     // only the trailing newline rules out: a message that opens with a time.
-    for (const text of ["[report.md](file:///tmp/report.md)", "[TODO] fix it", "[]\nhi", "[14:23] on my way", "[Ada<U1>] said no", "[note: see below]\nhi", "plain"]) {
+    for (const text of ["[report.md](file:///tmp/report.md)", "[TODO] fix it", "[]\nhi", "[14:23] on my way", "[Ada<U1>] said no", "[note: see below]\nhi", "[done]\nhi", "plain"]) {
       expect(splitSpeaker(text)).toEqual({ text });
     }
   });
@@ -160,6 +180,9 @@ describe("readableTitle", () => {
   it("drops the header a first-prompt title inherited and keeps what was said", () => {
     expect(readableTitle("[operator<web> 12:01]\nfix   the\nparser")).toBe("fix the parser");
     expect(readableTitle("[<U9>]\nfix it")).toBe("fix it");
+    // The opaque-ids shape, which is where a title lost the whole line to a
+    // 34-character open_id.
+    expect(readableTitle("[qiqi 2026-09-11 22:59 lark]\nfix it")).toBe("fix it");
   });
 
   it("hands back a title that never had a header, byte for byte", () => {

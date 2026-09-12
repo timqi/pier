@@ -228,7 +228,9 @@ export function appendTurn(
   const speaker = kind === "user" ? splitSpeaker(body) : null;
   const named = speaker?.id || speaker?.when || speaker?.where ? speaker : null;
   // Here the operator is the reader; their own name over every message is noise.
-  const caption = named?.id && named.id !== "web" ? named : null;
+  // A platform with opaque ids names the speaker and nothing else, so the
+  // caption cannot be gated on the id.
+  const caption = named && (named.id ? named.id !== "web" : !!named.name) ? named : null;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
   // Editing resends the raw text, markers and header included — stripping them
   // from the bubble must not detach the files, or drop who was speaking.

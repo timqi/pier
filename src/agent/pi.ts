@@ -112,7 +112,7 @@ const TITLE_TIMEOUT_MS = 20_000;
 const TITLE_PROMPT =
   "Name this conversation for a session list. Reply with the title only: at most 12 Chinese characters " +
   "or 6 English words, in the language the user wrote in, no quotes, no trailing period. " +
-  "A leading `[name<id> time]` on the user's message is a speaker header, not content.";
+  "A leading `[name time]` or `[name<id> time]` on the user's message is a speaker header, not content.";
 
 /** The halves are labelled so a reply quoting an instruction back is not
  *  mistaken for one. */

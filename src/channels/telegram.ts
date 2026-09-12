@@ -77,6 +77,8 @@ export interface TelegramDeps {
 
 export class TelegramChannel implements Channel {
   readonly id = "telegram";
+  /** No `pier telegram` CLI and no mention syntax out: its ids buy the prompt nothing. */
+  readonly opaqueIds = true;
   private readonly api: TelegramClient;
   private readonly log: (message: string) => void;
   private readonly receipts: Receipts;

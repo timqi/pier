@@ -1000,6 +1000,14 @@ describe("the speaker a session has been told about", () => {
     expect(fake.prompts[1]).not.toContain("web:");
   });
 
+  it("drops the ids no tool of the agent's can take", async () => {
+    router.registerChannel({ ...fakeChannel("lark").channel, opaqueIds: true });
+    const key = { channelId: "lark", conversationId: "oc_29115f94a301/om_2" };
+    const sender = { id: "ou_6823bea16e6f2da5fc4a78a2f137c870", name: "qiqi" };
+    await router.dispatch({ key, senderId: sender.id, sender, text: "hi", mode: "auto" });
+    expect(fake.prompts[0]).toMatch(/^\[qiqi [\d: -]+ lark\]\nhi$/);
+  });
+
   it("is dropped on demand, for a surface that took the message back", async () => {
     await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
     // A recalled queue or a rewound turn: the prefixed text is out of the

@@ -33,7 +33,8 @@ added by Pier, not typed by them. It appears only on a change — new speaker, a
 time only, like \`[14:23]\`. Use that \`id\` to mention someone; never ask for
 their own. \`place\` is \`<platform>:<conversation>\` (Slack:
 \`slack:<channel>/<thread_ts>\`), said once per session: the channel and thread a
-script takes.
+script takes. Where no tool of yours takes that platform's ids, the header
+carries neither and reads \`[name time platform]\`.
 `;
 
 /** Deployment facts an agent cannot discover: a guessed path is wrong wherever

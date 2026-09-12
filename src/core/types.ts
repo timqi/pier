@@ -51,6 +51,13 @@ export interface InboundMessage {
 /** Platform ↔ core seam. Implemented once per platform, ≤200 lines. */
 export interface Channel {
   readonly id: string;
+  /**
+   * Set when nothing the agent can run takes this platform's ids — no
+   * `pier <platform>` CLI, no mention syntax on the way out. The speaker
+   * header then names the person and the platform instead of spending ~40
+   * characters a turn on an id nothing can use (`core/identity.ts`).
+   */
+  readonly opaqueIds?: boolean;
   start(onMessage: (msg: InboundMessage) => void): Promise<void>;
   /**
    * Render the reply (markdown + next-step buttons) and send it. Called on
