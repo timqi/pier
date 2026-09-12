@@ -117,6 +117,9 @@ export const isSilentReply = (reply: { text: string; suggestions: string[] }): b
 export const thinkingLabel = (level: ThinkingLevel): string =>
   level === "xhigh" ? "Extra high" : level[0]!.toUpperCase() + level.slice(1);
 
+/** `max` characters, the last one an ellipsis when something was cut. */
+export const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
 /** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
 export const compact = (n: number): string => {
   if (n < 1000) return String(n);

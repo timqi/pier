@@ -3,6 +3,7 @@
 // `<url|label>`), so the agent's markdown is translated; Slack degrades unknown
 // syntax to literal text rather than rejecting the message.
 
+import { cut } from "../core/reply.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type { SlackBlock, SlackButton } from "./slack-api.js";
 
@@ -116,8 +117,7 @@ export const context = (text: string): SlackBlock => ({
 export const OFFER_PREFIX = "sg:";
 
 /** Slack refuses a button label over BUTTON_MAX: every button, the panel's too. */
-export const truncate = (label: string): string =>
-  label.length > BUTTON_MAX ? `${label.slice(0, BUTTON_MAX - 1)}\u2026` : label;
+export const truncate = (label: string): string => cut(label, BUTTON_MAX);
 
 /** Slack wraps buttons on its own, so there is no row packing to budget. */
 export function actions(labels: string[]): SlackBlock | undefined {

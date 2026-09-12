@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Hono } from "hono";
 import type { EventHub } from "../core/hub.js";
 import { sessionLabel } from "../core/identity.js";
+import { cut } from "../core/reply.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
 import { isSealed, type Secrets } from "../secrets.js";
@@ -133,10 +134,8 @@ export interface PushDeps {
   settleMs?: number;
 }
 
-const preview = (text: string): string => {
-  const line = text.replace(/```[\s\S]*?```/g, "…").replace(/\s+/g, " ").trim();
-  return line.length > MAX_BODY_CHARS ? `${line.slice(0, MAX_BODY_CHARS - 1)}…` : line;
-};
+const preview = (text: string): string =>
+  cut(text.replace(/```[\s\S]*?```/g, "…").replace(/\s+/g, " ").trim(), MAX_BODY_CHARS);
 
 /** A half-valid subscription would fail later, inside a send nobody watches. */
 function parseTarget(body: unknown): PushTarget | null {

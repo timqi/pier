@@ -93,7 +93,6 @@ export function resolveConversation<S extends { id: string }>(
   return async (key) => {
     const known = store.get(key);
     let stale: string | undefined;
-    let unwritten = false;
     let recorded: AgentLaunchOptions | undefined;
     if (known) {
       try {
@@ -103,9 +102,6 @@ export function resolveConversation<S extends { id: string }>(
         // main.ts notifies the chat directly, so the cause is cut here.
         stale = String(err).slice(0, ERROR_CHARS);
         recorded = store.launchOf(key);
-        // Pi writes nothing before the first reply, so a recorded session the
-        // backend never knew lost no message: that is not data loss to report.
-        unwritten = !!recorded && stale.includes(UNKNOWN_SESSION);
         store.forget(key);
       }
     }
@@ -116,7 +112,9 @@ export function resolveConversation<S extends { id: string }>(
     if (stale) {
       const was = known!.slice(0, 8);
       const now = session.id.slice(0, 8);
-      onStale?.(key, unwritten
+      // Pi writes nothing before the first reply, so a recorded session the
+      // backend never knew lost no message: that is not data loss to report.
+      onStale?.(key, recorded && stale.includes(UNKNOWN_SESSION)
         ? `Session ${was} had no messages yet — continuing as ${now}.`
         : recorded
         ? `Session ${was} is gone from disk (${stale}); re-created as ${now} with its own settings in ${launch.cwd}.`

@@ -155,12 +155,11 @@ export function createControl({ router, factory, conversations, store, modelMenu
       if (!session) return [];
       const pairs: { user: string; assistant?: string }[] = [];
       for (const turn of await session.history()) {
+        const last = pairs.at(-1);
         if (turn.role === "user") pairs.push({ user: turn.text });
         // The first reply after a user turn; later assistant turns of the same
         // exchange are continuations of the same answer.
-        else if (turn.role === "assistant" && pairs.at(-1) && pairs.at(-1)!.assistant === undefined) {
-          pairs.at(-1)!.assistant = turn.text;
-        }
+        else if (turn.role === "assistant" && last && last.assistant === undefined) last.assistant = turn.text;
       }
       return pairs.slice(-exchanges);
     },

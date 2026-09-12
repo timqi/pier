@@ -7,7 +7,7 @@
 
 import { sessionLabel, splitSpeaker } from "../core/identity.js";
 import { splitInboundFiles } from "../core/inbound-file.js";
-import { compact, splitReply, thinkingLabel } from "../core/reply.js";
+import { compact, cut, splitReply, thinkingLabel } from "../core/reply.js";
 import {
   type ConversationKey,
   isThinkingLevel,
@@ -99,8 +99,6 @@ const shortDir = (path: string): string => {
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
 };
 
-const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
-
 /** One transcript line as a reader sees it: what was said, minus what was
  *  written for the model (the speaker header, attachment markers, the
  *  next-step block, a silent turn's reason). */
@@ -149,7 +147,7 @@ export const serializeDraft = (draft: PanelDraft): string | undefined =>
  *  carries it, escapes included, not as the bytes the user typed. */
 export const holdQuestion = (q: string | undefined): PanelDraft => {
   if (!q) return {};
-  return (serializeDraft({ q }) ?? "").length > DRAFT_CHARS ? { dropped: true } : { q };
+  return JSON.stringify({ q }).length > DRAFT_CHARS ? { dropped: true } : { q };
 };
 
 /** A platform echoed this; only the fields the draft knows, each type-checked. */
@@ -257,15 +255,25 @@ export abstract class ChatPanel<S extends PanelState, C> {
     ];
   }
 
+  /** A listing that failed is one line on the card, logged — never an empty
+   *  list that reads as "nothing here". */
+  private async listed<T>(read: Promise<T[]>, what: string): Promise<{ items: T[]; unavailable?: string }> {
+    try {
+      return { items: await read };
+    } catch (err) {
+      const unavailable = `${what}: ${String(err)}`;
+      this.deps.log(unavailable);
+      return { items: [], unavailable };
+    }
+  }
+
   /** An excerpt, not a summary: the last exchanges are what makes a session
    *  one has been away from recognisable on a phone. */
   private async recentGroups(key: ConversationKey): Promise<PanelGroup[]> {
-    let unavailable: string | undefined;
-    const exchanges = await this.deps.control.recent(key, RECENT_EXCHANGES).catch((err: unknown) => {
-      unavailable = `Could not read the transcript: ${String(err)}`;
-      this.deps.log(unavailable);
-      return [];
-    });
+    const { items: exchanges, unavailable } = await this.listed(
+      this.deps.control.recent(key, RECENT_EXCHANGES),
+      "Could not read the transcript",
+    );
     if (unavailable) return [{ title: "Recent", lines: [unavailable] }];
     const lines = exchanges.flatMap(({ user, assistant }) => {
       const reply = assistant === undefined ? "" : excerpt(assistant, "assistant");
@@ -394,12 +402,8 @@ export abstract class ChatPanel<S extends PanelState, C> {
   private async showSessions(key: ConversationKey, page: number): Promise<void> {
     const state = this.state(key);
     if (!state) return;
-    let unavailable: string | undefined;
-    state.sessions = await this.deps.handoff.unbound(SESSIONS_LISTED).catch((err: unknown) => {
-      unavailable = `Could not list sessions: ${String(err)}`;
-      this.deps.log(unavailable);
-      return [];
-    });
+    const { items, unavailable } = await this.listed(this.deps.handoff.unbound(SESSIONS_LISTED), "Could not list sessions");
+    state.sessions = items;
     const { at, pages, slice, from } = paged(state.sessions, page);
     const now = Date.now();
     await this.draw(state, {
@@ -453,12 +457,8 @@ export abstract class ChatPanel<S extends PanelState, C> {
   private async showDirs(key: ConversationKey): Promise<void> {
     const state = this.state(key);
     if (!state) return;
-    let unavailable: string | undefined;
-    state.dirs = await this.deps.control.recentDirs(key).catch((err: unknown) => {
-      unavailable = `Could not list recent directories: ${String(err)}`;
-      this.deps.log(unavailable);
-      return [];
-    });
+    const { items, unavailable } = await this.listed(this.deps.control.recentDirs(key), "Could not list recent directories");
+    state.dirs = items;
     await this.draw(state, {
       groups: [{
         title: "Directory",

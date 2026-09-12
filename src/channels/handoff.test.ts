@@ -172,23 +172,12 @@ describe("continueIn", () => {
     expect(conversations.keyOf("s1")?.channelId).toBe("slack");
   });
 
-  it("title falls back to the directory name", async () => {
+  it("the note's title is `sessionLabel` (identity.test.ts): header off, one line, directory as fallback", async () => {
+    onDisk.set("s3", { id: "s3", cwd: "/srv/parser", createdAt: 1, title: "[qi<U1> 12:01 slack:C1/2]\nfix the parser\nthen the tests" });
     onDisk.set("s2", { id: "s2", cwd: "/srv/parser", createdAt: 1 });
-    await handoff().continueIn({ sessionId: "s2", ...SLACK_OPS });
-    expect(opened[0]!.note.title).toBe("parser");
-  });
-
-  it("a speaker header on the title is not announced", async () => {
-    onDisk.set("s3", { id: "s3", cwd: "/srv/parser", createdAt: 1, title: "[qi<U1> 12:01 slack:C1/2]\nfix it" });
     await handoff().continueIn({ sessionId: "s3", ...SLACK_OPS });
-    expect(opened[0]!.note.title).toBe("fix it");
-  });
-
-  it("a multi-line title is announced on one line", async () => {
-    // The root wraps it in `*…*` / `**…**`: a newline inside breaks the markup.
-    onDisk.set("s4", { id: "s4", cwd: "/srv/parser", createdAt: 1, title: "fix the parser\nthen the tests" });
-    await handoff().continueIn({ sessionId: "s4", ...SLACK_OPS });
-    expect(opened[0]!.note.title).toBe("fix the parser then the tests");
+    await handoff().continueIn({ sessionId: "s2", ...SLACK_OPS });
+    expect(opened.map((o) => o.note.title)).toEqual(["fix the parser then the tests", "parser"]);
   });
 
   it("no public URL → empty link", async () => {
