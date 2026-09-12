@@ -155,3 +155,9 @@ export function readableTitle(title: string | undefined): string | undefined {
     .trim();
   return said || title;
 }
+
+/** How a session is named where it is announced (a push, a handoff): its
+ *  readable title, else its directory. Never empty — a listing that could
+ *  not answer must not silence the message. */
+export const sessionLabel = (s?: { title?: string; cwd: string }): string =>
+  readableTitle(s?.title) || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";

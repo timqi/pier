@@ -40,6 +40,7 @@ import {
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { readThread } from "./slack-thread.js";
+import type { HandoffNote } from "./types.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const WORKING = "eyes";
@@ -528,6 +529,12 @@ export class SlackChannel implements Channel {
       () => this.out.reply(channel, threadTs, reply),
       reply.meta,
     );
+  }
+
+  /** A web session's thread: the root is the one message Pier posts into a
+   *  channel's main flow (channels/handoff.ts). */
+  async openThread(chatId: string, note: HandoffNote): Promise<string> {
+    return conversationId(chatId, await this.out.open(chatId, note));
   }
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of

@@ -63,11 +63,11 @@ describe("conversation store", () => {
     expect(second.get(CHAT)).toBe("s1");
   });
 
-  it("names the channel that owns a session, and nobody for the rest", () => {
+  it("keyOf finds the thread of a session and undefined otherwise", () => {
     const store = new ConversationStore(db);
     store.set(CHAT, "s1");
-    expect(store.channelOf("s1")).toBe(CHAT.channelId);
-    expect(store.channelOf("s2")).toBeUndefined(); // a workbench session
+    expect(store.keyOf("s1")).toEqual(CHAT);
+    expect(store.keyOf("s2")).toBeUndefined(); // a workbench session
   });
 
   it("keeps the launch a session was created with, and none for one launched from the defaults", () => {

@@ -79,6 +79,30 @@ export interface ChannelConfig {
 /** What the runtime asks about one chat. */
 export type ChatPolicy = Omit<ChatConfig, "id" | "name" | "kind">;
 
+/** A chat a web session can be continued in: a running platform × an enabled chat. */
+export interface HandoffTarget {
+  platform: ChannelPlatform;
+  chatId: string;
+  name: string;
+  kind: ChatKind;
+}
+
+export interface HandoffRequest {
+  sessionId: string;
+  platform: ChannelPlatform;
+  chatId: string;
+}
+
+export interface HandoffResult {
+  conversationId: string;
+}
+
+/** Title and link only — never conversation content. `url` "" when no public URL is set. */
+export interface HandoffNote {
+  title: string;
+  url: string;
+}
+
 export const defaultChannelConfig = (): ChannelConfig => ({
   enabled: false,
   token: "",

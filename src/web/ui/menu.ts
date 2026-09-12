@@ -10,6 +10,8 @@ export interface MenuItem {
   hint?: string; // right-aligned secondary text
   checked?: boolean;
   separatorBefore?: boolean;
+  /** Shown, not offered; the hint says why. Skipped by the arrow keys. */
+  disabled?: boolean;
   onSelect: () => void;
 }
 
@@ -186,6 +188,10 @@ function menuItem(item: MenuItem): HTMLElement {
     const hint = h("span", "ml-auto max-w-28 shrink-[999] truncate text-[13px] text-neutral-500", item.hint);
     hint.title = item.hint;
     row.append(hint);
+  }
+  if (item.disabled) {
+    (row as HTMLButtonElement).disabled = true;
+    row.classList.add("cursor-default", "text-neutral-400", "hover:bg-transparent", "hover:text-neutral-400");
   }
   row.onclick = () => item.onSelect();
   return row;

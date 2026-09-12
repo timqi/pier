@@ -37,6 +37,7 @@ import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
 import { card, markdown, OFFER_PREFIX } from "./lark-render.js";
 import { PANEL_PREFIX } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
+import type { HandoffNote } from "./types.js";
 
 const WORKING = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
@@ -459,6 +460,12 @@ export class LarkChannel implements Channel {
     }
     // The turn ended either way; a 👀 left up by a failed send looks like work.
     await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply), reply.meta);
+  }
+
+  /** A web session's topic: the root is the one card Pier posts into a
+   *  chat's main flow (channels/handoff.ts). */
+  async openThread(chatId: string, note: HandoffNote): Promise<string> {
+    return conversationId(chatId, await this.out.open(chatId, note));
   }
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of

@@ -52,11 +52,11 @@ export class ConversationStore {
 
   /** Durable, unlike the router's answer, which is gone once an idle session
    *  is evicted. No row: nobody's conversation. */
-  channelOf(sessionId: string): string | undefined {
+  keyOf(sessionId: string): ConversationKey | undefined {
     const row = this.db.prepare(`
-      SELECT channel_id FROM conversations WHERE session_id = ? LIMIT 1
-    `).get(sessionId) as { channel_id: string } | undefined;
-    return row?.channel_id;
+      SELECT channel_id, conversation_id FROM conversations WHERE session_id = ? LIMIT 1
+    `).get(sessionId) as { channel_id: string; conversation_id: string } | undefined;
+    return row && { channelId: row.channel_id, conversationId: row.conversation_id };
   }
 
   forget(key: ConversationKey): void {

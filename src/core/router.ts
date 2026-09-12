@@ -101,6 +101,9 @@ export class Router {
      *  workbench asking for one transcript must share one lock and one object.
      *  Undefined for a chat that has none yet. */
     private readonly sessionIdOf: (key: ConversationKey) => string | undefined = () => undefined,
+    /** The inverse: the durable chat of a session an alias is opening, so the
+     *  chat is the delivery key from the first turn (wired in main.ts). */
+    private readonly chatKeyOf: (sessionId: string) => ConversationKey | undefined = () => undefined,
   ) {}
 
   registerChannel(channel: Channel): void {
@@ -302,6 +305,13 @@ export class Router {
       }),
     };
     this.bySession.set(session.id, attached);
+    // The durable chat outranks the alias that happened to open the session
+    // first (a restart, the web speaking first), same rule as `reached`.
+    const chat = isAlias(key) ? this.chatKeyOf(session.id) : undefined;
+    if (chat) {
+      this.byKey.set(keyOf(chat), session);
+      attached.key = chat;
+    }
   }
 
   /** An adapter's send is several platform calls (chunks, then attachments),

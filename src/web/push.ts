@@ -6,7 +6,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Hono } from "hono";
 import type { EventHub } from "../core/hub.js";
-import { readableTitle } from "../core/identity.js";
+import { sessionLabel } from "../core/identity.js";
 import { pierDb } from "../db.js";
 import { logger } from "../log.js";
 import { isSealed, type Secrets } from "../secrets.js";
@@ -26,12 +26,6 @@ const MAX_SUBSCRIPTIONS = 20;
 /** Long enough to cross a heartbeat and a slow phone. */
 const SETTLE_MS = 6_000;
 const MAX_BODY_CHARS = 160;
-
-/** Untouched, a session titled by its first prompt announces itself as
- *  `[operator<web> 12:01]`. Never empty: a notification with no title reads as
- *  a browser bug, and a listing that could not answer must not silence the push. */
-const label = (s?: { title?: string; cwd: string }): string =>
-  readableTitle(s?.title) || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
 
 export interface PushSubscriptionRow extends PushTarget {
   /** The only way to tell two rows apart in the Console. */
@@ -242,7 +236,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
       // One async step before the send, so a failure in either half is reported.
       void (async () => {
         await deliver({
-          title: label(await summary(e.sessionId)),
+          title: sessionLabel(await summary(e.sessionId)),
           body: preview(text) || "Turn finished.",
           url: `/#/session/${encodeURIComponent(e.sessionId)}`,
           tag: e.sessionId,

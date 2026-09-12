@@ -27,6 +27,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
 | Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ |
+| Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message, replies land on both surfaces | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
@@ -39,8 +40,11 @@ Command spelling is per-platform: Lark takes `/stop`, `/settings`,
 Re-adding any of these is a design decision, not a gap: backend / agent
 selection in chat; message-visibility toggles; per-thread setting overrides;
 admin / bind management from chat; webhook inbound; registered Slack slash
-commands; posting in a Slack channel's main flow; editing a live session's cwd
-(Pi fixes cwd at creation — the panel offers "New session in…" instead).
+commands; posting in a Slack channel's main flow, except the single root
+message a web → IM handoff opens its thread with; editing a live session's cwd
+(Pi fixes cwd at creation — the panel offers "New session in…" instead);
+moving a session between threads (a second handoff is refused with the first
+chat's name).
 
 ## Layout
 
@@ -81,6 +85,41 @@ that itself fails is reported to the hub once, never retried.
 (`control.ts`): abort, read status, list/set model, set reasoning, start a new
 session, `knows()` — injected by `runtime.ts`, which owns router and factory.
 The seam keeps one inbound path (`onMessage`); add the next control here.
+
+**Opening a thread is channels-internal.** `ImChannel` (`runtime.ts`) is
+`Channel` plus `openThread(chatId, note)`: post the handoff root, answer the
+new conversation id. `ChannelRuntime.openThread` throws `<platform> is not
+running`; `running()` lists the live platforms.
+
+## Continue from web (`handoff.ts`)
+
+`continueIn({sessionId, platform, chatId})`, in order: platform running
+(409 `Slack is not running — enable it in Settings → Channels.`) → chat known
+(404) and enabled (409) `That chat is not enabled for the bot.` → session on
+disk (404 `Session … has no transcript yet — send it one message first.`) →
+not already bound (409 `Already answers in <platform> · <chat name>.`) → post
+the root (`openThread`; a platform refusal is 502 with its message and
+nothing is written) → `conversations.set(key, sessionId)` → attach the loaded
+session to the key when the web has it open → `sessions-changed`. Post before
+row: a row for a thread that does not exist is worse than a root with no row.
+
+- The note is `{title, url}`: `sessionLabel` (`core/identity.ts` — readable
+  title, else the directory name) and `<publicUrl>/#/session/<id>`, `""`
+  without a public URL, which the root says (`(no public URL set — Settings →
+  Instance)`) rather than refusing.
+- Slack root (mrkdwn, no `thread_ts`): `Continued from web: *<title>*` /
+  link / `_Reply in this thread to continue._`. Lark: one root card
+  (`createCard`, `im.v1.message.create` with `receive_id_type: chat_id`) then
+  one in-thread card `Reply here to continue.` — on the phone a topic has its
+  own composer only once it has a reply.
+- A reply in the thread without a mention is admitted: the row exists, so
+  `knows()` is true. A Lark DM user typing in the main flow starts a new
+  session, as for every DM; the root's last line is the only guard.
+- Restart: the row is the truth. The thread speaking first resumes and
+  attaches under the chat key; the web speaking first attaches the chat key
+  through the router's `chatKeyOf` hook, so the reply reaches the thread.
+- Crash between the post and the row: an orphan root whose thread opens a new
+  session (DM) or is dropped unaddressed (group); a retry posts a second root.
 
 ## The in-chat panel
 
@@ -240,6 +279,8 @@ channel row holds no credential.
 | `DELETE /api/channels/:platform/users/:id` | unbind |
 | `GET /api/models` | backend model catalog, no session needed |
 | `GET /api/fs/ls`, `POST /api/fs/mkdir` | directory browsing / mkdir for the cwd picker |
+| `GET /api/handoff/targets` | `{targets: HandoffTarget[]}` — running platforms × enabled chats |
+| `POST /api/handoff` | body `HandoffRequest` → 201 `HandoffResult`; 400 invalid body; 404 / 409 / 502 `{error}` per the order above |
 
 The save is **non-destructive** (stored chat list overlaid with the client's
 edits, so a chat discovered while the page was open survives) and **autosaved**
@@ -270,7 +311,7 @@ Answer these first.
 ## Slack facts
 
 - **Threads are the whole design.** Pier never posts into a channel's main
-  flow: a conversation is `<channel>/<threadTs>` and a thread *is* a session.
+  flow but the handoff root: a conversation is `<channel>/<threadTs>` and a thread *is* a session.
   DMs too (`threadOf` = `thread_ts ?? ts`): every top-level DM opens its own
   session. The Console's Connection card states it beside a help badge. Lark
   follows this rule too.
@@ -353,7 +394,9 @@ Answer these first.
 - **The cwd prompt is a form card** (a WebSocket app cannot open a modal);
   the submission arrives as `action.form_value`.
 - **Threads follow Slack's rule**, DMs included: `reply_in_thread` roots a
-  topic per top-level message; `root_id` continues it.
+  topic per top-level message; `root_id` continues it. `createCard` is the
+  one root Pier posts (the handoff); `im.v1.message.create` needs the
+  send-as-bot scope, and a missing one arrives as the 502's code.
 - **Permissions and the `im.message.receive_v1` subscription take effect only
   after a version is published and approved** — the usual reason a configured
   bot stays silent.

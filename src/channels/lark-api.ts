@@ -125,8 +125,10 @@ export interface LarkSocket {
 export interface LarkClient {
   botOpenId(): Promise<string>;
   connect(handlers: LarkHandlers): Promise<LarkSocket>;
-  /** Deliberately the only way to post: never into a chat's main flow. */
+  /** The only way to reply; `createCard` is the one root. */
   replyCard(messageId: string, card: LarkCard): Promise<{ messageId: string }>;
+  /** The one root Pier posts: a handoff's thread has no user message to reply to. */
+  createCard(chatId: string, card: LarkCard): Promise<{ messageId: string }>;
   patchCard(messageId: string, card: LarkCard): Promise<void>;
   deleteMessage(messageId: string): Promise<void>;
   /** `emojiType` is a Lark key (`OnIt`), never a codepoint. */
@@ -266,6 +268,14 @@ export class LarkApi implements LarkClient {
       },
     });
     return { messageId: ok("message.reply", res).data?.message_id ?? "" };
+  }
+
+  async createCard(chatId: string, card: LarkCard): Promise<{ messageId: string }> {
+    const res = await this.client.im.v1.message.create({
+      params: { receive_id_type: "chat_id" },
+      data: { receive_id: chatId, msg_type: "interactive", content: JSON.stringify(card) },
+    });
+    return { messageId: ok("message.create", res).data?.message_id ?? "" };
   }
 
   /** Images take the image endpoint so they render inline; `stream` is Lark's

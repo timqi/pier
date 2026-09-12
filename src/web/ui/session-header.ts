@@ -4,7 +4,7 @@
 import { ArrowLeft, LoaderCircle, X } from "lucide";
 import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
-import { mustGetJson, sendJson } from "./api.js";
+import { getJson, mustGetJson, sendJson } from "./api.js";
 import { appendTurn, revealActiveRun } from "./chat.js";
 import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
@@ -12,6 +12,7 @@ import { modelPicker } from "./model-picker.js";
 import { chord, chordLabel, modalOpen } from "./shortcut.js";
 import { renameSession, runsLabel, type SessionInfo } from "./sidebar.js";
 import type { ContextUsage, ModelRef, ThinkingLevel, TurnMeta } from "../../core/types.js";
+import type { HandoffTarget } from "../../channels/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
 export interface HeaderDeps {
@@ -279,17 +280,7 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
   // What the panel is showing right now — the placeholder, then the picker the
   // cache drew, then the picker the read reconciled.
   let shown: HTMLElement = loading;
-  if (session) {
-    const back = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
-    back.setAttribute("aria-label", "Back to session actions");
-    back.onclick = () => sessionMenu(anchor, session);
-    const close = h("button", "icon-btn h-11 w-11", icon(X));
-    close.setAttribute("aria-label", "Close model picker");
-    close.onclick = closeMenu;
-    const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", session.title ?? untitled(session.cwd));
-    title.title = title.textContent ?? "";
-    content.prepend(h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", back, title, close));
-  }
+  if (session) content.prepend(panelHead(anchor, session, "Close model picker"));
   openPanel(anchor, content);
   // Closing or replacing the panel cancels presentation of an in-flight read.
   const visible = (): boolean => shown.isConnected && !shown.closest("[inert]");
@@ -390,6 +381,60 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
   }
 }
 
+/** Head of a follow-up panel: back to the menu, the session's name, close. */
+function panelHead(anchor: HTMLElement, s: SessionInfo, closeLabel: string): HTMLElement {
+  const back = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
+  back.setAttribute("aria-label", "Back to session actions");
+  back.onclick = () => sessionMenu(anchor, s);
+  const close = h("button", "icon-btn h-11 w-11", icon(X));
+  close.setAttribute("aria-label", closeLabel);
+  close.onclick = closeMenu;
+  const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", s.title ?? untitled(s.cwd));
+  title.title = title.textContent ?? "";
+  return h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", back, title, close);
+}
+
+/** The chats a web session can be continued in; a pick posts the handoff and
+ *  the rail's chip follows from `sessions-changed`. A refusal stays under the
+ *  row it answers, as the directory picker's errors do. */
+async function handoffPicker(anchor: HTMLElement, s: SessionInfo): Promise<void> {
+  const status = h("p", "px-3 py-2 text-[15px] text-neutral-500", "Loading chats…");
+  const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full",
+    panelHead(anchor, s, "Close chat picker"),
+    h("div", "px-3 pb-1 text-sm font-medium text-neutral-500", "Continue in a chat"),
+    h("p", "px-3 pb-2 text-[13px] text-neutral-500", "Chats the bot has seen. A chat appears here after its first message to the bot."),
+    status);
+  openPanel(anchor, content);
+  const got = await getJson<{ targets: HandoffTarget[] }>("/api/handoff/targets", "Could not list chats");
+  if (!content.isConnected) return;
+  if (!got.ok) {
+    status.textContent = got.error;
+    status.setAttribute("role", "alert");
+    return;
+  }
+  if (!got.value.targets.length) {
+    status.textContent = "No chats yet — message the bot once in Lark or Slack, then come back.";
+    return;
+  }
+  const error = h("p", "hidden px-3 pt-1 text-[13px] text-red-600");
+  error.setAttribute("role", "alert");
+  const list = h("div", "");
+  list.dataset.list = "";
+  for (const t of got.value.targets) {
+    const row = h("button", "flex w-full min-h-10 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100",
+      h("span", "min-w-0 truncate", `${t.platform[0]!.toUpperCase()}${t.platform.slice(1)} · ${t.kind === "dm" ? "DM" : "group"} · ${t.name || t.chatId}`));
+    row.onclick = async () => {
+      const res = await sendJson("/api/handoff", { sessionId: s.id, platform: t.platform, chatId: t.chatId });
+      if (res.ok) return closeMenu();
+      error.textContent = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `handoff failed: ${String(res.status)}`;
+      error.classList.remove("hidden");
+    };
+    list.append(row);
+  }
+  status.replaceWith(list, error);
+  list.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+}
+
 /** Same menu from the chat header and from a rail row's ⋯ button. */
 export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
   const current = s.id === deps.currentId();
@@ -421,6 +466,11 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
         closeMenu();
         deps.openFiles(current ? undefined : s.cwd);
       },
+    },
+    {
+      label: "Continue in Lark/Slack…",
+      ...(s.channel && s.channel !== "web" ? { hint: `answers in ${s.channel}`, disabled: true } : {}),
+      onSelect: () => void handoffPicker(anchor, s),
     },
     {
       label: "Model & reasoning…",

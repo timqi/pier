@@ -2,13 +2,17 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
 import { ChannelStore } from "./config.js";
+import { HandoffError } from "./handoff.js";
 import { registerChannelRoutes } from "./routes.js";
 import type { ChannelRuntime } from "./runtime.js";
-import type { ChannelConfig } from "./types.js";
+import type { ChannelConfig, HandoffRequest, HandoffTarget } from "./types.js";
 
 let store: ChannelStore;
 let app: Hono;
 let reloads: number;
+let handoffs: HandoffRequest[];
+let refuse: HandoffError | undefined;
+const TARGETS: HandoffTarget[] = [{ platform: "slack", chatId: "C100", name: "#ops", kind: "group" }];
 
 beforeEach(() => {
   const vault = new Map<string, string>();
@@ -21,7 +25,15 @@ beforeEach(() => {
       return Promise.resolve();
     },
   } as unknown as ChannelRuntime;
-  registerChannelRoutes(app, store, runtime);
+  handoffs = [];
+  refuse = undefined;
+  registerChannelRoutes(app, store, runtime, {
+    targets: () => TARGETS,
+    continueIn: (req) => {
+      handoffs.push(req);
+      return refuse ? Promise.reject(refuse) : Promise.resolve({ conversationId: `${req.chatId}/1.0` });
+    },
+  });
 });
 
 const get = async (path = "/api/channels/slack"): Promise<ChannelConfig & { supported: boolean }> => {
@@ -106,5 +118,40 @@ describe("channel config routes", () => {
   it("rejects a body that is not an object", async () => {
     expect((await put("nope")).status).toBe(400);
     expect(reloads).toBe(0);
+  });
+});
+
+describe("handoff routes", () => {
+  const post = (body: unknown): Response | Promise<Response> =>
+    app.request("/api/handoff", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("lists the targets", async () => {
+    const res = await app.request("/api/handoff/targets");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ targets: TARGETS });
+  });
+
+  it("answers 201 with the conversation the session now answers in", async () => {
+    const res = await post({ sessionId: "s1", platform: "slack", chatId: "C100" });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ conversationId: "C100/1.0" });
+    expect(handoffs).toEqual([{ sessionId: "s1", platform: "slack", chatId: "C100" }]);
+  });
+
+  it("rejects an invalid body before asking anyone", async () => {
+    expect((await post({ sessionId: "s1", platform: "discord", chatId: "C100" })).status).toBe(400);
+    expect((await post({ sessionId: "", platform: "slack", chatId: "C100" })).status).toBe(400);
+    expect((await post({ sessionId: "s1", platform: "slack" })).status).toBe(400);
+    expect((await app.request("/api/handoff", { method: "POST", body: "not json" })).status).toBe(400);
+    expect(handoffs).toEqual([]);
+  });
+
+  it("relays a refusal with its status and sentence", async () => {
+    for (const status of [404, 409, 502] as const) {
+      refuse = new HandoffError(status, `no (${String(status)})`);
+      const res = await post({ sessionId: "s1", platform: "lark", chatId: "oc_1" });
+      expect(res.status).toBe(status);
+      expect(await res.json()).toEqual({ error: `no (${String(status)})` });
+    }
   });
 });

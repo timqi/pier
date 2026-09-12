@@ -59,6 +59,16 @@ class FakeClient implements LarkClient {
     return Promise.resolve({ messageId });
   }
 
+  /** createCard calls: the chat posted into, with which card. */
+  readonly created: { chatId: string; card: LarkCard }[] = [];
+
+  createCard(chatId: string, card: LarkCard): Promise<{ messageId: string }> {
+    this.created.push({ chatId, card });
+    const messageId = `om_root_${this.nextId++}`;
+    this.cards.set(messageId, card);
+    return Promise.resolve({ messageId });
+  }
+
   patchCard(messageId: string, card: LarkCard): Promise<void> {
     this.patched.push({ messageId, card });
     this.cards.set(messageId, card);
@@ -310,6 +320,35 @@ describe("gate", () => {
     known.add(`${CHAT}/om_1`);
     await feed(message({ text: "continue", rootId: "om_1" }));
     expect(inbound).toHaveLength(1);
+  });
+
+  it("openThread creates a root card then one in-thread card and returns <chat>/<root>", async () => {
+    const id = await channel.openThread(CHAT, { title: "Fix the parser", url: "https://pier.example/#/session/s1" });
+    expect(client.created).toHaveLength(1);
+    expect(client.created[0]!.chatId).toBe(CHAT);
+    const root = bodyText(client.created[0]!.card);
+    expect(root).toContain("**Continued from web: Fix the parser**");
+    expect(root).toContain("[Open on the web](https://pier.example/#/session/s1)");
+    expect(root).toContain("Reply in this thread to continue.");
+    expect(client.replied).toHaveLength(1);
+    expect(client.replied[0]!.to).toBe("om_root_900");
+    expect(bodyText(client.replied[0]!.card)).toBe("Reply here to continue.");
+    expect(id).toBe(`${CHAT}/om_root_900`);
+  });
+
+  it("openThread without a public URL says so instead of linking nowhere", async () => {
+    await channel.openThread(CHAT, { title: "Fix the parser", url: "" });
+    expect(bodyText(client.created[0]!.card)).toContain("(no public URL set — Settings → Instance)");
+    expect(bodyText(client.created[0]!.card)).not.toContain("](");
+  });
+
+  it("a topic reply to a handoff root without a mention is admitted", async () => {
+    bind();
+    const id = await channel.openThread(CHAT, { title: "t", url: "" });
+    known.add(id); // the row handoff.ts writes
+    await feed(message({ text: "continue", rootId: "om_root_900" }));
+    expect(inbound).toHaveLength(1);
+    expect(inbound[0]!.key.conversationId).toBe(id);
   });
 
   it("ignores another app's messages", async () => {

@@ -62,8 +62,17 @@ surface owns its routes and is mounted beside it.
 | `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
-  conversation row exists (`conversations.channelOf`) and no task run made the
+  conversation row exists (`conversations.keyOf`) and no task run made the
   session for itself. One flag, read by the dot, the badges and Web Push.
+- **Continue in a chat** (`channels/routes.ts`, `GET /api/handoff/targets` and
+  `POST /api/handoff`; contract in [04-im-channels.md](04-im-channels.md)):
+  the ⋯ menu's *Continue in Lark/Slack…* lists the chats the bot has seen on
+  a running platform; a pick posts one root message there and binds the
+  session to that thread. The row then shows the channel chip, Web Push for
+  the session stops (it answers the chat), replies land on both surfaces, web
+  prompts are not mirrored to the chat. A session already answering a chat
+  has the row disabled with `answers in <platform>`; a refusal stays under
+  the picked row in the server's words.
 
 Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`,
 `/api/devices*`), `config.ts` (`/api/config*`), `config-sync.ts`
@@ -188,9 +197,10 @@ browser keeps no second session order.
   that is (`data-list`, the directory tree's folders) and keeps Home/End for
   its text field. An open menu owns those keys: ⌘K/⌃K stands down. ⌘N/⌘P are
   never bound.
-- Session menu: Rename / Session info, New session here / Browse files, Model &
-  reasoning. Model loading is immediate; a cancelled load cannot reopen the
-  panel. Manual compaction is API-only.
+- Session menu: Rename / Session info, New session here / Browse files /
+  Continue in Lark/Slack…, Model & reasoning. Model loading is immediate; a
+  cancelled load cannot reopen the panel. A disabled row stays visible with
+  its hint and is skipped by the arrow keys. Manual compaction is API-only.
 - Session info: directory/ID (copy buttons), model/context, time groups; a
   return button when opened from the menu.
 - `model-picker.ts`: grouped by provider, Settings-managed Pinned combinations

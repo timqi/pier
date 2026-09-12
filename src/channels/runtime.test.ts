@@ -24,6 +24,10 @@ vi.mock("./slack.js", () => ({
     async notify(conversationId: string, note: { text: string }): Promise<void> {
       events.push(`notify ${conversationId}: ${note.text}`);
     }
+    async openThread(chatId: string, note: { title: string }): Promise<string> {
+      events.push(`open ${chatId}: ${note.title}`);
+      return `${chatId}/1.0`;
+    }
   },
 }));
 vi.mock("./lark.js", () => ({
@@ -91,6 +95,21 @@ describe("ChannelRuntime", () => {
     expect(events).toContain("notify C42: cut off");
     await expect(rt.notify("lark", "oc_1", "cut off")).resolves.toBe(false);
     await rt.stop();
+  });
+
+  it("running() lists live adapters, and openThread reaches one or throws by name", async () => {
+    events.length = 0;
+    generation = 0;
+    startGate = Promise.resolve();
+    const rt = runtime({ slack: { enabled: true, token: "t", appToken: "a" } });
+    expect(rt.running()).toEqual([]);
+    await rt.reload();
+    expect(rt.running()).toEqual(["slack"]);
+    await expect(rt.openThread("slack", "C42", { title: "Fix it", url: "" })).resolves.toBe("C42/1.0");
+    expect(events).toContain("open C42: Fix it");
+    await expect(rt.openThread("lark", "oc_1", { title: "Fix it", url: "" })).rejects.toThrow("lark is not running");
+    await rt.stop();
+    expect(rt.running()).toEqual([]);
   });
 
   it("a reload after stop() is refused — shutdown wins", async () => {

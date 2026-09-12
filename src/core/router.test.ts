@@ -494,6 +494,39 @@ describe("opening a session", () => {
     expect(router.conversationOf("s1")).toEqual(KEY);
   });
 
+  it("an alias open attaches the session's durable chat key and turn-end reaches that channel", async () => {
+    // After a restart the web tab speaks first: the chat that owns s1 is not
+    // loaded, but its row is, and the reply belongs in the thread.
+    router = new Router(
+      hub,
+      () => Promise.resolve(fake.session),
+      (key) => (key.channelId === KEY.channelId ? "s1" : undefined),
+      (id) => (id === "s1" ? KEY : undefined),
+    );
+    router.registerChannel(im.channel);
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    expect(router.conversationOf("s1")).toEqual(KEY);
+    // The chat key is live too: its next message shares the object.
+    expect(router.sessionOf(KEY)).toBe(fake.session);
+    fake.emit({ type: "turn-end", text: "done" });
+    expect(im.sent).toEqual([["C100/1717.7", { text: "done", suggestions: [], meta: undefined }]]);
+  });
+
+  it("a later alias reach does not take the key back", async () => {
+    router = new Router(hub, () => Promise.resolve(fake.session), () => undefined, () => KEY);
+    router.registerChannel(im.channel);
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    await router.ensure({ channelId: "task", conversationId: "s1" });
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    expect(router.conversationOf("s1")).toEqual(KEY);
+  });
+
+  it("no chat key → alias behaviour unchanged", async () => {
+    router = new Router(hub, () => Promise.resolve(fake.session), () => undefined, () => undefined);
+    await router.ensure({ channelId: "web", conversationId: "s1" });
+    expect(router.conversationOf("s1")).toEqual({ channelId: "web", conversationId: "s1" });
+  });
+
   it("tells the chat when the session cannot be opened", async () => {
     router = new Router(hub, () => Promise.reject(new Error("unknown session")));
     router.registerChannel(im.channel);

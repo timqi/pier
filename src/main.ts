@@ -16,6 +16,7 @@ import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
+import { createHandoff } from "./channels/handoff.js";
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
 import { EventHub } from "./core/hub.js";
@@ -123,7 +124,7 @@ const router = new Router(hub, (key) => {
     return factory.resume(key.conversationId);
   }
   return resolveIm(key);
-}, (key) => conversations.get(key));
+}, (key) => conversations.get(key), (id) => conversations.keyOf(id));
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
@@ -281,7 +282,16 @@ registerConfigSyncRoutes(app, {
   run: configurationSync.run,
 });
 registerTaskRoutes(app, tasks, { factory, router });
-registerChannelRoutes(app, channelStore, channels);
+registerChannelRoutes(app, channelStore, channels, createHandoff({
+  store: channelStore,
+  runtime: channels,
+  conversations,
+  factory,
+  router,
+  hub,
+  publicUrl: () => settings.get().publicUrl,
+  log: (m) => logger("channels").info(m),
+}));
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);
@@ -323,7 +333,7 @@ app.route("/", createServer({
   backgroundRuns: (id) => tasks.backgroundRuns(id),
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
   taskSessions: () => tasks.taskSessions(),
-  channelOf: (id) => conversations.channelOf(id),
+  channelOf: (id) => conversations.keyOf(id)?.channelId,
 }));
 
 const port = Number(process.env.PORT ?? 3141);

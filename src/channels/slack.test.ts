@@ -358,6 +358,32 @@ describe("gating", () => {
     expect(inbound[0]!.text).toBe("carry on");
   });
 
+  it("openThread posts a root without thread_ts and returns <channel>/<ts>", async () => {
+    const id = await channel.openThread("C100", { title: "Fix the parser", url: "https://pier.example/#/session/s1" });
+    expect(client.sent).toHaveLength(1);
+    const root = client.sent[0]!;
+    expect(root.channel).toBe("C100");
+    expect(root.thread_ts).toBeUndefined();
+    expect(root.text).toBe("Continued from web: *Fix the parser*\nhttps://pier.example/#/session/s1\n_Reply in this thread to continue._");
+    expect(id).toBe("C100/900.000100");
+  });
+
+  it("openThread without a public URL says so instead of linking nowhere", async () => {
+    await channel.openThread("C100", { title: "Fix <the> parser", url: "" });
+    expect(client.sent[0]!.text).toContain("_(no public URL set — Settings → Instance)_");
+    // mrkdwn-escaped: a session title cannot smuggle a mention or a link.
+    expect(client.sent[0]!.text).toContain("Continued from web: *Fix &lt;the&gt; parser*");
+  });
+
+  it("a reply in a handoff thread without a mention is admitted in a mention-required channel", async () => {
+    bind();
+    const id = await channel.openThread("C100", { title: "t", url: "" });
+    known.add(id); // the row handoff.ts writes
+    await feed(message({ text: "carry on", ts: "1800.000200", thread_ts: "900.000100" }));
+    expect(inbound).toHaveLength(1);
+    expect(inbound[0]!.key.conversationId).toBe(id);
+  });
+
   it("still requires a mention in a thread Pier does not own", async () => {
     bind();
     await feed(message({ text: "two humans talking", ts: "1800.1", thread_ts: "1700.000100" }));
