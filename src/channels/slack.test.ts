@@ -1092,6 +1092,13 @@ describe("settings panel", () => {
     client.sent.length = 0;
   };
 
+  /** No row for the thread: the panel is a draft. */
+  const openDraft = async (): Promise<void> => {
+    openGates();
+    await feed(message({ text: `<@${ME}>`, ts: "1710.000100" }));
+    client.sent.length = 0;
+  };
+
   const click = (action: string, value?: string): SlackEnvelope =>
     interaction({
       channel: { id: CHANNEL },
@@ -1144,7 +1151,7 @@ describe("settings panel", () => {
   });
 
   it("asks for a working directory in a modal, carrying the conversation with it", async () => {
-    await open();
+    await openDraft();
     await feed(click("cfg:cwdtype"));
     const view = client.views[0] as { private_metadata: string; callback_id: string };
     expect(view.callback_id).toBe("cfg_cwd");
@@ -1152,8 +1159,8 @@ describe("settings panel", () => {
     expect(JSON.parse(view.private_metadata)).toEqual({ conversation: "C100/1710.000100", ts: "900.000100" });
   });
 
-  it("starts a new session from the modal submission", async () => {
-    await open();
+  it("sets the draft's directory from the modal submission", async () => {
+    await openDraft();
     await feed(click("cfg:cwdtype"));
     await feed({
       type: "interactive",
@@ -1168,11 +1175,12 @@ describe("settings panel", () => {
         },
       },
     });
-    expect(control.created).toEqual([{ key: "C100/1710.000100", cwd: "/srv/new" }]);
+    expect(control.created).toEqual([]);
+    expect(JSON.stringify(client.updated)).toContain("/srv/new");
   });
 
   it("rejects a relative path without changing anything", async () => {
-    await open();
+    await openDraft();
     await feed({
       type: "interactive",
       envelope_id: "sub-2",

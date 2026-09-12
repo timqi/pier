@@ -26,7 +26,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | ✅ |
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
-| Settings panel | In-chat panel: a thread without a session drafts one (cwd, pinned model & reasoning, a pending question) and Starts it; a thread with one reads it out, picks model & reasoning, changes cwd (a new session), stops | shared control, adapter renders | ✅ | ✅ |
+| Settings panel | In-chat panel: a thread without a session drafts one (cwd, pinned model & reasoning, a pending question) and Starts it; a thread with one reads it out, picks model & reasoning, stops | shared control, adapter renders | ✅ | ✅ |
 | Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
 | Continue in this thread | The panel of a thread with no session binds it to an unbound web session | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
@@ -43,8 +43,8 @@ Re-adding any of these is a design decision, not a gap: backend / agent
 selection in chat; message-visibility toggles; per-thread setting overrides;
 admin / bind management from chat; webhook inbound; registered Slack slash
 commands; posting in a Slack channel's main flow (the handoff root excepted);
-editing a live session's cwd (Pi fixes cwd at creation — the panel offers "New
-session in…" instead); moving a session between threads.
+editing a live session's cwd (Pi fixes cwd at creation — a new directory is a
+new thread); moving a session between threads.
 
 ## Layout
 
@@ -154,11 +154,14 @@ Directory…, Continue web session… / Start, Close.
   `Directory`, submit `Set`).
 - Start (`cfg:start`): `newSession(key, draft)` creates and binds, then the
   question goes to the router as the tapper's `InboundMessage` (`sender` the
-  tapper, the 👀 on the card). The panel redraws with the session: `Started
+  tapper, the 👀 on the card). The card settles on the session — the Session
+  group, no button, no `Recent` — and the panel state is released: `Started
   <id8> in <cwd>.` or `Started <id8> — running your question.` A row that
   appeared meanwhile (a message raced the tap) is not replaced: `This thread
   already has a session — send your question as a message.`
-- Continue web session… binds an existing session; the draft is discarded.
+- Continue web session… binds an existing session; the draft is discarded and
+  the card settles the same way, with `Recent` — the excerpt is what tells a
+  phone reader which conversation this is.
 - **The card is the store.** Every button's value (Slack `value`, Lark
   `LarkActionValue.draft`) carries the draft `{cwd?, model?, thinking?, q?,
   dropped?}`; a tap whose in-memory state is gone (a restart) rebuilds it from
@@ -175,18 +178,23 @@ Directory…, Continue web session… / Start, Close.
 
 **With a session.** The Session group: `<id8> · <state>` (`created, no
 message yet` before the first turn), directory, model · reasoning, context.
-Buttons: Model & reasoning, New session in… / ⏹ Stop while streaming, Close.
-No Channel group: the Console owns the gates.
+Buttons: Model & reasoning / ⏹ Stop while streaming — nothing else: the
+conversation is right above the card (no `Recent`), a fresh session is a fresh
+thread, and the card stays. No Channel group: the Console owns the gates.
 
-A `Recent` group follows it with an excerpt — never a summary — of the last
-two exchanges (`ChannelControl.recent`), one line each, `▸ <user>` / `◂ <reply>`
-oldest first, whitespace flattened and cut at 150 characters, the speaker
-header, attachment markers, next-step block and `<silent>` reason stripped. No
-turn yet, no group; an unanswered last turn is a `▸` alone; a read that failed
-is one line `Could not read the transcript: <reason>`.
+The `Recent` group is an excerpt — never a summary — of the last two exchanges
+(`ChannelControl.recent`), one line each, `▸ <user>` / `◂ <reply>` oldest
+first, whitespace flattened and cut at 150 characters, the speaker header,
+attachment markers, next-step block and `<silent>` reason stripped. No turn
+yet, no group; an unanswered last turn is a `▸` alone; a read that failed is
+one line `Could not read the transcript: <reason>`. Only the card Continue web
+session… settles on carries it.
 
 - Opening it on an evicted session resumes that session (one Pi open,
   truthful values).
+- A tap on a settled card — an old button after a redeploy — rebuilds the
+  state, so an index pick answers "no longer listed" and the card is redrawn
+  in place; nothing is posted.
 - "Model & reasoning" (`cfg:pins:<page>`) lists the operator's pinned models
   (`settings.modelMenu`, read per tap through `ChannelControl.pins`), eight a
   page, each a numbered line `<id> · <level> — <note>` (no note, no dash) with
@@ -196,19 +204,20 @@ is one line `Could not read the transcript: <reason>`.
   note reads `Model set to <id> · <level>.` Nothing pinned: `No pinned models
   — Settings → Models → Model menu.`; the catalog is the Console's, not a
   chat's.
-- "New session in…" (`cfg:cwd`) lists up to six recent directories — the
-  distinct cwds of the session listing, newest first, the chat's own default
-  first (`ChannelControl.recentDirs`) — as numbered full paths with one
-  button each (`cfg:cwd:<i>`, label the last two segments), then "Type a
-  path…" (`cfg:cwdtype`) and Back. A tap creates the session at once with the
-  chat defaults; the note says nothing has run yet. The typed answer rejects a
-  relative path. Slack: a modal. Prefer a modal wherever the platform has one.
+- "Directory…" (`cfg:cwd`, draft state only) lists up to six recent
+  directories — the distinct cwds of the session listing, newest first, the
+  chat's own default first (`ChannelControl.recentDirs`) — as numbered full
+  paths with one button each (`cfg:cwd:<i>`, label the last two segments),
+  then "Type a path…" (`cfg:cwdtype`) and Back. A tap sets the draft's
+  directory; a thread that has a session is refused with the sentence Start
+  uses. The typed answer rejects a relative path. Slack: a modal. Prefer a
+  modal wherever the platform has one.
 - "Continue web session…" (`cfg:sessions:<page>`, draft state only): the 40
   newest unbound sessions, eight a page (`‹ Prev` / `Next ›` / Back as for the
   pins), each a numbered line — title or directory name cut at 40 characters ·
   directory basename · age — with one button (`cfg:session:<i>`). A tap is
   `continueHere`; the note reads `Continuing session <id8> — reply in this
-  thread.` and the panel redraws with the session. Nothing to list: `No
+  thread.` and the card settles on the session. Nothing to list: `No
   unbound sessions.`; a listing that failed says so instead. A refused pick
   prints the refusal sentence.
 - A session the panel creates has no transcript until its first reply, so

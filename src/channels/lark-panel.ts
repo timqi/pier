@@ -17,7 +17,6 @@ import {
   ChatPanel,
   CWD_DRAFT_TAIL,
   CWD_PLACEHOLDER,
-  CWD_TAIL,
   holdQuestion,
   PANEL_PREFIX,
   type PanelButton,
@@ -117,17 +116,16 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     _key: ConversationKey,
     state: LarkPanelState,
     _action: LarkCardAction,
-    creates: boolean,
   ): Promise<void> {
     const form: LarkElement = {
       tag: "form",
       name: "cwd_form",
       elements: [
         formInput(CWD_FIELD, "Working directory", CWD_PLACEHOLDER),
-        markdown(`An absolute path. ${creates ? CWD_TAIL : CWD_DRAFT_TAIL}`),
+        markdown(`An absolute path. ${CWD_DRAFT_TAIL}`),
         {
           tag: "button",
-          text: { tag: "plain_text", content: creates ? "Create" : "Set" },
+          text: { tag: "plain_text", content: "Set" },
           type: "primary",
           action_type: "form_submit",
           name: `${CWD_SUBMIT_PREFIX}${state.root}`,
@@ -145,6 +143,6 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
    *  carries no value, so a draft's earlier picks do not survive that restart. */
   async onCwdSubmit(key: ConversationKey, action: LarkCardAction, root: string): Promise<void> {
     if (!this.state(key)) this.remember(key, fresh(root, action.messageId, {}));
-    await this.startSessionIn(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
+    await this.chooseDir(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
   }
 }

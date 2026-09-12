@@ -20,8 +20,8 @@ truth.
 - Idle sessions leave memory but keep their transcript; they resume
   transparently on the next message. Never promise that a restart or a pause
   wipes context.
-- A fresh start is explicit: "New session in…" in the chat settings panel or
-  the web UI. The old transcript remains readable from the web workbench.
+- A fresh start is explicit: a new thread (its panel drafts the session) or the
+  web UI. The old transcript remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
 - A web session can be continued in Slack or Lark — the web session menu's
@@ -67,9 +67,8 @@ truth.
   Start runs as the first message; a bare `s`, or `s <text>` inside a thread,
   is an ordinary message.
 - In a thread with a session the panel reads it out (resuming an idle one) and
-  excerpts the last two exchanges under `Recent`;
-  "New session in…" creates a session in a recent or typed directory at once,
-  and the thread's next message runs there; Stop aborts a running turn.
+  offers "Model & reasoning"; Stop aborts a running turn. A session's directory
+  is fixed at creation, so another directory means another thread.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
 

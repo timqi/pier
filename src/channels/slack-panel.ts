@@ -8,7 +8,6 @@ import {
   ChatPanel,
   CWD_DRAFT_TAIL,
   CWD_PLACEHOLDER,
-  CWD_TAIL,
   holdQuestion,
   PANEL_PREFIX,
   type PanelButton,
@@ -149,7 +148,6 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
     key: ConversationKey,
     state: SlackPanelState,
     interaction: SlackInteraction,
-    creates: boolean,
   ): Promise<void> {
     const trigger = interaction.trigger_id;
     if (!trigger) {
@@ -161,15 +159,15 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
       type: "modal",
       callback_id: CWD_VIEW,
       private_metadata: JSON.stringify(metadata),
-      title: { type: "plain_text", text: creates ? "New session" : "Directory" },
-      submit: { type: "plain_text", text: creates ? "Create" : "Set" },
+      title: { type: "plain_text", text: "Directory" },
+      submit: { type: "plain_text", text: "Set" },
       close: { type: "plain_text", text: "Cancel" },
       blocks: [
         {
           type: "input",
           block_id: CWD_BLOCK,
           label: { type: "plain_text", text: "Working directory" },
-          hint: { type: "plain_text", text: `An absolute path. ${creates ? CWD_TAIL : CWD_DRAFT_TAIL}` },
+          hint: { type: "plain_text", text: `An absolute path. ${CWD_DRAFT_TAIL}` },
           element: {
             type: "plain_text_input",
             action_id: CWD_INPUT,
@@ -193,7 +191,7 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
     }
     const key: ConversationKey = { channelId: "slack", conversationId: meta.conversation };
     if (!this.state(key)) this.remember(key, fresh(chatOf(meta.conversation), meta.ts, this.parseDraft(meta.draft)));
-    await this.startSessionIn(key, (view.state?.values?.[CWD_BLOCK]?.[CWD_INPUT]?.value ?? "").trim());
+    await this.chooseDir(key, (view.state?.values?.[CWD_BLOCK]?.[CWD_INPUT]?.value ?? "").trim());
     return true;
   }
 }

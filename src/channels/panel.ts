@@ -35,7 +35,6 @@ const QUESTION_BYTES = 1500;
 /** The pull half of the handoff; the push half never needs a panel. */
 export type PanelHandoff = Pick<Handoff, "unbound" | "continueHere">;
 
-export const CWD_TAIL = "The session is created there at once; the first message you send in this thread runs in it.";
 export const CWD_DRAFT_TAIL = "Start creates the session there.";
 export const CWD_PLACEHOLDER = "/path/to/project";
 export const HAS_SESSION = "This thread already has a session — send your question as a message.";
@@ -174,9 +173,8 @@ export abstract class ChatPanel<S extends PanelState, C> {
   protected abstract esc(text: string): string;
   protected abstract draw(state: S, view: PanelView, note?: string): Promise<void>;
   /** One typed answer in the platform's dialog: a Slack modal, a Lark form
-   *  card. `creates`: the answer starts a session (a thread that has one)
-   *  rather than setting the draft's directory. */
-  protected abstract promptCwd(key: ConversationKey, state: S, ctx: C, creates: boolean): Promise<void>;
+   *  card; the answer is the draft's directory. */
+  protected abstract promptCwd(key: ConversationKey, state: S, ctx: C): Promise<void>;
   protected abstract erase(state: S): Promise<void>;
 
   protected code(text: string): string {
@@ -196,15 +194,14 @@ export abstract class ChatPanel<S extends PanelState, C> {
   protected async view(key: ConversationKey, state: S): Promise<PanelView> {
     const status = await this.deps.control.status(key);
     if (!status) return this.draftView(key, state.draft);
+    // The conversation is right above the card: no excerpt, and no way to a
+    // second session — that is a new thread.
     return {
-      groups: [{ title: "Session", lines: this.sessionLines(status) }, ...await this.recentGroups(key)],
-      rows: [
-        [btn("Model & reasoning", "pins:0"), btn("New session in…", "cwd")],
-        [
-          ...(status.state === "streaming" ? [btn("⏹ Stop", "stop")] : []),
-          btn("Close", "close"),
-        ],
-      ],
+      groups: [{ title: "Session", lines: this.sessionLines(status) }],
+      rows: [[
+        btn("Model & reasoning", "pins:0"),
+        ...(status.state === "streaming" ? [btn("⏹ Stop", "stop")] : []),
+      ]],
     };
   }
 
@@ -281,6 +278,20 @@ export abstract class ChatPanel<S extends PanelState, C> {
     await this.draw(state, await this.view(key, state), note);
   }
 
+  /** The card's last draw: the session it just bound, no button. The panel is
+   *  released with it, so nothing can tap it again and the card stays as a
+   *  record. `recent` excerpts the transcript — what tells a phone reader
+   *  which conversation was continued. */
+  private async settle(key: ConversationKey, state: S, note: string, recent: boolean): Promise<void> {
+    const status = await this.deps.control.status(key);
+    if (!status) return this.refresh(key, note);
+    await this.draw(state, {
+      groups: [{ title: "Session", lines: this.sessionLines(status) }, ...recent ? await this.recentGroups(key) : []],
+      rows: [],
+    }, note);
+    this.panels.delete(key.conversationId);
+  }
+
   // --- actions -----------------------------------------------------------------
 
   /** Returns false when the payload is not ours. `recover` rebuilds the state
@@ -327,7 +338,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
         else await this.showDirs(key);
         return true;
       case "cwdtype":
-        await this.promptCwd(key, state, ctx, this.deps.control.knows(key));
+        await this.promptCwd(key, state, ctx);
         return true;
       case "start":
         await this.start(key, state, run);
@@ -406,7 +417,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
       await this.deps.handoff.continueHere(key, session.id);
       // The bound session has its own settings; the draft is spent.
       state.draft = {};
-      await this.refresh(key, `Continuing session ${session.id.slice(0, 8)} — reply in this thread.`);
+      await this.settle(key, state, `Continuing session ${session.id.slice(0, 8)} — reply in this thread.`, true);
     } catch (err) {
       await this.refresh(key, failed("Could not continue that session", err));
     }
@@ -441,7 +452,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     });
     await this.draw(state, {
       groups: [{
-        title: this.deps.control.knows(key) ? "New session in" : "Directory",
+        title: "Directory",
         lines: state.dirs.length
           ? state.dirs.map((dir, i) => `${String(i + 1)}. ${this.code(dir)}`)
           : [unavailable ?? "No sessions yet — type a path."],
@@ -454,28 +465,18 @@ export abstract class ChatPanel<S extends PanelState, C> {
   private async pickDir(key: ConversationKey, index: number): Promise<void> {
     const dir = this.state(key)?.dirs[index];
     if (!dir) return this.refresh(key, "That directory is no longer listed.");
-    await this.startSessionIn(key, dir);
+    await this.chooseDir(key, dir);
   }
 
-  /** Pi fixes cwd at session creation, so "change the working directory" *is*
-   *  "start a new session there" — or, while the thread has none, the draft's
-   *  directory for Start. */
-  protected async startSessionIn(key: ConversationKey, path: string): Promise<void> {
-    if (!path.startsWith("/")) return this.refresh(key, "That is not an absolute path — nothing changed.");
+  /** Pi fixes cwd at session creation, so a directory is only ever the draft's:
+   *  a thread that already has a session keeps it, and a new one is a new thread. */
+  protected async chooseDir(key: ConversationKey, path: string): Promise<void> {
     const state = this.state(key);
-    if (state && !this.deps.control.knows(key)) {
-      state.draft = { ...state.draft, cwd: path };
-      return this.refresh(key);
-    }
-    try {
-      const id = await this.deps.control.newSession(key, { cwd: path });
-      await this.refresh(
-        key,
-        `Created session ${id.slice(0, 8)} in ${path} — nothing has run yet; the first message you send in this thread starts it.`,
-      );
-    } catch (err) {
-      await this.refresh(key, failed("Could not start a session there", err));
-    }
+    if (!state) return;
+    if (this.deps.control.knows(key)) return this.refresh(key, HAS_SESSION);
+    if (!path.startsWith("/")) return this.refresh(key, "That is not an absolute path — nothing changed.");
+    state.draft = { ...state.draft, cwd: path };
+    await this.refresh(key);
   }
 
   /** Create with the draft, bind the thread, run the question as the tapper's
@@ -493,9 +494,9 @@ export abstract class ChatPanel<S extends PanelState, C> {
     state.draft = {};
     if (q) {
       await run(q);
-      return this.refresh(key, `Started ${id.slice(0, 8)} — running your question.`);
+      return this.settle(key, state, `Started ${id.slice(0, 8)} — running your question.`, false);
     }
     const cwd = (await this.deps.control.status(key))?.cwd ?? launch.cwd ?? "?";
-    await this.refresh(key, `Started ${id.slice(0, 8)} in ${cwd}.`);
+    await this.settle(key, state, `Started ${id.slice(0, 8)} in ${cwd}.`, false);
   }
 }

@@ -191,11 +191,18 @@ const opened = async (question?: string): Promise<{ api: FakeSlack; panel: Slack
 describe("the Recent group", () => {
   /** The Recent section of the card as last drawn. */
   const recent = (blocks: SlackBlock[]): string => text(blocks[1]!);
+  /** Only one card carries it: the one Continue web session… settles on. */
+  const continued = async (): Promise<SlackBlock[]> => {
+    control.current = null;
+    const { api, panel } = await opened();
+    await tap(panel, "cfg:sessions:0");
+    await tap(panel, "cfg:session:0");
+    return last(api);
+  };
 
   it("excerpts the last two exchanges, oldest first, stripped, flattened and cut", async () => {
     control.exchanges = EXCHANGES;
-    const { api } = await opened();
-    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    const blocks = await continued();
     const lines = recent(blocks).split("\n");
     expect(lines[0]).toBe("*Recent*");
     expect(lines[1]).toBe("▸ read the parser");
@@ -211,28 +218,23 @@ describe("the Recent group", () => {
 
   it("asks for two and shows one when that is all there is", async () => {
     control.exchanges = [EXCHANGES[1]!];
-    const { api } = await opened();
-    expect(recent(api.posted[0]!.blocks as SlackBlock[]).split("\n")).toHaveLength(3);
+    expect(recent(await continued()).split("\n")).toHaveLength(3);
   });
 
   it("an unanswered last turn is a ▸ without a ◂", async () => {
     control.exchanges = [{ user: "still thinking?" }];
-    const { api } = await opened();
-    expect(recent(api.posted[0]!.blocks as SlackBlock[])).toBe("*Recent*\n▸ still thinking?");
+    expect(recent(await continued())).toBe("*Recent*\n▸ still thinking?");
   });
 
   it("a session with no turn yet has no group at all", async () => {
-    control.current = status({ empty: true, tokens: null });
-    const { api } = await opened();
-    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    const blocks = await continued();
     expect(JSON.stringify(blocks)).not.toContain("Recent");
-    expect(blocks).toHaveLength(3);
+    expect(blocks).toHaveLength(2);
   });
 
   it("a read that fails says so on the card and is logged", async () => {
     control.exchanges = new Error("disk");
-    const { api } = await opened();
-    expect(recent(api.posted[0]!.blocks as SlackBlock[]))
+    expect(recent(await continued()))
       .toBe("*Recent*\nCould not read the transcript: Error: disk");
     expect(logs).toContain("Could not read the transcript: Error: disk");
   });
@@ -244,38 +246,39 @@ describe("the Recent group", () => {
     expect(JSON.stringify(api.posted[0]!.blocks)).not.toContain("Recent");
   });
 
-  it("the redraw after Continue web session… and after Start includes it", async () => {
+  it("the panel of a thread with a session has none: the conversation is right above it", async () => {
+    control.exchanges = EXCHANGES;
+    const { api } = await opened();
+    expect(JSON.stringify(api.posted[0]!.blocks)).not.toContain("Recent");
+  });
+
+  it("Start settles without it: the session it created has no conversation yet", async () => {
     control.current = null;
     control.exchanges = EXCHANGES;
     const { api, panel } = await opened();
-    await tap(panel, "cfg:sessions:0");
-    await tap(panel, "cfg:session:0");
-    expect(text(last(api)[1]!)).toContain("▸ and fix it");
-
-    control.current = null;
-    const started = await opened();
-    await tap(started.panel, "cfg:start");
-    expect(text(last(started.api)[1]!)).toContain("▸ and fix it");
+    await tap(panel, "cfg:start");
+    expect(JSON.stringify(last(api))).not.toContain("Recent");
   });
 });
 
 describe("slack panel with a session", () => {
-  it("renders the session and the button rows; no channel group, no New session", async () => {
+  it("reads the session out and offers one button; no channel group, no New session, no Close", async () => {
     const { api } = await opened();
     const blocks = api.posted[0]!.blocks as SlackBlock[];
-    expect(blocks).toHaveLength(3);
+    expect(blocks).toHaveLength(2);
     expect(text(blocks[0]!)).toContain("*Session*");
     expect(text(blocks[0]!)).toContain("`01234567` · idle");
-    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "New session in…"]);
-    expect(labels(blocks[2]!)).toEqual(["Close"]);
+    expect(labels(blocks[1]!)).toEqual(["Model & reasoning"]);
     expect(JSON.stringify(blocks)).not.toContain("Channel");
-    expect(values(blocks)).toEqual([undefined, undefined, undefined]);
+    expect(JSON.stringify(blocks)).not.toContain("New session");
+    expect(JSON.stringify(blocks)).not.toContain("Close");
+    expect(values(blocks)).toEqual([undefined]);
   });
 
   it("offers Stop while streaming", async () => {
     control.current = status({ state: "streaming" });
     const { api } = await opened();
-    expect(labels((api.posted[0]!.blocks as SlackBlock[])[2]!)).toEqual(["⏹ Stop", "Close"]);
+    expect(labels((api.posted[0]!.blocks as SlackBlock[])[1]!)).toEqual(["Model & reasoning", "⏹ Stop"]);
   });
 
   it("an empty session reads \"created, no message yet\"", async () => {
@@ -312,13 +315,15 @@ describe("slack panel with a session", () => {
     expect(labels(blocks[2]!)).toEqual(["‹ Prev", "‹ Back"]);
   });
 
-  it("a pick sets the model and the level together", async () => {
+  it("a pick sets the model and the level together and redraws the same one button", async () => {
     const { api, panel } = await opened();
     await tap(panel, "cfg:pins:0");
     await tap(panel, "cfg:pin:1");
     expect(control.setModels).toEqual([{ provider: "anthropic", id: "model-1" }]);
     expect(control.setLevels).toEqual(["high"]);
     expect(footnote(last(api).at(-1)!)).toBe("Model set to model-1 · High.");
+    expect(labels(last(api)[1]!)).toEqual(["Model & reasoning"]);
+    expect(api.posted).toHaveLength(1);
   });
 
   it("no pins: the empty list names where they are pinned", async () => {
@@ -339,75 +344,12 @@ describe("slack panel with a session", () => {
     expect(footnote(last(api).at(-1)!)).toBe("That model is no longer listed.");
   });
 
-  it("New session in… lists recent directories as buttons with numbered full paths", async () => {
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:cwd");
-    const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("*New session in*");
-    expect(text(blocks[0]!)).toContain("1. `/home/qiqi/code/dev/pier`");
-    expect(text(blocks[0]!)).toContain("2. `/srv/ops`");
-    expect(labels(blocks[1]!)).toEqual(["1 …/dev/pier", "2 /srv/ops"]);
-    expect(labels(blocks[2]!)).toEqual(["Type a path…", "‹ Back"]);
-    expect(api.views).toEqual([]);
-  });
-
-  it("cwd:<i> creates there and the note distinguishes created from run", async () => {
+  it("a directory tap on this thread changes nothing and says why", async () => {
     const { api, panel } = await opened();
     await tap(panel, "cfg:cwd");
     await tap(panel, "cfg:cwd:1");
-    expect(control.newSessions).toEqual([{ cwd: "/srv/ops" }]);
-    const note = footnote(last(api).at(-1)!);
-    expect(note).toContain("Created session abcdef01 in /srv/ops");
-    expect(note).toContain("nothing has run yet");
-  });
-
-  it("a stale index after a redraw is refused, not misfiled", async () => {
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:cwd");
-    await tap(panel, "cfg:cwd:7");
     expect(control.newSessions).toEqual([]);
-    expect(footnote(last(api).at(-1)!)).toBe("That directory is no longer listed.");
-  });
-
-  it("empty listing offers only the typed path", async () => {
-    control.dirs = [];
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:cwd");
-    const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("No sessions yet — type a path.");
-    expect(blocks).toHaveLength(2);
-    expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
-  });
-
-  it("a listing that fails says so and still offers the typed path", async () => {
-    control.dirs = new Error("disk");
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:cwd");
-    const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("Could not list recent directories: Error: disk");
-    expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
-  });
-
-  it("Type a path… opens the modal carrying the conversation and the card", async () => {
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:cwdtype", { trigger_id: "t1" });
-    const view = api.views[0] as { callback_id: string; private_metadata: string };
-    expect(view.callback_id).toBe("cfg_cwd");
-    expect(JSON.parse(view.private_metadata)).toEqual({ conversation: "C100/1717.0000", ts: "1717.0001" });
-    expect(JSON.stringify(api.views[0])).toContain("\"Create\"");
-  });
-
-  it("starts the session a submitted modal asked for", async () => {
-    const { panel } = await opened();
-    const submission = {
-      view: {
-        callback_id: "cfg_cwd",
-        private_metadata: JSON.stringify({ conversation: "C100/1717.0000", ts: "1717.0001" }),
-        state: { values: { cwd_block: { cwd_input: { value: "/srv/other" } } } },
-      },
-    } as unknown as SlackInteraction;
-    expect(await panel.onViewSubmission(submission)).toBe(true);
-    expect(control.newSessions).toEqual([{ cwd: "/srv/other" }]);
+    expect(footnote(last(api).at(-1)!)).toBe(HAS_SESSION);
   });
 
   it("leaves a submission from someone else's view alone", async () => {
@@ -466,10 +408,48 @@ describe("draft panel (no session in the thread)", () => {
     expect(text(last(api)[0]!)).toContain("2. ✓ model-1 · High");
   });
 
-  it("Directory… sets the draft's directory without creating anything", async () => {
+  it("Directory… lists recent directories as buttons with numbered full paths", async () => {
     const { api, panel } = await openDraft();
     await tap(panel, "cfg:cwd");
-    expect(text(last(api)[0]!)).toContain("*Directory*");
+    const blocks = last(api);
+    expect(text(blocks[0]!)).toContain("*Directory*");
+    expect(text(blocks[0]!)).toContain("1. `/home/qiqi/code/dev/pier`");
+    expect(text(blocks[0]!)).toContain("2. `/srv/ops`");
+    expect(labels(blocks[1]!)).toEqual(["1 …/dev/pier", "2 /srv/ops"]);
+    expect(labels(blocks[2]!)).toEqual(["Type a path…", "‹ Back"]);
+    expect(api.views).toEqual([]);
+  });
+
+  it("empty listing offers only the typed path", async () => {
+    control.dirs = [];
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:cwd");
+    const blocks = last(api);
+    expect(text(blocks[0]!)).toContain("No sessions yet — type a path.");
+    expect(blocks).toHaveLength(2);
+    expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
+  });
+
+  it("a listing that fails says so and still offers the typed path", async () => {
+    control.dirs = new Error("disk");
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:cwd");
+    const blocks = last(api);
+    expect(text(blocks[0]!)).toContain("Could not list recent directories: Error: disk");
+    expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
+  });
+
+  it("a stale index after a redraw is refused, not misfiled", async () => {
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:cwd");
+    await tap(panel, "cfg:cwd:7");
+    expect(control.newSessions).toEqual([]);
+    expect(footnote(last(api).at(-1)!)).toBe("That directory is no longer listed.");
+  });
+
+  it("a pick sets the draft's directory without creating anything", async () => {
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:cwd");
     await tap(panel, "cfg:cwd:1");
     expect(control.newSessions).toEqual([]);
     expect(text(last(api)[0]!)).toContain("Starts in `/srv/ops` · model-1 · reasoning medium");
@@ -482,6 +462,9 @@ describe("draft panel (no session in the thread)", () => {
   it("a typed path sets the draft too, and the modal says so", async () => {
     const { api, panel } = await openDraft();
     await tap(panel, "cfg:cwdtype", { trigger_id: "t1" });
+    const view = api.views[0] as { callback_id: string; private_metadata: string };
+    expect(view.callback_id).toBe("cfg_cwd");
+    expect(JSON.parse(view.private_metadata)).toEqual({ conversation: "C100/1717.0000", ts: "1717.0001" });
     expect(JSON.stringify(api.views[0])).toContain("Start creates the session there.");
     expect(JSON.stringify(api.views[0])).toContain("\"Set\"");
     await panel.onViewSubmission({
@@ -495,17 +478,29 @@ describe("draft panel (no session in the thread)", () => {
     expect(text(last(api)[0]!)).toContain("Starts in `/srv/typed`");
   });
 
-  it("Start without a question creates with the draft and redraws as the session", async () => {
+  it("Start without a question creates with the draft and settles the card on the session", async () => {
     const { api, panel } = await openDraft();
     await tap(panel, "cfg:pin:2");
     await tap(panel, "cfg:start");
     expect(control.newSessions).toEqual([{ model: ref(2), thinking: "high" }]);
     expect(ran).toEqual([]);
     const blocks = last(api);
+    expect(blocks).toHaveLength(2);
     expect(footnote(blocks.at(-1)!)).toBe("Started abcdef01 in /srv/ops.");
     expect(text(blocks[0]!)).toContain("`abcdef01` · created, no message yet");
-    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "New session in…"]);
-    expect(values(blocks).every((v) => v === undefined)).toBe(true);
+    expect(blocks.some((b) => b.type === "actions")).toBe(false);
+  });
+
+  it("the settled card is released: a later tap answers on it, posting nothing new", async () => {
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:start");
+    const drawn = api.updated.length;
+    await tap(panel, "cfg:cwd:1");
+    expect(api.posted).toHaveLength(1);
+    expect(api.updated.length).toBe(drawn + 1);
+    expect(footnote(last(api).at(-1)!)).toBe("That directory is no longer listed.");
+    expect(control.newSessions).toHaveLength(1);
+    expect(labels(last(api)[1]!)).toEqual(["Model & reasoning"]);
   });
 
   it("Start with a question creates, then runs the question once", async () => {
@@ -677,7 +672,7 @@ describe("continue web session picker", () => {
     const blocks = last(api);
     expect(footnote(blocks.at(-1)!)).toBe("Continuing session sess9000 — reply in this thread.");
     expect(text(blocks[0]!)).toContain("`sess9000` · idle");
-    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "New session in…"]);
+    expect(blocks.some((b) => b.type === "actions")).toBe(false);
   });
 
   it("an empty list says so and offers only Back", async () => {

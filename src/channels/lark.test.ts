@@ -706,9 +706,8 @@ describe("commands and panel", () => {
     expect(bodyText(client.replied.at(-1)!.card)).toContain("Session");
   });
 
-  it("starts a session from a cwd form submit, even after a restart lost the panel", async () => {
+  it("sets the draft's directory from a cwd form submit, even after a restart lost the panel", async () => {
     openGates();
-    known.add(`${CHAT}/om_root`);
     // No panel state exists for this conversation — the submit still works,
     // because the button's name carries the thread root.
     await act({
@@ -718,9 +717,10 @@ describe("commands and panel", () => {
       name: "cwdgo:om_root",
       formValue: { cwd: "/srv/new" },
     });
-    expect(control.created).toEqual([{ key: `${CHAT}/om_root`, cwd: "/srv/new" }]);
+    expect(control.created).toEqual([]);
     // The outcome is drawn onto the panel card the user is looking at.
     expect(client.patched.at(-1)!.messageId).toBe("om_stale_panel");
+    expect(bodyText(client.patched.at(-1)!.card)).toContain("/srv/new");
   });
 
   it("/s <text> opens the draft with the question; Start creates and runs it as the tapper's message", async () => {
