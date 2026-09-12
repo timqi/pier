@@ -91,6 +91,14 @@ const titleOf = (name?: string | null, first?: string | null): string | undefine
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+/** The budget is the words, not the header: a 34-character Lark id would spend
+ *  it all and leave a clip that no longer parses back as a header. */
+function clipTitle(whole: string, clean: (text: string) => string): string {
+  const body = clean(whole);
+  const header = whole.slice(0, whole.length - body.length);
+  return header + body.slice(0, SESSION_TITLE_MAX);
+}
+
 /** A reply that calls a tool is a step, not a reply (events.ts), and steps are
  *  not indexed. `clean` takes off the speaker header (core/identity.ts), which
  *  as text would make "operator" hit every session. */
@@ -141,7 +149,7 @@ function fold(
     // The title keeps the header the index drops; surfaces read it back
     // through core/identity.ts.
     if (acc.first || said.role !== "user") return acc;
-    return { ...acc, first: textOf(message?.content).trim().slice(0, SESSION_TITLE_MAX) };
+    return { ...acc, first: clipTitle(textOf(message?.content).trim(), clean) };
   }
   return acc;
 }
@@ -296,7 +304,8 @@ export class IndexedListing implements SessionListing {
       const want = info && {
         cwd: info.cwd,
         created: info.created.getTime(),
-        title: info.name ?? info.firstMessage?.slice(0, SESSION_TITLE_MAX),
+        title: info.name ??
+          (info.firstMessage ? clipTitle(info.firstMessage.trim(), this.clean) : undefined),
       };
       if (want && want.cwd === seen.cwd && want.created === seen.created &&
         want.title === seen.title) continue;

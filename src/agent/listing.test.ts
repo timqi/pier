@@ -300,6 +300,14 @@ describe("the on-disk index", () => {
     expect((await listing.scan())[0]?.title).toBe("fix the parser");
   });
 
+  it("spends the title budget on the words, not on a long speaker header", async () => {
+    const head = "[qiqi<ou_6823bea16e6f2da5fc4a78a2f137c870> 2026-01-01 00:01 lark:oc_29115f94a301]";
+    await write("--p--", "s1", [header("s1", "/p"), user(`${head}\nfix the parser`)]);
+    const title = (await listing.scan())[0]?.title;
+    expect(title).toBe(`${head}\nfix the parser`);
+    expect(splitSpeaker(title ?? "").text).toBe("fix the parser");
+  });
+
   it("counts a session Pi does not know at all as a disagreement", async () => {
     await write("--p--", "s1", [header("s1", "/p")]);
     await listing.scan();
