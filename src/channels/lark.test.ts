@@ -4,7 +4,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
 import type {
@@ -189,15 +189,23 @@ function message(over: {
   };
 }
 
+/** Wait for the handlers the adapter has in flight, reaching for its chains
+ *  because a fixed sleep is a race: saving an attachment's bytes is real I/O
+ *  with no upper bound on a loaded machine. */
+async function settled(): Promise<void> {
+  const chains = (channel as unknown as { chains: { size: number } }).chains;
+  await vi.waitFor(() => expect(chains.size).toBe(0), { interval: 1, timeout: 5_000 });
+}
+
 /** Push events and let the per-chat chains drain. */
 async function feed(...events: LarkMessageEvent[]): Promise<void> {
   for (const event of events) client.handlers.onMessage(event);
-  await new Promise((r) => setTimeout(r, 20));
+  await settled();
 }
 
 async function act(action: LarkCardAction): Promise<void> {
   client.handlers.onCardAction(action);
-  await new Promise((r) => setTimeout(r, 20));
+  await settled();
 }
 
 /** Open the chat gates and bind the test sender (a DM is bind-only). */
