@@ -2,6 +2,7 @@
 // the `Channel` seam: the channel layer owns the router and hands adapters this
 // narrow interface instead. Thin wrappers over core; no policy.
 
+import { projectCwds } from "../core/identity.js";
 import type { Router } from "../core/router.js";
 import type {
   AgentFactory,
@@ -137,9 +138,8 @@ export function createControl({ router, factory, conversations, store, modelMenu
 
     async recentDirs(key, limit = 6) {
       const own = launchFor(key).cwd;
-      const seen = new Set<string>(own ? [own] : []);
-      // Newest first (agent/pi.ts); task runs' directories are project directories too.
-      for (const s of await factory.list()) seen.add(s.cwd);
+      // The web's rule (worktrees folded into their project); task runs' directories count too.
+      const seen = new Set<string>([...(own ? [own] : []), ...projectCwds(await factory.list())]);
       return [...seen].slice(0, limit);
     },
 

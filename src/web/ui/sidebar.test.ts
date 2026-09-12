@@ -53,24 +53,6 @@ it("shows twenty rows, the working set counted, and says how many wait behind Lo
   expect(topOnly.hidden).toBe(31);
 });
 
-it("offers each directory once, newest session first", () => {
-  expect(sidebar.distinctCwds([
-    row("a", { cwd: "/x", createdAt: 1 }),
-    row("b", { cwd: "/y", createdAt: 3 }),
-    row("c", { cwd: "/x", createdAt: 2 }),
-  ])).toEqual(["/y", "/x"]);
-});
-
-it("offers a project but not its worktrees, and keeps a dotted name with no such sibling", () => {
-  expect(sidebar.projectCwds([
-    row("a", { cwd: "/code/pier.palette-search", createdAt: 4 }),
-    row("b", { cwd: "/code/pier", createdAt: 3 }),
-    row("c", { cwd: "/code/pier.stable", createdAt: 2 }),
-    row("d", { cwd: "/code/site.v2", createdAt: 1 }), // no /code/site here: a name, not a branch
-    row("e", { cwd: "/home/me/.pier", createdAt: 0 }), // a leading dot names a directory
-  ])).toEqual(["/code/pier", "/code/site.v2", "/home/me/.pier"]);
-});
-
 // An idle session has no mark or reserved slot in the rail.
 it("draws no dot on an idle row and paints one only for something to look at", () => {
   const dot = (over: Partial<Row>) => sidebar.stateDot(row("x", over))[0] as unknown as { cls: string; title: string } | undefined;

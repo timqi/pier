@@ -2,7 +2,7 @@
 // message is pure token waste in a conversation whose speaker never changes.
 
 import { describe, expect, it } from "vitest";
-import { readableTitle, sanitizeIdentity, SenderPrefix, splitSpeaker, withPrefix } from "./identity.js";
+import { distinctCwds, projectCwds, readableTitle, sanitizeIdentity, SenderPrefix, splitSpeaker, withPrefix } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
 const bob = { id: "U2", name: "Bob" };
@@ -212,4 +212,22 @@ describe("readableTitle", () => {
     // Better a title only the operator can parse than a blank row.
     expect(readableTitle("[operator<web> 12:01]\n")).toBe("[operator<web> 12:01]\n");
   });
+});
+
+it("offers each directory once, newest session first", () => {
+  expect(distinctCwds([
+    { cwd: "/x", createdAt: 1 },
+    { cwd: "/y", createdAt: 3 },
+    { cwd: "/x", createdAt: 2 },
+  ])).toEqual(["/y", "/x"]);
+});
+
+it("offers a project but not its worktrees, and keeps a dotted name with no such sibling", () => {
+  expect(projectCwds([
+    { cwd: "/code/pier.palette-search", createdAt: 4 },
+    { cwd: "/code/pier", createdAt: 3 },
+    { cwd: "/code/pier.stable", createdAt: 2 },
+    { cwd: "/code/site.v2", createdAt: 1 }, // no /code/site here: a name, not a branch
+    { cwd: "/home/me/.pier", createdAt: 0 }, // a leading dot names a directory
+  ])).toEqual(["/code/pier", "/code/site.v2", "/home/me/.pier"]);
 });

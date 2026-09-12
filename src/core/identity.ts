@@ -161,3 +161,22 @@ export function readableTitle(title: string | undefined): string | undefined {
  *  not answer must not silence the message. */
 export const sessionLabel = (s?: { title?: string; cwd: string }): string =>
   readableTitle(s?.title) || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
+
+/** Distinct directories, newest session first: the ground `projectCwds` picks
+ *  from. */
+export const distinctCwds = (list: { cwd: string; createdAt: number }[]): string[] =>
+  [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
+
+/** The distinct directories less the worktrees: `wt` puts a checkout beside its
+ *  repository as `<repo>.<branch>`, and the next conversation about a project
+ *  belongs in the project. A worktree with no such sibling stays. What every
+ *  directory picker — web New-session menu, Settings scope, IM panel — offers. */
+export function projectCwds(list: { cwd: string; createdAt: number }[]): string[] {
+  const all = distinctCwds(list);
+  const known = new Set(all);
+  return all.filter((cwd) => {
+    const slash = cwd.lastIndexOf("/");
+    const dot = cwd.indexOf(".", slash + 2); // not a leading dot: `.pier` is a name
+    return dot < 0 || !known.has(cwd.slice(0, dot));
+  });
+}

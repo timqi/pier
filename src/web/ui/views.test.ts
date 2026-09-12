@@ -16,7 +16,7 @@ vi.mock("./chat.js", () => ({ turnsPane: mocks.element("turns") }));
 vi.mock("./composer.js", () => ({ syncQueuePanel: vi.fn() }));
 vi.mock("./session-header.js", () => ({ renderHeader: vi.fn() }));
 vi.mock("./shell.js", () => ({ closeDrawer: vi.fn(), setBarTitle: mocks.bar }));
-vi.mock("./sidebar.js", () => ({ projectCwds: vi.fn(), orderSessions: () => ({ top: [], rest: [] }) }));
+vi.mock("./sidebar.js", () => ({ orderSessions: () => ({ top: [], rest: [] }) }));
 vi.mock("./shortcut.js", () => ({ shortcut: vi.fn() }));
 vi.mock("./tasks.js", () => ({ createTasksView: () => mocks.tasks }));
 vi.mock("./runs.js", () => ({ createRunsView: () => mocks.runs }));

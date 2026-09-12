@@ -205,8 +205,9 @@ session… settles on carries it.
   — Settings → Models → Model menu.`; the catalog is the Console's, not a
   chat's.
 - "Directory…" (`cfg:cwd`, draft state only) lists up to six recent
-  directories — the distinct cwds of the session listing, newest first, the
-  chat's own default first (`ChannelControl.recentDirs`) — as numbered full
+  directories — the web New-session menu's list (`core/identity.ts`
+  `projectCwds`: distinct cwds newest first, worktrees folded into their
+  project), the chat's own default first (`ChannelControl.recentDirs`) — as numbered full
   paths with one button each (`cfg:cwd:<i>`, label the last two segments),
   then "Type a path…" (`cfg:cwdtype`) and Back. A tap sets the draft's
   directory; a thread that has a session is refused with the sentence Start
