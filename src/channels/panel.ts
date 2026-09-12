@@ -5,8 +5,9 @@
 // that rides every button's value, so the card is the store and a restart
 // loses nothing.
 
-import { sessionLabel } from "../core/identity.js";
-import { compact, thinkingLabel } from "../core/reply.js";
+import { sessionLabel, splitSpeaker } from "../core/identity.js";
+import { splitInboundFiles } from "../core/inbound-file.js";
+import { compact, splitReply, thinkingLabel } from "../core/reply.js";
 import {
   type ConversationKey,
   isThinkingLevel,
@@ -23,6 +24,10 @@ const PER_PAGE = 8;
 const SESSIONS_LISTED = 40;
 const TITLE_CHARS = 40;
 const QUESTION_CHARS = 80;
+/** Exchanges excerpted under the session, and the width of one line: four of
+ *  these stay far inside Slack's 3000-character section. */
+const RECENT_EXCHANGES = 2;
+const EXCERPT_CHARS = 150;
 /** UTF-8 bytes: Slack caps a button value at 2000 characters and Lark a card
  *  at 30 KB, and a picker page carries the draft on eleven buttons. */
 const QUESTION_BYTES = 1500;
@@ -92,6 +97,14 @@ const shortDir = (path: string): string => {
 };
 
 const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/** One transcript line as a reader sees it: what was said, minus what was
+ *  written for the model (the speaker header, attachment markers, the
+ *  next-step block, a silent turn's reason). */
+const excerpt = (text: string, role: "user" | "assistant"): string => {
+  const said = role === "user" ? splitInboundFiles(splitSpeaker(text).text).text : splitReply(text).text;
+  return cut(said.replace(/\s+/g, " ").trim(), EXCERPT_CHARS);
+};
 
 const shortTitle = (s: SessionSummary): string => cut(sessionLabel(s), TITLE_CHARS);
 
@@ -184,7 +197,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     const status = await this.deps.control.status(key);
     if (!status) return this.draftView(key, state.draft);
     return {
-      groups: [{ title: "Session", lines: this.sessionLines(status) }],
+      groups: [{ title: "Session", lines: this.sessionLines(status) }, ...await this.recentGroups(key)],
       rows: [
         [btn("Model & reasoning", "pins:0"), btn("New session in…", "cwd")],
         [
@@ -240,6 +253,26 @@ export abstract class ChatPanel<S extends PanelState, C> {
       } · ${thinkingLabel(status.thinking)}`,
       `Context: ${status.empty ? "empty — the first message you send runs here." : usage}`,
     ];
+  }
+
+  /** An excerpt, not a summary: the last exchanges are what makes a session
+   *  one has been away from recognisable on a phone. */
+  private async recentGroups(key: ConversationKey): Promise<PanelGroup[]> {
+    let unavailable: string | undefined;
+    const exchanges = await this.deps.control.recent(key, RECENT_EXCHANGES).catch((err: unknown) => {
+      unavailable = `Could not read the transcript: ${String(err)}`;
+      this.deps.log(unavailable);
+      return [];
+    });
+    if (unavailable) return [{ title: "Recent", lines: [unavailable] }];
+    const lines = exchanges.flatMap(({ user, assistant }) => {
+      const reply = assistant === undefined ? "" : excerpt(assistant, "assistant");
+      return [
+        `▸ ${this.esc(excerpt(user, "user"))}`,
+        ...(reply ? [`◂ ${this.esc(reply)}`] : []),
+      ];
+    });
+    return lines.length ? [{ title: "Recent", lines }] : [];
   }
 
   protected async refresh(key: ConversationKey, note?: string): Promise<void> {

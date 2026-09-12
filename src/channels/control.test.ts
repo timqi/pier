@@ -228,6 +228,42 @@ describe("recentDirs", () => {
   });
 });
 
+describe("recent", () => {
+  const turns: ChatTurn[] = [
+    { role: "user", text: "one" },
+    { role: "assistant", text: "first" },
+    { role: "assistant", text: "still first" },
+    { role: "system", text: "a note" },
+    { role: "user", text: "two" },
+    { role: "assistant", text: "second" },
+    { role: "user", text: "three" },
+  ];
+
+  it("is empty for a thread without a session, and opens nothing", async () => {
+    expect(await control.recent(KEY, 2)).toEqual([]);
+    expect(factory.created).toEqual([]);
+    expect(factory.resumed).toEqual([]);
+  });
+
+  it("pairs each user turn with the reply that followed it, oldest last, resuming an evicted session", async () => {
+    wire(fakeFactory([fakeSession("s1", turns)]));
+    conversations.set(KEY, "s1");
+    expect(await control.recent(KEY, 2)).toEqual([{ user: "two", assistant: "second" }, { user: "three" }]);
+    expect(factory.resumed).toEqual(["s1"]);
+    expect(await control.recent(KEY, 9)).toEqual([
+      { user: "one", assistant: "first" },
+      { user: "two", assistant: "second" },
+      { user: "three" },
+    ]);
+  });
+
+  it("a session with no turn yet has no exchange", async () => {
+    wire(fakeFactory([fakeSession("s1")]));
+    conversations.set(KEY, "s1");
+    expect(await control.recent(KEY, 2)).toEqual([]);
+  });
+});
+
 describe("a row whose transcript is gone", () => {
   it("re-creates and tells the thread", async () => {
     conversations.set(KEY, "vanished");

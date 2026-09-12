@@ -177,6 +177,13 @@ message yet` before the first turn), directory, model · reasoning, context.
 Buttons: Model & reasoning, New session in… / ⏹ Stop while streaming, Close.
 No Channel group: the Console owns the gates.
 
+A `Recent` group follows it with an excerpt — never a summary — of the last
+two exchanges (`ChannelControl.recent`), one line each, `▸ <user>` / `◂ <reply>`
+oldest first, whitespace flattened and cut at 150 characters, the speaker
+header, attachment markers, next-step block and `<silent>` reason stripped. No
+turn yet, no group; an unanswered last turn is a `▸` alone; a read that failed
+is one line `Could not read the transcript: <reason>`.
+
 - Opening it on an evicted session resumes that session (one Pi open,
   truthful values).
 - "Model & reasoning" (`cfg:pins:<page>`) lists the operator's pinned models

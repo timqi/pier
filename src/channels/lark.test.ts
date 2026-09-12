@@ -226,6 +226,7 @@ function fakeControl() {
     setModel: () => Promise.resolve(),
     setThinking: () => Promise.resolve(),
     recentDirs: () => Promise.resolve(["/srv/ops"]),
+    recent: () => Promise.resolve([]),
     newSession: (key: ConversationKey, over?: Partial<AgentLaunchOptions>) => {
       state.created.push({ key: key.conversationId, ...over });
       known.add(key.conversationId);

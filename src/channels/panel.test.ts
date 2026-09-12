@@ -72,7 +72,20 @@ class FakeControl implements ChannelControl {
   };
   recentDirs = (): Promise<string[]> =>
     this.dirs instanceof Error ? Promise.reject(this.dirs) : Promise.resolve(this.dirs);
+  exchanges: { user: string; assistant?: string }[] | Error = [];
+  recent = (_k: ConversationKey, count: number): Promise<{ user: string; assistant?: string }[]> =>
+    this.exchanges instanceof Error ? Promise.reject(this.exchanges) : Promise.resolve(this.exchanges.slice(-count));
 }
+
+/** Two exchanges as they are stored: a speaker header, an attachment marker,
+ *  a next-step block, a silent turn's reason. */
+const EXCHANGES: { user: string; assistant?: string }[] = [
+  {
+    user: "[Qi<U42> 14:23 slack:C100/1717.0000]\nread the\nparser\n[notes.md](file:///srv/notes.md)",
+    assistant: "<silent>not for me</silent>Read it.\n\n---\n[Run it] | [Show the diff]",
+  },
+  { user: "[14:31]\nand fix it", assistant: `Fixed ${"y".repeat(200)}` },
+];
 
 const HOUR = 3_600_000;
 const SESSIONS: SessionSummary[] = Array.from({ length: 10 }, (_, i) => ({
@@ -174,6 +187,77 @@ const opened = async (question?: string): Promise<{ api: FakeSlack; panel: Slack
   await panel.open(SLACK_KEY, "C100", "1717.0000", question);
   return { api, panel };
 };
+
+describe("the Recent group", () => {
+  /** The Recent section of the card as last drawn. */
+  const recent = (blocks: SlackBlock[]): string => text(blocks[1]!);
+
+  it("excerpts the last two exchanges, oldest first, stripped, flattened and cut", async () => {
+    control.exchanges = EXCHANGES;
+    const { api } = await opened();
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    const lines = recent(blocks).split("\n");
+    expect(lines[0]).toBe("*Recent*");
+    expect(lines[1]).toBe("▸ read the parser");
+    expect(lines[2]).toBe("◂ Read it.");
+    expect(lines[3]).toBe("▸ and fix it");
+    expect(lines[4]).toBe(`◂ Fixed ${"y".repeat(143)}…`);
+    expect(lines[4]!.length).toBe(152);
+    expect(recent(blocks)).not.toContain("Run it");
+    expect(recent(blocks)).not.toContain("not for me");
+    expect(recent(blocks)).not.toContain("file://");
+    expect(recent(blocks)).not.toContain("U42");
+  });
+
+  it("asks for two and shows one when that is all there is", async () => {
+    control.exchanges = [EXCHANGES[1]!];
+    const { api } = await opened();
+    expect(recent(api.posted[0]!.blocks as SlackBlock[]).split("\n")).toHaveLength(3);
+  });
+
+  it("an unanswered last turn is a ▸ without a ◂", async () => {
+    control.exchanges = [{ user: "still thinking?" }];
+    const { api } = await opened();
+    expect(recent(api.posted[0]!.blocks as SlackBlock[])).toBe("*Recent*\n▸ still thinking?");
+  });
+
+  it("a session with no turn yet has no group at all", async () => {
+    control.current = status({ empty: true, tokens: null });
+    const { api } = await opened();
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(JSON.stringify(blocks)).not.toContain("Recent");
+    expect(blocks).toHaveLength(3);
+  });
+
+  it("a read that fails says so on the card and is logged", async () => {
+    control.exchanges = new Error("disk");
+    const { api } = await opened();
+    expect(recent(api.posted[0]!.blocks as SlackBlock[]))
+      .toBe("*Recent*\nCould not read the transcript: Error: disk");
+    expect(logs).toContain("Could not read the transcript: Error: disk");
+  });
+
+  it("the draft view has none: there is no transcript to excerpt", async () => {
+    control.current = null;
+    control.exchanges = EXCHANGES;
+    const { api } = await opened();
+    expect(JSON.stringify(api.posted[0]!.blocks)).not.toContain("Recent");
+  });
+
+  it("the redraw after Continue web session… and after Start includes it", async () => {
+    control.current = null;
+    control.exchanges = EXCHANGES;
+    const { api, panel } = await opened();
+    await tap(panel, "cfg:sessions:0");
+    await tap(panel, "cfg:session:0");
+    expect(text(last(api)[1]!)).toContain("▸ and fix it");
+
+    control.current = null;
+    const started = await opened();
+    await tap(started.panel, "cfg:start");
+    expect(text(last(started.api)[1]!)).toContain("▸ and fix it");
+  });
+});
 
 describe("slack panel with a session", () => {
   it("renders the session and the button rows; no channel group, no New session", async () => {

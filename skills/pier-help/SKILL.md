@@ -66,7 +66,8 @@ truth.
   `/s <text>`) opens that draft with the text as a pending question, which
   Start runs as the first message; a bare `s`, or `s <text>` inside a thread,
   is an ordinary message.
-- In a thread with a session the panel reads it out (resuming an idle one);
+- In a thread with a session the panel reads it out (resuming an idle one) and
+  excerpts the last two exchanges under `Recent`;
   "New session in…" creates a session in a recent or typed directory at once,
   and the thread's next message runs there; Stop aborts a running turn.
 - Panel taps never reach you. The next-step buttons under your own replies
