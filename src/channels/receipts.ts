@@ -41,13 +41,13 @@ export class ReceiptLedger {
     this.db = db;
   }
 
-  add(receipt: Receipt): void {
+  add(receipt: Receipt, createdAt = Date.now()): void {
     this.db.prepare(`
       INSERT INTO receipts(platform, conversation_id, chat_id, message_id, created_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(platform, chat_id, message_id) DO UPDATE SET
         conversation_id = excluded.conversation_id, created_at = excluded.created_at
-    `).run(this.platform, receipt.conversationId, receipt.chatId, receipt.messageId, Date.now());
+    `).run(this.platform, receipt.conversationId, receipt.chatId, receipt.messageId, createdAt);
   }
 
   /** Returned once, then gone. `bookedBy` claims only what was on the books by
@@ -99,13 +99,18 @@ export class Receipts {
     private readonly staleMs: number,
   ) {}
 
-  mark(conversationId: string, chatId: string, messageId: string): void {
+  /** `at` is when the turn this receipt belongs to began; it defaults to now,
+   *  which is right for a message someone typed. A system note is posted *by*
+   *  the turn that will clear it, so booking it at `now` — a round trip after
+   *  the turn started — would put it outside that turn's scope and leave the
+   *  reaction up until the stale sweep. */
+  mark(conversationId: string, chatId: string, messageId: string, at?: number): void {
     this.applying.set(
       `${chatId}:${messageId}`,
       this.api.setReaction(chatId, messageId, this.emoji)
         .catch((err) => this.log(`reaction failed: ${String(err)}`)),
     );
-    this.ledger.add({ conversationId, chatId, messageId });
+    this.ledger.add({ conversationId, chatId, messageId }, at);
   }
 
   /** Only the messages *this* turn was working on: a message queued mid-turn

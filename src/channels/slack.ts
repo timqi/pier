@@ -276,18 +276,18 @@ export class SlackChannel implements Channel {
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
-    // A bare `@bot` and `settings` are the same request; `s <text>` drafts a
-    // session, so only where this message would start one: a thread root, and
-    // never one carrying files — the panel would swallow them.
-    const question = threadTs === ts && !files.length && !shares.length ? settingsDraft(text) : undefined;
-    if (this.panel && (question || command?.name === "settings" || (!text && !files.length && !shares.length))) {
-      return this.panel.open(here, channel, threadTs, question);
-    }
-
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(files);
     const shared = await Promise.all(shares.map((share) => this.sharedBlock(share)));
+    // A bare `@bot` and `settings` are the same request; `s <text>` drafts a
+    // session, so only where this message would start one: a thread root. The
+    // held question carries its markers, so Start sends what the user sent.
+    const question = threadTs === ts ? settingsDraft(text) : undefined;
+    if (this.panel && (question || command?.name === "settings" || (!text && !files.length && !shares.length))) {
+      return this.panel.open(here, channel, threadTs, question && [question, ...shared, ...markers].join("\n"));
+    }
+
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
@@ -561,7 +561,7 @@ export class SlackChannel implements Channel {
    *  the user's to carry them. */
   async notify(
     conversation: string,
-    note: { text: string; origin: NoteOrigin },
+    note: { text: string; origin: NoteOrigin; at?: number },
   ): Promise<void> {
     const { channel, threadTs } = parseConversation(conversation);
     if (!threadTs) {
@@ -569,7 +569,7 @@ export class SlackChannel implements Channel {
       return;
     }
     const ts = await this.out.note(channel, threadTs, note);
-    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, channel, ts);
+    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, channel, ts, note.at);
   }
 }
 

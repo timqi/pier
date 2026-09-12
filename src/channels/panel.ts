@@ -150,6 +150,13 @@ export const holdQuestion = (q: string | undefined): PanelDraft => {
   return JSON.stringify({ q }).length > DRAFT_CHARS ? { dropped: true } : { q };
 };
 
+/** The held question as the card shows it: one line, its attachments counted, not listed. */
+const heldLine = (q: string): string => {
+  const { text, paths } = splitInboundFiles(q);
+  const files = paths.length ? ` · ${paths.length} file${paths.length > 1 ? "s" : ""}` : "";
+  return `${text.replace(/\s+/g, " ").trim()}${files}`;
+};
+
 /** A platform echoed this; only the fields the draft knows, each type-checked. */
 export const readDraft = (raw: unknown): PanelDraft => {
   const draft: PanelDraft = {};
@@ -210,7 +217,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   private draftView(key: ConversationKey, draft: PanelDraft): PanelView {
     const { cwd, model, thinking } = this.effective(key, draft);
-    const question = draft.q ? [`▸ ${this.esc(cut(draft.q.replace(/\s+/g, " "), QUESTION_CHARS))}`]
+    const question = draft.q ? [`▸ ${this.esc(cut(heldLine(draft.q), QUESTION_CHARS))}`]
       : draft.dropped ? [QUESTION_TOO_LONG] : [];
     return {
       groups: [{

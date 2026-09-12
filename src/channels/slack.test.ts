@@ -1075,18 +1075,26 @@ describe("commands", () => {
     expect(client.sent).toEqual([]);
   });
 
-  it("`s <text>` carrying a file is an ordinary message: the panel would swallow the bytes", async () => {
+  it("`s <text>` carrying a file holds the file with the question; Start sends both", async () => {
     openGates();
     await feed(message({
       text: `<@${ME}> s read this`,
-      ts: "1722.000100",
+      ts: "1710.000100",
       subtype: "file_share",
       files: [{ id: "F7", name: "spec.pdf", mimetype: "application/pdf", url_private_download: "https://files/spec.pdf" }],
     }));
-    expect(client.sent).toEqual([]);
+    expect(inbound).toEqual([]);
+    const [section] = client.sent[0]!.blocks as { text?: { text: string } }[];
+    expect(section!.text!.text).toContain("▸ read this · 1 file");
+    expect(section!.text!.text).not.toContain("file:///"); // the marker rides the value, not the line
+    await feed(interaction({
+      channel: { id: CHANNEL },
+      message: { ts: "900.000100", thread_ts: "1710.000100", blocks: [] },
+      actions: [{ action_id: "cfg:start" }],
+    }));
     expect(inbound).toHaveLength(1);
     const { text, paths } = splitInboundFiles(inbound[0]!.text);
-    expect(text).toBe("s read this");
+    expect(text).toBe("read this");
     expect(paths).toHaveLength(1);
   });
 

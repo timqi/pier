@@ -286,7 +286,12 @@ export function toSessionEvents(e: PiEvent): SessionEventPayload[] {
       // On the message, not its text: an attachment with no caption is still a turn.
       const out: SessionEventPayload[] = [{ type: "turn-start" }];
       const text = textOf(m.content);
-      if (text) out.push(origin ? { type: "system-input", text, origin } : { type: "user-message", text });
+      if (text) {
+        out.push(origin
+          // `at` is what `turnMetaAt` will read back as this turn's start.
+          ? { type: "system-input", text, origin, at: m.timestamp }
+          : { type: "user-message", text });
+      }
       return out;
     }
     case "message_update": {

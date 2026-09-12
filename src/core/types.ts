@@ -71,7 +71,10 @@ export interface Channel {
    * never as an assistant turn — the people in the chat otherwise see the
    * agent answer a question nobody asked.
    */
-  notify(conversationId: string, note: { text: string; origin: NoteOrigin }): Promise<void>;
+  notify(
+    conversationId: string,
+    note: { text: string; origin: NoteOrigin; at?: number },
+  ): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -143,7 +146,10 @@ export type SessionEventPayload =
   // A user message entered the model's context: a fresh prompt, a steer, or a
   // queued message the agent just picked up. Clients render it as a user turn.
   | { type: "user-message"; text: string }
-  | { type: "system-input"; text: string; origin: SystemInputOrigin }
+  // `at` is the transcript timestamp of the message that opened the turn: the
+  // note an adapter posts for this input carries a receipt, and only that
+  // timestamp books it to the turn about to answer it (channels/receipts.ts).
+  | { type: "system-input"; text: string; origin: SystemInputOrigin; at?: number }
   | { type: "task-status"; run: BackgroundRun }
   | { type: "text-start" } // a new assistant message; prior text is intermediate
   | { type: "text-delta"; text: string }

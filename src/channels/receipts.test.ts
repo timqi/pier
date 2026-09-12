@@ -148,6 +148,18 @@ describe("receipt ledger", () => {
     expect(cleared).toEqual(["asked", "queued"]);
   });
 
+  it("books a system note to the turn that posted it, not to the round trip", async () => {
+    // The note goes up *because* a turn started, so posting it lands after
+    // that start; booked at `now` it would fall outside the turn's own scope
+    // and the reaction would sit there until the stale sweep.
+    const { receipts, cleared } = recording();
+    const started = Date.now();
+    await new Promise((r) => setTimeout(r, 5)); // posting the note
+    receipts.mark("C100", "C100", "note", started);
+    await receipts.settle("C100", { completedAt: started + 500, durationMs: 500, tokens: 1 });
+    expect(cleared).toEqual(["note"]);
+  });
+
   it("clears everything when there is no turn to scope by", async () => {
     // The refusal paths (a conversation id with no thread) have no meta, and
     // the stale sweep is the only other thing that would ever clear these.

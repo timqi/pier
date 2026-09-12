@@ -273,7 +273,11 @@ export class Router {
         // triggers, so the answer has a visible cause. The hub carries it whole.
         if (payload.type === "system-input") {
           const channel = this.channels.get(key.channelId);
-          channel?.notify(key.conversationId, { text: digest(payload.text), origin: payload.origin })
+          channel?.notify(key.conversationId, {
+            text: digest(payload.text),
+            origin: payload.origin,
+            at: payload.at,
+          })
             .catch((err) => {
               log.error(`notify ${key.channelId} failed`, err);
               this.hub.emit(session.id, {

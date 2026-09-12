@@ -227,17 +227,17 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
-    // session, so only where this message would start one: outside any topic,
-    // and never on one carrying files — the panel would swallow them.
-    const question = msg.rootId || attachments.length ? undefined : settingsDraft(text);
-    if (this.panel && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
-      return this.panel.open(here, root, question);
-    }
-
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(msg.messageId, attachments);
+    // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
+    // session, so only where this message would start one: outside any topic.
+    // The held question carries its markers, so Start sends what the user sent.
+    const question = msg.rootId ? undefined : settingsDraft(text);
+    if (this.panel && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
+      return this.panel.open(here, root, question && [question, ...markers].join("\n"));
+    }
+
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: senderId, name: await this.userName(senderId) };
@@ -482,13 +482,18 @@ export class LarkChannel implements Channel {
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of
    *  the user's to carry them. */
-  async notify(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+  async notify(
+    conversation: string,
+    note: { text: string; origin: NoteOrigin; at?: number },
+  ): Promise<void> {
     const { chatId, root } = parseConversation(conversation);
     if (!root) {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
     const messageId = await this.out.note(root, note);
-    if (messageId && awaitsTurn(note.origin)) this.receipts.mark(conversation, chatId, messageId);
+    if (messageId && awaitsTurn(note.origin)) {
+      this.receipts.mark(conversation, chatId, messageId, note.at);
+    }
   }
 }

@@ -177,8 +177,9 @@ Directory…, Continue web session… / Start, Close.
   and the later cwd / model / reasoning included): line 2 says `Your question
   is too long to hold — send it again after Start.` and Start creates without
   it.
-- A message carrying files is never the draft's trigger: `s <text>` with an
-  attachment is an ordinary message, so the bytes are not swallowed by a panel.
+- `s <text>` with attachments holds them with the question: the files are
+  saved past the gate as usual and their marker lines ride the draft, so Start
+  sends exactly what the user sent; the card shows `▸ <text> · N files`.
 - A card that cannot be posted at all says so as plain text in the thread
   (`Could not open the panel: <reason>`). A Slack value that cannot be read
   redraws an empty draft with `Your earlier picks could not be read — pick

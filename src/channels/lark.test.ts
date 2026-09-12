@@ -611,15 +611,22 @@ describe("outbound shapes", () => {
     // follows is the turn nobody typed anything for.
     await channel.send(`${CHAT}/om_t`, { text: "on it", suggestions: [] });
     client.reactions.length = 0;
+    const started = Date.now();
     await channel.notify(`${CHAT}/om_t`, {
       text: "delegated: audit the logs",
       origin: { kind: "task-delegation", taskId: "t1", runId: "r1", sourceSessionId: null },
+      at: started,
     });
     const noteId = [...client.cards.keys()].at(-1)!;
     expect(bodyText(client.replied.at(-1)!.card)).toContain("> delegated: audit the logs");
     expect(client.reactions).toEqual([{ messageId: noteId, emoji: "OnIt", add: true }]);
-    // Cleared by the turn-end, like a receipt on a message someone typed.
-    await channel.send(`${CHAT}/om_t`, { text: "answered", suggestions: [] });
+    // Cleared by the turn-end, like a receipt on a message someone typed —
+    // `at` is what puts the note inside the scope of that turn (receipts.ts).
+    await channel.send(`${CHAT}/om_t`, {
+      text: "answered",
+      suggestions: [],
+      meta: { completedAt: started + 500, durationMs: 500, tokens: 1 },
+    });
     expect(client.reactions.at(-1)).toEqual({ messageId: noteId, emoji: "OnIt", add: false });
   });
 
@@ -814,7 +821,7 @@ describe("commands and panel", () => {
     expect(client.cards.size).toBe(before);
   });
 
-  it("`s <text>` carrying an image is an ordinary message: the panel would swallow the bytes", async () => {
+  it("`s <text>` carrying an image holds the image with the question; Start sends both", async () => {
     openGates();
     await feed(message({
       messageType: "post",
@@ -824,10 +831,22 @@ describe("commands and panel", () => {
         content: [[{ tag: "img", image_key: "img_k9" }]],
       }),
     }));
-    expect(client.replied).toEqual([]);
+    expect(inbound).toEqual([]);
+    const panelId = [...client.cards.keys()].at(-1)!;
+    const panel = client.cards.get(panelId)!;
+    expect(bodyText(panel)).toContain("▸ read this · 1 file");
+    expect(bodyText(panel)).not.toContain("file:///");
+    const held = (JSON.parse(JSON.stringify(panel)) as { elements: unknown[] });
+    const draft = /"draft":(\{[^}]*\})/.exec(JSON.stringify(held))?.[1];
+    await act({
+      messageId: panelId,
+      chatId: CHAT,
+      operatorId: USER,
+      value: { key: "cfg:start", root: "om_q_file", draft: JSON.parse(draft!) as { q: string } },
+    });
     expect(inbound).toHaveLength(1);
     const { text, paths } = splitInboundFiles(inbound[0]!.text);
-    expect(text).toBe("s read this");
+    expect(text).toBe("read this");
     expect(paths).toHaveLength(1);
   });
 
