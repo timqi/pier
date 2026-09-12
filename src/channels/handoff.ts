@@ -26,6 +26,8 @@ export interface HandoffDeps {
   router: Pick<Router, "sessionOf" | "attach">;
   hub: Pick<EventHub, "emitWorkspace">;
   publicUrl: () => string;
+  /** Sessions a task run created for itself; a picker offers only the operator's. */
+  taskSessions: () => Set<string>;
   log(message: string): void;
 }
 
@@ -110,7 +112,8 @@ export function createHandoff(deps: HandoffDeps): Handoff {
 
     async unbound(limit) {
       const bound = conversations.boundSessions();
-      return (await factory.list()).filter((s) => !bound.has(s.id)).slice(0, limit);
+      const owned = deps.taskSessions();
+      return (await factory.list()).filter((s) => !bound.has(s.id) && !owned.has(s.id)).slice(0, limit);
     },
 
     async continueHere(key, sessionId) {

@@ -158,6 +158,7 @@ const handoff = createHandoff({
   router,
   hub,
   publicUrl: () => settings.get().publicUrl,
+  taskSessions: () => tasks.taskSessions(),
   log: (m) => logger("channels").info(m),
 });
 const channels = new ChannelRuntime(channelStore, router, control, handoff);

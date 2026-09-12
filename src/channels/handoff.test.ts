@@ -18,6 +18,7 @@ let running: ChannelPlatform[];
 let opened: { platform: string; chatId: string; note: HandoffNote }[];
 let openFails: Error | undefined;
 let onDisk: Map<string, SessionSummary>;
+let taskOwned: Set<string>;
 let loaded: Map<string, AgentSession>;
 let attached: [ConversationKey, AgentSession][];
 let events: WorkspaceEvent[];
@@ -47,11 +48,13 @@ function handoff() {
     } as Pick<Router, "sessionOf" | "attach">,
     hub: { emitWorkspace: (e) => void events.push(e) },
     publicUrl: () => publicUrl,
+    taskSessions: () => taskOwned,
     log: (m) => void logs.push(m),
   });
 }
 
 beforeEach(() => {
+  taskOwned = new Set();
   const db = openDb(":memory:");
   const vault = new Map<string, string>();
   store = new ChannelStore(db, { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
@@ -220,9 +223,11 @@ describe("continueHere (pull from the panel)", () => {
 });
 
 describe("unbound", () => {
-  it("lists the backend's sessions minus every bound one, in listing order, capped", async () => {
+  it("lists the backend's sessions minus bound and task-owned ones, in listing order, capped", async () => {
     onDisk.set("s2", { id: "s2", cwd: "/srv/b", createdAt: 2 });
     onDisk.set("s3", { id: "s3", cwd: "/srv/c", createdAt: 3 });
+    onDisk.set("s4", { id: "s4", cwd: "/srv/d", createdAt: 4 });
+    taskOwned.add("s4");
     conversations.set({ channelId: "lark", conversationId: "oc_1/om_9" }, "s2");
     expect((await handoff().unbound(10)).map((s) => s.id)).toEqual(["s1", "s3"]);
     expect((await handoff().unbound(1)).map((s) => s.id)).toEqual(["s1"]);

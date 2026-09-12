@@ -28,7 +28,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
 | Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ |
 | Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message, replies land on both surfaces | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
-| Continue in this thread | The panel of a thread with no session yet binds it to an unbound web or task session; same binding and guard as the push | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
+| Continue in this thread | The panel of a thread with no session yet binds it to an unbound web session (task runs' own sessions excluded); same binding and guard as the push | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
@@ -112,8 +112,9 @@ thread that does not exist is worse than a root with no row.
 `continueHere(key, sessionId)` (IM → web, from the panel): thread has no row
 (409 `This thread already has a session.` — a stale panel must not orphan
 one) → the guards → the binding. No root: the thread exists. `unbound(limit)`
-is the picker's list — the backend's listing minus `conversations.boundSessions()`,
-newest first.
+is the picker's list — the backend's listing minus `conversations.boundSessions()`
+and the sessions task runs created for themselves (`taskSessions`, the web
+sidebar's rule), newest first.
 
 - The note is `{title, url}`: `sessionLabel` (`core/identity.ts` — readable
   title, else the directory name) and `<publicUrl>/#/session/<id>`, `""`
