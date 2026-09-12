@@ -307,8 +307,8 @@ function inlineDraft(input: Record<string, unknown>): Record<string, unknown> | 
 }
 
 /** A label for the Console, not an identifier. */
-function nameFromPrompt(prompt: string): string {
-  const line = prompt.split("\n")
+function nameFrom(text: string): string {
+  const line = text.split("\n")
     .map((l) => l.replace(/^[\s#>*-]+/, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim())
     .find(Boolean) ?? "subagent";
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
@@ -342,12 +342,20 @@ async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknow
   }
   const action = record(draft.action);
   const session = record(action?.session);
-  if (action?.type === "agent" && session?.mode === "fresh" && (session.cwd === undefined || (typeof session.cwd === "string" && !isAbsolute(session.cwd)))) {
+  const absolute = async (cwd: unknown): Promise<string> => {
     const base = await definitions.sessionCwd(callerSessionId);
-    if (!base) throw new Error(`cwd ${session.cwd === undefined ? "omitted" : `"${session.cwd}" is relative`} and the calling session has no working directory; give an absolute path`);
-    draft = { ...draft, action: { ...action, session: { ...session, cwd: resolve(base, session.cwd ?? ".") } } };
+    if (!base) throw new Error(`cwd ${cwd === undefined ? "omitted" : `"${String(cwd)}" is relative`} and the calling session has no working directory; give an absolute path`);
+    return resolve(base, typeof cwd === "string" ? cwd : ".");
+  };
+  const relative = (cwd: unknown): boolean => cwd === undefined || (typeof cwd === "string" && !isAbsolute(cwd));
+  if (action?.type === "agent" && session?.mode === "fresh" && relative(session.cwd)) {
+    draft = { ...draft, action: { ...action, session: { ...session, cwd: await absolute(session.cwd) } } };
   }
-  if (draft.name === undefined && typeof action?.prompt === "string") draft = { ...draft, name: nameFromPrompt(action.prompt) };
+  if (action?.type === "bash" && relative(action.cwd)) {
+    draft = { ...draft, action: { ...action, cwd: await absolute(action.cwd) } };
+  }
+  const label = action?.prompt ?? action?.script;
+  if (draft.name === undefined && typeof label === "string") draft = { ...draft, name: nameFrom(label) };
   const launch = record(action?.launch);
   if (typeof launch?.model === "string") {
     const { model, thinking } = resolveModel(launch.model, await menu());

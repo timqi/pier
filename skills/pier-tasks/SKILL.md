@@ -32,6 +32,13 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 | `--session <id> --prompt …` | continue an idle session (it keeps its cwd and model) |
 | `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt's `delivery` says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
+| `--bash <script>` | a command, not an agent: its stdout is the result, and `--prompt`/`--model`/`--thinking`/`--session` beside it are refused |
+
+`--bash` is for a command whose output needs no model **and** runs too long to
+hold your turn; a quick one belongs in your own shell, where `&` and `wait`
+already run several at once. Raise `--timeout` past the hour a long one needs,
+or it is killed and reported as timed out. A non-zero exit still delivers what
+it printed.
 
 A child that needs your answer ends its turn with the question as its result;
 answer it with `--run <id> --prompt`. Core owns the join: never aggregate
@@ -50,9 +57,10 @@ review it" is `--model gpt`); none or several hits lists the pins, pick one.
 `pier task cancel --run <id> | --group <id>` — the runs you launched.
 
 `pier task recover (--run <id> | --group <id>) --reason <text>` — the full
-result after its callback settled, for text truncated (8000 chars; 2000 per
-member) or lost to compaction. **Never to check progress**: the refusal
-reveals no state.
+result after its callback settled, for text the callback truncated (8 000
+chars per run, a group's members included) or lost to compaction. `--group`
+caps each member at 2 000, so a long member is recovered with `--run`.
+**Never to check progress**: the refusal reveals no state.
 
 ## Saved definitions
 
@@ -68,6 +76,7 @@ session; `pier task list` shows definitions, never runs.
 
 - A delegated run does not delegate: `pier task` is refused inside a run
   someone waits on — ask in your result; your supervisor runs it.
-- 6 agent runs execute at once instance-wide; the rest queue until cancelled
+- 6 agent runs execute at once instance-wide, `--bash` runs taking none of
+  those slots; the rest queue until cancelled
   or a restart marks them `interrupted` (callbacks still fire).
 - During a restart drain new runs are refused: retry after.

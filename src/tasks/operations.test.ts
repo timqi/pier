@@ -291,6 +291,18 @@ describe("task operations", () => {
     await expect(ask({ operation: "models" })).rejects.toThrow("unknown task operation");
   });
 
+  it("gives an inline bash action the caller's directory and a name off its script", async () => {
+    const ask = rig([]);
+    expect((await ask({ operation: "run", task: { action: { type: "bash", script: "make check\nsecond line" } } }) as RunSummary).runId).toBe("new");
+    expect(await ask({ operation: "run", task: { action: { type: "bash", script: "make", cwd: "sub/dir" } } })).toBeTruthy();
+    expect(await ask({ operation: "run", task: { name: "build", action: { type: "bash", script: "make", cwd: "/elsewhere" } } })).toBeTruthy();
+    expect(ask.created.map((draft) => [draft.name, draft.action])).toEqual([
+      ["make check", { type: "bash", script: "make check\nsecond line", cwd: "/tmp" }],
+      ["make", { type: "bash", script: "make", cwd: "/tmp/sub/dir" }],
+      ["build", { type: "bash", script: "make", cwd: "/elsewhere" }],
+    ]);
+  });
+
   it("does not take task_id", async () => {
     const ask = rig([run("r1")]);
     await expect(ask({ operation: "recover", task_id: task.id, reason: "x" })).rejects.toThrow(/run_id/);

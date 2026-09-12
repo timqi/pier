@@ -32,10 +32,10 @@ type Params = Record<string, unknown>;
  *  command accepts are read off it, so the two cannot drift. */
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
-    usage: "run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
+    usage: "run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
       "        [--model <name|?>] [--thinking <level>] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…",
-    help: "a prompt on a run: a new one (--prompt | --task-id | --session … --prompt), a batch (--member), or an existing one (--run)",
+    help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
   },
   save: {
     usage: "save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)\n" +
@@ -157,11 +157,17 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     const launch = launchOf(v);
     const timeoutSeconds = seconds("timeout", v.timeout);
     if (v["task-id"] !== undefined) {
-      const extra = flagsOf(own).find((flag) => ["prompt", "session", "cwd", "model", "thinking", "name", "timeout"].includes(flag));
+      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "name", "timeout"].includes(flag));
       if (extra) refuse(`--${extra} does not apply to a saved definition (--task-id)`);
       return { task_id: v["task-id"] };
     }
-    const prompt = text(v.prompt) ?? refuse("a new run needs --prompt or --task-id");
+    if (v.bash !== undefined) {
+      if (v.prompt !== undefined) refuse("a run takes exactly one of --prompt or --bash");
+      if (launch) refuse("--model/--thinking apply to a prompt, not --bash");
+      if (v.session !== undefined) refuse("--session continues an agent session; --bash is a command, not a turn");
+      return compact({ name: v.name, timeoutSeconds, action: compact({ type: "bash", script: v.bash, cwd: v.cwd }) });
+    }
+    const prompt = text(v.prompt) ?? refuse("a new run needs --prompt, --bash or --task-id");
     if (v.session === undefined) return compact({ prompt, cwd: v.cwd, launch, name: v.name, timeoutSeconds });
     if (v.cwd !== undefined) refuse("--cwd applies to a fresh session, not --session");
     return compact({ name: v.name, timeoutSeconds, action: compact({ type: "agent", session: { mode: "reuse", sessionId: v.session }, prompt, launch }) });

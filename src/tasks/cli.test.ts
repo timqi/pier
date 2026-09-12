@@ -82,6 +82,19 @@ describe("pier task", () => {
     }]);
   });
 
+  it("runs a command with no definition filed: --bash on its own, or on a member", async () => {
+    const { run, posted } = rig();
+    expect(await run("run", "--bash", "make check", "--cwd", "/repo", "--timeout", "7200")).toBe(0);
+    expect(await run("run", "--member", "--bash", "pier web search a", "--member", "--bash", "pier web search b", "--name", "b")).toBe(0);
+    expect(posted).toEqual([
+      { operation: "run", task: { timeoutSeconds: 7200, action: { type: "bash", script: "make check", cwd: "/repo" } } },
+      { operation: "run", tasks: [
+        { action: { type: "bash", script: "pier web search a" } },
+        { name: "b", action: { type: "bash", script: "pier web search b" } },
+      ] },
+    ]);
+  });
+
   it("saves a definition, --task-id naming the one to update; one action, one trigger", async () => {
     const { run, posted } = rig();
     expect(await run("save", "--name", "nightly", "--bash", "make", "--cwd", "/repo", "--cron", "0 3 * * *", "--tz", "UTC", "--timeout", "900")).toBe(0);
@@ -139,7 +152,12 @@ describe("pier task", () => {
       [["recover", "--run", "r", "--group", "g", "--reason", "x"], "task: recover takes exactly one of --run or --group"],
       [["recover", "--run", "r"], "task: recover needs --reason"],
       [["run", "--prompt", "x", "--timeout", "soon"], "task: --timeout must be a whole number of seconds"],
-      [["run"], "task: a new run needs --prompt or --task-id"],
+      [["run"], "task: a new run needs --prompt, --bash or --task-id"],
+      [["run", "--prompt", "x", "--bash", "y"], "task: a run takes exactly one of --prompt or --bash"],
+      [["run", "--bash", "x", "--model", "gpt"], "task: --model/--thinking apply to a prompt, not --bash"],
+      [["run", "--session", "s1", "--bash", "x"], "task: --session continues an agent session; --bash is a command, not a turn"],
+      [["run", "--task-id", "t1", "--bash", "x"], "task: --bash does not apply to a saved definition (--task-id)"],
+      [["run", "--run", "r1", "--bash", "x"], "task: --bash does not apply to an existing run (--run)"],
       [["run", "--task-id", "t1", "--prompt", "x"], "task: --prompt does not apply to a saved definition (--task-id)"],
       [["run", "--session", "s1", "--prompt", "x", "--cwd", "/x"], "task: --cwd applies to a fresh session, not --session"],
       [["run", "--run", "r1"], "task: --run needs --prompt"],

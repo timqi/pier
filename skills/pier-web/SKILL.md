@@ -8,7 +8,8 @@ description: The public web from the shell with `pier web search` and `pier web 
 `pier web --help` lists the two commands and their flags. There is no web
 tool. The answer is text on stdout, exit 0; a refusal is one `web:` line,
 exit 1; a bad flag is `web:` plus the usage, exit 2. A call takes tens of
-seconds and gives up at 90 s — run it once, not in a loop.
+seconds and gives up at 90 s — run it once, not in a loop; independent
+queries may run in parallel.
 
 ```sh
 pier web search "阿里巴巴 股价" --lang preserve
@@ -18,8 +19,9 @@ pier web fetch https://example.com/post --prompt "what changed in v2?"
 ## search
 
 A briefing (≤6 000 chars) with up to 8 sources and the queries the backend
-actually ran. Anthropic by default, OpenAI when that is the only auth;
-`--backend openai` retries a thin answer on the other index.
+actually ran. Anthropic by default, OpenAI when that is the only auth; the
+backend is this flag's to choose and never follows the model you run on —
+`--backend openai` sends a thin answer to the other index.
 
 - `--lang preserve` when the query's language is the point (a local company,
   a Chinese source): the backend is audited and retried in that language;
