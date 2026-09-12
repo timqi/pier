@@ -2,7 +2,7 @@
 // --model` and listed first in every picker, the model every new session
 // starts on, and the title model Pier itself calls.
 
-import { Plus } from "lucide";
+import { ChevronDown, ChevronUp, Plus, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { THINKING_LEVELS, type AgentDefaults, type ModelRef, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
@@ -44,6 +44,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   let dirty = false;
   let titleModel: ModelRef | undefined;
   let defaults: LaunchChoice = { model: null, thinking: null };
+  // A move redraws the list, so the arrow that was pressed has to be handed
+  // its focus back or a keyboard walk up the list ends after one step.
+  let focusAfter: { at: string; step: -1 | 1 } | null = null;
 
   const status = h("span", "text-[11.5px]", "");
   const titleStatus = h("span", "text-[11.5px]", "");
@@ -61,6 +64,26 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   function markDirty(): void {
     dirty = true;
     setStatus(status, "idle", "unsaved changes");
+  }
+
+  /** Order is what the menu says beyond each line: pickers list it as stored
+   *  and `pier task --model ?` prints it in that order, so first pin reads as
+   *  first choice. Arrows, not drag: they work on a thumb and on a keyboard. */
+  function moveButton(entry: MenuEntry, step: -1 | 1, glyph: IconNode, label: string): HTMLButtonElement {
+    const at = entries.indexOf(entry);
+    const to = at + step;
+    const el = btn("", "icon-btn max-md:h-11 max-md:w-11 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent");
+    el.append(icon(glyph));
+    el.title = label;
+    el.setAttribute("aria-label", `${label}: ${key(entry)}`);
+    el.disabled = to < 0 || to >= entries.length;
+    el.onclick = () => {
+      entries.splice(to, 0, ...entries.splice(at, 1));
+      focusAfter = { at: key(entry), step };
+      markDirty();
+      render();
+    };
+    return el;
   }
 
   function entryRow(entry: MenuEntry): HTMLElement {
@@ -95,9 +118,18 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     };
     const name = h("span", "w-52 flex-none truncate font-mono text-[12px] text-neutral-700", key(entry));
     name.title = key(entry);
+    const up = moveButton(entry, -1, ChevronUp, "Move up");
+    const down = moveButton(entry, 1, ChevronDown, "Move down");
+    if (focusAfter?.at === key(entry)) {
+      // At an end that arrow is disabled; the focus goes to the way back.
+      const [moved, back] = focusAfter.step === -1 ? [up, down] : [down, up];
+      focusAfter = null;
+      queueMicrotask(() => (moved.disabled ? back : moved).focus());
+    }
     return h(
       "div",
       "flex min-w-0 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 shadow-2xs max-md:flex-wrap",
+      h("span", "flex flex-none items-center", up, down),
       name,
       thinking,
       note,
@@ -274,7 +306,9 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         "Pinned entries lead every model picker, and agents delegating work match your notes against the task " +
         "instead of guessing ids.",
       field("Pinned models", listBox, {
-        hint: "The note is what an agent matches a task against — say when to reach for it, not what it is.",
+        hint: "The note is what an agent matches a task against — say when to reach for it, not what it is, "
+          + "and keep every note distinct: two pins reading alike are refused as ambiguous. The arrows set the "
+          + "order pickers and `pier task --model ?` list.",
       }),
       field("Add", adder, { hint: "The list is the live catalog — only models that exist right now can be pinned." }),
       h("div", "flex items-center gap-3", save, status),

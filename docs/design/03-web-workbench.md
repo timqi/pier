@@ -273,7 +273,9 @@ browser keeps no second session order.
   and reports saved / unsaved / failed. A file the index marks `readonly`
   (settings.json, written by Pier) opens in the viewer alone with one line on
   where its keys are set. Models: Default model is the launch picker written on
-  change, redrawn from the server's answer. Instance: Public URL, the browser's
+  change, redrawn from the server's answer; a pinned row's ∧/∨ arrows move it,
+  staged like any menu edit until Save, since the stored order is the one every
+  picker and `pier task --model ?` list. Instance: Public URL, the browser's
   notification switch, Reload.
 - **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
   was opened from): a directory tree beside a viewer; in a git checkout the

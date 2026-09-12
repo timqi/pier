@@ -28,6 +28,8 @@ class Element {
   onchange: (() => void) | null = null;
   oninput: (() => void) | null = null;
   classList = { add: vi.fn(), remove: vi.fn(), replace: vi.fn(), toggle: vi.fn() };
+  attrs: Record<string, string> = {};
+  focus = vi.fn();
   constructor(readonly tag: string) {}
   append(...kids: (Element | string)[]): void {
     this.children.push(...kids);
@@ -38,7 +40,9 @@ class Element {
   replaceChildren(...kids: (Element | string)[]): void {
     this.children = kids;
   }
-  setAttribute = vi.fn();
+  setAttribute = vi.fn((name: string, value: string) => {
+    this.attrs[name] = value;
+  });
   get textContent(): string {
     return this.children.map((c) => (typeof c === "string" ? c : c.textContent)).join("");
   }
@@ -121,6 +125,45 @@ it("offers only what is not pinned yet, and a pick stages the row", async () => 
     },
     "PUT",
   ]);
+});
+
+it("reorders the menu by the row arrows, ends included, and saves the new order", async () => {
+  const second = { ...free, thinking: "low" as ThinkingLevel };
+  vi.mocked(getJson).mockImplementation((url: string) =>
+    Promise.resolve(
+      url.startsWith("/api/models")
+        ? { ok: true, value: [pinned, free] }
+        : url.startsWith("/api/config/defaults")
+        ? { ok: true, value: { defaultModel: null, defaultThinkingLevel: null } }
+        : { ok: true, value: { modelMenu: [stored, second] } },
+    ) as never
+  );
+  const el = await pane();
+  const arrow = (label: string): Element => {
+    const found = walk(el).find((e) => e.attrs["aria-label"] === label);
+    if (!found) throw new Error(`no arrow: ${label}`);
+    return found;
+  };
+  // The first row cannot go up, the last cannot go down.
+  expect(arrow("Move up: anthropic/pinned-model").disabled).toBe(true);
+  expect(arrow("Move down: openai/free-model").disabled).toBe(true);
+
+  arrow("Move down: anthropic/pinned-model").onclick!();
+  expect(el.textContent).toContain("unsaved changes");
+  // Redrawn at its new place: now it is the row that cannot go further down.
+  expect(arrow("Move down: anthropic/pinned-model").disabled).toBe(true);
+
+  vi.mocked(sendJson).mockResolvedValue(
+    { ok: true, json: async () => ({ modelMenu: [second, stored] }) } as unknown as Response,
+  );
+  button(el, "Save menu").onclick!();
+  await vi.waitFor(() => expect(sendJson).toHaveBeenCalled());
+  expect(vi.mocked(sendJson).mock.lastCall![1]).toEqual({
+    modelMenu: [
+      { provider: "openai", id: "free-model", thinking: "low" },
+      { provider: "anthropic", id: "pinned-model", thinking: "high" },
+    ],
+  });
 });
 
 it("has nothing to pin once every model is pinned", async () => {
