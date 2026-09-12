@@ -39,6 +39,10 @@ export interface ChannelControl {
    *  thread Pier owns is addressed, and that must hold across a reload. */
   knows(key: ConversationKey): boolean;
   abort(key: ConversationKey): Promise<void>;
+  /** Is a turn still running in this thread? Attachment only, so it stays
+   *  synchronous: the receipt sweep asks on every inbound message and must
+   *  neither resume nor create a session. */
+  working(key: ConversationKey): boolean;
   /** Null when the thread has no session; an evicted one is resumed, never
    *  answered null. */
   status(key: ConversationKey): Promise<ConversationStatus | null>;
@@ -92,6 +96,8 @@ export function createControl({ router, factory, conversations, store, modelMenu
     knows: (key) => conversations.get(key) !== undefined,
 
     abort: (key) => router.abortConversation(key),
+
+    working: (key) => router.sessionOf(key)?.state === "streaming",
 
     async status(key) {
       const session = await live(key);

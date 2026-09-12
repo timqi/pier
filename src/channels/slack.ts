@@ -48,7 +48,8 @@ const WORKING = "eyes";
 // The envelope is already acked, so this bounds concurrency (sockets,
 // downloads), not the backlog.
 const MAX_ACTIVE_CHATS = 16;
-const RECEIPT_STALE_MS = 30 * 60_000;
+/** Only an idle conversation ages out, so this need not cover a long turn. */
+const RECEIPT_STALE_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 5000;
 /** Only has to cover a redelivery that crossed our immediate ack. */
 const DEDUP_TTL_MS = 5 * 60_000;
@@ -160,6 +161,7 @@ export class SlackChannel implements Channel {
       this.log,
       WORKING,
       RECEIPT_STALE_MS,
+      (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
     if (deps.control && deps.handoff) {
       this.panel = new SlackPanel({

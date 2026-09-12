@@ -80,7 +80,18 @@ describe("receipt ledger", () => {
     const ledger = new ReceiptLedger("slack", db);
     ledger.add(receipt("C100", "1"));
     expect(ledger.takeStale(60_000)).toEqual([]);
-    expect(ledger.takeStale(60_000, Date.now() + 61_000)).toHaveLength(1);
+    expect(ledger.takeStale(60_000, undefined, Date.now() + 61_000)).toHaveLength(1);
+  });
+
+  it("leaves a stale receipt whose conversation is still working", () => {
+    const ledger = new ReceiptLedger("slack", db);
+    ledger.add(receipt("C100", "1"));
+    ledger.add(receipt("C200", "2"));
+    const later = Date.now() + 61_000;
+    const working = (conversationId: string): boolean => conversationId === "C100";
+    expect(ledger.takeStale(60_000, working, later)).toEqual([receipt("C200", "2")]);
+    // Only the claimed row left the books; the turn that is still going keeps its 👀.
+    expect(ledger.takeStale(60_000, undefined, later)).toEqual([receipt("C100", "1")]);
   });
 
   it("sweeps once and then throttles, but never the startup sweep", async () => {

@@ -48,6 +48,7 @@ class FakeControl implements ChannelControl {
     this.aborted++;
     return Promise.resolve();
   };
+  working = (): boolean => this.current?.state === "streaming";
   status = (): Promise<ConversationStatus | null> => Promise.resolve(this.current);
   pins = (): ModelMenuEntry[] => this.pinned;
   setModel = (_k: ConversationKey, model: ModelRef): Promise<void> => {

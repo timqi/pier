@@ -157,6 +157,8 @@ let dropped: string[];
 let receipts: ReceiptLedger;
 let aborted: string[];
 let known: Set<string>;
+/** Conversations mid-turn: what keeps a receipt off the stale sweep. */
+let working: Set<string>;
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   pins_: ModelMenuEntry[];
@@ -228,6 +230,7 @@ function fakeControl() {
       aborted.push(key.conversationId);
       return Promise.resolve();
     },
+    working: (key: ConversationKey) => working.has(key.conversationId),
     // Null where `knows` is false, as the real control's row decides both.
     status: (key: ConversationKey) =>
       Promise.resolve(known.has(key.conversationId)
@@ -271,6 +274,7 @@ beforeEach(async () => {
   receipts = new ReceiptLedger("slack", openDb(":memory:"));
   aborted = [];
   known = new Set();
+  working = new Set();
   control = fakeControl();
   channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
   await channel.start((msg) => inbound.push(msg));
@@ -818,7 +822,7 @@ describe("outbound", () => {
     client.rejectWith = "invalid_arguments";
     await expect(channel.send("C100/1740.000100", { text: "x", suggestions: [] }))
       .rejects.toThrow();
-    // Otherwise the 👀 sits on the user's message until the 30-minute sweep,
+    // Otherwise the 👀 sits on the user's message until the stale sweep,
     // looking like the agent is still working on it.
     expect(client.reactions.at(-1))
       .toEqual({ channel: "C100", ts: "1740.000100", name: "eyes", add: false });

@@ -13,6 +13,7 @@ import type {
   ConversationKey,
   ModelRef,
   SessionEventPayload,
+  SessionState,
   SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
@@ -29,7 +30,7 @@ function fakeSession(id: string, turns: ChatTurn[] = []) {
   const listeners = new Set<(e: SessionEventPayload) => void>();
   const session = {
     id,
-    state: "idle" as const,
+    state: "idle" as SessionState,
     model: SONNET,
     thinkingLevel: "medium" as ThinkingLevel,
     contextUsage: undefined,
@@ -140,6 +141,21 @@ describe("status", () => {
     wire(fakeFactory([fakeSession("s1")]));
     conversations.set(KEY, "s1");
     expect((await control.status(KEY))?.empty).toBe(true);
+  });
+});
+
+describe("working", () => {
+  it("is the attached session's turn, and asking resumes nothing", () => {
+    const s = fakeSession("s1");
+    wire(fakeFactory([s]));
+    conversations.set(KEY, "s1");
+    // Evicted, so idle: the sweep must not open a session to find that out.
+    expect(control.working(KEY)).toBe(false);
+    router.attach(KEY, s as unknown as AgentSession);
+    expect(control.working(KEY)).toBe(false);
+    s.state = "streaming";
+    expect(control.working(KEY)).toBe(true);
+    expect(factory.resumed).toEqual([]);
   });
 });
 

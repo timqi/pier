@@ -236,6 +236,8 @@ function fakeControl() {
       aborted.push(key.conversationId);
       return Promise.resolve();
     },
+    working: (key: ConversationKey) =>
+      known.has(key.conversationId) && state.sessionState === "streaming",
     // Null where `knows` is false, as the real control's row decides both.
     status: (key: ConversationKey) =>
       Promise.resolve(known.has(key.conversationId)
