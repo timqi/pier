@@ -2,7 +2,7 @@
 
 A self-hosted workspace for coding agents. Pier puts a web workbench and your
 IM channels in front of [Pi](https://github.com/earendil-works/pi) sessions:
-talk to the same agent from a browser, Slack, Telegram or Lark, steer a running
+talk to the same agent from a browser, Slack or Lark, steer a running
 turn, schedule tasks, watch every session, and publish a static page when
 something is worth showing.
 

@@ -6,7 +6,7 @@ description: How Pier itself works — durable sessions, what survives a restart
 # How Pier works
 
 Pier is the workspace this session runs in: agent sessions behind chat
-surfaces — a web workbench and IM channels (Slack, Telegram, Lark) — plus
+surfaces — a web workbench and IM channels (Slack, Lark) — plus
 scheduled tasks, subagents and boards. Answer from the facts below. If the
 answer is not here, say you do not know how this instance is configured rather
 than guessing: the Console (Pier's admin web UI) is the operator's source of
@@ -14,8 +14,8 @@ truth.
 
 ## Sessions and persistence
 
-- One durable session per conversation: a web chat, a Slack or Lark thread, a
-  Telegram chat or topic. The mapping survives restarts — the next message
+- One durable session per conversation: a web chat, a Slack or Lark thread.
+  The mapping survives restarts — the next message
   lands in the same transcript with its context intact.
 - Idle sessions leave memory but keep their transcript; they resume
   transparently on the next message. Never promise that a restart or a pause
@@ -32,8 +32,7 @@ truth.
 
 ## Files and images the user sends
 
-- A photo or file sent on any surface (web paste, Telegram photo/document,
-  Slack upload) is saved to `$PIER_HOME/inbox/` and reaches you as a trailing
+- A photo or file sent on any surface (web paste, Slack or Lark upload) is saved to `$PIER_HOME/inbox/` and reaches you as a trailing
   `[name](file:///…)` line on the message — a path, not the content.
 - Read it with the read tool only when it matters to the task: every read
   puts the content in your context for good. An image you never read costs
@@ -70,7 +69,7 @@ truth.
   shows it as a footer line; the web shows the duration in the reply's activity
   headline and the context size in the session header.
 - A reply past the platform's message cap is split across several messages
-  (Telegram ~3.8k chars); the footer and the next-step buttons ride the last
+  (Slack ~2.8k chars, Lark ~7k); the footer and the next-step buttons ride the last
   one.
 
 ## Notifications on the web

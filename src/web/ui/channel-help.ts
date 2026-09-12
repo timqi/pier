@@ -62,27 +62,6 @@ const slackManifestUrl = (): string =>
     encodeURIComponent(JSON.stringify(SLACK_MANIFEST))
   }`;
 
-/** Privacy mode is the single most common reason a bot looks dead in a group. */
-export const telegramTokenHelp = (): HTMLElement =>
-  helpBadge("Getting a bot token", [
-    "Open [@BotFather](https://t.me/BotFather) in Telegram.",
-    "Send `/newbot`, pick a display name, then a username ending in `bot`.",
-    "Copy the token it prints (`123456789:AA…`) and paste it here.",
-    "Send `/setprivacy` → `Disable` if the bot should see plain group messages. Left enabled it only ever receives mentions, replies and commands — the usual reason a bot looks dead in a group.",
-    "Send `/setjoingroups` → `Enable`, then add the bot to your group or forum.",
-  ]);
-
-/** Without the bot's Manage Topics right every topic creation fails and Pier
- *  quietly keeps answering in General. */
-export const topicModeHelp = (align: "left" | "right" = "left"): HTMLElement =>
-  helpBadge("Enabling topics on a group", [
-    "In Telegram open the group → `Edit` → turn on `Topics`. Owner only; group size no longer matters.",
-    "The group becomes a forum supergroup and the existing chat becomes its `General` topic.",
-    "Make the bot an admin with `Manage Topics`. That is the one right topic creation needs — without it Pier logs the failure and answers in General instead.",
-    "Send one message in the group so Pier discovers it, then enable it under `Chats` below.",
-    "After that, a message in General opens its own topic with its own session. A reply, or anything starting with `/`, stays where it was sent.",
-  ], align);
-
 /** The prose covers only what a manifest cannot do. */
 export function slackTokenHelp(): HTMLElement {
   const openApp = button("Create Slack app", true);
@@ -105,15 +84,15 @@ export function slackTokenHelp(): HTMLElement {
   ]);
 }
 
-/** Threads are not optional on Slack, so an explanation stands where a switch would. */
-export const slackThreadHelp = (align: "left" | "right" = "left"): HTMLElement =>
+/** Threads are not optional on Slack; this says what that means for sessions. */
+export const slackThreadHelp = (): HTMLElement =>
   helpBadge("How Slack threads work here", [
     "Pier never posts in a channel's main flow. A message in the channel is answered in *its own thread*; a message in a thread is answered in that thread.",
     "Each thread is its own Pi session, so one channel hosts many parallel sessions.",
     "The same applies in a DM: every new message you send there starts its own thread and its own session. Reply *inside* a thread to continue that conversation.",
     "Inside a thread Pier already owns, no `@mention` is needed — continuing that thread is addressing it.",
     "Commands are bare words after a mention: `@bot settings`, `@bot stop`, `@bot bind <code>`. Slack's client swallows an unregistered `/command` before it ever reaches an app.",
-  ], align);
+  ]);
 
 /** Feishu has no create-from-config URL, and permissions only take effect
  *  after a version is published — the step everyone misses. */
@@ -127,12 +106,12 @@ export const larkTokenHelp = (): HTMLElement =>
     "Add the bot to a group (群设置 → 群机器人), or DM it directly.",
   ]);
 
-/** Threads are not optional on Lark either. */
-export const larkThreadHelp = (align: "left" | "right" = "left"): HTMLElement =>
+/** Topics are not optional on Lark either. */
+export const larkThreadHelp = (): HTMLElement =>
   helpBadge("How Lark topics work here", [
     "Pier never posts in a chat's main flow. A message in the chat is answered in *its own topic* (话题); a message inside a topic is answered there.",
     "Each topic is its own Pi session, so one group hosts many parallel sessions.",
     "The same applies in a DM: every new message starts its own topic and its own session. Reply *inside* a topic to continue that conversation.",
     "Inside a topic Pier already owns, no @mention is needed — continuing that topic is addressing it.",
     "Commands are slash words: `/stop`, `/settings`, `/bind <code>`. A bare @mention with nothing else also opens the settings panel.",
-  ], align);
+  ]);

@@ -91,9 +91,9 @@ describe("when a speaker line is worth its tokens", () => {
 
   it("names the conversation again after a forget, and never for a surface without one", () => {
     const p = new SenderPrefix();
-    p.next("s1", ada, noon, "telegram:-100/7");
+    p.next("s1", ada, noon, "slack:C100/1717.7");
     p.forget("s1");
-    expect(p.next("s1", ada, noon, "telegram:-100/7")).toBe("[Ada<U1> 2024-06-01 12:00 telegram:-100/7]");
+    expect(p.next("s1", ada, noon, "slack:C100/1717.7")).toBe("[Ada<U1> 2024-06-01 12:00 slack:C100/1717.7]");
     expect(new SenderPrefix().next("s2", ada, noon)).toBe("[Ada<U1> 2024-06-01 12:00]");
   });
 

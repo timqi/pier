@@ -1,5 +1,5 @@
-// The settings panel, once for the shared behaviour and once per platform's
-// rendering. Hermetic — in-memory store, a recording control, fake clients.
+// The settings panel, through Slack's rendering of the shared behaviour.
+// Hermetic — in-memory store, a recording control, a fake client.
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
@@ -7,11 +7,8 @@ import type { ConversationKey, ModelRef } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl, ConversationStatus } from "./control.js";
 import { SlackPanel } from "./slack-panel.js";
-import { TelegramPanel } from "./telegram-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
-import type { TelegramClient, TgMessage } from "./telegram-api.js";
 
-const KEY: ConversationKey = { channelId: "telegram", conversationId: "c1" };
 const MODELS: ModelRef[] = Array.from({ length: 10 }, (_, i) => ({
   provider: "anthropic",
   id: `model-${i}`,
@@ -60,163 +57,9 @@ let logs: string[];
 beforeEach(() => {
   const vault = new Map<string, string>();
   store = new ChannelStore(openDb(":memory:"), { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
-  store.discoverChat("telegram", { id: "100", name: "Ops", kind: "group" });
   store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
   control = new FakeControl();
   logs = [];
-});
-
-// --- Telegram ------------------------------------------------------------------
-
-class FakeTelegram {
-  readonly sent: Record<string, unknown>[] = [];
-  readonly edits: Record<string, unknown>[] = [];
-  readonly deleted: string[] = [];
-  private next = 1;
-
-  sendMessage = (payload: Record<string, unknown>): Promise<TgMessage> => {
-    this.sent.push(payload);
-    return Promise.resolve({ message_id: this.next++, chat: { id: 100 } } as TgMessage);
-  };
-  editMessage = (payload: Record<string, unknown>): Promise<void> => {
-    this.edits.push(payload);
-    return Promise.resolve();
-  };
-  deleteMessage = (chatId: string, messageId: number): Promise<void> => {
-    this.deleted.push(`${chatId}:${messageId}`);
-    return Promise.resolve();
-  };
-}
-
-const tgPanel = (api: FakeTelegram): TelegramPanel =>
-  new TelegramPanel({
-    api: api as unknown as Pick<
-      TelegramClient,
-      "sendMessage" | "editMessage" | "deleteMessage"
-    >,
-    control,
-    store,
-    log: (m) => logs.push(m),
-  });
-
-const tap = (panel: TelegramPanel, data: string): Promise<boolean> =>
-  panel.onCallback({ id: "q", data, message: { message_id: 1, chat: { id: 100 } } } as never, KEY);
-
-describe("telegram panel", () => {
-  it("opens one message with the session, the chat and its buttons", async () => {
-    const api = new FakeTelegram();
-    await tgPanel(api).open(KEY, "100");
-    const text = String(api.sent[0]!.text);
-    expect(text).toContain("<b>Session</b>");
-    expect(text).toContain("<code>01234567</code> · idle");
-    expect(text).toContain("Directory: <code>/srv/pier</code>");
-    expect(text).toContain("<b>Chat</b>");
-    expect(text).toContain("Ops · group · <code>100</code>");
-    expect(text).toContain("mention on · bind on");
-    const rows = (api.sent[0]!.reply_markup as { inline_keyboard: { text: string }[][] })
-      .inline_keyboard.map((r) => r.map((b) => b.text));
-    expect(rows).toEqual([
-      ["Model", "Reasoning"],
-      ["New session", "New session in…"],
-      ["Close"],
-    ]);
-  });
-
-  it("offers Stop only while a turn is streaming", async () => {
-    control.current = status({ state: "streaming" });
-    const api = new FakeTelegram();
-    await tgPanel(api).open(KEY, "100");
-    const rows = (api.sent[0]!.reply_markup as { inline_keyboard: { text: string }[][] })
-      .inline_keyboard;
-    expect(rows[2]!.map((b) => b.text)).toEqual(["⏹ Stop", "Close"]);
-  });
-
-  it("pages the model list one model per row, and picks by index", async () => {
-    const api = new FakeTelegram();
-    const panel = tgPanel(api);
-    await panel.open(KEY, "100");
-    await tap(panel, "cfg:models:1");
-    const rows = (api.edits[0]!.reply_markup as { inline_keyboard: { text: string }[][] })
-      .inline_keyboard;
-    // Page two of ten with eight per page: two models, then the nav row.
-    expect(rows.slice(0, 2).map((r) => r.map((b) => b.text))).toEqual([
-      ["model-8"],
-      ["model-9"],
-    ]);
-    expect(rows[2]!.map((b) => b.text)).toEqual(["‹ Prev", "‹ Back"]);
-    await tap(panel, "cfg:model:9");
-    expect(control.setModels).toEqual([MODELS[9]]);
-  });
-
-  it("says the catalog could not be read instead of drawing an empty list", async () => {
-    control.models = () => Promise.reject(new Error("models.json is broken"));
-    const api = new FakeTelegram();
-    const panel = tgPanel(api);
-    await panel.open(KEY, "100");
-    await tap(panel, "cfg:models:0");
-    expect(String(api.edits[0]!.text)).toContain("Could not list models: Error: models.json is broken");
-    expect(String(api.edits[0]!.text)).not.toContain("No models");
-    expect(logs.join(" ")).toContain("models.json is broken");
-  });
-
-  it("ignores a payload that is not the panel's", async () => {
-    const panel = tgPanel(new FakeTelegram());
-    expect(await tap(panel, "Run it")).toBe(false);
-  });
-
-  it("reopens instead of going dead when the panel outlived the process", async () => {
-    const api = new FakeTelegram();
-    // A fresh panel object has no state for this conversation, as after a restart.
-    expect(await tap(tgPanel(api), "cfg:models:0")).toBe(true);
-    expect(api.sent).toHaveLength(1);
-  });
-
-  it("closes by deleting its own message", async () => {
-    const api = new FakeTelegram();
-    const panel = tgPanel(api);
-    await panel.open(KEY, "100");
-    await tap(panel, "cfg:close");
-    expect(api.deleted).toEqual(["100:1"]);
-  });
-
-  it("starts a session in a typed directory and says so in the chat", async () => {
-    const api = new FakeTelegram();
-    const panel = tgPanel(api);
-    await panel.open(KEY, "100");
-    await tap(panel, "cfg:cwd");
-    const prompt = api.sent[1]!;
-    expect((prompt.reply_markup as { force_reply: boolean }).force_reply).toBe(true);
-    const reply = {
-      chat: { id: 100 },
-      text: "/srv/other",
-      reply_to_message: { message_id: 2 },
-    } as TgMessage;
-    expect(await panel.consumeCwdReply(reply, KEY)).toBe(true);
-    expect(control.newSessions).toEqual(["/srv/other"]);
-    expect(String(api.sent[2]!.text)).toContain("<code>/srv/other</code>");
-  });
-
-  it("refuses a relative path without starting anything", async () => {
-    const api = new FakeTelegram();
-    const panel = tgPanel(api);
-    await panel.open(KEY, "100");
-    await tap(panel, "cfg:cwd");
-    const reply = {
-      chat: { id: 100 },
-      text: "relative/path",
-      reply_to_message: { message_id: 2 },
-    } as TgMessage;
-    await panel.consumeCwdReply(reply, KEY);
-    expect(control.newSessions).toEqual([]);
-    expect(String(api.sent[2]!.text)).toContain("not an absolute path");
-  });
-
-  it("shows the topics gate only on a forum", async () => {
-    store.discoverChat("telegram", { id: "200", name: "Forum", kind: "forum" });
-    const api = new FakeTelegram();
-    await tgPanel(api).open({ channelId: "telegram", conversationId: "c2" }, "200");
-    expect(String(api.sent[0]!.text)).toContain("topics");
-  });
 });
 
 // --- Slack -----------------------------------------------------------------------
@@ -267,10 +110,8 @@ describe("slack panel", () => {
     const blocks = api.posted[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("*Session*");
     expect(text(blocks[0]!)).toContain("`01234567` · idle");
-    // Slack has no topics gate, so the channel line says only what it has.
     expect(text(blocks[1]!)).toContain("*Channel*");
     expect(text(blocks[1]!)).toContain("mention on · bind on");
-    expect(text(blocks[1]!)).not.toContain("topics");
     expect(labels(blocks[2]!)).toEqual(["Model", "Reasoning"]);
     expect(labels(blocks[4]!)).toEqual(["Close"]);
   });

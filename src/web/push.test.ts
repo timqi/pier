@@ -306,7 +306,7 @@ describe("the finished-turn trigger", () => {
   });
 
   it("stays quiet for a turn that was already delivered to a chat", async () => {
-    // Slack, Telegram and Lark carry the answer themselves; a push would be
+    // Slack and Lark carry the answer themselves; a push would be
     // the same reply a second time, on the same phone.
     const { app, hub, sent, channelOf, cookie } = setup(6_000);
     await subscribe(app, cookie);

@@ -90,7 +90,7 @@ function fakeChannel(id: string) {
   return { channel, sent, notes };
 }
 
-const KEY = { channelId: "telegram", conversationId: "-100/7" };
+const KEY = { channelId: "slack", conversationId: "C100/1717.7" };
 const ORIGIN: SystemInputOrigin = {
   kind: "task-callback",
   taskId: "t1",
@@ -101,14 +101,14 @@ const ORIGIN: SystemInputOrigin = {
 let hub: EventHub;
 let router: Router;
 let fake: ReturnType<typeof fakeSession>;
-let tg: ReturnType<typeof fakeChannel>;
+let im: ReturnType<typeof fakeChannel>;
 
 beforeEach(() => {
   hub = new EventHub();
   fake = fakeSession("s1");
   router = new Router(hub, () => Promise.resolve(fake.session));
-  tg = fakeChannel("telegram");
-  router.registerChannel(tg.channel);
+  im = fakeChannel("slack");
+  router.registerChannel(im.channel);
 });
 
 describe("channel fan-out", () => {
@@ -116,21 +116,21 @@ describe("channel fan-out", () => {
     await router.ensure(KEY);
     const meta = { completedAt: 5, durationMs: 1200, tokens: 999 };
     fake.emit({ type: "turn-end", text: "done\n\n---\n[Run it]", meta });
-    expect(tg.sent).toEqual([["-100/7", { text: "done", suggestions: ["Run it"], meta }]]);
+    expect(im.sent).toEqual([["C100/1717.7", { text: "done", suggestions: ["Run it"], meta }]]);
   });
 
   it("sends an empty turn-end too — that is the turn-settled signal", async () => {
     await router.ensure(KEY);
     fake.emit({ type: "turn-end", text: "" });
-    expect(tg.sent).toEqual([["-100/7", { text: "", suggestions: [], meta: undefined }]]);
+    expect(im.sent).toEqual([["C100/1717.7", { text: "", suggestions: [], meta: undefined }]]);
   });
 
   it("forwards a system input as a note, before the turn it triggers", async () => {
     await router.ensure(KEY);
     fake.emit({ type: "system-input", text: "task finished", origin: ORIGIN });
     fake.emit({ type: "turn-end", text: "acknowledged" });
-    expect(tg.notes).toEqual([["-100/7", { text: "task finished", origin: ORIGIN }]]);
-    expect(tg.sent).toHaveLength(1);
+    expect(im.notes).toEqual([["C100/1717.7", { text: "task finished", origin: ORIGIN }]]);
+    expect(im.sent).toHaveLength(1);
   });
 
   it("gives the chat a digest of a long system input, and the hub all of it", async () => {
@@ -141,12 +141,12 @@ describe("channel fan-out", () => {
     // characters of result text they do not (tasks/callbacks.ts).
     const long = `Task "review" finished with state: succeeded\n${"result line\n".repeat(200)}`;
     fake.emit({ type: "system-input", text: long, origin: ORIGIN });
-    expect(tg.notes[0]![1].text).toBe(
+    expect(im.notes[0]![1].text).toBe(
       `Task "review" finished with state: succeeded\nresult line\nresult line\nresult line\n\u2026 +197 more lines`,
     );
     // One paragraph, no line to cut on: the head stops on a word instead.
     fake.emit({ type: "system-input", text: "word ".repeat(200), origin: ORIGIN });
-    const oneLine = tg.notes[1]![1].text;
+    const oneLine = im.notes[1]![1].text;
     expect(oneLine).toBe(`${"word ".repeat(39)}word\n\u2026 +1 more line`);
     // The event stream is unclamped — the web timeline and the transcript are
     // where the whole thing still is.
@@ -156,7 +156,7 @@ describe("channel fan-out", () => {
   it("leaves a system input that already fits exactly as it is", async () => {
     await router.ensure(KEY);
     fake.emit({ type: "system-input", text: "line one\nline two", origin: ORIGIN });
-    expect(tg.notes).toEqual([["-100/7", { text: "line one\nline two", origin: ORIGIN }]]);
+    expect(im.notes).toEqual([["C100/1717.7", { text: "line one\nline two", origin: ORIGIN }]]);
   });
 
   it("delivers one reply at a time per conversation", async () => {
@@ -167,7 +167,7 @@ describe("channel fan-out", () => {
     const finished: string[] = [];
     const gates: (() => void)[] = [];
     router.registerChannel({
-      id: "telegram",
+      id: "slack",
       start: () => Promise.resolve(),
       send: async (_conversationId, reply) => {
         started.push(reply.text);
@@ -195,7 +195,7 @@ describe("channel fan-out", () => {
     const errors: string[] = [];
     hub.subscribe("s1", (e) => { if (e.type === "error") errors.push(e.message); });
     router.registerChannel({
-      id: "telegram",
+      id: "slack",
       start: () => Promise.resolve(),
       send: (_conversationId, reply) => {
         sent.push(reply.text);
@@ -209,7 +209,7 @@ describe("channel fan-out", () => {
     fake.emit({ type: "turn-end", text: "second" });
     await new Promise((r) => setTimeout(r, 0));
     expect(sent).toEqual(["first", "second"]);
-    expect(errors).toEqual(["outbound to telegram failed: Error: 429"]);
+    expect(errors).toEqual(["outbound to slack failed: Error: 429"]);
   });
 
   it("keeps deltas and thinking off IM entirely", async () => {
@@ -217,14 +217,14 @@ describe("channel fan-out", () => {
     fake.emit({ type: "text-delta", text: "par" });
     fake.emit({ type: "thinking-delta", text: "hmm" });
     fake.emit({ type: "tool-start", toolCallId: "c1", toolName: "bash", args: {} });
-    expect(tg.sent).toEqual([]);
-    expect(tg.notes).toEqual([]);
+    expect(im.sent).toEqual([]);
+    expect(im.notes).toEqual([]);
   });
 
   it("sends nothing for a conversation on a channel it does not own", async () => {
     await router.ensure({ channelId: "web", conversationId: "s1" });
     fake.emit({ type: "turn-end", text: "done" });
-    expect(tg.sent).toEqual([]);
+    expect(im.sent).toEqual([]);
   });
 
   it("reports a failed delivery as an error event, never as a throw", async () => {
@@ -232,7 +232,7 @@ describe("channel fan-out", () => {
     hub.subscribe("s1", (e) => {
       if (e.type === "error") errors.push(e.message);
     });
-    const broken = fakeChannel("telegram");
+    const broken = fakeChannel("slack");
     broken.channel.send = () => Promise.reject(new Error("429"));
     broken.channel.notify = () => Promise.reject(new Error("network"));
     router.registerChannel(broken.channel);
@@ -241,11 +241,11 @@ describe("channel fan-out", () => {
     fake.emit({ type: "turn-end", text: "y" });
     await new Promise((r) => setTimeout(r, 0));
     expect(errors).toEqual([
-      "notify telegram failed: Error: network",
-      "outbound to telegram failed: Error: 429",
+      "notify slack failed: Error: network",
+      "outbound to slack failed: Error: 429",
       // The failure is also pushed at the chat, and that attempt failing is
       // itself reported — but only once, never recursively.
-      "could not report the failure to telegram: Error: network",
+      "could not report the failure to slack: Error: network",
     ]);
   });
 
@@ -258,7 +258,7 @@ describe("channel fan-out", () => {
   });
 
   it("tells the conversation when the session itself reports an error", async () => {
-    const { channel, notes, sent } = fakeChannel("telegram");
+    const { channel, notes, sent } = fakeChannel("slack");
     router.registerChannel(channel);
     await router.ensure(KEY);
     fake.emit({ type: "turn-end", text: "", error: "tool exploded" });
@@ -277,7 +277,7 @@ describe("channel fan-out", () => {
   });
 
   it("tells the conversation when the prompt itself fails", async () => {
-    const { channel, notes } = fakeChannel("telegram");
+    const { channel, notes } = fakeChannel("slack");
     router.registerChannel(channel);
     // The double is cast to AgentSession; reach the real object to break it.
     Object.assign(fake.session, { prompt: () => Promise.reject(new Error("session gone")) });
@@ -293,7 +293,7 @@ describe("channel fan-out", () => {
   });
 
   it("trims a long error to something a chat window can hold", async () => {
-    const { channel, notes } = fakeChannel("telegram");
+    const { channel, notes } = fakeChannel("slack");
     router.registerChannel(channel);
     await router.ensure(KEY);
     fake.emit({ type: "error", message: "x".repeat(2000) });
@@ -307,7 +307,7 @@ describe("reporting to a session", () => {
   it("tells the conversation waiting on it", async () => {
     await router.ensure(KEY);
     router.reportTo("s1", "the result could not be delivered");
-    expect(tg.notes.at(-1)?.[1]).toMatchObject({
+    expect(im.notes.at(-1)?.[1]).toMatchObject({
       text: "the result could not be delivered",
       origin: { kind: "error" },
     });
@@ -318,7 +318,7 @@ describe("reporting to a session", () => {
     hub.subscribe("s9", (e) => { if (e.type === "error") seen.push(e.message); });
     router.reportTo("s9", "nobody to tell but the timeline");
     expect(seen).toEqual(["nobody to tell but the timeline"]);
-    expect(tg.notes).toEqual([]);
+    expect(im.notes).toEqual([]);
   });
 });
 
@@ -343,7 +343,7 @@ describe("idle eviction", () => {
     await router.ensure(KEY);
     await router.evictIdle(60_000, Date.now() + 61_000);
     fake.emit({ type: "turn-end", text: "late" });
-    expect(tg.sent).toEqual([]);
+    expect(im.sent).toEqual([]);
   });
 
   it("drops the aliases too, so a task callback never reaches a disposed session", async () => {
@@ -459,7 +459,7 @@ describe("opening a session", () => {
       },
       (key) => (key.channelId === KEY.channelId ? "s1" : undefined),
     );
-    router.registerChannel(tg.channel);
+    router.registerChannel(im.channel);
     let a: AgentSession, b: AgentSession;
     if (when === "mid-turn") {
       a = await router.ensure(keyOf(first));
@@ -474,7 +474,7 @@ describe("opening a session", () => {
     // Whichever order, the chat is where the turn is answered.
     expect(router.conversationOf("s1")).toEqual(KEY);
     fake.emit({ type: "turn-end", text: "done" });
-    expect(tg.sent).toEqual([["-100/7", { text: "done", suggestions: [], meta: undefined }]]);
+    expect(im.sent).toEqual([["C100/1717.7", { text: "done", suggestions: [], meta: undefined }]]);
   });
 
   it("answers the alias that reached it last, never a chat it belongs to", async () => {
@@ -496,10 +496,10 @@ describe("opening a session", () => {
 
   it("tells the chat when the session cannot be opened", async () => {
     router = new Router(hub, () => Promise.reject(new Error("unknown session")));
-    router.registerChannel(tg.channel);
+    router.registerChannel(im.channel);
     await expect(router.ensure(KEY)).rejects.toThrow("unknown session");
-    expect(tg.notes[0]?.[1].text).toContain("could not open a session");
-    expect(tg.notes[0]?.[1].origin).toEqual({ kind: "error" });
+    expect(im.notes[0]?.[1].text).toContain("could not open a session");
+    expect(im.notes[0]?.[1].origin).toEqual({ kind: "error" });
   });
 });
 
@@ -509,8 +509,8 @@ describe("drain", () => {
     await expect(
       router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" }),
     ).rejects.toThrow(/restarting/);
-    expect(tg.notes[0]?.[1].text).toContain("restarting");
-    expect(tg.notes[0]?.[1].origin).toEqual({ kind: "error" });
+    expect(im.notes[0]?.[1].text).toContain("restarting");
+    expect(im.notes[0]?.[1].origin).toEqual({ kind: "error" });
     // Gated before ensure: a drain must not be what opens a session.
     expect(router.sessionOf(KEY)).toBeUndefined();
   });
@@ -520,13 +520,13 @@ describe("drain", () => {
     router = new Router(hub, () => new Promise((resolve) => {
       release = () => resolve(fake.session);
     }));
-    router.registerChannel(tg.channel);
+    router.registerChannel(im.channel);
     const dispatched = router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" });
     dispatched.catch(() => {}); // asserted below; unhandled until then
     router.beginDrain();
     release();
     await expect(dispatched).rejects.toThrow(/restarting/);
-    expect(tg.notes[0]?.[1].text).toContain("restarting");
+    expect(im.notes[0]?.[1].text).toContain("restarting");
   });
 
   it("busy() lists only mid-turn sessions", async () => {
@@ -540,7 +540,7 @@ describe("drain", () => {
 
   it("busy() counts an answer the adapter has not finished sending", async () => {
     let release = (): void => {};
-    tg.channel.send = () => new Promise((resolve) => { release = resolve; });
+    im.channel.send = () => new Promise((resolve) => { release = resolve; });
     await router.ensure(KEY);
     fake.emit({ type: "turn-end", text: "done" });
     // The turn is over and the session idle, but the chat has nothing yet.
@@ -636,8 +636,8 @@ describe("a queue with no turn left to drain it", () => {
     await settle();
     expect(fake.prompts).toEqual([]);
     expect(await fake.session.pendingQueue()).toEqual({ steering: ["the thing I typed"], followUp: [] });
-    expect(tg.notes.at(-1)?.[1].text).toContain("restarting");
-    expect(tg.notes.at(-1)?.[1].origin).toEqual({ kind: "error" });
+    expect(im.notes.at(-1)?.[1].text).toContain("restarting");
+    expect(im.notes.at(-1)?.[1].origin).toEqual({ kind: "error" });
   });
 
   it("reports a promotion that failed instead of losing it quietly", async () => {
@@ -646,7 +646,7 @@ describe("a queue with no turn left to drain it", () => {
     fake.setQueue({ steering: ["one"] });
     fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
     await settle();
-    expect(tg.notes.at(-1)?.[1].text).toContain("session gone");
+    expect(im.notes.at(-1)?.[1].text).toContain("session gone");
   });
 });
 
@@ -677,7 +677,7 @@ describe("queue promotion recovery", () => {
     await expect(router.deliverQueue("s1", mode)).rejects.toThrow("restarting");
     expect(fake.prompts).toEqual([]);
     expect(router.recoveryOf("s1")).toEqual([expect.objectContaining({ ...originals, status: "not-submitted" })]);
-    expect(tg.notes).toHaveLength(1);
+    expect(im.notes).toHaveLength(1);
   });
 
   it.each(["reject", "drain"])("retains originals after abort %s and does not touch new arrivals", async (outcome) => {
@@ -706,7 +706,7 @@ describe("queue promotion recovery", () => {
     prompt.reject(new Error("prompt failed"));
     await settle();
     expect(router.recoveryOf("s1")[0]).toMatchObject({ ...originals, status: "uncertain" });
-    expect(tg.notes).toHaveLength(1);
+    expect(im.notes).toHaveLength(1);
     // Reading/copying cannot consume or mutate the retained originals.
     batch.steering[0] = "changed by reader";
     expect(router.recoveryOf("s1")[0]?.steering).toEqual(originals.steering);
@@ -994,7 +994,7 @@ describe("the speaker a session has been told about", () => {
   it("names the chat as the adapter spelled it, and no alias", async () => {
     await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "hi", mode: "auto" });
     // `<channelId>:<conversationId>` verbatim: a skill script takes it apart.
-    expect(fake.prompts[0]).toMatch(/^\[Ada<U1> [\d: -]+ telegram:-100\/7\]\nhi$/);
+    expect(fake.prompts[0]).toMatch(/^\[Ada<U1> [\d: -]+ slack:C100\/1717.7\]\nhi$/);
     const web = { channelId: "web", conversationId: "s1" };
     await router.dispatch({ key: web, senderId: "web", sender: { id: "web", name: "operator" }, text: "yo", mode: "auto" });
     expect(fake.prompts[1]).not.toContain("web:");
@@ -1026,7 +1026,7 @@ describe("conversation abort", () => {
   });
 
   it("is a no-op for a conversation nobody opened — never a lazy create", async () => {
-    await router.abortConversation({ channelId: "telegram", conversationId: "-999" });
+    await router.abortConversation({ channelId: "slack", conversationId: "C999" });
     expect(fake.calls).toEqual([]);
   });
 });

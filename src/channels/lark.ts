@@ -206,10 +206,7 @@ export class LarkChannel implements Channel {
     }
 
     const text = raw.trim();
-    // Lark gives Pier no @username a command target could match, so any target
-    // means "not us".
-    const parsed = parseCommand(text);
-    const command = parsed?.target ? undefined : parsed;
+    const command = parseCommand(text);
     const root = threadOf(msg);
     const here: ConversationKey = { channelId: this.id, conversationId: conversationId(msg.chatId, root) };
     const bindRequest = command?.name === "bind" && isDm;

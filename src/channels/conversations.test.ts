@@ -7,7 +7,7 @@ import type { ConversationKey } from "../core/types.js";
 import { openDb } from "../db.js";
 import { ConversationStore, resolveConversation } from "./conversations.js";
 
-const CHAT: ConversationKey = { channelId: "telegram", conversationId: "-100/7" };
+const CHAT: ConversationKey = { channelId: "lark", conversationId: "oc_1/om_7" };
 
 let dbPath: string;
 let db: DatabaseSync;
@@ -50,10 +50,10 @@ describe("conversation store", () => {
   it("round-trips a mapping and keeps channels apart", () => {
     const store = new ConversationStore(db);
     store.set(CHAT, "s1");
-    store.set({ channelId: "slack", conversationId: "-100/7" }, "s2");
+    store.set({ channelId: "slack", conversationId: "C100/1717.7" }, "s2");
     expect(store.get(CHAT)).toBe("s1");
-    expect(store.get({ channelId: "slack", conversationId: "-100/7" })).toBe("s2");
-    expect(store.get({ channelId: "telegram", conversationId: "-100/8" })).toBeUndefined();
+    expect(store.get({ channelId: "slack", conversationId: "C100/1717.7" })).toBe("s2");
+    expect(store.get({ channelId: "lark", conversationId: "oc_1/om_8" })).toBeUndefined();
   });
 
   it("survives a restart — the point of the table", () => {

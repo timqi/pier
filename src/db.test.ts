@@ -480,8 +480,7 @@ describe("openDb", () => {
     before.exec("PRAGMA user_version = 23");
     const insert = before.prepare("INSERT INTO channels(platform, json) VALUES (?, ?)");
     insert.run("slack", JSON.stringify({ enabled: true, token: "v1:aa:bot", appToken: "v1:aa:app", users: [] }));
-    insert.run("telegram", JSON.stringify({ enabled: false, token: "", appToken: "" }));
-    insert.run("lark", JSON.stringify({ token: "v1:aa:id" }));
+    insert.run("lark", JSON.stringify({ enabled: false, token: "v1:aa:id", appToken: "" }));
     before.prepare("INSERT INTO vault VALUES (?, ?, ?)").run("SLACK_TOKEN", "v1:aa:filed", 1);
     before.close();
 
@@ -494,9 +493,8 @@ describe("openDb", () => {
     ]);
     // Neither key survives in any row, filled or empty.
     expect(db.prepare("SELECT platform, json FROM channels ORDER BY platform").all()).toEqual([
-      { platform: "lark", json: "{}" },
+      { platform: "lark", json: JSON.stringify({ enabled: false }) },
       { platform: "slack", json: JSON.stringify({ enabled: true, users: [] }) },
-      { platform: "telegram", json: JSON.stringify({ enabled: false }) },
     ]);
     db.close();
   });

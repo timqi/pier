@@ -9,7 +9,7 @@ core; core routes them to Pi sessions through the agent seam; every session
 emits one ordered event stream that all surfaces consume.
 
 ```
-Slack / Telegram / Lark          Web workbench (browser)       Tasks
+Slack / Lark                     Web workbench (browser)       Tasks
         │ Channel seam                  │ HTTP + SSE          HTTP / timer / socket
         ▼                               ▼                         ▼
 ┌──────────────────────────── core ──────────────────────────────┐
@@ -41,7 +41,7 @@ src/
                language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
-               panel, runtime, routes; per platform: telegram / slack / lark
+               panel, runtime, routes; per platform: slack / lark
                (+ -api, -render, -panel; slack also -outbound, -directory,
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
@@ -149,7 +149,7 @@ seams:
   will retry. `notify` carries a persisted `system-input` (delegation, task
   callback, supervisor message) or a service/error note.
 - Slash commands are parsed once in `channels/commands.ts`: trim both ends,
-  require a leading `/`, split off an `@target`, keep args verbatim. Control
+  require a leading `/`, keep args verbatim. Control
   that is not a prompt (`/stop`) is wired by `channels/runtime.ts`, which owns
   the router — the `Channel` seam has one inbound path.
 - `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (text
@@ -225,9 +225,6 @@ seams:
   chats. `requireMention` and `requireBind` default to true; a new chat
   *copies* the platform values once — no runtime inheritance. `gate()` is the
   whole inbound decision; denials are silent.
-- **Topic mode** (Telegram): a message in a forum group's General opens a
-  topic named after its first line; replies and commands stay put; a failure
-  falls back to General. Per-chat.
 - **IM inbound is `mode: "steer"`.**
 - **Errors**: a malformed inbound message is logged and dropped at the seam.
   Agent errors surface as `error` events, never as thrown exceptions across
@@ -264,7 +261,6 @@ One line each; the reasoning is in the commit that made it.
   its tables or its handle. Nothing restart-relevant lives in a JSON file.
 - IM chats are discovered from traffic, not registered; new chats arrive
   enabled behind the mention and bind gates.
-- Telegram over raw Bot API long polling: no framework, no webhooks.
 - Vite + Tailwind, static CSS, zero runtime, no UI framework.
 - A subagent is a Task run in a fresh or reused session; context travels as a
   written handoff in the prompt. `fork` was removed; stored runs with
@@ -272,7 +268,3 @@ One line each; the reasoning is in the commit that made it.
 - No project concept: a flat rail, a directory chosen once at creation.
 - The rail never reorders itself: a working set of five on top, entered when a
   human speaks to a session; everything else by birth (`web/session-state.ts`).
-- Known debt: `ChatKind` `"forum"` and `topicMode` (`channels/types.ts`) are
-  Telegram facts in the shared config contract — Slack and Lark report
-  `"group"` and ignore the flag. The fix is an adapter capability, taken when
-  the stored contract next migrates for its own reasons.

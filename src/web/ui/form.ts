@@ -217,12 +217,7 @@ export const empty = (text: string): HTMLElement =>
 
 /** The gap between badge and bubble is the bubble's own transparent padding,
  *  so crossing it never leaves the hover group. Clicking pins it open. */
-export function helpBadge(
-  title: string,
-  steps: (string | HTMLElement)[],
-  /** Which edge to pin to — "right" for badges living in a narrow column. */
-  align: "left" | "right" = "left",
-): HTMLElement {
+export function helpBadge(title: string, steps: (string | HTMLElement)[]): HTMLElement {
   const wrap = h("span", "group relative inline-flex");
   const badgeEl = btn(
     "",
@@ -234,9 +229,7 @@ export function helpBadge(
   // capped against the viewport so a narrow window cannot push it off-screen.
   const bubble = h(
     "span",
-    `absolute ${
-      align === "right" ? "right-0" : "left-0"
-    } top-full z-20 hidden w-[min(27rem,calc(100vw-3rem))] pt-1.5 group-hover:block`,
+    "absolute left-0 top-full z-20 hidden w-[min(27rem,calc(100vw-3rem))] pt-1.5 group-hover:block",
   );
   const panel = h(
     "span",

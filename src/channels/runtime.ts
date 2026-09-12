@@ -8,22 +8,19 @@ import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { LarkChannel } from "./lark.js";
 import { SlackChannel } from "./slack.js";
-import { TelegramChannel } from "./telegram.js";
 import type { ChannelPlatform } from "./types.js";
 
 const ADAPTERS: {
   platform: ChannelPlatform;
-  needsAppToken: boolean;
   build(deps: {
     store: ChannelStore;
     log: (m: string) => void;
     control: ChannelControl;
   }): Channel;
 }[] = [
-  { platform: "telegram", needsAppToken: false, build: (deps) => new TelegramChannel(deps) },
-  { platform: "slack", needsAppToken: true, build: (deps) => new SlackChannel(deps) },
+  { platform: "slack", build: (deps) => new SlackChannel(deps) },
   // Lark's "token" is the App ID and "appToken" the App Secret.
-  { platform: "lark", needsAppToken: true, build: (deps) => new LarkChannel(deps) },
+  { platform: "lark", build: (deps) => new LarkChannel(deps) },
 ];
 
 // The injected sink is for warnings; "slack started" is not one.
@@ -60,7 +57,7 @@ export class ChannelRuntime {
   }
 
   private async restart(adapter: (typeof ADAPTERS)[number]): Promise<void> {
-    const { platform, needsAppToken, build } = adapter;
+    const { platform, build } = adapter;
     const existing = this.live.get(platform);
     if (existing) {
       this.live.delete(platform);
@@ -70,7 +67,7 @@ export class ChannelRuntime {
     }
     const config = this.store.get(platform);
     if (!config.enabled || !config.token) return;
-    if (needsAppToken && !config.appToken) {
+    if (!config.appToken) {
       // "Enabled but nothing happens" is indistinguishable from a broken adapter.
       this.log(`${platform}: enabled but no app token, not starting`);
       return;

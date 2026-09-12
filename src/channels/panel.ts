@@ -1,6 +1,6 @@
 // The in-chat settings panel, minus the platform: one message edited in place,
 // every payload namespaced `cfg:` so a tap never reaches the agent. Choices
-// travel as an index: Telegram's callback data caps at 64 bytes.
+// travel as an index: platform callback payloads are small and opaque.
 
 import { compact, thinkingLabel } from "../core/reply.js";
 import type { ConversationKey, ModelRef, ThinkingLevel } from "../core/types.js";
@@ -22,7 +22,7 @@ export interface PanelButton {
   action: string;
 }
 
-/** A titled block of lines: one Slack section, one Telegram paragraph. */
+/** A titled block of lines: one Slack section, one Lark markdown element. */
 export interface PanelGroup {
   title: string;
   /** Trails the title outside the emphasis, for a counter or a hint. */
@@ -32,8 +32,7 @@ export interface PanelGroup {
 
 export interface PanelView {
   groups: PanelGroup[];
-  /** Same-kind choices, laid out by the platform: Slack fits them on one row,
-   *  Telegram gives a long model id a row of its own. */
+  /** Same-kind choices, laid out by the platform as one row. */
   picks?: PanelButton[];
   /** Button rows, taken as authored. */
   rows: PanelButton[][];
@@ -63,7 +62,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
   protected abstract readonly fence: [string, string];
   protected abstract esc(text: string): string;
   protected abstract draw(state: S, view: PanelView, note?: string): Promise<void>;
-  /** A modal, or a forced reply. */
+  /** One typed answer in the platform's dialog: a Slack modal, a Lark form card. */
   protected abstract promptCwd(key: ConversationKey, state: S, ctx: C): Promise<void>;
   protected abstract erase(state: S): Promise<void>;
   /** Gates this platform has and the other does not. */

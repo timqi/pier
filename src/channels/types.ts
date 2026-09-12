@@ -5,9 +5,9 @@
 
 import type { ModelRef, ThinkingLevel } from "../core/types.js";
 
-export type ChannelPlatform = "telegram" | "slack" | "lark";
+export type ChannelPlatform = "slack" | "lark";
 
-const PLATFORMS: readonly string[] = ["telegram", "slack", "lark"];
+const PLATFORMS: readonly string[] = ["slack", "lark"];
 
 /** Validate at the boundary: an unknown platform is a 404, not a new row. */
 export const isChannelPlatform = (v: unknown): v is ChannelPlatform =>
@@ -18,8 +18,8 @@ export const isChannelPlatform = (v: unknown): v is ChannelPlatform =>
 export const chatOf = (conversationId: string): string =>
   conversationId.split("/", 1)[0] ?? "";
 
-/** A DM, a plain group, or a group with native sub-threads (Telegram forum). */
-export type ChatKind = "dm" | "group" | "forum";
+/** A DM or a group; both platforms thread inside either. */
+export type ChatKind = "dm" | "group";
 
 export interface ChatConfig {
   id: string;
@@ -28,7 +28,6 @@ export interface ChatConfig {
   enabled: boolean;
   requireMention: boolean;
   requireBind: boolean;
-  topicMode: boolean;
   /** Where this chat's sessions start; seeded from the platform default. */
   cwd: string;
   /** null → whatever Pi would pick for a new session. */
@@ -57,19 +56,17 @@ export type BindOutcome = "bound" | "invalid" | "voided";
 /** Platform-level values double as the seed for newly discovered chats. */
 export interface ChannelConfig {
   enabled: boolean;
-  /** The platform's primary credential: Telegram's bot token, Slack's bot
-   *  token (`xoxb-`), Lark's App ID (`cli_…`). */
+  /** The platform's primary credential: Slack's bot token (`xoxb-`), Lark's
+   *  App ID (`cli_…`). */
   token: string;
   /**
-   * Second credential, for platforms that authenticate with a pair. Slack
-   * Socket Mode needs an app-level token (`xapp-`) beside the bot token;
-   * Lark signs everything with App ID + App Secret, and this is the secret.
-   * Telegram leaves this empty.
+   * Second credential; both platforms authenticate with a pair. Slack Socket
+   * Mode needs an app-level token (`xapp-`) beside the bot token; Lark signs
+   * everything with App ID + App Secret, and this is the secret.
    */
   appToken: string;
   requireMention: boolean;
   requireBind: boolean;
-  topicMode: boolean;
   /** "" → the pier process cwd. */
   cwd: string;
   model: ModelRef | null;
@@ -88,7 +85,6 @@ export const defaultChannelConfig = (): ChannelConfig => ({
   appToken: "",
   requireMention: true,
   requireBind: true,
-  topicMode: true,
   cwd: "",
   model: null,
   thinking: null,

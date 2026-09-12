@@ -57,7 +57,7 @@ describe("drainForRestart", () => {
   it("ledgers an idle attached session's queue — the runtime is its only home", async () => {
     const idle = busySession("s1", ["first", "second"]);
     Object.assign(idle.session, { state: "idle" });
-    const key = { channelId: "telegram" as const, conversationId: "42" };
+    const key = { channelId: "slack" as const, conversationId: "42" };
     const rig = deps(() => [], () => 0, () => [{ session: idle.session, key }]);
     await drainForRestart(rig.deps, 1000, 1);
     // Nothing was running: the queue is snapshotted, never aborted.
@@ -83,14 +83,14 @@ describe("drainForRestart", () => {
   it("deadline aborts IM turns into the ledger, queue texts included", async () => {
     const turn = busySession("s1", ["queued question"]);
     const rig = deps(
-      () => [{ session: turn.session, key: { channelId: "telegram", conversationId: "42" } }],
+      () => [{ session: turn.session, key: { channelId: "slack", conversationId: "42" } }],
       () => 0,
     );
     await drainForRestart(rig.deps, 0, 1);
     expect(turn.calls).toEqual(["pendingQueue", "abort"]);
     const entries = rig.ledger.list();
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ channelId: "telegram", conversationId: "42" });
+    expect(entries[0]).toMatchObject({ channelId: "slack", conversationId: "42" });
     expect(entries[0]!.note).toContain("restarted before this turn finished");
     expect(entries[0]!.note).toContain("queued question");
   });
@@ -127,7 +127,7 @@ describe("drainForRestart", () => {
   it("a hung abort cannot hold the deadline hostage — the note is already written", async () => {
     const turn = busySession("s1", [], "abort");
     const rig = deps(
-      () => [{ session: turn.session, key: { channelId: "telegram", conversationId: "42" } }],
+      () => [{ session: turn.session, key: { channelId: "slack", conversationId: "42" } }],
       () => 0,
     );
     // Resolves despite abort() never settling, because the cleanup bound answers.
@@ -142,7 +142,7 @@ describe("drainForRestart", () => {
       const second = busySession("s2", [], "abort");
       const rig = deps(
         () => [
-          { session: first.session, key: { channelId: "telegram", conversationId: "1" } },
+          { session: first.session, key: { channelId: "lark", conversationId: "1" } },
           { session: second.session, key: { channelId: "slack", conversationId: "2" } },
         ],
         () => 0,
@@ -184,7 +184,7 @@ describe("deliverLedger", () => {
 
   it("keeps a thrown notify for the next delivery attempt", async () => {
     const ledger = new RestartLedger(openDb(":memory:"));
-    ledger.record({ channelId: "telegram", conversationId: "b", note: "n" });
+    ledger.record({ channelId: "slack", conversationId: "b", note: "n" });
     const notify = vi.fn()
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce(true);

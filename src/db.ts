@@ -293,7 +293,6 @@ const MIGRATIONS: readonly string[] = [
   -- every migration. A name filed in the vault first wins (DO NOTHING); the
   -- channel copy is dropped either way.
   WITH moved(platform, path, name) AS (VALUES
-    ('telegram', '$.token', 'TELEGRAM_TOKEN'),
     ('slack', '$.token', 'SLACK_TOKEN'), ('slack', '$.appToken', 'SLACK_APP_TOKEN'),
     ('lark', '$.token', 'LARK_APP_ID'), ('lark', '$.appToken', 'LARK_APP_SECRET'))
   INSERT INTO vault(name, value, updated_at)

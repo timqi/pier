@@ -1,4 +1,4 @@
-// What the shared control moments say — one spelling for three platforms. The
+// What the shared control moments say — one spelling for both platforms. The
 // only legitimate variation is the spelling of the bind command, so it is the parameter.
 
 import type { BindOutcome } from "./types.js";

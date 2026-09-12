@@ -26,14 +26,4 @@ describe("IM command parsing", () => {
       args: "line one\nline two",
     });
   });
-
-  it("reports the @target so the caller can decide if it is theirs", () => {
-    expect(parseCommand("/stop@pierbot")).toEqual({ name: "stop", args: "", target: "pierbot" });
-    expect(parseCommand("/stop@otherbot now")).toEqual({
-      name: "stop",
-      args: "now",
-      target: "otherbot",
-    });
-    expect(parseCommand("/stop")).not.toHaveProperty("target");
-  });
 });

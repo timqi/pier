@@ -64,7 +64,7 @@ journalctl --user -u pier --since -1h | grep 'tasks:'   # one area
 journalctl --user -u pier | grep 'client:'              # browser-side errors
 ```
 
-Every line is `area: message` — `core`, `agent`, `tasks`, `slack`, `telegram`,
+Every line is `area: message` — `core`, `agent`, `tasks`, `slack`,
 `lark`, `channels`, `auth`, `boards`, `client`, `db`, `drain`, `secrets`,
 `vault`, `socket`, `settings`, `credentials`, `packages`, `config-sync`,
 `update`, `tools`, `push`, `web`, `web.providers`, `pier`. Level: a syslog priority prefix under
@@ -222,8 +222,8 @@ pier vault run SLACK_BOT_TOKEN=SLACK_TOKEN -- ./script.py
   created at start, removed at exit): `docs/design/08-cli-socket.md` has the
   protocol and every failure line.
 - `approve` secrets in cron tasks wait on the approval like any other `vt` use.
-- Channel tokens are vault rows too (`SLACK_TOKEN`, `TELEGRAM_TOKEN`,
-  `LARK_APP_ID`, …): removing one there empties that channel's credential.
+- Channel tokens are vault rows too (`SLACK_TOKEN`, `SLACK_APP_TOKEN`,
+  `LARK_APP_ID`, `LARK_APP_SECRET`): removing one there empties that channel's credential.
 
 ## Remote access
 

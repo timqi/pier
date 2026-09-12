@@ -1,7 +1,7 @@
 # Pier — Principles
 
-Pier is a minimal agent workspace on the Pi SDK: IM channels (Slack, Telegram,
-Lark) and a Web UI in front of Pi sessions, with steering/queued messages,
+Pier is a minimal agent workspace on the Pi SDK: IM channels (Slack, Lark)
+and a Web UI in front of Pi sessions, with steering/queued messages,
 scheduled tasks, live observability, and static Show pages.
 
 ## Principles
@@ -125,7 +125,7 @@ exists to catch.
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
 | `core/` | 1.5k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate |
-| `channels/` | 5k | three adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds only what would otherwise be copied |
+| `channels/` | 4.2k | two adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds only what would otherwise be copied |
 | `web/` | 14k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; every pane is the only implementation of its surface — the Pi SDK ships no browser UI — and duplication across the area measures 0.4%; still the least tested area |
 | `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry |
 | `tasks/` | 3.2k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam |

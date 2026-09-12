@@ -4,7 +4,7 @@
 
 /** A conversation is the unit of session routing. */
 export interface ConversationKey {
-  channelId: string; // "web" | "telegram" | "slack" | "lark"
+  channelId: string; // "web" | "slack" | "lark"
   conversationId: string; // platform thread/chat id, or web session ui id
 }
 
