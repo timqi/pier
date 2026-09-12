@@ -8,6 +8,9 @@ export interface Command {
   args: string;
 }
 
+/** One request, four spellings; the text after it is the panel's pending question. */
+export const SETTINGS_WORDS = new Set(["s", "set", "setting", "settings"]);
+
 export function parseCommand(text: string): Command | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return null;

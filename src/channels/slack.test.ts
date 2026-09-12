@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
-import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
+import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -158,7 +158,7 @@ let receipts: ReceiptLedger;
 let aborted: string[];
 let known: Set<string>;
 let control: ChannelControl & {
-  created: { key: string; cwd?: string }[];
+  created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   pins_: ModelMenuEntry[];
   thinking?: ThinkingLevel;
   model?: ModelRef;
@@ -215,7 +215,7 @@ function bind(): void {
 /** Scripted ChannelControl: records what the panel asked core to do. */
 function fakeControl() {
   const state = {
-    created: [] as { key: string; cwd?: string }[],
+    created: [] as ({ key: string } & Partial<AgentLaunchOptions>)[],
     pins_: [
       { provider: "anthropic", id: "claude-opus-4-5", thinking: "medium" },
       { provider: "openai", id: "gpt-5", thinking: "high", note: "hardest reasoning" },
@@ -228,17 +228,20 @@ function fakeControl() {
       aborted.push(key.conversationId);
       return Promise.resolve();
     },
-    status: () =>
-      Promise.resolve({
-        sessionId: "session-abcdef12",
-        cwd: "/srv/ops",
-        state: "idle" as const,
-        empty: false,
-        model: state.model,
-        thinking: state.thinking ?? "medium",
-        tokens: 32_140,
-        contextWindow: 200_000,
-      }),
+    // Null where `knows` is false, as the real control's row decides both.
+    status: (key: ConversationKey) =>
+      Promise.resolve(known.has(key.conversationId)
+        ? {
+          sessionId: "session-abcdef12",
+          cwd: "/srv/ops",
+          state: "idle" as const,
+          empty: false,
+          model: state.model,
+          thinking: state.thinking ?? "medium",
+          tokens: 32_140,
+          contextWindow: 200_000,
+        }
+        : null),
     pins: () => state.pins_,
     setModel: (_k: ConversationKey, model: ModelRef) => {
       state.model = model;
@@ -249,8 +252,9 @@ function fakeControl() {
       return Promise.resolve();
     },
     recentDirs: () => Promise.resolve(["/srv/ops"]),
-    newSession: (key: ConversationKey, cwd?: string) => {
-      state.created.push({ key: key.conversationId, cwd });
+    newSession: (key: ConversationKey, over?: Partial<AgentLaunchOptions>) => {
+      state.created.push({ key: key.conversationId, ...over });
+      known.add(key.conversationId);
       return Promise.resolve("session-99887766");
     },
   };
@@ -1039,7 +1043,7 @@ describe("commands", () => {
 
   it("does not treat an ordinary sentence starting with a command word as one", async () => {
     openGates();
-    await feed(message({ text: "settings are broken, please help", ts: "1707.000100" }));
+    await feed(message({ text: "stop the deploy and tell me why", ts: "1707.000100" }));
     expect(inbound).toHaveLength(1);
     expect(client.sent).toEqual([]);
   });
@@ -1053,29 +1057,73 @@ describe("commands", () => {
     expect(inbound).toEqual([]);
   });
 
+  it("`s`, `set`, `setting`, `settings` followed by text open the panel with that question", async () => {
+    openGates();
+    await feed(message({ text: `<@${ME}> s   what is  new?`, ts: "1720.000100" }));
+    await feed(message({ text: "Set the timer", ts: "1721.000100" }));
+    await feed(message({ text: "setting up", ts: "1722.000100" }));
+    await feed(message({ text: "settings", ts: "1723.000100" }));
+    expect(inbound).toEqual([]);
+    expect(client.sent).toHaveLength(4);
+    // Verbatim: the question keeps its own spacing.
+    expect(JSON.stringify(client.sent[0]!.blocks)).toContain("▸ what is new?");
+    expect(JSON.stringify(client.sent[0]!.blocks)).toContain("\\\"q\\\":\\\"what is  new?\\\"");
+    expect(JSON.stringify(client.sent[1]!.blocks)).toContain("▸ the timer");
+    expect(JSON.stringify(client.sent[2]!.blocks)).toContain("▸ up");
+    expect(JSON.stringify(client.sent[3]!.blocks)).not.toContain("▸");
+  });
+
+  it("a bare `s` is a message, not a command", async () => {
+    openGates();
+    await feed(message({ text: "s", ts: "1724.000100" }));
+    expect(inbound.map((m) => m.text)).toEqual(["s"]);
+    expect(client.sent).toEqual([]);
+  });
 });
 
 describe("settings panel", () => {
+  const THREAD = "C100/1710.000100";
   const open = async (): Promise<void> => {
     openGates();
+    known.add(THREAD);
     await feed(message({ text: `<@${ME}>`, ts: "1710.000100" }));
     client.sent.length = 0;
   };
 
-  const click = (action: string): SlackEnvelope =>
+  const click = (action: string, value?: string): SlackEnvelope =>
     interaction({
       channel: { id: CHANNEL },
       message: { ts: "900.000100", thread_ts: "1710.000100", blocks: [] },
-      actions: [{ action_id: action }],
+      actions: [{ action_id: action, ...(value ? { value } : {}) }],
     });
 
-  it("reads out the session and the channel policy", async () => {
+  it("reads out the session", async () => {
     openGates();
+    known.add(THREAD);
     await feed(message({ text: `<@${ME}>`, ts: "1710.000100" }));
     const body = JSON.stringify(client.sent[0]!.blocks);
     expect(body).toContain("session-");
     expect(body).toContain("/srv/ops");
     expect(body).toContain("claude-opus-4-5");
+  });
+
+  it("Start creates with the draft and runs the question as the clicker's message, 👀 on the card", async () => {
+    openGates();
+    await feed(message({ text: `<@${ME}> set review the parser`, ts: "1710.000100" }));
+    expect(client.sent).toHaveLength(1);
+    const panelTs = "900.000100"; // the fake's first post
+    await feed(click("cfg:pin:1"));
+    await feed(click("cfg:start"));
+    expect(control.created).toEqual([{ key: THREAD, model: { provider: "openai", id: "gpt-5" }, thinking: "high" }]);
+    expect(inbound).toEqual([{
+      key: { channelId: "slack", conversationId: THREAD },
+      senderId: "U42",
+      sender: { id: "U42", name: "Q" },
+      text: "review the parser",
+      mode: "steer",
+    }]);
+    expect(client.reactions).toEqual([{ channel: CHANNEL, ts: panelTs, name: "eyes", add: true }]);
+    expect(JSON.stringify(client.updated.at(-1)!.blocks)).toContain("running your question");
   });
 
   it("edits one message in place instead of posting a new one", async () => {
@@ -1099,7 +1147,7 @@ describe("settings panel", () => {
     const view = client.views[0] as { private_metadata: string; callback_id: string };
     expect(view.callback_id).toBe("cfg_cwd");
     // No adapter-side state: the submission is understood from the modal alone.
-    expect(view.private_metadata).toBe("C100/1710.000100");
+    expect(JSON.parse(view.private_metadata)).toEqual({ conversation: "C100/1710.000100", ts: "900.000100" });
   });
 
   it("starts a new session from the modal submission", async () => {
@@ -1113,7 +1161,7 @@ describe("settings panel", () => {
         user: { id: "U42" },
         view: {
           callback_id: "cfg_cwd",
-          private_metadata: "C100/1710.000100",
+          private_metadata: JSON.stringify({ conversation: "C100/1710.000100", ts: "900.000100" }),
           state: { values: { cwd_block: { cwd_input: { value: "/srv/new" } } } },
         },
       },
@@ -1131,7 +1179,7 @@ describe("settings panel", () => {
         user: { id: "U42" },
         view: {
           callback_id: "cfg_cwd",
-          private_metadata: "C100/1710.000100",
+          private_metadata: JSON.stringify({ conversation: "C100/1710.000100", ts: "900.000100" }),
           state: { values: { cwd_block: { cwd_input: { value: "relative/path" } } } },
         },
       },
@@ -1140,12 +1188,16 @@ describe("settings panel", () => {
     expect(JSON.stringify(client.updated)).toContain("not an absolute path");
   });
 
-  it("reopens a panel a previous process left behind, on the first click", async () => {
+  it("a click on a panel a previous process left behind redraws it in place from the value", async () => {
     // No open() first: this adapter has no panel state, exactly like a restart.
     openGates();
-    await feed(click("cfg:pins:0"));
-    expect(client.sent).toHaveLength(1);
-    expect(client.sent[0]!.text).toBe("Settings");
+    await feed(click("cfg:panel", JSON.stringify({ cwd: "/srv/kept", q: "still here" })));
+    expect(client.sent).toEqual([]);
+    expect(client.updated).toHaveLength(1);
+    expect(client.updated[0]!.ts).toBe("900.000100");
+    const body = JSON.stringify(client.updated[0]!.blocks);
+    expect(body).toContain("Starts in `/srv/kept`");
+    expect(body).toContain("▸ still here");
   });
 });
 

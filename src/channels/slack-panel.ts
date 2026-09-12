@@ -1,20 +1,26 @@
-// Slack's half of the settings panel (panel.ts has the rest). The modal's
-// `private_metadata` carries the conversation, so a submission needs no
-// adapter-side state and survives a reload.
+// Slack's half of the settings panel (panel.ts has the rest). Every button's
+// `value` and the modal's `private_metadata` carry the draft with the card's
+// coordinates, so a click or a submission after a reload is understood from
+// the payload alone and lands on the message the user is looking at.
 
 import type { ConversationKey } from "../core/types.js";
 import {
   ChatPanel,
+  CWD_DRAFT_TAIL,
   CWD_PLACEHOLDER,
   CWD_TAIL,
   PANEL_PREFIX,
   type PanelButton,
   type PanelDeps,
+  type PanelDraft,
   type PanelState,
   type PanelView,
+  readDraft,
+  serializeDraft,
 } from "./panel.js";
 import type { SlackBlock, SlackButton, SlackClient, SlackInteraction } from "./slack-api.js";
 import { context, escapeMrkdwn as esc, section } from "./slack-render.js";
+import { chatOf } from "./types.js";
 
 const CWD_VIEW = "cfg_cwd";
 const CWD_BLOCK = "cwd_block";
@@ -25,20 +31,31 @@ export interface SlackPanelDeps extends PanelDeps {
 }
 
 interface SlackPanelState extends PanelState {
-  threadTs: string;
+  /** The panel message. */
   ts: string;
 }
 
-const button = (b: PanelButton): SlackButton => ({
+/** What the modal carries: where its answer is drawn, and the draft it amends. */
+interface CwdMetadata {
+  conversation: string;
+  ts: string;
+  draft?: string;
+}
+
+const button = (b: PanelButton, value: string | undefined): SlackButton => ({
   type: "button",
   action_id: `${PANEL_PREFIX}${b.action}`,
   text: { type: "plain_text", text: b.label, emoji: true },
+  ...(value ? { value } : {}),
 });
 
-const row = (buttons: PanelButton[]): SlackBlock => ({
+const row = (buttons: PanelButton[], value: string | undefined): SlackBlock => ({
   type: "actions",
-  elements: buttons.map(button),
+  elements: buttons.map((b) => button(b, value)),
 });
+
+const fresh = (channel: string, ts: string, draft: PanelDraft): SlackPanelState =>
+  ({ chatId: channel, ts, draft, dirs: [], sessions: [] });
 
 export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
   protected readonly platform = "slack" as const;
@@ -52,25 +69,39 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
     return esc(text);
   }
 
+  /** A malformed value is a stale or foreign card: logged, drawn as an empty draft. */
+  private parseDraft(raw: string | undefined): PanelDraft {
+    if (!raw) return {};
+    try {
+      return readDraft(JSON.parse(raw));
+    } catch (err) {
+      this.deps.log(`unreadable panel value, draft reset: ${String(err)}`);
+      return {};
+    }
+  }
+
   // --- rendering -------------------------------------------------------------
 
-  private blocks(view: PanelView, note?: string): SlackBlock[] {
+  private blocks(view: PanelView, draft: PanelDraft, note?: string): SlackBlock[] {
+    const value = serializeDraft(draft);
     return [
       ...view.groups.map((g) => section([`*${g.title}*${g.suffix ?? ""}`, ...g.lines].join("\n"))),
-      ...(view.picks?.length ? [row(view.picks)] : []),
-      ...view.rows.filter((r) => r.length).map(row),
+      ...(view.picks?.length ? [row(view.picks, value)] : []),
+      ...view.rows.filter((r) => r.length).map((r) => row(r, value)),
       ...(note ? [context(esc(note))] : []),
     ];
   }
 
-  async open(key: ConversationKey, channel: string, threadTs: string): Promise<void> {
+  async open(key: ConversationKey, channel: string, threadTs: string, question?: string): Promise<void> {
+    const { draft, note } = this.opening(key, question);
+    const state = fresh(channel, "", draft);
     const sent = await this.deps.api.postMessage({
       channel,
       thread_ts: threadTs,
       text: "Settings",
-      blocks: this.blocks(await this.view(key, channel)),
+      blocks: this.blocks(await this.view(key, state), draft, note),
     });
-    this.remember(key, { chatId: channel, threadTs, ts: sent.ts, dirs: [], sessions: [] });
+    this.remember(key, { ...state, ts: sent.ts });
   }
 
   protected async draw(state: SlackPanelState, view: PanelView, note?: string): Promise<void> {
@@ -78,7 +109,7 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
       channel: state.chatId,
       ts: state.ts,
       text: "Settings",
-      blocks: this.blocks(view, note),
+      blocks: this.blocks(view, state.draft, note),
     }).catch((err) => this.deps.log(`panel edit failed: ${String(err)}`));
   }
 
@@ -89,44 +120,55 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
 
   // --- actions ---------------------------------------------------------------
 
-  /** Returns false when the action is not ours. */
+  /** Returns false when the action is not ours. `run` delivers Start's
+   *  question as the clicker's message. */
   async onAction(
     interaction: SlackInteraction,
     key: ConversationKey,
     actionId: string,
+    run: (text: string) => Promise<void>,
   ): Promise<boolean> {
-    return this.dispatch(key, actionId, interaction, async () => {
-      const channel = interaction.channel?.id;
-      const message = interaction.message;
-      if (channel && message) await this.open(key, channel, message.thread_ts ?? message.ts);
-    });
+    return this.dispatch(
+      key,
+      actionId,
+      interaction,
+      () =>
+        fresh(
+          interaction.channel?.id ?? chatOf(key.conversationId),
+          interaction.message?.ts ?? "",
+          this.parseDraft(interaction.actions?.[0]?.value),
+        ),
+      run,
+    );
   }
 
   // --- working directory (one typed answer, in a modal) ----------------------
 
   protected async promptCwd(
     key: ConversationKey,
-    _state: SlackPanelState,
+    state: SlackPanelState,
     interaction: SlackInteraction,
+    creates: boolean,
   ): Promise<void> {
     const trigger = interaction.trigger_id;
     if (!trigger) {
       await this.refresh(key, "Could not open the dialog — try again.");
       return;
     }
+    const metadata: CwdMetadata = { conversation: key.conversationId, ts: state.ts, draft: serializeDraft(state.draft) };
     await this.deps.api.openView(trigger, {
       type: "modal",
       callback_id: CWD_VIEW,
-      private_metadata: key.conversationId,
-      title: { type: "plain_text", text: "New session" },
-      submit: { type: "plain_text", text: "Create" },
+      private_metadata: JSON.stringify(metadata),
+      title: { type: "plain_text", text: creates ? "New session" : "Directory" },
+      submit: { type: "plain_text", text: creates ? "Create" : "Set" },
       close: { type: "plain_text", text: "Cancel" },
       blocks: [
         {
           type: "input",
           block_id: CWD_BLOCK,
           label: { type: "plain_text", text: "Working directory" },
-          hint: { type: "plain_text", text: `An absolute path. ${CWD_TAIL}` },
+          hint: { type: "plain_text", text: `An absolute path. ${creates ? CWD_TAIL : CWD_DRAFT_TAIL}` },
           element: {
             type: "plain_text_input",
             action_id: CWD_INPUT,
@@ -141,10 +183,15 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
   async onViewSubmission(interaction: SlackInteraction): Promise<boolean> {
     const view = interaction.view;
     if (view?.callback_id !== CWD_VIEW) return false;
-    const key: ConversationKey = {
-      channelId: "slack",
-      conversationId: view.private_metadata ?? "",
-    };
+    let meta: CwdMetadata;
+    try {
+      meta = JSON.parse(view.private_metadata ?? "") as CwdMetadata;
+    } catch (err) {
+      this.deps.log(`cwd modal without readable metadata, dropped: ${String(err)}`);
+      return true;
+    }
+    const key: ConversationKey = { channelId: "slack", conversationId: meta.conversation };
+    if (!this.state(key)) this.remember(key, fresh(chatOf(meta.conversation), meta.ts, this.parseDraft(meta.draft)));
     await this.startSessionIn(key, (view.state?.values?.[CWD_BLOCK]?.[CWD_INPUT]?.value ?? "").trim());
     return true;
   }

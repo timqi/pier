@@ -26,15 +26,16 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | ✅ |
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
-| Settings panel | In-chat panel: read out session + policy, pick model & reasoning from the operator's pins, change cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ |
+| Settings panel | In-chat panel: a thread without a session drafts one (cwd, model & reasoning from the operator's pins, a pending question) and Starts it; a thread with one reads it out, picks model & reasoning, changes cwd (a new session), stops | shared control, adapter renders | ✅ | ✅ |
 | Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message, replies land on both surfaces | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
 | Continue in this thread | The panel of a thread with no session yet binds it to an unbound web session (task runs' own sessions excluded); same binding and guard as the push | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
 
-Command spelling is per-platform: Lark takes `/stop`, `/settings`,
-`/bind <code>`; Slack the same words without the slash.
+Command spelling is per-platform: Lark takes `/stop`, `/settings [question]`,
+`/bind <code>`; Slack the same words without the slash. `/s`, `/set` and
+`/setting` spell `/settings`; a bare `s` is a message.
 
 ### Deliberately not features
 
@@ -137,49 +138,86 @@ sidebar's rule), newest first.
 ## The in-chat panel
 
 `@bot` on its own (empty text once the mention is stripped) and `settings` are
-the same request.
+the same request; `settings <text>` (`s`, `set`, `setting` too —
+`SETTINGS_WORDS`, `commands.ts`) adds the text as the *pending question*. A
+bare `s` is a message. The panel has two states, decided by the thread's row
+(`ChannelControl.knows`).
 
 - One message, edited in place.
 - Panel buttons are `cfg:<action>[:<arg>]`, consumed by the panel; any other
   payload is a next-step label and *is* the message to send.
-- The panel acts on the thread's real session or says there is none. Opening
-  it on an evicted session resumes that session (one Pi open, truthful
-  values); Model & reasoning on a thread without a row is refused with
-  `NO_SESSION` (`control.ts`), never confirmed. A session with no turn yet
-  reads `created, no message yet`; the Chat group's last line is what the
-  chat's next session launches with (`launchFor`), display only.
 - Lists are paged and picked by **index** (payloads are size-capped).
+
+**No session — a draft.** Line 1 `Starts in <cwd> · <model> · <reasoning>` is
+what Start creates with: the draft over the chat defaults (`launchFor`), the
+group suffixed `· chat defaults` while no pick changed it. Line 2, with a
+question, `▸ <question>` cut at 80 characters. Buttons: Model & reasoning,
+Directory…, Continue web session… / Start, Close.
+
+- Model & reasoning and Directory… set the draft and redraw; nothing is
+  created. A typed path sets the draft's directory too (modal title
+  `Directory`, submit `Set`).
+- Start (`cfg:start`): `newSession(key, draft)` creates and binds, then the
+  question goes to the router as the tapper's message — the same
+  `InboundMessage` a typed one makes, `sender` the person who tapped, the 👀
+  on the card. The panel redraws with the session: `Started <id8> in <cwd>.`
+  or `Started <id8> — running your question.` A row that appeared meanwhile
+  (a message raced the tap) is not replaced: `This thread already has a
+  session — send your question as a message.` — the same sentence a
+  `settings <text>` in a thread with a session opens with, its question not
+  carried.
+- Continue web session… binds an existing session; the draft is discarded.
+- **The card is the store.** In-memory `PanelState` is primary; every button's
+  value (Slack `value`, Lark `LarkActionValue.draft`) carries the serialized
+  draft `{cwd?, model?, thinking?, q?, dropped?}`. A tap whose state is gone (a
+  restart) rebuilds it from the tapped value and the card's own id (Slack
+  `message.ts`, Lark `open_message_id`), then honours the tap on that card;
+  an index pick's list is gone, so it prints "no longer listed". The Slack
+  modal carries `{conversation, ts, draft}` in `private_metadata`; Lark's
+  form-submit button carries no value, so a typed path after a restart
+  recovers the card but not earlier picks.
+- A question over 1500 UTF-8 bytes is not held — Slack caps a value at 2000
+  characters and Lark a card at 30 KB with the draft on eleven buttons — and
+  line 2 says `Your question is too long to hold — send it again after
+  Start.`; Start creates without it.
+
+**With a session.** The Session group: `<id8> · <state>` (`created, no
+message yet` before the first turn), directory, model · reasoning, context.
+Buttons: Model & reasoning, New session in… / ⏹ Stop while streaming, Close.
+No Channel group: the Console owns the gates.
+
+- Opening it on an evicted session resumes that session (one Pi open,
+  truthful values).
 - "Model & reasoning" (`cfg:pins:<page>`) lists the operator's pinned models
   (`settings.modelMenu`, read per tap through `ChannelControl.pins`), eight a
   page, each a numbered line `<id> · <level> — <note>` (no note, no dash) with
-  ✓ on the pin matching the session's model *and* level, and one button each
-  (`cfg:pin:<i>`, labelled `<n> <id>` — a platform truncates a long label). A
-  tap applies both (`setModel`, then `setThinking`) and the note reads `Model
-  set to <id> · <level>.` Nothing pinned: `No pinned models — Settings →
-  Models → Model menu.`; the catalog is the Console's, not a chat's.
-- A panel from a previous process has no state: reopen on the first tap.
+  ✓ on the pin matching the session's (or the draft's) model *and* level, and
+  one button each (`cfg:pin:<i>`, labelled `<n> <id>` — a platform truncates a
+  long label). A tap applies both (`setModel`, then `setThinking`) and the
+  note reads `Model set to <id> · <level>.` Nothing pinned: `No pinned models
+  — Settings → Models → Model menu.`; the catalog is the Console's, not a
+  chat's.
 - "New session in…" (`cfg:cwd`) lists up to six recent directories — the
   distinct cwds of the session listing, newest first, the chat's own default
   first (`ChannelControl.recentDirs`) — as numbered full paths with one
   button each (`cfg:cwd:<i>`, label the last two segments), then "Type a
-  path…" (`cfg:cwdtype`) and Back. A tap creates the session at once; the
-  note says nothing has run yet. The typed answer rejects a relative path.
-  Slack: a modal with the conversation id in `private_metadata`. Prefer a
-  modal wherever the platform has one.
-- "Continue web session…" (`cfg:sessions:<page>`) shows only while the
-  thread has no session: the 40 newest unbound sessions, eight a page
-  (`‹ Prev` / `Next ›` / Back as for the pins), each a numbered line — title or
-  directory name cut at 40 characters · directory basename · age — with one
-  button (`cfg:session:<i>`). A tap is `continueHere`; the note reads
-  `Continuing session <id8> — reply in this thread.` and the panel redraws
-  with the session. Nothing to list: `No unbound sessions.`; a listing that
-  failed says so instead. A refused pick prints the refusal sentence.
+  path…" (`cfg:cwdtype`) and Back. A tap creates the session at once with the
+  chat defaults; the note says nothing has run yet. The typed answer rejects a
+  relative path. Slack: a modal. Prefer a modal wherever the platform has one.
+- "Continue web session…" (`cfg:sessions:<page>`, draft state only): the 40
+  newest unbound sessions, eight a page (`‹ Prev` / `Next ›` / Back as for the
+  pins), each a numbered line — title or directory name cut at 40 characters ·
+  directory basename · age — with one button (`cfg:session:<i>`). A tap is
+  `continueHere`; the note reads `Continuing session <id8> — reply in this
+  thread.` and the panel redraws with the session. Nothing to list: `No
+  unbound sessions.`; a listing that failed says so instead. A refused pick
+  prints the refusal sentence.
 - A session the panel creates has no transcript until its first reply (Pi
   writes nothing before one), so the row carries the launch it was created
-  with, amended by every Model & reasoning pick (`conversations.launch`); a
-  resume that fails re-creates from that record, and the thread is told
-  `re-created as … with its own settings in …`. A row without a record
-  re-creates from the chat defaults and says so.
+  with — Start's draft included — amended by every Model & reasoning pick
+  (`conversations.launch`); a resume that fails re-creates from that record,
+  and the thread is told `re-created as … with its own settings in …`. A row
+  without a record re-creates from the chat defaults and says so.
 
 ## Agent access: the platform from a shell
 
@@ -255,7 +293,8 @@ launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
 `parseCommand()` (`commands.ts`): trim both ends, require a leading `/`,
 lowercase the name, keep args **verbatim**. Slack never delivers an
 unregistered `/`, so its adapter matches bare words: a closed set with an exact
-argument count (`stop`/`settings` none, `bind` one); anything longer is prose.
+argument count (`stop` none, `bind` one), anything longer being prose — except
+the settings words, whose text is the question (`s` only with some).
 
 ## Inbound checklist for a new adapter
 
@@ -360,8 +399,8 @@ Answer these first.
   redelivers anything unacked past the deadline.
 - **Read methods take form encoding**, not JSON (`SlackApi.read`).
 - **Commands have no slash** — the client intercepts unregistered `/`. `stop`,
-  `settings`, `bind <code>` are bare words matched as the *whole* message with
-  an exact arity.
+  `bind <code>` are bare words matched as the *whole* message with an exact
+  arity; `settings [question]` takes the rest of the message.
 - **`app_mention` duplicates `message.channels`** with its own `event_id`;
   ignored at the source.
 - **A forwarded message hides in `attachments`** (`is_share`, `author_id`,

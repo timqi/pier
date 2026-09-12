@@ -17,7 +17,7 @@ import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import { chatOf, isChannelPlatform } from "./types.js";
 
-export const NO_SESSION = "No session in this thread yet — start one first (New session / New session in…).";
+export const NO_SESSION = "No session in this thread yet — start one first (Start in the panel).";
 
 export interface ConversationStatus {
   sessionId: string;
@@ -46,9 +46,10 @@ export interface ChannelControl {
   setModel(key: ConversationKey, model: ModelRef): Promise<void>;
   setThinking(key: ConversationKey, level: ThinkingLevel): Promise<void>;
   /** Pi fixes cwd at creation, so "change the working directory" *is* this.
+   *  `over` carries only what was chosen; the chat defaults fill the rest.
    *  The launch it used is recorded beside the row: Pi writes nothing until
    *  the first reply, so until then this record is the session. */
-  newSession(key: ConversationKey, cwd?: string): Promise<string>;
+  newSession(key: ConversationKey, over?: Partial<AgentLaunchOptions>): Promise<string>;
   /** Distinct cwds of the backend's session listing, newest first; the chat's
    *  own default first when set. */
   recentDirs(key: ConversationKey, limit?: number): Promise<string[]>;
@@ -121,9 +122,9 @@ export function createControl({ router, factory, conversations, store, modelMenu
       conversations.amendLaunch(key, { thinking: level });
     },
 
-    async newSession(key, cwd) {
+    async newSession(key, over = {}) {
       const defaults = launchFor(key);
-      const launch: AgentLaunchOptions = { ...defaults, cwd: cwd || defaults.cwd || process.cwd() };
+      const launch: AgentLaunchOptions = { ...defaults, ...over, cwd: over.cwd || defaults.cwd || process.cwd() };
       const session = await factory.create(launch);
       // Persist before attaching: a crash between must not leave an unrecorded session.
       conversations.set(key, session.id, launch);

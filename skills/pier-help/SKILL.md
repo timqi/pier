@@ -20,8 +20,8 @@ truth.
 - Idle sessions leave memory but keep their transcript; they resume
   transparently on the next message. Never promise that a restart or a pause
   wipes context.
-- A fresh start is explicit: "New session" in the chat settings panel or the
-  web UI. The old transcript remains readable from the web workbench.
+- A fresh start is explicit: "New session in…" in the chat settings panel or
+  the web UI. The old transcript remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
 - A web session can be continued in Slack or Lark: the web session menu's
@@ -59,11 +59,16 @@ truth.
 ## In-chat commands and the settings panel
 
 - `/settings` — or an addressed message with no text at all (a bare mention,
-  an empty DM) — opens a panel: model & reasoning (the operator's pinned
-  models, one pick setting both), new session, stop. "New session in…" offers
-  the recent session directories as buttons and a typed path; the session is
-  created on the tap, and the thread's first message runs in it. Slack also
-  accepts the bare words `stop`, `settings`, `bind <code>`.
+  an empty DM) — opens a panel. In a thread with no session yet it is a
+  draft: directory, model & reasoning (the operator's pinned models, one pick
+  setting both), and Start creates the session with them. `/settings <text>`
+  (also `/s`, `/set`, `/setting`) carries the text as a pending question:
+  Start creates the session and runs it as the tapper's first message. In a
+  thread with a session the panel reads it out; "New session in…" offers the
+  recent session directories as buttons and a typed path, and creates on the
+  tap, the thread's next message running there; Stop while a turn runs.
+  Slack takes the same words bare: `stop`, `settings <text>`, `bind <code>`;
+  a bare `s` is a message.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
 - The panel reads the thread's real session, resuming an idle one; in a thread

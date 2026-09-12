@@ -20,7 +20,7 @@ import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
-import { parseCommand } from "./commands.js";
+import { parseCommand, SETTINGS_WORDS } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -127,7 +127,6 @@ export class LarkChannel implements Channel {
         api: this.api,
         control: deps.control,
         handoff: deps.handoff,
-        store: deps.store,
         log: this.log,
       });
     }
@@ -228,10 +227,11 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    // A bare `@bot` and `/settings` are the same request.
-    if (this.panel && (command?.name === "settings" || (!text && !attachments.length && mentioned))) {
-      return this.panel.open(here, msg.chatId, root);
+    // A bare `@bot` and `/settings` are the same request; `/settings <text>` adds the question.
+    if (this.panel && command && SETTINGS_WORDS.has(command.name)) {
+      return this.panel.open(here, msg.chatId, root, command.args || undefined);
     }
+    if (this.panel && !text && !attachments.length && mentioned) return this.panel.open(here, msg.chatId, root);
 
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
@@ -367,7 +367,9 @@ export class LarkChannel implements Channel {
       return;
     }
     if (payload.startsWith(PANEL_PREFIX)) {
-      if (!(await this.panel?.onAction(action, key, payload, root))) {
+      // Start's question: the card is the message the tap was on, so it carries the 👀.
+      const run = (text: string): Promise<void> => this.deliver(key, action, action.messageId, text, onMessage);
+      if (!(await this.panel?.onAction(action, key, payload, root, run))) {
         this.log(`panel action ${payload} with no panel wired, dropped`);
       }
       return;
@@ -387,22 +389,27 @@ export class LarkChannel implements Channel {
     }
     // A bot cannot post as the user, so the pick is echoed: otherwise the
     // topic shows an answer to a request nobody can see, with nothing to carry the eyes.
-    const sender = { id: action.operatorId, name: await this.userName(action.operatorId) };
     await this.out.retire(action.messageId);
     const echo = await this.api.replyCard(root, card([markdown(picked(label))]))
       .catch((err) => {
         this.log(`option echo failed: ${String(err)}`);
         return undefined;
       });
+    await this.deliver(key, action, echo?.messageId, label, onMessage);
+  }
+
+  /** A tap's text as the tapper's message; `messageId` is the message that carries the 👀. */
+  private async deliver(
+    key: ConversationKey,
+    action: LarkCardAction,
+    messageId: string | undefined,
+    text: string,
+    onMessage: (msg: InboundMessage) => void,
+  ): Promise<void> {
+    const sender = { id: action.operatorId, name: await this.userName(action.operatorId) };
     // No await between mark and dispatch — see onMessage.
-    if (echo?.messageId) this.receipts.mark(key.conversationId, action.chatId, echo.messageId);
-    onMessage({
-      key,
-      senderId: action.operatorId,
-      sender,
-      text: label,
-      mode: "steer",
-    });
+    if (messageId) this.receipts.mark(key.conversationId, action.chatId, messageId);
+    onMessage({ key, senderId: action.operatorId, sender, text, mode: "steer" });
   }
 
   /** The abort ends the turn, which reaches send() and clears the receipts. */

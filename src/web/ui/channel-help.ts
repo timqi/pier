@@ -91,7 +91,7 @@ export const slackThreadHelp = (): HTMLElement =>
     "Each thread is its own Pi session, so one channel hosts many parallel sessions.",
     "The same applies in a DM: every new message you send there starts its own thread and its own session. Reply *inside* a thread to continue that conversation.",
     "Inside a thread Pier already owns, no `@mention` is needed — continuing that thread is addressing it.",
-    "Commands are bare words after a mention: `@bot settings`, `@bot stop`, `@bot bind <code>`. Slack's client swallows an unregistered `/command` before it ever reaches an app.",
+    "Commands are bare words after a mention: `@bot settings`, `@bot stop`, `@bot bind <code>`. `@bot settings <question>` (or `s`, `set`) drafts a session — directory, model, reasoning — and Start runs the question in it. Slack's client swallows an unregistered `/command` before it ever reaches an app.",
   ]);
 
 /** Feishu has no create-from-config URL, and permissions only take effect
@@ -113,5 +113,5 @@ export const larkThreadHelp = (): HTMLElement =>
     "Each topic is its own Pi session, so one group hosts many parallel sessions.",
     "The same applies in a DM: every new message starts its own topic and its own session. Reply *inside* a topic to continue that conversation.",
     "Inside a topic Pier already owns, no @mention is needed — continuing that topic is addressing it.",
-    "Commands are slash words: `/stop`, `/settings`, `/bind <code>`. A bare @mention with nothing else also opens the settings panel.",
+    "Commands are slash words: `/stop`, `/settings`, `/bind <code>`. `/settings <question>` (or `/s`, `/set`) drafts a session — directory, model, reasoning — and Start runs the question in it. A bare @mention with nothing else also opens the settings panel.",
   ]);

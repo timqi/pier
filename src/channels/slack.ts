@@ -18,7 +18,7 @@ import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
-import { parseCommand } from "./commands.js";
+import { parseCommand, SETTINGS_WORDS } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -55,8 +55,9 @@ const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
 
 /** Bare words with exact arity, since there is no leading `/` to key on: "stop
- *  the deploy and tell me why" is a sentence for the agent, not an abort. */
-const BARE_COMMANDS = new Map<string, number>([["stop", 0], ["settings", 0], ["bind", 1]]);
+ *  the deploy and tell me why" is a sentence for the agent, not an abort. The
+ *  settings words take any text (the question); `s` only with some. */
+const BARE_COMMANDS = new Map<string, number>([["stop", 0], ["bind", 1]]);
 
 /** The only definition of the conversation id format; control.ts decodes with it. */
 const conversationId = (channel: string, threadTs: string): string => `${channel}/${threadTs}`;
@@ -98,11 +99,15 @@ interface SlackCommand {
 function slackCommand(text: string): SlackCommand | undefined {
   const slash = parseCommand(text);
   if (slash) return { name: slash.name, args: slash.args };
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
   const name = words[0]?.toLowerCase() ?? "";
+  // Args verbatim, as parseCommand keeps them: a question is a sentence.
+  const args = trimmed.slice(name.length).trim();
+  if (SETTINGS_WORDS.has(name)) return name === "s" && !args ? undefined : { name, args };
   const arity = BARE_COMMANDS.get(name);
   if (arity === undefined || words.length - 1 !== arity) return undefined;
-  return { name, args: words.slice(1).join(" ") };
+  return { name, args };
 }
 
 export interface SlackDeps {
@@ -166,7 +171,6 @@ export class SlackChannel implements Channel {
         api: this.api,
         control: deps.control,
         handoff: deps.handoff,
-        store: deps.store,
         log: this.log,
       });
     }
@@ -277,10 +281,11 @@ export class SlackChannel implements Channel {
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
-    // A bare `@bot` and `settings` are the same request.
-    if (this.panel && (command?.name === "settings" || (!text && !files.length && !shares.length))) {
-      return this.panel.open(here, channel, threadTs);
+    // A bare `@bot` and `settings` are the same request; `settings <text>` adds the question.
+    if (this.panel && command && SETTINGS_WORDS.has(command.name)) {
+      return this.panel.open(here, channel, threadTs, command.args || undefined);
     }
+    if (this.panel && !text && !files.length && !shares.length) return this.panel.open(here, channel, threadTs);
 
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
@@ -336,7 +341,9 @@ export class SlackChannel implements Channel {
       userId: user,
     });
     if (!admitted) return;
-    if (await this.panel?.onAction(interaction, key, actionId)) return;
+    // Start's question: the card is the message the click was on, so it carries the 👀.
+    const run = (text: string): Promise<void> => this.deliver(key, channel, message.ts, user, text, onMessage);
+    if (await this.panel?.onAction(interaction, key, actionId, run)) return;
 
     const text = offeredLabel(message.blocks, actionId);
     if (text === undefined) {
@@ -349,7 +356,6 @@ export class SlackChannel implements Channel {
     await this.retireOptions(channel, message.ts, message.blocks);
     // A bot cannot post as the user, so the pick is echoed: otherwise the
     // thread shows an answer to a request nobody can see, with nothing to carry the eyes.
-    const sender = { id: user, name: await this.directory.user(this.api, user) };
     const echo = await this.api.postMessage({
       channel,
       thread_ts: threadTs,
@@ -358,8 +364,21 @@ export class SlackChannel implements Channel {
       this.log(`option echo failed: ${String(err)}`);
       return undefined;
     });
+    await this.deliver(key, channel, echo?.ts, user, text, onMessage);
+  }
+
+  /** A click's text as the clicker's message; `ts` is the message that carries the 👀. */
+  private async deliver(
+    key: ConversationKey,
+    channel: string,
+    ts: string | undefined,
+    user: string,
+    text: string,
+    onMessage: (msg: InboundMessage) => void,
+  ): Promise<void> {
+    const sender = { id: user, name: await this.directory.user(this.api, user) };
     // No await between mark and dispatch — see onMessage.
-    if (echo?.ts) this.receipts.mark(key.conversationId, channel, echo.ts);
+    if (ts) this.receipts.mark(key.conversationId, channel, ts);
     onMessage({ key, senderId: user, sender, text, mode: "steer" });
   }
 

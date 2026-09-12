@@ -1,14 +1,12 @@
 // The settings panel, through Slack's rendering of the shared behaviour.
-// Hermetic — in-memory store, a recording control, a fake client.
+// Hermetic — a recording control, a fake client.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { openDb } from "../db.js";
 import type { AgentLaunchOptions, ConversationKey, ModelRef, SessionSummary, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
-import { ChannelStore } from "./config.js";
-import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
+import { type ChannelControl, type ConversationStatus } from "./control.js";
 import { HandoffError } from "./handoff.js";
-import type { PanelHandoff } from "./panel.js";
+import { HAS_SESSION, type PanelHandoff, QUESTION_TOO_LONG } from "./panel.js";
 import { SlackPanel } from "./slack-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
 
@@ -33,9 +31,11 @@ const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => (
   ...over,
 });
 
+/** `current` is the thread's session; null is a thread without one, and
+ *  `knows` agrees, as the real control's row does. */
 class FakeControl implements ChannelControl {
   current: ConversationStatus | null = status();
-  readonly newSessions: (string | undefined)[] = [];
+  readonly newSessions: Partial<AgentLaunchOptions>[] = [];
   dirs: string[] | Error = ["/home/qiqi/code/dev/pier", "/srv/ops"];
   pinned: ModelMenuEntry[] = PINS;
   readonly setModels: ModelRef[] = [];
@@ -43,7 +43,7 @@ class FakeControl implements ChannelControl {
   aborted = 0;
   launch: Partial<AgentLaunchOptions> = {};
   launchFor = (): Partial<AgentLaunchOptions> => this.launch;
-  knows = () => true;
+  knows = (): boolean => this.current !== null;
   abort = (): Promise<void> => {
     this.aborted++;
     return Promise.resolve();
@@ -51,18 +51,24 @@ class FakeControl implements ChannelControl {
   status = (): Promise<ConversationStatus | null> => Promise.resolve(this.current);
   pins = (): ModelMenuEntry[] => this.pinned;
   setModel = (_k: ConversationKey, model: ModelRef): Promise<void> => {
-    if (!this.current) return Promise.reject(new Error(NO_SESSION));
     this.setModels.push(model);
     return Promise.resolve();
   };
   setThinking = (_k: ConversationKey, level: ThinkingLevel): Promise<void> => {
-    if (!this.current) return Promise.reject(new Error(NO_SESSION));
     this.setLevels.push(level);
     return Promise.resolve();
   };
-  newSession = (_k: ConversationKey, cwd?: string): Promise<string> => {
-    this.newSessions.push(cwd);
-    return Promise.resolve("abcdef0123");
+  newSession = (_k: ConversationKey, over: Partial<AgentLaunchOptions> = {}): Promise<string> => {
+    this.newSessions.push(over);
+    this.current = status({
+      sessionId: "abcdef0123456789",
+      cwd: over.cwd ?? this.launch.cwd ?? "/srv/pier",
+      model: over.model ?? this.launch.model,
+      thinking: over.thinking ?? this.launch.thinking ?? "off",
+      empty: true,
+      tokens: null,
+    });
+    return Promise.resolve("abcdef0123456789");
   };
   recentDirs = (): Promise<string[]> =>
     this.dirs instanceof Error ? Promise.reject(this.dirs) : Promise.resolve(this.dirs);
@@ -91,18 +97,16 @@ class FakeHandoff implements PanelHandoff {
   };
 }
 
-let store: ChannelStore;
 let control: FakeControl;
 let handoff: FakeHandoff;
 let logs: string[];
+let ran: string[];
 
 beforeEach(() => {
-  const vault = new Map<string, string>();
-  store = new ChannelStore(openDb(":memory:"), { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
-  store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
   control = new FakeControl();
   handoff = new FakeHandoff();
   logs = [];
+  ran = [];
 });
 
 // --- Slack -----------------------------------------------------------------------
@@ -110,6 +114,7 @@ beforeEach(() => {
 class FakeSlack {
   readonly posted: Record<string, unknown>[] = [];
   readonly updated: Record<string, unknown>[] = [];
+  readonly deleted: string[] = [];
   readonly views: unknown[] = [];
 
   postMessage = (payload: Record<string, unknown>): Promise<{ ts: string }> => {
@@ -120,14 +125,17 @@ class FakeSlack {
     this.updated.push(payload);
     return Promise.resolve();
   };
-  deleteMessage = (): Promise<void> => Promise.resolve();
+  deleteMessage = (_channel: string, ts: string): Promise<void> => {
+    this.deleted.push(ts);
+    return Promise.resolve();
+  };
   openView = (_trigger: string, view: unknown): Promise<void> => {
     this.views.push(view);
     return Promise.resolve();
   };
 }
 
-const SLACK_KEY: ConversationKey = { channelId: "slack", conversationId: "s1" };
+const SLACK_KEY: ConversationKey = { channelId: "slack", conversationId: "C100/1717.0000" };
 
 const slackPanel = (api: FakeSlack): SlackPanel =>
   new SlackPanel({
@@ -137,8 +145,13 @@ const slackPanel = (api: FakeSlack): SlackPanel =>
     >,
     control,
     handoff,
-    store,
     log: (m) => logs.push(m),
+  });
+
+const tap = (panel: SlackPanel, action: string, interaction: Partial<SlackInteraction> = {}): Promise<boolean> =>
+  panel.onAction(interaction as SlackInteraction, SLACK_KEY, action, (text) => {
+    ran.push(text);
+    return Promise.resolve();
   });
 
 const text = (block: SlackBlock): string =>
@@ -149,60 +162,31 @@ const footnote = (block: SlackBlock): string =>
 const labels = (block: SlackBlock): string[] =>
   ((block as { elements?: { text?: { text: string } }[] }).elements ?? [])
     .map((e) => e.text?.text ?? "");
+/** Every button's value across the message, parsed; `undefined` where a button has none. */
+const values = (blocks: SlackBlock[]): unknown[] =>
+  blocks.filter((b) => b.type === "actions").flatMap((b) =>
+    (b as { elements: { value?: string }[] }).elements.map((e) => e.value === undefined ? undefined : JSON.parse(e.value)));
+const last = (api: FakeSlack): SlackBlock[] => api.updated.at(-1)!.blocks as SlackBlock[];
 
-describe("slack panel", () => {
-  it("renders one section per group and takes the button rows as authored", async () => {
+describe("slack panel with a session", () => {
+  it("renders the session and the button rows; no channel group, no New session", async () => {
     const api = new FakeSlack();
     await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
     const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(blocks).toHaveLength(3);
     expect(text(blocks[0]!)).toContain("*Session*");
     expect(text(blocks[0]!)).toContain("`01234567` · idle");
-    expect(text(blocks[1]!)).toContain("*Channel*");
-    expect(text(blocks[1]!)).toContain("mention on · bind on");
-    expect(labels(blocks[2]!)).toEqual(["Model & reasoning"]);
-    expect(labels(blocks[4]!)).toEqual(["Close"]);
+    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "New session in…"]);
+    expect(labels(blocks[2]!)).toEqual(["Close"]);
+    expect(JSON.stringify(blocks)).not.toContain("Channel");
+    expect(values(blocks)).toEqual([undefined, undefined, undefined]);
   });
 
-  it("no session: the group says how one starts and the chat line shows the defaults", async () => {
-    control.current = null;
-    control.launch = { cwd: "/srv/ops", model: ref(1), thinking: "medium" };
+  it("offers Stop while streaming", async () => {
+    control.current = status({ state: "streaming" });
     const api = new FakeSlack();
     await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
-    const blocks = api.posted[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("None in this thread yet");
-    expect(text(blocks[0]!)).toContain("New session in…");
-    expect(text(blocks[1]!)).toContain("New sessions start in `/srv/ops` · model-1 · reasoning medium");
-  });
-
-  it("offers Continue web session… only while the thread has no session", async () => {
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
-    expect(labels((api.posted[0]!.blocks as SlackBlock[])[3]!)).toEqual(["New session", "New session in…"]);
-    control.current = null;
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
-    expect(labels((api.posted[1]!.blocks as SlackBlock[])[3]!))
-      .toEqual(["New session", "New session in…", "Continue web session…"]);
-  });
-
-  it("no session and no chat config: the defaults line still says what would happen", async () => {
-    control.current = null;
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
-    const blocks = api.posted[0]!.blocks as SlackBlock[];
-    expect(text(blocks[1]!)).toContain("New sessions start in Pier's directory · Pi default · default reasoning");
-  });
-
-  it("a pick with no session prints NO_SESSION, not a confirmation", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
-    control.current = null;
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pin:1");
-    const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
-    const note = footnote(blocks.at(-1)!);
-    expect(note).toContain(NO_SESSION);
-    expect(note).not.toContain("Model set");
-    expect(control.setLevels).toEqual([]);
+    expect(labels((api.posted[0]!.blocks as SlackBlock[])[2]!)).toEqual(["⏹ Stop", "Close"]);
   });
 
   it("an empty session reads \"created, no message yet\"", async () => {
@@ -214,11 +198,19 @@ describe("slack panel", () => {
     expect(text(blocks[0]!)).toContain("Context: empty — the first message you send runs here.");
   });
 
+  it("a question where a session already answers is not carried, and the card says so", async () => {
+    const api = new FakeSlack();
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000", "what is the plan?");
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(footnote(blocks.at(-1)!)).toBe(HAS_SESSION);
+    expect(JSON.stringify(blocks)).not.toContain("what is the plan?");
+  });
+
   it("lists the operator's pins eight a page, the current model and level ticked", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:0");
+    await tap(panel, "cfg:pins:0");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("*Model & reasoning* · page 1/2");
     expect(text(blocks[0]!)).toContain("1. ✓ model-0 · Off — note-0");
@@ -235,7 +227,7 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:1");
+    await tap(panel, "cfg:pins:1");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("page 2/2");
     expect(text(blocks[0]!)).toContain("10. model-0 · High — note-9");
@@ -248,11 +240,11 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:0");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pin:1");
+    await tap(panel, "cfg:pins:0");
+    await tap(panel, "cfg:pin:1");
     expect(control.setModels).toEqual([{ provider: "anthropic", id: "model-1" }]);
     expect(control.setLevels).toEqual(["high"]);
-    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("Model set to model-1 · High.");
+    expect(footnote(last(api).at(-1)!)).toBe("Model set to model-1 · High.");
   });
 
   it("no pins: the empty list names where they are pinned", async () => {
@@ -260,7 +252,7 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:0");
+    await tap(panel, "cfg:pins:0");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("No pinned models — Settings → Models → Model menu.");
     expect(blocks).toHaveLength(2);
@@ -271,17 +263,17 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pin:42");
+    await tap(panel, "cfg:pin:42");
     expect(control.setModels).toEqual([]);
     expect(control.setLevels).toEqual([]);
-    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("That model is no longer listed.");
+    expect(footnote(last(api).at(-1)!)).toBe("That model is no longer listed.");
   });
 
   it("New session in… lists recent directories as buttons with numbered full paths", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    await tap(panel, "cfg:cwd");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("*New session in*");
     expect(text(blocks[0]!)).toContain("1. `/home/qiqi/code/dev/pier`");
@@ -295,10 +287,10 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd:1");
-    expect(control.newSessions).toEqual(["/srv/ops"]);
-    const note = footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!);
+    await tap(panel, "cfg:cwd");
+    await tap(panel, "cfg:cwd:1");
+    expect(control.newSessions).toEqual([{ cwd: "/srv/ops" }]);
+    const note = footnote(last(api).at(-1)!);
     expect(note).toContain("Created session abcdef01 in /srv/ops");
     expect(note).toContain("nothing has run yet");
   });
@@ -307,10 +299,10 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd:7");
+    await tap(panel, "cfg:cwd");
+    await tap(panel, "cfg:cwd:7");
     expect(control.newSessions).toEqual([]);
-    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("That directory is no longer listed.");
+    expect(footnote(last(api).at(-1)!)).toBe("That directory is no longer listed.");
   });
 
   it("empty listing offers only the typed path", async () => {
@@ -318,7 +310,7 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    await tap(panel, "cfg:cwd");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("No sessions yet — type a path.");
     expect(blocks).toHaveLength(2);
@@ -330,18 +322,20 @@ describe("slack panel", () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    await tap(panel, "cfg:cwd");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("Could not list recent directories: Error: disk");
     expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
   });
 
-  it("Type a path… opens the modal carrying the conversation", async () => {
+  it("Type a path… opens the modal carrying the conversation and the card", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({ trigger_id: "t1" } as SlackInteraction, SLACK_KEY, "cfg:cwdtype");
-    expect(api.views[0]).toMatchObject({ callback_id: "cfg_cwd", private_metadata: "s1" });
+    await tap(panel, "cfg:cwdtype", { trigger_id: "t1" });
+    const view = api.views[0] as { callback_id: string; private_metadata: string };
+    expect(view.callback_id).toBe("cfg_cwd");
+    expect(JSON.parse(view.private_metadata)).toEqual({ conversation: "C100/1717.0000", ts: "1717.0001" });
     expect(JSON.stringify(api.views[0])).toContain("\"Create\"");
   });
 
@@ -352,12 +346,12 @@ describe("slack panel", () => {
     const submission = {
       view: {
         callback_id: "cfg_cwd",
-        private_metadata: "s1",
+        private_metadata: JSON.stringify({ conversation: "C100/1717.0000", ts: "1717.0001" }),
         state: { values: { cwd_block: { cwd_input: { value: "/srv/other" } } } },
       },
     } as unknown as SlackInteraction;
     expect(await panel.onViewSubmission(submission)).toBe(true);
-    expect(control.newSessions).toEqual(["/srv/other"]);
+    expect(control.newSessions).toEqual([{ cwd: "/srv/other" }]);
   });
 
   it("leaves a submission from someone else's view alone", async () => {
@@ -367,13 +361,237 @@ describe("slack panel", () => {
   });
 });
 
+describe("draft panel (no session in the thread)", () => {
+  const openDraft = async (question?: string): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
+    control.current = null;
+    control.launch = { cwd: "/srv/ops", model: ref(1), thinking: "medium" };
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000", question);
+    return { api, panel };
+  };
+
+  it("is seeded from the chat defaults and says so; Start replaces New session", async () => {
+    const { api } = await openDraft();
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toBe("*Session* · chat defaults\nStarts in `/srv/ops` · model-1 · reasoning medium");
+    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "Directory…", "Continue web session…"]);
+    expect(labels(blocks[2]!)).toEqual(["Start", "Close"]);
+    expect(JSON.stringify(blocks)).not.toContain("New session");
+    // Nothing chosen: nothing to carry.
+    expect(values(blocks).every((v) => v === undefined)).toBe(true);
+  });
+
+  it("no chat config: the line still says what Start would do", async () => {
+    control.current = null;
+    const api = new FakeSlack();
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    expect(text((api.posted[0]!.blocks as SlackBlock[])[0]!)).toContain("Starts in Pier's directory · Pi default · default reasoning");
+  });
+
+  it("shows the pending question, flattened and cut, and carries it whole on every button", async () => {
+    const q = `Please review\nthe parser ${"x".repeat(100)}`;
+    const { api } = await openDraft(q);
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    const line = text(blocks[0]!).split("\n")[2]!;
+    expect(line.startsWith("▸ Please review the parser xxx")).toBe(true);
+    expect(line.length).toBe(82);
+    expect(values(blocks)).toEqual(Array<unknown>(5).fill({ q }));
+  });
+
+  it("a Model & reasoning pick sets the draft, ticks it, and rides every button", async () => {
+    const { api, panel } = await openDraft("go");
+    await tap(panel, "cfg:pins:0");
+    // The chat default is model-1 · medium; the pin is model-1 · high, so nothing is ticked yet.
+    expect(text((api.updated[0]!.blocks as SlackBlock[])[0]!)).not.toContain("✓");
+    await tap(panel, "cfg:pin:1");
+    expect(control.setModels).toEqual([]);
+    const blocks = last(api);
+    expect(text(blocks[0]!)).toBe("*Session*\nStarts in `/srv/ops` · model-1 · reasoning high\n▸ go");
+    const draft = { model: { provider: "anthropic", id: "model-1" }, thinking: "high", q: "go" };
+    expect(values(blocks)).toEqual(Array<unknown>(5).fill(draft));
+    await tap(panel, "cfg:pins:0");
+    expect(text(last(api)[0]!)).toContain("2. ✓ model-1 · High");
+  });
+
+  it("Directory… sets the draft's directory without creating anything", async () => {
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:cwd");
+    expect(text(last(api)[0]!)).toContain("*Directory*");
+    await tap(panel, "cfg:cwd:1");
+    expect(control.newSessions).toEqual([]);
+    expect(text(last(api)[0]!)).toContain("Starts in `/srv/ops` · model-1 · reasoning medium");
+    await tap(panel, "cfg:cwd");
+    await tap(panel, "cfg:cwd:0");
+    expect(text(last(api)[0]!)).toBe("*Session*\nStarts in `/home/qiqi/code/dev/pier` · model-1 · reasoning medium");
+    expect(values(last(api))).toEqual(Array<unknown>(5).fill({ cwd: "/home/qiqi/code/dev/pier" }));
+  });
+
+  it("a typed path sets the draft too, and the modal says so", async () => {
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:cwdtype", { trigger_id: "t1" });
+    expect(JSON.stringify(api.views[0])).toContain("Start creates the session there.");
+    expect(JSON.stringify(api.views[0])).toContain("\"Set\"");
+    await panel.onViewSubmission({
+      view: {
+        callback_id: "cfg_cwd",
+        private_metadata: JSON.stringify({ conversation: "C100/1717.0000", ts: "1717.0001" }),
+        state: { values: { cwd_block: { cwd_input: { value: "/srv/typed" } } } },
+      },
+    } as unknown as SlackInteraction);
+    expect(control.newSessions).toEqual([]);
+    expect(text(last(api)[0]!)).toContain("Starts in `/srv/typed`");
+  });
+
+  it("Start without a question creates with the draft and redraws as the session", async () => {
+    const { api, panel } = await openDraft();
+    await tap(panel, "cfg:pin:2");
+    await tap(panel, "cfg:start");
+    expect(control.newSessions).toEqual([{ model: ref(2), thinking: "high" }]);
+    expect(ran).toEqual([]);
+    const blocks = last(api);
+    expect(footnote(blocks.at(-1)!)).toBe("Started abcdef01 in /srv/ops.");
+    expect(text(blocks[0]!)).toContain("`abcdef01` · created, no message yet");
+    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "New session in…"]);
+    expect(values(blocks).every((v) => v === undefined)).toBe(true);
+  });
+
+  it("Start with a question creates, then runs the question once", async () => {
+    const { api, panel } = await openDraft("fix the parser");
+    await tap(panel, "cfg:cwd");
+    await tap(panel, "cfg:cwd:1");
+    await tap(panel, "cfg:start");
+    expect(control.newSessions).toEqual([{ cwd: "/srv/ops" }]);
+    expect(ran).toEqual(["fix the parser"]);
+    expect(footnote(last(api).at(-1)!)).toBe("Started abcdef01 — running your question.");
+    expect(JSON.stringify(last(api))).not.toContain("fix the parser");
+  });
+
+  it("Start after a message raced it does not replace the thread's session", async () => {
+    const { api, panel } = await openDraft("go");
+    control.current = status();
+    await tap(panel, "cfg:start");
+    expect(control.newSessions).toEqual([]);
+    expect(ran).toEqual([]);
+    expect(footnote(last(api).at(-1)!)).toBe(HAS_SESSION);
+    expect(text(last(api)[0]!)).toContain("`01234567` · idle");
+  });
+
+  it("a creation that fails is reported on the card", async () => {
+    const { api, panel } = await openDraft("go");
+    control.newSession = () => Promise.reject(new Error("no such directory"));
+    await tap(panel, "cfg:start");
+    expect(ran).toEqual([]);
+    expect(footnote(last(api).at(-1)!)).toBe("Could not start a session: Error: no such directory");
+  });
+
+  it("a question too long to hold is not held, and the card says so", async () => {
+    const { api, panel } = await openDraft("字".repeat(600));
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain(QUESTION_TOO_LONG);
+    expect(values(blocks)).toEqual(Array<unknown>(5).fill({ dropped: true }));
+    await tap(panel, "cfg:start");
+    expect(control.newSessions).toEqual([{}]);
+    expect(ran).toEqual([]);
+    expect(footnote(last(api).at(-1)!)).toBe("Started abcdef01 in /srv/ops.");
+  });
+
+  it("Continue web session… discards the draft", async () => {
+    const { api, panel } = await openDraft("go");
+    await tap(panel, "cfg:pin:2");
+    await tap(panel, "cfg:sessions:0");
+    await tap(panel, "cfg:session:0");
+    expect(handoff.continued).toEqual([[SLACK_KEY, "sess00000000000"]]);
+    expect(control.newSessions).toEqual([]);
+    expect(ran).toEqual([]);
+    expect(values(last(api)).every((v) => v === undefined)).toBe(true);
+  });
+
+  describe("after a restart", () => {
+    const draft = { cwd: "/srv/kept", model: ref(3), thinking: "low", q: "still here" };
+    const click = (action: string, value: unknown = draft): Partial<SlackInteraction> => ({
+      channel: { id: "C100" },
+      message: { ts: "900.0001", thread_ts: "1717.0000" },
+      actions: [{ action_id: action, value: JSON.stringify(value) }],
+    });
+
+    it("rebuilds the draft from the tapped value and redraws in place, posting nothing", async () => {
+      control.current = null;
+      const api = new FakeSlack();
+      const panel = slackPanel(api);
+      await tap(panel, "cfg:panel", click("cfg:panel"));
+      expect(api.posted).toEqual([]);
+      expect(api.updated).toHaveLength(1);
+      expect(api.updated[0]).toMatchObject({ channel: "C100", ts: "900.0001" });
+      expect(text(last(api)[0]!)).toBe("*Session*\nStarts in `/srv/kept` · model-3 · reasoning low\n▸ still here");
+      expect(values(last(api))).toEqual(Array<unknown>(5).fill(draft));
+    });
+
+    it("honours the tap itself: Start creates with the recovered draft and runs the question", async () => {
+      control.current = null;
+      const api = new FakeSlack();
+      await tap(slackPanel(api), "cfg:start", click("cfg:start"));
+      expect(control.newSessions).toEqual([{ cwd: "/srv/kept", model: ref(3), thinking: "low" }]);
+      expect(ran).toEqual(["still here"]);
+      expect(api.posted).toEqual([]);
+    });
+
+    it("Close deletes the card it was tapped on", async () => {
+      const api = new FakeSlack();
+      await tap(slackPanel(api), "cfg:close", click("cfg:close"));
+      expect(api.deleted).toEqual(["900.0001"]);
+    });
+
+    it("an unreadable value is logged and drawn as an empty draft", async () => {
+      control.current = null;
+      const api = new FakeSlack();
+      await tap(slackPanel(api), "cfg:panel", {
+        ...click("cfg:panel"),
+        actions: [{ action_id: "cfg:panel", value: "{not json" }],
+      });
+      expect(logs.some((m) => m.startsWith("unreadable panel value"))).toBe(true);
+      expect(text(last(api)[0]!)).toContain("· chat defaults");
+    });
+
+    it("a foreign shape keeps only the fields the draft knows", async () => {
+      control.current = null;
+      const api = new FakeSlack();
+      await tap(slackPanel(api), "cfg:panel", click("cfg:panel", { cwd: 7, model: { id: "x" }, thinking: "bogus", q: "ok", extra: 1 }));
+      expect(values(last(api))).toEqual(Array<unknown>(5).fill({ q: "ok" }));
+    });
+
+    it("a stale index pick is refused, and the panel still lands on the card", async () => {
+      control.current = null;
+      const api = new FakeSlack();
+      await tap(slackPanel(api), "cfg:cwd:1", click("cfg:cwd:1"));
+      expect(control.newSessions).toEqual([]);
+      expect(footnote(last(api).at(-1)!)).toBe("That directory is no longer listed.");
+      expect(api.updated[0]).toMatchObject({ ts: "900.0001" });
+    });
+
+    it("a typed path lands on the card the modal was opened from", async () => {
+      control.current = null;
+      const api = new FakeSlack();
+      await slackPanel(api).onViewSubmission({
+        view: {
+          callback_id: "cfg_cwd",
+          private_metadata: JSON.stringify({ conversation: "C100/1717.0000", ts: "900.0001", draft: JSON.stringify(draft) }),
+          state: { values: { cwd_block: { cwd_input: { value: "/srv/typed" } } } },
+        },
+      } as unknown as SlackInteraction);
+      expect(api.updated[0]).toMatchObject({ channel: "C100", ts: "900.0001" });
+      expect(values(last(api))).toEqual(Array<unknown>(5).fill({ ...draft, cwd: "/srv/typed" }));
+    });
+  });
+});
+
 describe("continue web session picker", () => {
   const openPicker = async (page = "0"): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
     control.current = null;
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, `cfg:sessions:${page}`);
+    await tap(panel, `cfg:sessions:${page}`);
     return { api, panel };
   };
 
@@ -403,13 +621,13 @@ describe("continue web session picker", () => {
 
   it("a pick binds this thread through the handoff and the panel shows the session", async () => {
     const { api, panel } = await openPicker("1");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:9");
+    await tap(panel, "cfg:session:9");
     expect(handoff.continued).toEqual([[SLACK_KEY, "sess90000000000"]]);
     expect(control.newSessions).toEqual([]);
-    const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
+    const blocks = last(api);
     expect(footnote(blocks.at(-1)!)).toBe("Continuing session sess9000 — reply in this thread.");
     expect(text(blocks[0]!)).toContain("`sess9000` · idle");
-    expect(labels(blocks[3]!)).toEqual(["New session", "New session in…"]);
+    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "New session in…"]);
   });
 
   it("an empty list says so and offers only Back", async () => {
@@ -431,25 +649,23 @@ describe("continue web session picker", () => {
   it("a pick that lost the race prints the guard's refusal, never silence", async () => {
     handoff.refuse = new HandoffError(409, "Already answers in lark · DM · Qi.");
     const { api, panel } = await openPicker();
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:0");
-    const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
+    await tap(panel, "cfg:session:0");
+    const blocks = last(api);
     expect(footnote(blocks.at(-1)!)).toBe("Already answers in lark · DM · Qi.");
-    expect(text(blocks[0]!)).toContain("None in this thread yet");
+    expect(text(blocks[0]!)).toContain("Starts in");
   });
 
   it("a failure that is not a refusal names what was attempted", async () => {
     handoff.refuse = new Error("SQLITE_BUSY");
     const { api, panel } = await openPicker();
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:0");
-    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!))
-      .toBe("Could not continue that session: Error: SQLITE_BUSY");
+    await tap(panel, "cfg:session:0");
+    expect(footnote(last(api).at(-1)!)).toBe("Could not continue that session: Error: SQLITE_BUSY");
   });
 
   it("a stale index is refused, not misfiled", async () => {
     const { api, panel } = await openPicker();
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:42");
+    await tap(panel, "cfg:session:42");
     expect(handoff.continued).toEqual([]);
-    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("That session is no longer listed.");
+    expect(footnote(last(api).at(-1)!)).toBe("That session is no longer listed.");
   });
 });
-

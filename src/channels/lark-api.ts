@@ -7,6 +7,7 @@
 // handlers return once the event is queued.
 
 import * as Lark from "@larksuiteoapi/node-sdk";
+import type { PanelDraft } from "./panel.js";
 
 // --- card shapes (schema 2.0) --------------------------------------------------
 // Schema 2.0 is what makes button callbacks arrive over the WebSocket; 1.0
@@ -33,6 +34,8 @@ export interface LarkActionValue {
   root: string;
   /** Next-step buttons only; panel buttons repaint from their own state. */
   label?: string;
+  /** Panel buttons of a thread without a session: the card is the draft's store. */
+  draft?: PanelDraft;
 }
 
 export type LarkElement =

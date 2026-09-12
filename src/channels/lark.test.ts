@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
-import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
+import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import type { PanelHandoff } from "./panel.js";
@@ -131,7 +131,7 @@ let dropped: string[];
 let receipts: ReceiptLedger;
 let aborted: string[];
 let known: Set<string>;
-let control: ChannelControl & { created: { key: string; cwd?: string }[] };
+let control: ChannelControl & { created: ({ key: string } & Partial<AgentLaunchOptions>)[] };
 
 /** The panel's pull half is exercised in panel.test.ts; here it only has to exist. */
 const handoff: PanelHandoff = { unbound: () => Promise.resolve([]), continueHere: () => Promise.resolve() };
@@ -199,7 +199,7 @@ const bodyText = (card: LarkCard): string =>
 
 function fakeControl() {
   const state = {
-    created: [] as { key: string; cwd?: string }[],
+    created: [] as ({ key: string } & Partial<AgentLaunchOptions>)[],
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel,
     launchFor: () => ({}),
@@ -208,23 +208,27 @@ function fakeControl() {
       aborted.push(key.conversationId);
       return Promise.resolve();
     },
-    status: () =>
-      Promise.resolve({
-        sessionId: "session-abcdef12",
-        cwd: "/srv/ops",
-        state: "idle" as const,
-        empty: false,
-        model: state.model,
-        thinking: state.thinking,
-        tokens: 32_140,
-        contextWindow: 200_000,
-      }),
+    // Null where `knows` is false, as the real control's row decides both.
+    status: (key: ConversationKey) =>
+      Promise.resolve(known.has(key.conversationId)
+        ? {
+          sessionId: "session-abcdef12",
+          cwd: "/srv/ops",
+          state: "idle" as const,
+          empty: false,
+          model: state.model,
+          thinking: state.thinking,
+          tokens: 32_140,
+          contextWindow: 200_000,
+        }
+        : null),
     pins: () => [{ ...state.model!, thinking: state.thinking }],
     setModel: () => Promise.resolve(),
     setThinking: () => Promise.resolve(),
     recentDirs: () => Promise.resolve(["/srv/ops"]),
-    newSession: (key: ConversationKey, cwd?: string) => {
-      state.created.push({ key: key.conversationId, cwd });
+    newSession: (key: ConversationKey, over?: Partial<AgentLaunchOptions>) => {
+      state.created.push({ key: key.conversationId, ...over });
+      known.add(key.conversationId);
       return Promise.resolve("session-99887766");
     },
   };
@@ -703,6 +707,7 @@ describe("commands and panel", () => {
 
   it("starts a session from a cwd form submit, even after a restart lost the panel", async () => {
     openGates();
+    known.add(`${CHAT}/om_root`);
     // No panel state exists for this conversation — the submit still works,
     // because the button's name carries the thread root.
     await act({
@@ -715,6 +720,50 @@ describe("commands and panel", () => {
     expect(control.created).toEqual([{ key: `${CHAT}/om_root`, cwd: "/srv/new" }]);
     // The outcome is drawn onto the panel card the user is looking at.
     expect(client.patched.at(-1)!.messageId).toBe("om_stale_panel");
+  });
+
+  it("/s <text> opens the draft with the question; Start creates and runs it as the tapper's message", async () => {
+    openGates();
+    await feed(message({ text: "/s  review the parser", messageId: "om_q" }));
+    expect(inbound).toEqual([]);
+    const panelId = [...client.cards.keys()].at(-1)!;
+    const panel = client.cards.get(panelId)!;
+    expect(bodyText(panel)).toContain("▸ review the parser");
+    const buttons = JSON.stringify(panel);
+    expect(buttons).toContain(`"draft":{"q":"review the parser"}`);
+    expect(buttons).not.toContain("New session");
+    await act({
+      messageId: panelId,
+      chatId: CHAT,
+      operatorId: USER,
+      value: { key: "cfg:start", root: "om_q", draft: { q: "review the parser" } },
+    });
+    expect(control.created).toEqual([{ key: `${CHAT}/om_q` }]);
+    expect(inbound).toEqual([{
+      key: { channelId: "lark", conversationId: `${CHAT}/om_q` },
+      senderId: USER,
+      sender: { id: USER, name: "Q" },
+      text: "review the parser",
+      mode: "steer",
+    }]);
+    // The 👀 goes on the card the tap was on.
+    expect(client.reactions).toEqual([{ messageId: panelId, emoji: "OnIt", add: true }]);
+    expect(bodyText(client.patched.at(-1)!.card)).toContain("running your question");
+  });
+
+  it("a tap on a card a previous process drew rebuilds the draft from its value, in place", async () => {
+    openGates();
+    await act({
+      messageId: "om_old_panel",
+      chatId: CHAT,
+      operatorId: USER,
+      value: { key: "cfg:panel", root: "om_root", draft: { cwd: "/srv/kept", q: "still here" } },
+    });
+    expect(client.replied).toEqual([]);
+    expect(client.patched.at(-1)!.messageId).toBe("om_old_panel");
+    const body = bodyText(client.patched.at(-1)!.card);
+    expect(body).toContain("Starts in `/srv/kept`");
+    expect(body).toContain("▸ still here");
   });
 
   it("rejects a relative path without starting anything", async () => {

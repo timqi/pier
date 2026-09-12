@@ -93,6 +93,7 @@ let router: Router;
 let conversations: ConversationStore;
 let factory: ReturnType<typeof fakeFactory>;
 let control: ChannelControl;
+let store: ChannelStore;
 let stale: [ConversationKey, string][];
 
 function wire(f: ReturnType<typeof fakeFactory>): void {
@@ -101,7 +102,7 @@ function wire(f: ReturnType<typeof fakeFactory>): void {
   const db = openDb(":memory:");
   conversations = new ConversationStore(db);
   const vault = new Map<string, string>();
-  const store = new ChannelStore(db, { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
+  store = new ChannelStore(db, { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
   store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
   stale = [];
   let resolveIm: (key: ConversationKey) => Promise<AgentSession> = () => Promise.reject(new Error("unwired"));
@@ -167,7 +168,7 @@ describe("setModel / setThinking", () => {
 
 describe("the launch record", () => {
   it("newSession records the launch it used", async () => {
-    const id = await control.newSession(KEY, "/srv/pier");
+    const id = await control.newSession(KEY, { cwd: "/srv/pier" });
     expect(id).toBe("new1");
     expect(factory.created).toEqual([{ cwd: "/srv/pier" }]);
     expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/pier" });
@@ -176,15 +177,24 @@ describe("the launch record", () => {
     expect(factory.resumed).toEqual([]);
   });
 
+  it("a draft's model and reasoning are created with and recorded; the chat defaults fill the rest", async () => {
+    const config = store.get("slack");
+    Object.assign(config.chats[0]!, { cwd: "/srv/default", thinking: "low" });
+    store.save("slack", config);
+    await control.newSession(KEY, { model: SONNET, thinking: "high" });
+    expect(factory.created).toEqual([{ cwd: "/srv/default", model: SONNET, thinking: "high" }]);
+    expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/default", model: SONNET, thinking: "high" });
+  });
+
   it("setModel and setThinking amend the record", async () => {
-    await control.newSession(KEY, "/srv/pier");
+    await control.newSession(KEY, { cwd: "/srv/pier" });
     await control.setModel(KEY, SONNET);
     await control.setThinking(KEY, "high");
     expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/pier", model: SONNET, thinking: "high" });
   });
 
   it("a created session that Pi never wrote is re-created from the record after an eviction", async () => {
-    await control.newSession(KEY, "/srv/pier");
+    await control.newSession(KEY, { cwd: "/srv/pier" });
     await control.setThinking(KEY, "high");
     // Eviction, then the transcript is not there: Pi wrote nothing.
     await router.evictIdle(0);
@@ -195,7 +205,7 @@ describe("the launch record", () => {
   });
 
   it("the directory of a session not yet on disk comes from the record", async () => {
-    await control.newSession(KEY, "/srv/pier");
+    await control.newSession(KEY, { cwd: "/srv/pier" });
     expect((await control.status(KEY))?.cwd).toBe("/srv/pier");
   });
 });

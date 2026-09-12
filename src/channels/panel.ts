@@ -1,28 +1,41 @@
 // The in-chat settings panel, minus the platform: one message edited in place,
 // every payload namespaced `cfg:` so a tap never reaches the agent. Choices
-// travel as an index: platform callback payloads are small and opaque.
+// travel as an index: platform callback payloads are small and opaque. A thread
+// without a session shows a draft — cwd, model, reasoning, a pending question —
+// that rides every button's value, so the card is the store and a restart
+// loses nothing.
 
 import { sessionLabel } from "../core/identity.js";
 import { compact, thinkingLabel } from "../core/reply.js";
-import type { ConversationKey, SessionSummary } from "../core/types.js";
-import type { ChannelStore } from "./config.js";
+import {
+  type ConversationKey,
+  isThinkingLevel,
+  type ModelRef,
+  type SessionSummary,
+  type ThinkingLevel,
+} from "../core/types.js";
 import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
 import { type Handoff, HandoffError } from "./handoff.js";
-import type { ChannelPlatform, ChatConfig, ChatPolicy } from "./types.js";
+import type { ChannelPlatform } from "./types.js";
 
 export const PANEL_PREFIX = "cfg:";
 const PER_PAGE = 8;
 /** The picker's reach: five pages of the newest unbound sessions. */
 const SESSIONS_LISTED = 40;
 const TITLE_CHARS = 40;
+const QUESTION_CHARS = 80;
+/** UTF-8 bytes: Slack caps a button value at 2000 characters and Lark a card
+ *  at 30 KB, and a picker page carries the draft on eleven buttons. */
+const QUESTION_BYTES = 1500;
 
 /** The pull half of the handoff; the push half never needs a panel. */
 export type PanelHandoff = Pick<Handoff, "unbound" | "continueHere">;
 
 export const CWD_TAIL = "The session is created there at once; the first message you send in this thread runs in it.";
+export const CWD_DRAFT_TAIL = "Start creates the session there.";
 export const CWD_PLACEHOLDER = "/path/to/project";
-
-const onOff = (v: boolean): string => (v ? "on" : "off");
+export const HAS_SESSION = "This thread already has a session — send your question as a message.";
+export const QUESTION_TOO_LONG = "Your question is too long to hold — send it again after Start.";
 
 export interface PanelButton {
   label: string;
@@ -46,15 +59,27 @@ export interface PanelView {
   rows: PanelButton[][];
 }
 
+/** What Start creates with, only the fields a pick set; the rest are the chat
+ *  defaults at creation. Serialized into every button's value. */
+export interface PanelDraft {
+  cwd?: string;
+  model?: ModelRef;
+  thinking?: ThinkingLevel;
+  /** The pending question, run as the thread's first message on Start. */
+  q?: string;
+  /** The question was over QUESTION_BYTES and is not held. */
+  dropped?: true;
+}
+
 export interface PanelDeps {
   control: ChannelControl;
   handoff: PanelHandoff;
-  store: ChannelStore;
   log(message: string): void;
 }
 
 export interface PanelState {
   chatId: string;
+  draft: PanelDraft;
   /** The lists the payloads' indices point into. */
   dirs: string[];
   sessions: SessionSummary[];
@@ -68,10 +93,9 @@ const shortDir = (path: string): string => {
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
 };
 
-const shortTitle = (s: SessionSummary): string => {
-  const title = sessionLabel(s);
-  return title.length > TITLE_CHARS ? `${title.slice(0, TITLE_CHARS - 1)}…` : title;
-};
+const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+const shortTitle = (s: SessionSummary): string => cut(sessionLabel(s), TITLE_CHARS);
 
 /** Compact age, as the web sidebar spells it ("now", "12m", "3h", "2d"). */
 const age = (ts: number, now: number): string => {
@@ -103,6 +127,34 @@ const created = (id: string, where: string): string =>
 const failed = (what: string, err: unknown): string =>
   err instanceof Error && err.message === NO_SESSION ? NO_SESSION : `${what}: ${String(err)}`;
 
+/** The question, or the fact that it was too long. */
+const holdQuestion = (q: string | undefined): PanelDraft => {
+  if (!q) return {};
+  return new TextEncoder().encode(q).length > QUESTION_BYTES ? { dropped: true } : { q };
+};
+
+const hasFields = (draft: PanelDraft): boolean => Object.keys(draft).length > 0;
+
+/** `undefined` when there is nothing to carry, so a with-session panel's buttons stay bare. */
+export const serializeDraft = (draft: PanelDraft): string | undefined =>
+  hasFields(draft) ? JSON.stringify(draft) : undefined;
+
+/** A platform echoed this; only the fields the draft knows, each type-checked. */
+export const readDraft = (raw: unknown): PanelDraft => {
+  const draft: PanelDraft = {};
+  if (!raw || typeof raw !== "object") return draft;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.cwd === "string") draft.cwd = v.cwd;
+  const model = v.model as Record<string, unknown> | undefined;
+  if (model && typeof model.provider === "string" && typeof model.id === "string") {
+    draft.model = { provider: model.provider, id: model.id };
+  }
+  if (isThinkingLevel(v.thinking)) draft.thinking = v.thinking;
+  if (typeof v.q === "string" && v.q) draft.q = v.q;
+  if (v.dropped === true) draft.dropped = true;
+  return draft;
+};
+
 export abstract class ChatPanel<S extends PanelState, C> {
   private readonly panels = new Map<string, S>();
 
@@ -113,13 +165,11 @@ export abstract class ChatPanel<S extends PanelState, C> {
   protected abstract readonly fence: [string, string];
   protected abstract esc(text: string): string;
   protected abstract draw(state: S, view: PanelView, note?: string): Promise<void>;
-  /** One typed answer in the platform's dialog: a Slack modal, a Lark form card. */
-  protected abstract promptCwd(key: ConversationKey, state: S, ctx: C): Promise<void>;
+  /** One typed answer in the platform's dialog: a Slack modal, a Lark form
+   *  card. `creates`: the answer starts a session (a thread that has one)
+   *  rather than setting the draft's directory. */
+  protected abstract promptCwd(key: ConversationKey, state: S, ctx: C, creates: boolean): Promise<void>;
   protected abstract erase(state: S): Promise<void>;
-  /** Gates this platform has and the other does not. */
-  protected gateExtras(_chat: ChatConfig, _policy: ChatPolicy): string {
-    return "";
-  }
 
   protected code(text: string): string {
     return `${this.fence[0]}${this.esc(text)}${this.fence[1]}`;
@@ -133,38 +183,59 @@ export abstract class ChatPanel<S extends PanelState, C> {
     return this.panels.get(key.conversationId);
   }
 
+  /** The draft a trigger opens with. A question where a session already
+   *  answers is not carried, and the card says so. */
+  protected opening(key: ConversationKey, question: string | undefined): { draft: PanelDraft; note?: string } {
+    if (question && this.deps.control.knows(key)) return { draft: {}, note: HAS_SESSION };
+    return { draft: holdQuestion(question) };
+  }
+
   // --- rendering ---------------------------------------------------------------
 
-  protected async view(key: ConversationKey, chatId: string): Promise<PanelView> {
+  protected async view(key: ConversationKey, state: S): Promise<PanelView> {
     const status = await this.deps.control.status(key);
+    if (!status) return this.draftView(key, state.draft);
     return {
-      groups: [
-        {
-          title: "Session",
-          lines: status
-            ? this.sessionLines(status)
-            : [
-              "None in this thread yet — your first message starts one with the chat defaults below.",
-              "To choose the directory first, tap New session in….",
-            ],
-        },
-        {
-          title: this.platform === "slack" ? "Channel" : "Chat",
-          lines: [...this.chatLines(chatId), this.defaultsLine(key)],
-        },
-      ],
+      groups: [{ title: "Session", lines: this.sessionLines(status) }],
       rows: [
-        [btn("Model & reasoning", "pins:0")],
+        [btn("Model & reasoning", "pins:0"), btn("New session in…", "cwd")],
         [
-          btn("New session", "new"),
-          btn("New session in…", "cwd"),
-          ...(status ? [] : [btn("Continue web session…", "sessions:0")]),
-        ],
-        [
-          ...(status?.state === "streaming" ? [btn("⏹ Stop", "stop")] : []),
+          ...(status.state === "streaming" ? [btn("⏹ Stop", "stop")] : []),
           btn("Close", "close"),
         ],
       ],
+    };
+  }
+
+  private draftView(key: ConversationKey, draft: PanelDraft): PanelView {
+    const { cwd, model, thinking } = this.effective(key, draft);
+    const question = draft.q ? [`▸ ${this.esc(cut(draft.q.replace(/\s+/g, " "), QUESTION_CHARS))}`]
+      : draft.dropped ? [QUESTION_TOO_LONG] : [];
+    return {
+      groups: [{
+        title: "Session",
+        suffix: draft.cwd || draft.model || draft.thinking ? undefined : " · chat defaults",
+        lines: [
+          `Starts in ${cwd ? this.code(cwd) : "Pier's directory"} · ${
+            model ? this.esc(model.id) : "Pi default"
+          } · ${thinking ? `reasoning ${thinking}` : "default reasoning"}`,
+          ...question,
+        ],
+      }],
+      rows: [
+        [btn("Model & reasoning", "pins:0"), btn("Directory…", "cwd"), btn("Continue web session…", "sessions:0")],
+        [btn("Start", "start"), btn("Close", "close")],
+      ],
+    };
+  }
+
+  /** What Start would create with: the draft over the chat defaults. */
+  private effective(key: ConversationKey, draft: PanelDraft): Pick<PanelDraft, "cwd" | "model" | "thinking"> {
+    const launch = this.deps.control.launchFor(key);
+    return {
+      cwd: draft.cwd ?? launch.cwd,
+      model: draft.model ?? launch.model,
+      thinking: draft.thinking ?? launch.thinking,
     };
   }
 
@@ -183,55 +254,37 @@ export abstract class ChatPanel<S extends PanelState, C> {
     ];
   }
 
-  /** Display only: the chat's launch config is the Console's to change. */
-  private defaultsLine(key: ConversationKey): string {
-    const launch = this.deps.control.launchFor(key);
-    return `New sessions start in ${launch.cwd ? this.code(launch.cwd) : "Pier's directory"} · ${
-      launch.model ? this.esc(launch.model.id) : "Pi default"
-    } · ${launch.thinking ? `reasoning ${launch.thinking}` : "default reasoning"}`;
-  }
-
-  private chatLines(chatId: string): string[] {
-    const chat = this.deps.store.chat(this.platform, chatId);
-    if (!chat) return [this.code(chatId)];
-    const policy = this.deps.store.policy(this.platform, chatId);
-    // A DM is bind-only by construction, so the group knobs would be a lie.
-    const gates = chat.kind === "dm"
-      ? "bound users only"
-      : `mention ${onOff(policy.requireMention)} · bind ${onOff(policy.requireBind)}${
-        this.gateExtras(chat, policy)
-      }`;
-    return [`${this.esc(chat.name || chatId)} · ${chat.kind} · ${this.code(chatId)}`, gates];
-  }
-
   protected async refresh(key: ConversationKey, note?: string): Promise<void> {
     const state = this.state(key);
     if (!state) return;
-    await this.draw(state, await this.view(key, state.chatId), note);
+    await this.draw(state, await this.view(key, state), note);
   }
 
   // --- actions -----------------------------------------------------------------
 
-  /** Returns false when the payload is not ours. `reopen` recovers a panel
-   *  whose state died with a previous process; it costs one tap. */
+  /** Returns false when the payload is not ours. `recover` rebuilds the state
+   *  of a panel whose process died — from the tapped button's value, so the
+   *  tap is honoured on the card the user is looking at. `run` hands Start's
+   *  pending question to the router as the tapper's message. */
   protected async dispatch(
     key: ConversationKey,
     payload: string,
     ctx: C,
-    reopen: () => Promise<void>,
+    recover: () => S,
+    run: (text: string) => Promise<void>,
   ): Promise<boolean> {
     if (!payload.startsWith(PANEL_PREFIX)) return false;
     const [action = "", arg = ""] = payload.slice(PANEL_PREFIX.length).split(":");
-    const state = this.state(key);
-    if (!state && action !== "close") {
-      await reopen();
-      return true;
+    let state = this.state(key);
+    if (!state) {
+      state = recover();
+      this.remember(key, state);
     }
 
     switch (action) {
       case "close":
         this.panels.delete(key.conversationId);
-        if (state) await this.erase(state);
+        await this.erase(state);
         return true;
       case "panel":
         await this.refresh(key);
@@ -248,17 +301,15 @@ export abstract class ChatPanel<S extends PanelState, C> {
       case "session":
         await this.pickSession(key, Number(arg));
         return true;
-      case "new": {
-        const id = await this.deps.control.newSession(key);
-        await this.refresh(key, created(id, "in its directory"));
-        return true;
-      }
       case "cwd":
         if (arg) await this.pickDir(key, Number(arg));
         else await this.showDirs(key);
         return true;
       case "cwdtype":
-        await this.promptCwd(key, state!, ctx);
+        await this.promptCwd(key, state, ctx, this.deps.control.knows(key));
+        return true;
+      case "start":
+        await this.start(key, state, run);
         return true;
       case "stop":
         await this.deps.control.abort(key);
@@ -277,6 +328,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     if (!state) return;
     const pins = this.deps.control.pins();
     const status = await this.deps.control.status(key);
+    const current = status ?? this.effective(key, state.draft);
     const { at, pages, slice, from } = paged(pins, page);
     await this.draw(state, {
       groups: [{
@@ -284,9 +336,9 @@ export abstract class ChatPanel<S extends PanelState, C> {
         suffix: ` · page ${at + 1}/${pages}`,
         lines: slice.length
           ? slice.map((pin, i) => {
-            const current = status?.model?.provider === pin.provider && status.model.id === pin.id
-              && status.thinking === pin.thinking;
-            return `${String(from + i + 1)}. ${current ? "✓ " : ""}${this.esc(pin.id)} · ${
+            const ticked = current.model?.provider === pin.provider && current.model.id === pin.id
+              && current.thinking === pin.thinking;
+            return `${String(from + i + 1)}. ${ticked ? "✓ " : ""}${this.esc(pin.id)} · ${
               thinkingLabel(pin.thinking)
             }${pin.note ? ` — ${this.esc(pin.note)}` : ""}`;
           })
@@ -326,10 +378,13 @@ export abstract class ChatPanel<S extends PanelState, C> {
   }
 
   private async pickSession(key: ConversationKey, index: number): Promise<void> {
-    const session = this.state(key)?.sessions[index];
-    if (!session) return this.refresh(key, "That session is no longer listed.");
+    const state = this.state(key);
+    const session = state?.sessions[index];
+    if (!state || !session) return this.refresh(key, "That session is no longer listed.");
     try {
       await this.deps.handoff.continueHere(key, session.id);
+      // The bound session has its own settings; the draft is spent.
+      state.draft = {};
       await this.refresh(key, `Continuing session ${session.id.slice(0, 8)} — reply in this thread.`);
     } catch (err) {
       // A refusal's sentence is the whole answer ("Already answers in …").
@@ -338,10 +393,16 @@ export abstract class ChatPanel<S extends PanelState, C> {
   }
 
   private async pickPin(key: ConversationKey, index: number): Promise<void> {
+    const state = this.state(key);
     const pin = this.deps.control.pins()[index];
-    if (!pin) return this.refresh(key, "That model is no longer listed.");
+    if (!state || !pin) return this.refresh(key, "That model is no longer listed.");
+    const model = { provider: pin.provider, id: pin.id };
+    if (!this.deps.control.knows(key)) {
+      state.draft = { ...state.draft, model, thinking: pin.thinking };
+      return this.refresh(key);
+    }
     try {
-      await this.deps.control.setModel(key, { provider: pin.provider, id: pin.id });
+      await this.deps.control.setModel(key, model);
       await this.deps.control.setThinking(key, pin.thinking);
       await this.refresh(key, `Model set to ${pin.id} · ${thinkingLabel(pin.thinking)}.`);
     } catch (err) {
@@ -360,7 +421,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     });
     await this.draw(state, {
       groups: [{
-        title: "New session in",
+        title: this.deps.control.knows(key) ? "New session in" : "Directory",
         lines: state.dirs.length
           ? state.dirs.map((dir, i) => `${String(i + 1)}. ${this.code(dir)}`)
           : [unavailable ?? "No sessions yet — type a path."],
@@ -377,24 +438,41 @@ export abstract class ChatPanel<S extends PanelState, C> {
   }
 
   /** Pi fixes cwd at session creation, so "change the working directory" *is*
-   *  "start a new session there". */
-  protected async startSessionIn(
-    key: ConversationKey,
-    path: string,
-  ): Promise<{ id: string } | { error: string }> {
-    if (!path.startsWith("/")) {
-      const error = "That is not an absolute path — nothing changed.";
-      await this.refresh(key, error);
-      return { error };
+   *  "start a new session there" — or, while the thread has none, the draft's
+   *  directory for Start. */
+  protected async startSessionIn(key: ConversationKey, path: string): Promise<void> {
+    if (!path.startsWith("/")) return this.refresh(key, "That is not an absolute path — nothing changed.");
+    const state = this.state(key);
+    if (state && !this.deps.control.knows(key)) {
+      state.draft = { ...state.draft, cwd: path };
+      return this.refresh(key);
     }
     try {
-      const id = await this.deps.control.newSession(key, path);
+      const id = await this.deps.control.newSession(key, { cwd: path });
       await this.refresh(key, created(id, `in ${path}`));
-      return { id };
     } catch (err) {
-      const error = `Could not start a session there: ${String(err)}`;
-      await this.refresh(key, error);
-      return { error };
+      await this.refresh(key, `Could not start a session there: ${String(err)}`);
     }
+  }
+
+  /** Create with the draft, bind the thread, run the question as the tapper's
+   *  first message. A session that appeared meanwhile (a message raced the
+   *  tap) is not replaced: the draft would orphan it. */
+  private async start(key: ConversationKey, state: S, run: (text: string) => Promise<void>): Promise<void> {
+    if (this.deps.control.knows(key)) return this.refresh(key, HAS_SESSION);
+    const { q, dropped: _dropped, ...launch } = state.draft;
+    let id: string;
+    try {
+      id = await this.deps.control.newSession(key, launch);
+    } catch (err) {
+      return this.refresh(key, `Could not start a session: ${String(err)}`);
+    }
+    state.draft = {};
+    if (q) {
+      await run(q);
+      return this.refresh(key, `Started ${id.slice(0, 8)} — running your question.`);
+    }
+    const cwd = (await this.deps.control.status(key))?.cwd ?? launch.cwd ?? "?";
+    await this.refresh(key, `Started ${id.slice(0, 8)} in ${cwd}.`);
   }
 }
