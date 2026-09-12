@@ -19,6 +19,7 @@ import type { ConversationStore } from "./conversations.js";
 import { chatOf, isChannelPlatform } from "./types.js";
 
 export const NO_SESSION = "No session in this thread yet — start one first (Start in the panel).";
+export const HAS_SESSION = "This thread already has a session — send your question as a message.";
 
 export interface ConversationStatus {
   sessionId: string;
@@ -130,6 +131,12 @@ export function createControl({ router, factory, conversations, store, modelMenu
       const defaults = launchFor(key);
       const launch: AgentLaunchOptions = { ...defaults, ...over, cwd: over.cwd || defaults.cwd || process.cwd() };
       const session = await factory.create(launch);
+      // A message already inside the router's resolve can write the row while Pi
+      // was opening: the first row wins, and the session nobody routes to goes.
+      if (conversations.get(key)) {
+        await session.dispose();
+        throw new Error(HAS_SESSION);
+      }
       // Persist before attaching: a crash between must not leave an unrecorded session.
       conversations.set(key, session.id, launch);
       router.attach(key, session);

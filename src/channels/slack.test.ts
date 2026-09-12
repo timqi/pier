@@ -1075,6 +1075,21 @@ describe("commands", () => {
     expect(client.sent).toEqual([]);
   });
 
+  it("`s <text>` carrying a file is an ordinary message: the panel would swallow the bytes", async () => {
+    openGates();
+    await feed(message({
+      text: `<@${ME}> s read this`,
+      ts: "1722.000100",
+      subtype: "file_share",
+      files: [{ id: "F7", name: "spec.pdf", mimetype: "application/pdf", url_private_download: "https://files/spec.pdf" }],
+    }));
+    expect(client.sent).toEqual([]);
+    expect(inbound).toHaveLength(1);
+    const { text, paths } = splitInboundFiles(inbound[0]!.text);
+    expect(text).toBe("s read this");
+    expect(paths).toHaveLength(1);
+  });
+
   it("a bare `s` is a message (the other spellings: commands.test.ts)", async () => {
     openGates();
     await feed(message({ text: "s", ts: "1724.000100" }));

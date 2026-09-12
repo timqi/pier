@@ -2,7 +2,7 @@
 // message is pure token waste in a conversation whose speaker never changes.
 
 import { describe, expect, it } from "vitest";
-import { distinctCwds, projectCwds, readableTitle, sanitizeIdentity, SenderPrefix, splitSpeaker, withPrefix } from "./identity.js";
+import { distinctCwds, projectCwds, readableTitle, sanitizeIdentity, SenderPrefix, sessionLabel, splitSpeaker, withPrefix } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
 const bob = { id: "U2", name: "Bob" };
@@ -211,6 +211,23 @@ describe("readableTitle", () => {
   it("falls back to the raw title when the header was all there was", () => {
     // Better a title only the operator can parse than a blank row.
     expect(readableTitle("[operator<web> 12:01]\n")).toBe("[operator<web> 12:01]\n");
+  });
+});
+
+describe("sessionLabel", () => {
+  it("is one line, wherever the newlines came from", () => {
+    // Every caller puts it inside emphasis or a button, which a newline breaks.
+    expect(sessionLabel({ title: "fix the parser\nthen the tests", cwd: "/srv/pier" }))
+      .toBe("fix the parser then the tests");
+    expect(sessionLabel({ title: "[operator<web> 12:01]\nfix   the\nparser", cwd: "/srv/pier" }))
+      .toBe("fix the parser");
+    expect(sessionLabel({ title: "  spaced  ", cwd: "/srv/pier" })).toBe("spaced");
+  });
+
+  it("falls back to the directory, then to a name that is never empty", () => {
+    expect(sessionLabel({ title: "\n \n", cwd: "/srv/pier" })).toBe("pier");
+    expect(sessionLabel({ cwd: "/srv/pier" })).toBe("pier");
+    expect(sessionLabel()).toBe("Pier session");
   });
 });
 

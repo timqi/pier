@@ -28,7 +28,7 @@ export class LarkOutbound {
   private readonly sent = new Map<string, LarkCard>();
 
   constructor(
-    private readonly api: Pick<LarkClient, "replyCard" | "createCard" | "patchCard" | "uploadFile">,
+    private readonly api: Pick<LarkClient, "replyCard" | "createCard" | "patchCard" | "uploadFile" | "deleteMessage">,
     private readonly log: (message: string) => void,
   ) {}
 
@@ -63,13 +63,21 @@ export class LarkOutbound {
   }
 
   /** The root, then one card inside its topic: on the phone a topic has its
-   *  own composer only once it has a reply. Answers the root's id. */
+   *  own composer only once it has a reply. Answers the root's id. The handoff
+   *  writes no row when this throws, so a root left behind would invite a reply
+   *  into a thread nobody answers: it is taken back down. */
   async open(chatId: string, note: HandoffNote): Promise<string> {
     const link = note.url ? `[Open on the web](${note.url})` : "(no public URL set — Settings → Instance)";
     const { messageId: root } = await this.api.createCard(chatId, card([
       markdown(`**Continued from web: ${note.title}**\n${link}\nReply in this thread to continue.`),
     ]));
-    await this.api.replyCard(root, card([markdown("Reply here to continue.")]));
+    try {
+      await this.api.replyCard(root, card([markdown("Reply here to continue.")]));
+    } catch (err) {
+      await this.api.deleteMessage(root)
+        .catch((e: unknown) => this.log(`orphan handoff root ${root} not deleted: ${String(e)}`));
+      throw err;
+    }
     return root;
   }
 

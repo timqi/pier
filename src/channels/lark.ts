@@ -228,8 +228,9 @@ export class LarkChannel implements Channel {
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
     // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
-    // session, so only where this message would start one: outside any topic.
-    const question = msg.rootId ? undefined : settingsDraft(text);
+    // session, so only where this message would start one: outside any topic,
+    // and never on one carrying files — the panel would swallow them.
+    const question = msg.rootId || attachments.length ? undefined : settingsDraft(text);
     if (this.panel && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
       return this.panel.open(here, root, question);
     }

@@ -240,7 +240,7 @@ browser keeps no second session order.
   `web/ui/attachments.ts`; images open in the lightbox.
 - **Speaker caption**: a user bubble whose text opens with the speaker header
   (`core/identity.ts`) shows the name above the message and, when the session
-  answers an IM, the channel beside it in muted uppercase (`qiqi · LARK`); the
+  answers an IM, the channel beside it in muted uppercase (`qiqi` `LARK`); the
   header itself is stripped from the bubble. The operator's own web messages
   carry no caption.
 - **File references**: an inline code span that is a path with an extension —

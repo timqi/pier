@@ -19,7 +19,7 @@ import type {
 import { openDb } from "../db.js";
 import { ChannelStore } from "./config.js";
 import { ConversationStore, resolveConversation } from "./conversations.js";
-import { type ChannelControl, createControl, NO_SESSION } from "./control.js";
+import { type ChannelControl, createControl, HAS_SESSION, NO_SESSION } from "./control.js";
 
 const KEY: ConversationKey = { channelId: "slack", conversationId: "C100/1717.7" };
 const SONNET: ModelRef = { provider: "anthropic", id: "sonnet" };
@@ -49,7 +49,11 @@ function fakeSession(id: string, turns: ChatTurn[] = []) {
       return () => listeners.delete(fn);
     },
     pendingQueue: () => Promise.resolve({ steering: [], followUp: [] }),
-    dispose: () => Promise.resolve(),
+    disposed: 0,
+    dispose: () => {
+      session.disposed++;
+      return Promise.resolve();
+    },
   };
   return session;
 }
@@ -177,6 +181,21 @@ describe("the launch record", () => {
     expect(factory.resumed).toEqual([]);
   });
 
+  it("a row written while Pi was opening wins; the session nobody routes to is let go", async () => {
+    // A message already inside resolveConversation when Start was tapped.
+    let born: Fake | undefined;
+    factory.create = () => {
+      conversations.set(KEY, "raced");
+      born = fakeSession("loser");
+      return Promise.resolve(born as unknown as AgentSession);
+    };
+    await expect(control.newSession(KEY, { cwd: "/srv/pier" })).rejects.toThrow(HAS_SESSION);
+    expect(conversations.get(KEY)).toBe("raced");
+    expect(born!.disposed).toBe(1);
+    // Nothing attached: the thread keeps answering from the row that won.
+    expect(router.sessionOf(KEY)).toBeUndefined();
+  });
+
   it("a draft's model and reasoning are created with and recorded; the chat defaults fill the rest", async () => {
     const config = store.get("slack");
     Object.assign(config.chats[0]!, { cwd: "/srv/default", thinking: "low" });
@@ -201,7 +220,7 @@ describe("the launch record", () => {
     const status = await control.status(KEY);
     expect(status?.sessionId).toBe("new2");
     expect(factory.created[1]).toEqual({ cwd: "/srv/pier", thinking: "high" });
-    expect(stale[0]![1]).toContain("re-created as new2 with its own settings in /srv/pier");
+    expect(stale[0]![1]).toBe(`Session ${"new1".slice(0, 8)} had no messages yet — continuing as new2.`);
   });
 
   it("the directory of a session not yet on disk comes from the record", async () => {
@@ -212,8 +231,9 @@ describe("the launch record", () => {
 
 describe("recentDirs", () => {
   it("dedupes, newest first, chat cwd first", async () => {
-    const at = (id: string, cwd: string, modified: number): SessionSummary => ({ id, cwd, createdAt: 1, modified });
-    factory.listed = [at("a", "/srv/new", 3), at("b", "/srv/old", 2), at("c", "/srv/new", 1), at("d", "/srv/older", 0)];
+    const at = (id: string, cwd: string, createdAt: number): SessionSummary => ({ id, cwd, createdAt });
+    // Listed in none of the orders asserted below: only the sort can produce them.
+    factory.listed = [at("d", "/srv/older", 1), at("b", "/srv/old", 3), at("c", "/srv/new", 2), at("a", "/srv/new", 4)];
     expect(await control.recentDirs(KEY)).toEqual(["/srv/new", "/srv/old", "/srv/older"]);
     expect(await control.recentDirs(KEY, 2)).toEqual(["/srv/new", "/srv/old"]);
   });

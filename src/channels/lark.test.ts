@@ -7,7 +7,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
-import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
+import type {
+  AgentLaunchOptions,
+  ConversationKey,
+  InboundMessage,
+  ModelRef,
+  SessionState,
+  SessionSummary,
+  ThinkingLevel,
+} from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import type { PanelHandoff } from "./panel.js";
@@ -131,10 +139,22 @@ let dropped: string[];
 let receipts: ReceiptLedger;
 let aborted: string[];
 let known: Set<string>;
-let control: ChannelControl & { created: ({ key: string } & Partial<AgentLaunchOptions>)[] };
+let control: ChannelControl & {
+  created: ({ key: string } & Partial<AgentLaunchOptions>)[];
+  sessionState: SessionState;
+  exchanges: { user: string; assistant?: string }[];
+};
 
-/** The panel's pull half is exercised in panel.test.ts; here it only has to exist. */
-const handoff: PanelHandoff = { unbound: () => Promise.resolve([]), continueHere: () => Promise.resolve() };
+/** The panel's pull half: empty unless a test fills `unbound`. A pick binds the
+ *  thread, as the real handoff's `conversations.set` does. */
+let unbound: SessionSummary[];
+const handoff: PanelHandoff = {
+  unbound: (limit) => Promise.resolve(unbound.slice(0, limit)),
+  continueHere: (key) => {
+    known.add(key.conversationId);
+    return Promise.resolve();
+  },
+};
 
 let eventSeq = 0;
 
@@ -197,9 +217,17 @@ function bind(): void {
 const bodyText = (card: LarkCard): string =>
   card.body.elements.flatMap((el) => (el.tag === "markdown" ? [el.content] : [])).join("\n");
 
+/** Every button label on a card, rows flattened in the order they are drawn. */
+const buttonLabels = (card: LarkCard): string[] =>
+  card.body.elements.flatMap((el) =>
+    el.tag === "column_set" ? el.columns.flatMap((c) => c.elements.map((b) => b.text.content)) : []
+  );
+
 function fakeControl() {
   const state = {
     created: [] as ({ key: string } & Partial<AgentLaunchOptions>)[],
+    sessionState: "idle" as SessionState,
+    exchanges: [] as { user: string; assistant?: string }[],
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel,
     launchFor: () => ({}),
@@ -214,7 +242,7 @@ function fakeControl() {
         ? {
           sessionId: "session-abcdef12",
           cwd: "/srv/ops",
-          state: "idle" as const,
+          state: state.sessionState,
           empty: false,
           model: state.model,
           thinking: state.thinking,
@@ -226,7 +254,7 @@ function fakeControl() {
     setModel: () => Promise.resolve(),
     setThinking: () => Promise.resolve(),
     recentDirs: () => Promise.resolve(["/srv/ops"]),
-    recent: () => Promise.resolve([]),
+    recent: () => Promise.resolve(state.exchanges),
     newSession: (key: ConversationKey, over?: Partial<AgentLaunchOptions>) => {
       state.created.push({ key: key.conversationId, ...over });
       known.add(key.conversationId);
@@ -245,6 +273,7 @@ beforeEach(async () => {
   receipts = new ReceiptLedger("lark", openDb(":memory:"));
   aborted = [];
   known = new Set();
+  unbound = [];
   control = fakeControl();
   channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
   await channel.start((msg) => inbound.push(msg));
@@ -342,6 +371,12 @@ describe("gate", () => {
     expect(client.replied[0]!.to).toBe("om_root_900");
     expect(bodyText(client.replied[0]!.card)).toBe("Reply here to continue.");
     expect(id).toBe(`${CHAT}/om_root_900`);
+  });
+
+  it("deletes the root when the in-thread card fails, leaving no orphan to reply to", async () => {
+    client.replyCard = () => Promise.reject(new Error("card too large"));
+    await expect(channel.openThread(CHAT, { title: "t", url: "" })).rejects.toThrow("card too large");
+    expect(client.deleted).toEqual(["om_root_900"]);
   });
 
   it("openThread without a public URL says so instead of linking nowhere", async () => {
@@ -764,6 +799,23 @@ describe("commands and panel", () => {
     expect(client.cards.size).toBe(before);
   });
 
+  it("`s <text>` carrying an image is an ordinary message: the panel would swallow the bytes", async () => {
+    openGates();
+    await feed(message({
+      messageType: "post",
+      messageId: "om_q_file",
+      content: JSON.stringify({
+        title: "s read this",
+        content: [[{ tag: "img", image_key: "img_k9" }]],
+      }),
+    }));
+    expect(client.replied).toEqual([]);
+    expect(inbound).toHaveLength(1);
+    const { text, paths } = splitInboundFiles(inbound[0]!.text);
+    expect(text).toBe("s read this");
+    expect(paths).toHaveLength(1);
+  });
+
   it("a tap on a card a previous process drew rebuilds the draft from its value, in place", async () => {
     openGates();
     await act({
@@ -790,6 +842,100 @@ describe("commands and panel", () => {
     });
     expect(control.created).toEqual([]);
     expect(bodyText(client.patched.at(-1)!.card)).toContain("not an absolute path");
+  });
+});
+
+describe("the panel of a thread with a session", () => {
+  const ROOT = "om_known";
+  const THREAD = `${CHAT}/${ROOT}`;
+
+  /** `/settings` inside a topic Pier already answers for. */
+  const openPanel = async (): Promise<LarkCard> => {
+    openGates();
+    known.add(THREAD);
+    await feed(message({ text: "/settings", messageId: "om_set", rootId: ROOT }));
+    return client.replied.at(-1)!.card;
+  };
+
+  it("reads the session out and offers model & reasoning, nothing else", async () => {
+    const card = await openPanel();
+    expect(bodyText(card)).toContain("**Session**");
+    expect(bodyText(card)).toContain("`session-");
+    expect(bodyText(card)).toContain("/srv/ops");
+    // No Recent above the conversation, no Close, no way to a second session.
+    expect(bodyText(card)).not.toContain("**Recent**");
+    expect(buttonLabels(card)).toEqual(["Model & reasoning"]);
+  });
+
+  it("offers Stop only while the session streams", async () => {
+    control.sessionState = "streaming";
+    expect(buttonLabels(await openPanel())).toEqual(["Model & reasoning", "⏹ Stop"]);
+  });
+});
+
+describe("the Continue picker", () => {
+  const ROOT = "om_pick";
+  const THREAD = `${CHAT}/${ROOT}`;
+  const HOUR = 3_600_000;
+
+  /** Ten unbound sessions: more than one page, so the pager has to appear. */
+  const listed = (): SessionSummary[] =>
+    Array.from({ length: 10 }, (_, i) => ({
+      id: `sess${String(i)}000000`,
+      cwd: `/srv/proj-${String(i)}`,
+      createdAt: Date.now() - (i + 1) * HOUR,
+      title: i === 0 ? "Fix the parser" : undefined,
+    }));
+
+  const tap = (key: string, messageId: string): Promise<void> =>
+    act({ messageId, chatId: CHAT, operatorId: USER, value: { key, root: ROOT } });
+
+  /** The draft panel, then its Continue web session… page. */
+  const picker = async (): Promise<{ panelId: string; card: LarkCard }> => {
+    openGates();
+    unbound = listed();
+    await feed(message({ text: "/settings", messageId: ROOT }));
+    const panelId = [...client.cards.keys()].at(-1)!;
+    await tap("cfg:sessions:0", panelId);
+    return { panelId, card: client.patched.at(-1)!.card };
+  };
+
+  it("lists eight of the unbound sessions with a pager", async () => {
+    const { card } = await picker();
+    const lines = bodyText(card).split("\n");
+    expect(lines[0]).toBe("**Continue web session** · page 1/2");
+    expect(lines).toHaveLength(9);
+    expect(lines[1]).toBe("1. Fix the parser · `proj-0` · 1h");
+    expect(lines[8]).toContain("8. proj-7");
+    expect(buttonLabels(card)).toEqual([
+      ...Array.from({ length: 8 }, (_, i) => `${String(i + 1)} ${i === 0 ? "Fix the parser" : `proj-${String(i)}`}`),
+      "Next ›",
+      "‹ Back",
+    ]);
+  });
+
+  it("pages forward to the rest", async () => {
+    const { panelId } = await picker();
+    await tap("cfg:sessions:1", panelId);
+    const card = client.patched.at(-1)!.card;
+    expect(bodyText(card).split("\n")[0]).toBe("**Continue web session** · page 2/2");
+    expect(buttonLabels(card)).toEqual(["9 proj-8", "10 proj-9", "‹ Prev", "‹ Back"]);
+  });
+
+  it("settles the card on the picked session with its Recent excerpt and no button", async () => {
+    control.exchanges = [{ user: "why is it slow?", assistant: "The parser\nrereads the file." }];
+    const { panelId } = await picker();
+    await tap("cfg:session:0", panelId);
+    const card = client.patched.at(-1)!.card;
+    const body = bodyText(card);
+    expect(known.has(THREAD)).toBe(true);
+    expect(body).toContain("**Session**");
+    expect(body).toContain("**Recent**");
+    expect(body).toContain("▸ why is it slow?");
+    // Flattened: one line each, as a phone reads it.
+    expect(body).toContain("◂ The parser rereads the file.");
+    expect(buttonLabels(card)).toEqual([]);
+    expect(body).toContain("Continuing session sess0000 — reply in this thread.");
   });
 });
 

@@ -277,8 +277,9 @@ export class SlackChannel implements Channel {
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
     // A bare `@bot` and `settings` are the same request; `s <text>` drafts a
-    // session, so only where this message would start one: a thread root.
-    const question = threadTs === ts ? settingsDraft(text) : undefined;
+    // session, so only where this message would start one: a thread root, and
+    // never one carrying files — the panel would swallow them.
+    const question = threadTs === ts && !files.length && !shares.length ? settingsDraft(text) : undefined;
     if (this.panel && (question || command?.name === "settings" || (!text && !files.length && !shares.length))) {
       return this.panel.open(here, channel, threadTs, question);
     }

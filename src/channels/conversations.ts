@@ -71,6 +71,12 @@ export class ConversationStore {
 
 }
 
+/** The backend's "no such session" (`agent/pi.ts`), also read in `web/server.ts`. */
+const UNKNOWN_SESSION = "unknown session";
+/** A note reaches the chat through `channels.notify`, which does not cut for
+ *  itself the way `Router.report` does. */
+const ERROR_CHARS = 200;
+
 /** The IM half of the router's session factory, wired in main.ts so neither
  *  core nor an adapter learns where the mapping lives. */
 export function resolveConversation<S extends { id: string }>(
@@ -87,14 +93,19 @@ export function resolveConversation<S extends { id: string }>(
   return async (key) => {
     const known = store.get(key);
     let stale: string | undefined;
+    let unwritten = false;
     let recorded: AgentLaunchOptions | undefined;
     if (known) {
       try {
         return await factory.resume(known);
       } catch (err) {
         // Never persisted, or deleted: re-route rather than fail every message.
-        stale = `${known.slice(0, 8)} is gone from disk (${String(err)})`;
+        // main.ts notifies the chat directly, so the cause is cut here.
+        stale = String(err).slice(0, ERROR_CHARS);
         recorded = store.launchOf(key);
+        // Pi writes nothing before the first reply, so a recorded session the
+        // backend never knew lost no message: that is not data loss to report.
+        unwritten = !!recorded && stale.includes(UNKNOWN_SESSION);
         store.forget(key);
       }
     }
@@ -103,9 +114,13 @@ export function resolveConversation<S extends { id: string }>(
     const session = await factory.create(launch);
     store.set(key, session.id, recorded);
     if (stale) {
-      onStale?.(key, recorded
-        ? `Session ${stale}; re-created as ${session.id.slice(0, 8)} with its own settings in ${launch.cwd}.`
-        : `Session ${stale}; this thread continues in a new session with the chat defaults in ${launch.cwd}.`);
+      const was = known!.slice(0, 8);
+      const now = session.id.slice(0, 8);
+      onStale?.(key, unwritten
+        ? `Session ${was} had no messages yet — continuing as ${now}.`
+        : recorded
+        ? `Session ${was} is gone from disk (${stale}); re-created as ${now} with its own settings in ${launch.cwd}.`
+        : `Session ${was} is gone from disk (${stale}); this thread continues in a new session with the chat defaults in ${launch.cwd}.`);
     }
     return session;
   };

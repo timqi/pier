@@ -19,7 +19,7 @@ import {
   serializeDraft,
 } from "./panel.js";
 import type { SlackBlock, SlackButton, SlackClient, SlackInteraction } from "./slack-api.js";
-import { context, escapeMrkdwn as esc, section } from "./slack-render.js";
+import { context, escapeMrkdwn as esc, section, truncate } from "./slack-render.js";
 import { chatOf } from "./types.js";
 
 const CWD_VIEW = "cfg_cwd";
@@ -46,7 +46,7 @@ interface CwdMetadata {
 const button = (b: PanelButton, value: string | undefined): SlackButton => ({
   type: "button",
   action_id: `${PANEL_PREFIX}${b.action}`,
-  text: { type: "plain_text", text: b.label, emoji: true },
+  text: { type: "plain_text", text: truncate(b.label), emoji: true },
   ...(value ? { value } : {}),
 });
 
@@ -92,15 +92,28 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
     ];
   }
 
+  /** A card that cannot be posted must not look like nothing happening: the
+   *  thread gets the reason as plain text. */
   async open(key: ConversationKey, channel: string, threadTs: string, question?: string): Promise<void> {
     const draft = holdQuestion(question);
     const state = fresh(channel, "", draft);
-    const sent = await this.deps.api.postMessage({
-      channel,
-      thread_ts: threadTs,
-      text: "Settings",
-      blocks: this.blocks(await this.view(key, state), draft),
-    });
+    let sent: { ts: string };
+    try {
+      sent = await this.deps.api.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text: "Settings",
+        blocks: this.blocks(await this.view(key, state), draft),
+      });
+    } catch (err) {
+      this.deps.log(`panel open failed: ${String(err)}`);
+      await this.deps.api.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text: `Could not open the panel: ${String(err)}`,
+      }).catch((e: unknown) => this.deps.log(`panel open failure not posted: ${String(e)}`));
+      return;
+    }
     this.remember(key, { ...state, ts: sent.ts });
   }
 

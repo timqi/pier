@@ -158,9 +158,10 @@ export function readableTitle(title: string | undefined): string | undefined {
 
 /** How a session is named where it is announced (a push, a handoff): its
  *  readable title, else its directory. Never empty — a listing that could
- *  not answer must not silence the message. */
+ *  not answer must not silence the message. One line: every caller puts it
+ *  inside emphasis or a button, where a newline breaks the markup. */
 export const sessionLabel = (s?: { title?: string; cwd: string }): string =>
-  readableTitle(s?.title) || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
+  readableTitle(s?.title)?.replace(/\s+/g, " ").trim() || s?.cwd.split("/").filter(Boolean).at(-1) || "Pier session";
 
 /** Distinct directories, newest session first: the ground `projectCwds` picks
  *  from. */

@@ -159,7 +159,21 @@ describe("IM session resolution", () => {
     expect(store.get(CHAT)).toBe(session.id);
     // The record survives the re-create: the next loss re-creates the same way.
     expect(store.launchOf(CHAT)).toEqual(launch);
+    // Pi never wrote it, so nothing was lost: the note must not read as damage.
+    expect(stale[0]).toBe(`Session never-wr had no messages yet — continuing as ${session.id.slice(0, 8)}.`);
+  });
+
+  it("a recorded session that failed to open for another reason is still reported as lost, cause cut", async () => {
+    const store = new ConversationStore(db);
+    store.set(CHAT, "was-written", { cwd: "/srv/pier" });
+    const factory = fakeFactory([]);
+    factory.resume = () => Promise.reject(new Error(`EIO ${"x".repeat(500)}`));
+    const stale: string[] = [];
+    const session = await resolveConversation(store, factory, () => ({ cwd: "/srv/ops" }), (_k, m) => stale.push(m))(CHAT);
+    expect(stale[0]).toContain(`Session was-writ is gone from disk (Error: EIO`);
     expect(stale[0]).toContain(`re-created as ${session.id.slice(0, 8)} with its own settings in /srv/pier`);
+    // channels.notify does not cut for itself the way Router.report does.
+    expect(stale[0]!.length).toBeLessThan(300);
   });
 
   it("falls back to a fresh session when Pi lost the transcript", async () => {

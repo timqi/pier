@@ -104,7 +104,7 @@ Both directions share the guards and the binding, in this order:
 | `continueHere` only: thread has no row | 409 `This thread already has a session.` |
 | session on disk | 404 `Session <id8> has no transcript yet — send it one message first.` |
 | not already bound | 409 `Already answers in <platform> · <chat name>.` |
-| `continueIn` only: post the root (`openThread`) | 502 with the platform's message; nothing written |
+| `continueIn` only: post the root (`openThread`) | 502 with the platform's message; nothing written — Lark's second card failing takes the root back down |
 | bind: `conversations.set` → attach the session when the web has it loaded → `sessions-changed` | — |
 
 Post before row: a row for a thread that does not exist is worse than a root
@@ -171,10 +171,16 @@ Directory…, Continue web session… / Start, Close.
   `{conversation, ts, draft}` in `private_metadata`; Lark's form-submit button
   carries no value, so a typed path after a restart keeps the card, not the
   earlier picks.
-- A question over 1500 UTF-8 bytes is not held (`dropped`; Slack caps a value
-  at 2000 characters, Lark a card at 30 KB, and the draft rides eleven
-  buttons): line 2 says `Your question is too long to hold — send it again
-  after Start.` and Start creates without it.
+- A question whose **serialized draft** passes 1700 characters is not held
+  (`dropped`; Slack caps a value at 2000 characters, Lark a card at 30 KB, and
+  the draft rides eleven buttons — what a button carries is the JSON, escapes
+  and the later cwd / model / reasoning included): line 2 says `Your question
+  is too long to hold — send it again after Start.` and Start creates without
+  it.
+- A message carrying files is never the draft's trigger: `s <text>` with an
+  attachment is an ordinary message, so the bytes are not swallowed by a panel.
+- A card that cannot be posted at all says so as plain text in the thread
+  (`Could not open the panel: <reason>`).
 
 **With a session.** The Session group: `<id8> · <state>` (`created, no
 message yet` before the first turn), directory, model · reasoning, context.
@@ -204,23 +210,25 @@ session… settles on carries it.
   note reads `Model set to <id> · <level>.` Nothing pinned: `No pinned models
   — Settings → Models → Model menu.`; the catalog is the Console's, not a
   chat's.
-- "Directory…" (`cfg:cwd`, draft state only) lists up to six recent
-  directories — the web New-session menu's list (`core/identity.ts`
-  `projectCwds`: distinct cwds newest first, worktrees folded into their
-  project), the chat's own default first (`ChannelControl.recentDirs`) — as numbered full
-  paths with one button each (`cfg:cwd:<i>`, label the last two segments),
+- "Directory…" (`cfg:cwd`) lists up to six recent directories — the web
+  New-session menu's list (`core/identity.ts` `projectCwds`: distinct cwds
+  newest first, worktrees folded into their project), the chat's own default
+  first (`ChannelControl.recentDirs`) — as numbered full paths with one button each (`cfg:cwd:<i>`, label the last two segments),
   then "Type a path…" (`cfg:cwdtype`) and Back. A tap sets the draft's
   directory; a thread that has a session is refused with the sentence Start
   uses. The typed answer rejects a relative path. Slack: a modal. Prefer a
   modal wherever the platform has one.
-- "Continue web session…" (`cfg:sessions:<page>`, draft state only): the 40
-  newest unbound sessions, eight a page (`‹ Prev` / `Next ›` / Back as for the
-  pins), each a numbered line — title or directory name cut at 40 characters ·
+- "Continue web session…" (`cfg:sessions:<page>`): 40 sessions in `unbound`'s
+  order ([Continue from web](#continue-from-web-and-from-a-thread-handoffts)),
+  eight a page (`‹ Prev` / `Next ›` / Back as for the pins), each a numbered line — title or directory name cut at 40 characters ·
   directory basename · age — with one button (`cfg:session:<i>`). A tap is
   `continueHere`; the note reads `Continuing session <id8> — reply in this
   thread.` and the card settles on the session. Nothing to list: `No
   unbound sessions.`; a listing that failed says so instead. A refused pick
   prints the refusal sentence.
+- Both lists and the typed path are **draft-only**: a tap on a card whose
+  thread gained a session since it was drawn is refused with the sentence Start
+  uses, before the list opens.
 - A session the panel creates has no transcript until its first reply, so
   its row carries the launch record ([Conversation identity](#conversation-identity)).
 
@@ -273,8 +281,9 @@ every model / reasoning pick (Pi writes nothing before the first reply, so
 until then the record is the session). A mapping whose session Pi no longer
 has is dropped and re-created — from that record when there is one, else from
 the chat defaults — and the thread is told which (`resolveConversation`'s
-`onStale`, wired in `main.ts`). Per-chat launch options (cwd, model, thinking)
-come from `ChannelControl.launchFor(key)` — parsing the chat id out of the
+`onStale`, wired in `main.ts`); a recorded session the backend never knew had
+no message to lose, and its note says so instead of reading as damage.
+Per-chat launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)` — parsing the chat id out of the
 conversation id is the adapter's business.
 
 ## Permission model (shared, platform-blind)

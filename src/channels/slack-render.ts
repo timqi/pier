@@ -115,7 +115,8 @@ export const context = (text: string): SlackBlock => ({
  *  echoes with the click, so a button survives a reload. */
 export const OFFER_PREFIX = "sg:";
 
-const truncate = (label: string): string =>
+/** Slack refuses a button label over BUTTON_MAX: every button, the panel's too. */
+export const truncate = (label: string): string =>
   label.length > BUTTON_MAX ? `${label.slice(0, BUTTON_MAX - 1)}\u2026` : label;
 
 /** Slack wraps buttons on its own, so there is no row packing to budget. */

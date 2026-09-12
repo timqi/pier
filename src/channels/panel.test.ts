@@ -4,9 +4,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { AgentLaunchOptions, ConversationKey, ModelRef, SessionSummary, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
-import { type ChannelControl, type ConversationStatus } from "./control.js";
+import { type ChannelControl, type ConversationStatus, HAS_SESSION } from "./control.js";
 import { HandoffError } from "./handoff.js";
-import { HAS_SESSION, type PanelHandoff, QUESTION_TOO_LONG } from "./panel.js";
+import { type PanelHandoff, QUESTION_TOO_LONG } from "./panel.js";
 import { SlackPanel } from "./slack-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
 
@@ -262,6 +262,25 @@ describe("the Recent group", () => {
 });
 
 describe("slack panel with a session", () => {
+  it("says in the thread when the card itself cannot be posted", async () => {
+    const api = new FakeSlack();
+    const post = api.postMessage;
+    let first = true;
+    api.postMessage = (payload) => {
+      if (!first) return post(payload);
+      first = false;
+      return Promise.reject(new Error("invalid_blocks"));
+    };
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000", undefined);
+    // Plain text, in the same thread: nothing that happened may look like nothing.
+    expect(api.posted).toEqual([{
+      channel: "C100",
+      thread_ts: "1717.0000",
+      text: "Could not open the panel: Error: invalid_blocks",
+    }]);
+    expect(logs).toContain("panel open failed: Error: invalid_blocks");
+  });
+
   it("reads the session out and offers one button; no channel group, no New session, no Close", async () => {
     const { api } = await opened();
     const blocks = api.posted[0]!.blocks as SlackBlock[];
@@ -495,12 +514,25 @@ describe("draft panel (no session in the thread)", () => {
     const { api, panel } = await openDraft();
     await tap(panel, "cfg:start");
     const drawn = api.updated.length;
-    await tap(panel, "cfg:cwd:1");
+    await tap(panel, "cfg:pin:99");
     expect(api.posted).toHaveLength(1);
     expect(api.updated.length).toBe(drawn + 1);
-    expect(footnote(last(api).at(-1)!)).toBe("That directory is no longer listed.");
+    expect(footnote(last(api).at(-1)!)).toBe("That model is no longer listed.");
     expect(control.newSessions).toHaveLength(1);
     expect(labels(last(api)[1]!)).toEqual(["Model & reasoning"]);
+  });
+
+  it("a draft-only page is refused on a card whose thread has since gained a session", async () => {
+    const { api, panel } = await openDraft();
+    control.current = status();
+    for (const action of ["cfg:cwd", "cfg:cwdtype", "cfg:sessions:0", "cfg:session:0"]) {
+      await tap(panel, action);
+      expect(footnote(last(api).at(-1)!)).toBe(HAS_SESSION);
+      // The with-session card is what is drawn, never a list of refused picks.
+      expect(labels(last(api)[1]!)).toEqual(["Model & reasoning"]);
+    }
+    expect(api.views).toEqual([]);
+    expect(handoff.continued).toEqual([]);
   });
 
   it("Start with a question creates, then runs the question once", async () => {
@@ -532,8 +564,17 @@ describe("draft panel (no session in the thread)", () => {
     expect(footnote(last(api).at(-1)!)).toBe("Could not start a session: Error: no such directory");
   });
 
+  it("a race the control caught is the refusal sentence alone, not a failure report", async () => {
+    const { api, panel } = await openDraft("go");
+    control.newSession = () => Promise.reject(new Error(HAS_SESSION));
+    await tap(panel, "cfg:start");
+    expect(ran).toEqual([]);
+    expect(footnote(last(api).at(-1)!)).toBe(HAS_SESSION);
+  });
+
   it("a question too long to hold is not held, and the card says so", async () => {
-    const { api, panel } = await openDraft("字".repeat(600));
+    // Measured as the button carries it: 900 quotes are 1808 serialized characters.
+    const { api, panel } = await openDraft('"'.repeat(900));
     const blocks = api.posted[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain(QUESTION_TOO_LONG);
     expect(values(blocks)).toEqual(Array<unknown>(5).fill({ dropped: true }));
@@ -541,6 +582,30 @@ describe("draft panel (no session in the thread)", () => {
     expect(control.newSessions).toEqual([{}]);
     expect(ran).toEqual([]);
     expect(footnote(last(api).at(-1)!)).toBe("Started abcdef01 in /srv/ops.");
+  });
+
+  it("a held question keeps every button value inside Slack's 2000 characters, picks included", async () => {
+    // Quotes double under JSON: what the user typed is not what the button carries.
+    const { api, panel } = await openDraft('"'.repeat(840));
+    expect(text((api.posted[0]!.blocks as SlackBlock[])[0]!)).not.toContain(QUESTION_TOO_LONG);
+    await tap(panel, "cfg:pin:2");
+    await tap(panel, "cfg:cwd");
+    await tap(panel, "cfg:cwd:0");
+    const carried = (last(api).filter((b) => b.type === "actions") as { elements: { value?: string }[] }[])
+      .flatMap((b) => b.elements.map((e) => e.value ?? ""));
+    expect(carried.length).toBeGreaterThan(0);
+    expect(Math.max(...carried.map((v) => v.length))).toBeLessThanOrEqual(2000);
+    expect(JSON.parse(carried[0]!)).toMatchObject({ q: '"'.repeat(840), cwd: "/home/qiqi/code/dev/pier" });
+  });
+
+  it("truncates a button label Slack would refuse", async () => {
+    control.current = null;
+    control.dirs = [`/srv/${"deep-".repeat(20)}project`];
+    const { api, panel } = await opened();
+    await tap(panel, "cfg:cwd");
+    const picks = labels(last(api)[1]!);
+    expect(picks[0]!.length).toBe(75);
+    expect(picks[0]!.endsWith("\u2026")).toBe(true);
   });
 
   it("Continue web session… discards the draft", async () => {

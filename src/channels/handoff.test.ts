@@ -184,6 +184,13 @@ describe("continueIn", () => {
     expect(opened[0]!.note.title).toBe("fix it");
   });
 
+  it("a multi-line title is announced on one line", async () => {
+    // The root wraps it in `*…*` / `**…**`: a newline inside breaks the markup.
+    onDisk.set("s4", { id: "s4", cwd: "/srv/parser", createdAt: 1, title: "fix the parser\nthen the tests" });
+    await handoff().continueIn({ sessionId: "s4", ...SLACK_OPS });
+    expect(opened[0]!.note.title).toBe("fix the parser then the tests");
+  });
+
   it("no public URL → empty link", async () => {
     publicUrl = "";
     await handoff().continueIn({ sessionId: "s1", ...SLACK_OPS });

@@ -15,7 +15,7 @@ import {
   type SessionSummary,
   type ThinkingLevel,
 } from "../core/types.js";
-import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
+import { type ChannelControl, type ConversationStatus, HAS_SESSION, NO_SESSION } from "./control.js";
 import { type Handoff, HandoffError } from "./handoff.js";
 
 export const PANEL_PREFIX = "cfg:";
@@ -28,16 +28,20 @@ const QUESTION_CHARS = 80;
  *  these stay far inside Slack's 3000-character section. */
 const RECENT_EXCHANGES = 2;
 const EXCERPT_CHARS = 150;
-/** UTF-8 bytes: Slack caps a button value at 2000 characters and Lark a card
- *  at 30 KB, and a picker page carries the draft on eleven buttons. */
-const QUESTION_BYTES = 1500;
+/** Characters of the serialized draft — what a button actually carries. Slack
+ *  caps a value at 2000 and Lark a card at 30 KB; the rest of the 2000 is room
+ *  for the cwd, model and reasoning a pick adds after the question. */
+const DRAFT_CHARS = 1700;
+
+/** Pages whose every pick Pi's fixed-at-creation cwd or the row would refuse:
+ *  reachable only by tapping a card that gained a session since it was drawn. */
+const DRAFT_ONLY = new Set(["cwd", "cwdtype", "sessions", "session"]);
 
 /** The pull half of the handoff; the push half never needs a panel. */
 export type PanelHandoff = Pick<Handoff, "unbound" | "continueHere">;
 
 export const CWD_DRAFT_TAIL = "Start creates the session there.";
 export const CWD_PLACEHOLDER = "/path/to/project";
-export const HAS_SESSION = "This thread already has a session — send your question as a message.";
 export const QUESTION_TOO_LONG = "Your question is too long to hold — send it again after Start.";
 
 export interface PanelButton {
@@ -130,22 +134,23 @@ const pager = (action: string, at: number, pages: number): PanelButton[] => [
   btn("‹ Back", "panel"),
 ];
 
-/** A refusal's sentence (NO_SESSION, a HandoffError) is the whole answer; any
- *  other failure names what was attempted. */
+/** A refusal's sentence (a control refusal, a HandoffError) is the whole
+ *  answer; any other failure names what was attempted. */
 const failed = (what: string, err: unknown): string =>
-  err instanceof HandoffError || (err instanceof Error && err.message === NO_SESSION)
+  err instanceof HandoffError || (err instanceof Error && (err.message === NO_SESSION || err.message === HAS_SESSION))
     ? err.message
     : `${what}: ${String(err)}`;
-
-/** The question, or the fact that it was too long. */
-export const holdQuestion = (q: string | undefined): PanelDraft => {
-  if (!q) return {};
-  return new TextEncoder().encode(q).length > QUESTION_BYTES ? { dropped: true } : { q };
-};
 
 /** `undefined` when there is nothing to carry, so a with-session panel's buttons stay bare. */
 export const serializeDraft = (draft: PanelDraft): string | undefined =>
   Object.keys(draft).length ? JSON.stringify(draft) : undefined;
+
+/** The question, or the fact that it was too long — measured as the button
+ *  carries it, escapes included, not as the bytes the user typed. */
+export const holdQuestion = (q: string | undefined): PanelDraft => {
+  if (!q) return {};
+  return (serializeDraft({ q }) ?? "").length > DRAFT_CHARS ? { dropped: true } : { q };
+};
 
 /** A platform echoed this; only the fields the draft knows, each type-checked. */
 export const readDraft = (raw: unknown): PanelDraft => {
@@ -311,6 +316,10 @@ export abstract class ChatPanel<S extends PanelState, C> {
     if (!state) {
       state = recover();
       this.remember(key, state);
+    }
+    if (DRAFT_ONLY.has(action) && this.deps.control.knows(key)) {
+      await this.refresh(key, HAS_SESSION);
+      return true;
     }
 
     switch (action) {
