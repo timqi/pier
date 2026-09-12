@@ -18,7 +18,7 @@ import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
-import { parseCommand, SETTINGS_WORDS } from "./commands.js";
+import { parseCommand, settingsDraft } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -55,9 +55,8 @@ const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
 
 /** Bare words with exact arity, since there is no leading `/` to key on: "stop
- *  the deploy and tell me why" is a sentence for the agent, not an abort. The
- *  settings words take any text (the question); `s` only with some. */
-const BARE_COMMANDS = new Map<string, number>([["stop", 0], ["bind", 1]]);
+ *  the deploy and tell me why" is a sentence for the agent, not an abort. */
+const BARE_COMMANDS = new Map<string, number>([["stop", 0], ["settings", 0], ["bind", 1]]);
 
 /** The only definition of the conversation id format; control.ts decodes with it. */
 const conversationId = (channel: string, threadTs: string): string => `${channel}/${threadTs}`;
@@ -99,15 +98,11 @@ interface SlackCommand {
 function slackCommand(text: string): SlackCommand | undefined {
   const slash = parseCommand(text);
   if (slash) return { name: slash.name, args: slash.args };
-  const trimmed = text.trim();
-  const words = trimmed.split(/\s+/).filter(Boolean);
+  const words = text.trim().split(/\s+/).filter(Boolean);
   const name = words[0]?.toLowerCase() ?? "";
-  // Args verbatim, as parseCommand keeps them: a question is a sentence.
-  const args = trimmed.slice(name.length).trim();
-  if (SETTINGS_WORDS.has(name)) return name === "s" && !args ? undefined : { name, args };
   const arity = BARE_COMMANDS.get(name);
   if (arity === undefined || words.length - 1 !== arity) return undefined;
-  return { name, args };
+  return { name, args: words.slice(1).join(" ") };
 }
 
 export interface SlackDeps {
@@ -281,11 +276,14 @@ export class SlackChannel implements Channel {
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
-    // A bare `@bot` and `settings` are the same request; `settings <text>` adds the question.
-    if (this.panel && command && SETTINGS_WORDS.has(command.name)) {
-      return this.panel.open(here, channel, threadTs, command.args || undefined);
+    // A bare `@bot` and `settings` are the same request.
+    if (this.panel && (command?.name === "settings" || (!text && !files.length && !shares.length))) {
+      return this.panel.open(here, channel, threadTs);
     }
-    if (this.panel && !text && !files.length && !shares.length) return this.panel.open(here, channel, threadTs);
+    // Configure-first: only on a thread root, where the session it drafts is
+    // the one this thread will have. Inside a thread it is prose.
+    const question = threadTs === ts ? settingsDraft(text) : undefined;
+    if (this.panel && question) return this.panel.open(here, channel, threadTs, question);
 
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.

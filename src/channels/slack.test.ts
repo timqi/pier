@@ -1057,26 +1057,30 @@ describe("commands", () => {
     expect(inbound).toEqual([]);
   });
 
-  it("`s`, `set`, `setting`, `settings` followed by text open the panel with that question", async () => {
+  it("`s <text>` on a thread root opens the panel with that question", async () => {
     openGates();
     await feed(message({ text: `<@${ME}> s   what is  new?`, ts: "1720.000100" }));
-    await feed(message({ text: "Set the timer", ts: "1721.000100" }));
-    await feed(message({ text: "setting up", ts: "1722.000100" }));
-    await feed(message({ text: "settings", ts: "1723.000100" }));
     expect(inbound).toEqual([]);
-    expect(client.sent).toHaveLength(4);
+    expect(client.sent).toHaveLength(1);
     // Verbatim: the question keeps its own spacing.
     expect(JSON.stringify(client.sent[0]!.blocks)).toContain("▸ what is new?");
     expect(JSON.stringify(client.sent[0]!.blocks)).toContain("\\\"q\\\":\\\"what is  new?\\\"");
-    expect(JSON.stringify(client.sent[1]!.blocks)).toContain("▸ the timer");
-    expect(JSON.stringify(client.sent[2]!.blocks)).toContain("▸ up");
-    expect(JSON.stringify(client.sent[3]!.blocks)).not.toContain("▸");
   });
 
-  it("a bare `s` is a message, not a command", async () => {
+  it("inside a thread `s <text>` is an ordinary message", async () => {
+    openGates();
+    await feed(message({ text: `<@${ME}> s review the parser`, ts: "1721.000200", thread_ts: "1721.000100" }));
+    expect(inbound.map((m) => m.text)).toEqual(["s review the parser"]);
+    expect(client.sent).toEqual([]);
+  });
+
+  it("a bare `s`, and the other settings words with text, are messages", async () => {
     openGates();
     await feed(message({ text: "s", ts: "1724.000100" }));
-    expect(inbound.map((m) => m.text)).toEqual(["s"]);
+    await feed(message({ text: "set the timer", ts: "1725.000100" }));
+    await feed(message({ text: "setting up", ts: "1726.000100" }));
+    await feed(message({ text: "settings are broken, please help", ts: "1727.000100" }));
+    expect(inbound.map((m) => m.text)).toEqual(["s", "set the timer", "setting up", "settings are broken, please help"]);
     expect(client.sent).toEqual([]);
   });
 });
@@ -1109,7 +1113,7 @@ describe("settings panel", () => {
 
   it("Start creates with the draft and runs the question as the clicker's message, 👀 on the card", async () => {
     openGates();
-    await feed(message({ text: `<@${ME}> set review the parser`, ts: "1710.000100" }));
+    await feed(message({ text: `<@${ME}> s review the parser`, ts: "1710.000100" }));
     expect(client.sent).toHaveLength(1);
     const panelTs = "900.000100"; // the fake's first post
     await feed(click("cfg:pin:1"));

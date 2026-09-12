@@ -20,7 +20,7 @@ import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
-import { parseCommand, SETTINGS_WORDS } from "./commands.js";
+import { parseCommand, settingsDraft } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -227,11 +227,14 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    // A bare `@bot` and `/settings` are the same request; `/settings <text>` adds the question.
-    if (this.panel && command && SETTINGS_WORDS.has(command.name)) {
-      return this.panel.open(here, msg.chatId, root, command.args || undefined);
+    // A bare `@bot` and `/settings` are the same request.
+    if (this.panel && (command?.name === "settings" || (!text && !attachments.length && mentioned))) {
+      return this.panel.open(here, msg.chatId, root);
     }
-    if (this.panel && !text && !attachments.length && mentioned) return this.panel.open(here, msg.chatId, root);
+    // Configure-first: only outside an existing topic, where the session it
+    // drafts is the one this topic will have. Inside one it is prose.
+    const question = msg.rootId ? undefined : settingsDraft(text);
+    if (this.panel && question) return this.panel.open(here, msg.chatId, root, question);
 
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.

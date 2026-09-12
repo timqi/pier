@@ -61,14 +61,15 @@ truth.
 - `/settings` — or an addressed message with no text at all (a bare mention,
   an empty DM) — opens a panel. In a thread with no session yet it is a
   draft: directory, model & reasoning (the operator's pinned models, one pick
-  setting both), and Start creates the session with them. `/settings <text>`
-  (also `/s`, `/set`, `/setting`) carries the text as a pending question:
-  Start creates the session and runs it as the tapper's first message. In a
+  setting both), and Start creates the session with them. `s <text>` — on
+  Slack and Lark alike, only as the first message of a thread (Lark also
+  `/s <text>`) — opens that panel with the text as a pending question: Start
+  creates the session and runs it as the tapper's first message. In a
   thread with a session the panel reads it out; "New session in…" offers the
   recent session directories as buttons and a typed path, and creates on the
   tap, the thread's next message running there; Stop while a turn runs.
-  Slack takes the same words bare: `stop`, `settings <text>`, `bind <code>`;
-  a bare `s` is a message.
+  Slack takes the same words bare: `stop`, `settings`, `bind <code>`. A bare
+  `s`, and `s <text>` inside a thread, are ordinary messages.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
 - The panel reads the thread's real session, resuming an idle one; in a thread

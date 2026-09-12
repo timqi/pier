@@ -9,6 +9,7 @@ import {
   CWD_DRAFT_TAIL,
   CWD_PLACEHOLDER,
   CWD_TAIL,
+  holdQuestion,
   PANEL_PREFIX,
   type PanelButton,
   type PanelDeps,
@@ -93,13 +94,13 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
   }
 
   async open(key: ConversationKey, channel: string, threadTs: string, question?: string): Promise<void> {
-    const { draft, note } = this.opening(key, question);
+    const draft = holdQuestion(question);
     const state = fresh(channel, "", draft);
     const sent = await this.deps.api.postMessage({
       channel,
       thread_ts: threadTs,
       text: "Settings",
-      blocks: this.blocks(await this.view(key, state), draft, note),
+      blocks: this.blocks(await this.view(key, state), draft),
     });
     this.remember(key, { ...state, ts: sent.ts });
   }

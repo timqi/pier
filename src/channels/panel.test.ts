@@ -198,14 +198,6 @@ describe("slack panel with a session", () => {
     expect(text(blocks[0]!)).toContain("Context: empty — the first message you send runs here.");
   });
 
-  it("a question where a session already answers is not carried, and the card says so", async () => {
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000", "what is the plan?");
-    const blocks = api.posted[0]!.blocks as SlackBlock[];
-    expect(footnote(blocks.at(-1)!)).toBe(HAS_SESSION);
-    expect(JSON.stringify(blocks)).not.toContain("what is the plan?");
-  });
-
   it("lists the operator's pins eight a page, the current model and level ticked", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);

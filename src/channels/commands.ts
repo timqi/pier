@@ -8,8 +8,12 @@ export interface Command {
   args: string;
 }
 
-/** One request, four spellings; the text after it is the panel's pending question. */
-export const SETTINGS_WORDS = new Set(["s", "set", "setting", "settings"]);
+/** The configure-first trigger, one spelling on both platforms: `s <text>`
+ *  (Lark also `/s <text>`), the text being the panel's pending question. A bare
+ *  `s` carries no question and is prose. */
+export function settingsDraft(text: string): string | undefined {
+  return /^\/?s[ \t]+(\S[\s\S]*)$/i.exec(text.trim())?.[1];
+}
 
 export function parseCommand(text: string): Command | null {
   const trimmed = text.trim();

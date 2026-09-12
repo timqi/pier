@@ -128,7 +128,7 @@ const failed = (what: string, err: unknown): string =>
   err instanceof Error && err.message === NO_SESSION ? NO_SESSION : `${what}: ${String(err)}`;
 
 /** The question, or the fact that it was too long. */
-const holdQuestion = (q: string | undefined): PanelDraft => {
+export const holdQuestion = (q: string | undefined): PanelDraft => {
   if (!q) return {};
   return new TextEncoder().encode(q).length > QUESTION_BYTES ? { dropped: true } : { q };
 };
@@ -181,13 +181,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   protected state(key: ConversationKey): S | undefined {
     return this.panels.get(key.conversationId);
-  }
-
-  /** The draft a trigger opens with. A question where a session already
-   *  answers is not carried, and the card says so. */
-  protected opening(key: ConversationKey, question: string | undefined): { draft: PanelDraft; note?: string } {
-    if (question && this.deps.control.knows(key)) return { draft: {}, note: HAS_SESSION };
-    return { draft: holdQuestion(question) };
   }
 
   // --- rendering ---------------------------------------------------------------

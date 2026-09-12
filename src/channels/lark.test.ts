@@ -751,6 +751,18 @@ describe("commands and panel", () => {
     expect(bodyText(client.patched.at(-1)!.card)).toContain("running your question");
   });
 
+  it("bare `s <text>` on a topic root triggers too; inside a topic, and bare `s`, are messages", async () => {
+    openGates();
+    await feed(message({ text: "s review the parser", messageId: "om_bare_q" }));
+    expect(inbound).toEqual([]);
+    expect(bodyText(client.cards.get([...client.cards.keys()].at(-1)!)!)).toContain("▸ review the parser");
+    const before = client.cards.size;
+    await feed(message({ text: "s review the parser", messageId: "om_in_topic", rootId: "om_1" }));
+    await feed(message({ text: "s", messageId: "om_bare_s" }));
+    expect(inbound.map((m) => m.text)).toEqual(["s review the parser", "s"]);
+    expect(client.cards.size).toBe(before);
+  });
+
   it("a tap on a card a previous process drew rebuilds the draft from its value, in place", async () => {
     openGates();
     await act({

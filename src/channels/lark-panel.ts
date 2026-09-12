@@ -19,6 +19,7 @@ import {
   CWD_DRAFT_TAIL,
   CWD_PLACEHOLDER,
   CWD_TAIL,
+  holdQuestion,
   PANEL_PREFIX,
   type PanelButton,
   type PanelDeps,
@@ -77,9 +78,8 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
   }
 
   async open(key: ConversationKey, chatId: string, root: string, question?: string): Promise<void> {
-    const { draft, note } = this.opening(key, question);
-    const state = fresh(chatId, root, "", draft);
-    const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, state), state, note));
+    const state = fresh(chatId, root, "", holdQuestion(question));
+    const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, state), state));
     this.remember(key, { ...state, messageId: sent.messageId });
   }
 

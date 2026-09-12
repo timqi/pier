@@ -33,9 +33,10 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
 
-Command spelling is per-platform: Lark takes `/stop`, `/settings [question]`,
-`/bind <code>`; Slack the same words without the slash. `/s`, `/set` and
-`/setting` spell `/settings`; a bare `s` is a message.
+Command spelling is per-platform: Lark takes `/stop`, `/settings`,
+`/bind <code>`; Slack the same words without the slash. The draft trigger is
+the same on both: `s <text>` (Lark `/s <text>` too), and nothing else — a bare
+`s`, `set x`, `settings x` are messages.
 
 ### Deliberately not features
 
@@ -138,10 +139,11 @@ sidebar's rule), newest first.
 ## The in-chat panel
 
 `@bot` on its own (empty text once the mention is stripped) and `settings` are
-the same request; `settings <text>` (`s`, `set`, `setting` too —
-`SETTINGS_WORDS`, `commands.ts`) adds the text as the *pending question*. A
-bare `s` is a message. The panel has two states, decided by the thread's row
-(`ChannelControl.knows`).
+the same request. `s <text>` (`settingsDraft`, `commands.ts`) opens it with the
+text as the *pending question*, and only on a **thread root** — a Slack message
+with no other `thread_ts`, a Lark message with no `root_id` — since that is
+where the session it drafts would be created; inside a thread it is prose. The
+panel has two states, decided by the thread's row (`ChannelControl.knows`).
 
 - One message, edited in place.
 - Panel buttons are `cfg:<action>[:<arg>]`, consumed by the panel; any other
@@ -163,9 +165,7 @@ Directory…, Continue web session… / Start, Close.
   on the card. The panel redraws with the session: `Started <id8> in <cwd>.`
   or `Started <id8> — running your question.` A row that appeared meanwhile
   (a message raced the tap) is not replaced: `This thread already has a
-  session — send your question as a message.` — the same sentence a
-  `settings <text>` in a thread with a session opens with, its question not
-  carried.
+  session — send your question as a message.`
 - Continue web session… binds an existing session; the draft is discarded.
 - **The card is the store.** In-memory `PanelState` is primary; every button's
   value (Slack `value`, Lark `LarkActionValue.draft`) carries the serialized
@@ -293,8 +293,9 @@ launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
 `parseCommand()` (`commands.ts`): trim both ends, require a leading `/`,
 lowercase the name, keep args **verbatim**. Slack never delivers an
 unregistered `/`, so its adapter matches bare words: a closed set with an exact
-argument count (`stop` none, `bind` one), anything longer being prose — except
-the settings words, whose text is the question (`s` only with some).
+argument count (`stop`/`settings` none, `bind` one); anything longer is prose.
+`settingsDraft()` is the one exception, shared with Lark so the operator types
+the same `s <text>` on both.
 
 ## Inbound checklist for a new adapter
 
@@ -399,8 +400,8 @@ Answer these first.
   redelivers anything unacked past the deadline.
 - **Read methods take form encoding**, not JSON (`SlackApi.read`).
 - **Commands have no slash** — the client intercepts unregistered `/`. `stop`,
-  `bind <code>` are bare words matched as the *whole* message with an exact
-  arity; `settings [question]` takes the rest of the message.
+  `settings`, `bind <code>` are bare words matched as the *whole* message with
+  an exact arity.
 - **`app_mention` duplicates `message.channels`** with its own `event_id`;
   ignored at the source.
 - **A forwarded message hides in `attachments`** (`is_share`, `author_id`,
