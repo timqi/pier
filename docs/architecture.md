@@ -41,7 +41,7 @@ src/
                language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
-               panel, runtime, routes, handoff (web → IM: the one binding of a
+               panel, runtime, routes, handoff (web ↔ IM: the one binding of a
                session to a thread it did not create); per platform: slack / lark
                (+ -api, -render, -panel; slack also -outbound, -directory,
                -thread, -cli (`pier slack`) and -transcript (the one

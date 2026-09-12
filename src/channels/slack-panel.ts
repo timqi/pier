@@ -70,7 +70,7 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
       text: "Settings",
       blocks: this.blocks(await this.view(key, channel)),
     });
-    this.remember(key, { chatId: channel, threadTs, ts: sent.ts, models: [], dirs: [] });
+    this.remember(key, { chatId: channel, threadTs, ts: sent.ts, models: [], dirs: [], sessions: [] });
   }
 
   protected async draw(state: SlackPanelState, view: PanelView, note?: string): Promise<void> {

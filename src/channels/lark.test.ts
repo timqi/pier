@@ -10,6 +10,7 @@ import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
+import type { PanelHandoff } from "./panel.js";
 import { LarkChannel } from "./lark.js";
 import type {
   LarkCard,
@@ -132,6 +133,9 @@ let aborted: string[];
 let known: Set<string>;
 let control: ChannelControl & { created: { key: string; cwd?: string }[] };
 
+/** The panel's pull half is exercised in panel.test.ts; here it only has to exist. */
+const handoff: PanelHandoff = { unbound: () => Promise.resolve([]), continueHere: () => Promise.resolve() };
+
 let eventSeq = 0;
 
 /** One `im.message.receive_v1` event, text unless overridden. */
@@ -238,7 +242,7 @@ beforeEach(async () => {
   aborted = [];
   known = new Set();
   control = fakeControl();
-  channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
+  channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -508,7 +512,7 @@ describe("receipts", () => {
     // owner, so start() must sweep it.
     receipts.add({ conversationId: `${CHAT}/om_old`, chatId: CHAT, messageId: "om_old" });
     const fresh = new FakeClient();
-    const revived = new LarkChannel({ store, client: fresh, receipts, log: () => {}, control });
+    const revived = new LarkChannel({ store, client: fresh, receipts, log: () => {}, control, handoff });
     await revived.start(() => {});
     await new Promise((r) => setTimeout(r, 10));
     expect(fresh.reactions).toEqual([{ messageId: "om_old", emoji: "OnIt", add: false }]);
@@ -628,7 +632,7 @@ describe("next-step buttons", () => {
   it("a click on a card sent before this process still works; the row just stays", async () => {
     const offerId = await offer();
     // A fresh adapter (a restart): the retire cache is empty, the value is not.
-    const fresh = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
+    const fresh = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
     await fresh.start((msg) => inbound.push(msg));
     client.handlers.onCardAction({
       messageId: offerId,

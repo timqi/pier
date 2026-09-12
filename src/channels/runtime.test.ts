@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Router } from "../core/router.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
+import type { PanelHandoff } from "./panel.js";
 import { ChannelRuntime } from "./runtime.js";
 
 // Fake adapters: the runtime's contract with them is start/stop only.
@@ -48,7 +49,7 @@ function runtime(config: Record<string, unknown>, log: (m: string) => void = () 
     },
   } as unknown as ChannelStore;
   const router = { registerChannel: vi.fn(), dispatch: vi.fn() } as unknown as Router;
-  return new ChannelRuntime(store, router, {} as ChannelControl, log);
+  return new ChannelRuntime(store, router, {} as ChannelControl, {} as PanelHandoff, log);
 }
 
 describe("ChannelRuntime", () => {

@@ -28,6 +28,8 @@ beforeEach(() => {
   handoffs = [];
   refuse = undefined;
   registerChannelRoutes(app, store, runtime, {
+    unbound: () => Promise.resolve([]),
+    continueHere: () => Promise.resolve(),
     targets: () => TARGETS,
     continueIn: (req) => {
       handoffs.push(req);

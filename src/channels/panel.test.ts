@@ -3,9 +3,11 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import type { AgentLaunchOptions, ConversationKey, ModelRef } from "../core/types.js";
+import type { AgentLaunchOptions, ConversationKey, ModelRef, SessionSummary } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
+import { HandoffError } from "./handoff.js";
+import type { PanelHandoff } from "./panel.js";
 import { SlackPanel } from "./slack-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
 
@@ -56,8 +58,32 @@ class FakeControl implements ChannelControl {
     this.dirs instanceof Error ? Promise.reject(this.dirs) : Promise.resolve(this.dirs);
 }
 
+const HOUR = 3_600_000;
+const SESSIONS: SessionSummary[] = Array.from({ length: 10 }, (_, i) => ({
+  id: `sess${String(i)}0000000000`,
+  cwd: `/srv/proj-${String(i)}`,
+  createdAt: Date.now() - (i + 1) * HOUR,
+  modified: Date.now() - (i + 1) * HOUR,
+  title: i === 0 ? "Fix the parser so that the benchmark suite passes again" : undefined,
+}));
+
+class FakeHandoff implements PanelHandoff {
+  sessions: SessionSummary[] | Error = SESSIONS;
+  refuse: Error | undefined;
+  readonly continued: [ConversationKey, string][] = [];
+  unbound = (limit: number): Promise<SessionSummary[]> =>
+    this.sessions instanceof Error ? Promise.reject(this.sessions) : Promise.resolve(this.sessions.slice(0, limit));
+  continueHere = (key: ConversationKey, sessionId: string): Promise<void> => {
+    if (this.refuse) return Promise.reject(this.refuse);
+    this.continued.push([key, sessionId]);
+    control.current = status({ sessionId, cwd: "/srv/proj-0" });
+    return Promise.resolve();
+  };
+}
+
 let store: ChannelStore;
 let control: FakeControl;
+let handoff: FakeHandoff;
 let logs: string[];
 
 beforeEach(() => {
@@ -65,6 +91,7 @@ beforeEach(() => {
   store = new ChannelStore(openDb(":memory:"), { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
   store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
   control = new FakeControl();
+  handoff = new FakeHandoff();
   logs = [];
 });
 
@@ -99,6 +126,7 @@ const slackPanel = (api: FakeSlack): SlackPanel =>
       "postMessage" | "updateMessage" | "deleteMessage" | "openView"
     >,
     control,
+    handoff,
     store,
     log: (m) => logs.push(m),
   });
@@ -134,6 +162,16 @@ describe("slack panel", () => {
     expect(text(blocks[0]!)).toContain("None in this thread yet");
     expect(text(blocks[0]!)).toContain("New session in…");
     expect(text(blocks[1]!)).toContain("New sessions start in `/srv/ops` · model-1 · reasoning medium");
+  });
+
+  it("offers Continue web session… only while the thread has no session", async () => {
+    const api = new FakeSlack();
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    expect(labels((api.posted[0]!.blocks as SlackBlock[])[3]!)).toEqual(["New session", "New session in…"]);
+    control.current = null;
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    expect(labels((api.posted[1]!.blocks as SlackBlock[])[3]!))
+      .toEqual(["New session", "New session in…", "Continue web session…"]);
   });
 
   it("no session and no chat config: the defaults line still says what would happen", async () => {
@@ -267,3 +305,90 @@ describe("slack panel", () => {
     expect(await panel.onViewSubmission(other)).toBe(false);
   });
 });
+
+describe("continue web session picker", () => {
+  const openPicker = async (page = "0"): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
+    control.current = null;
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, `cfg:sessions:${page}`);
+    return { api, panel };
+  };
+
+  it("lists eight per page: title or directory, basename, age; picks by index", async () => {
+    const { api } = await openPicker();
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("*Continue web session* · page 1/2");
+    expect(text(blocks[0]!)).toContain("1. Fix the parser so that the benchmark su… · `proj-0` · 1h");
+    expect(text(blocks[0]!)).toContain("2. proj-1 · `proj-1` · 2h");
+    expect(text(blocks[0]!)).toContain("8. proj-7 · `proj-7` · 8h");
+    expect(text(blocks[0]!)).not.toContain("9. ");
+    const picks = labels(blocks[1]!);
+    expect(picks).toHaveLength(8);
+    expect(picks[0]).toBe("1 Fix the parser so that the benchmark su…");
+    expect(picks[7]).toBe("8 proj-7");
+    expect(labels(blocks[2]!)).toEqual(["Next ›", "‹ Back"]);
+  });
+
+  it("pages: the second page continues the numbering and offers Prev", async () => {
+    const { api } = await openPicker("1");
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("page 2/2");
+    expect(text(blocks[0]!)).toContain("9. proj-8");
+    expect(labels(blocks[1]!)).toEqual(["9 proj-8", "10 proj-9"]);
+    expect(labels(blocks[2]!)).toEqual(["‹ Prev", "‹ Back"]);
+  });
+
+  it("a pick binds this thread through the handoff and the panel shows the session", async () => {
+    const { api, panel } = await openPicker("1");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:9");
+    expect(handoff.continued).toEqual([[SLACK_KEY, "sess90000000000"]]);
+    expect(control.newSessions).toEqual([]);
+    const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
+    expect(footnote(blocks.at(-1)!)).toBe("Continuing session sess9000 — reply in this thread.");
+    expect(text(blocks[0]!)).toContain("`sess9000` · idle");
+    expect(labels(blocks[3]!)).toEqual(["New session", "New session in…"]);
+  });
+
+  it("an empty list says so and offers only Back", async () => {
+    handoff.sessions = [];
+    const { api } = await openPicker();
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("No unbound sessions.");
+    expect(blocks).toHaveLength(2);
+    expect(labels(blocks[1]!)).toEqual(["‹ Back"]);
+  });
+
+  it("a listing that fails is not drawn as empty", async () => {
+    handoff.sessions = new Error("disk");
+    const { api } = await openPicker();
+    expect(text((api.updated[0]!.blocks as SlackBlock[])[0]!)).toContain("Could not list sessions: Error: disk");
+    expect(logs).toContain("Could not list sessions: Error: disk");
+  });
+
+  it("a pick that lost the race prints the guard's refusal, never silence", async () => {
+    handoff.refuse = new HandoffError(409, "Already answers in lark · DM · Qi.");
+    const { api, panel } = await openPicker();
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:0");
+    const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
+    expect(footnote(blocks.at(-1)!)).toBe("Already answers in lark · DM · Qi.");
+    expect(text(blocks[0]!)).toContain("None in this thread yet");
+  });
+
+  it("a failure that is not a refusal names what was attempted", async () => {
+    handoff.refuse = new Error("SQLITE_BUSY");
+    const { api, panel } = await openPicker();
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:0");
+    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!))
+      .toBe("Could not continue that session: Error: SQLITE_BUSY");
+  });
+
+  it("a stale index is refused, not misfiled", async () => {
+    const { api, panel } = await openPicker();
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:session:42");
+    expect(handoff.continued).toEqual([]);
+    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("That session is no longer listed.");
+  });
+});
+

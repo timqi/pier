@@ -35,7 +35,7 @@ import {
 import { LarkOutbound } from "./lark-outbound.js";
 import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
 import { card, markdown, OFFER_PREFIX } from "./lark-render.js";
-import { PANEL_PREFIX } from "./panel.js";
+import { PANEL_PREFIX, type PanelHandoff } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
 import type { HandoffNote } from "./types.js";
 
@@ -77,6 +77,8 @@ export interface LarkDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `/stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
+  /** With `control`: the panel's "Continue web session…". */
+  handoff?: PanelHandoff;
 }
 
 export class LarkChannel implements Channel {
@@ -120,10 +122,11 @@ export class LarkChannel implements Channel {
       WORKING,
       RECEIPT_STALE_MS,
     );
-    if (deps.control) {
+    if (deps.control && deps.handoff) {
       this.panel = new LarkPanel({
         api: this.api,
         control: deps.control,
+        handoff: deps.handoff,
         store: deps.store,
         log: this.log,
       });

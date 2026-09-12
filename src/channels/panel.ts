@@ -2,14 +2,22 @@
 // every payload namespaced `cfg:` so a tap never reaches the agent. Choices
 // travel as an index: platform callback payloads are small and opaque.
 
+import { sessionLabel } from "../core/identity.js";
 import { compact, thinkingLabel } from "../core/reply.js";
-import type { ConversationKey, ModelRef, ThinkingLevel } from "../core/types.js";
+import type { ConversationKey, ModelRef, SessionSummary, ThinkingLevel } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
 import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
+import { type Handoff, HandoffError } from "./handoff.js";
 import type { ChannelPlatform, ChatConfig, ChatPolicy } from "./types.js";
 
 export const PANEL_PREFIX = "cfg:";
-const MODELS_PER_PAGE = 8;
+const PER_PAGE = 8;
+/** The picker's reach: five pages of the newest unbound sessions. */
+const SESSIONS_LISTED = 40;
+const TITLE_CHARS = 40;
+
+/** The pull half of the handoff; the push half never needs a panel. */
+export type PanelHandoff = Pick<Handoff, "unbound" | "continueHere">;
 
 export const CWD_TAIL = "The session is created there at once; the first message you send in this thread runs in it.";
 export const CWD_PLACEHOLDER = "/path/to/project";
@@ -40,6 +48,7 @@ export interface PanelView {
 
 export interface PanelDeps {
   control: ChannelControl;
+  handoff: PanelHandoff;
   store: ChannelStore;
   log(message: string): void;
 }
@@ -49,6 +58,7 @@ export interface PanelState {
   /** The lists the payloads' indices point into. */
   models: ModelRef[];
   dirs: string[];
+  sessions: SessionSummary[];
 }
 
 const btn = (label: string, action: string): PanelButton => ({ label, action });
@@ -58,6 +68,34 @@ const shortDir = (path: string): string => {
   const parts = path.split("/").filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
 };
+
+const shortTitle = (s: SessionSummary): string => {
+  const title = sessionLabel(s);
+  return title.length > TITLE_CHARS ? `${title.slice(0, TITLE_CHARS - 1)}…` : title;
+};
+
+/** Compact age, as the web sidebar spells it ("now", "12m", "3h", "2d"). */
+const age = (ts: number, now: number): string => {
+  const mins = Math.round((now - ts) / 60_000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${String(mins)}m`;
+  if (mins < 1440) return `${String(Math.round(mins / 60))}h`;
+  return `${String(Math.round(mins / 1440))}d`;
+};
+
+/** Page `page` of `items`, clamped: a stale Next past the end lands on the last page. */
+const paged = <T>(items: T[], page: number): { at: number; pages: number; slice: T[]; from: number } => {
+  const pages = Math.max(1, Math.ceil(items.length / PER_PAGE));
+  const at = Math.min(Math.max(page, 0), pages - 1);
+  const from = at * PER_PAGE;
+  return { at, pages, slice: items.slice(from, from + PER_PAGE), from };
+};
+
+const pager = (action: string, at: number, pages: number): PanelButton[] => [
+  ...(at > 0 ? [btn("‹ Prev", `${action}:${String(at - 1)}`)] : []),
+  ...(at < pages - 1 ? [btn("Next ›", `${action}:${String(at + 1)}`)] : []),
+  btn("‹ Back", "panel"),
+];
 
 const created = (id: string, where: string): string =>
   `Created session ${id.slice(0, 8)} ${where} — nothing has run yet; the first message you send in this thread starts it.`;
@@ -118,7 +156,11 @@ export abstract class ChatPanel<S extends PanelState, C> {
       ],
       rows: [
         [btn("Model", "models:0"), btn("Reasoning", "think")],
-        [btn("New session", "new"), btn("New session in…", "cwd")],
+        [
+          btn("New session", "new"),
+          btn("New session in…", "cwd"),
+          ...(status ? [] : [btn("Continue web session…", "sessions:0")]),
+        ],
         [
           ...(status?.state === "streaming" ? [btn("⏹ Stop", "stop")] : []),
           btn("Close", "close"),
@@ -201,6 +243,12 @@ export abstract class ChatPanel<S extends PanelState, C> {
       case "model":
         await this.pickModel(key, Number(arg));
         return true;
+      case "sessions":
+        await this.showSessions(key, Number(arg) || 0);
+        return true;
+      case "session":
+        await this.pickSession(key, Number(arg));
+        return true;
       case "think":
         if (arg) await this.pickThinking(key, arg as ThinkingLevel);
         else await this.showThinking(key);
@@ -239,9 +287,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
       return [];
     });
     const status = await this.deps.control.status(key);
-    const pages = Math.max(1, Math.ceil(state.models.length / MODELS_PER_PAGE));
-    const at = Math.min(Math.max(page, 0), pages - 1);
-    const slice = state.models.slice(at * MODELS_PER_PAGE, (at + 1) * MODELS_PER_PAGE);
+    const { at, pages, slice, from } = paged(state.models, page);
     await this.draw(state, {
       groups: [{
         title: "Model",
@@ -250,14 +296,49 @@ export abstract class ChatPanel<S extends PanelState, C> {
       }],
       picks: slice.map((model, i) => {
         const current = status?.model?.provider === model.provider && status.model.id === model.id;
-        return btn(`${current ? "✓ " : ""}${model.id}`, `model:${at * MODELS_PER_PAGE + i}`);
+        return btn(`${current ? "✓ " : ""}${model.id}`, `model:${from + i}`);
       }),
-      rows: [[
-        ...(at > 0 ? [btn("‹ Prev", `models:${at - 1}`)] : []),
-        ...(at < pages - 1 ? [btn("Next ›", `models:${at + 1}`)] : []),
-        btn("‹ Back", "panel"),
-      ]],
+      rows: [pager("models", at, pages)],
     });
+  }
+
+  private async showSessions(key: ConversationKey, page: number): Promise<void> {
+    const state = this.state(key);
+    if (!state) return;
+    let unavailable: string | undefined;
+    state.sessions = await this.deps.handoff.unbound(SESSIONS_LISTED).catch((err: unknown) => {
+      unavailable = `Could not list sessions: ${String(err)}`;
+      this.deps.log(unavailable);
+      return [];
+    });
+    const { at, pages, slice, from } = paged(state.sessions, page);
+    const now = Date.now();
+    await this.draw(state, {
+      groups: [{
+        title: "Continue web session",
+        suffix: ` · page ${at + 1}/${pages}`,
+        lines: slice.length
+          ? slice.map((s, i) =>
+            `${String(from + i + 1)}. ${this.esc(shortTitle(s))} · ${
+              this.code(s.cwd.split("/").filter(Boolean).at(-1) ?? s.cwd)
+            } · ${age(s.modified ?? s.createdAt, now)}`)
+          : [unavailable ?? "No unbound sessions."],
+      }],
+      picks: slice.map((s, i) => btn(`${String(from + i + 1)} ${shortTitle(s)}`, `session:${String(from + i)}`)),
+      rows: [pager("sessions", at, pages)],
+    });
+  }
+
+  private async pickSession(key: ConversationKey, index: number): Promise<void> {
+    const session = this.state(key)?.sessions[index];
+    if (!session) return this.refresh(key, "That session is no longer listed.");
+    try {
+      await this.deps.handoff.continueHere(key, session.id);
+      await this.refresh(key, `Continuing session ${session.id.slice(0, 8)} — reply in this thread.`);
+    } catch (err) {
+      // A refusal's sentence is the whole answer ("Already answers in …").
+      await this.refresh(key, err instanceof HandoffError ? err.message : `Could not continue that session: ${String(err)}`);
+    }
   }
 
   private async pickModel(key: ConversationKey, index: number): Promise<void> {

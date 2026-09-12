@@ -28,6 +28,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
 | Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ |
 | Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message, replies land on both surfaces | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
+| Continue in this thread | The panel of a thread with no session yet binds it to an unbound web or task session; same binding and guard as the push | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
@@ -84,24 +85,35 @@ that itself fails is reported to the hub once, never retried.
 **Control that is not a prompt does not go through the seam.** `ChannelControl`
 (`control.ts`): abort, read status, list/set model, set reasoning, start a new
 session, `knows()` — injected by `runtime.ts`, which owns router and factory.
-The seam keeps one inbound path (`onMessage`); add the next control here.
+The panel's pull of a web session goes the same way, as the handoff's
+`unbound` / `continueHere` (`PanelHandoff`). The seam keeps one inbound path
+(`onMessage`); add the next control here.
 
 **Opening a thread is channels-internal.** `ImChannel` (`runtime.ts`) is
 `Channel` plus `openThread(chatId, note)`: post the handoff root, answer the
 new conversation id. `ChannelRuntime.openThread` throws `<platform> is not
 running`; `running()` lists the live platforms.
 
-## Continue from web (`handoff.ts`)
+## Continue from web, and from a thread (`handoff.ts`)
 
-`continueIn({sessionId, platform, chatId})`, in order: platform running
-(409 `Slack is not running — enable it in Settings → Channels.`) → chat known
-(404) and enabled (409) `That chat is not enabled for the bot.` → session on
+Both directions share one guard pair and one binding. The guards: session on
 disk (404 `Session … has no transcript yet — send it one message first.`) →
-not already bound (409 `Already answers in <platform> · <chat name>.`) → post
-the root (`openThread`; a platform refusal is 502 with its message and
-nothing is written) → `conversations.set(key, sessionId)` → attach the loaded
-session to the key when the web has it open → `sessions-changed`. Post before
-row: a row for a thread that does not exist is worse than a root with no row.
+not already bound (409 `Already answers in <platform> · <chat name>.`). The
+binding: `conversations.set(key, sessionId)` → attach the loaded session to
+the key when the web has it open → `sessions-changed`.
+
+`continueIn({sessionId, platform, chatId})` (web → IM), in order: platform
+running (409 `Slack is not running — enable it in Settings → Channels.`) →
+chat known (404) and enabled (409) `That chat is not enabled for the bot.` →
+the guards → post the root (`openThread`; a platform refusal is 502 with its
+message and nothing is written) → the binding. Post before row: a row for a
+thread that does not exist is worse than a root with no row.
+
+`continueHere(key, sessionId)` (IM → web, from the panel): thread has no row
+(409 `This thread already has a session.` — a stale panel must not orphan
+one) → the guards → the binding. No root: the thread exists. `unbound(limit)`
+is the picker's list — the backend's listing minus `conversations.boundSessions()`,
+newest first.
 
 - The note is `{title, url}`: `sessionLabel` (`core/identity.ts` — readable
   title, else the directory name) and `<publicUrl>/#/session/<id>`, `""`
@@ -146,6 +158,14 @@ the same request.
   note says nothing has run yet. The typed answer rejects a relative path.
   Slack: a modal with the conversation id in `private_metadata`. Prefer a
   modal wherever the platform has one.
+- "Continue web session…" (`cfg:sessions:<page>`) shows only while the
+  thread has no session: the 40 newest unbound sessions, eight a page
+  (`‹ Prev` / `Next ›` / Back as for models), each a numbered line — title or
+  directory name cut at 40 characters · directory basename · age — with one
+  button (`cfg:session:<i>`). A tap is `continueHere`; the note reads
+  `Continuing session <id8> — reply in this thread.` and the panel redraws
+  with the session. Nothing to list: `No unbound sessions.`; a listing that
+  failed says so instead. A refused pick prints the refusal sentence.
 - A session the panel creates has no transcript until its first reply (Pi
   writes nothing before one), so the row carries the launch it was created
   with, amended by every Model / Reasoning pick (`conversations.launch`); a

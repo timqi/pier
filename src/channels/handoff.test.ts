@@ -1,6 +1,7 @@
-// Web → IM handoff: every refusal by status and sentence, and the one happy
-// path — post first, then the row, then the live attach. Hermetic: in-memory
-// stores, a scripted runtime, a fake Pi.
+// Web ↔ IM handoff: every refusal by status and sentence, the push's happy
+// path — post first, then the row, then the live attach — and the pull, which
+// shares the guards and the binding. Hermetic: in-memory stores, a scripted
+// runtime, a fake Pi.
 
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Router } from "../core/router.js";
@@ -36,7 +37,10 @@ function handoff() {
       },
     },
     conversations,
-    factory: { find: (id) => Promise.resolve(onDisk.get(id)) },
+    factory: {
+      find: (id) => Promise.resolve(onDisk.get(id)),
+      list: () => Promise.resolve([...onDisk.values()]),
+    },
     router: {
       sessionOf: (key) => (key.channelId === "web" ? loaded.get(key.conversationId) : undefined),
       attach: (key, session) => void attached.push([key, session]),
@@ -178,5 +182,49 @@ describe("continueIn", () => {
     publicUrl = "";
     await handoff().continueIn({ sessionId: "s1", ...SLACK_OPS });
     expect(opened[0]!.note.url).toBe("");
+  });
+});
+
+describe("continueHere (pull from the panel)", () => {
+  const THREAD: ConversationKey = { channelId: "slack", conversationId: "C100/1717.5" };
+
+  it("binds the thread, attaches when loaded, emits, and posts nothing", async () => {
+    const session = { id: "s1" } as AgentSession;
+    loaded.set("s1", session);
+    await handoff().continueHere(THREAD, "s1");
+    expect(conversations.keyOf("s1")).toEqual(THREAD);
+    expect(attached).toEqual([[THREAD, session]]);
+    expect(events).toEqual([{ type: "sessions-changed" }]);
+    expect(opened).toEqual([]);
+    expect(logs[0]).toContain("s1 continued in slack:C100/1717.5");
+  });
+
+  it("refuses with the push's sentences: not on disk, already bound", async () => {
+    await expect(handoff().continueHere(THREAD, "nascent1")).rejects.toMatchObject({
+      status: 404, message: "Session nascent1 has no transcript yet — send it one message first.",
+    });
+    conversations.set({ channelId: "lark", conversationId: "oc_1/om_9" }, "s1");
+    await expect(handoff().continueHere(THREAD, "s1")).rejects.toMatchObject({
+      status: 409, message: "Already answers in lark · DM · Qi.",
+    });
+    expect(conversations.get(THREAD)).toBeUndefined();
+  });
+
+  it("refuses a thread that already has a session rather than orphaning it", async () => {
+    conversations.set(THREAD, "s0");
+    await expect(handoff().continueHere(THREAD, "s1")).rejects.toMatchObject({
+      status: 409, message: "This thread already has a session.",
+    });
+    expect(conversations.get(THREAD)).toBe("s0");
+  });
+});
+
+describe("unbound", () => {
+  it("lists the backend's sessions minus every bound one, in listing order, capped", async () => {
+    onDisk.set("s2", { id: "s2", cwd: "/srv/b", createdAt: 2 });
+    onDisk.set("s3", { id: "s3", cwd: "/srv/c", createdAt: 3 });
+    conversations.set({ channelId: "lark", conversationId: "oc_1/om_9" }, "s2");
+    expect((await handoff().unbound(10)).map((s) => s.id)).toEqual(["s1", "s3"]);
+    expect((await handoff().unbound(1)).map((s) => s.id)).toEqual(["s1"]);
   });
 });

@@ -37,6 +37,7 @@ import {
   type SlackMessageEvent,
   type SlackSocket,
 } from "./slack-api.js";
+import type { PanelHandoff } from "./panel.js";
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { readThread } from "./slack-thread.js";
@@ -114,6 +115,8 @@ export interface SlackDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
+  /** With `control`: the panel's "Continue web session…". */
+  handoff?: PanelHandoff;
 }
 
 export class SlackChannel implements Channel {
@@ -158,10 +161,11 @@ export class SlackChannel implements Channel {
       WORKING,
       RECEIPT_STALE_MS,
     );
-    if (deps.control) {
+    if (deps.control && deps.handoff) {
       this.panel = new SlackPanel({
         api: this.api,
         control: deps.control,
+        handoff: deps.handoff,
         store: deps.store,
         log: this.log,
       });

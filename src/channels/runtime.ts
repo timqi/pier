@@ -7,6 +7,7 @@ import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { LarkChannel } from "./lark.js";
+import type { PanelHandoff } from "./panel.js";
 import { SlackChannel } from "./slack.js";
 import type { ChannelPlatform, HandoffNote } from "./types.js";
 
@@ -23,6 +24,7 @@ const ADAPTERS: {
     store: ChannelStore;
     log: (m: string) => void;
     control: ChannelControl;
+    handoff: PanelHandoff;
   }): ImChannel;
 }[] = [
   { platform: "slack", build: (deps) => new SlackChannel(deps) },
@@ -44,6 +46,8 @@ export class ChannelRuntime {
     private readonly store: ChannelStore,
     private readonly router: Router,
     private readonly control: ChannelControl,
+    /** The pull half only; the push half needs this runtime, so main.ts closes the loop. */
+    private readonly handoff: PanelHandoff,
     private readonly log: (message: string) => void = warn,
   ) {}
 
@@ -83,6 +87,7 @@ export class ChannelRuntime {
       store: this.store,
       log: (m) => this.log(`${platform}: ${m}`),
       control: this.control,
+      handoff: this.handoff,
     });
     try {
       await channel.start((msg) => {

@@ -70,6 +70,14 @@ describe("conversation store", () => {
     expect(store.keyOf("s2")).toBeUndefined(); // a workbench session
   });
 
+  it("boundSessions is every row's session, whichever platform", () => {
+    const store = new ConversationStore(db);
+    expect(store.boundSessions()).toEqual(new Set());
+    store.set(CHAT, "s1");
+    store.set({ channelId: "slack", conversationId: "C1/1.0" }, "s2");
+    expect(store.boundSessions()).toEqual(new Set(["s1", "s2"]));
+  });
+
   it("keeps the launch a session was created with, and none for one launched from the defaults", () => {
     const store = new ConversationStore(db);
     const launch = { cwd: "/srv/pier", model: { provider: "anthropic", id: "sonnet" }, thinking: "medium" as const };

@@ -145,7 +145,22 @@ packages.watchUpdates();
 
 channelStore = new ChannelStore(db, vault);
 const control = createControl({ router, factory, conversations, store: channelStore });
-const channels = new ChannelRuntime(channelStore, router, control);
+// The panel pulls through the handoff and the handoff posts through the
+// runtime: the runtime's half is reached lazily so both can be built.
+const handoff = createHandoff({
+  store: channelStore,
+  runtime: {
+    running: () => channels.running(),
+    openThread: (platform, chatId, note) => channels.openThread(platform, chatId, note),
+  },
+  conversations,
+  factory,
+  router,
+  hub,
+  publicUrl: () => settings.get().publicUrl,
+  log: (m) => logger("channels").info(m),
+});
+const channels = new ChannelRuntime(channelStore, router, control, handoff);
 resolveIm = resolveConversation(
   conversations,
   factory,
@@ -282,16 +297,7 @@ registerConfigSyncRoutes(app, {
   run: configurationSync.run,
 });
 registerTaskRoutes(app, tasks, { factory, router });
-registerChannelRoutes(app, channelStore, channels, createHandoff({
-  store: channelStore,
-  runtime: channels,
-  conversations,
-  factory,
-  router,
-  hub,
-  publicUrl: () => settings.get().publicUrl,
-  log: (m) => logger("channels").info(m),
-}));
+registerChannelRoutes(app, channelStore, channels, handoff);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 const sessionState = new SessionStateStore(db);

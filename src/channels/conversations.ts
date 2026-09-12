@@ -59,6 +59,13 @@ export class ConversationStore {
     return row && { channelId: row.channel_id, conversationId: row.conversation_id };
   }
 
+  /** Every session some IM conversation answers for — one query, so a listing
+   *  can be filtered without asking `keyOf` per row. */
+  boundSessions(): Set<string> {
+    const rows = this.db.prepare(`SELECT session_id FROM conversations`).all() as { session_id: string }[];
+    return new Set(rows.map((r) => r.session_id));
+  }
+
   forget(key: ConversationKey): void {
     this.db.prepare(`
       DELETE FROM conversations WHERE channel_id = ? AND conversation_id = ?

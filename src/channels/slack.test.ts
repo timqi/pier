@@ -10,6 +10,7 @@ import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
+import type { PanelHandoff } from "./panel.js";
 import { ReceiptLedger } from "./receipts.js";
 import { SlackChannel } from "./slack.js";
 import type {
@@ -162,6 +163,9 @@ let control: ChannelControl & {
   model?: ModelRef;
 };
 
+/** The panel's pull half is exercised in panel.test.ts; here it only has to exist. */
+const handoff: PanelHandoff = { unbound: () => Promise.resolve([]), continueHere: () => Promise.resolve() };
+
 let eventSeq = 0;
 
 /** One `message` event, wrapped as the envelope the transport hands over. */
@@ -263,7 +267,7 @@ beforeEach(async () => {
   aborted = [];
   known = new Set();
   control = fakeControl();
-  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
+  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -1155,7 +1159,7 @@ describe("receipts", () => {
 
   it("clears receipts a dead process left behind, at startup", async () => {
     receipts.add({ conversationId: "C100/1.1", chatId: "C100", messageId: "5.5" });
-    const reborn = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
+    const reborn = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
     await reborn.start(() => {});
     // The startup sweep is a detached promise: wait for what it does, not for
     // however long a loaded machine needs to get around to it.

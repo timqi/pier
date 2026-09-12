@@ -4,7 +4,7 @@
 import type { Hono } from "hono";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
-import { type createHandoff, HandoffError } from "./handoff.js";
+import { type Handoff, HandoffError } from "./handoff.js";
 import type { ChannelRuntime } from "./runtime.js";
 import {
   type ChannelConfig,
@@ -60,7 +60,7 @@ export function registerChannelRoutes(
   app: Hono,
   store: ChannelStore,
   runtime: Pick<ChannelRuntime, "reload">,
-  handoff: ReturnType<typeof createHandoff>,
+  handoff: Handoff,
 ): void {
   app.get("/api/channels/:platform", (c) => {
     const platform = c.req.param("platform");
