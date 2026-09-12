@@ -209,6 +209,7 @@ function fakeControl() {
     models: () => Promise.resolve([state.model!]),
     setModel: () => Promise.resolve(),
     setThinking: () => Promise.resolve(),
+    recentDirs: () => Promise.resolve(["/srv/ops"]),
     newSession: (key: ConversationKey, cwd?: string) => {
       state.created.push({ key: key.conversationId, cwd });
       return Promise.resolve("session-99887766");

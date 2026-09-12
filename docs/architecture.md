@@ -212,8 +212,10 @@ seams:
   `web:`/`task:` aliases share one lock and attach to one object; the chat is
   the delivery key whenever it is attached. Durability is the caller's: web conversation ids *are* session ids, task
   definitions persist their target, IM channels keep
-  `channels/conversations.ts`. A mapping whose session Pi no longer has is
-  dropped and re-created, never retried forever, and the thread is told.
+  `channels/conversations.ts`, with the launch a panel-created session was
+  made from. A mapping whose session Pi no longer has is dropped and
+  re-created — from that record when there is one — never retried forever,
+  and the thread is told.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters

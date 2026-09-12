@@ -11,7 +11,7 @@ import type { ChannelPlatform, ChatConfig, ChatPolicy } from "./types.js";
 export const PANEL_PREFIX = "cfg:";
 const MODELS_PER_PAGE = 8;
 
-export const CWD_TAIL = "A new session starts there; the current one stays in its own directory.";
+export const CWD_TAIL = "The session is created there at once; the first message you send in this thread runs in it.";
 export const CWD_PLACEHOLDER = "/path/to/project";
 
 const onOff = (v: boolean): string => (v ? "on" : "off");
@@ -46,11 +46,21 @@ export interface PanelDeps {
 
 export interface PanelState {
   chatId: string;
-  /** The list the payload's indices point into. */
+  /** The lists the payloads' indices point into. */
   models: ModelRef[];
+  dirs: string[];
 }
 
 const btn = (label: string, action: string): PanelButton => ({ label, action });
+
+/** A button label is the last two segments; the numbered line above has the whole path. */
+const shortDir = (path: string): string => {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
+};
+
+const created = (id: string, where: string): string =>
+  `Created session ${id.slice(0, 8)} ${where} — nothing has run yet; the first message you send in this thread starts it.`;
 
 /** NO_SESSION is the whole answer; any other failure names what was attempted. */
 const failed = (what: string, err: unknown): string =>
@@ -197,10 +207,14 @@ export abstract class ChatPanel<S extends PanelState, C> {
         return true;
       case "new": {
         const id = await this.deps.control.newSession(key);
-        await this.refresh(key, `Started session ${id.slice(0, 8)}.`);
+        await this.refresh(key, created(id, "in its directory"));
         return true;
       }
       case "cwd":
+        if (arg) await this.pickDir(key, Number(arg));
+        else await this.showDirs(key);
+        return true;
+      case "cwdtype":
         await this.promptCwd(key, state!, ctx);
         return true;
       case "stop":
@@ -257,6 +271,33 @@ export abstract class ChatPanel<S extends PanelState, C> {
     }
   }
 
+  private async showDirs(key: ConversationKey): Promise<void> {
+    const state = this.state(key);
+    if (!state) return;
+    let unavailable: string | undefined;
+    state.dirs = await this.deps.control.recentDirs(key).catch((err: unknown) => {
+      unavailable = `Could not list recent directories: ${String(err)}`;
+      this.deps.log(unavailable);
+      return [];
+    });
+    await this.draw(state, {
+      groups: [{
+        title: "New session in",
+        lines: state.dirs.length
+          ? state.dirs.map((dir, i) => `${String(i + 1)}. ${this.code(dir)}`)
+          : [unavailable ?? "No sessions yet — type a path."],
+      }],
+      picks: state.dirs.map((dir, i) => btn(`${String(i + 1)} ${shortDir(dir)}`, `cwd:${String(i)}`)),
+      rows: [[btn("Type a path…", "cwdtype"), btn("‹ Back", "panel")]],
+    });
+  }
+
+  private async pickDir(key: ConversationKey, index: number): Promise<void> {
+    const dir = this.state(key)?.dirs[index];
+    if (!dir) return this.refresh(key, "That directory is no longer listed.");
+    await this.startSessionIn(key, dir);
+  }
+
   private async showThinking(key: ConversationKey): Promise<void> {
     const state = this.state(key);
     if (!state) return;
@@ -296,7 +337,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     }
     try {
       const id = await this.deps.control.newSession(key, path);
-      await this.refresh(key, `Started session ${id.slice(0, 8)} in ${path}.`);
+      await this.refresh(key, created(id, `in ${path}`));
       return { id };
     } catch (err) {
       const error = `Could not start a session there: ${String(err)}`;

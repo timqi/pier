@@ -70,6 +70,28 @@ describe("conversation store", () => {
     expect(store.channelOf("s2")).toBeUndefined(); // a workbench session
   });
 
+  it("keeps the launch a session was created with, and none for one launched from the defaults", () => {
+    const store = new ConversationStore(db);
+    const launch = { cwd: "/srv/pier", model: { provider: "anthropic", id: "sonnet" }, thinking: "medium" as const };
+    store.set(CHAT, "s1", launch);
+    expect(store.launchOf(CHAT)).toEqual(launch);
+    store.set(CHAT, "s2");
+    expect(store.launchOf(CHAT)).toBeUndefined();
+    expect(store.launchOf({ channelId: "lark", conversationId: "none" })).toBeUndefined();
+  });
+
+  it("amendLaunch merges model then thinking, and is a no-op without a record", () => {
+    const store = new ConversationStore(db);
+    store.set(CHAT, "s1", { cwd: "/srv/pier" });
+    store.amendLaunch(CHAT, { model: { provider: "anthropic", id: "opus" } });
+    store.amendLaunch(CHAT, { thinking: "high" });
+    expect(store.launchOf(CHAT)).toEqual({ cwd: "/srv/pier", model: { provider: "anthropic", id: "opus" }, thinking: "high" });
+    const other: ConversationKey = { channelId: "slack", conversationId: "C1/1.0" };
+    store.set(other, "s2");
+    store.amendLaunch(other, { thinking: "high" });
+    expect(store.launchOf(other)).toBeUndefined();
+  });
+
   it("re-pointing a conversation replaces the mapping", () => {
     const store = new ConversationStore(db);
     store.set(CHAT, "s1");
@@ -118,6 +140,20 @@ describe("IM session resolution", () => {
     expect(second.created).toEqual([]);
   });
 
+  it("stale re-route uses the launch record, not the chat defaults", async () => {
+    const store = new ConversationStore(db);
+    const launch = { cwd: "/srv/pier", model: { provider: "anthropic", id: "opus" }, thinking: "high" as const };
+    store.set(CHAT, "never-written", launch);
+    const factory = fakeFactory([]);
+    const stale: string[] = [];
+    const session = await resolveConversation(store, factory, () => ({ cwd: "/srv/ops" }), (_k, m) => stale.push(m))(CHAT);
+    expect(factory.created).toEqual([launch]);
+    expect(store.get(CHAT)).toBe(session.id);
+    // The record survives the re-create: the next loss re-creates the same way.
+    expect(store.launchOf(CHAT)).toEqual(launch);
+    expect(stale[0]).toContain(`re-created as ${session.id.slice(0, 8)} with its own settings in /srv/pier`);
+  });
+
   it("falls back to a fresh session when Pi lost the transcript", async () => {
     const store = new ConversationStore(db);
     store.set(CHAT, "gone");
@@ -129,7 +165,7 @@ describe("IM session resolution", () => {
     expect(stale).toHaveLength(1);
     expect(stale[0]![0]).toEqual(CHAT);
     expect(stale[0]![1]).toContain("Session gone is gone from disk");
-    expect(stale[0]![1]).toContain("new session in /srv/ops");
+    expect(stale[0]![1]).toContain("new session with the chat defaults in /srv/ops");
     // The dead mapping is replaced, not retried on every later message.
     expect(store.get(CHAT)).toBe("s1");
     expect(factory.resumed).toEqual(["gone"]);

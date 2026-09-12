@@ -20,13 +20,34 @@ export class ConversationStore {
     return row?.session_id;
   }
 
-  set(key: ConversationKey, sessionId: string): void {
+  /** `launch` is what the session was created with, kept for the day Pi has
+   *  no transcript to resume (a session never prompted was never written);
+   *  omitted for one launched from the chat defaults, which a re-create reads
+   *  again. */
+  set(key: ConversationKey, sessionId: string, launch?: AgentLaunchOptions): void {
     this.db.prepare(`
-      INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at, launch)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(channel_id, conversation_id) DO UPDATE SET
-        session_id = excluded.session_id, updated_at = excluded.updated_at
-    `).run(key.channelId, key.conversationId, sessionId, Date.now());
+        session_id = excluded.session_id, updated_at = excluded.updated_at, launch = excluded.launch
+    `).run(key.channelId, key.conversationId, sessionId, Date.now(), launch ? JSON.stringify(launch) : null);
+  }
+
+  launchOf(key: ConversationKey): AgentLaunchOptions | undefined {
+    const row = this.db.prepare(`
+      SELECT launch FROM conversations WHERE channel_id = ? AND conversation_id = ?
+    `).get(key.channelId, key.conversationId) as { launch: string | null } | undefined;
+    return row?.launch ? JSON.parse(row.launch) as AgentLaunchOptions : undefined;
+  }
+
+  /** Merge a model/reasoning change into the record, so a never-written
+   *  session re-creates as last configured. No record: nothing to amend. */
+  amendLaunch(key: ConversationKey, patch: Partial<Pick<AgentLaunchOptions, "model" | "thinking">>): void {
+    const launch = this.launchOf(key);
+    if (!launch) return;
+    this.db.prepare(`
+      UPDATE conversations SET launch = ? WHERE channel_id = ? AND conversation_id = ?
+    `).run(JSON.stringify({ ...launch, ...patch }), key.channelId, key.conversationId);
   }
 
   /** Durable, unlike the router's answer, which is gone once an idle session
@@ -62,20 +83,26 @@ export function resolveConversation<S extends { id: string }>(
   return async (key) => {
     const known = store.get(key);
     let stale: string | undefined;
+    let recorded: AgentLaunchOptions | undefined;
     if (known) {
       try {
         return await factory.resume(known);
       } catch (err) {
         // Never persisted, or deleted: re-route rather than fail every message.
         stale = `${known.slice(0, 8)} is gone from disk (${String(err)})`;
+        recorded = store.launchOf(key);
         store.forget(key);
       }
     }
-    const launch = launchFor(key);
-    const cwd = launch.cwd ?? process.cwd();
-    const session = await factory.create({ ...launch, cwd });
-    store.set(key, session.id);
-    if (stale) onStale?.(key, `Session ${stale}; this thread continues in a new session in ${cwd}.`);
+    const defaults = launchFor(key);
+    const launch = recorded ?? { ...defaults, cwd: defaults.cwd ?? process.cwd() };
+    const session = await factory.create(launch);
+    store.set(key, session.id, recorded);
+    if (stale) {
+      onStale?.(key, recorded
+        ? `Session ${stale}; re-created as ${session.id.slice(0, 8)} with its own settings in ${launch.cwd}.`
+        : `Session ${stale}; this thread continues in a new session with the chat defaults in ${launch.cwd}.`);
+    }
     return session;
   };
 }

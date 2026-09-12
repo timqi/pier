@@ -99,9 +99,20 @@ the same request.
 - Model lists are paged and referenced by **index** (payloads are size-capped);
   the page's list is cached per panel.
 - A panel from a previous process has no state: reopen on the first tap.
-- The cwd button reads "New session in…", asks for one typed answer, rejects a
-  relative path. Slack: a modal with the conversation id in `private_metadata`.
-  Prefer a modal wherever the platform has one.
+- "New session in…" (`cfg:cwd`) lists up to six recent directories — the
+  distinct cwds of the session listing, newest first, the chat's own default
+  first (`ChannelControl.recentDirs`) — as numbered full paths with one
+  button each (`cfg:cwd:<i>`, label the last two segments), then "Type a
+  path…" (`cfg:cwdtype`) and Back. A tap creates the session at once; the
+  note says nothing has run yet. The typed answer rejects a relative path.
+  Slack: a modal with the conversation id in `private_metadata`. Prefer a
+  modal wherever the platform has one.
+- A session the panel creates has no transcript until its first reply (Pi
+  writes nothing before one), so the row carries the launch it was created
+  with, amended by every Model / Reasoning pick (`conversations.launch`); a
+  resume that fails re-creates from that record, and the thread is told
+  `re-created as … with its own settings in …`. A row without a record
+  re-creates from the chat defaults and says so.
 
 ## Agent access: the platform from a shell
 
@@ -147,7 +158,8 @@ A `conversationId` is opaque to core. Slack and Lark spell it
 `<channelId>/<threadTs>`; the chat half has one decoder (`chatOf`).
 
 `ConversationStore` (`conversations.ts`) makes routing survive a restart; a
-mapping whose session Pi no longer has is dropped and re-created, and the
+mapping whose session Pi no longer has is dropped and re-created — from the
+row's own launch record when it has one, else from the chat defaults — and the
 thread hears it as an error note naming the lost session and the new cwd
 (`resolveConversation`'s `onStale`, wired in `main.ts`). Per-chat
 launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`

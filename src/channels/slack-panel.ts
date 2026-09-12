@@ -70,7 +70,7 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
       text: "Settings",
       blocks: this.blocks(await this.view(key, channel)),
     });
-    this.remember(key, { chatId: channel, threadTs, ts: sent.ts, models: [] });
+    this.remember(key, { chatId: channel, threadTs, ts: sent.ts, models: [], dirs: [] });
   }
 
   protected async draw(state: SlackPanelState, view: PanelView, note?: string): Promise<void> {
@@ -119,7 +119,7 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
       callback_id: CWD_VIEW,
       private_metadata: key.conversationId,
       title: { type: "plain_text", text: "New session" },
-      submit: { type: "plain_text", text: "Start" },
+      submit: { type: "plain_text", text: "Create" },
       close: { type: "plain_text", text: "Cancel" },
       blocks: [
         {

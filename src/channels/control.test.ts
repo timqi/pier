@@ -56,31 +56,33 @@ function fakeSession(id: string, turns: ChatTurn[] = []) {
 
 type Fake = ReturnType<typeof fakeSession>;
 
-/** Sessions "on disk": resumable and findable. `created` records every launch. */
+/** Like Pi: a created session is an object, and on disk — resumable,
+ *  findable — only once written. `created` records every launch. */
 function fakeFactory(onDisk: Fake[] = []) {
   const created: AgentLaunchOptions[] = [];
   const resumed: string[] = [];
-  const live = new Map(onDisk.map((s) => [s.id, s]));
+  const written = new Map(onDisk.map((s) => [s.id, s]));
   let next = 0;
   const factory = {
     created,
     resumed,
-    live,
+    written,
     availableModels: () => Promise.resolve([SONNET]),
     create(opts: AgentLaunchOptions) {
       created.push(opts);
-      const s = fakeSession(`new${String(++next)}`);
-      live.set(s.id, s);
-      return Promise.resolve(s as unknown as AgentSession);
+      return Promise.resolve(fakeSession(`new${String(++next)}`) as unknown as AgentSession);
     },
     resume(id: string) {
       resumed.push(id);
-      const s = live.get(id);
+      const s = written.get(id);
       return s ? Promise.resolve(s as unknown as AgentSession) : Promise.reject(new Error(`unknown session: ${id}`));
     },
-    list: () => Promise.resolve([] as SessionSummary[]),
+    listed: [] as SessionSummary[],
+    list() {
+      return Promise.resolve(factory.listed);
+    },
     find: (id: string) =>
-      Promise.resolve(live.has(id) ? { id, cwd: `/srv/${id}`, createdAt: 1 } : undefined),
+      Promise.resolve(written.has(id) ? { id, cwd: `/srv/${id}`, createdAt: 1 } : undefined),
     search: () => Promise.resolve([]),
   };
   return factory;
@@ -160,6 +162,63 @@ describe("setModel / setThinking", () => {
     await control.setModel(KEY, SONNET);
     expect(s.models).toEqual([SONNET]);
     expect(factory.resumed).toEqual([]);
+  });
+});
+
+describe("the launch record", () => {
+  it("newSession records the launch it used", async () => {
+    const id = await control.newSession(KEY, "/srv/pier");
+    expect(id).toBe("new1");
+    expect(factory.created).toEqual([{ cwd: "/srv/pier" }]);
+    expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/pier" });
+    // Attached at once: the panel's next look finds it without a resume.
+    expect(router.sessionOf(KEY)?.id).toBe("new1");
+    expect(factory.resumed).toEqual([]);
+  });
+
+  it("setModel and setThinking amend the record", async () => {
+    await control.newSession(KEY, "/srv/pier");
+    await control.setModel(KEY, SONNET);
+    await control.setThinking(KEY, "high");
+    expect(conversations.launchOf(KEY)).toEqual({ cwd: "/srv/pier", model: SONNET, thinking: "high" });
+  });
+
+  it("a created session that Pi never wrote is re-created from the record after an eviction", async () => {
+    await control.newSession(KEY, "/srv/pier");
+    await control.setThinking(KEY, "high");
+    // Eviction, then the transcript is not there: Pi wrote nothing.
+    await router.evictIdle(0);
+    const status = await control.status(KEY);
+    expect(status?.sessionId).toBe("new2");
+    expect(factory.created[1]).toEqual({ cwd: "/srv/pier", thinking: "high" });
+    expect(stale[0]![1]).toContain("re-created as new2 with its own settings in /srv/pier");
+  });
+
+  it("the directory of a session not yet on disk comes from the record", async () => {
+    await control.newSession(KEY, "/srv/pier");
+    expect((await control.status(KEY))?.cwd).toBe("/srv/pier");
+  });
+});
+
+describe("recentDirs", () => {
+  it("dedupes, newest first, chat cwd first", async () => {
+    const at = (id: string, cwd: string, modified: number): SessionSummary => ({ id, cwd, createdAt: 1, modified });
+    factory.listed = [at("a", "/srv/new", 3), at("b", "/srv/old", 2), at("c", "/srv/new", 1), at("d", "/srv/older", 0)];
+    expect(await control.recentDirs(KEY)).toEqual(["/srv/new", "/srv/old", "/srv/older"]);
+    expect(await control.recentDirs(KEY, 2)).toEqual(["/srv/new", "/srv/old"]);
+  });
+
+  it("puts the chat's own directory first when the Console set one", async () => {
+    const at = (id: string, cwd: string): SessionSummary => ({ id, cwd, createdAt: 1 });
+    factory.listed = [at("a", "/srv/new"), at("b", "/srv/ops")];
+    const store = new ChannelStore(openDb(":memory:"), { get: () => undefined, seal: () => {}, remove: () => false });
+    store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
+    const config = store.get("slack");
+    config.chats.find((c) => c.id === "C100")!.cwd = "/srv/ops";
+    store.save("slack", config);
+    // Same wiring, this store.
+    control = createControl({ router, factory: factory as unknown as AgentFactory, conversations, store });
+    expect(await control.recentDirs(KEY)).toEqual(["/srv/ops", "/srv/new"]);
   });
 });
 

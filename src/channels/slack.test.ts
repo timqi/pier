@@ -244,6 +244,7 @@ function fakeControl() {
       state.thinking = level;
       return Promise.resolve();
     },
+    recentDirs: () => Promise.resolve(["/srv/ops"]),
     newSession: (key: ConversationKey, cwd?: string) => {
       state.created.push({ key: key.conversationId, cwd });
       return Promise.resolve("session-99887766");
@@ -1063,7 +1064,7 @@ describe("settings panel", () => {
 
   it("asks for a working directory in a modal, carrying the conversation with it", async () => {
     await open();
-    await feed(click("cfg:cwd"));
+    await feed(click("cfg:cwdtype"));
     const view = client.views[0] as { private_metadata: string; callback_id: string };
     expect(view.callback_id).toBe("cfg_cwd");
     // No adapter-side state: the submission is understood from the modal alone.
@@ -1072,7 +1073,7 @@ describe("settings panel", () => {
 
   it("starts a new session from the modal submission", async () => {
     await open();
-    await feed(click("cfg:cwd"));
+    await feed(click("cfg:cwdtype"));
     await feed({
       type: "interactive",
       envelope_id: "sub-1",

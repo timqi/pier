@@ -53,13 +53,17 @@ truth.
 ## In-chat commands and the settings panel
 
 - `/settings` — or an addressed message with no text at all (a bare mention,
-  an empty DM) — opens a panel: model, reasoning level, new session
-  (optionally in a chosen directory), stop. Slack also accepts the bare words
-  `stop`, `settings`, `bind <code>`.
+  an empty DM) — opens a panel: model, reasoning level, new session, stop.
+  "New session in…" offers the recent session directories as buttons and a
+  typed path; the session is created on the tap, and the thread's first
+  message runs in it. Slack also accepts the bare words `stop`, `settings`,
+  `bind <code>`.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
 - The panel reads the thread's real session, resuming an idle one; in a thread
   with no session yet, Model and Reasoning are refused until one is started.
+  A session created from the panel keeps its directory, model and reasoning
+  across a restart even before its first message.
 
 ## What a turn looks like from outside
 

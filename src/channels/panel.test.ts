@@ -30,6 +30,7 @@ const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => (
 class FakeControl implements ChannelControl {
   current: ConversationStatus | null = status();
   readonly newSessions: (string | undefined)[] = [];
+  dirs: string[] | Error = ["/home/qiqi/code/dev/pier", "/srv/ops"];
   readonly setModels: ModelRef[] = [];
   aborted = 0;
   launch: Partial<AgentLaunchOptions> = {};
@@ -51,6 +52,8 @@ class FakeControl implements ChannelControl {
     this.newSessions.push(cwd);
     return Promise.resolve("abcdef0123");
   };
+  recentDirs = (): Promise<string[]> =>
+    this.dirs instanceof Error ? Promise.reject(this.dirs) : Promise.resolve(this.dirs);
 }
 
 let store: ChannelStore;
@@ -175,12 +178,72 @@ describe("slack panel", () => {
     expect(labels(blocks[2]!)).toEqual(["Next ›", "‹ Back"]);
   });
 
-  it("asks for a directory in a modal carrying the conversation", async () => {
+  it("New session in… lists recent directories as buttons with numbered full paths", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({ trigger_id: "t1" } as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("*New session in*");
+    expect(text(blocks[0]!)).toContain("1. `/home/qiqi/code/dev/pier`");
+    expect(text(blocks[0]!)).toContain("2. `/srv/ops`");
+    expect(labels(blocks[1]!)).toEqual(["1 …/dev/pier", "2 /srv/ops"]);
+    expect(labels(blocks[2]!)).toEqual(["Type a path…", "‹ Back"]);
+    expect(api.views).toEqual([]);
+  });
+
+  it("cwd:<i> creates there and the note distinguishes created from run", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd:1");
+    expect(control.newSessions).toEqual(["/srv/ops"]);
+    const note = footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!);
+    expect(note).toContain("Created session abcdef01 in /srv/ops");
+    expect(note).toContain("nothing has run yet");
+  });
+
+  it("a stale index after a redraw is refused, not misfiled", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd:7");
+    expect(control.newSessions).toEqual([]);
+    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("That directory is no longer listed.");
+  });
+
+  it("empty listing offers only the typed path", async () => {
+    control.dirs = [];
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("No sessions yet — type a path.");
+    expect(blocks).toHaveLength(2);
+    expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
+  });
+
+  it("a listing that fails says so and still offers the typed path", async () => {
+    control.dirs = new Error("disk");
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:cwd");
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("Could not list recent directories: Error: disk");
+    expect(labels(blocks[1]!)).toEqual(["Type a path…", "‹ Back"]);
+  });
+
+  it("Type a path… opens the modal carrying the conversation", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({ trigger_id: "t1" } as SlackInteraction, SLACK_KEY, "cfg:cwdtype");
     expect(api.views[0]).toMatchObject({ callback_id: "cfg_cwd", private_metadata: "s1" });
+    expect(JSON.stringify(api.views[0])).toContain("\"Create\"");
   });
 
   it("starts the session a submitted modal asked for", async () => {

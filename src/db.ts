@@ -304,6 +304,16 @@ const MIGRATIONS: readonly string[] = [
   `,
   // 25 — the mid-run decision channel is gone; a control message is steer or follow_up.
   `DELETE FROM task_messages WHERE json_extract(json, '$.kind') IN ('progress', 'decision', 'reply');`,
+  // 26 — a session created from the panel is re-created from its own launch record.
+  `
+  -- What the thread's session was created with, and the model/reasoning set on
+  -- it since. Consulted only when Pi has no transcript to resume: a session
+  -- never prompted was never written, and is re-created from this instead of
+  -- from the chat defaults. NULL for a session launched from those defaults.
+  ALTER TABLE conversations ADD COLUMN launch TEXT;
+  -- The session → thread direction: channelOf / keyOf.
+  CREATE INDEX conversations_session ON conversations(session_id);
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

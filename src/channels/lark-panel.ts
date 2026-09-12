@@ -69,7 +69,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
 
   async open(key: ConversationKey, chatId: string, root: string): Promise<void> {
     const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, chatId), root));
-    this.remember(key, { chatId, root, messageId: sent.messageId, models: [] });
+    this.remember(key, { chatId, root, messageId: sent.messageId, models: [], dirs: [] });
   }
 
   protected async draw(state: LarkPanelState, view: PanelView, note?: string): Promise<void> {
@@ -109,7 +109,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
         markdown(`An absolute path. ${CWD_TAIL}`),
         {
           tag: "button",
-          text: { tag: "plain_text", content: "Start" },
+          text: { tag: "plain_text", content: "Create" },
           type: "primary",
           action_type: "form_submit",
           name: `${CWD_SUBMIT_PREFIX}${state.root}`,
@@ -126,7 +126,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
    *  the outcome lands on the card the user is looking at. */
   async onCwdSubmit(key: ConversationKey, action: LarkCardAction, root: string): Promise<void> {
     if (!this.state(key)) {
-      this.remember(key, { chatId: action.chatId, root, messageId: action.messageId, models: [] });
+      this.remember(key, { chatId: action.chatId, root, messageId: action.messageId, models: [], dirs: [] });
     }
     await this.startSessionIn(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
   }
