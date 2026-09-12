@@ -334,15 +334,24 @@ describe("slack panel with a session", () => {
     expect(labels(blocks[2]!)).toEqual(["‹ Prev", "‹ Back"]);
   });
 
-  it("a pick sets the model and the level together and redraws the same one button", async () => {
+  it("a pick sets the model and the level together and settles the card: no button left", async () => {
     const { api, panel } = await opened();
     await tap(panel, "cfg:pins:0");
     await tap(panel, "cfg:pin:1");
     expect(control.setModels).toEqual([{ provider: "anthropic", id: "model-1" }]);
     expect(control.setLevels).toEqual(["high"]);
     expect(footnote(last(api).at(-1)!)).toBe("Model set to model-1 · High.");
-    expect(labels(last(api)[1]!)).toEqual(["Model & reasoning"]);
+    expect(last(api).some((b) => b.type === "actions")).toBe(false);
     expect(api.posted).toHaveLength(1);
+  });
+
+  it("Stop settles the card too", async () => {
+    control.current = status({ state: "streaming" });
+    const { api, panel } = await opened();
+    await tap(panel, "cfg:stop");
+    expect(control.aborted).toBe(1);
+    expect(footnote(last(api).at(-1)!)).toBe("Stop requested.");
+    expect(last(api).some((b) => b.type === "actions")).toBe(false);
   });
 
   it("no pins: the empty list names where they are pinned", async () => {

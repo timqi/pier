@@ -291,10 +291,11 @@ export abstract class ChatPanel<S extends PanelState, C> {
     await this.draw(state, await this.view(key, state), note);
   }
 
-  /** The card's last draw: the session it just bound, no button. The panel is
-   *  released with it, so nothing can tap it again and the card stays as a
-   *  record. `recent` excerpts the transcript — what tells a phone reader
-   *  which conversation was continued. */
+  /** The card's last draw, once an operation completed: the session as it now
+   *  is, no button. The panel is released with it, so nothing can tap it again
+   *  and the card stays as a record; another @bot opens a fresh one. `recent`
+   *  excerpts the transcript — what tells a phone reader which conversation
+   *  was continued. */
   private async settle(key: ConversationKey, state: S, note: string, recent: boolean): Promise<void> {
     const status = await this.deps.control.status(key);
     if (!status) return this.refresh(key, note);
@@ -362,7 +363,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
         return true;
       case "stop":
         await this.deps.control.abort(key);
-        await this.refresh(key, "Stop requested.");
+        await this.settle(key, state, "Stop requested.", false);
         return true;
       default:
         this.deps.log(`unknown panel action: ${action}`);
@@ -448,7 +449,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     try {
       await this.deps.control.setModel(key, model);
       await this.deps.control.setThinking(key, pin.thinking);
-      await this.refresh(key, `Model set to ${pin.id} · ${thinkingLabel(pin.thinking)}.`);
+      await this.settle(key, state, `Model set to ${pin.id} · ${thinkingLabel(pin.thinking)}.`, false);
     } catch (err) {
       await this.refresh(key, failed("Could not set that model", err));
     }

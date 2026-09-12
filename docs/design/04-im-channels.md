@@ -188,7 +188,13 @@ Directory…, Continue web session… / Start, Close.
 message yet` before the first turn), directory, model · reasoning, context.
 Buttons: Model & reasoning / ⏹ Stop while streaming — nothing else: the
 conversation is right above the card (no `Recent`), a fresh session is a fresh
-thread, and the card stays. No Channel group: the Console owns the gates.
+thread. No Channel group: the Console owns the gates.
+
+**Settling.** A tap that completes an operation — Start, Continue, a model
+pick on a live session, Stop — redraws the card as the session now is, with
+no buttons, and releases the panel; the card stays as a record and the next
+`@bot` opens a fresh one. Draft picks are steps, not operations: they redraw
+with the buttons.
 
 The `Recent` group is an excerpt — never a summary — of the last two exchanges
 (`ChannelControl.recent`), one line each, `▸ <user>` / `◂ <reply>` oldest
