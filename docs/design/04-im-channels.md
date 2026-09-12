@@ -26,7 +26,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | ✅ |
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
-| Settings panel | In-chat panel: read out session + policy, change model / reasoning / cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ |
+| Settings panel | In-chat panel: read out session + policy, pick model & reasoning from the operator's pins, change cwd (a new session), stop | shared control, adapter renders | ✅ | ✅ |
 | Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message, replies land on both surfaces | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
 | Continue in this thread | The panel of a thread with no session yet binds it to an unbound web session (task runs' own sessions excluded); same binding and guard as the push | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
@@ -144,12 +144,19 @@ the same request.
   payload is a next-step label and *is* the message to send.
 - The panel acts on the thread's real session or says there is none. Opening
   it on an evicted session resumes that session (one Pi open, truthful
-  values); Model / Reasoning on a thread without a row are refused with
+  values); Model & reasoning on a thread without a row is refused with
   `NO_SESSION` (`control.ts`), never confirmed. A session with no turn yet
   reads `created, no message yet`; the Chat group's last line is what the
   chat's next session launches with (`launchFor`), display only.
-- Model lists are paged and referenced by **index** (payloads are size-capped);
-  the page's list is cached per panel.
+- Lists are paged and picked by **index** (payloads are size-capped).
+- "Model & reasoning" (`cfg:pins:<page>`) lists the operator's pinned models
+  (`settings.modelMenu`, read per tap through `ChannelControl.pins`), eight a
+  page, each a numbered line `<id> · <level> — <note>` (no note, no dash) with
+  ✓ on the pin matching the session's model *and* level, and one button each
+  (`cfg:pin:<i>`, labelled `<n> <id>` — a platform truncates a long label). A
+  tap applies both (`setModel`, then `setThinking`) and the note reads `Model
+  set to <id> · <level>.` Nothing pinned: `No pinned models — Settings →
+  Models → Model menu.`; the catalog is the Console's, not a chat's.
 - A panel from a previous process has no state: reopen on the first tap.
 - "New session in…" (`cfg:cwd`) lists up to six recent directories — the
   distinct cwds of the session listing, newest first, the chat's own default
@@ -161,7 +168,7 @@ the same request.
   modal wherever the platform has one.
 - "Continue web session…" (`cfg:sessions:<page>`) shows only while the
   thread has no session: the 40 newest unbound sessions, eight a page
-  (`‹ Prev` / `Next ›` / Back as for models), each a numbered line — title or
+  (`‹ Prev` / `Next ›` / Back as for the pins), each a numbered line — title or
   directory name cut at 40 characters · directory basename · age — with one
   button (`cfg:session:<i>`). A tap is `continueHere`; the note reads
   `Continuing session <id8> — reply in this thread.` and the panel redraws
@@ -169,7 +176,7 @@ the same request.
   failed says so instead. A refused pick prints the refusal sentence.
 - A session the panel creates has no transcript until its first reply (Pi
   writes nothing before one), so the row carries the launch it was created
-  with, amended by every Model / Reasoning pick (`conversations.launch`); a
+  with, amended by every Model & reasoning pick (`conversations.launch`); a
   resume that fails re-creates from that record, and the thread is told
   `re-created as … with its own settings in …`. A row without a record
   re-creates from the chat defaults and says so.

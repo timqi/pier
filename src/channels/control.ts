@@ -12,6 +12,7 @@ import type {
   SessionState,
   ThinkingLevel,
 } from "../core/types.js";
+import type { ModelMenuEntry } from "../settings.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import { chatOf, isChannelPlatform } from "./types.js";
@@ -26,7 +27,6 @@ export interface ConversationStatus {
   empty: boolean;
   model: ModelRef | undefined;
   thinking: ThinkingLevel;
-  thinkingLevels: ThinkingLevel[];
   tokens: number | null;
   contextWindow: number | null;
 }
@@ -40,7 +40,8 @@ export interface ChannelControl {
   /** Null when the thread has no session; an evicted one is resumed, never
    *  answered null. */
   status(key: ConversationKey): Promise<ConversationStatus | null>;
-  models(): Promise<ModelRef[]>;
+  /** The operator's pinned models, the same list `pier task --model ?` prints. */
+  pins(): ModelMenuEntry[];
   /** Rejects with NO_SESSION for a thread without one: a confirmed no-op is a lie. */
   setModel(key: ConversationKey, model: ModelRef): Promise<void>;
   setThinking(key: ConversationKey, level: ThinkingLevel): Promise<void>;
@@ -58,9 +59,10 @@ export interface ControlDeps {
   factory: AgentFactory;
   conversations: ConversationStore;
   store: ChannelStore;
+  modelMenu: () => ModelMenuEntry[];
 }
 
-export function createControl({ router, factory, conversations, store }: ControlDeps): ChannelControl {
+export function createControl({ router, factory, conversations, store, modelMenu }: ControlDeps): ChannelControl {
   const launchFor = (key: ConversationKey): Partial<AgentLaunchOptions> => {
     if (!isChannelPlatform(key.channelId)) return {};
     const policy = store.policy(key.channelId, chatOf(key.conversationId));
@@ -98,13 +100,12 @@ export function createControl({ router, factory, conversations, store }: Control
         empty: (await session.history()).length === 0,
         model: session.model,
         thinking: session.thinkingLevel,
-        thinkingLevels: session.availableThinkingLevels(),
         tokens: usage?.tokens ?? null,
         contextWindow: usage?.contextWindow ?? null,
       };
     },
 
-    models: () => factory.availableModels(),
+    pins: modelMenu,
 
     async setModel(key, model) {
       const session = await live(key);

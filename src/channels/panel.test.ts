@@ -3,7 +3,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import type { AgentLaunchOptions, ConversationKey, ModelRef, SessionSummary } from "../core/types.js";
+import type { AgentLaunchOptions, ConversationKey, ModelRef, SessionSummary, ThinkingLevel } from "../core/types.js";
+import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
 import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
 import { HandoffError } from "./handoff.js";
@@ -11,9 +12,13 @@ import type { PanelHandoff } from "./panel.js";
 import { SlackPanel } from "./slack-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
 
-const MODELS: ModelRef[] = Array.from({ length: 10 }, (_, i) => ({
-  provider: "anthropic",
-  id: `model-${i}`,
+const ref = (i: number): ModelRef => ({ provider: "anthropic", id: `model-${i}` });
+/** Ten pins: the last repeats the first's model at another level, so a tick
+ *  that ignored the level would show twice. */
+const PINS: ModelMenuEntry[] = Array.from({ length: 10 }, (_, i) => ({
+  ...ref(i === 9 ? 0 : i),
+  thinking: (i === 0 ? "off" : "high") as ThinkingLevel,
+  ...(i === 1 ? {} : { note: `note-${i}` }),
 }));
 
 const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => ({
@@ -21,9 +26,8 @@ const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => (
   cwd: "/srv/pier",
   state: "idle",
   empty: false,
-  model: MODELS[0],
+  model: ref(0),
   thinking: "off",
-  thinkingLevels: ["off", "high"],
   tokens: 1200,
   contextWindow: 200_000,
   ...over,
@@ -33,7 +37,9 @@ class FakeControl implements ChannelControl {
   current: ConversationStatus | null = status();
   readonly newSessions: (string | undefined)[] = [];
   dirs: string[] | Error = ["/home/qiqi/code/dev/pier", "/srv/ops"];
+  pinned: ModelMenuEntry[] = PINS;
   readonly setModels: ModelRef[] = [];
+  readonly setLevels: ThinkingLevel[] = [];
   aborted = 0;
   launch: Partial<AgentLaunchOptions> = {};
   launchFor = (): Partial<AgentLaunchOptions> => this.launch;
@@ -43,13 +49,17 @@ class FakeControl implements ChannelControl {
     return Promise.resolve();
   };
   status = (): Promise<ConversationStatus | null> => Promise.resolve(this.current);
-  models = (): Promise<ModelRef[]> => Promise.resolve(MODELS);
+  pins = (): ModelMenuEntry[] => this.pinned;
   setModel = (_k: ConversationKey, model: ModelRef): Promise<void> => {
+    if (!this.current) return Promise.reject(new Error(NO_SESSION));
     this.setModels.push(model);
     return Promise.resolve();
   };
-  setThinking = (): Promise<void> =>
-    this.current ? Promise.resolve() : Promise.reject(new Error(NO_SESSION));
+  setThinking = (_k: ConversationKey, level: ThinkingLevel): Promise<void> => {
+    if (!this.current) return Promise.reject(new Error(NO_SESSION));
+    this.setLevels.push(level);
+    return Promise.resolve();
+  };
   newSession = (_k: ConversationKey, cwd?: string): Promise<string> => {
     this.newSessions.push(cwd);
     return Promise.resolve("abcdef0123");
@@ -149,13 +159,13 @@ describe("slack panel", () => {
     expect(text(blocks[0]!)).toContain("`01234567` · idle");
     expect(text(blocks[1]!)).toContain("*Channel*");
     expect(text(blocks[1]!)).toContain("mention on · bind on");
-    expect(labels(blocks[2]!)).toEqual(["Model", "Reasoning"]);
+    expect(labels(blocks[2]!)).toEqual(["Model & reasoning"]);
     expect(labels(blocks[4]!)).toEqual(["Close"]);
   });
 
   it("no session: the group says how one starts and the chat line shows the defaults", async () => {
     control.current = null;
-    control.launch = { cwd: "/srv/ops", model: MODELS[1], thinking: "medium" };
+    control.launch = { cwd: "/srv/ops", model: ref(1), thinking: "medium" };
     const api = new FakeSlack();
     await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
     const blocks = api.posted[0]!.blocks as SlackBlock[];
@@ -182,16 +192,17 @@ describe("slack panel", () => {
     expect(text(blocks[1]!)).toContain("New sessions start in Pier's directory · Pi default · default reasoning");
   });
 
-  it("reasoning pick with no session prints NO_SESSION, not a confirmation", async () => {
+  it("a pick with no session prints NO_SESSION, not a confirmation", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
     control.current = null;
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:think:high");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pin:1");
     const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
     const note = footnote(blocks.at(-1)!);
     expect(note).toContain(NO_SESSION);
-    expect(note).not.toContain("Reasoning set");
+    expect(note).not.toContain("Model set");
+    expect(control.setLevels).toEqual([]);
   });
 
   it("an empty session reads \"created, no message yet\"", async () => {
@@ -203,17 +214,67 @@ describe("slack panel", () => {
     expect(text(blocks[0]!)).toContain("Context: empty — the first message you send runs here.");
   });
 
-  it("puts a whole page of models on one row", async () => {
+  it("lists the operator's pins eight a page, the current model and level ticked", async () => {
     const api = new FakeSlack();
     const panel = slackPanel(api);
     await panel.open(SLACK_KEY, "C100", "1717.0000");
-    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:models:0");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:0");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("*Model* · page 1/2");
+    expect(text(blocks[0]!)).toContain("*Model & reasoning* · page 1/2");
+    expect(text(blocks[0]!)).toContain("1. ✓ model-0 · Off — note-0");
+    // A pin with no note stops after the level.
+    expect(text(blocks[0]!)).toContain("2. model-1 · High\n");
+    expect(text(blocks[0]!)).toContain("8. model-7 · High — note-7");
+    expect(text(blocks[0]!)).not.toContain("9. ");
     expect(labels(blocks[1]!)).toHaveLength(8);
-    // The current model is ticked, not repeated elsewhere.
-    expect(labels(blocks[1]!)[0]).toBe("✓ model-0");
+    expect(labels(blocks[1]!)[0]).toBe("1 model-0");
     expect(labels(blocks[2]!)).toEqual(["Next ›", "‹ Back"]);
+  });
+
+  it("pages: the numbering continues and the same model at another level is not ticked", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:1");
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("page 2/2");
+    expect(text(blocks[0]!)).toContain("10. model-0 · High — note-9");
+    expect(text(blocks[0]!)).not.toContain("✓");
+    expect(labels(blocks[1]!)).toEqual(["9 model-8", "10 model-0"]);
+    expect(labels(blocks[2]!)).toEqual(["‹ Prev", "‹ Back"]);
+  });
+
+  it("a pick sets the model and the level together", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:0");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pin:1");
+    expect(control.setModels).toEqual([{ provider: "anthropic", id: "model-1" }]);
+    expect(control.setLevels).toEqual(["high"]);
+    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("Model set to model-1 · High.");
+  });
+
+  it("no pins: the empty list names where they are pinned", async () => {
+    control.pinned = [];
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pins:0");
+    const blocks = api.updated[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("No pinned models — Settings → Models → Model menu.");
+    expect(blocks).toHaveLength(2);
+    expect(labels(blocks[1]!)).toEqual(["‹ Back"]);
+  });
+
+  it("a stale pin index is refused, not misfiled", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:pin:42");
+    expect(control.setModels).toEqual([]);
+    expect(control.setLevels).toEqual([]);
+    expect(footnote((api.updated.at(-1)!.blocks as SlackBlock[]).at(-1)!)).toBe("That model is no longer listed.");
   });
 
   it("New session in… lists recent directories as buttons with numbered full paths", async () => {

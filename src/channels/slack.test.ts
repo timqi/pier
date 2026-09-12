@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { splitInboundFiles } from "../core/inbound-file.js";
 import { openDb } from "../db.js";
 import type { ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
+import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import type { PanelHandoff } from "./panel.js";
@@ -158,7 +159,7 @@ let aborted: string[];
 let known: Set<string>;
 let control: ChannelControl & {
   created: { key: string; cwd?: string }[];
-  models_: ModelRef[];
+  pins_: ModelMenuEntry[];
   thinking?: ThinkingLevel;
   model?: ModelRef;
 };
@@ -215,10 +216,10 @@ function bind(): void {
 function fakeControl() {
   const state = {
     created: [] as { key: string; cwd?: string }[],
-    models_: [
-      { provider: "anthropic", id: "claude-opus-4-5" },
-      { provider: "openai", id: "gpt-5" },
-    ] as ModelRef[],
+    pins_: [
+      { provider: "anthropic", id: "claude-opus-4-5", thinking: "medium" },
+      { provider: "openai", id: "gpt-5", thinking: "high", note: "hardest reasoning" },
+    ] as ModelMenuEntry[],
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel | undefined,
     launchFor: () => ({}),
@@ -235,11 +236,10 @@ function fakeControl() {
         empty: false,
         model: state.model,
         thinking: state.thinking ?? "medium",
-        thinkingLevels: ["off", "medium", "high"] as ThinkingLevel[],
         tokens: 32_140,
         contextWindow: 200_000,
       }),
-    models: () => Promise.resolve(state.models_),
+    pins: () => state.pins_,
     setModel: (_k: ConversationKey, model: ModelRef) => {
       state.model = model;
       return Promise.resolve();
@@ -1080,16 +1080,17 @@ describe("settings panel", () => {
 
   it("edits one message in place instead of posting a new one", async () => {
     await open();
-    await feed(click("cfg:models:0"));
+    await feed(click("cfg:pins:0"));
     expect(client.sent).toEqual([]);
     expect(client.updated).toHaveLength(1);
   });
 
-  it("sets a model by index, not by name", async () => {
+  it("sets a pinned model and its level by index, not by name", async () => {
     await open();
-    await feed(click("cfg:models:0"));
-    await feed(click("cfg:model:1"));
+    await feed(click("cfg:pins:0"));
+    await feed(click("cfg:pin:1"));
     expect(control.model).toEqual({ provider: "openai", id: "gpt-5" });
+    expect(control.thinking).toBe("high");
   });
 
   it("asks for a working directory in a modal, carrying the conversation with it", async () => {
@@ -1142,7 +1143,7 @@ describe("settings panel", () => {
   it("reopens a panel a previous process left behind, on the first click", async () => {
     // No open() first: this adapter has no panel state, exactly like a restart.
     openGates();
-    await feed(click("cfg:models:0"));
+    await feed(click("cfg:pins:0"));
     expect(client.sent).toHaveLength(1);
     expect(client.sent[0]!.text).toBe("Settings");
   });

@@ -69,7 +69,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
 
   async open(key: ConversationKey, chatId: string, root: string): Promise<void> {
     const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, chatId), root));
-    this.remember(key, { chatId, root, messageId: sent.messageId, models: [], dirs: [], sessions: [] });
+    this.remember(key, { chatId, root, messageId: sent.messageId, dirs: [], sessions: [] });
   }
 
   protected async draw(state: LarkPanelState, view: PanelView, note?: string): Promise<void> {
@@ -126,7 +126,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
    *  the outcome lands on the card the user is looking at. */
   async onCwdSubmit(key: ConversationKey, action: LarkCardAction, root: string): Promise<void> {
     if (!this.state(key)) {
-      this.remember(key, { chatId: action.chatId, root, messageId: action.messageId, models: [], dirs: [], sessions: [] });
+      this.remember(key, { chatId: action.chatId, root, messageId: action.messageId, dirs: [], sessions: [] });
     }
     await this.startSessionIn(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
   }

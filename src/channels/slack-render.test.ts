@@ -151,7 +151,7 @@ describe("next-step buttons", () => {
 
   it("returns nothing for a payload that is not ours, or no longer there", () => {
     const row = actions(["Run it"])!;
-    expect(offeredLabel([row], "cfg:models:0")).toBeUndefined();
+    expect(offeredLabel([row], "cfg:pins:0")).toBeUndefined();
     expect(offeredLabel([row], "sg:9")).toBeUndefined();
     expect(offeredLabel(undefined, "sg:0")).toBeUndefined();
   });

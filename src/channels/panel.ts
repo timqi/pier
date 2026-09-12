@@ -4,7 +4,7 @@
 
 import { sessionLabel } from "../core/identity.js";
 import { compact, thinkingLabel } from "../core/reply.js";
-import type { ConversationKey, ModelRef, SessionSummary, ThinkingLevel } from "../core/types.js";
+import type { ConversationKey, SessionSummary } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
 import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
 import { type Handoff, HandoffError } from "./handoff.js";
@@ -56,7 +56,6 @@ export interface PanelDeps {
 export interface PanelState {
   chatId: string;
   /** The lists the payloads' indices point into. */
-  models: ModelRef[];
   dirs: string[];
   sessions: SessionSummary[];
 }
@@ -155,7 +154,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
         },
       ],
       rows: [
-        [btn("Model", "models:0"), btn("Reasoning", "think")],
+        [btn("Model & reasoning", "pins:0")],
         [
           btn("New session", "new"),
           btn("New session in…", "cwd"),
@@ -237,21 +236,17 @@ export abstract class ChatPanel<S extends PanelState, C> {
       case "panel":
         await this.refresh(key);
         return true;
-      case "models":
-        await this.showModels(key, Number(arg) || 0);
+      case "pins":
+        await this.showPins(key, Number(arg) || 0);
         return true;
-      case "model":
-        await this.pickModel(key, Number(arg));
+      case "pin":
+        await this.pickPin(key, Number(arg));
         return true;
       case "sessions":
         await this.showSessions(key, Number(arg) || 0);
         return true;
       case "session":
         await this.pickSession(key, Number(arg));
-        return true;
-      case "think":
-        if (arg) await this.pickThinking(key, arg as ThinkingLevel);
-        else await this.showThinking(key);
         return true;
       case "new": {
         const id = await this.deps.control.newSession(key);
@@ -275,30 +270,31 @@ export abstract class ChatPanel<S extends PanelState, C> {
     }
   }
 
-  private async showModels(key: ConversationKey, page: number): Promise<void> {
+  /** The operator's pins, model and reasoning in one pick: the catalog is the
+   *  Console's business, and a chat is the wrong place to browse it. */
+  private async showPins(key: ConversationKey, page: number): Promise<void> {
     const state = this.state(key);
     if (!state) return;
-    // An empty list and a catalog that could not be read are two different
-    // answers; the second must not draw as the first.
-    let unavailable: string | undefined;
-    state.models = await this.deps.control.models().catch((err: unknown) => {
-      unavailable = `Could not list models: ${String(err)}`;
-      this.deps.log(unavailable);
-      return [];
-    });
+    const pins = this.deps.control.pins();
     const status = await this.deps.control.status(key);
-    const { at, pages, slice, from } = paged(state.models, page);
+    const { at, pages, slice, from } = paged(pins, page);
     await this.draw(state, {
       groups: [{
-        title: "Model",
+        title: "Model & reasoning",
         suffix: ` · page ${at + 1}/${pages}`,
-        lines: state.models.length ? [] : [unavailable ?? "No models with configured auth."],
+        lines: slice.length
+          ? slice.map((pin, i) => {
+            const current = status?.model?.provider === pin.provider && status.model.id === pin.id
+              && status.thinking === pin.thinking;
+            return `${String(from + i + 1)}. ${current ? "✓ " : ""}${this.esc(pin.id)} · ${
+              thinkingLabel(pin.thinking)
+            }${pin.note ? ` — ${this.esc(pin.note)}` : ""}`;
+          })
+          : ["No pinned models — Settings → Models → Model menu."],
       }],
-      picks: slice.map((model, i) => {
-        const current = status?.model?.provider === model.provider && status.model.id === model.id;
-        return btn(`${current ? "✓ " : ""}${model.id}`, `model:${from + i}`);
-      }),
-      rows: [pager("models", at, pages)],
+      // The note stays on the line: a platform truncates a button label.
+      picks: slice.map((pin, i) => btn(`${String(from + i + 1)} ${pin.id}`, `pin:${String(from + i)}`)),
+      rows: [pager("pins", at, pages)],
     });
   }
 
@@ -341,12 +337,13 @@ export abstract class ChatPanel<S extends PanelState, C> {
     }
   }
 
-  private async pickModel(key: ConversationKey, index: number): Promise<void> {
-    const model = this.state(key)?.models[index];
-    if (!model) return this.refresh(key, "That model is no longer listed.");
+  private async pickPin(key: ConversationKey, index: number): Promise<void> {
+    const pin = this.deps.control.pins()[index];
+    if (!pin) return this.refresh(key, "That model is no longer listed.");
     try {
-      await this.deps.control.setModel(key, model);
-      await this.refresh(key, `Model set to ${model.id}.`);
+      await this.deps.control.setModel(key, { provider: pin.provider, id: pin.id });
+      await this.deps.control.setThinking(key, pin.thinking);
+      await this.refresh(key, `Model set to ${pin.id} · ${thinkingLabel(pin.thinking)}.`);
     } catch (err) {
       await this.refresh(key, failed("Could not set that model", err));
     }
@@ -377,32 +374,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
     const dir = this.state(key)?.dirs[index];
     if (!dir) return this.refresh(key, "That directory is no longer listed.");
     await this.startSessionIn(key, dir);
-  }
-
-  private async showThinking(key: ConversationKey): Promise<void> {
-    const state = this.state(key);
-    if (!state) return;
-    const status = await this.deps.control.status(key);
-    const levels = status?.thinkingLevels ?? [];
-    await this.draw(state, {
-      groups: [{
-        title: "Reasoning",
-        lines: levels.length ? [] : ["This model has no levels."],
-      }],
-      picks: levels.map((level) =>
-        btn(`${status?.thinking === level ? "✓ " : ""}${thinkingLabel(level)}`, `think:${level}`)
-      ),
-      rows: [[btn("‹ Back", "panel")]],
-    });
-  }
-
-  private async pickThinking(key: ConversationKey, level: ThinkingLevel): Promise<void> {
-    try {
-      await this.deps.control.setThinking(key, level);
-      await this.refresh(key, `Reasoning set to ${thinkingLabel(level)}.`);
-    } catch (err) {
-      await this.refresh(key, failed("Could not set reasoning", err));
-    }
   }
 
   /** Pi fixes cwd at session creation, so "change the working directory" *is*

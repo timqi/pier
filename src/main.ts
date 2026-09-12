@@ -144,7 +144,10 @@ const packages = new PiPackageStore(piConfig, { version: currentVersion(), setti
 packages.watchUpdates();
 
 channelStore = new ChannelStore(db, vault);
-const control = createControl({ router, factory, conversations, store: channelStore });
+const control = createControl({
+  router, factory, conversations, store: channelStore,
+  modelMenu: () => settings.get().modelMenu,
+});
 // The panel pulls through the handoff and the handoff posts through the
 // runtime: the runtime's half is reached lazily so both can be built.
 const handoff = createHandoff({

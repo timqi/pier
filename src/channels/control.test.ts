@@ -106,7 +106,7 @@ function wire(f: ReturnType<typeof fakeFactory>): void {
   stale = [];
   let resolveIm: (key: ConversationKey) => Promise<AgentSession> = () => Promise.reject(new Error("unwired"));
   router = new Router(hub, (key) => resolveIm(key), (key) => conversations.get(key));
-  control = createControl({ router, factory: factory as unknown as AgentFactory, conversations, store });
+  control = createControl({ router, factory: factory as unknown as AgentFactory, conversations, store, modelMenu: () => [] });
   resolveIm = resolveConversation(conversations, factory as unknown as AgentFactory, control.launchFor, (k, m) => stale.push([k, m]));
 }
 
@@ -217,7 +217,7 @@ describe("recentDirs", () => {
     config.chats.find((c) => c.id === "C100")!.cwd = "/srv/ops";
     store.save("slack", config);
     // Same wiring, this store.
-    control = createControl({ router, factory: factory as unknown as AgentFactory, conversations, store });
+    control = createControl({ router, factory: factory as unknown as AgentFactory, conversations, store, modelMenu: () => [] });
     expect(await control.recentDirs(KEY)).toEqual(["/srv/ops", "/srv/new"]);
   });
 });
