@@ -122,10 +122,14 @@ describe("IM session resolution", () => {
     const store = new ConversationStore(db);
     store.set(CHAT, "gone");
     const factory = fakeFactory([]); // resume always rejects
-    const stale: string[] = [];
-    const resolve = resolveConversation(store, factory, () => ({}), (m) => stale.push(m));
+    const stale: [ConversationKey, string][] = [];
+    const resolve = resolveConversation(store, factory, () => ({ cwd: "/srv/ops" }), (k, m) => stale.push([k, m]));
     expect((await resolve(CHAT)).id).toBe("s1");
+    // The thread hears it, and the note names the lost session and where it goes on.
     expect(stale).toHaveLength(1);
+    expect(stale[0]![0]).toEqual(CHAT);
+    expect(stale[0]![1]).toContain("Session gone is gone from disk");
+    expect(stale[0]![1]).toContain("new session in /srv/ops");
     // The dead mapping is replaced, not retried on every later message.
     expect(store.get(CHAT)).toBe("s1");
     expect(factory.resumed).toEqual(["gone"]);

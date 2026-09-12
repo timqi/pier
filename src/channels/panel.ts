@@ -5,7 +5,7 @@
 import { compact, thinkingLabel } from "../core/reply.js";
 import type { ConversationKey, ModelRef, ThinkingLevel } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
-import type { ChannelControl, ConversationStatus } from "./control.js";
+import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
 import type { ChannelPlatform, ChatConfig, ChatPolicy } from "./types.js";
 
 export const PANEL_PREFIX = "cfg:";
@@ -52,6 +52,10 @@ export interface PanelState {
 
 const btn = (label: string, action: string): PanelButton => ({ label, action });
 
+/** NO_SESSION is the whole answer; any other failure names what was attempted. */
+const failed = (what: string, err: unknown): string =>
+  err instanceof Error && err.message === NO_SESSION ? NO_SESSION : `${what}: ${String(err)}`;
+
 export abstract class ChatPanel<S extends PanelState, C> {
   private readonly panels = new Map<string, S>();
 
@@ -92,11 +96,14 @@ export abstract class ChatPanel<S extends PanelState, C> {
           title: "Session",
           lines: status
             ? this.sessionLines(status)
-            : ["None yet — send a message to start one."],
+            : [
+              "None in this thread yet — your first message starts one with the chat defaults below.",
+              "To choose the directory first, tap New session in….",
+            ],
         },
         {
           title: this.platform === "slack" ? "Channel" : "Chat",
-          lines: this.chatLines(chatId),
+          lines: [...this.chatLines(chatId), this.defaultsLine(key)],
         },
       ],
       rows: [
@@ -114,14 +121,23 @@ export abstract class ChatPanel<S extends PanelState, C> {
     const usage = status.tokens !== null && status.contextWindow
       ? `${compact(status.tokens)}/${compact(status.contextWindow)} tok`
       : "not measured yet";
+    const fresh = status.empty && status.state === "idle";
     return [
-      `${this.code(status.sessionId.slice(0, 8))} · ${status.state}`,
+      `${this.code(status.sessionId.slice(0, 8))} · ${fresh ? "created, no message yet" : status.state}`,
       `Directory: ${this.code(status.cwd || "?")}`,
       `Model: ${
         status.model ? this.esc(status.model.id) : "Pi default"
       } · ${thinkingLabel(status.thinking)}`,
-      `Context: ${usage}`,
+      `Context: ${status.empty ? "empty — the first message you send runs here." : usage}`,
     ];
+  }
+
+  /** Display only: the chat's launch config is the Console's to change. */
+  private defaultsLine(key: ConversationKey): string {
+    const launch = this.deps.control.launchFor(key);
+    return `New sessions start in ${launch.cwd ? this.code(launch.cwd) : "Pier's directory"} · ${
+      launch.model ? this.esc(launch.model.id) : "Pi default"
+    } · ${launch.thinking ? `reasoning ${launch.thinking}` : "default reasoning"}`;
   }
 
   private chatLines(chatId: string): string[] {
@@ -237,7 +253,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
       await this.deps.control.setModel(key, model);
       await this.refresh(key, `Model set to ${model.id}.`);
     } catch (err) {
-      await this.refresh(key, `Could not set that model: ${String(err)}`);
+      await this.refresh(key, failed("Could not set that model", err));
     }
   }
 
@@ -259,8 +275,12 @@ export abstract class ChatPanel<S extends PanelState, C> {
   }
 
   private async pickThinking(key: ConversationKey, level: ThinkingLevel): Promise<void> {
-    await this.deps.control.setThinking(key, level);
-    await this.refresh(key, `Reasoning set to ${thinkingLabel(level)}.`);
+    try {
+      await this.deps.control.setThinking(key, level);
+      await this.refresh(key, `Reasoning set to ${thinkingLabel(level)}.`);
+    } catch (err) {
+      await this.refresh(key, failed("Could not set reasoning", err));
+    }
   }
 
   /** Pi fixes cwd at session creation, so "change the working directory" *is*

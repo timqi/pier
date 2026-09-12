@@ -90,6 +90,12 @@ the same request.
 - One message, edited in place.
 - Panel buttons are `cfg:<action>[:<arg>]`, consumed by the panel; any other
   payload is a next-step label and *is* the message to send.
+- The panel acts on the thread's real session or says there is none. Opening
+  it on an evicted session resumes that session (one Pi open, truthful
+  values); Model / Reasoning on a thread without a row are refused with
+  `NO_SESSION` (`control.ts`), never confirmed. A session with no turn yet
+  reads `created, no message yet`; the Chat group's last line is what the
+  chat's next session launches with (`launchFor`), display only.
 - Model lists are paged and referenced by **index** (payloads are size-capped);
   the page's list is cached per panel.
 - A panel from a previous process has no state: reopen on the first tap.
@@ -141,7 +147,9 @@ A `conversationId` is opaque to core. Slack and Lark spell it
 `<channelId>/<threadTs>`; the chat half has one decoder (`chatOf`).
 
 `ConversationStore` (`conversations.ts`) makes routing survive a restart; a
-mapping whose session Pi no longer has is dropped and re-created. Per-chat
+mapping whose session Pi no longer has is dropped and re-created, and the
+thread hears it as an error note naming the lost session and the new cwd
+(`resolveConversation`'s `onStale`, wired in `main.ts`). Per-chat
 launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
 — parsing the chat id out of the conversation id is the adapter's business.
 

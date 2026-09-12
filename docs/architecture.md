@@ -213,7 +213,7 @@ seams:
   the delivery key whenever it is attached. Durability is the caller's: web conversation ids *are* session ids, task
   definitions persist their target, IM channels keep
   `channels/conversations.ts`. A mapping whose session Pi no longer has is
-  dropped and re-created, never retried forever.
+  dropped and re-created, never retried forever, and the thread is told.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters

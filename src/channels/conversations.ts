@@ -55,22 +55,27 @@ export function resolveConversation<S extends { id: string }>(
     create(opts: AgentLaunchOptions): Promise<S>;
   },
   launchFor: (key: ConversationKey) => Partial<AgentLaunchOptions>,
-  onStale?: (message: string) => void,
+  /** The thread is told, not only the log: its next answer comes from a
+   *  session that remembers nothing. */
+  onStale?: (key: ConversationKey, message: string) => void,
 ): (key: ConversationKey) => Promise<S> {
   return async (key) => {
     const known = store.get(key);
+    let stale: string | undefined;
     if (known) {
       try {
         return await factory.resume(known);
       } catch (err) {
         // Never persisted, or deleted: re-route rather than fail every message.
-        onStale?.(`${key.channelId}:${key.conversationId} lost session ${known}: ${String(err)}`);
+        stale = `${known.slice(0, 8)} is gone from disk (${String(err)})`;
         store.forget(key);
       }
     }
     const launch = launchFor(key);
-    const session = await factory.create({ ...launch, cwd: launch.cwd ?? process.cwd() });
+    const cwd = launch.cwd ?? process.cwd();
+    const session = await factory.create({ ...launch, cwd });
     store.set(key, session.id);
+    if (stale) onStale?.(key, `Session ${stale}; this thread continues in a new session in ${cwd}.`);
     return session;
   };
 }

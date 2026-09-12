@@ -58,6 +58,8 @@ truth.
   `stop`, `settings`, `bind <code>`.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
+- The panel reads the thread's real session, resuming an idle one; in a thread
+  with no session yet, Model and Reasoning are refused until one is started.
 
 ## What a turn looks like from outside
 

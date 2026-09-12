@@ -3,9 +3,9 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import type { ConversationKey, ModelRef } from "../core/types.js";
+import type { AgentLaunchOptions, ConversationKey, ModelRef } from "../core/types.js";
 import { ChannelStore } from "./config.js";
-import type { ChannelControl, ConversationStatus } from "./control.js";
+import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
 import { SlackPanel } from "./slack-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
 
@@ -18,6 +18,7 @@ const status = (over: Partial<ConversationStatus> = {}): ConversationStatus => (
   sessionId: "0123456789abcdef",
   cwd: "/srv/pier",
   state: "idle",
+  empty: false,
   model: MODELS[0],
   thinking: "off",
   thinkingLevels: ["off", "high"],
@@ -31,7 +32,8 @@ class FakeControl implements ChannelControl {
   readonly newSessions: (string | undefined)[] = [];
   readonly setModels: ModelRef[] = [];
   aborted = 0;
-  launchFor = () => ({});
+  launch: Partial<AgentLaunchOptions> = {};
+  launchFor = (): Partial<AgentLaunchOptions> => this.launch;
   knows = () => true;
   abort = (): Promise<void> => {
     this.aborted++;
@@ -43,7 +45,8 @@ class FakeControl implements ChannelControl {
     this.setModels.push(model);
     return Promise.resolve();
   };
-  setThinking = (): Promise<void> => Promise.resolve();
+  setThinking = (): Promise<void> =>
+    this.current ? Promise.resolve() : Promise.reject(new Error(NO_SESSION));
   newSession = (_k: ConversationKey, cwd?: string): Promise<string> => {
     this.newSessions.push(cwd);
     return Promise.resolve("abcdef0123");
@@ -99,6 +102,9 @@ const slackPanel = (api: FakeSlack): SlackPanel =>
 
 const text = (block: SlackBlock): string =>
   (block as { text?: { text?: string } }).text?.text ?? "";
+/** The panel's note is a context block under the buttons. */
+const footnote = (block: SlackBlock): string =>
+  (block as { elements?: { text?: string }[] }).elements?.[0]?.text ?? "";
 const labels = (block: SlackBlock): string[] =>
   ((block as { elements?: { text?: { text: string } }[] }).elements ?? [])
     .map((e) => e.text?.text ?? "");
@@ -114,6 +120,46 @@ describe("slack panel", () => {
     expect(text(blocks[1]!)).toContain("mention on · bind on");
     expect(labels(blocks[2]!)).toEqual(["Model", "Reasoning"]);
     expect(labels(blocks[4]!)).toEqual(["Close"]);
+  });
+
+  it("no session: the group says how one starts and the chat line shows the defaults", async () => {
+    control.current = null;
+    control.launch = { cwd: "/srv/ops", model: MODELS[1], thinking: "medium" };
+    const api = new FakeSlack();
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("None in this thread yet");
+    expect(text(blocks[0]!)).toContain("New session in…");
+    expect(text(blocks[1]!)).toContain("New sessions start in `/srv/ops` · model-1 · reasoning medium");
+  });
+
+  it("no session and no chat config: the defaults line still says what would happen", async () => {
+    control.current = null;
+    const api = new FakeSlack();
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(text(blocks[1]!)).toContain("New sessions start in Pier's directory · Pi default · default reasoning");
+  });
+
+  it("reasoning pick with no session prints NO_SESSION, not a confirmation", async () => {
+    const api = new FakeSlack();
+    const panel = slackPanel(api);
+    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    control.current = null;
+    await panel.onAction({} as SlackInteraction, SLACK_KEY, "cfg:think:high");
+    const blocks = api.updated.at(-1)!.blocks as SlackBlock[];
+    const note = footnote(blocks.at(-1)!);
+    expect(note).toContain(NO_SESSION);
+    expect(note).not.toContain("Reasoning set");
+  });
+
+  it("an empty session reads \"created, no message yet\"", async () => {
+    control.current = status({ empty: true, tokens: null });
+    const api = new FakeSlack();
+    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const blocks = api.posted[0]!.blocks as SlackBlock[];
+    expect(text(blocks[0]!)).toContain("`01234567` · created, no message yet");
+    expect(text(blocks[0]!)).toContain("Context: empty — the first message you send runs here.");
   });
 
   it("puts a whole page of models on one row", async () => {

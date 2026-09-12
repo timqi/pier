@@ -149,7 +149,11 @@ resolveIm = resolveConversation(
   conversations,
   factory,
   control.launchFor,
-  (message) => logger("channels").warn(message),
+  (key, message) => {
+    logger("channels").warn(`${key.channelId}:${key.conversationId} ${message}`);
+    void channels.notify(key.channelId, key.conversationId, message)
+      .catch((err: unknown) => log.error(`could not tell ${key.channelId} about its re-routed session`, err));
+  },
 );
 // Channels connect once tokens are readable; a refused unlock must not take
 // down the web surface, which is where the operator repairs it. The chats a

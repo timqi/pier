@@ -6,6 +6,7 @@ import type { Router } from "../core/router.js";
 import type {
   AgentFactory,
   AgentLaunchOptions,
+  AgentSession,
   ConversationKey,
   ModelRef,
   SessionState,
@@ -15,10 +16,14 @@ import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
 import { chatOf, isChannelPlatform } from "./types.js";
 
+export const NO_SESSION = "No session in this thread yet — start one first (New session / New session in…).";
+
 export interface ConversationStatus {
   sessionId: string;
   cwd: string;
   state: SessionState;
+  /** No turn in the transcript yet: the panel says "created, no message yet". */
+  empty: boolean;
   model: ModelRef | undefined;
   thinking: ThinkingLevel;
   thinkingLevels: ThinkingLevel[];
@@ -32,8 +37,11 @@ export interface ChannelControl {
    *  thread Pier owns is addressed, and that must hold across a reload. */
   knows(key: ConversationKey): boolean;
   abort(key: ConversationKey): Promise<void>;
+  /** Null when the thread has no session; an evicted one is resumed, never
+   *  answered null. */
   status(key: ConversationKey): Promise<ConversationStatus | null>;
   models(): Promise<ModelRef[]>;
+  /** Rejects with NO_SESSION for a thread without one: a confirmed no-op is a lie. */
   setModel(key: ConversationKey, model: ModelRef): Promise<void>;
   setThinking(key: ConversationKey, level: ThinkingLevel): Promise<void>;
   /** Pi fixes cwd at creation, so "change the working directory" *is* this. */
@@ -58,6 +66,13 @@ export function createControl({ router, factory, conversations, store }: Control
     };
   };
 
+  /** The thread's session, resumed if evicted; undefined when the thread has
+   *  none. Never creates: a look at the panel must not open a session. */
+  const live = async (key: ConversationKey): Promise<AgentSession | undefined> => {
+    if (!conversations.get(key)) return undefined;
+    return router.sessionOf(key) ?? router.ensure(key);
+  };
+
   return {
     launchFor,
 
@@ -66,7 +81,7 @@ export function createControl({ router, factory, conversations, store }: Control
     abort: (key) => router.abortConversation(key),
 
     async status(key) {
-      const session = router.sessionOf(key);
+      const session = await live(key);
       if (!session) return null;
       const summary = await factory.find(session.id);
       const usage = session.contextUsage;
@@ -74,6 +89,7 @@ export function createControl({ router, factory, conversations, store }: Control
         sessionId: session.id,
         cwd: summary?.cwd ?? "",
         state: session.state,
+        empty: (await session.history()).length === 0,
         model: session.model,
         thinking: session.thinkingLevel,
         thinkingLevels: session.availableThinkingLevels(),
@@ -85,11 +101,15 @@ export function createControl({ router, factory, conversations, store }: Control
     models: () => factory.availableModels(),
 
     async setModel(key, model) {
-      await router.sessionOf(key)?.setModel(model);
+      const session = await live(key);
+      if (!session) throw new Error(NO_SESSION);
+      await session.setModel(model);
     },
 
     async setThinking(key, level) {
-      router.sessionOf(key)?.setThinkingLevel(level);
+      const session = await live(key);
+      if (!session) throw new Error(NO_SESSION);
+      session.setThinkingLevel(level);
     },
 
     async newSession(key, cwd) {

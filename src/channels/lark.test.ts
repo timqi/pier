@@ -199,6 +199,7 @@ function fakeControl() {
         sessionId: "session-abcdef12",
         cwd: "/srv/ops",
         state: "idle" as const,
+        empty: false,
         model: state.model,
         thinking: state.thinking,
         thinkingLevels: ["off", "medium", "high"] as ThinkingLevel[],
