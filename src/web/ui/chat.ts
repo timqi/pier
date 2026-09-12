@@ -43,6 +43,8 @@ export interface ChatDeps {
   sessionId: () => string | null;
   /** Where a `src/x.ts:12` in a reply resolves from; null when unknown. */
   sessionCwd: () => string | null;
+  /** The IM channel answering this session, `"web"` or null when unknown. */
+  sessionChannel: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
   showRun: (runId: string) => void;
@@ -279,6 +281,12 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
     const label = h("span", "font-semibold text-inherit", who);
     if (speaker?.id) label.title = speaker.id;
     line.append(label);
+  }
+  // A named speaker means the message came through an IM; the header's own
+  // `place` appears only on a change, so the session's channel names it.
+  const channel = deps.sessionChannel();
+  if (channel && channel !== "web") {
+    line.append(h("span", "text-[10px] uppercase tracking-wide opacity-60", channel));
   }
   return line;
 }

@@ -240,6 +240,11 @@ browser keeps no second session order.
   sent, optimistic and echoed text are identical. The strip is per session, in
   memory only. User bubbles strip markers and render them via
   `web/ui/attachments.ts`; images open in the lightbox.
+- **Speaker caption**: a user bubble whose text opens with the speaker header
+  (`core/identity.ts`) shows the name above the message and, when the session
+  answers an IM, the channel beside it in muted uppercase (`qiqi · LARK`); the
+  header itself is stripped from the bubble. The operator's own web messages
+  carry no caption.
 - **File references**: an inline code span that is a path with an extension —
   `src/web/ui/chat.ts:481`, and a bare name only when the extension is a
   file-ish one — opens the preview dialog, at the named line when it names one.
