@@ -6,9 +6,9 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 # Pier tasks
 
 `pier task --help` lists the five commands and their flags. Each prints one
-JSON receipt, exit 0; a refusal is a `task:` line, exit 1 (`--model` with no
-or several hits lists the menu under it); a bad flag is `task:` plus the
-usage, exit 2. `--prompt -` reads stdin.
+JSON receipt (`--model ?` one pin per line), exit 0; a refusal is a `task:`
+line, exit 1 (`--model` with no or several hits lists the menu under it); a
+bad flag is `task:` plus the usage, exit 2. `--prompt -` reads stdin.
 
 ## Delegate, then end your turn
 
@@ -50,7 +50,7 @@ Default: your model. Harder reasoning: `--thinking` first
 (`off/minimal/low/medium/high/xhigh/max`). `--model <name>` is matched
 against the operator's menu (substring of provider, id or note — "let gpt
 review it" is `--model gpt`); none or several hits lists the pins, pick one.
-`--model ?` prints the menu. Never name a model id from memory.
+`--model ?` prints the menu, one pin per line. Never name a model id from memory.
 
 ## Cancel · recover
 

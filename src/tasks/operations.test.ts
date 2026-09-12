@@ -283,8 +283,11 @@ describe("task operations", () => {
       'model "gpt" matches 2 of the menu:\nopenai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk',
     );
     await expect(launchOf({ model: "gemini" })).rejects.toThrow(/model "gemini" matches 0 of the menu:\nanthropic\/claude-opus-4 · high — hardest reasoning\n/);
-    // `?` is the menu itself, in place of a run.
-    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toEqual({ source: "menu", models: menu });
+    // `?` is the menu itself, in the same lines a refusal lists, in place of a run.
+    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toBe(
+      "the operator's menu — --model takes a provider/id or a unique substring of one:\n"
+      + "anthropic/claude-opus-4 · high — hardest reasoning\nopenai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk",
+    );
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });
     expect(ask.created).toHaveLength(7);

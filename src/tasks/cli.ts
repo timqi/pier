@@ -51,7 +51,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
 const USAGE = [
   "usage: pier task <command> … — subagents and scheduled tasks (skills/pier-tasks)",
   ...Object.values(COMMANDS).map(({ usage, help }) => `  ${usage}\n      ${help}`),
-  "`--prompt -` reads stdin. The receipt is one line of JSON, exit 0; a refusal is one `task:` line, exit 1.",
+  "`--prompt -` reads stdin. The receipt is one line of JSON (`--model ?` one pin per line), exit 0; a refusal is one `task:` line, exit 1.",
 ].join("\n");
 
 /** Flags that belong to the batch, never to one member. */
@@ -124,8 +124,9 @@ export async function runTaskCli(argv: string[], post: TaskPost, io: TaskCliIo =
   }
   const { status, body } = await post(params);
   if (status === 200) {
-    // Compact: the reader is a model, and the ids are what it keeps.
-    io.stdout(JSON.stringify(body.result));
+    // Compact: the reader is a model, and the ids are what it keeps; an answer
+    // the server already wrote in lines (`--model ?`) is printed as it came.
+    io.stdout(typeof body.result === "string" ? body.result : JSON.stringify(body.result));
     return 0;
   }
   io.stderr(`task: ${body.error ?? `socket answered ${String(status)}`}`);

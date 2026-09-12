@@ -83,7 +83,10 @@ none is pinned):
   (`provider/id · thinking — note`; the hits when several, the whole menu
   when none), exit 1.
 
-`--model ?` prints the menu instead of running, exit 0.
+`--model ?` prints the menu instead of running, exit 0: a line naming its
+source (the operator's menu, or the live catalog when none is pinned) then
+the same one-line-per-pin shape. It is the one answer that is text, not JSON;
+the CLI prints a string result as it came.
 
 ## Decisions
 

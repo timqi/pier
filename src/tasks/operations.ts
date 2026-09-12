@@ -194,7 +194,11 @@ export async function handleTask(
   }
   if (input.operation === "run") {
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
-    if (record(input.launch)?.model === "?") return host.models();
+    if (record(input.launch)?.model === "?") {
+      const { source, models } = await host.models();
+      const head = source === "menu" ? "the operator's menu" : "the live catalog (no model pinned)";
+      return `${head} — --model takes a provider/id or a unique substring of one:\n${menuLines(models)}`;
+    }
     const callbackMode = callbackModeOf(input);
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
@@ -320,15 +324,18 @@ function nameFrom(text: string): string {
 function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
-  const line = (pin: MenuEntry): string => `${full(pin)}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`;
   const exact = menu.find((pin) => full(pin).toLowerCase() === needle);
   const hits = exact ? [exact] : menu.filter((pin) => `${full(pin)} ${pin.note ?? ""}`.toLowerCase().includes(needle));
   if (hits.length === 1) return { model: { provider: hits[0]!.provider, id: hits[0]!.id }, thinking: hits[0]!.thinking };
   const slash = name.indexOf("/");
   if (!hits.length && slash > 0 && slash < name.length - 1) return { model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } };
-  const lines = (hits.length ? hits : menu).map(line).join("\n") || "(no model is pinned or available)";
-  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${lines}`);
+  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${menuLines(hits.length ? hits : menu)}`);
 }
+
+/** One pin per line, the only shape a menu is ever printed in. */
+const menuLines = (menu: MenuEntry[]): string =>
+  menu.map((pin) => `${pin.provider}/${pin.id}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`).join("\n")
+  || "(no model is pinned or available)";
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own
  *  directory; everything the caller did spell out passes through to parseDraft. */

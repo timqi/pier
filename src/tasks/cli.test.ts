@@ -138,6 +138,10 @@ describe("pier task", () => {
     expect(await run("run", "--prompt", "Review", "--model", "?")).toBe(0);
     expect(await run("save", "--name", "n", "--prompt", "x", "--model", "?")).toBe(0);
     expect(posted).toEqual([{ operation: "run", launch: { model: "?" } }, { operation: "run", launch: { model: "?" } }]);
+    // The menu comes back written in lines; printing it as JSON would escape them.
+    const lines = rig({ status: 200, body: { result: "the operator's menu:\nopenai/gpt-5 · medium" } });
+    expect(await lines.run("run", "--model", "?")).toBe(0);
+    expect(lines.out).toEqual(["the operator's menu:\nopenai/gpt-5 · medium"]);
   });
 
   it("exits 2 on argv it cannot shape, without posting", async () => {
