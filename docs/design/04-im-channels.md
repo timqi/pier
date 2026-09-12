@@ -26,28 +26,25 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Per-chat launch config | cwd, model, reasoning level for the sessions a chat opens | shared (`launchFor`) | ✅ | ✅ |
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
-| Settings panel | In-chat panel: a thread without a session drafts one (cwd, model & reasoning from the operator's pins, a pending question) and Starts it; a thread with one reads it out, picks model & reasoning, changes cwd (a new session), stops | shared control, adapter renders | ✅ | ✅ |
-| Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message, replies land on both surfaces | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
-| Continue in this thread | The panel of a thread with no session yet binds it to an unbound web session (task runs' own sessions excluded); same binding and guard as the push | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
+| Settings panel | In-chat panel: a thread without a session drafts one (cwd, pinned model & reasoning, a pending question) and Starts it; a thread with one reads it out, picks model & reasoning, changes cwd (a new session), stops | shared control, adapter renders | ✅ | ✅ |
+| Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
+| Continue in this thread | The panel of a thread with no session binds it to an unbound web session | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
 
 ✅ done · — not started · ¹ explicitly not wanted (operator decision, 2025)
 
 Command spelling is per-platform: Lark takes `/stop`, `/settings`,
-`/bind <code>`; Slack the same words without the slash. The draft trigger is
-the same on both: `s <text>` (Lark `/s <text>` too), and nothing else — a bare
-`s`, `set x`, `settings x` are messages.
+`/bind <code>`; Slack the same words without the slash. `s <text>` is the same
+on both ([the panel](#the-in-chat-panel)).
 
 ### Deliberately not features
 
 Re-adding any of these is a design decision, not a gap: backend / agent
 selection in chat; message-visibility toggles; per-thread setting overrides;
 admin / bind management from chat; webhook inbound; registered Slack slash
-commands; posting in a Slack channel's main flow, except the single root
-message a web → IM handoff opens its thread with; editing a live session's cwd
-(Pi fixes cwd at creation — the panel offers "New session in…" instead);
-moving a session between threads (a second handoff is refused with the first
-chat's name).
+commands; posting in a Slack channel's main flow (the handoff root excepted);
+editing a live session's cwd (Pi fixes cwd at creation — the panel offers "New
+session in…" instead); moving a session between threads.
 
 ## Layout
 
@@ -85,11 +82,11 @@ adapter must not reimplement it. Notes are trimmed to 600 characters; a notify
 that itself fails is reported to the hub once, never retried.
 
 **Control that is not a prompt does not go through the seam.** `ChannelControl`
-(`control.ts`): abort, read status, list/set model, set reasoning, start a new
-session, `knows()` — injected by `runtime.ts`, which owns router and factory.
-The panel's pull of a web session goes the same way, as the handoff's
-`unbound` / `continueHere` (`PanelHandoff`). The seam keeps one inbound path
-(`onMessage`); add the next control here.
+(`control.ts`): abort, read status, pins, set model / reasoning, start a new
+session, recent directories, `knows()` — injected by `runtime.ts`, which owns
+router and factory. The panel's pull of a web session is the handoff's
+`unbound` / `continueHere` (`PanelHandoff`), injected the same way. The seam
+keeps one inbound path (`onMessage`); add the next control here.
 
 **Opening a thread is channels-internal.** `ImChannel` (`runtime.ts`) is
 `Channel` plus `openThread(chatId, note)`: post the handoff root, answer the
@@ -98,52 +95,47 @@ running`; `running()` lists the live platforms.
 
 ## Continue from web, and from a thread (`handoff.ts`)
 
-Both directions share one guard pair and one binding. The guards: session on
-disk (404 `Session … has no transcript yet — send it one message first.`) →
-not already bound (409 `Already answers in <platform> · <chat name>.`). The
-binding: `conversations.set(key, sessionId)` → attach the loaded session to
-the key when the web has it open → `sessions-changed`.
+Both directions share the guards and the binding, in this order:
 
-`continueIn({sessionId, platform, chatId})` (web → IM), in order: platform
-running (409 `Slack is not running — enable it in Settings → Channels.`) →
-chat known (404) and enabled (409) `That chat is not enabled for the bot.` →
-the guards → post the root (`openThread`; a platform refusal is 502 with its
-message and nothing is written) → the binding. Post before row: a row for a
-thread that does not exist is worse than a root with no row.
+| Step | Refusal |
+| --- | --- |
+| `continueIn` only: platform running | 409 `Slack is not running — enable it in Settings → Channels.` |
+| `continueIn` only: chat known, enabled | 404 / 409 `That chat is not enabled for the bot.` |
+| `continueHere` only: thread has no row | 409 `This thread already has a session.` |
+| session on disk | 404 `Session <id8> has no transcript yet — send it one message first.` |
+| not already bound | 409 `Already answers in <platform> · <chat name>.` |
+| `continueIn` only: post the root (`openThread`) | 502 with the platform's message; nothing written |
+| bind: `conversations.set` → attach the session when the web has it loaded → `sessions-changed` | — |
 
-`continueHere(key, sessionId)` (IM → web, from the panel): thread has no row
-(409 `This thread already has a session.` — a stale panel must not orphan
-one) → the guards → the binding. No root: the thread exists. `unbound(limit)`
-is the picker's list — the backend's listing minus `conversations.boundSessions()`
-and the sessions task runs created for themselves (`taskSessions`, the web
-sidebar's rule), newest first.
+Post before row: a row for a thread that does not exist is worse than a root
+with no row. `unbound(limit)` is the picker's list: the backend's listing
+minus `conversations.boundSessions()` and the sessions task runs created for
+themselves (`taskSessions`), newest first.
 
-- The note is `{title, url}`: `sessionLabel` (`core/identity.ts` — readable
-  title, else the directory name) and `<publicUrl>/#/session/<id>`, `""`
-  without a public URL, which the root says (`(no public URL set — Settings →
-  Instance)`) rather than refusing.
+- The note is `{title, url}`: `sessionLabel` (`core/identity.ts`) and
+  `<publicUrl>/#/session/<id>`, `""` without a public URL, which the root says
+  (`(no public URL set — Settings → Instance)`) rather than refusing.
 - Slack root (mrkdwn, no `thread_ts`): `Continued from web: *<title>*` /
   link / `_Reply in this thread to continue._`. Lark: one root card
-  (`createCard`, `im.v1.message.create` with `receive_id_type: chat_id`) then
-  one in-thread card `Reply here to continue.` — on the phone a topic has its
-  own composer only once it has a reply.
+  (`createCard`) then one in-thread card `Reply here to continue.` — on the
+  phone a topic has its own composer only once it has a reply.
 - A reply in the thread without a mention is admitted: the row exists, so
   `knows()` is true. A Lark DM user typing in the main flow starts a new
-  session, as for every DM; the root's last line is the only guard.
-- Restart: the row is the truth. The thread speaking first resumes and
-  attaches under the chat key; the web speaking first attaches the chat key
-  through the router's `chatKeyOf` hook, so the reply reaches the thread.
-- Crash between the post and the row: an orphan root whose thread opens a new
-  session (DM) or is dropped unaddressed (group); a retry posts a second root.
+  session, as for every DM.
+- Restart: the row is the truth. The thread speaking first resumes under the
+  chat key; the web speaking first attaches it through the router's
+  `chatKeyOf` hook, so the reply reaches the thread.
+- Crash between the post and the row: an orphan root; a retry posts a second.
 
 ## The in-chat panel
 
 `@bot` on its own (empty text once the mention is stripped) and `settings` are
-the same request. `s <text>` (`settingsDraft`, `commands.ts`) opens it with the
-text as the *pending question*, and only on a **thread root** — a Slack message
-with no other `thread_ts`, a Lark message with no `root_id` — since that is
-where the session it drafts would be created; inside a thread it is prose. The
-panel has two states, decided by the thread's row (`ChannelControl.knows`).
+the same request. `s <text>` (`settingsDraft`, `commands.ts`; Lark also
+`/s <text>`) opens it with the text as the *pending question*, only on a
+**thread root** — a Slack message with no other `thread_ts`, a Lark message
+with no `root_id` — where the session it drafts would be created; inside a
+thread, and a bare `s`, are prose. The panel has two states, decided by the
+thread's row (`ChannelControl.knows`).
 
 - One message, edited in place.
 - Panel buttons are `cfg:<action>[:<arg>]`, consumed by the panel; any other
@@ -160,26 +152,25 @@ Directory…, Continue web session… / Start, Close.
   created. A typed path sets the draft's directory too (modal title
   `Directory`, submit `Set`).
 - Start (`cfg:start`): `newSession(key, draft)` creates and binds, then the
-  question goes to the router as the tapper's message — the same
-  `InboundMessage` a typed one makes, `sender` the person who tapped, the 👀
-  on the card. The panel redraws with the session: `Started <id8> in <cwd>.`
-  or `Started <id8> — running your question.` A row that appeared meanwhile
-  (a message raced the tap) is not replaced: `This thread already has a
-  session — send your question as a message.`
+  question goes to the router as the tapper's `InboundMessage` (`sender` the
+  tapper, the 👀 on the card). The panel redraws with the session: `Started
+  <id8> in <cwd>.` or `Started <id8> — running your question.` A row that
+  appeared meanwhile (a message raced the tap) is not replaced: `This thread
+  already has a session — send your question as a message.`
 - Continue web session… binds an existing session; the draft is discarded.
-- **The card is the store.** In-memory `PanelState` is primary; every button's
-  value (Slack `value`, Lark `LarkActionValue.draft`) carries the serialized
-  draft `{cwd?, model?, thinking?, q?, dropped?}`. A tap whose state is gone (a
-  restart) rebuilds it from the tapped value and the card's own id (Slack
-  `message.ts`, Lark `open_message_id`), then honours the tap on that card;
-  an index pick's list is gone, so it prints "no longer listed". The Slack
-  modal carries `{conversation, ts, draft}` in `private_metadata`; Lark's
-  form-submit button carries no value, so a typed path after a restart
-  recovers the card but not earlier picks.
-- A question over 1500 UTF-8 bytes is not held — Slack caps a value at 2000
-  characters and Lark a card at 30 KB with the draft on eleven buttons — and
-  line 2 says `Your question is too long to hold — send it again after
-  Start.`; Start creates without it.
+- **The card is the store.** Every button's value (Slack `value`, Lark
+  `LarkActionValue.draft`) carries the draft `{cwd?, model?, thinking?, q?,
+  dropped?}`; a tap whose in-memory state is gone (a restart) rebuilds it from
+  the value and the card's own id (Slack `message.ts`, Lark
+  `open_message_id`), then honours the tap on that card — an index pick's
+  list is gone, so it prints "no longer listed". The Slack modal carries
+  `{conversation, ts, draft}` in `private_metadata`; Lark's form-submit button
+  carries no value, so a typed path after a restart keeps the card, not the
+  earlier picks.
+- A question over 1500 UTF-8 bytes is not held (`dropped`; Slack caps a value
+  at 2000 characters, Lark a card at 30 KB, and the draft rides eleven
+  buttons): line 2 says `Your question is too long to hold — send it again
+  after Start.` and Start creates without it.
 
 **With a session.** The Session group: `<id8> · <state>` (`created, no
 message yet` before the first turn), directory, model · reasoning, context.
@@ -212,12 +203,8 @@ No Channel group: the Console owns the gates.
   thread.` and the panel redraws with the session. Nothing to list: `No
   unbound sessions.`; a listing that failed says so instead. A refused pick
   prints the refusal sentence.
-- A session the panel creates has no transcript until its first reply (Pi
-  writes nothing before one), so the row carries the launch it was created
-  with — Start's draft included — amended by every Model & reasoning pick
-  (`conversations.launch`); a resume that fails re-creates from that record,
-  and the thread is told `re-created as … with its own settings in …`. A row
-  without a record re-creates from the chat defaults and says so.
+- A session the panel creates has no transcript until its first reply, so
+  its row carries the launch record ([Conversation identity](#conversation-identity)).
 
 ## Agent access: the platform from a shell
 
@@ -262,13 +249,15 @@ Identity is **per-turn, never baked into a session**: a thread is shared.
 A `conversationId` is opaque to core. Slack and Lark spell it
 `<channelId>/<threadTs>`; the chat half has one decoder (`chatOf`).
 
-`ConversationStore` (`conversations.ts`) makes routing survive a restart; a
-mapping whose session Pi no longer has is dropped and re-created — from the
-row's own launch record when it has one, else from the chat defaults — and the
-thread hears it as an error note naming the lost session and the new cwd
-(`resolveConversation`'s `onStale`, wired in `main.ts`). Per-chat
-launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
-— parsing the chat id out of the conversation id is the adapter's business.
+`ConversationStore` (`conversations.ts`) makes routing survive a restart. A
+row made by `newSession` carries the launch it was created with, amended by
+every model / reasoning pick (Pi writes nothing before the first reply, so
+until then the record is the session). A mapping whose session Pi no longer
+has is dropped and re-created — from that record when there is one, else from
+the chat defaults — and the thread is told which (`resolveConversation`'s
+`onStale`, wired in `main.ts`). Per-chat launch options (cwd, model, thinking)
+come from `ChannelControl.launchFor(key)` — parsing the chat id out of the
+conversation id is the adapter's business.
 
 ## Permission model (shared, platform-blind)
 
@@ -293,9 +282,8 @@ launch options (cwd, model, thinking) come from `ChannelControl.launchFor(key)`
 `parseCommand()` (`commands.ts`): trim both ends, require a leading `/`,
 lowercase the name, keep args **verbatim**. Slack never delivers an
 unregistered `/`, so its adapter matches bare words: a closed set with an exact
-argument count (`stop`/`settings` none, `bind` one); anything longer is prose.
-`settingsDraft()` is the one exception, shared with Lark so the operator types
-the same `s <text>` on both.
+argument count (`stop`/`settings` none, `bind` one); anything longer is prose,
+`s <text>` (`settingsDraft`) the one exception.
 
 ## Inbound checklist for a new adapter
 
@@ -462,9 +450,9 @@ Answer these first.
 - **The cwd prompt is a form card** (a WebSocket app cannot open a modal);
   the submission arrives as `action.form_value`.
 - **Threads follow Slack's rule**, DMs included: `reply_in_thread` roots a
-  topic per top-level message; `root_id` continues it. `createCard` is the
-  one root Pier posts (the handoff); `im.v1.message.create` needs the
-  send-as-bot scope, and a missing one arrives as the 502's code.
+  topic per top-level message; `root_id` continues it. `createCard`
+  (`im.v1.message.create`, `receive_id_type: chat_id`) is the one root Pier
+  posts, for the handoff; it needs the send-as-bot scope.
 - **Permissions and the `im.message.receive_v1` subscription take effect only
   after a version is published and approved** — the usual reason a configured
   bot stays silent.

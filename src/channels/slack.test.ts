@@ -1074,13 +1074,10 @@ describe("commands", () => {
     expect(client.sent).toEqual([]);
   });
 
-  it("a bare `s`, and the other settings words with text, are messages", async () => {
+  it("a bare `s` is a message (the other spellings: commands.test.ts)", async () => {
     openGates();
     await feed(message({ text: "s", ts: "1724.000100" }));
-    await feed(message({ text: "set the timer", ts: "1725.000100" }));
-    await feed(message({ text: "setting up", ts: "1726.000100" }));
-    await feed(message({ text: "settings are broken, please help", ts: "1727.000100" }));
-    expect(inbound.map((m) => m.text)).toEqual(["s", "set the timer", "setting up", "settings are broken, please help"]);
+    expect(inbound.map((m) => m.text)).toEqual(["s"]);
     expect(client.sent).toEqual([]);
   });
 });

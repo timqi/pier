@@ -167,11 +167,17 @@ const values = (blocks: SlackBlock[]): unknown[] =>
   blocks.filter((b) => b.type === "actions").flatMap((b) =>
     (b as { elements: { value?: string }[] }).elements.map((e) => e.value === undefined ? undefined : JSON.parse(e.value)));
 const last = (api: FakeSlack): SlackBlock[] => api.updated.at(-1)!.blocks as SlackBlock[];
+/** A panel opened in the thread, `question` making it the draft's trigger. */
+const opened = async (question?: string): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
+  const api = new FakeSlack();
+  const panel = slackPanel(api);
+  await panel.open(SLACK_KEY, "C100", "1717.0000", question);
+  return { api, panel };
+};
 
 describe("slack panel with a session", () => {
   it("renders the session and the button rows; no channel group, no New session", async () => {
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const { api } = await opened();
     const blocks = api.posted[0]!.blocks as SlackBlock[];
     expect(blocks).toHaveLength(3);
     expect(text(blocks[0]!)).toContain("*Session*");
@@ -184,24 +190,20 @@ describe("slack panel with a session", () => {
 
   it("offers Stop while streaming", async () => {
     control.current = status({ state: "streaming" });
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const { api } = await opened();
     expect(labels((api.posted[0]!.blocks as SlackBlock[])[2]!)).toEqual(["⏹ Stop", "Close"]);
   });
 
   it("an empty session reads \"created, no message yet\"", async () => {
     control.current = status({ empty: true, tokens: null });
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const { api } = await opened();
     const blocks = api.posted[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("`01234567` · created, no message yet");
     expect(text(blocks[0]!)).toContain("Context: empty — the first message you send runs here.");
   });
 
   it("lists the operator's pins eight a page, the current model and level ticked", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:pins:0");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("*Model & reasoning* · page 1/2");
@@ -216,9 +218,7 @@ describe("slack panel with a session", () => {
   });
 
   it("pages: the numbering continues and the same model at another level is not ticked", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:pins:1");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("page 2/2");
@@ -229,9 +229,7 @@ describe("slack panel with a session", () => {
   });
 
   it("a pick sets the model and the level together", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:pins:0");
     await tap(panel, "cfg:pin:1");
     expect(control.setModels).toEqual([{ provider: "anthropic", id: "model-1" }]);
@@ -241,9 +239,7 @@ describe("slack panel with a session", () => {
 
   it("no pins: the empty list names where they are pinned", async () => {
     control.pinned = [];
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:pins:0");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("No pinned models — Settings → Models → Model menu.");
@@ -252,9 +248,7 @@ describe("slack panel with a session", () => {
   });
 
   it("a stale pin index is refused, not misfiled", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:pin:42");
     expect(control.setModels).toEqual([]);
     expect(control.setLevels).toEqual([]);
@@ -262,9 +256,7 @@ describe("slack panel with a session", () => {
   });
 
   it("New session in… lists recent directories as buttons with numbered full paths", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:cwd");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("*New session in*");
@@ -276,9 +268,7 @@ describe("slack panel with a session", () => {
   });
 
   it("cwd:<i> creates there and the note distinguishes created from run", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:cwd");
     await tap(panel, "cfg:cwd:1");
     expect(control.newSessions).toEqual([{ cwd: "/srv/ops" }]);
@@ -288,9 +278,7 @@ describe("slack panel with a session", () => {
   });
 
   it("a stale index after a redraw is refused, not misfiled", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:cwd");
     await tap(panel, "cfg:cwd:7");
     expect(control.newSessions).toEqual([]);
@@ -299,9 +287,7 @@ describe("slack panel with a session", () => {
 
   it("empty listing offers only the typed path", async () => {
     control.dirs = [];
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:cwd");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("No sessions yet — type a path.");
@@ -311,9 +297,7 @@ describe("slack panel with a session", () => {
 
   it("a listing that fails says so and still offers the typed path", async () => {
     control.dirs = new Error("disk");
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:cwd");
     const blocks = api.updated[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain("Could not list recent directories: Error: disk");
@@ -321,9 +305,7 @@ describe("slack panel with a session", () => {
   });
 
   it("Type a path… opens the modal carrying the conversation and the card", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, "cfg:cwdtype", { trigger_id: "t1" });
     const view = api.views[0] as { callback_id: string; private_metadata: string };
     expect(view.callback_id).toBe("cfg_cwd");
@@ -332,9 +314,7 @@ describe("slack panel with a session", () => {
   });
 
   it("starts the session a submitted modal asked for", async () => {
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { panel } = await opened();
     const submission = {
       view: {
         callback_id: "cfg_cwd",
@@ -354,13 +334,10 @@ describe("slack panel with a session", () => {
 });
 
 describe("draft panel (no session in the thread)", () => {
-  const openDraft = async (question?: string): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
+  const openDraft = (question?: string): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
     control.current = null;
     control.launch = { cwd: "/srv/ops", model: ref(1), thinking: "medium" };
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000", question);
-    return { api, panel };
+    return opened(question);
   };
 
   it("is seeded from the chat defaults and says so; Start replaces New session", async () => {
@@ -376,8 +353,7 @@ describe("draft panel (no session in the thread)", () => {
 
   it("no chat config: the line still says what Start would do", async () => {
     control.current = null;
-    const api = new FakeSlack();
-    await slackPanel(api).open(SLACK_KEY, "C100", "1717.0000");
+    const { api } = await opened();
     expect(text((api.posted[0]!.blocks as SlackBlock[])[0]!)).toContain("Starts in Pier's directory · Pi default · default reasoning");
   });
 
@@ -580,9 +556,7 @@ describe("draft panel (no session in the thread)", () => {
 describe("continue web session picker", () => {
   const openPicker = async (page = "0"): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
     control.current = null;
-    const api = new FakeSlack();
-    const panel = slackPanel(api);
-    await panel.open(SLACK_KEY, "C100", "1717.0000");
+    const { api, panel } = await opened();
     await tap(panel, `cfg:sessions:${page}`);
     return { api, panel };
   };

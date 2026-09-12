@@ -24,12 +24,11 @@ truth.
   the web UI. The old transcript remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
-- A web session can be continued in Slack or Lark: the web session menu's
-  "Continue in Lark/Slack…" posts one message in a chat the bot knows, and
-  replies in that thread reach the same session. The other way round, the
-  settings panel of a thread with no session yet offers "Continue web
-  session…", a picker of sessions no chat answers for. Every reply then lands
-  on both surfaces; a session already answering a chat cannot be moved.
+- A web session can be continued in Slack or Lark — the web session menu's
+  "Continue in Lark/Slack…" opens a thread for it — or pulled from a thread
+  that has no session yet, through its panel's "Continue web session…".
+  Replies then land on both surfaces; a session already answering a chat
+  cannot be moved.
 - A long session does not hit a wall: when the context fills, Pi compacts it
   automatically — older turns become a summary. The transcript on disk keeps
   everything, but detail can leave *your* context, so a very old turn is worth
@@ -59,23 +58,19 @@ truth.
 ## In-chat commands and the settings panel
 
 - `/settings` — or an addressed message with no text at all (a bare mention,
-  an empty DM) — opens a panel. In a thread with no session yet it is a
-  draft: directory, model & reasoning (the operator's pinned models, one pick
-  setting both), and Start creates the session with them. `s <text>` — on
-  Slack and Lark alike, only as the first message of a thread (Lark also
-  `/s <text>`) — opens that panel with the text as a pending question: Start
-  creates the session and runs it as the tapper's first message. In a
-  thread with a session the panel reads it out; "New session in…" offers the
-  recent session directories as buttons and a typed path, and creates on the
-  tap, the thread's next message running there; Stop while a turn runs.
-  Slack takes the same words bare: `stop`, `settings`, `bind <code>`. A bare
-  `s`, and `s <text>` inside a thread, are ordinary messages.
+  an empty DM) — opens a panel; Slack takes the same words bare (`stop`,
+  `settings`, `bind <code>`).
+- In a thread with no session yet the panel is a draft: directory, model &
+  reasoning (the operator's pinned models, one pick sets both), and Start
+  creates the session. `s <text>` as a thread's first message (Lark also
+  `/s <text>`) opens that draft with the text as a pending question, which
+  Start runs as the first message; a bare `s`, or `s <text>` inside a thread,
+  is an ordinary message.
+- In a thread with a session the panel reads it out (resuming an idle one);
+  "New session in…" creates a session in a recent or typed directory at once,
+  and the thread's next message runs there; Stop aborts a running turn.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
-- The panel reads the thread's real session, resuming an idle one; in a thread
-  with no session yet, a model pick is refused until one is started. A session
-  created from the panel keeps its directory, model and reasoning across a
-  restart even before its first message.
 
 ## What a turn looks like from outside
 

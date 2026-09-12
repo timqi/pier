@@ -221,13 +221,9 @@ describe("recentDirs", () => {
   it("puts the chat's own directory first when the Console set one", async () => {
     const at = (id: string, cwd: string): SessionSummary => ({ id, cwd, createdAt: 1 });
     factory.listed = [at("a", "/srv/new"), at("b", "/srv/ops")];
-    const store = new ChannelStore(openDb(":memory:"), { get: () => undefined, seal: () => {}, remove: () => false });
-    store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
     const config = store.get("slack");
-    config.chats.find((c) => c.id === "C100")!.cwd = "/srv/ops";
+    config.chats[0]!.cwd = "/srv/ops";
     store.save("slack", config);
-    // Same wiring, this store.
-    control = createControl({ router, factory: factory as unknown as AgentFactory, conversations, store, modelMenu: () => [] });
     expect(await control.recentDirs(KEY)).toEqual(["/srv/ops", "/srv/new"]);
   });
 });

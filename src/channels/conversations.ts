@@ -20,10 +20,9 @@ export class ConversationStore {
     return row?.session_id;
   }
 
-  /** `launch` is what the session was created with, kept for the day Pi has
-   *  no transcript to resume (a session never prompted was never written);
-   *  omitted for one launched from the chat defaults, which a re-create reads
-   *  again. */
+  /** `launch`: what the session was created with, for a re-create when Pi has
+   *  no transcript (a session never prompted was never written); omitted for
+   *  one launched from the chat defaults, which a re-create reads again. */
   set(key: ConversationKey, sessionId: string, launch?: AgentLaunchOptions): void {
     this.db.prepare(`
       INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at, launch)
@@ -40,8 +39,7 @@ export class ConversationStore {
     return row?.launch ? JSON.parse(row.launch) as AgentLaunchOptions : undefined;
   }
 
-  /** Merge a model/reasoning change into the record, so a never-written
-   *  session re-creates as last configured. No record: nothing to amend. */
+  /** No record: nothing to amend. */
   amendLaunch(key: ConversationKey, patch: Partial<Pick<AgentLaunchOptions, "model" | "thinking">>): void {
     const launch = this.launchOf(key);
     if (!launch) return;
@@ -59,8 +57,7 @@ export class ConversationStore {
     return row && { channelId: row.channel_id, conversationId: row.conversation_id };
   }
 
-  /** Every session some IM conversation answers for — one query, so a listing
-   *  can be filtered without asking `keyOf` per row. */
+  /** Every session some IM conversation answers for, in one query. */
   boundSessions(): Set<string> {
     const rows = this.db.prepare(`SELECT session_id FROM conversations`).all() as { session_id: string }[];
     return new Set(rows.map((r) => r.session_id));

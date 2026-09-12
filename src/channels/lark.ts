@@ -227,14 +227,12 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    // A bare `@bot` and `/settings` are the same request.
-    if (this.panel && (command?.name === "settings" || (!text && !attachments.length && mentioned))) {
-      return this.panel.open(here, msg.chatId, root);
-    }
-    // Configure-first: only outside an existing topic, where the session it
-    // drafts is the one this topic will have. Inside one it is prose.
+    // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
+    // session, so only where this message would start one: outside any topic.
     const question = msg.rootId ? undefined : settingsDraft(text);
-    if (this.panel && question) return this.panel.open(here, msg.chatId, root, question);
+    if (this.panel && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
+      return this.panel.open(here, root, question);
+    }
 
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.

@@ -125,7 +125,7 @@ exists to catch.
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
 | `core/` | 1.5k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate |
-| `channels/` | 4.4k | two adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds only what would otherwise be copied, plus the handoff — both handoff directions share one binding and one single-destination guard, and the one root post, whose failure table is principle 5's |
+| `channels/` | 4.4k | two adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds what would otherwise be copied: the panel's two states and its draft, the web ↔ IM handoff (one binding, one guard table), the launch record a lost session is re-created from |
 | `web/` | 14k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; every pane is the only implementation of its surface — the Pi SDK ships no browser UI — and duplication across the area measures 0.4%; still the least tested area |
 | `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry |
 | `tasks/` | 3.2k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam |

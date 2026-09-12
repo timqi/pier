@@ -276,14 +276,12 @@ export class SlackChannel implements Channel {
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
-    // A bare `@bot` and `settings` are the same request.
-    if (this.panel && (command?.name === "settings" || (!text && !files.length && !shares.length))) {
-      return this.panel.open(here, channel, threadTs);
-    }
-    // Configure-first: only on a thread root, where the session it drafts is
-    // the one this thread will have. Inside a thread it is prose.
+    // A bare `@bot` and `settings` are the same request; `s <text>` drafts a
+    // session, so only where this message would start one: a thread root.
     const question = threadTs === ts ? settingsDraft(text) : undefined;
-    if (this.panel && question) return this.panel.open(here, channel, threadTs, question);
+    if (this.panel && (question || command?.name === "settings" || (!text && !files.length && !shares.length))) {
+      return this.panel.open(here, channel, threadTs, question);
+    }
 
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.

@@ -32,6 +32,7 @@ export interface SlackPanelDeps extends PanelDeps {
 }
 
 interface SlackPanelState extends PanelState {
+  chatId: string;
   /** The panel message. */
   ts: string;
 }
@@ -59,7 +60,6 @@ const fresh = (channel: string, ts: string, draft: PanelDraft): SlackPanelState 
   ({ chatId: channel, ts, draft, dirs: [], sessions: [] });
 
 export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
-  protected readonly platform = "slack" as const;
   protected readonly fence: [string, string] = ["`", "`"];
 
   constructor(protected override readonly deps: SlackPanelDeps) {

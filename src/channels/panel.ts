@@ -16,7 +16,6 @@ import {
 } from "../core/types.js";
 import { type ChannelControl, type ConversationStatus, NO_SESSION } from "./control.js";
 import { type Handoff, HandoffError } from "./handoff.js";
-import type { ChannelPlatform } from "./types.js";
 
 export const PANEL_PREFIX = "cfg:";
 const PER_PAGE = 8;
@@ -78,7 +77,6 @@ export interface PanelDeps {
 }
 
 export interface PanelState {
-  chatId: string;
   draft: PanelDraft;
   /** The lists the payloads' indices point into. */
   dirs: string[];
@@ -120,12 +118,12 @@ const pager = (action: string, at: number, pages: number): PanelButton[] => [
   btn("‹ Back", "panel"),
 ];
 
-const created = (id: string, where: string): string =>
-  `Created session ${id.slice(0, 8)} ${where} — nothing has run yet; the first message you send in this thread starts it.`;
-
-/** NO_SESSION is the whole answer; any other failure names what was attempted. */
+/** A refusal's sentence (NO_SESSION, a HandoffError) is the whole answer; any
+ *  other failure names what was attempted. */
 const failed = (what: string, err: unknown): string =>
-  err instanceof Error && err.message === NO_SESSION ? NO_SESSION : `${what}: ${String(err)}`;
+  err instanceof HandoffError || (err instanceof Error && err.message === NO_SESSION)
+    ? err.message
+    : `${what}: ${String(err)}`;
 
 /** The question, or the fact that it was too long. */
 export const holdQuestion = (q: string | undefined): PanelDraft => {
@@ -133,11 +131,9 @@ export const holdQuestion = (q: string | undefined): PanelDraft => {
   return new TextEncoder().encode(q).length > QUESTION_BYTES ? { dropped: true } : { q };
 };
 
-const hasFields = (draft: PanelDraft): boolean => Object.keys(draft).length > 0;
-
 /** `undefined` when there is nothing to carry, so a with-session panel's buttons stay bare. */
 export const serializeDraft = (draft: PanelDraft): string | undefined =>
-  hasFields(draft) ? JSON.stringify(draft) : undefined;
+  Object.keys(draft).length ? JSON.stringify(draft) : undefined;
 
 /** A platform echoed this; only the fields the draft knows, each type-checked. */
 export const readDraft = (raw: unknown): PanelDraft => {
@@ -160,7 +156,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   constructor(protected readonly deps: PanelDeps) {}
 
-  protected abstract readonly platform: ChannelPlatform;
   /** What wraps a fixed-width span in this platform's markup. */
   protected abstract readonly fence: [string, string];
   protected abstract esc(text: string): string;
@@ -380,8 +375,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
       state.draft = {};
       await this.refresh(key, `Continuing session ${session.id.slice(0, 8)} — reply in this thread.`);
     } catch (err) {
-      // A refusal's sentence is the whole answer ("Already answers in …").
-      await this.refresh(key, err instanceof HandoffError ? err.message : `Could not continue that session: ${String(err)}`);
+      await this.refresh(key, failed("Could not continue that session", err));
     }
   }
 
@@ -442,9 +436,12 @@ export abstract class ChatPanel<S extends PanelState, C> {
     }
     try {
       const id = await this.deps.control.newSession(key, { cwd: path });
-      await this.refresh(key, created(id, `in ${path}`));
+      await this.refresh(
+        key,
+        `Created session ${id.slice(0, 8)} in ${path} — nothing has run yet; the first message you send in this thread starts it.`,
+      );
     } catch (err) {
-      await this.refresh(key, `Could not start a session there: ${String(err)}`);
+      await this.refresh(key, failed("Could not start a session there", err));
     }
   }
 
@@ -458,7 +455,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     try {
       id = await this.deps.control.newSession(key, launch);
     } catch (err) {
-      return this.refresh(key, `Could not start a session: ${String(err)}`);
+      return this.refresh(key, failed("Could not start a session", err));
     }
     state.draft = {};
     if (q) {

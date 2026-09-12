@@ -45,10 +45,9 @@ export interface ChannelControl {
   /** Rejects with NO_SESSION for a thread without one: a confirmed no-op is a lie. */
   setModel(key: ConversationKey, model: ModelRef): Promise<void>;
   setThinking(key: ConversationKey, level: ThinkingLevel): Promise<void>;
-  /** Pi fixes cwd at creation, so "change the working directory" *is* this.
-   *  `over` carries only what was chosen; the chat defaults fill the rest.
-   *  The launch it used is recorded beside the row: Pi writes nothing until
-   *  the first reply, so until then this record is the session. */
+  /** `over` carries only what was chosen; the chat defaults fill the rest.
+   *  The launch is recorded beside the row: Pi writes nothing until the first
+   *  reply, so until then the record is the session. */
   newSession(key: ConversationKey, over?: Partial<AgentLaunchOptions>): Promise<string>;
   /** Distinct cwds of the backend's session listing, newest first; the chat's
    *  own default first when set. */
@@ -135,8 +134,7 @@ export function createControl({ router, factory, conversations, store, modelMenu
     async recentDirs(key, limit = 6) {
       const own = launchFor(key).cwd;
       const seen = new Set<string>(own ? [own] : []);
-      // The listing is newest first (agent/pi.ts); task runs' directories are
-      // project directories too and stay in.
+      // Newest first (agent/pi.ts); task runs' directories are project directories too.
       for (const s of await factory.list()) seen.add(s.cwd);
       return [...seen].slice(0, limit);
     },

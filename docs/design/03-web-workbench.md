@@ -64,15 +64,13 @@ surface owns its routes and is mounted beside it.
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
   session for itself. One flag, read by the dot, the badges and Web Push.
-- **Continue in a chat** (`channels/routes.ts`, `GET /api/handoff/targets` and
-  `POST /api/handoff`; contract in [04-im-channels.md](04-im-channels.md)):
-  the ⋯ menu's *Continue in Lark/Slack…* lists the chats the bot has seen on
-  a running platform; a pick posts one root message there and binds the
-  session to that thread. The row then shows the channel chip, Web Push for
-  the session stops (it answers the chat), replies land on both surfaces, web
-  prompts are not mirrored to the chat. A session already answering a chat
-  has the row disabled with `answers in <platform>`; a refusal stays under
-  the picked row in the server's words.
+- **Continue in a chat** (`GET /api/handoff/targets`, `POST /api/handoff`;
+  owned by `channels/routes.ts`, contract in
+  [04-im-channels.md](04-im-channels.md#continue-from-web-and-from-a-thread-handoffts)):
+  the ⋯ menu's *Continue in Lark/Slack…* lists the targets; a pick posts the
+  handoff and the rail's chip follows from `sessions-changed`. A session
+  already answering a chat has the row disabled with `answers in <platform>`;
+  a refusal stays under the picked row in the server's words.
 
 Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`,
 `/api/devices*`), `config.ts` (`/api/config*`), `config-sync.ts`

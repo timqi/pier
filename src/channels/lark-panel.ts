@@ -1,8 +1,7 @@
-// Lark's half of the settings panel (panel.ts has the rest). Lark has no modal
-// a WebSocket app can open, so the typed answer is the panel patched into a
-// form card; the submit button's `name` carries the thread root. Every callback
-// button's value carries the draft, so a tap after a reload is understood from
-// the payload and lands on the card it came from.
+// Lark's half of the settings panel (panel.ts has the rest). No modal a
+// WebSocket app can open, so the typed answer is the panel patched into a form
+// card whose submit button's `name` carries the thread root; every callback
+// button's value carries the draft, so a tap after a reload lands on its card.
 
 import type { ConversationKey } from "../core/types.js";
 import type { LarkCard, LarkCardAction, LarkClient, LarkElement } from "./lark-api.js";
@@ -42,11 +41,10 @@ interface LarkPanelState extends PanelState {
   messageId: string;
 }
 
-const fresh = (chatId: string, root: string, messageId: string, draft: PanelDraft): LarkPanelState =>
-  ({ chatId, root, messageId, draft, dirs: [], sessions: [] });
+const fresh = (root: string, messageId: string, draft: PanelDraft): LarkPanelState =>
+  ({ root, messageId, draft, dirs: [], sessions: [] });
 
 export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
-  protected readonly platform = "lark" as const;
   protected readonly fence: [string, string] = ["`", "`"];
 
   constructor(protected override readonly deps: LarkPanelDeps) {
@@ -77,8 +75,8 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     return card(elements);
   }
 
-  async open(key: ConversationKey, chatId: string, root: string, question?: string): Promise<void> {
-    const state = fresh(chatId, root, "", holdQuestion(question));
+  async open(key: ConversationKey, root: string, question?: string): Promise<void> {
+    const state = fresh(root, "", holdQuestion(question));
     const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, state), state));
     this.remember(key, { ...state, messageId: sent.messageId });
   }
@@ -108,7 +106,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
       key,
       payload,
       action,
-      () => fresh(action.chatId, root, action.messageId, readDraft(action.value?.draft)),
+      () => fresh(root, action.messageId, readDraft(action.value?.draft)),
       run,
     );
   }
@@ -116,7 +114,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
   // --- working directory (one typed answer, in a form card) -------------------
 
   protected async promptCwd(
-    key: ConversationKey,
+    _key: ConversationKey,
     state: LarkPanelState,
     _action: LarkCardAction,
     creates: boolean,
@@ -146,7 +144,7 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
    *  the outcome lands on the card the user is looking at. The submit button
    *  carries no value, so a draft's earlier picks do not survive that restart. */
   async onCwdSubmit(key: ConversationKey, action: LarkCardAction, root: string): Promise<void> {
-    if (!this.state(key)) this.remember(key, fresh(action.chatId, root, action.messageId, {}));
+    if (!this.state(key)) this.remember(key, fresh(root, action.messageId, {}));
     await this.startSessionIn(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
   }
 }

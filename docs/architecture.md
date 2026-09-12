@@ -41,8 +41,7 @@ src/
                language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
-               panel, runtime, routes, handoff (web ↔ IM: the one binding of a
-               session to a thread it did not create); per platform: slack / lark
+               panel, runtime, routes, handoff (web ↔ IM); per platform: slack / lark
                (+ -api, -render, -panel; slack also -outbound, -directory,
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
@@ -213,12 +212,11 @@ seams:
   `web:`/`task:` aliases share one lock and attach to one object; the chat is
   the delivery key whenever it is attached, and an alias opening a session
   whose durable chat is known (injected `chatKeyOf`) attaches that chat at
-  once, so the thread hears the next turn before it speaks. Durability is the caller's: web conversation ids *are* session ids, task
-  definitions persist their target, IM channels keep
-  `channels/conversations.ts`, with the launch a panel-created session was
-  made from. A mapping whose session Pi no longer has is dropped and
-  re-created — from that record when there is one — never retried forever,
-  and the thread is told.
+  once. Durability is the caller's: web conversation ids *are* session ids,
+  task definitions persist their target, IM channels keep
+  `channels/conversations.ts`. A mapping whose session Pi no longer has is
+  dropped and re-created, never retried forever
+  ([04](design/04-im-channels.md#conversation-identity)).
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters
