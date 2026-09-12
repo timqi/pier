@@ -19,6 +19,7 @@ let opened: { platform: string; chatId: string; note: HandoffNote }[];
 let openFails: Error | undefined;
 let onDisk: Map<string, SessionSummary>;
 let taskOwned: Set<string>;
+let ranks: Map<string, { rank?: number }>;
 let loaded: Map<string, AgentSession>;
 let attached: [ConversationKey, AgentSession][];
 let events: WorkspaceEvent[];
@@ -49,12 +50,14 @@ function handoff() {
     hub: { emitWorkspace: (e) => void events.push(e) },
     publicUrl: () => publicUrl,
     taskSessions: () => taskOwned,
+    workingSet: () => ranks,
     log: (m) => void logs.push(m),
   });
 }
 
 beforeEach(() => {
   taskOwned = new Set();
+  ranks = new Map();
   const db = openDb(":memory:");
   const vault = new Map<string, string>();
   store = new ChannelStore(db, { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
@@ -223,13 +226,16 @@ describe("continueHere (pull from the panel)", () => {
 });
 
 describe("unbound", () => {
-  it("lists the backend's sessions minus bound and task-owned ones, in listing order, capped", async () => {
+  it("lists what the web rail lists: working set first, then newest, minus bound and task-owned, capped", async () => {
     onDisk.set("s2", { id: "s2", cwd: "/srv/b", createdAt: 2 });
     onDisk.set("s3", { id: "s3", cwd: "/srv/c", createdAt: 3 });
     onDisk.set("s4", { id: "s4", cwd: "/srv/d", createdAt: 4 });
+    onDisk.set("s5", { id: "s5", cwd: "/srv/e", createdAt: 5 });
     taskOwned.add("s4");
     conversations.set({ channelId: "lark", conversationId: "oc_1/om_9" }, "s2");
-    expect((await handoff().unbound(10)).map((s) => s.id)).toEqual(["s1", "s3"]);
-    expect((await handoff().unbound(1)).map((s) => s.id)).toEqual(["s1"]);
+    ranks.set("s1", { rank: 1 });
+    ranks.set("s3", { rank: 0 });
+    expect((await handoff().unbound(10)).map((s) => s.id)).toEqual(["s3", "s1", "s5"]);
+    expect((await handoff().unbound(1)).map((s) => s.id)).toEqual(["s3"]);
   });
 });

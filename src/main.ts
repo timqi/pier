@@ -144,6 +144,7 @@ const packages = new PiPackageStore(piConfig, { version: currentVersion(), setti
 packages.watchUpdates();
 
 channelStore = new ChannelStore(db, vault);
+const sessionState = new SessionStateStore(db);
 const control = createControl({
   router, factory, conversations, store: channelStore,
   modelMenu: () => settings.get().modelMenu,
@@ -162,6 +163,7 @@ const handoff = createHandoff({
   hub,
   publicUrl: () => settings.get().publicUrl,
   taskSessions: () => tasks.taskSessions(),
+  workingSet: () => sessionState.flags(),
   log: (m) => logger("channels").info(m),
 });
 const channels = new ChannelRuntime(channelStore, router, control, handoff);
@@ -304,7 +306,6 @@ registerTaskRoutes(app, tasks, { factory, router });
 registerChannelRoutes(app, channelStore, channels, handoff);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
-const sessionState = new SessionStateStore(db);
 registerPushRoutes(app, {
   store: new PushStore(db, secrets),
   hub,

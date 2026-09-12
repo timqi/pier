@@ -28,6 +28,8 @@ export interface HandoffDeps {
   publicUrl: () => string;
   /** Sessions a task run created for itself; a picker offers only the operator's. */
   taskSessions: () => Set<string>;
+  /** The web rail's working set (`rank`): the picker lists what the rail lists, in its order. */
+  workingSet: () => Map<string, { rank?: number }>;
   log(message: string): void;
 }
 
@@ -113,7 +115,12 @@ export function createHandoff(deps: HandoffDeps): Handoff {
     async unbound(limit) {
       const bound = conversations.boundSessions();
       const owned = deps.taskSessions();
-      return (await factory.list()).filter((s) => !bound.has(s.id) && !owned.has(s.id)).slice(0, limit);
+      const ranks = deps.workingSet();
+      const rank = (id: string): number => ranks.get(id)?.rank ?? Infinity;
+      return (await factory.list())
+        .filter((s) => !bound.has(s.id) && !owned.has(s.id))
+        .sort((a, b) => rank(a.id) - rank(b.id) || b.createdAt - a.createdAt)
+        .slice(0, limit);
     },
 
     async continueHere(key, sessionId) {
