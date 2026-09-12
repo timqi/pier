@@ -74,9 +74,19 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     return card(elements);
   }
 
+  /** A card that cannot be posted must not look like nothing happening: the
+   *  topic gets the reason as a plain card. */
   async open(key: ConversationKey, root: string, question?: string): Promise<void> {
     const state = fresh(root, "", holdQuestion(question));
-    const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, state), state));
+    let sent: { messageId: string };
+    try {
+      sent = await this.deps.api.replyCard(root, this.render(await this.view(key, state), state));
+    } catch (err) {
+      this.deps.log(`panel open failed: ${String(err)}`);
+      await this.deps.api.replyCard(root, card([markdown(this.esc(`Could not open the panel: ${String(err)}`))]))
+        .catch((e: unknown) => this.deps.log(`panel open failure not posted: ${String(e)}`));
+      return;
+    }
     this.remember(key, { ...state, messageId: sent.messageId });
   }
 

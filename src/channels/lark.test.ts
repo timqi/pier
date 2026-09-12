@@ -731,6 +731,21 @@ describe("commands and panel", () => {
     expect(client.deleted).toEqual([panelId]);
   });
 
+  it("a panel that cannot be posted says so in the topic instead of nothing", async () => {
+    openGates();
+    const reply = client.replyCard.bind(client);
+    let first = true;
+    client.replyCard = (to, c) => {
+      if (!first) return reply(to, c);
+      first = false;
+      return Promise.reject(new Error("card too large"));
+    };
+    await feed(message({ text: "/settings", messageId: "om_p3" }));
+    const fallback = client.replied.at(-1)!;
+    expect(fallback.to).toBe("om_p3");
+    expect(bodyText(fallback.card)).toBe("Could not open the panel: Error: card too large");
+  });
+
   it("a bare @bot mention opens the panel too", async () => {
     openGates();
     await feed(message({

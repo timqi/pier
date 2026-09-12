@@ -69,13 +69,17 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
     return esc(text);
   }
 
-  /** A malformed value is a stale or foreign card: logged, drawn as an empty draft. */
+  /** Said on the next redraw when a value could not be read: the picks it held are gone. */
+  private resetNote?: string;
+
+  /** A malformed value is a stale or foreign card: logged, drawn as an empty draft, and said. */
   private parseDraft(raw: string | undefined): PanelDraft {
     if (!raw) return {};
     try {
       return readDraft(JSON.parse(raw));
     } catch (err) {
       this.deps.log(`unreadable panel value, draft reset: ${String(err)}`);
+      this.resetNote = "Your earlier picks could not be read — pick again.";
       return {};
     }
   }
@@ -118,11 +122,13 @@ export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
   }
 
   protected async draw(state: SlackPanelState, view: PanelView, note?: string): Promise<void> {
+    const said = note ?? this.resetNote;
+    this.resetNote = undefined;
     await this.deps.api.updateMessage({
       channel: state.chatId,
       ts: state.ts,
       text: "Settings",
-      blocks: this.blocks(view, state.draft, note),
+      blocks: this.blocks(view, state.draft, said),
     }).catch((err) => this.deps.log(`panel edit failed: ${String(err)}`));
   }
 

@@ -180,7 +180,9 @@ Directory…, Continue web session… / Start, Close.
 - A message carrying files is never the draft's trigger: `s <text>` with an
   attachment is an ordinary message, so the bytes are not swallowed by a panel.
 - A card that cannot be posted at all says so as plain text in the thread
-  (`Could not open the panel: <reason>`).
+  (`Could not open the panel: <reason>`). A Slack value that cannot be read
+  redraws an empty draft with `Your earlier picks could not be read — pick
+  again.`
 
 **With a session.** The Session group: `<id8> · <state>` (`created, no
 message yet` before the first turn), directory, model · reasoning, context.

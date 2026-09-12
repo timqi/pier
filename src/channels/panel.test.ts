@@ -654,15 +654,19 @@ describe("draft panel (no session in the thread)", () => {
       expect(api.deleted).toEqual(["900.0001"]);
     });
 
-    it("an unreadable value is logged and drawn as an empty draft", async () => {
+    it("an unreadable value is logged, drawn as an empty draft, and said once", async () => {
       control.current = null;
       const api = new FakeSlack();
-      await tap(slackPanel(api), "cfg:panel", {
+      const panel = slackPanel(api);
+      await tap(panel, "cfg:panel", {
         ...click("cfg:panel"),
         actions: [{ action_id: "cfg:panel", value: "{not json" }],
       });
       expect(logs.some((m) => m.startsWith("unreadable panel value"))).toBe(true);
       expect(text(last(api)[0]!)).toContain("· chat defaults");
+      expect(footnote(last(api).at(-1)!)).toBe("Your earlier picks could not be read — pick again.");
+      await tap(panel, "cfg:panel");
+      expect(last(api).at(-1)!.type).not.toBe("context");
     });
 
     it("a foreign shape keeps only the fields the draft knows", async () => {
