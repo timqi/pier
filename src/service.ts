@@ -160,8 +160,10 @@ MemoryHigh=60%
 MemoryMax=75%
 # Swapping an agent is worse than failing it.
 MemorySwapMax=0
-# A runaway command an agent ran can fork as well as allocate.
-TasksMax=512
+# A runaway command an agent ran can fork as well as allocate. Counted in
+# tasks, not processes: one test runner on a many-core box is already in the
+# hundreds of threads, so the ceiling is a fork bomb's, not a toolchain's.
+TasksMax=4096
 # Prefer this unit's processes if the *machine* runs out anyway.
 OOMScoreAdjust=200
 # A child being OOM-killed must not take the service with it.

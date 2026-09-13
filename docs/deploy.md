@@ -42,7 +42,7 @@ systemctl show "user@$(id -u).service" -p DelegateControllers
 ```
 
 The installer writes `~/.config/systemd/user/pier.service.d/limits.conf` once
-(`MemoryHigh=60%`, `MemoryMax=75%`, no swap, `TasksMax=512`, `OOMPolicy=continue`,
+(`MemoryHigh=60%`, `MemoryMax=75%`, no swap, `TasksMax=4096`, `OOMPolicy=continue`,
 each line commented). The limit covers the **whole unit** — `node`, Pi
 subagents, every command a turn ran, their page cache. Dedicated 4–8 GB VPS:
 the defaults land around 2.5–6 GB. Big shared box: absolute values
