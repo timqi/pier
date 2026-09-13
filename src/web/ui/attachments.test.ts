@@ -21,6 +21,15 @@ describe("parseFileRef", () => {
     expect(parseFileRef("/tmp/run.log")).toEqual({ path: "/tmp/run.log", line: undefined });
   });
 
+  it("takes a filesystem root without an extension — a folder is browsable", () => {
+    expect(parseFileRef("~/.pier/boards")).toEqual({ path: "~/.pier/boards", line: undefined });
+    expect(parseFileRef("~")).toEqual({ path: "~", line: undefined });
+    expect(parseFileRef("/home/qiqi/code/dev")).toEqual({ path: "/home/qiqi/code/dev", line: undefined });
+    expect(parseFileRef("/etc/hosts")).toEqual({ path: "/etc/hosts", line: undefined });
+    expect(parseFileRef("/api/fs/ls")).toBeNull(); // a route, not a directory
+    expect(parseFileRef("~foo")).toBeNull();
+  });
+
   it("leaves code that only looks like a path alone", () => {
     expect(parseFileRef("marked.parse")).toBeNull(); // bare name, not a file extension
     expect(parseFileRef("res.text")).toBeNull();

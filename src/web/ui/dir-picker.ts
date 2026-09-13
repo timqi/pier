@@ -9,14 +9,14 @@ import { h } from "./dom.js";
 import { btn } from "./form.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 
-interface Listing {
+export interface Listing {
   path: string;
   parent: string | null;
   entries: { name: string; dir: boolean }[];
 }
 
 /** Absolute paths only; anything else means "start from the user's home". */
-const listing = async (path?: string): Promise<Listing | null> => {
+export const listing = async (path?: string): Promise<Listing | null> => {
   const q = path?.startsWith("/") ? `?path=${encodeURIComponent(path)}` : "";
   const got = await getJson<Listing>(`/api/fs/ls${q}`, "Could not list directories");
   return got.ok ? got.value : null;

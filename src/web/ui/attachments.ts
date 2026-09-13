@@ -8,7 +8,9 @@ import { icon } from "./icons.js";
 import { replaceOutsideCode } from "../../core/inbound-file.js";
 import { failure } from "./api.js";
 import { codePane, fileRows } from "./code.js";
+import { listing, type Listing } from "./dir-picker.js";
 import { $, basename, h } from "./dom.js";
+import { btn } from "./form.js";
 import { langFor } from "./highlight.js";
 
 // --- image lightbox + thumbnails ---------------------------------------------------
@@ -168,6 +170,15 @@ const fileUrl = (sessionId: string, path: string, download = false): string =>
     download ? "&download=1" : ""
   }`;
 
+/** The session a files URL belongs to — the tree opens its rows through the
+ *  same route the attachment came from. */
+const sessionOf = (url: string): string =>
+  decodeURIComponent(/^\/api\/sessions\/([^/]+)\//.exec(url)?.[1] ?? "");
+
+const parentOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || "/";
+
+const childOf = (dir: string, name: string): string => `${dir === "/" ? "" : dir}/${name}`;
+
 /** `[x](file:///p)` → the session's files route, so the sanitizer keeps it.
  *  Not inside code: an example link is the code the reader asked to see. */
 export function rewriteFileLinks(markdown: string, sessionId: string): string {
@@ -204,15 +215,74 @@ const previewNote = (msg: string, tone = "text-neutral-500"): HTMLElement =>
  *  closed must not land on the one now shown. */
 let previewSeq = 0;
 
+/** The dialog's header. A file names its whole path, with the folder around it
+ *  one click from the tree: which `index.ts` this is cannot be read off a
+ *  basename, and a reference that landed on the wrong file is then one step
+ *  from the right one. */
+function dialogHeader(sessionId: string, path: string, isDir: boolean): void {
+  fileDownload.hidden = isDir;
+  if (isDir) {
+    fileName.replaceChildren(path);
+    return;
+  }
+  const dir = parentOf(path);
+  const up = btn(`${dir}/`, "min-w-0 cursor-pointer truncate text-neutral-400 hover:text-indigo-600");
+  up.title = `Browse ${dir}`;
+  up.onclick = () => void browse(sessionId, dir);
+  fileName.replaceChildren(up, h("span", "flex-none", basename(path)));
+}
+
+/** A folder in the file dialog: `../` walks up, a folder row walks in, a file
+ *  row opens the preview — the same dialog, so browsing never spawns a second. */
+function treePane(sessionId: string, list: Listing): HTMLElement {
+  const box = h("div", "flex flex-col py-1");
+  const row = (label: string, cls: string, open: () => void): HTMLElement => {
+    const el = btn(
+      label,
+      `flex w-full cursor-pointer items-center px-3 py-1.5 text-left font-mono text-[12.5px] hover:bg-indigo-50 hover:text-indigo-700 ${cls}`,
+    );
+    el.onclick = open;
+    return el;
+  };
+  if (list.parent) {
+    box.append(row("../", "text-neutral-500", () => void browse(sessionId, list.parent!)));
+  }
+  for (const entry of list.entries) {
+    const path = childOf(list.path, entry.name);
+    box.append(
+      entry.dir
+        ? row(`${entry.name}/`, "text-neutral-800", () => void browse(sessionId, path))
+        : row(entry.name, "text-neutral-600", () => void preview(fileUrl(sessionId, path), entry.name)),
+    );
+  }
+  if (!list.entries.length) box.append(previewNote("Empty folder."));
+  return box;
+}
+
+/** Lists a directory into the file dialog, opening it if a reference pointed
+ *  straight at a folder. */
+async function browse(sessionId: string, path: string): Promise<void> {
+  const seq = ++previewSeq;
+  dialogHeader(sessionId, path, true);
+  fileBody.replaceChildren(previewNote("loading…"));
+  if (!fileDialog.open) fileDialog.showModal();
+  const list = await listing(path);
+  if (seq !== previewSeq) return;
+  fileBody.replaceChildren(
+    list ? treePane(sessionId, list) : previewNote(`failed to list: ${path}`, "text-red-600"),
+  );
+}
+
 /** Text is whatever the server served the bytes as (it sniffs, web/fs.ts).
  *  An SVG is shown as its markup, never rendered. `line` is the line a
  *  reference named: tinted and scrolled to the middle of the pane. */
 async function preview(url: string, name: string, line?: number): Promise<void> {
   const seq = ++previewSeq;
-  fileName.textContent = name;
+  dialogHeader(sessionOf(url), pathOf(url) || name, false);
   fileDownload.href = `${url}&download=1`;
   fileBody.replaceChildren(previewNote("loading…"));
-  fileDialog.showModal();
+  // Already open when a tree row asked for it: showModal() on an open dialog throws.
+  if (!fileDialog.open) fileDialog.showModal();
   const show = (node: HTMLElement): void => {
     if (seq === previewSeq) fileBody.replaceChildren(node);
   };
@@ -222,10 +292,14 @@ async function preview(url: string, name: string, line?: number): Promise<void> 
   } catch (err) {
     return show(previewNote(`failed to load: ${String(err)}`, "text-red-600"));
   }
-  // With the path: the header carries a basename, and a reference resolved
-  // against the wrong root is only recognisable as the whole path.
+  // A reference may name a folder as easily as a file; the route answers 404
+  // for both, so the listing decides which kind of miss this was.
   if (!res.ok) {
-    return show(previewNote(`${await failure(res, "failed to load")}: ${pathOf(url)}`, "text-red-600"));
+    const path = pathOf(url);
+    const list = res.status === 404 ? await listing(path) : null;
+    if (seq !== previewSeq) return;
+    if (list) return void browse(sessionOf(url), path);
+    return show(previewNote(`${await failure(res, "failed to load")}: ${path}`, "text-red-600"));
   }
   const type = res.headers.get("content-type") ?? "";
   if (!type.startsWith("text/") && !type.startsWith("image/svg+xml")) {
@@ -250,28 +324,49 @@ const REF_EXT = new Set([
   "yml", "yaml", "toml", "ini", "conf", "txt", "lock",
 ]);
 
-/** `src/web/ui/chat.ts:481`, `chat.ts:481:12`, `/tmp/run.log` — path, and the
- *  line if one was named. A column is parsed only to be dropped, and an
- *  extension is required: `src/web/ui` is as likely a directory as a file. */
+/** Under one of these a path is a path with no extension to prove it — `~/.pier`
+ *  and `/home/qiqi/code` are places on disk, while `/api/fs/ls` in prose is a
+ *  route. Directories included: the dialog browses one. */
+const FS_ROOT = /^(?:~|\/(?:home|Users|root|tmp|var|opt|etc|srv|mnt|media|data|usr))(?:\/|$)/;
+
+/** `src/web/ui/chat.ts:481`, `chat.ts:481:12`, `/tmp/run.log`, `~/.pier/boards` —
+ *  path, and the line if one was named. A column is parsed only to be dropped;
+ *  off a filesystem root an extension is required, since `src/web/ui` is as
+ *  likely a directory as a file. */
 export function parseFileRef(raw: string): { path: string; line?: number } | null {
   const m = /^([^\s`"'()[\]{}<>]+?)(?::(\d+))?(?::\d+)?$/.exec(raw);
   if (!m || raw.includes("://")) return null;
   const path = m[1]!;
   const ext = path.includes(".") ? extOf(path) : "";
-  if (!ext || (!REF_EXT.has(ext) && !path.includes("/"))) return null;
+  if (!FS_ROOT.test(path) && (!ext || (!REF_EXT.has(ext) && !path.includes("/")))) return null;
   return { path, line: m[2] === undefined ? undefined : Number(m[2]) };
 }
 
-/** A code span naming a file opens the preview, at its line when it named one.
- *  A relative path resolves against the session's cwd — the files route takes
- *  absolute paths only — so without one it stays plain code. */
+/** The home directory is the server's, learned once from the listing route. */
+let homePath: Promise<string | null> | undefined;
+
+/** Opens what a reference named, `~` expanded first. Unresolved it is opened as
+ *  written, so the dialog names the path it could not find (§5). */
+async function openRef(sessionId: string, path: string, line?: number): Promise<void> {
+  let target = path;
+  if (target.startsWith("~")) {
+    homePath ??= listing().then((l) => l?.path ?? null);
+    target = `${(await homePath) ?? "~"}${target.slice(1)}`;
+  }
+  await preview(fileUrl(sessionId, target), basename(target), line);
+}
+
+/** A code span naming a file or a folder opens the dialog, at its line when it
+ *  named one. A relative path resolves against the session's cwd — the files
+ *  route takes absolute paths only — so without one it stays plain code. */
 export function renderFileRefs(root: HTMLElement, sessionId: string, cwd: string | null): void {
   for (const el of root.querySelectorAll<HTMLElement>(":not(pre) > code")) {
     const ref = parseFileRef(el.textContent?.trim() ?? "");
     if (!ref || el.closest("a")) continue; // inside a link, the label is the link's
-    const path = ref.path.startsWith("/") ? ref.path : cwd ? `${cwd}/${ref.path}` : null;
+    const rooted = ref.path.startsWith("/") || ref.path.startsWith("~");
+    const path = rooted ? ref.path : cwd ? `${cwd}/${ref.path}` : null;
     if (!path) continue;
-    const open = (): void => void preview(fileUrl(sessionId, path), basename(path), ref.line);
+    const open = (): void => void openRef(sessionId, path, ref.line);
     el.classList.add("fileref");
     el.tabIndex = 0;
     el.setAttribute("role", "button");

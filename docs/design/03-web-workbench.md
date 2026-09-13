@@ -247,9 +247,16 @@ browser keeps no second session order.
 - **File references**: an inline code span that is a path with an extension —
   `src/web/ui/chat.ts:481`, and a bare name only when the extension is a
   file-ish one — opens the preview dialog, at the named line when it names one.
-  Relative paths resolve against the session's cwd; the files route takes
-  absolute paths only. A pointer press leaves no focus ring on one; a keyboard
-  focus does.
+  Under a filesystem root (`~`, `/home`, `/tmp`, `/etc`, …) the extension is not
+  required, so `~/.pier/boards` is a reference too; `~` expands to the home the
+  listing route reports. Relative paths resolve against the session's cwd; the
+  files route takes absolute paths only. A pointer press leaves no focus ring on
+  one; a keyboard focus does.
+- **Folder tree**: the same dialog lists a directory (`GET /api/fs/ls`) — `../`
+  walks up, a folder row walks in, a file row previews it, Download hidden. A
+  file's header names its whole path and its folder is the click that opens the
+  tree, so a reference that landed on the wrong file is one step from the right
+  one; a reference naming a folder lands there directly.
 - **Copy**: a fenced block has a Copy button in its corner; any inline code
   span — a file reference included — copies on a 450 ms press-and-hold that
   stays put, flashing green or red in place and swallowing the click it would
