@@ -372,7 +372,7 @@ export function createActivityView(
         card.setAttribute("type", "button");
         card.onclick = () => openSession(node.id);
         const session = snapshot.sessions.find((candidate) => candidate.id === node.id);
-        if (session?.createdAt !== null && session?.createdAt !== undefined) hoverInfo(card, { ...session, createdAt: session.createdAt });
+        if (session && session.createdAt !== null) hoverInfo(card, { ...session, createdAt: session.createdAt });
       }
       stage.append(card);
     }
