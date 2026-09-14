@@ -42,6 +42,10 @@ function start(path = sockPath(), over: Partial<SocketHosts> & { locked?: boolea
       calls.push(`task by ${caller}`);
       return { echo: params, caller };
     },
+    web: async (params, caller) => {
+      calls.push(`web by ${caller}`);
+      return { text: `searched ${JSON.stringify(params)}` };
+    },
     knows: async (id) => KNOWN.includes(id),
     ...over,
   }, path);
@@ -68,7 +72,7 @@ describe("cli socket", () => {
   it("requires the caller's session on every route, and knows it or refuses", async () => {
     const { path, calls } = start();
     await listening(servers[0]!);
-    for (const url of ["/resolve", "/task"]) {
+    for (const url of ["/resolve", "/task", "/web"]) {
       expect(await call(path, JSON.stringify({ names: ["A"], params: {} }), "POST", url))
         .toEqual({ status: 400, body: { error: "PIER_SESSION_ID is required" } });
       expect(await call(path, JSON.stringify({ sessionId: "", names: ["A"] }), "POST", url))
@@ -94,6 +98,14 @@ describe("cli socket", () => {
     const res = await call(path, JSON.stringify({ sessionId: "s2", params }), "POST", "/task");
     expect(res).toEqual({ status: 200, body: { result: { echo: { operation: "run", prompt: "Review", launch: { thinking: "high" } }, caller: "s2" } } });
     expect(calls).toEqual(["task by s2"]);
+  });
+
+  it("runs a web search under the caller's session and answers its text", async () => {
+    const { path, calls } = start();
+    await listening(servers[0]!);
+    const res = await call(path, JSON.stringify({ sessionId: "s2", params: { op: "search", query: "pier" } }), "POST", "/web");
+    expect(res).toEqual({ status: 200, body: { result: { text: 'searched {"op":"search","query":"pier"}' } } });
+    expect(calls).toEqual(["web by s2"]);
   });
 
   it("answers 422 with the tool's own words when it refuses", async () => {

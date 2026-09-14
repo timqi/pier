@@ -25,9 +25,8 @@ type CredentialKey = "token" | "appToken";
 
 /** Where each platform's credentials live in the vault — fixed names, so a
  *  skill and the Console agree without a setting. Migration 24 spells the same
- *  table in SQL. Telegram authenticates with one token. */
-const CREDENTIAL_NAMES: Record<ChannelPlatform, Partial<Record<CredentialKey, string>>> = {
-  telegram: { token: "TELEGRAM_TOKEN" },
+ *  table in SQL. */
+const CREDENTIAL_NAMES: Record<ChannelPlatform, Record<CredentialKey, string>> = {
   slack: { token: "SLACK_TOKEN", appToken: "SLACK_APP_TOKEN" },
   lark: { token: "LARK_APP_ID", appToken: "LARK_APP_SECRET" },
 };
@@ -86,9 +85,9 @@ export class ChannelStore {
     return this.get(platform).chats.find((c) => c.id === chatId);
   }
 
-  /** Telegram has no "list my chats" API, so discovery is passive and happens
-   *  on every message: the unchanged case must cost no clone. A new chat copies
-   *  the platform defaults and owns them from then on. */
+  /** No platform reliably lists every chat a bot is in, so discovery is passive
+   *  and happens on every message: the unchanged case must cost no clone. A new
+   *  chat copies the platform defaults and owns them from then on. */
   discoverChat(platform: ChannelPlatform, chat: { id: string; name: string; kind: ChatKind }): void {
     const cached = this.cached(platform).chats.find((c) => c.id === chat.id);
     if (cached && cached.name === chat.name && cached.kind === chat.kind) return;
@@ -117,7 +116,6 @@ export class ChannelStore {
       enabled: true,
       requireMention: config.requireMention,
       requireBind: config.requireBind,
-      topicMode: config.topicMode,
       cwd: config.cwd,
       model: config.model,
       thinking: config.thinking,
@@ -175,7 +173,7 @@ export class ChannelStore {
 export interface GateInput {
   policy: ChatPolicy;
   isDm: boolean;
-  /** Mentioned, replied to, or addressed by a targeted slash command. */
+  /** Mentioned, replied to, or continuing a thread Pier owns. */
   addressed: boolean;
   bound: boolean;
   /** Bind requests must survive the bind gate, or nobody can ever bind. */

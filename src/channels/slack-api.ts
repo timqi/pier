@@ -81,6 +81,8 @@ export interface SlackButton {
   type: "button";
   action_id: string;
   text: { type: "plain_text"; text: string; emoji: true };
+  /** Echoed with the click; ≤ 2000 characters. */
+  value?: string;
 }
 
 export type SlackBlock =
@@ -98,7 +100,7 @@ export interface SlackInteraction {
   user?: { id: string };
   channel?: { id: string };
   message?: { ts: string; thread_ts?: string; blocks?: SlackBlock[] };
-  actions?: { action_id: string }[];
+  actions?: { action_id: string; value?: string }[];
   view?: SlackView;
 }
 

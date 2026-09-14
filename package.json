@@ -1,6 +1,6 @@
 {
   "name": "@timqi/pier",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A self-hosted workspace for coding agents: web workbench and IM channels in front of Pi sessions",
   "license": "AGPL-3.0-only",
   "repository": "github:timqi/pier",
@@ -51,7 +51,6 @@
     "highlight.js": "^11.12.0",
     "hono": "^4.13.3",
     "lucide": "1.43.0",
-    "marked": "^18.0.10",
-    "typebox": "^1.3.7"
+    "marked": "^18.0.10"
   }
 }

@@ -43,18 +43,18 @@ describe("credentials in the vault", () => {
 
   it("an emptied field removes the vault row; a removed row empties the field", () => {
     const vault = new Vault(secrets, db);
-    const config = store.get("telegram");
-    config.token = "12345:bot";
-    store.save("telegram", config);
-    expect(vault.get("TELEGRAM_TOKEN")).toBe("12345:bot");
+    const config = store.get("lark");
+    config.token = "cli_app";
+    store.save("lark", config);
+    expect(vault.get("LARK_APP_ID")).toBe("cli_app");
     config.token = "";
-    store.save("telegram", config);
-    expect(vault.get("TELEGRAM_TOKEN")).toBeUndefined();
+    store.save("lark", config);
+    expect(vault.get("LARK_APP_ID")).toBeUndefined();
     // Filed in the Vault topic, read by the channel; removed there, gone here.
-    vault.seal("TELEGRAM_TOKEN", "67890:bot");
-    expect(new ChannelStore(db, vault).get("telegram").token).toBe("67890:bot");
-    vault.remove("TELEGRAM_TOKEN");
-    expect(new ChannelStore(db, vault).get("telegram").token).toBe("");
+    vault.seal("LARK_APP_ID", "cli_other");
+    expect(new ChannelStore(db, vault).get("lark").token).toBe("cli_other");
+    vault.remove("LARK_APP_ID");
+    expect(new ChannelStore(db, vault).get("lark").token).toBe("");
   });
 
   it("only a changed credential touches the vault, so its updated_at is the rotation", () => {
@@ -80,131 +80,129 @@ describe("credentials in the vault", () => {
 
 describe("channel config store", () => {
   it("defaults to least privilege and disabled", () => {
-    const config = store.get("telegram");
+    const config = store.get("slack");
     expect(config).toMatchObject({
       enabled: false,
       token: "",
       requireMention: true,
       requireBind: true,
-      topicMode: true,
       users: [],
       chats: [],
     });
   });
 
   it("discovers a chat once, seeded from the platform defaults", () => {
-    const seeded = store.get("telegram");
+    const seeded = store.get("slack");
     seeded.cwd = "/srv/work";
     seeded.model = { provider: "anthropic", id: "claude-opus-4-5" };
     seeded.thinking = "high";
-    store.save("telegram", seeded);
-    store.discoverChat("telegram", { id: "-100", name: "Ops", kind: "forum" });
-    store.discoverChat("telegram", { id: "-100", name: "Ops", kind: "forum" });
-    expect(store.get("telegram").chats).toEqual([{
-      id: "-100",
+    store.save("slack", seeded);
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    expect(store.get("slack").chats).toEqual([{
+      id: "C100",
       name: "Ops",
-      kind: "forum",
+      kind: "group",
       enabled: true,
       requireMention: true,
       requireBind: true,
-      topicMode: true,
       cwd: "/srv/work",
       model: { provider: "anthropic", id: "claude-opus-4-5" },
       thinking: "high",
     }]);
     // Seeds, not inheritance: moving the platform default leaves the chat put.
-    const moved = store.get("telegram");
+    const moved = store.get("slack");
     moved.requireMention = false;
     moved.cwd = "/elsewhere";
-    store.save("telegram", moved);
-    expect(store.policy("telegram", "-100")).toMatchObject({
+    store.save("slack", moved);
+    expect(store.policy("slack", "C100")).toMatchObject({
       requireMention: true,
       cwd: "/srv/work",
     });
   });
 
   it("renames a known chat without losing its overrides", () => {
-    store.discoverChat("telegram", { id: "-100", name: "Ops", kind: "group" });
-    const config = store.get("telegram");
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    const config = store.get("slack");
     config.chats[0]!.requireMention = false;
-    store.save("telegram", config);
-    store.discoverChat("telegram", { id: "-100", name: "Ops v2", kind: "forum" });
-    expect(store.chat("telegram", "-100")).toMatchObject({
+    store.save("slack", config);
+    store.discoverChat("slack", { id: "C100", name: "Ops v2", kind: "dm" });
+    expect(store.chat("slack", "C100")).toMatchObject({
       name: "Ops v2",
-      kind: "forum",
+      kind: "dm",
       requireMention: false,
     });
   });
 
   it("a chat answers with its own values, an unknown one with the seed", () => {
-    const config = store.get("telegram");
+    const config = store.get("slack");
     config.requireMention = true;
     config.cwd = "/srv/work";
-    const seed = { requireMention: true, requireBind: true, topicMode: true, cwd: "/srv/work", model: null, thinking: null };
+    const seed = { requireMention: true, requireBind: true, cwd: "/srv/work", model: null, thinking: null };
     config.chats = [
       { id: "a", name: "a", kind: "group", enabled: true, ...seed, requireMention: false },
       { id: "b", name: "b", kind: "group", enabled: false, ...seed, cwd: "/srv/b" },
     ];
-    store.save("telegram", config);
-    expect(store.policy("telegram", "a")).toMatchObject({ requireMention: false, cwd: "/srv/work" });
-    expect(store.policy("telegram", "b")).toMatchObject({ requireMention: true, enabled: false, cwd: "/srv/b" });
+    store.save("slack", config);
+    expect(store.policy("slack", "a")).toMatchObject({ requireMention: false, cwd: "/srv/work" });
+    expect(store.policy("slack", "b")).toMatchObject({ requireMention: true, enabled: false, cwd: "/srv/b" });
     // Unknown chats fall back to the globals rather than being denied outright;
     // discovery runs first, and the bind gate is what keeps them harmless.
-    expect(store.policy("telegram", "zzz")).toMatchObject({ enabled: true, requireMention: true });
+    expect(store.policy("slack", "zzz")).toMatchObject({ enabled: true, requireMention: true });
   });
 
   it("redeems a bind code exactly once", () => {
-    const { code } = store.issueBindCode("telegram");
+    const { code } = store.issueBindCode("slack");
     expect(code).toMatch(/^[0-9A-Z]{6}$/);
-    expect(store.redeemBindCode("telegram", code.toLowerCase(), { id: "7", name: "Q" }))
+    expect(store.redeemBindCode("slack", code.toLowerCase(), { id: "7", name: "Q" }))
       .toBe("bound");
-    expect(store.isBound("telegram", "7")).toBe(true);
-    expect(store.redeemBindCode("telegram", code, { id: "8", name: "R" })).toBe("invalid");
-    expect(store.isBound("telegram", "8")).toBe(false);
-    store.unbind("telegram", "7");
-    expect(store.isBound("telegram", "7")).toBe(false);
+    expect(store.isBound("slack", "7")).toBe(true);
+    expect(store.redeemBindCode("slack", code, { id: "8", name: "R" })).toBe("invalid");
+    expect(store.isBound("slack", "8")).toBe(false);
+    store.unbind("slack", "7");
+    expect(store.isBound("slack", "7")).toBe(false);
   });
 
   it("voids a bind code after five wrong tries, and says so on the fifth", () => {
-    const { code } = store.issueBindCode("telegram");
+    const { code } = store.issueBindCode("slack");
     for (let i = 0; i < 4; i++) {
-      expect(store.redeemBindCode("telegram", "AAAAAA", { id: "7", name: "Q" })).toBe("invalid");
+      expect(store.redeemBindCode("slack", "AAAAAA", { id: "7", name: "Q" })).toBe("invalid");
     }
-    expect(store.redeemBindCode("telegram", "AAAAAA", { id: "7", name: "Q" })).toBe("voided");
+    expect(store.redeemBindCode("slack", "AAAAAA", { id: "7", name: "Q" })).toBe("voided");
     // The real code is dead too, and no longer pending in the Console.
-    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe("invalid");
-    expect(store.isBound("telegram", "7")).toBe(false);
-    expect(store.get("telegram").bindCode).toBeNull();
+    expect(store.redeemBindCode("slack", code, { id: "7", name: "Q" })).toBe("invalid");
+    expect(store.isBound("slack", "7")).toBe(false);
+    expect(store.get("slack").bindCode).toBeNull();
     // A fresh code starts over.
-    const next = store.issueBindCode("telegram").code;
-    expect(store.redeemBindCode("telegram", next, { id: "7", name: "Q" })).toBe("bound");
+    const next = store.issueBindCode("slack").code;
+    expect(store.redeemBindCode("slack", next, { id: "7", name: "Q" })).toBe("bound");
   });
 
   it("rejects an expired bind code", () => {
-    const { code } = store.issueBindCode("telegram");
-    const config = store.get("telegram");
+    const { code } = store.issueBindCode("slack");
+    const config = store.get("slack");
     config.bindCode = { code, expiresAt: Date.now() - 1 };
-    store.save("telegram", config);
-    expect(store.redeemBindCode("telegram", code, { id: "7", name: "Q" })).toBe("invalid");
+    store.save("slack", config);
+    expect(store.redeemBindCode("slack", code, { id: "7", name: "Q" })).toBe("invalid");
   });
 
   it("hands out a copy, so an unsaved edit cannot reach the store", () => {
-    store.discoverChat("telegram", { id: "-100", name: "Ops", kind: "group" });
-    const escaped = store.get("telegram");
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    const escaped = store.get("slack");
     escaped.requireBind = false;
     escaped.chats[0]!.enabled = false;
     escaped.users.push({ id: "9", name: "nope", boundAt: 0 });
-    expect(store.policy("telegram", "-100")).toMatchObject({ requireBind: true, enabled: true });
-    expect(store.isBound("telegram", "9")).toBe(false);
+    expect(store.policy("slack", "C100")).toMatchObject({ requireBind: true, enabled: true });
+    expect(store.isBound("slack", "9")).toBe(false);
     // And a saved object stays detached afterwards.
-    store.save("telegram", escaped);
+    store.save("slack", escaped);
     escaped.requireMention = false;
-    expect(store.policy("telegram", "-100").requireMention).toBe(true);
+    expect(store.policy("slack", "C100").requireMention).toBe(true);
   });
 
   it("keeps platforms independent", () => {
-    store.discoverChat("telegram", { id: "-100", name: "Ops", kind: "group" });
-    expect(store.get("slack").chats).toEqual([]);
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    expect(store.get("lark").chats).toEqual([]);
   });
 });
 
@@ -212,7 +210,6 @@ const policy = (over: Partial<ChatPolicy> = {}): ChatPolicy => ({
   enabled: true,
   requireMention: true,
   requireBind: true,
-  topicMode: true,
   cwd: "",
   model: null,
   thinking: null,

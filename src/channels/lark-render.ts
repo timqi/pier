@@ -5,6 +5,7 @@
 // takes the agent's markdown near-unmodified and treats what it cannot parse as
 // literal text, so there is no translation and no escaping.
 
+import { cut } from "../core/reply.js";
 import { balanceFences, chunkText } from "./chunk.js";
 import type {
   LarkActionValue,
@@ -45,8 +46,7 @@ export const withFooter = (body: string, note: string): LarkElement => {
   return markdown(`${body}${brk}<font color='grey'>${note}</font>`);
 };
 
-const truncate = (label: string): string =>
-  label.length > BUTTON_MAX ? `${label.slice(0, BUTTON_MAX - 1)}\u2026` : label;
+const truncate = (label: string): string => cut(label, BUTTON_MAX);
 
 export const button = (label: string, value: LarkActionValue): LarkButton => ({
   tag: "button",

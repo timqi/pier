@@ -9,7 +9,7 @@ core; core routes them to Pi sessions through the agent seam; every session
 emits one ordered event stream that all surfaces consume.
 
 ```
-Slack / Telegram / Lark          Web workbench (browser)       Tasks
+Slack / Lark                     Web workbench (browser)       Tasks
         │ Channel seam                  │ HTTP + SSE          HTTP / timer / socket
         ▼                               ▼                         ▼
 ┌──────────────────────────── core ──────────────────────────────┐
@@ -30,16 +30,18 @@ src/
                identity.ts, inbox.ts, inbound-file.ts
   agent/       pi.ts (sessions) and packages.ts (the package registry: Pi's
                DefaultPackageManager behind `PackageStore`) — the two files
-               outside extensions/ importing @earendil-works/pi-*; events.ts
+               importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, credentials.ts (sealed store +
                auth.json import), models.ts
-  extensions/  index.ts (the list Pier ships: the built-in `pier` package's
-               extensions), web/ (web_search + web_fetch on the provider's
-               hosted tools)
+  websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
+               operations and the validator), cli.ts (argv), provider.ts
+               (backend + auth over core's `WebContext`), anthropic.ts /
+               openai.ts (the hosted-tool wire formats), content.ts,
+               language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
-               panel, runtime, routes; per platform: telegram / slack / lark
+               panel, runtime, routes, handoff (web ↔ IM); per platform: slack / lark
                (+ -api, -render, -panel; slack also -outbound, -directory,
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
@@ -100,11 +102,11 @@ src/
 
 Dependency rules:
 
-- `channels | web | tasks | boards → core → agent`. Core never imports platform
+- `channels | web | tasks | boards | websearch → core → agent`. Core never imports platform
   SDKs or Pi; runtime dependencies never go sideways.
-- `extensions/` takes an `ExtensionAPI` and is the second area allowed to
-  import the SDK. Only `agent/pi.ts` registers one (inline factory); only
-  `agent/packages.ts` lists them, as the resources of the `pier` package.
+- `websearch/` imports no SDK: it speaks Messages/Responses itself over the
+  `WebAuth` seam (`core/types.ts`), which `agent/pi.ts` implements with
+  Pi's `ModelRegistry`; `main.ts` joins the two on the `/web` socket route.
 - `agent/packages.ts` is the second SDK-importing file in `agent/` because the
   registry is a second reason: `pi.ts` opens sessions, `packages.ts` changes
   what they open with. Nothing else imports `DefaultPackageManager` or
@@ -147,7 +149,7 @@ seams:
   will retry. `notify` carries a persisted `system-input` (delegation, task
   callback, supervisor message) or a service/error note.
 - Slash commands are parsed once in `channels/commands.ts`: trim both ends,
-  require a leading `/`, split off an `@target`, keep args verbatim. Control
+  require a leading `/`, keep args verbatim. Control
   that is not a prompt (`/stop`) is wired by `channels/runtime.ts`, which owns
   the router — the `Channel` seam has one inbound path.
 - `AgentSession` / `AgentFactory` — core ↔ Pi: prompt/steer/followUp (text
@@ -208,10 +210,13 @@ seams:
   One live `AgentSession` per session id: an IM key is looked up to its
   session id (injected `sessionIdOf`) before opening, so a chat and the
   `web:`/`task:` aliases share one lock and attach to one object; the chat is
-  the delivery key whenever it is attached. Durability is the caller's: web conversation ids *are* session ids, task
-  definitions persist their target, IM channels keep
+  the delivery key whenever it is attached, and an alias opening a session
+  whose durable chat is known (injected `chatKeyOf`) attaches that chat at
+  once. Durability is the caller's: web conversation ids *are* session ids,
+  task definitions persist their target, IM channels keep
   `channels/conversations.ts`. A mapping whose session Pi no longer has is
-  dropped and re-created, never retried forever.
+  dropped and re-created, never retried forever
+  ([04](design/04-im-channels.md#conversation-identity)).
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters
@@ -223,9 +228,6 @@ seams:
   chats. `requireMention` and `requireBind` default to true; a new chat
   *copies* the platform values once — no runtime inheritance. `gate()` is the
   whole inbound decision; denials are silent.
-- **Topic mode** (Telegram): a message in a forum group's General opens a
-  topic named after its first line; replies and commands stay put; a failure
-  falls back to General. Per-chat.
 - **IM inbound is `mode: "steer"`.**
 - **Errors**: a malformed inbound message is logged and dropped at the seam.
   Agent errors surface as `error` events, never as thrown exceptions across
@@ -244,9 +246,9 @@ One line each; the reasoning is in the commit that made it.
 - Pi **SDK** over RPC; the seam stays RPC-compatible (no Pi types leave `agent/`).
 - Standalone program, not a Pi extension. Pier is the Console over Pi's
   package manager: one registry (settings.json `packages` plus Pi's local
-  `extensions`/`skills` dirs), Pier writes it, never a second list; built-ins
-  stay inline factories, never copied to disk, and stand down when a copy on
-  disk registers the same tools.
+  `extensions`/`skills` dirs), Pier writes it, never a second list; Pier
+  ships no extension of its own — its tools are CLIs (`pier slack`, `pier
+  task`, `pier web`) documented by skills, so no tool schema rides in context.
 - Boards are directories under `$PIER_HOME/boards`, found by scanning; only
   `site/` is served; static HTML against one shipped stylesheet, no toolchain.
 - **One writer per instance directory**, enforced before the database opens:
@@ -262,7 +264,6 @@ One line each; the reasoning is in the commit that made it.
   its tables or its handle. Nothing restart-relevant lives in a JSON file.
 - IM chats are discovered from traffic, not registered; new chats arrive
   enabled behind the mention and bind gates.
-- Telegram over raw Bot API long polling: no framework, no webhooks.
 - Vite + Tailwind, static CSS, zero runtime, no UI framework.
 - A subagent is a Task run in a fresh or reused session; context travels as a
   written handoff in the prompt. `fork` was removed; stored runs with
@@ -270,7 +271,3 @@ One line each; the reasoning is in the commit that made it.
 - No project concept: a flat rail, a directory chosen once at creation.
 - The rail never reorders itself: a working set of five on top, entered when a
   human speaks to a session; everything else by birth (`web/session-state.ts`).
-- Known debt: `ChatKind` `"forum"` and `topicMode` (`channels/types.ts`) are
-  Telegram facts in the shared config contract — Slack and Lark report
-  `"group"` and ignore the flag. The fix is an adapter capability, taken when
-  the stored contract next migrates for its own reasons.

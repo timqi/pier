@@ -31,10 +31,8 @@ export interface Settings {
   titleModel?: ModelRef;
   /** Off by default: replacing your own code is the operator's decision. */
   autoUpdate: boolean;
-  /** Bundled extensions switched on (src/extensions); an unknown name is simply not found. */
-  extensions: string[];
-  /** Pier's own skills switched off. An off-list, not a second on-list: skills
-   *  default on and extensions default off, so one list would flip the other on upgrade. */
+  /** Pier's own skills switched off. An off-list: skills default on, so an
+   *  upgrade's new skill is on without a write. */
   skillsOff: string[];
   /** Managed CLI tools switched on (src/tools.ts). */
   tools: string[];
@@ -92,13 +90,8 @@ export function normalizeModelRef(raw: unknown): ModelRef | null {
   return { provider: provider.trim(), id: id.trim() };
 }
 
-/** Shape only: the catalog is code behind the Pi SDK, and an unknown name is
- *  ignored there, so a downgrade cannot lose a setting it cannot explain. */
-export function normalizeExtensions(raw: unknown): string[] | null {
-  return normalizeNames(raw);
-}
-
-/** Shape only, for the same reason: tools.ts owns the catalog. */
+/** Shape only: tools.ts owns the catalog, and an unknown name is ignored
+ *  there, so a downgrade cannot lose a setting it cannot explain. */
 export function normalizeTools(raw: unknown): string[] | null {
   return normalizeNames(raw);
 }
@@ -129,13 +122,12 @@ export class SettingsStore {
       modelMenu: this.#json("modelMenu", normalizeModelMenu, "a valid menu") ?? [],
       ...(titleModel ? { titleModel } : {}),
       autoUpdate: this.#value("autoUpdate") === "1",
-      extensions: this.#json("extensions", normalizeExtensions, "a list of names") ?? [],
       skillsOff: this.#json("skillsOff", normalizeNames, "a list of names") ?? [],
       tools: this.#json("tools", normalizeTools, "a list of names") ?? [],
       // `"drop"`: a row the bundled catalog has since taken is redundant, not malformed.
       customTools: this.#json(
         "customTools",
-        (raw) => normalizeCustomTools(raw, [], "drop"),
+        (raw) => normalizeCustomTools(raw, "drop"),
         "a list of {name, toml}",
       ) ?? [],
     };
@@ -176,11 +168,6 @@ export class SettingsStore {
 
   setAutoUpdate(on: boolean): Settings {
     this.#set("autoUpdate", on ? "1" : "0");
-    return this.get();
-  }
-
-  setExtensions(names: string[]): Settings {
-    this.#set("extensions", JSON.stringify(names));
     return this.get();
   }
 

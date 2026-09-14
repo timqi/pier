@@ -39,10 +39,10 @@ describe("fileMarker ↔ splitInboundFiles", () => {
   });
 
   it("round-trips a PIER_HOME with spaces and parentheses", () => {
-    const path = "/srv/Pier State (prod)/inbox/telegram/1-ab-a.jpg";
+    const path = "/srv/Pier State (prod)/inbox/slack/1-ab-a.jpg";
     const marker = fileMarker(path);
     // The encoded link survives markdown: no raw space or paren inside `(…)`.
-    expect(marker).toBe("[1-ab-a.jpg](file:///srv/Pier%20State%20%28prod%29/inbox/telegram/1-ab-a.jpg)");
+    expect(marker).toBe("[1-ab-a.jpg](file:///srv/Pier%20State%20%28prod%29/inbox/slack/1-ab-a.jpg)");
     expect(splitInboundFiles(marker).paths).toEqual([path]);
   });
 

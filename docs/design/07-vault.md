@@ -115,7 +115,6 @@ row holds neither. Fixed names (`CREDENTIAL_NAMES`, `channels/config.ts`):
 
 | Platform | `token` | `appToken` |
 | --- | --- | --- |
-| Telegram | `TELEGRAM_TOKEN` | — |
 | Slack | `SLACK_TOKEN` | `SLACK_APP_TOKEN` |
 | Lark | `LARK_APP_ID` | `LARK_APP_SECRET` |
 

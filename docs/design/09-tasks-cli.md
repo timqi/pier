@@ -27,14 +27,17 @@ the one validator of the params object.
 ## `run`
 
 ```
-pier task run [--prompt <text|->] [--run <id> [--after]] [--task-id <id>] [--session <id>]
+pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
         [--model <name|?>] [--thinking <level>] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
-  caller's), or `--task-id` (a saved definition, as is), or `--session <id>`
-  with `--prompt` (continue an idle session; `--cwd` refused).
+  caller's), or `--bash` (a one-shot script action in the same `--cwd`, no
+  session and no model — `--prompt`, `--model`, `--thinking` and `--session`
+  beside it are refused), or `--task-id` (a saved definition, as is), or
+  `--session <id>` with `--prompt` (continue an idle session; `--cwd`
+  refused).
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
@@ -80,7 +83,10 @@ none is pinned):
   (`provider/id · thinking — note`; the hits when several, the whole menu
   when none), exit 1.
 
-`--model ?` prints the menu instead of running, exit 0.
+`--model ?` prints the menu instead of running, exit 0: a line naming its
+source (the operator's menu, or the live catalog when none is pinned) then
+the same one-line-per-pin shape. It is the one answer that is text, not JSON;
+the CLI prints a string result as it came.
 
 ## Decisions
 

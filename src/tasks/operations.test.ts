@@ -283,12 +283,27 @@ describe("task operations", () => {
       'model "gpt" matches 2 of the menu:\nopenai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk',
     );
     await expect(launchOf({ model: "gemini" })).rejects.toThrow(/model "gemini" matches 0 of the menu:\nanthropic\/claude-opus-4 · high — hardest reasoning\n/);
-    // `?` is the menu itself, in place of a run.
-    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toEqual({ source: "menu", models: menu });
+    // `?` is the menu itself, in the same lines a refusal lists, in place of a run.
+    expect(await ask({ operation: "run", prompt: "Work", launch: { model: "?" } })).toBe(
+      "the operator's menu — --model takes a provider/id or a unique substring of one:\n"
+      + "anthropic/claude-opus-4 · high — hardest reasoning\nopenai/gpt-5 · medium — second opinion\nopenai/gpt-5-mini · low — cheap bulk",
+    );
     // An object passes through as it always did.
     expect(await launchOf({ model: { provider: "x", id: "y" } })).toEqual({ model: { provider: "x", id: "y" } });
     expect(ask.created).toHaveLength(7);
     await expect(ask({ operation: "models" })).rejects.toThrow("unknown task operation");
+  });
+
+  it("gives an inline bash action the caller's directory and a name off its script", async () => {
+    const ask = rig([]);
+    expect((await ask({ operation: "run", task: { action: { type: "bash", script: "make check\nsecond line" } } }) as RunSummary).runId).toBe("new");
+    expect(await ask({ operation: "run", task: { action: { type: "bash", script: "make", cwd: "sub/dir" } } })).toBeTruthy();
+    expect(await ask({ operation: "run", task: { name: "build", action: { type: "bash", script: "make", cwd: "/elsewhere" } } })).toBeTruthy();
+    expect(ask.created.map((draft) => [draft.name, draft.action])).toEqual([
+      ["make check", { type: "bash", script: "make check\nsecond line", cwd: "/tmp" }],
+      ["make", { type: "bash", script: "make", cwd: "/tmp/sub/dir" }],
+      ["build", { type: "bash", script: "make", cwd: "/elsewhere" }],
+    ]);
   });
 
   it("does not take task_id", async () => {

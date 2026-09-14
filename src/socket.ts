@@ -22,6 +22,9 @@ export interface SocketHosts {
   fileUrl: (name: string) => string;
   /** `pier task`'s operation, under the caller's session. */
   task: (params: unknown, callerSessionId: string) => Promise<unknown>;
+  /** `pier web`'s search or fetch, on the instance's model auth; the caller's
+   *  session names the active model. */
+  web: (params: unknown, callerSessionId: string) => Promise<unknown>;
   /** Identity, not authentication: the 0600 bits are the boundary, this is the
    *  audit key. A session Pier can locate is known; nothing else is. */
   knows: (sessionId: string) => Promise<boolean>;
@@ -43,16 +46,21 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
       answer(500, { error: String(err) });
     }
   },
-  // 422, not 400: the request was well-formed; what the operation refused is
-  // the caller's to read.
-  async "/task"({ task }, { params }, sessionId, answer) {
+  "/task": operation("task"),
+  "/web": operation("web"),
+};
+
+/** A CLI verb's params under the caller's session. 422, not 400: the request
+ *  was well-formed; what the operation refused is the caller's to read. */
+function operation(name: "task" | "web"): (typeof ROUTES)[string] {
+  return async (hosts, { params }, sessionId, answer) => {
     try {
-      answer(200, { result: await task(params, sessionId) });
+      answer(200, { result: await hosts[name](params, sessionId) });
     } catch (err) {
       answer(422, { error: err instanceof Error ? err.message : String(err) });
     }
-  },
-};
+  };
+}
 
 export function servePier(hosts: SocketHosts, path: string = PIER_SOCK): Server {
   const server = createServer((req, res) => void handle(hosts, req, res).catch((err: unknown) => {

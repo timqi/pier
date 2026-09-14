@@ -1,6 +1,7 @@
-// Lark's half of the settings panel (panel.ts has the rest). Lark has no modal
-// a WebSocket app can open, so the typed answer is the panel patched into a
-// form card; the submit button's `name` carries the thread root.
+// Lark's half of the settings panel (panel.ts has the rest). No modal a
+// WebSocket app can open, so the typed answer is the panel patched into a form
+// card whose submit button's `name` carries the thread root; every callback
+// button's value carries the draft, so a tap after a reload lands on its card.
 
 import type { ConversationKey } from "../core/types.js";
 import type { LarkCard, LarkCardAction, LarkClient, LarkElement } from "./lark-api.js";
@@ -14,13 +15,16 @@ import {
 } from "./lark-render.js";
 import {
   ChatPanel,
+  CWD_DRAFT_TAIL,
   CWD_PLACEHOLDER,
-  CWD_TAIL,
+  holdQuestion,
   PANEL_PREFIX,
   type PanelButton,
   type PanelDeps,
+  type PanelDraft,
   type PanelState,
   type PanelView,
+  readDraft,
 } from "./panel.js";
 
 /** A form-submit button name: `cwdgo:<thread root>`. */
@@ -36,8 +40,10 @@ interface LarkPanelState extends PanelState {
   messageId: string;
 }
 
+const fresh = (root: string, messageId: string, draft: PanelDraft): LarkPanelState =>
+  ({ root, messageId, draft, dirs: [], sessions: [] });
+
 export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
-  protected readonly platform = "lark" as const;
   protected readonly fence: [string, string] = ["`", "`"];
 
   constructor(protected override readonly deps: LarkPanelDeps) {
@@ -51,29 +57,41 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
 
   // --- rendering -------------------------------------------------------------
 
-  private btn(b: PanelButton, root: string) {
-    return cardButton(b.label, { key: `${PANEL_PREFIX}${b.action}`, root });
+  private btn(b: PanelButton, state: Pick<LarkPanelState, "root" | "draft">) {
+    const draft = Object.keys(state.draft).length ? { draft: state.draft } : {};
+    return cardButton(b.label, { key: `${PANEL_PREFIX}${b.action}`, root: state.root, ...draft });
   }
 
-  private render(view: PanelView, root: string, note?: string): LarkCard {
+  private render(view: PanelView, state: Pick<LarkPanelState, "root" | "draft">, note?: string): LarkCard {
     const elements: LarkElement[] = [
       ...view.groups.map((g) =>
         markdown([`**${g.title}**${g.suffix ?? ""}`, ...g.lines].join("\n"))),
-      ...(view.picks?.length ? [buttonRow(view.picks.map((p) => this.btn(p, root)))] : []),
+      ...(view.picks?.length ? [buttonRow(view.picks.map((p) => this.btn(p, state)))] : []),
       ...view.rows.filter((r) => r.length).map((row) =>
-        buttonRow(row.map((b) => this.btn(b, root)))),
+        buttonRow(row.map((b) => this.btn(b, state)))),
     ];
     if (note) elements.push(footer(note));
     return card(elements);
   }
 
-  async open(key: ConversationKey, chatId: string, root: string): Promise<void> {
-    const sent = await this.deps.api.replyCard(root, this.render(await this.view(key, chatId), root));
-    this.remember(key, { chatId, root, messageId: sent.messageId, models: [] });
+  /** A card that cannot be posted must not look like nothing happening: the
+   *  topic gets the reason as a plain card. */
+  async open(key: ConversationKey, root: string, question?: string): Promise<void> {
+    const state = fresh(root, "", holdQuestion(question));
+    let sent: { messageId: string };
+    try {
+      sent = await this.deps.api.replyCard(root, this.render(await this.view(key, state), state));
+    } catch (err) {
+      this.deps.log(`panel open failed: ${String(err)}`);
+      await this.deps.api.replyCard(root, card([markdown(this.esc(`Could not open the panel: ${String(err)}`))]))
+        .catch((e: unknown) => this.deps.log(`panel open failure not posted: ${String(e)}`));
+      return;
+    }
+    this.remember(key, { ...state, messageId: sent.messageId });
   }
 
   protected async draw(state: LarkPanelState, view: PanelView, note?: string): Promise<void> {
-    await this.deps.api.patchCard(state.messageId, this.render(view, state.root, note))
+    await this.deps.api.patchCard(state.messageId, this.render(view, state, note))
       .catch((err) => this.deps.log(`panel edit failed: ${String(err)}`));
   }
 
@@ -84,20 +102,28 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
 
   // --- actions ---------------------------------------------------------------
 
-  /** Returns false when the action is not ours. */
+  /** Returns false when the action is not ours. `run` delivers Start's
+   *  question as the tapper's message. */
   async onAction(
     action: LarkCardAction,
     key: ConversationKey,
     payload: string,
     root: string,
+    run: (text: string) => Promise<void>,
   ): Promise<boolean> {
-    return this.dispatch(key, payload, action, () => this.open(key, action.chatId, root));
+    return this.dispatch(
+      key,
+      payload,
+      action,
+      () => fresh(root, action.messageId, readDraft(action.value?.draft)),
+      run,
+    );
   }
 
   // --- working directory (one typed answer, in a form card) -------------------
 
   protected async promptCwd(
-    key: ConversationKey,
+    _key: ConversationKey,
     state: LarkPanelState,
     _action: LarkCardAction,
   ): Promise<void> {
@@ -106,10 +132,10 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
       name: "cwd_form",
       elements: [
         formInput(CWD_FIELD, "Working directory", CWD_PLACEHOLDER),
-        markdown(`An absolute path. ${CWD_TAIL}`),
+        markdown(`An absolute path. ${CWD_DRAFT_TAIL}`),
         {
           tag: "button",
-          text: { tag: "plain_text", content: "Start" },
+          text: { tag: "plain_text", content: "Set" },
           type: "primary",
           action_type: "form_submit",
           name: `${CWD_SUBMIT_PREFIX}${state.root}`,
@@ -118,16 +144,15 @@ export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
     };
     await this.deps.api.patchCard(
       state.messageId,
-      card([form, buttonRow([this.btn({ label: "Cancel", action: "panel" }, state.root)])]),
+      card([form, buttonRow([this.btn({ label: "Cancel", action: "panel" }, state)])]),
     ).catch((err) => this.deps.log(`cwd form failed: ${String(err)}`));
   }
 
   /** A panel that outlived its process is re-remembered from the event, so
-   *  the outcome lands on the card the user is looking at. */
+   *  the outcome lands on the card the user is looking at. The submit button
+   *  carries no value, so a draft's earlier picks do not survive that restart. */
   async onCwdSubmit(key: ConversationKey, action: LarkCardAction, root: string): Promise<void> {
-    if (!this.state(key)) {
-      this.remember(key, { chatId: action.chatId, root, messageId: action.messageId, models: [] });
-    }
-    await this.startSessionIn(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
+    if (!this.state(key)) this.remember(key, fresh(root, action.messageId, {}));
+    await this.chooseDir(key, String(action.formValue?.[CWD_FIELD] ?? "").trim());
   }
 }

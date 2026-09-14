@@ -7,6 +7,7 @@
 // handlers return once the event is queued.
 
 import * as Lark from "@larksuiteoapi/node-sdk";
+import type { PanelDraft } from "./panel.js";
 
 // --- card shapes (schema 2.0) --------------------------------------------------
 // Schema 2.0 is what makes button callbacks arrive over the WebSocket; 1.0
@@ -33,6 +34,8 @@ export interface LarkActionValue {
   root: string;
   /** Next-step buttons only; panel buttons repaint from their own state. */
   label?: string;
+  /** Panel buttons of a thread without a session: the card is the draft's store. */
+  draft?: PanelDraft;
 }
 
 export type LarkElement =
@@ -125,8 +128,10 @@ export interface LarkSocket {
 export interface LarkClient {
   botOpenId(): Promise<string>;
   connect(handlers: LarkHandlers): Promise<LarkSocket>;
-  /** Deliberately the only way to post: never into a chat's main flow. */
+  /** The only way to reply; `createCard` is the one root. */
   replyCard(messageId: string, card: LarkCard): Promise<{ messageId: string }>;
+  /** The one root Pier posts: a handoff's thread has no user message to reply to. */
+  createCard(chatId: string, card: LarkCard): Promise<{ messageId: string }>;
   patchCard(messageId: string, card: LarkCard): Promise<void>;
   deleteMessage(messageId: string): Promise<void>;
   /** `emojiType` is a Lark key (`OnIt`), never a codepoint. */
@@ -266,6 +271,14 @@ export class LarkApi implements LarkClient {
       },
     });
     return { messageId: ok("message.reply", res).data?.message_id ?? "" };
+  }
+
+  async createCard(chatId: string, card: LarkCard): Promise<{ messageId: string }> {
+    const res = await this.client.im.v1.message.create({
+      params: { receive_id_type: "chat_id" },
+      data: { receive_id: chatId, msg_type: "interactive", content: JSON.stringify(card) },
+    });
+    return { messageId: ok("message.create", res).data?.message_id ?? "" };
   }
 
   /** Images take the image endpoint so they render inline; `stream` is Lark's

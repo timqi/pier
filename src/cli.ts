@@ -31,6 +31,7 @@ Usage
                               run a command with named secrets in its env
   pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
   pier task <command> ...     subagents and scheduled tasks from a shell (pier task --help)
+  pier web search|fetch ...   the public web through the provider's hosted tools (pier web --help)
   pier --version | --help
 
 Options for "service install"
@@ -48,6 +49,9 @@ const say = (message: string): void => void process.stdout.write(`${message}\n`)
 /** Every socket route answers from memory and the database, so a Pier that
  *  takes longer than this is stuck, and an agent's shell must not hang with it. */
 const SOCKET_TIMEOUT_MS = 30_000;
+/** `/web` is the one route that waits on a provider: its own 90 s ceiling
+ *  (`websearch/run.ts`) answers first, so this only catches a stuck Pier. */
+const WEB_TIMEOUT_MS = 120_000;
 
 /** Typed on the binding: only then does a call narrow the code after it. */
 const die: (message: string) => never = (message) => {
@@ -60,8 +64,8 @@ const argv = process.argv.slice(2);
 const parsed = (() => {
   try {
     return parseArgs({
-      // `slack` and `task` own their options; only the name is parsed here.
-      args: argv[0] === "slack" || argv[0] === "task" ? [argv[0]] : argv,
+      // `slack`, `task` and `web` own their options; only the name is parsed here.
+      args: argv[0] === "slack" || argv[0] === "task" || argv[0] === "web" ? [argv[0]] : argv,
       allowPositionals: true,
       strict: true,
       options: {
@@ -117,6 +121,9 @@ if (values.help || command === "help") {
 } else if (command === "task") {
   const { runTaskCli } = await import("./tasks/cli.js");
   process.exitCode = await runTaskCli(argv.slice(1), (params) => askPier("/task", { params }));
+} else if (command === "web") {
+  const { runWebCli } = await import("./websearch/cli.js");
+  process.exitCode = await runWebCli(argv.slice(1), (params) => askPier("/web", { params }, WEB_TIMEOUT_MS));
 } else if (command === "restart" || command === "reload") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], `pier ${command}`);
@@ -267,12 +274,12 @@ function inject(wanted: readonly (readonly [string, string])[], values: Resolved
  *  session (`PIER_SESSION_ID`, the harness variable mapped by the shim). Not
  *  running, silent, unreadable, or an identity or body Pier refuses, is one
  *  `pier:` line and exit 2 before any route reads the answer. */
-async function askPier<T extends { error?: string }>(path: string, body: Record<string, unknown>): Promise<{ status: number; body: T }> {
+async function askPier<T extends { error?: string }>(path: string, body: Record<string, unknown>, timeout = SOCKET_TIMEOUT_MS): Promise<{ status: number; body: T }> {
   const { PIER_SOCK } = await import("./paths.js");
   const answer = await new Promise<{ status: number; body: T }>((done, reject) => {
     let responded = false;
     const req = request(
-      { socketPath: PIER_SOCK, method: "POST", path, headers: { "content-type": "application/json" }, timeout: SOCKET_TIMEOUT_MS },
+      { socketPath: PIER_SOCK, method: "POST", path, headers: { "content-type": "application/json" }, timeout },
       (res) => {
         responded = true;
         let raw = "";
@@ -289,7 +296,7 @@ async function askPier<T extends { error?: string }>(path: string, body: Record<
         });
       },
     );
-    req.on("timeout", () => req.destroy(new Error(`Pier did not answer within ${String(SOCKET_TIMEOUT_MS / 1000)} s`)));
+    req.on("timeout", () => req.destroy(new Error(`Pier did not answer within ${String(timeout / 1000)} s`)));
     // A 413 arrives while the body is still being written; the EPIPE after it is not the news.
     req.on("error", (err) => responded || reject(err));
     req.end(JSON.stringify({ ...body, sessionId: process.env.PIER_SESSION_ID }));

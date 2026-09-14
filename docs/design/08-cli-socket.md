@@ -1,7 +1,7 @@
 # CLI socket (design)
 
 `$PIER_HOME/pier.sock` is how the `pier` CLI reaches the running instance:
-`pier vault run`, `pier slack` (a vault resolve) and `pier task`. `node:http`
+`pier vault run`, `pier slack` (a vault resolve), `pier task` and `pier web`. `node:http`
 on a Unix socket, mode `0600`, unlinked on start and on exit; the permission
 bits are the whole auth (`src/socket.ts`). Not a workbench route: plaintext
 crosses this socket into a local process of Pier's user and nowhere else.
@@ -28,12 +28,13 @@ operates as (ownership, the supervised-run refusal, callback target).
 `POST <route>`, body a JSON object, ≤64 KiB (past that `413 {error: "body
 exceeds 64 KiB"}`, answered before the rest is read). Any other method or
 path is `404`; a body that is not a JSON object is `400`. The CLI waits 30 s
-for an answer.
+for an answer — 120 s on `/web`, the one route that waits on a provider.
 
 | Route | Body | Answers |
 | --- | --- | --- |
 | `/resolve` | `{sessionId, names: string[]}` | `200 {values}` — `{NAME: {kind: "plain" \| "record", value}}`; `404 {error: "no secret named X", file}` where `file` is `<publicUrl>/#/settings/vault?name=X` (loopback when no public URL is set); `423 {error: "locked — <reason>"}`; `400` for names that are not a non-empty list of vault names; `500 {error}` for anything else ([07-vault.md](07-vault.md)) |
 | `/task` | `{sessionId, params}` — `params.operation` is `run`, `message`, `save`, `list`, `cancel` or `recover` ([09-tasks-cli.md](09-tasks-cli.md)) | `200 {result}`; `422 {error}` with the operation's own message for anything it refused — `handleTask` (`tasks/operations.ts`) is the one validator, and the CLI does none |
+| `/web` | `{sessionId, params}` — `params.op` is `search` (`query`, `language_mode?`, `allowed_domains?`, `blocked_domains?`, `backend?`) or `fetch` (`url`, `prompt?`, `mode?`) | `200 {result: {text, details}}`; `422 {error}` for a refused field, no backend with auth, a URL that is not public HTTP(S), or a provider failure — `parseWebParams`/`runWeb` (`websearch/run.ts`) validate, the CLI checks argv shape only; the model auth is the instance's (`WebContext`), the caller's active model a candidate |
 
 ## Failure lines
 
@@ -43,7 +44,8 @@ for an answer.
 | `pier: PIER_SESSION_ID is required` | 2 | the env has no session |
 | `pier: <id> is not a session of this Pier` | 2 | a foreign or stale id |
 | `pier: body exceeds 64 KiB` | 2 | a `--prompt -` too large for one request |
-| `pier: Pier did not answer within 30 s` | 2 | Pier is up but stuck |
+| `pier: Pier did not answer within 30 s` | 2 | Pier is up but stuck (`120 s` on `/web`) |
 | `pier: unreadable answer from $PIER_HOME/pier.sock (status N)` | 2 | something other than Pier answered |
 | `vault: …` | 2 | a `/resolve` route answer ([07-vault.md](07-vault.md)) |
 | `task: …` | 1 | a `/task` route answer (`skills/pier-tasks/SKILL.md`) |
+| `web: …` | 1 | a `/web` route answer (`skills/pier-web/SKILL.md`) |

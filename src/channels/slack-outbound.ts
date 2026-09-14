@@ -2,6 +2,7 @@
 // against its limit, and what an empty turn still has to say.
 
 import type { AgentReply, NoteOrigin, TurnMeta } from "../core/types.js";
+import type { HandoffNote } from "./types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
@@ -70,6 +71,17 @@ export class SlackOutbound {
       ts = await this.post(channel, threadTs, part, []);
     }
     return ts;
+  }
+
+  /** The one root Pier posts (no `thread_ts`): the thread a web session is
+   *  continued in has no user message to hang from. Answers the root's `ts`. */
+  async open(channel: string, note: HandoffNote): Promise<string> {
+    const link = note.url || "_(no public URL set — Settings → Instance)_";
+    const sent = await this.api.postMessage({
+      channel,
+      text: `Continued from web: *${escapeMrkdwn(note.title)}*\n${link}\n_Reply in this thread to continue._`,
+    });
+    return sent.ts;
   }
 
   private budget(): number {

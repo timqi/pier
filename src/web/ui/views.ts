@@ -8,7 +8,8 @@ import { $, consoleView, h, type ConsoleView } from "./dom.js";
 import { button, pageTitle, pill } from "./form.js";
 import { renderHeader } from "./session-header.js";
 import { closeDrawer, setBarTitle } from "./shell.js";
-import { orderSessions, projectCwds, type SessionInfo } from "./sidebar.js";
+import { projectCwds } from "../../core/identity.js";
+import { orderSessions, type SessionInfo } from "./sidebar.js";
 import type { RunsView } from "./runs.js";
 import type { TasksView } from "./tasks.js";
 

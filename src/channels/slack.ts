@@ -18,7 +18,7 @@ import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
-import { parseCommand } from "./commands.js";
+import { parseCommand, settingsDraft } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -37,16 +37,19 @@ import {
   type SlackMessageEvent,
   type SlackSocket,
 } from "./slack-api.js";
+import type { PanelHandoff } from "./panel.js";
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { readThread } from "./slack-thread.js";
+import type { HandoffNote } from "./types.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const WORKING = "eyes";
 // The envelope is already acked, so this bounds concurrency (sockets,
 // downloads), not the backlog.
 const MAX_ACTIVE_CHATS = 16;
-const RECEIPT_STALE_MS = 30 * 60_000;
+/** Only an idle conversation ages out, so this need not cover a long turn. */
+const RECEIPT_STALE_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 5000;
 /** Only has to cover a redelivery that crossed our immediate ack. */
 const DEDUP_TTL_MS = 5 * 60_000;
@@ -113,6 +116,8 @@ export interface SlackDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
+  /** With `control`: the panel's "Continue web session…". */
+  handoff?: PanelHandoff;
 }
 
 export class SlackChannel implements Channel {
@@ -156,12 +161,13 @@ export class SlackChannel implements Channel {
       this.log,
       WORKING,
       RECEIPT_STALE_MS,
+      (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
-    if (deps.control) {
+    if (deps.control && deps.handoff) {
       this.panel = new SlackPanel({
         api: this.api,
         control: deps.control,
-        store: deps.store,
+        handoff: deps.handoff,
         log: this.log,
       });
     }
@@ -272,15 +278,18 @@ export class SlackChannel implements Channel {
     }
     if (bindRequest) return this.bind(channel, event.user, threadTs, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, channel, threadTs);
-    // A bare `@bot` and `settings` are the same request.
-    if (this.panel && (command?.name === "settings" || (!text && !files.length && !shares.length))) {
-      return this.panel.open(here, channel, threadTs);
-    }
-
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(files);
     const shared = await Promise.all(shares.map((share) => this.sharedBlock(share)));
+    // A bare `@bot` and `settings` are the same request; `s <text>` drafts a
+    // session, so only where this message would start one: a thread root. The
+    // held question carries its markers, so Start sends what the user sent.
+    const question = threadTs === ts ? settingsDraft(text) : undefined;
+    if (this.panel && (question || command?.name === "settings" || (!text && !files.length && !shares.length))) {
+      return this.panel.open(here, channel, threadTs, question && [question, ...shared, ...markers].join("\n"));
+    }
+
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: event.user, name: await this.directory.user(this.api, event.user) };
@@ -331,7 +340,9 @@ export class SlackChannel implements Channel {
       userId: user,
     });
     if (!admitted) return;
-    if (await this.panel?.onAction(interaction, key, actionId)) return;
+    // Start's question: the card is the message the click was on, so it carries the 👀.
+    const run = (text: string): Promise<void> => this.deliver(key, channel, message.ts, user, text, onMessage);
+    if (await this.panel?.onAction(interaction, key, actionId, run)) return;
 
     const text = offeredLabel(message.blocks, actionId);
     if (text === undefined) {
@@ -344,7 +355,6 @@ export class SlackChannel implements Channel {
     await this.retireOptions(channel, message.ts, message.blocks);
     // A bot cannot post as the user, so the pick is echoed: otherwise the
     // thread shows an answer to a request nobody can see, with nothing to carry the eyes.
-    const sender = { id: user, name: await this.directory.user(this.api, user) };
     const echo = await this.api.postMessage({
       channel,
       thread_ts: threadTs,
@@ -353,8 +363,21 @@ export class SlackChannel implements Channel {
       this.log(`option echo failed: ${String(err)}`);
       return undefined;
     });
+    await this.deliver(key, channel, echo?.ts, user, text, onMessage);
+  }
+
+  /** A click's text as the clicker's message; `ts` is the message that carries the 👀. */
+  private async deliver(
+    key: ConversationKey,
+    channel: string,
+    ts: string | undefined,
+    user: string,
+    text: string,
+    onMessage: (msg: InboundMessage) => void,
+  ): Promise<void> {
+    const sender = { id: user, name: await this.directory.user(this.api, user) };
     // No await between mark and dispatch — see onMessage.
-    if (echo?.ts) this.receipts.mark(key.conversationId, channel, echo.ts);
+    if (ts) this.receipts.mark(key.conversationId, channel, ts);
     onMessage({ key, senderId: user, sender, text, mode: "steer" });
   }
 
@@ -530,11 +553,17 @@ export class SlackChannel implements Channel {
     );
   }
 
+  /** A web session's thread: the root is the one message Pier posts into a
+   *  channel's main flow (channels/handoff.ts). */
+  async openThread(chatId: string, note: HandoffNote): Promise<string> {
+    return conversationId(chatId, await this.out.open(chatId, note));
+  }
+
   /** The 👀 goes on the note itself: the turn it triggers has no message of
    *  the user's to carry them. */
   async notify(
     conversation: string,
-    note: { text: string; origin: NoteOrigin },
+    note: { text: string; origin: NoteOrigin; at?: number },
   ): Promise<void> {
     const { channel, threadTs } = parseConversation(conversation);
     if (!threadTs) {
@@ -542,7 +571,7 @@ export class SlackChannel implements Channel {
       return;
     }
     const ts = await this.out.note(channel, threadTs, note);
-    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, channel, ts);
+    if (ts && awaitsTurn(note.origin)) this.receipts.mark(conversation, channel, ts, note.at);
   }
 }
 

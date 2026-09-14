@@ -20,22 +20,47 @@ export class ConversationStore {
     return row?.session_id;
   }
 
-  set(key: ConversationKey, sessionId: string): void {
+  /** `launch`: what the session was created with, for a re-create when Pi has
+   *  no transcript (a session never prompted was never written); omitted for
+   *  one launched from the chat defaults, which a re-create reads again. */
+  set(key: ConversationKey, sessionId: string, launch?: AgentLaunchOptions): void {
     this.db.prepare(`
-      INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO conversations(channel_id, conversation_id, session_id, updated_at, launch)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(channel_id, conversation_id) DO UPDATE SET
-        session_id = excluded.session_id, updated_at = excluded.updated_at
-    `).run(key.channelId, key.conversationId, sessionId, Date.now());
+        session_id = excluded.session_id, updated_at = excluded.updated_at, launch = excluded.launch
+    `).run(key.channelId, key.conversationId, sessionId, Date.now(), launch ? JSON.stringify(launch) : null);
+  }
+
+  launchOf(key: ConversationKey): AgentLaunchOptions | undefined {
+    const row = this.db.prepare(`
+      SELECT launch FROM conversations WHERE channel_id = ? AND conversation_id = ?
+    `).get(key.channelId, key.conversationId) as { launch: string | null } | undefined;
+    return row?.launch ? JSON.parse(row.launch) as AgentLaunchOptions : undefined;
+  }
+
+  /** No record: nothing to amend. */
+  amendLaunch(key: ConversationKey, patch: Partial<Pick<AgentLaunchOptions, "model" | "thinking">>): void {
+    const launch = this.launchOf(key);
+    if (!launch) return;
+    this.db.prepare(`
+      UPDATE conversations SET launch = ? WHERE channel_id = ? AND conversation_id = ?
+    `).run(JSON.stringify({ ...launch, ...patch }), key.channelId, key.conversationId);
   }
 
   /** Durable, unlike the router's answer, which is gone once an idle session
    *  is evicted. No row: nobody's conversation. */
-  channelOf(sessionId: string): string | undefined {
+  keyOf(sessionId: string): ConversationKey | undefined {
     const row = this.db.prepare(`
-      SELECT channel_id FROM conversations WHERE session_id = ? LIMIT 1
-    `).get(sessionId) as { channel_id: string } | undefined;
-    return row?.channel_id;
+      SELECT channel_id, conversation_id FROM conversations WHERE session_id = ? LIMIT 1
+    `).get(sessionId) as { channel_id: string; conversation_id: string } | undefined;
+    return row && { channelId: row.channel_id, conversationId: row.conversation_id };
+  }
+
+  /** Every session some IM conversation answers for, in one query. */
+  boundSessions(): Set<string> {
+    const rows = this.db.prepare(`SELECT session_id FROM conversations`).all() as { session_id: string }[];
+    return new Set(rows.map((r) => r.session_id));
   }
 
   forget(key: ConversationKey): void {
@@ -46,6 +71,12 @@ export class ConversationStore {
 
 }
 
+/** The backend's "no such session" (`agent/pi.ts`), also read in `web/server.ts`. */
+const UNKNOWN_SESSION = "unknown session";
+/** A note reaches the chat through `channels.notify`, which does not cut for
+ *  itself the way `Router.report` does. */
+const ERROR_CHARS = 200;
+
 /** The IM half of the router's session factory, wired in main.ts so neither
  *  core nor an adapter learns where the mapping lives. */
 export function resolveConversation<S extends { id: string }>(
@@ -55,22 +86,40 @@ export function resolveConversation<S extends { id: string }>(
     create(opts: AgentLaunchOptions): Promise<S>;
   },
   launchFor: (key: ConversationKey) => Partial<AgentLaunchOptions>,
-  onStale?: (message: string) => void,
+  /** The thread is told, not only the log: its next answer comes from a
+   *  session that remembers nothing. */
+  onStale?: (key: ConversationKey, message: string) => void,
 ): (key: ConversationKey) => Promise<S> {
   return async (key) => {
     const known = store.get(key);
+    let stale: string | undefined;
+    let recorded: AgentLaunchOptions | undefined;
     if (known) {
       try {
         return await factory.resume(known);
       } catch (err) {
         // Never persisted, or deleted: re-route rather than fail every message.
-        onStale?.(`${key.channelId}:${key.conversationId} lost session ${known}: ${String(err)}`);
+        // main.ts notifies the chat directly, so the cause is cut here.
+        stale = String(err).slice(0, ERROR_CHARS);
+        recorded = store.launchOf(key);
         store.forget(key);
       }
     }
-    const launch = launchFor(key);
-    const session = await factory.create({ ...launch, cwd: launch.cwd ?? process.cwd() });
-    store.set(key, session.id);
+    const defaults = launchFor(key);
+    const launch = recorded ?? { ...defaults, cwd: defaults.cwd ?? process.cwd() };
+    const session = await factory.create(launch);
+    store.set(key, session.id, recorded);
+    if (stale) {
+      const was = known!.slice(0, 8);
+      const now = session.id.slice(0, 8);
+      // Pi writes nothing before the first reply, so a recorded session the
+      // backend never knew lost no message: that is not data loss to report.
+      onStale?.(key, recorded && stale.includes(UNKNOWN_SESSION)
+        ? `Session ${was} had no messages yet — continuing as ${now}.`
+        : recorded
+        ? `Session ${was} is gone from disk (${stale}); re-created as ${now} with its own settings in ${launch.cwd}.`
+        : `Session ${was} is gone from disk (${stale}); this thread continues in a new session with the chat defaults in ${launch.cwd}.`);
+    }
     return session;
   };
 }

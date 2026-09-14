@@ -101,6 +101,9 @@ export class Router {
      *  workbench asking for one transcript must share one lock and one object.
      *  Undefined for a chat that has none yet. */
     private readonly sessionIdOf: (key: ConversationKey) => string | undefined = () => undefined,
+    /** The inverse: the durable chat of a session an alias is opening, so the
+     *  chat is the delivery key from the first turn (wired in main.ts). */
+    private readonly chatKeyOf: (sessionId: string) => ConversationKey | undefined = () => undefined,
   ) {}
 
   registerChannel(channel: Channel): void {
@@ -270,7 +273,11 @@ export class Router {
         // triggers, so the answer has a visible cause. The hub carries it whole.
         if (payload.type === "system-input") {
           const channel = this.channels.get(key.channelId);
-          channel?.notify(key.conversationId, { text: digest(payload.text), origin: payload.origin })
+          channel?.notify(key.conversationId, {
+            text: digest(payload.text),
+            origin: payload.origin,
+            at: payload.at,
+          })
             .catch((err) => {
               log.error(`notify ${key.channelId} failed`, err);
               this.hub.emit(session.id, {
@@ -302,6 +309,13 @@ export class Router {
       }),
     };
     this.bySession.set(session.id, attached);
+    // The durable chat outranks the alias that happened to open the session
+    // first (a restart, the web speaking first), same rule as `reached`.
+    const chat = isAlias(key) ? this.chatKeyOf(session.id) : undefined;
+    if (chat) {
+      this.byKey.set(keyOf(chat), session);
+      attached.key = chat;
+    }
   }
 
   /** An adapter's send is several platform calls (chunks, then attachments),
@@ -612,7 +626,11 @@ export class Router {
     // A chat is named so the agent can hand it to a script (skills/pier-slack);
     // an alias names nothing a shell could reach.
     const where = isAlias(msg.key) ? undefined : keyOf(msg.key);
-    const prompt = withPrefix(this.senders.next(session.id, msg.sender, Date.now(), where), text);
+    const opaque = this.channels.get(msg.key.channelId)?.opaqueIds;
+    const prompt = withPrefix(
+      this.senders.next(session.id, msg.sender, Date.now(), where, opaque),
+      text,
+    );
     log.debug(
       `${action} ${keyOf(msg.key)} → session ${session.id} (${String(prompt.length)} chars)`,
     );

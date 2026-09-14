@@ -41,13 +41,13 @@ export class ReceiptLedger {
     this.db = db;
   }
 
-  add(receipt: Receipt): void {
+  add(receipt: Receipt, createdAt = Date.now()): void {
     this.db.prepare(`
       INSERT INTO receipts(platform, conversation_id, chat_id, message_id, created_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(platform, chat_id, message_id) DO UPDATE SET
         conversation_id = excluded.conversation_id, created_at = excluded.created_at
-    `).run(this.platform, receipt.conversationId, receipt.chatId, receipt.messageId, Date.now());
+    `).run(this.platform, receipt.conversationId, receipt.chatId, receipt.messageId, createdAt);
   }
 
   /** Returned once, then gone. `bookedBy` claims only what was on the books by
@@ -64,16 +64,25 @@ export class ReceiptLedger {
     return rows.map(toReceipt);
   }
 
-  /** Claim receipts older than `ageMs`; `0` claims everything (startup sweep). */
-  takeStale(ageMs: number, now = Date.now()): Receipt[] {
+  /** Claim receipts older than `ageMs`; `0` claims everything (startup sweep).
+   *  A conversation `working` says yes to is skipped, whatever its age: its
+   *  turn is still going to settle. */
+  takeStale(
+    ageMs: number,
+    working: (conversationId: string) => boolean = () => false,
+    now = Date.now(),
+  ): Receipt[] {
     const cutoff = now - ageMs;
     const rows = this.db.prepare(`
       SELECT conversation_id, chat_id, message_id FROM receipts
       WHERE platform = ? AND created_at <= ?
     `).all(this.platform, cutoff) as unknown as ReceiptRow[];
-    this.db.prepare("DELETE FROM receipts WHERE platform = ? AND created_at <= ?")
-      .run(this.platform, cutoff);
-    return rows.map(toReceipt);
+    const claimed = rows.map(toReceipt).filter(({ conversationId }) => !working(conversationId));
+    const drop = this.db.prepare(
+      "DELETE FROM receipts WHERE platform = ? AND chat_id = ? AND message_id = ?",
+    );
+    for (const { chatId, messageId } of claimed) drop.run(this.platform, chatId, messageId);
+    return claimed;
   }
 
 }
@@ -95,17 +104,24 @@ export class Receipts {
     private readonly ledger: ReceiptLedger,
     private readonly log: (message: string) => void,
     private readonly emoji: string,
-    /** After this, a receipt's turn is assumed never to settle. */
+    /** After this, a receipt whose conversation is idle is assumed never to
+     *  settle. A turn still running keeps its 👀 however long it takes. */
     private readonly staleMs: number,
+    private readonly working?: (conversationId: string) => boolean,
   ) {}
 
-  mark(conversationId: string, chatId: string, messageId: string): void {
+  /** `at` is when the turn this receipt belongs to began; it defaults to now,
+   *  which is right for a message someone typed. A system note is posted *by*
+   *  the turn that will clear it, so booking it at `now` — a round trip after
+   *  the turn started — would put it outside that turn's scope and leave the
+   *  reaction up until the stale sweep. */
+  mark(conversationId: string, chatId: string, messageId: string, at?: number): void {
     this.applying.set(
       `${chatId}:${messageId}`,
       this.api.setReaction(chatId, messageId, this.emoji)
         .catch((err) => this.log(`reaction failed: ${String(err)}`)),
     );
-    this.ledger.add({ conversationId, chatId, messageId });
+    this.ledger.add({ conversationId, chatId, messageId }, at);
   }
 
   /** Only the messages *this* turn was working on: a message queued mid-turn
@@ -135,7 +151,8 @@ export class Receipts {
     const now = Date.now();
     if (!all && now - this.sweptAt < SWEEP_EVERY_MS) return Promise.resolve();
     this.sweptAt = now;
-    return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs));
+    // The startup sweep needs no liveness check: no turn survives the process.
+    return this.clear(this.ledger.takeStale(all ? 0 : this.staleMs, all ? undefined : this.working));
   }
 
   private async clear(receipts: Receipt[]): Promise<void> {

@@ -67,7 +67,7 @@ describe("chunk", () => {
   });
 
   it("balances code fences across a cut, so a split block still renders", () => {
-    // Slack does not auto-close a fence the way Telegram closes a tag: an odd
+    // Slack does not auto-close a fence the way HTML closes a tag: an odd
     // ``` swallows the rest of the message and the next chunk starts outside
     // the block, rendering code as prose.
     const code = "x".repeat(6000).replace(/(.{60})/g, "$1\n");
@@ -151,7 +151,7 @@ describe("next-step buttons", () => {
 
   it("returns nothing for a payload that is not ours, or no longer there", () => {
     const row = actions(["Run it"])!;
-    expect(offeredLabel([row], "cfg:models:0")).toBeUndefined();
+    expect(offeredLabel([row], "cfg:pins:0")).toBeUndefined();
     expect(offeredLabel([row], "sg:9")).toBeUndefined();
     expect(offeredLabel(undefined, "sg:0")).toBeUndefined();
   });

@@ -7,23 +7,29 @@ import { logger } from "../log.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
 import { LarkChannel } from "./lark.js";
+import type { PanelHandoff } from "./panel.js";
 import { SlackChannel } from "./slack.js";
-import { TelegramChannel } from "./telegram.js";
-import type { ChannelPlatform } from "./types.js";
+import type { ChannelPlatform, HandoffNote } from "./types.js";
+
+/** What an IM adapter has beyond the seam: opening a thread of its own is a
+ *  channels-internal operation, so it stays out of `Channel`. */
+export interface ImChannel extends Channel {
+  /** Post the handoff root in `chatId`, return the new conversation id. */
+  openThread(chatId: string, note: HandoffNote): Promise<string>;
+}
 
 const ADAPTERS: {
   platform: ChannelPlatform;
-  needsAppToken: boolean;
   build(deps: {
     store: ChannelStore;
     log: (m: string) => void;
     control: ChannelControl;
-  }): Channel;
+    handoff: PanelHandoff;
+  }): ImChannel;
 }[] = [
-  { platform: "telegram", needsAppToken: false, build: (deps) => new TelegramChannel(deps) },
-  { platform: "slack", needsAppToken: true, build: (deps) => new SlackChannel(deps) },
+  { platform: "slack", build: (deps) => new SlackChannel(deps) },
   // Lark's "token" is the App ID and "appToken" the App Secret.
-  { platform: "lark", needsAppToken: true, build: (deps) => new LarkChannel(deps) },
+  { platform: "lark", build: (deps) => new LarkChannel(deps) },
 ];
 
 // The injected sink is for warnings; "slack started" is not one.
@@ -32,7 +38,7 @@ const log = logger("channels");
 const warn = (m: string): void => log.warn(m);
 
 export class ChannelRuntime {
-  private readonly live = new Map<ChannelPlatform, Channel>();
+  private readonly live = new Map<ChannelPlatform, ImChannel>();
   private reloading: Promise<void> = Promise.resolve();
   private stopped = false;
 
@@ -40,6 +46,8 @@ export class ChannelRuntime {
     private readonly store: ChannelStore,
     private readonly router: Router,
     private readonly control: ChannelControl,
+    /** The pull half only; the push half needs this runtime, so main.ts closes the loop. */
+    private readonly handoff: PanelHandoff,
     private readonly log: (message: string) => void = warn,
   ) {}
 
@@ -60,7 +68,7 @@ export class ChannelRuntime {
   }
 
   private async restart(adapter: (typeof ADAPTERS)[number]): Promise<void> {
-    const { platform, needsAppToken, build } = adapter;
+    const { platform, build } = adapter;
     const existing = this.live.get(platform);
     if (existing) {
       this.live.delete(platform);
@@ -70,7 +78,7 @@ export class ChannelRuntime {
     }
     const config = this.store.get(platform);
     if (!config.enabled || !config.token) return;
-    if (needsAppToken && !config.appToken) {
+    if (!config.appToken) {
       // "Enabled but nothing happens" is indistinguishable from a broken adapter.
       this.log(`${platform}: enabled but no app token, not starting`);
       return;
@@ -79,6 +87,7 @@ export class ChannelRuntime {
       store: this.store,
       log: (m) => this.log(`${platform}: ${m}`),
       control: this.control,
+      handoff: this.handoff,
     });
     try {
       await channel.start((msg) => {
@@ -100,6 +109,18 @@ export class ChannelRuntime {
     if (!channel) return false;
     await channel.notify(conversationId, { text, origin: { kind: "error" } });
     return true;
+  }
+
+  running(): ChannelPlatform[] {
+    return [...this.live.keys()];
+  }
+
+  /** Throws by name when the platform is not running: the caller's answer is
+   *  "enable it in Settings", not a silent no-op. */
+  async openThread(platform: ChannelPlatform, chatId: string, note: HandoffNote): Promise<string> {
+    const channel = this.live.get(platform);
+    if (!channel) throw new Error(`${platform} is not running`);
+    return channel.openThread(chatId, note);
   }
 
   async stop(): Promise<void> {

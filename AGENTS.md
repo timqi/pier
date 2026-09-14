@@ -1,7 +1,7 @@
 # Pier — Principles
 
-Pier is a minimal agent workspace on the Pi SDK: IM channels (Slack, Telegram,
-Lark) and a Web UI in front of Pi sessions, with steering/queued messages,
+Pier is a minimal agent workspace on the Pi SDK: IM channels (Slack, Lark)
+and a Web UI in front of Pi sessions, with steering/queued messages,
 scheduled tasks, live observability, and static Show pages.
 
 ## Principles
@@ -11,7 +11,7 @@ scheduled tasks, live observability, and static Show pages.
 2. **Bloat is a bug.** Over budget → stop and diagnose before writing more.
    The cause is usually a wrong-layer abstraction or a feature that shouldn't exist.
 3. **Two seams only.** `Channel` (platform ↔ core) and `AgentSession`
-   (core ↔ Pi). Only `agent/` and `extensions/` import the Pi SDK; only
+   (core ↔ Pi). Only `agent/` imports the Pi SDK; only
    `channels/` imports platform SDKs; `core/` is blind to both, so Pi stays
    swappable (SDK → RPC later) and platform quirks stay out of core.
 4. **One event stream per session.** Web UI, logs, Show pages are all
@@ -37,12 +37,12 @@ scheduled tasks, live observability, and static Show pages.
 - `core/` routing, steer/follow-up policy, event fan-out
 - `channels/` one file per platform: normalize inbound, render outbound
 - `agent/` Pi SDK behind `AgentSession`
-- `extensions/` the extensions Pier ships with, loaded as Pi inline factories
-  and switched on per instance from the Console — never copied to disk, and
-  standing down when a copy on disk already registers the same tools; the
-  Console shows them as the built-in `pier` package beside every package in
-  Pi's own registry (settings.json `packages`), which Pier writes and never
-  mirrors
+- `websearch/` `pier web search|fetch` over the CLI socket: the provider's
+  hosted search and fetch spoken on the wire (Messages/Responses) with the
+  instance's model auth, no SDK import; Pier ships no extension — its tools
+  are CLIs documented by skills, and the Console shows those skills as the
+  built-in `pier` package beside every package in Pi's own registry
+  (settings.json `packages`), which Pier writes and never mirrors
 - `web/` chat + observability timeline, an event-stream consumer
 - `tasks/` scheduler; cron + prompt + session config; `pier task` over the CLI
   socket is the entire agent-collaboration surface
@@ -55,7 +55,7 @@ scheduled tasks, live observability, and static Show pages.
   of its Pi session directory — no external `pi` CLI, no second Pier on the
   same `~/.pier`, enforced by a pid claim on `$PIER_HOME` taken before the
   database opens — so in-process knowledge of what changed may be trusted.
-- Dependency direction: `channels/ | web/ | tasks/ | boards/ → core/ → agent/`.
+- Dependency direction: `channels/ | web/ | tasks/ | boards/ | websearch/ → core/ → agent/`.
   Runtime dependencies never go sideways. The browser may import owner-defined
   HTTP DTOs from `tasks/types.ts` and `channels/types.ts` type-only.
 - **Browser-safe core.** `web/ui/` bundles `core/types.ts`, `core/reply.ts`,
@@ -125,12 +125,12 @@ exists to catch.
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
 | `core/` | 1.5k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate |
-| `channels/` | 5k | three adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds only what would otherwise be copied |
+| `channels/` | 4.5k | two adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds what would otherwise be copied: the panel's two states and its draft, the transcript excerpt that makes a continued session recognisable on the phone, the web ↔ IM handoff (one binding, one guard table), the launch record a lost session is re-created from |
 | `web/` | 14k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; every pane is the only implementation of its surface — the Pi SDK ships no browser UI — and duplication across the area measures 0.4%; still the least tested area |
 | `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry |
 | `tasks/` | 3.2k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam |
 | root `src/*.ts` | 3.25k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix, the vault — store, socket and injector; the vault, the CLI socket and `pier task`'s dispatch are the right things in there |
-| one bundled extension | 500 | pays for itself or is not shipped |
+| `websearch/` | 1.2k | two hosted tools on two wire formats, the language audit, the fetched copy on disk, the `/web` validator and `pier web`'s argv |
 | one module | 750 | rule 2 before splitting; `agent/pi.ts` (sessions) and `agent/packages.ts` (the package registry) are the two files that may touch the Pi SDK, and every block in each does |
 | channel adapter file | 400 | transport, render and panel counted separately |
 

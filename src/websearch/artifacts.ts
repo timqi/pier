@@ -4,8 +4,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { logger } from "../../log.js";
-import { pierPath } from "../../paths.js";
+import { logger } from "../log.js";
+import { pierPath } from "../paths.js";
 
 const log = logger("web");
 

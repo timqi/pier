@@ -21,7 +21,7 @@ release bump="patch":
 size:
     #!/usr/bin/env bash
     count() { cat "$@" | grep -v '^\s*$' | grep -vcE '^\s*(//|/\*|\*)'; }
-    for a in core channels web agent tasks extensions boards; do
+    for a in core channels web agent tasks websearch boards; do
         printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts'))"
     done
     printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -v '\.test\.ts$'))"

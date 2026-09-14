@@ -43,6 +43,8 @@ export interface ChatDeps {
   sessionId: () => string | null;
   /** Where a `src/x.ts:12` in a reply resolves from; null when unknown. */
   sessionCwd: () => string | null;
+  /** The IM channel answering this session, `"web"` or null when unknown. */
+  sessionChannel: () => string | null;
   sessionState: () => SessionState;
   select: (id: string) => void;
   showRun: (runId: string) => void;
@@ -228,7 +230,9 @@ export function appendTurn(
   const speaker = kind === "user" ? splitSpeaker(body) : null;
   const named = speaker?.id || speaker?.when || speaker?.where ? speaker : null;
   // Here the operator is the reader; their own name over every message is noise.
-  const caption = named?.id && named.id !== "web" ? named : null;
+  // A platform with opaque ids names the speaker and nothing else, so the
+  // caption cannot be gated on the id.
+  const caption = named && (named.id ? named.id !== "web" : !!named.name) ? named : null;
   const node = h("div", `whitespace-pre-wrap break-words ${s.body}`, named?.text ?? body);
   // Editing resends the raw text, markers and header included — stripping them
   // from the bubble must not detach the files, or drop who was speaking.
@@ -276,6 +280,12 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
     const label = h("span", "font-semibold text-inherit", who);
     if (speaker?.id) label.title = speaker.id;
     line.append(label);
+  }
+  // A named speaker means the message came through an IM; the header's own
+  // `place` appears only on a change, so the session's channel names it.
+  const channel = deps.sessionChannel();
+  if (channel && channel !== "web") {
+    line.append(h("span", "text-[10px] uppercase tracking-wide opacity-60", channel));
   }
   return line;
 }

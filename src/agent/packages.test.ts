@@ -54,7 +54,6 @@ beforeEach(() => {
   file(join(agentDir, "extensions", "rtk.ts"), "export default () => {}");
   skill(join(agentDir, "skills"), "x");
   settings = new SettingsStore(openDb(":memory:"));
-  settings.setExtensions(["web"]);
   store = new PiPackageStore(config, { version: "0.1.2", settings }, [skills], agentDir);
 });
 
@@ -89,7 +88,6 @@ describe("the registry", () => {
     const pierRow = row(packages, "pier");
     expect(pierRow.version).toBe("0.1.2");
     expect(pierRow.resources).toEqual([
-      { kind: "extension", name: "web", path: "<inline:web>", enabled: true, state: null },
       { kind: "skill", name: "pier-help", path: join(skills, "pier-help", "SKILL.md"), enabled: true, state: null },
       { kind: "skill", name: "pier-slack", path: join(skills, "pier-slack", "SKILL.md"), enabled: true, state: null },
     ]);
@@ -132,9 +130,6 @@ describe("the registry", () => {
 
 describe("switches", () => {
   it("writes pier switches to the pier.db lists", async () => {
-    const web = await store.setEnabled({ source: "pier", kind: "extension", path: "<inline:web>", enabled: false });
-    expect(web.enabled).toBe(false);
-    expect(settings.get().extensions).toEqual([]);
     const help = await store.setEnabled({ source: "pier", kind: "skill", path: join(skills, "pier-help", "SKILL.md"), enabled: false });
     expect(help.enabled).toBe(false);
     expect(settings.get().skillsOff).toEqual(["pier-help"]);

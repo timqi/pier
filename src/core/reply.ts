@@ -33,7 +33,8 @@ added by Pier, not typed by them. It appears only on a change — new speaker, a
 time only, like \`[14:23]\`. Use that \`id\` to mention someone; never ask for
 their own. \`place\` is \`<platform>:<conversation>\` (Slack:
 \`slack:<channel>/<thread_ts>\`), said once per session: the channel and thread a
-script takes.
+script takes. Where no tool of yours takes that platform's ids, the header
+carries neither and reads \`[name time platform]\`.
 `;
 
 /** Deployment facts an agent cannot discover: a guessed path is wrong wherever
@@ -115,6 +116,9 @@ export const isSilentReply = (reply: { text: string; suggestions: string[] }): b
 /** How a reasoning level is spelled wherever a human reads it. */
 export const thinkingLabel = (level: ThinkingLevel): string =>
   level === "xhigh" ? "Extra high" : level[0]!.toUpperCase() + level.slice(1);
+
+/** `max` characters, the last one an ellipsis when something was cut. */
+export const cut = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
 /** 1200 → "1.2K", 12_000 → "12K" — absolute token counts read badly inline. */
 export const compact = (n: number): string => {

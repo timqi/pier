@@ -16,17 +16,18 @@ import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
+import { createHandoff } from "./channels/handoff.js";
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
 import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
-import { BUNDLED } from "./extensions/index.js";
 import { surfacePrompt } from "./core/reply.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
+import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
 import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
@@ -123,7 +124,7 @@ const router = new Router(hub, (key) => {
     return factory.resume(key.conversationId);
   }
   return resolveIm(key);
-}, (key) => conversations.get(key));
+}, (key) => conversations.get(key), (id) => conversations.keyOf(id));
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
@@ -143,13 +144,38 @@ const packages = new PiPackageStore(piConfig, { version: currentVersion(), setti
 packages.watchUpdates();
 
 channelStore = new ChannelStore(db, vault);
-const control = createControl({ router, factory, conversations, store: channelStore });
-const channels = new ChannelRuntime(channelStore, router, control);
+const sessionState = new SessionStateStore(db);
+const control = createControl({
+  router, factory, conversations, store: channelStore,
+  modelMenu: () => settings.get().modelMenu,
+});
+// The panel pulls through the handoff and the handoff posts through the
+// runtime: the runtime's half is reached lazily so both can be built.
+const handoff = createHandoff({
+  store: channelStore,
+  runtime: {
+    running: () => channels.running(),
+    openThread: (platform, chatId, note) => channels.openThread(platform, chatId, note),
+  },
+  conversations,
+  factory,
+  router,
+  hub,
+  publicUrl: () => settings.get().publicUrl,
+  taskSessions: () => tasks.taskSessions(),
+  workingSet: () => sessionState.flags(),
+  log: (m) => logger("channels").info(m),
+});
+const channels = new ChannelRuntime(channelStore, router, control, handoff);
 resolveIm = resolveConversation(
   conversations,
   factory,
   control.launchFor,
-  (message) => logger("channels").warn(message),
+  (key, message) => {
+    logger("channels").warn(`${key.channelId}:${key.conversationId} ${message}`);
+    void channels.notify(key.channelId, key.conversationId, message)
+      .catch((err: unknown) => log.error(`could not tell ${key.channelId} about its re-routed session`, err));
+  },
 );
 // Channels connect once tokens are readable; a refused unlock must not take
 // down the web surface, which is where the operator repairs it. The chats a
@@ -277,10 +303,9 @@ registerConfigSyncRoutes(app, {
   run: configurationSync.run,
 });
 registerTaskRoutes(app, tasks, { factory, router });
-registerChannelRoutes(app, channelStore, channels);
+registerChannelRoutes(app, channelStore, channels, handoff);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
-const sessionState = new SessionStateStore(db);
 registerPushRoutes(app, {
   store: new PushStore(db, secrets),
   hub,
@@ -308,7 +333,7 @@ app.route("/", createServer({
   names: MANAGED.map((tool) => tool.name),
   onToolsChanged: toolsUpdate.changed,
   validateCustomTools: (raw: unknown) => {
-    const validated = normalizeCustomTools(raw, BUNDLED.map((ext) => ext.name));
+    const validated = normalizeCustomTools(raw);
     return validated ? { tools: validated } : { error: CUSTOM_TOOL_RULES };
   },
   secrets,
@@ -319,7 +344,7 @@ app.route("/", createServer({
   backgroundRuns: (id) => tasks.backgroundRuns(id),
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
   taskSessions: () => tasks.taskSessions(),
-  channelOf: (id) => conversations.channelOf(id),
+  channelOf: (id) => conversations.keyOf(id)?.channelId,
 }));
 
 const port = Number(process.env.PORT ?? 3141);
@@ -331,6 +356,14 @@ servePier({
   // no public URL is set, since nothing in the process can discover one.
   fileUrl: (name) => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/#/settings/vault?name=${name}`,
   task: (params, callerSessionId) => tasks.handle(params, callerSessionId),
+  // Progress and cost go to the log: the CLI's answer is the text alone.
+  web: async (params, callerSessionId) => {
+    const parsed = parseWebParams(params);
+    const note = (text: string): void => log.info(`web ${callerSessionId}: ${text}`);
+    const result = await runWeb(parsed, await factory.webContext(router.modelOf(callerSessionId)), note);
+    note(`done ${JSON.stringify(result.details)}`);
+    return result;
+  },
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
 });

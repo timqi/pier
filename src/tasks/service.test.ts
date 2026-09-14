@@ -633,12 +633,13 @@ describe("task service", () => {
     ]);
     const menu: { provider: string; id: string; note?: string }[] = [];
     const service = new TaskService(new TaskStore(openDb(":memory:")), factory, new Router(new EventHub(), () => factory.resume("s1")), new EventHub(), { modelMenu: () => menu });
-    expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toEqual({
-      source: "catalog",
-      models: [{ provider: "test", id: "model" }],
-    });
+    expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
+      "the live catalog (no model pinned) — --model takes a provider/id or a unique substring of one:\ntest/model",
+    );
     menu.push({ provider: "test", id: "model", note: "the one we pay for" });
-    expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toEqual({ source: "menu", models: menu });
+    expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
+      "the operator's menu — --model takes a provider/id or a unique substring of one:\ntest/model — the one we pay for",
+    );
   });
 
   it("caps a chatty callback but recovers the full result", async () => {

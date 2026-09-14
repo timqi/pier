@@ -4,7 +4,7 @@
 
 /** A conversation is the unit of session routing. */
 export interface ConversationKey {
-  channelId: string; // "web" | "telegram" | "slack" | "lark"
+  channelId: string; // "web" | "slack" | "lark"
   conversationId: string; // platform thread/chat id, or web session ui id
 }
 
@@ -51,6 +51,13 @@ export interface InboundMessage {
 /** Platform ↔ core seam. Implemented once per platform, ≤200 lines. */
 export interface Channel {
   readonly id: string;
+  /**
+   * Set when nothing the agent can run takes this platform's ids — no
+   * `pier <platform>` CLI, no mention syntax on the way out. The speaker
+   * header then names the person and the platform instead of spending ~40
+   * characters a turn on an id nothing can use (`core/identity.ts`).
+   */
+  readonly opaqueIds?: boolean;
   start(onMessage: (msg: InboundMessage) => void): Promise<void>;
   /**
    * Render the reply (markdown + next-step buttons) and send it. Called on
@@ -64,7 +71,10 @@ export interface Channel {
    * never as an assistant turn — the people in the chat otherwise see the
    * agent answer a question nobody asked.
    */
-  notify(conversationId: string, note: { text: string; origin: NoteOrigin }): Promise<void>;
+  notify(
+    conversationId: string,
+    note: { text: string; origin: NoteOrigin; at?: number },
+  ): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -136,7 +146,10 @@ export type SessionEventPayload =
   // A user message entered the model's context: a fresh prompt, a steer, or a
   // queued message the agent just picked up. Clients render it as a user turn.
   | { type: "user-message"; text: string }
-  | { type: "system-input"; text: string; origin: SystemInputOrigin }
+  // `at` is the transcript timestamp of the message that opened the turn: the
+  // note an adapter posts for this input carries a receipt, and only that
+  // timestamp books it to the turn about to answer it (channels/receipts.ts).
+  | { type: "system-input"; text: string; origin: SystemInputOrigin; at?: number }
   | { type: "task-status"; run: BackgroundRun }
   | { type: "text-start" } // a new assistant message; prior text is intermediate
   | { type: "text-delta"; text: string }
@@ -414,8 +427,8 @@ export interface PackageResource {
   path: string;
   /** What the switch says. What the runtime did with it is `state`. */
   enabled: boolean;
-  /** The one line a row shows instead of a plain switch reading (`stood down —
-   *  web_search from <path>`, `installed by the rtk tool`), or null. */
+  /** The one line a row shows instead of a plain switch reading (`installed
+   *  by the rtk tool`), or null. */
   state: string | null;
   /** The switch is another surface's (rtk.ts: the rtk tool's, under Tools);
    *  drawn disabled, `state` names whose. */
@@ -674,6 +687,38 @@ export interface ProviderCheck {
   request: string;
   /** The answer's text when there was one, otherwise the refusal verbatim. */
   response: string;
+}
+
+/** The slice of a Pi model `websearch/` reads; structural, so Pi's
+ *  `ModelRegistry` is handed in as is and the area imports no SDK. */
+export interface RegistryModel {
+  id: string;
+  provider: string;
+  api: string;
+  baseUrl?: string;
+  headers?: unknown;
+  maxTokens?: number;
+}
+
+export type RequestAuth =
+  | { ok: true; apiKey?: string; headers?: unknown; baseUrl?: string }
+  | { ok: false; error: string };
+
+/** What `pier web` searches with: the instance's model auth, and the caller's
+ *  active model as a candidate when it is on the backend's API. */
+export interface WebContext {
+  modelRegistry: {
+    getAll(): readonly RegistryModel[];
+    hasConfiguredAuth(model: RegistryModel): boolean;
+    getApiKeyAndHeaders(model: RegistryModel): Promise<RequestAuth>;
+  };
+  model?: RegistryModel;
+}
+
+/** Core ↔ Pi auth seam for `pier web`: the instance's model auth as
+ *  `websearch/` reads it, the caller's active model included when given. */
+export interface WebAuth {
+  webContext(active?: ModelRef): Promise<WebContext>;
 }
 
 /** Core ↔ Pi provider seam: structural setup plus provider-owned auth flows. */

@@ -11,24 +11,17 @@ import {
   larkTokenHelp,
   slackThreadHelp,
   slackTokenHelp,
-  telegramTokenHelp,
-  topicModeHelp,
 } from "./channel-help.js";
 import { dirInput } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, btn, button, card, empty, field, segmented, STATUS_TONE, textInput, toggle } from "./form.js";
 import { launchField } from "./model-picker.js";
 
-const PLATFORMS: [ChannelPlatform, string][] = [["telegram", "Telegram"], ["slack", "Slack"], ["lark", "Lark"]];
-
-/** A switch that cannot move, replaced by the sentence saying why. */
-const noteLine = (text: string, help: HTMLElement): HTMLElement =>
-  h("span", "flex items-center gap-1.5 text-[13px] text-neutral-400", h("span", "", text), help);
+const PLATFORMS: [ChannelPlatform, string][] = [["slack", "Slack"], ["lark", "Lark"]];
 
 const KIND_STYLE: Record<ChatKind, string> = {
   dm: "bg-sky-50 text-sky-700 ring-sky-200",
   group: "bg-neutral-100 text-neutral-600 ring-neutral-200",
-  forum: "bg-violet-50 text-violet-700 ring-violet-200",
 };
 
 // --- view ---------------------------------------------------------------------
@@ -39,7 +32,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   const stored = localStorage.getItem(PLATFORM_KEY);
   let platform: ChannelPlatform = PLATFORMS.some(([id]) => id === stored)
     ? (stored as ChannelPlatform)
-    : "telegram";
+    : "slack";
   let config: ChannelConfig | null = null;
   let models: ModelRef[] = [];
 
@@ -157,14 +150,8 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   // --- cards -------------------------------------------------------------------
 
   function connection(cfg: ChannelConfig): HTMLElement {
-    const slack = platform === "slack";
     const lark = platform === "lark";
-    const token = textInput(
-      cfg.token,
-      slack ? "xoxb-…" : lark ? "cli_…" : "123456789:AA…",
-      set((v) => (cfg.token = v)),
-      true,
-    );
+    const token = textInput(cfg.token, lark ? "cli_…" : "xoxb-…", set((v) => (cfg.token = v)), true);
     // Slack authenticates its event socket separately from its Web API; Lark
     // signs everything with an App ID + App Secret pair. Either way the
     // adapter needs both credentials before it can start.
@@ -172,26 +159,29 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const cwd = dirInput(cfg.cwd, "(pier process cwd)", set((v) => (cfg.cwd = v)));
     return card(
       "Connection",
-      slack
-        ? "Pier connects over Socket Mode; no public URL or webhook needed."
-        : lark
+      lark
         ? "Pier connects over Feishu's WebSocket long connection; no public URL or webhook needed."
-        : "Pier polls Telegram for updates; no public URL or webhook needed.",
+        : "Pier connects over Socket Mode; no public URL or webhook needed.",
       toggle("Enabled", "Start the adapter when Pier boots.", cfg.enabled, set((v) => {
         cfg.enabled = v;
         renderTabs();
       })),
       field(lark ? "App ID" : "Bot token", token, {
         hint: "Stored locally, shown masked once saved.",
-        help: platform === "telegram" ? telegramTokenHelp() : slack ? slackTokenHelp() : larkTokenHelp(),
+        help: lark ? larkTokenHelp() : slackTokenHelp(),
       }),
-      ...(slack
-        ? [field("App-level token", appToken, { hint: "Opens the Socket Mode connection. Needs connections:write." })]
-        : []),
-      ...(lark
-        ? [field("App Secret", appToken, { hint: "From Credentials & Basic Info, beside the App ID." })]
-        : []),
+      lark
+        ? field("App Secret", appToken, { hint: "From Credentials & Basic Info, beside the App ID." })
+        : field("App-level token", appToken, { hint: "Opens the Socket Mode connection. Needs connections:write." }),
       field("Default working directory", cwd.el, { hint: "Where sessions this channel opens start." }),
+      // Threads are the whole design on both platforms, so the explanation is a
+      // fact on the card, not a setting.
+      h(
+        "span",
+        "flex items-center gap-1.5 text-[13px] text-neutral-400",
+        h("span", "", lark ? "Every topic is its own session." : "Every thread is its own session."),
+        lark ? larkThreadHelp() : slackThreadHelp(),
+      ),
     );
   }
 
@@ -201,15 +191,6 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
       "Copied into a group the first time the bot sees it; changing them here never touches a group that already exists. DMs are always bound-users-only.",
       toggle("Require mention in groups", "Ignore group messages that do not @mention or reply to the bot.", cfg.requireMention, set((v) => (cfg.requireMention = v))),
       toggle("Require bound user", "Only users bound with a code below can drive the agent.", cfg.requireBind, set((v) => (cfg.requireBind = v))),
-      // Slack and Lark have no equivalent switch: a thread per request is the
-      // only behaviour, so the toggle is replaced by the explanation.
-      ...(platform === "slack"
-        ? [noteLine("Thread mode: always on", slackThreadHelp())]
-        : platform === "lark"
-        ? [noteLine("Thread mode: always on", larkThreadHelp())]
-        : [
-          toggle("Topic mode", "In a forum group, each new request opens its own topic and its own session.", cfg.topicMode, set((v) => (cfg.topicMode = v)), topicModeHelp()),
-        ]),
       launchField("Model & reasoning", cfg, models, set((next) => {
         cfg.model = next.model;
         cfg.thinking = next.thinking;
@@ -278,26 +259,13 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
 
     const switches = h("div", "mt-3 flex flex-wrap items-center gap-x-6 gap-y-2");
     if (chat.kind === "dm") {
-      // A DM has two parties: mention is meaningless, bind is not optional, and
-      // topics do not exist. Three switches that cannot move are worse than a
-      // sentence saying so.
-      switches.append(h("span", "text-[13px] text-neutral-400", platform === "telegram"
-        ? "Direct message · bound users only, mention and topics not applicable"
-        : "Direct message · bound users only, mention not applicable"));
+      // A DM has two parties: mention is meaningless and bind is not optional.
+      // Two switches that cannot move are worse than a sentence saying so.
+      switches.append(h("span", "text-[13px] text-neutral-400", "Direct message · bound users only, mention not applicable"));
     } else {
       switches.append(
         toggle("Require mention", "", chat.requireMention, set((v) => (chat.requireMention = v))),
         toggle("Require bind", "", chat.requireBind, set((v) => (chat.requireBind = v))),
-        // Slack threads every reply unconditionally; on Telegram only a forum
-        // has topics, and a plain group gets the "how do I?" help instead of a
-        // switch that would do nothing.
-        platform === "slack"
-          ? noteLine("Thread mode: always on", slackThreadHelp("right"))
-          : platform === "lark"
-          ? noteLine("Thread mode: always on", larkThreadHelp("right"))
-          : chat.kind === "forum"
-          ? toggle("Topic mode", "", chat.topicMode, set((v) => (chat.topicMode = v)), topicModeHelp("right"))
-          : noteLine("Topic mode: forum groups only", topicModeHelp("right")),
       );
     }
 

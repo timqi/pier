@@ -20,7 +20,7 @@ import { awaitsTurn } from "../core/reply.js";
 import { bindHint, bindResult, picked, STALE_OPTION, STOPPED } from "./lines.js";
 import { logger } from "../log.js";
 import { Chains } from "./chains.js";
-import { parseCommand } from "./commands.js";
+import { parseCommand, settingsDraft } from "./commands.js";
 import { Dedup } from "./dedup.js";
 import type { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
@@ -35,13 +35,15 @@ import {
 import { LarkOutbound } from "./lark-outbound.js";
 import { CWD_SUBMIT_PREFIX, LarkPanel } from "./lark-panel.js";
 import { card, markdown, OFFER_PREFIX } from "./lark-render.js";
-import { PANEL_PREFIX } from "./panel.js";
+import { PANEL_PREFIX, type PanelHandoff } from "./panel.js";
 import { ReceiptLedger, Receipts } from "./receipts.js";
+import type { HandoffNote } from "./types.js";
 
 const WORKING = "OnIt";
 // The event is already acked, so this bounds concurrency, not the backlog.
 const MAX_ACTIVE_CHATS = 16;
-const RECEIPT_STALE_MS = 30 * 60_000;
+/** Only an idle conversation ages out, so this need not cover a long turn. */
+const RECEIPT_STALE_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 5000;
 const DEDUP_TTL_MS = 5 * 60_000;
 const DEDUP_MAX = 2000;
@@ -76,10 +78,14 @@ export interface LarkDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `/stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
+  /** With `control`: the panel's "Continue web session…". */
+  handoff?: PanelHandoff;
 }
 
 export class LarkChannel implements Channel {
   readonly id = "lark";
+  /** No `pier lark` CLI and no mention syntax out: its ids buy the prompt nothing. */
+  readonly opaqueIds = true;
   private readonly api: LarkClient;
   private readonly log: (message: string) => void;
   private readonly receipts: Receipts;
@@ -116,12 +122,13 @@ export class LarkChannel implements Channel {
       this.log,
       WORKING,
       RECEIPT_STALE_MS,
+      (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
-    if (deps.control) {
+    if (deps.control && deps.handoff) {
       this.panel = new LarkPanel({
         api: this.api,
         control: deps.control,
-        store: deps.store,
+        handoff: deps.handoff,
         log: this.log,
       });
     }
@@ -204,10 +211,7 @@ export class LarkChannel implements Channel {
     }
 
     const text = raw.trim();
-    // Lark gives Pier no @username a command target could match, so any target
-    // means "not us".
-    const parsed = parseCommand(text);
-    const command = parsed?.target ? undefined : parsed;
+    const command = parseCommand(text);
     const root = threadOf(msg);
     const here: ConversationKey = { channelId: this.id, conversationId: conversationId(msg.chatId, root) };
     const bindRequest = command?.name === "bind" && isDm;
@@ -225,14 +229,17 @@ export class LarkChannel implements Channel {
     }
     if (bindRequest) return this.bind(senderId, msg.messageId, command?.args ?? "");
     if (command?.name === "stop") return this.abortTurn(here, msg.messageId);
-    // A bare `@bot` and `/settings` are the same request.
-    if (this.panel && (command?.name === "settings" || (!text && !attachments.length && mentioned))) {
-      return this.panel.open(here, msg.chatId, root);
-    }
-
     // Downloading only past the gate: an unauthorized sender must not make the
     // bot pull bytes on their behalf.
     const markers = await this.saveAttachments(msg.messageId, attachments);
+    // A bare `@bot` and `/settings` are the same request; `s <text>` drafts a
+    // session, so only where this message would start one: outside any topic.
+    // The held question carries its markers, so Start sends what the user sent.
+    const question = msg.rootId ? undefined : settingsDraft(text);
+    if (this.panel && (question || command?.name === "settings" || (!text && !attachments.length && mentioned))) {
+      return this.panel.open(here, root, question && [question, ...markers].join("\n"));
+    }
+
     // Resolved before the mark: any await between mark() and dispatch is a
     // window in which a previous turn can settle and take this receipt with it.
     const sender = { id: senderId, name: await this.userName(senderId) };
@@ -364,7 +371,9 @@ export class LarkChannel implements Channel {
       return;
     }
     if (payload.startsWith(PANEL_PREFIX)) {
-      if (!(await this.panel?.onAction(action, key, payload, root))) {
+      // Start's question: the card is the message the tap was on, so it carries the 👀.
+      const run = (text: string): Promise<void> => this.deliver(key, action, action.messageId, text, onMessage);
+      if (!(await this.panel?.onAction(action, key, payload, root, run))) {
         this.log(`panel action ${payload} with no panel wired, dropped`);
       }
       return;
@@ -384,22 +393,27 @@ export class LarkChannel implements Channel {
     }
     // A bot cannot post as the user, so the pick is echoed: otherwise the
     // topic shows an answer to a request nobody can see, with nothing to carry the eyes.
-    const sender = { id: action.operatorId, name: await this.userName(action.operatorId) };
     await this.out.retire(action.messageId);
     const echo = await this.api.replyCard(root, card([markdown(picked(label))]))
       .catch((err) => {
         this.log(`option echo failed: ${String(err)}`);
         return undefined;
       });
+    await this.deliver(key, action, echo?.messageId, label, onMessage);
+  }
+
+  /** A tap's text as the tapper's message; `messageId` is the message that carries the 👀. */
+  private async deliver(
+    key: ConversationKey,
+    action: LarkCardAction,
+    messageId: string | undefined,
+    text: string,
+    onMessage: (msg: InboundMessage) => void,
+  ): Promise<void> {
+    const sender = { id: action.operatorId, name: await this.userName(action.operatorId) };
     // No await between mark and dispatch — see onMessage.
-    if (echo?.messageId) this.receipts.mark(key.conversationId, action.chatId, echo.messageId);
-    onMessage({
-      key,
-      senderId: action.operatorId,
-      sender,
-      text: label,
-      mode: "steer",
-    });
+    if (messageId) this.receipts.mark(key.conversationId, action.chatId, messageId);
+    onMessage({ key, senderId: action.operatorId, sender, text, mode: "steer" });
   }
 
   /** The abort ends the turn, which reaches send() and clears the receipts. */
@@ -462,15 +476,26 @@ export class LarkChannel implements Channel {
     await this.receipts.settleAfter(conversation, () => this.out.reply(root, reply), reply.meta);
   }
 
+  /** A web session's topic: the root is the one card Pier posts into a
+   *  chat's main flow (channels/handoff.ts). */
+  async openThread(chatId: string, note: HandoffNote): Promise<string> {
+    return conversationId(chatId, await this.out.open(chatId, note));
+  }
+
   /** The 👀 goes on the note itself: the turn it triggers has no message of
    *  the user's to carry them. */
-  async notify(conversation: string, note: { text: string; origin: NoteOrigin }): Promise<void> {
+  async notify(
+    conversation: string,
+    note: { text: string; origin: NoteOrigin; at?: number },
+  ): Promise<void> {
     const { chatId, root } = parseConversation(conversation);
     if (!root) {
       this.log(`refusing to post a system note to ${conversation}: no thread root in the conversation id`);
       return;
     }
     const messageId = await this.out.note(root, note);
-    if (messageId && awaitsTurn(note.origin)) this.receipts.mark(conversation, chatId, messageId);
+    if (messageId && awaitsTurn(note.origin)) {
+      this.receipts.mark(conversation, chatId, messageId, note.at);
+    }
   }
 }

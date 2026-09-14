@@ -114,6 +114,23 @@ describe("toSessionEvents", () => {
       ],
     },
     {
+      // Seen in the wild: stop_reason tool_use, output tokens billed, zero
+      // tool_use blocks on the message. Nothing ran and nothing was said.
+      name: "agent_end on tool_use with no tool call ends the turn as a failure",
+      input: {
+        type: "agent_end",
+        messages: [{ role: "assistant", content: [], stopReason: "toolUse" }],
+      },
+      expected: [
+        {
+          type: "turn-end",
+          text: "",
+          error: "the provider stopped on tool_use but sent no tool call",
+        },
+        { type: "error", message: "the provider stopped on tool_use but sent no tool call" },
+      ],
+    },
+    {
       // Pi emits one agent_end per attempt. Reported, four 503s would be four
       // "no reply" turns and four errors for one turn that has not ended.
       name: "agent_end Pi is about to retry is not the end of anything",

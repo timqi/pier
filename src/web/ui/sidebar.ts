@@ -5,6 +5,7 @@ import { Ellipsis } from "lucide";
 import { icon } from "./icons.js";
 import { sendJson } from "./api.js";
 import { openBrowser, openPathMenu } from "./dir-picker.js";
+import { projectCwds } from "../../core/identity.js";
 import { $, basename, h, relTime } from "./dom.js";
 import { closeMenu } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
@@ -89,25 +90,6 @@ export function neighbor(list: SessionInfo[], currentId: string | null, by: numb
 /** How many the New-session menu lists before "Browse…": a menu is scanned,
  *  not scrolled, and the project you want is almost always a recent one. */
 const RECENT_CWDS = 8;
-
-/** Distinct directories, newest session first: the ground `projectCwds` picks
- *  from. */
-export const distinctCwds = (list: SessionInfo[]): string[] =>
-  [...new Set([...list].sort((a, b) => b.createdAt - a.createdAt).map((s) => s.cwd))];
-
-/** The distinct directories less the worktrees: `wt` puts a checkout beside its
- *  repository as `<repo>.<branch>`, and the next conversation about a project
- *  belongs in the project. A worktree with no such sibling stays. What the
- *  New-session menu and the Settings scope list both offer. */
-export function projectCwds(list: SessionInfo[]): string[] {
-  const all = distinctCwds(list);
-  const known = new Set(all);
-  return all.filter((cwd) => {
-    const slash = cwd.lastIndexOf("/");
-    const dot = cwd.indexOf(".", slash + 2); // not a leading dot: `.pier` is a name
-    return dot < 0 || !known.has(cwd.slice(0, dot));
-  });
-}
 
 /** Actions take space only while revealed; touch keeps the current row's reachable. */
 const HOVER_BTN = "session-more hidden h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700";

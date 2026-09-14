@@ -452,6 +452,7 @@ const reloadIfCurrent = async (id: string): Promise<void> => {
 initChat({
   sessionId: () => currentId,
   sessionCwd: () => currentSession()?.cwd ?? null,
+  sessionChannel: () => currentSession()?.channel ?? null,
   sessionState: () => currentState,
   select: (id) => void select(id),
   showRun,

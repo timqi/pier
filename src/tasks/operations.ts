@@ -194,7 +194,11 @@ export async function handleTask(
   }
   if (input.operation === "run") {
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
-    if (record(input.launch)?.model === "?") return host.models();
+    if (record(input.launch)?.model === "?") {
+      const { source, models } = await host.models();
+      const head = source === "menu" ? "the operator's menu" : "the live catalog (no model pinned)";
+      return `${head} — --model takes a provider/id or a unique substring of one:\n${menuLines(models)}`;
+    }
     const callbackMode = callbackModeOf(input);
     if (Array.isArray(input.tasks)) {
       // Core-joined fan-out: members run detached, one aggregated callback.
@@ -307,8 +311,8 @@ function inlineDraft(input: Record<string, unknown>): Record<string, unknown> | 
 }
 
 /** A label for the Console, not an identifier. */
-function nameFromPrompt(prompt: string): string {
-  const line = prompt.split("\n")
+function nameFrom(text: string): string {
+  const line = text.split("\n")
     .map((l) => l.replace(/^[\s#>*-]+/, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim())
     .find(Boolean) ?? "subagent";
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
@@ -320,15 +324,18 @@ function nameFromPrompt(prompt: string): string {
 function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
-  const line = (pin: MenuEntry): string => `${full(pin)}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`;
   const exact = menu.find((pin) => full(pin).toLowerCase() === needle);
   const hits = exact ? [exact] : menu.filter((pin) => `${full(pin)} ${pin.note ?? ""}`.toLowerCase().includes(needle));
   if (hits.length === 1) return { model: { provider: hits[0]!.provider, id: hits[0]!.id }, thinking: hits[0]!.thinking };
   const slash = name.indexOf("/");
   if (!hits.length && slash > 0 && slash < name.length - 1) return { model: { provider: name.slice(0, slash), id: name.slice(slash + 1) } };
-  const lines = (hits.length ? hits : menu).map(line).join("\n") || "(no model is pinned or available)";
-  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${lines}`);
+  throw new Error(`model "${name}" matches ${String(hits.length)} of the menu:\n${menuLines(hits.length ? hits : menu)}`);
 }
+
+/** One pin per line, the only shape a menu is ever printed in. */
+const menuLines = (menu: MenuEntry[]): string =>
+  menu.map((pin) => `${pin.provider}/${pin.id}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`).join("\n")
+  || "(no model is pinned or available)";
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own
  *  directory; everything the caller did spell out passes through to parseDraft. */
@@ -342,12 +349,20 @@ async function expandDraft(definitions: TaskDefinitions, menu: Menu, raw: unknow
   }
   const action = record(draft.action);
   const session = record(action?.session);
-  if (action?.type === "agent" && session?.mode === "fresh" && (session.cwd === undefined || (typeof session.cwd === "string" && !isAbsolute(session.cwd)))) {
+  const absolute = async (cwd: unknown): Promise<string> => {
     const base = await definitions.sessionCwd(callerSessionId);
-    if (!base) throw new Error(`cwd ${session.cwd === undefined ? "omitted" : `"${session.cwd}" is relative`} and the calling session has no working directory; give an absolute path`);
-    draft = { ...draft, action: { ...action, session: { ...session, cwd: resolve(base, session.cwd ?? ".") } } };
+    if (!base) throw new Error(`cwd ${cwd === undefined ? "omitted" : `"${String(cwd)}" is relative`} and the calling session has no working directory; give an absolute path`);
+    return resolve(base, typeof cwd === "string" ? cwd : ".");
+  };
+  const relative = (cwd: unknown): boolean => cwd === undefined || (typeof cwd === "string" && !isAbsolute(cwd));
+  if (action?.type === "agent" && session?.mode === "fresh" && relative(session.cwd)) {
+    draft = { ...draft, action: { ...action, session: { ...session, cwd: await absolute(session.cwd) } } };
   }
-  if (draft.name === undefined && typeof action?.prompt === "string") draft = { ...draft, name: nameFromPrompt(action.prompt) };
+  if (action?.type === "bash" && relative(action.cwd)) {
+    draft = { ...draft, action: { ...action, cwd: await absolute(action.cwd) } };
+  }
+  const label = action?.prompt ?? action?.script;
+  if (draft.name === undefined && typeof label === "string") draft = { ...draft, name: nameFrom(label) };
   const launch = record(action?.launch);
   if (typeof launch?.model === "string") {
     const { model, thinking } = resolveModel(launch.model, await menu());

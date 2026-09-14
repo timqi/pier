@@ -7,8 +7,8 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { lostMarker, replaceOutsideCode } from "../core/inbound-file.js";
 
-/** Telegram refuses a photo past 10 MB, the smallest of the three; one cap so
- *  a turn does not land on one chat and not another. */
+/** Lark refuses an image past 10 MB, the smaller of the two; one cap so a
+ *  turn does not land on one chat and not another. */
 export const MAX_ATTACH_BYTES = 10 * 1024 * 1024;
 
 const MAX_ATTACHMENTS = 5;

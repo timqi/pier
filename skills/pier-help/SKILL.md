@@ -6,7 +6,7 @@ description: How Pier itself works — durable sessions, what survives a restart
 # How Pier works
 
 Pier is the workspace this session runs in: agent sessions behind chat
-surfaces — a web workbench and IM channels (Slack, Telegram, Lark) — plus
+surfaces — a web workbench and IM channels (Slack, Lark) — plus
 scheduled tasks, subagents and boards. Answer from the facts below. If the
 answer is not here, say you do not know how this instance is configured rather
 than guessing: the Console (Pier's admin web UI) is the operator's source of
@@ -14,16 +14,21 @@ truth.
 
 ## Sessions and persistence
 
-- One durable session per conversation: a web chat, a Slack or Lark thread, a
-  Telegram chat or topic. The mapping survives restarts — the next message
+- One durable session per conversation: a web chat, a Slack or Lark thread.
+  The mapping survives restarts — the next message
   lands in the same transcript with its context intact.
 - Idle sessions leave memory but keep their transcript; they resume
   transparently on the next message. Never promise that a restart or a pause
   wipes context.
-- A fresh start is explicit: "New session" in the chat settings panel or the
+- A fresh start is explicit: a new thread (its panel drafts the session) or the
   web UI. The old transcript remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
+- A web session can be continued in Slack or Lark — the web session menu's
+  "Continue in Lark/Slack…" opens a thread for it — or pulled from a thread
+  that has no session yet, through its panel's "Continue web session…".
+  Replies then land on both surfaces; a session already answering a chat
+  cannot be moved.
 - A long session does not hit a wall: when the context fills, Pi compacts it
   automatically — older turns become a summary. The transcript on disk keeps
   everything, but detail can leave *your* context, so a very old turn is worth
@@ -32,8 +37,7 @@ truth.
 
 ## Files and images the user sends
 
-- A photo or file sent on any surface (web paste, Telegram photo/document,
-  Slack upload) is saved to `$PIER_HOME/inbox/` and reaches you as a trailing
+- A photo or file sent on any surface (web paste, Slack or Lark upload) is saved to `$PIER_HOME/inbox/` and reaches you as a trailing
   `[name](file:///…)` line on the message — a path, not the content.
 - Read it with the read tool only when it matters to the task: every read
   puts the content in your context for good. An image you never read costs
@@ -54,9 +58,17 @@ truth.
 ## In-chat commands and the settings panel
 
 - `/settings` — or an addressed message with no text at all (a bare mention,
-  an empty DM) — opens a panel: model, reasoning level, new session
-  (optionally in a chosen directory), stop. Slack also accepts the bare words
-  `stop`, `settings`, `bind <code>`.
+  an empty DM) — opens a panel; Slack takes the same words bare (`stop`,
+  `settings`, `bind <code>`).
+- In a thread with no session yet the panel is a draft: directory, model &
+  reasoning (the operator's pinned models, one pick sets both), and Start
+  creates the session. `s <text>` as a thread's first message (Lark also
+  `/s <text>`) opens that draft with the text as a pending question, which
+  Start runs as the first message; a bare `s`, or `s <text>` inside a thread,
+  is an ordinary message.
+- In a thread with a session the panel reads it out (resuming an idle one) and
+  offers "Model & reasoning"; Stop aborts a running turn. A session's directory
+  is fixed at creation, so another directory means another thread.
 - Panel taps never reach you. The next-step buttons under your own replies
   do — a click arrives as an ordinary user message with that label.
 
@@ -70,7 +82,7 @@ truth.
   shows it as a footer line; the web shows the duration in the reply's activity
   headline and the context size in the session header.
 - A reply past the platform's message cap is split across several messages
-  (Telegram ~3.8k chars); the footer and the next-step buttons ride the last
+  (Slack ~2.8k chars, Lark ~7k); the footer and the next-step buttons ride the last
   one.
 
 ## Notifications on the web

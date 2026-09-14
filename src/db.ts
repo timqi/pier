@@ -293,7 +293,6 @@ const MIGRATIONS: readonly string[] = [
   -- every migration. A name filed in the vault first wins (DO NOTHING); the
   -- channel copy is dropped either way.
   WITH moved(platform, path, name) AS (VALUES
-    ('telegram', '$.token', 'TELEGRAM_TOKEN'),
     ('slack', '$.token', 'SLACK_TOKEN'), ('slack', '$.appToken', 'SLACK_APP_TOKEN'),
     ('lark', '$.token', 'LARK_APP_ID'), ('lark', '$.appToken', 'LARK_APP_SECRET'))
   INSERT INTO vault(name, value, updated_at)
@@ -305,6 +304,12 @@ const MIGRATIONS: readonly string[] = [
   `,
   // 25 — the mid-run decision channel is gone; a control message is steer or follow_up.
   `DELETE FROM task_messages WHERE json_extract(json, '$.kind') IN ('progress', 'decision', 'reply');`,
+  // 26 — a session created from the panel is re-created from its own launch
+  // record (channels/conversations.ts); the index serves the session → thread lookups.
+  `
+  ALTER TABLE conversations ADD COLUMN launch TEXT;
+  CREATE INDEX conversations_session ON conversations(session_id);
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

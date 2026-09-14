@@ -135,7 +135,6 @@ const SETTINGS_JSON = {
   publicUrl: "",
   modelMenu: [],
   autoUpdate: false,
-  extensions: [],
   skillsOff: [],
   tools: [],
   customTools: [],
@@ -359,10 +358,9 @@ function setup(
     // them rather than against a catalog the same request may be rewriting.
     names: TOOLS.map((tool) => tool.name),
     onToolsChanged,
-    // main.ts owns the rule (tools.ts) and the bundled names; the route only
-    // gets an answer.
+    // main.ts owns the rule (tools.ts); the route only gets an answer.
     validateCustomTools: (raw: unknown) => {
-      const tools = normalizeCustomTools(raw, ["web"]);
+      const tools = normalizeCustomTools(raw);
       return tools ? { tools } : { error: CUSTOM_TOOL_RULES };
     },
     reload,
