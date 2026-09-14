@@ -78,6 +78,7 @@ export function registerTaskRoutes(
         return {
           id,
           cwd: session?.cwd ?? "",
+          createdAt: session?.createdAt ?? null,
           title: session?.title,
           state: activity.router.stateOf(id) ?? "idle",
           stateSince: activity.router.stateSinceOf(id) ?? null,

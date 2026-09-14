@@ -1931,8 +1931,8 @@ describe("workbench server", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       sessions: expect.arrayContaining([
-        expect.objectContaining({ id: "s1" }),
-        expect.objectContaining({ id: "source-session" }),
+        expect.objectContaining({ id: "s1", createdAt: 1 }),
+        expect.objectContaining({ id: "source-session", createdAt: null }),
       ]),
       runs: [expect.objectContaining({
         id: run.id,

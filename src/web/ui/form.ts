@@ -2,7 +2,7 @@
 // Every control is uncontrolled and callback-driven; nothing here knows what a
 // channel or a task is.
 
-import { CircleQuestionMark } from "lucide";
+import { CircleQuestionMark, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { h, prose } from "./dom.js";
 
@@ -29,17 +29,23 @@ export const toolbar = (...children: (HTMLElement | SVGElement | string)[]): HTM
   h("div", "toolbar flex min-h-10 flex-none flex-wrap items-center gap-2 px-4 py-2", ...children);
 
 /** Smaller than a pill strip: it sits under one, and two rows of the same
- *  chrome would read as two levels of one navigation. */
-export function segmented<K extends string>(options: [string, K][], value: K, onChange: (key: K) => void): HTMLElement {
+ *  chrome would read as two levels of one navigation. An option with an icon
+ *  shows only that; its label becomes the accessible name and the tooltip. */
+export function segmented<K extends string>(options: [string, K, IconNode?][], value: K, onChange: (key: K) => void): HTMLElement {
   const el = h("div", "inline-flex flex-none items-center gap-0.5 rounded-full bg-neutral-100 p-1");
-  for (const [label, key] of options) {
+  for (const [label, key, glyph] of options) {
     const active = key === value;
     const opt = btn(
-      label,
-      `cursor-pointer whitespace-nowrap rounded-full px-3 py-1 text-[12px] transition-colors ${
+      glyph ? "" : label,
+      `cursor-pointer whitespace-nowrap rounded-full text-[12px] transition-colors ${glyph ? "flex h-7 w-7 items-center justify-center" : "px-3 py-1"} ${
         active ? "bg-white font-medium text-neutral-800 shadow-xs" : "text-neutral-500 hover:text-neutral-700"
       }`,
     );
+    if (glyph) {
+      opt.append(icon(glyph, "h-4 w-4"));
+      opt.setAttribute("aria-label", label);
+      opt.title = label;
+    }
     opt.setAttribute("aria-pressed", String(active));
     opt.onclick = () => onChange(key);
     el.append(opt);

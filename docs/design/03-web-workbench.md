@@ -270,12 +270,16 @@ browser keeps no second session order.
 
 ### Console views
 
-- **Activity**: Session table + directed task graph. Invocation edges solid,
-  from the launching session (the scheduler when none) to the run's session
-  or process — never run to run; callbacks dashed, control messages dotted;
-  Session nodes open chat, run edges open Runs. Active and last-24h include every queued or
-  running task regardless of age; last-24h adds up to 200 terminal runs,
-  excluding successful unmatched watch probes.
+- **Activity**: Session table + directed task graph, an icon toggle (list /
+  graph) between them. Nodes are cards over an SVG of edges; invocation edges
+  solid, from the launching session (the scheduler when none) to the run's
+  session or process — never run to run; callbacks dashed, control messages
+  dotted. Session nodes open chat, run edges open Runs; a mouse resting 300 ms
+  on a session node opens its Session info panel, gone when the pointer leaves
+  both (touch: nothing). Dragging empty canvas pans the pane; a drag past 4px
+  is not a click. Active and last-24h include every queued or running task
+  regardless of age; last-24h adds up to 200 terminal runs, excluding
+  successful unmatched watch probes.
 - **Automation**: Tasks, Runs, Activity share the head's tabs; New task is a
   head action, its editor guards owned by Tasks. Filter card and list are one
   inset panel each; the list panel scrolls with a sticky table header. Runs

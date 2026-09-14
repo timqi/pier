@@ -1,16 +1,21 @@
 // Console → Activity: the session table and the directed graph of task runs,
 // from one /api/activity snapshot — the picture no single session's timeline can show.
 
+import { List, Waypoints } from "lucide";
 import { readableTitle } from "../../core/identity.js";
 import type { SessionState } from "../../core/types.js";
 import type { TaskMessage, TaskRun } from "../../tasks/types.js";
 import { coalesce, getJson } from "./api.js";
 import { consoleView, fmtDuration, h, untitled, type ConsoleView } from "./dom.js";
 import { badge, empty, segmented, toolbar } from "./form.js";
+import { closeMenu } from "./menu.js";
+import { sessionInfo } from "./session-header.js";
 
 interface ActivitySession {
   id: string;
   cwd: string;
+  /** Null for a session the listing no longer has: the graph knows only its id. */
+  createdAt: number | null;
   title?: string;
   state: SessionState;
   stateSince: number | null;
@@ -33,45 +38,95 @@ const svg = (name: string, attrs: Record<string, string> = {}): SVGElement => {
 const elapsed = (since: number | null): string =>
   since === null ? "-" : fmtDuration(Date.now() - since);
 
-/** SVG presentation attributes cannot take `var()` in every engine, so the
- *  graph carries both palettes and picks at draw time (`pier:theme`). */
-interface Card { fill: string; stroke: string; text: string; dash?: string }
-interface Palette {
-  edge: string;
-  callback: string;
-  message: string;
-  scheduler: Card;
-  console: Card;
-  task: Card;
-  process: Card;
-  streaming: Card;
-  idle: Card;
-}
-const PALETTE: Record<"light" | "dark", Palette> = {
-  light: {
-    edge: "#a3a3a3",
-    callback: "#0891b2",
-    message: "#d97706",
-    scheduler: { fill: "#f5f3ff", stroke: "#a78bfa", text: "#5b21b6" },
-    console: { fill: "#eff6ff", stroke: "#93c5fd", text: "#1d4ed8" },
-    task: { fill: "#fffbeb", stroke: "#fbbf24", text: "#92400e" },
-    process: { fill: "#f5f5f5", stroke: "#a3a3a3", text: "#525252", dash: "4 3" },
-    streaming: { fill: "#ffffff", stroke: "#10b981", text: "#262626" },
-    idle: { fill: "#fafafa", stroke: "#d4d4d4", text: "#737373" },
-  },
-  dark: {
-    edge: "#7a7a7a",
-    callback: "#3fc3dd",
-    message: "#e0a13a",
-    scheduler: { fill: "#2b2440", stroke: "#7d63c9", text: "#c9b8f5" },
-    console: { fill: "#1f2a3d", stroke: "#4a7fbf", text: "#a8c8f0" },
-    task: { fill: "#3a2f1c", stroke: "#b8862a", text: "#f0d49a" },
-    process: { fill: "#262626", stroke: "#5c5c5c", text: "#a3a3a3", dash: "4 3" },
-    streaming: { fill: "#22302a", stroke: "#10b981", text: "#e5e5e5" },
-    idle: { fill: "#212121", stroke: "#4a4a4a", text: "#9a9a9a" },
-  },
+/** Edges are the graph's only SVG, and they take their colour as utility
+ *  classes, so a theme switch recolours a drawn graph like any other surface. */
+const EDGE: Record<"invocation" | "callback" | "message", { stroke: string; fill: string; dash?: string }> = {
+  invocation: { stroke: "stroke-neutral-400", fill: "fill-neutral-400" },
+  callback: { stroke: "stroke-cyan-500", fill: "fill-cyan-500", dash: "6 5" },
+  message: { stroke: "stroke-amber-500", fill: "fill-amber-500", dash: "2 5" },
 };
-const palette = (): Palette => PALETTE[document.documentElement.dataset.theme === "dark" ? "dark" : "light"];
+/** The badge tones the Console already uses for the same actors: violet is
+ *  `agent` on Tasks, indigo the selection tint, amber the run-in-flight chip. */
+const NODE_TONE = {
+  scheduler: "border-violet-200 bg-violet-50 text-violet-700",
+  console: "border-indigo-200 bg-indigo-50 text-indigo-700",
+  task: "border-amber-200 bg-amber-50 text-amber-700",
+  process: "border-dashed border-neutral-300 bg-neutral-50 text-neutral-500",
+  streaming: "border-emerald-200 bg-white font-medium text-neutral-800",
+  idle: "border-neutral-200 bg-white font-medium text-neutral-600",
+};
+const HOVER_DELAY = 300;
+const SLOP = 4; // a click from a shaky hand is still a click
+
+/** A rested pointer opens the session's info panel under its card; leaving
+ *  both the card and the panel closes it. A finger never rests, so touch gets
+ *  nothing and the tap stays the click that opens the chat. */
+function hoverInfo(card: HTMLElement, session: Parameters<typeof sessionInfo>[1]): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let panel: HTMLElement | null = null;
+  let overCard = false;
+  let overPanel = false;
+  const settle = (): void => {
+    clearTimeout(timer);
+    // Grace for the 4px gap between card and panel; a redraw's stale card is
+    // not ours to close (`data-closing` marks a panel already on its way out).
+    timer = setTimeout(() => {
+      if (overCard || overPanel || !panel || panel.dataset.closing !== undefined) return;
+      closeMenu();
+      panel = null;
+    }, 120);
+  };
+  card.onpointerenter = (ev) => {
+    if (ev.pointerType === "touch") return;
+    overCard = true;
+    clearTimeout(timer);
+    if (panel?.isConnected && panel.dataset.closing === undefined) return;
+    timer = setTimeout(() => {
+      if (!card.isConnected || !overCard) return;
+      panel = sessionInfo(card, session);
+      panel.onpointerenter = () => { overPanel = true; clearTimeout(timer); };
+      panel.onpointerleave = () => { overPanel = false; settle(); };
+    }, HOVER_DELAY);
+  };
+  card.onpointerleave = () => { overCard = false; settle(); };
+  // A press is a click coming: the panel would open under it and eat the chat.
+  card.onpointerdown = () => clearTimeout(timer);
+}
+
+/** Mouse and pen pan the pane by dragging its empty canvas; a finger already
+ *  scrolls it natively. Nodes and edges keep their clicks, and a drag longer
+ *  than the slop swallows the click it would otherwise end in. */
+function panWith(pane: HTMLElement): void {
+  let from: { x: number; y: number; left: number; top: number } | undefined;
+  let panned = false;
+  pane.classList.add("cursor-grab");
+  pane.onpointerdown = (ev) => {
+    panned = false;
+    if (ev.button !== 0 || ev.pointerType === "touch" || (ev.target as Element).closest("[data-node], path")) return;
+    from = { x: ev.clientX, y: ev.clientY, left: pane.scrollLeft, top: pane.scrollTop };
+    pane.setPointerCapture(ev.pointerId);
+    pane.classList.add("cursor-grabbing", "select-none");
+  };
+  pane.onpointermove = (ev) => {
+    if (!from) return;
+    const dx = ev.clientX - from.x;
+    const dy = ev.clientY - from.y;
+    if (Math.abs(dx) > SLOP || Math.abs(dy) > SLOP) panned = true;
+    pane.scrollLeft = from.left - dx;
+    pane.scrollTop = from.top - dy;
+  };
+  const end = (): void => {
+    from = undefined;
+    pane.classList.remove("cursor-grabbing", "select-none");
+  };
+  pane.onpointerup = end;
+  pane.onpointercancel = end;
+  pane.addEventListener("click", (ev) => {
+    if (!panned) return;
+    ev.stopPropagation();
+    ev.preventDefault();
+  }, true);
+}
 
 export function createActivityView(
   root: HTMLElement,
@@ -109,7 +164,7 @@ export function createActivityView(
     // time scope it covers on the right. The strip names the view, so no title.
     const bar = toolbar(
 
-      segmented<typeof tab>([["Sessions", "sessions"], ["Relationships", "dependencies"]], tab, (next) => { tab = next; render(); }),
+      segmented<typeof tab>([["Sessions", "sessions", List], ["Relationships", "dependencies", Waypoints]], tab, (next) => { tab = next; render(); }),
       h("span", "ml-auto text-[11.5px] text-neutral-400", `${snapshot.sessions.length} sessions · ${snapshot.runs.length} runs`),
       // render() first, load() second: the fetch behind a scope is ~150ms, and
       // until it lands the pressed button would show no sign of having been hit.
@@ -242,13 +297,17 @@ export function createActivityView(
     }
 
     // Real pixel size, not a stretched viewBox: the pane scrolls when the
-    // graph outgrows it instead of shrinking labels into illegibility.
-    const graph = svg("svg", { width: String(width), height: String(height), viewBox: `0 0 ${width} ${height}`, class: "block" });
+    // graph outgrows it instead of shrinking labels into illegibility. Edges
+    // are SVG; nodes are HTML cards over it, so text truncates and colours
+    // theme like everywhere else.
+    const stage = h("div", "relative");
+    stage.style.width = `${width}px`;
+    stage.style.height = `${height}px`;
+    const graph = svg("svg", { width: String(width), height: String(height), viewBox: `0 0 ${width} ${height}`, class: "absolute inset-0" });
     const defs = svg("defs");
-    const ink = palette();
-    for (const [id, color] of [["activity-arrow", ink.edge], ["activity-arrow-cb", ink.callback], ["activity-arrow-msg", ink.message]] as const) {
+    for (const [kind, tone] of Object.entries(EDGE)) {
       const marker = svg("marker", {
-        id,
+        id: `activity-arrow-${kind}`,
         viewBox: "0 0 10 10",
         refX: "9",
         refY: "5",
@@ -256,7 +315,7 @@ export function createActivityView(
         markerHeight: "6",
         orient: "auto-start-reverse",
       });
-      marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: color }));
+      marker.append(svg("path", { d: "M 0 0 L 10 5 L 0 10 z", class: tone.fill }));
       defs.append(marker);
     }
     graph.append(defs);
@@ -280,79 +339,48 @@ export function createActivityView(
           const bend = Math.max(36, Math.abs(x2 - x1) * 0.45) * (forward ? 1 : -1);
           return `M ${x1} ${from.y} C ${x1 + bend} ${from.y}, ${x2 - bend} ${to.y}, ${x2} ${to.y}`;
         })();
+      const tone = EDGE[edge.kind];
       const path = svg("path", {
         d,
         fill: "none",
-        stroke: edge.kind === "callback" ? ink.callback : edge.kind === "message" ? ink.message : ink.edge,
+        class: `cursor-pointer ${tone.stroke}`,
         "stroke-width": "1.5",
-        "marker-end": edge.kind === "callback" ? "url(#activity-arrow-cb)" : edge.kind === "message" ? "url(#activity-arrow-msg)" : "url(#activity-arrow)",
+        "marker-end": `url(#activity-arrow-${edge.kind})`,
       });
-      if (edge.kind === "callback") path.setAttribute("stroke-dasharray", "6 5");
-      if (edge.kind === "message") path.setAttribute("stroke-dasharray", "2 5");
-      path.classList.add("cursor-pointer");
+      if (tone.dash) path.setAttribute("stroke-dasharray", tone.dash);
       path.onclick = () => openRun(edge.run.id);
       graph.append(path);
     }
+    stage.append(graph);
 
-    // SVG text doesn't clip to its card, so truncate by width: CJK glyphs run
-    // twice as wide as latin at this size.
-    const wide = /[\u1100-\u11FF\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;
-    const fit = (label: string, maxUnits: number): string => {
-      let units = 0;
-      for (let i = 0; i < label.length; i++) {
-        units += wide.test(label[i]!) ? 2 : 1;
-        if (units > maxUnits) return `${label.slice(0, i)}…`;
-      }
-      return label;
-    };
     for (const node of all) {
       const p = positions.get(node.id)!;
-      const card: Card = node.kind === "session"
-        ? node.state === "streaming" ? ink.streaming : ink.idle
-        : ink[node.kind];
-      const group = svg("g", { transform: `translate(${p.x},${p.y})` });
-      if (node.kind === "session") group.classList.add("cursor-pointer");
-      group.onclick = () => { if (node.kind === "session") openSession(node.id); };
-      const rect = svg("rect", {
-        x: String(-NODE_W / 2),
-        y: String(-NODE_H / 2),
-        width: String(NODE_W),
-        height: String(NODE_H),
-        rx: "8",
-        fill: card.fill,
-        stroke: card.stroke,
-        "stroke-width": node.kind === "session" && node.state === "streaming" ? "1.5" : "1",
-      });
-      if (card.dash) rect.setAttribute("stroke-dasharray", card.dash);
-      group.append(rect);
-      let textX = -NODE_W / 2 + 12;
+      const tone = node.kind === "session" ? (node.state === "streaming" ? NODE_TONE.streaming : NODE_TONE.idle) : NODE_TONE[node.kind];
+      const card = h(
+        node.kind === "session" ? "button" : "div",
+        `absolute flex items-center gap-2 rounded-xl border px-3 text-left text-[11.5px] shadow-xs ${tone} ${node.kind === "session" ? "cursor-pointer hover:bg-neutral-50" : "cursor-default"}`,
+        ...(node.kind === "session" ? [h("span", `inline-block h-1.5 w-1.5 flex-none rounded-full ${node.state === "streaming" ? "animate-pulse bg-emerald-500" : "bg-neutral-300"}`)] : []),
+        h("span", "min-w-0 truncate", node.label),
+      );
+      card.dataset.node = node.id;
+      card.style.left = `${p.x - NODE_W / 2}px`;
+      card.style.top = `${p.y - NODE_H / 2}px`;
+      card.style.width = `${NODE_W}px`;
+      card.style.height = `${NODE_H}px`;
+      card.title = node.label === node.id ? node.id : `${node.label}\n${node.id}`;
       if (node.kind === "session") {
-        const dot = svg("circle", { cx: String(-NODE_W / 2 + 15), cy: "0", r: "3.5", fill: card.stroke });
-        if (node.state === "streaming") {
-          const pulse = svg("animate", { attributeName: "opacity", values: "1;0.3;1", dur: "1.6s", repeatCount: "indefinite" });
-          dot.append(pulse);
-        }
-        group.append(dot);
-        textX = -NODE_W / 2 + 26;
+        card.setAttribute("type", "button");
+        card.onclick = () => openSession(node.id);
+        const session = snapshot.sessions.find((candidate) => candidate.id === node.id);
+        if (session?.createdAt !== null && session?.createdAt !== undefined) hoverInfo(card, { ...session, createdAt: session.createdAt });
       }
-      const text = svg("text", {
-        x: String(textX),
-        "text-anchor": "start",
-        "dominant-baseline": "middle",
-        "font-size": "11.5",
-        "font-weight": node.kind === "session" ? "500" : "400",
-        fill: card.text,
-      });
-      text.textContent = fit(node.label, node.kind === "session" ? 22 : 25);
-      const title = svg("title");
-      title.textContent = node.label === node.id ? node.id : `${node.label}\n${node.id}`;
-      group.append(text, title);
-      graph.append(group);
+      stage.append(card);
     }
+    panWith(body);
     const legendDot = (cls: string): HTMLElement => h("span", `inline-block h-2 w-2 rounded-full ${cls}`);
     // Line samples drawn the way the edges are, so the legend is read, not decoded.
     const legendLine = (cls: string): HTMLElement => h("span", `inline-block h-0 w-6 border-t-2 ${cls}`);
-    body.append(h("div", "w-max p-4", graph), h(
+    body.append(h("div", "w-max p-4", stage), h(
       "div",
       "flex flex-wrap gap-x-5 gap-y-1.5 border-t border-neutral-200 bg-neutral-50/60 px-4 py-2 text-[11px] text-neutral-500",
       h("span", "inline-flex items-center gap-2", legendLine("border-solid border-neutral-400"), "task invocation"),
@@ -376,8 +404,5 @@ export function createActivityView(
     snapshot = { sessions: [], runs: [], messages: [] };
     drawn = "";
   });
-  // The graph's palette is baked into attributes at draw time, so a theme
-  // switch under an open graph leaves the old one on screen until it redraws.
-  window.addEventListener("pier:theme", () => { if (view.visible) render(); });
   return Object.assign(view, { refresh() { if (view.visible) void load(); } });
 }

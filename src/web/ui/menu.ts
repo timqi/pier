@@ -126,8 +126,9 @@ function anchorBox(anchor: HTMLElement): { top: number; left: number } {
  *  a sheet's rows are sized for a fingertip rather than a cursor. */
 const isSheet = (): boolean => window.innerWidth < 640;
 
-/** Float arbitrary content under an anchor, clamped to the viewport. */
-export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
+/** Float arbitrary content under an anchor, clamped to the viewport. Returns
+ *  the floated panel, for a caller that must know when the pointer leaves it. */
+export function openPanel(anchor: HTMLElement, content: HTMLElement): HTMLElement {
   closeMenu();
   // Replacing a menu is one surface changing content, not stacked exits.
   document.querySelectorAll(".glass-menu[data-closing]").forEach((el) => el.remove());
@@ -173,6 +174,7 @@ export function openPanel(anchor: HTMLElement, content: HTMLElement): void {
   document.addEventListener("keydown", onKey, true);
   window.addEventListener("scroll", onScroll, true);
   window.addEventListener("resize", closeMenu);
+  return panel;
 }
 
 function menuItem(item: MenuItem): HTMLElement {

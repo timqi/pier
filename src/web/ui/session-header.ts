@@ -217,8 +217,10 @@ function renderSessionMeta(): void {
 }
 
 /** Read-only details panel: what this session is and how full its context is.
- *  Opened from the ⋯ menu, from either title bar, or from a project row. */
-export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = false): void {
+ *  Opened from the ⋯ menu, from either title bar, from a project row, or on
+ *  hover from Activity's graph — which has these four facts and no rail row.
+ *  `back` puts a return arrow in the head; returns the floated panel. */
+export function sessionInfo(anchor: HTMLElement, s: Pick<SessionInfo, "id" | "cwd" | "createdAt" | "title">, back?: () => void): HTMLElement {
   // The trailing relative time is supporting text, not part of the value.
   const rows: [string, string, string?][] = [
     ["Directory", s.cwd],
@@ -248,11 +250,11 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
     h("div", "min-w-0 flex-1",
       h("div", "text-sm font-medium text-neutral-500", "Session info"),
       h("h2", "mt-1 [overflow-wrap:anywhere] text-lg leading-7 font-semibold text-neutral-900", s.title ?? untitled(s.cwd))), close);
-  if (fromMenu) {
-    const back = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", icon(ArrowLeft));
-    back.setAttribute("aria-label", "Back to session actions");
-    back.onclick = () => sessionMenu(anchor, s);
-    heading.prepend(back);
+  if (back) {
+    const arrow = h("button", "icon-btn h-11 w-11 sm:h-8 sm:w-8", icon(ArrowLeft));
+    arrow.setAttribute("aria-label", "Back to session actions");
+    arrow.onclick = back;
+    heading.prepend(arrow);
   }
   panel.append(heading);
   const fields = h("dl", "");
@@ -271,7 +273,7 @@ export function sessionInfo(anchor: HTMLElement, s: SessionInfo, fromMenu = fals
       h("dt", "text-[15px] text-neutral-500", label === "Session" ? "Session ID" : label), shown));
   }
   panel.append(fields);
-  openPanel(anchor, panel);
+  return openPanel(anchor, panel);
 }
 
 async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo): Promise<void> {
@@ -448,7 +450,7 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
     },
     {
       label: "Session info",
-      onSelect: () => sessionInfo(anchor, s, true),
+      onSelect: () => sessionInfo(anchor, s, () => sessionMenu(anchor, s)),
     },
     {
       label: "New session here",
