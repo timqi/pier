@@ -122,6 +122,21 @@ describe("the registry", () => {
     expect(local.resources.map((r) => r.name)).toContain("linked");
   });
 
+  it("says so when Pi will not load an enabled skill", async () => {
+    // A colon in an unquoted value: Pi's frontmatter parser throws and drops it.
+    file(join(pkgDir, "skills", "broken", "SKILL.md"), "---\nname: broken\ndescription: needs a CLI: run npm install\n---\n");
+    // Same name as one of Pier's own: Pi loads the package's first, so Pier's loses.
+    skill(join(pkgDir, "skills"), "pier-help");
+    writeSettings({ packages: [pkgDir] });
+    const { packages } = await store.list();
+    const state = (source: string, name: string): string | null | undefined =>
+      row(packages, source).resources.find((r) => r.name === name)?.state;
+    expect(state(pkgDir, "broken")).toMatch(/^not loaded — /);
+    expect(state("pier", "pier-help")).toMatch(/^not loaded — .*collision/);
+    expect(state(pkgDir, "pier-help")).toBeNull();
+    expect(state(pkgDir, "s")).toBeNull();
+  });
+
   it("refuses to read a settings.json that is not JSON", async () => {
     file(join(agentDir, "settings.json"), "{ nope");
     await expect(store.list()).rejects.toMatchObject({ reason: "invalid" });

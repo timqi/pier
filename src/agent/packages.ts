@@ -7,6 +7,7 @@ import { existsSync, promises as fs } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
   DefaultPackageManager,
+  loadSkills,
   SettingsManager,
   type PackageSource,
   type ResolvedResource,
@@ -168,7 +169,28 @@ export class PiPackageStore implements PackageStore {
       else if (pkg.kind === "git") pkg.version = pinnedRef(pkg.source);
       else if (pkg.kind !== "local") pkg.version = await versionFile(pkg.installedPath);
     }
+    this.#markUnloadable(packages, cwd);
     return { packages, checkedAt: this.#checkedAt, busy: this.#busy };
+  }
+
+  /** Pi drops a skill whose frontmatter will not parse, or whose name another
+   *  skill already took, with a diagnostic only its own log sees: a switch that
+   *  reads on while no session gets the skill is nothing looking like nothing (§5). */
+  #markUnloadable(packages: readonly Package[], cwd?: string): void {
+    // Pi's own order, so the collision loser is the one it would drop: the
+    // resolved skills first, Pier's additionalSkillPaths last.
+    const rows = [...packages].sort((a, b) => Number(a.kind === "pier") - Number(b.kind === "pier"))
+      .flatMap((p) => p.resources).filter((r) => r.kind === "skill" && r.enabled && r.state === null);
+    const { skills, diagnostics } = loadSkills({
+      cwd: cwd ?? this.agentDir, agentDir: this.agentDir, skillPaths: rows.map((r) => r.path), includeDefaults: false,
+    });
+    const loaded = new Set(skills.map((s) => s.filePath));
+    for (const row of rows) {
+      // A package resource may be named by its directory; Pi loads the SKILL.md in it.
+      if (loaded.has(row.path) || loaded.has(join(row.path, "SKILL.md"))) continue;
+      const why = diagnostics.find((d) => d.path === row.path)?.message.trim().split("\n")[0];
+      row.state = `not loaded — ${why ?? "Pi refused it"}`;
+    }
   }
 
   async #fillPier(pkg: Package): Promise<void> {
