@@ -251,8 +251,11 @@
     <button type="button" id="image-prev" aria-label="Previous image" class="lightbox-btn left-2 top-1/2 -translate-y-1/2"><span data-icon="ChevronLeft" class="h-6 w-6"></span></button>
     <button type="button" id="image-next" aria-label="Next image" class="lightbox-btn right-2 top-1/2 -translate-y-1/2"><span data-icon="ChevronRight" class="h-6 w-6"></span></button>
     <!-- The way out on a touch screen: tapping the image now zooms it, and the
-         scrim beside a fitted shot is a 4vw strip — not a thumb's target. -->
-    <button type="button" id="image-close" aria-label="Close" class="lightbox-btn right-2 top-2"><span data-icon="X" class="h-6 w-6"></span></button>
+         scrim beside a fitted shot is a 4vw strip — not a thumb's target. The
+         inset is its own: the dialog sits outside `main`, so style.css's rule
+         never reaches it and `top-2` alone is under iOS's status bar, where
+         the tap belongs to the system. -->
+    <button type="button" id="image-close" aria-label="Close" class="lightbox-btn right-2 top-[calc(0.5rem+env(safe-area-inset-top))]"><span data-icon="X" class="h-6 w-6"></span></button>
   </dialog>
 
   <!-- Text preview of an agent attachment — the Files view's code pane fills
