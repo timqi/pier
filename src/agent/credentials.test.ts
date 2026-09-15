@@ -174,7 +174,7 @@ describe("locked refusal", () => {
   it("read, modify and assertUnlocked all fail with the reason", async () => {
     await store().modify("anthropic", async () => oauth("tok"));
     const locked = new CredentialStore(db, new Secrets(join(dir, "master.key")), dir);
-    expect(() => locked.assertUnlocked()).toThrow(/secrets locked: unlock\(\) has not run/);
+    await expect(locked.assertUnlocked()).rejects.toThrow(/secrets locked: unlock\(\) has not run/);
     await expect(locked.read("anthropic")).rejects.toThrow(/secrets locked/);
     await expect(locked.modify("x", async () => oauth("t"))).rejects.toThrow(/secrets locked/);
   });

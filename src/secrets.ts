@@ -45,6 +45,11 @@ export class Secrets {
   #file?: KeyFile;
   /** Why decrypt is refused right now — "" once unlocked. */
   #lockedReason = "unlock() has not run";
+  /** The unlock in flight. Boot starts it without waiting (the web has to
+   *  serve so a broken key can be repaired), so vt mode leaves a window the
+   *  length of a `vt read` in which a session open would refuse a store that
+   *  is about to be fine. */
+  #attempt?: Promise<void>;
 
   constructor(
     private readonly path: string = pierPath("master.key"),
@@ -66,7 +71,18 @@ export class Secrets {
   /** Created on first boot in file mode, so an unattended start needs no
    *  ceremony. Throws and remembers why: the process must keep serving (web is
    *  how the operator repairs), and every refused decrypt names the reason. */
-  async unlock(): Promise<void> {
+  unlock(): Promise<void> {
+    this.#attempt = this.#unlock();
+    return this.#attempt;
+  }
+
+  /** Settles with the boot's unlock attempt, succeed or fail; immediate once it
+   *  has. A caller still asks `state` afterwards — this waits, it never grants. */
+  async settled(): Promise<void> {
+    await this.#attempt?.catch(() => undefined);
+  }
+
+  async #unlock(): Promise<void> {
     try {
       let raw: string;
       try {

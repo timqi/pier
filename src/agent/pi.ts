@@ -718,7 +718,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.
-    this.credentials?.assertUnlocked();
+    await this.credentials?.assertUnlocked();
     if (opts.name) sessionManager.appendSessionInfo(opts.name);
     // This runtime serves one session, so shadowing streamSimple is the
     // per-session seam for the cache TTL. Default before the spread: compaction

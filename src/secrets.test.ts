@@ -91,6 +91,38 @@ describe("locked behaviour", () => {
     expect(b.state).toBe("locked");
     expect(() => b.decrypt("v1:x:a:b:c")).toThrow(/approval denied/);
   });
+
+  // The boot window: the web serves before the KEK is read, so a session
+  // opened in it must wait for the attempt rather than refuse a store that is
+  // about to be unlocked.
+  it("settled() waits for the unlock in flight", async () => {
+    const a = new Secrets(path, fakeVt());
+    await a.unlock();
+    await a.rotateKek("vt");
+
+    const vt = fakeVt();
+    const read = vt.read.bind(vt);
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => (release = r));
+    vt.read = async (record) => {
+      await gate;
+      return read(record);
+    };
+
+    const b = new Secrets(path, vt);
+    await b.settled(); // nothing started: immediate, and no answer invented
+    expect(b.state).toBe("locked");
+
+    const unlocking = b.unlock();
+    let waited = false;
+    const settled = b.settled().then(() => (waited = true));
+    await new Promise(setImmediate);
+    expect(waited).toBe(false);
+    release();
+    await unlocking;
+    await settled;
+    expect(b.state).toBe("unlocked");
+  });
 });
 
 describe("rotate", () => {

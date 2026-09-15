@@ -40,8 +40,11 @@ export class CredentialStore {
     private readonly agentDir: string = defaultAgentDir(),
   ) {}
 
-  /** encrypt() throws the `secrets locked: ...` error a session open must fail with. */
-  assertUnlocked(): void {
+  /** encrypt() throws the `secrets locked: ...` error a session open must fail
+   *  with — after the boot's unlock attempt has settled, so a message that
+   *  arrives while vt is still reading the KEK waits instead of failing. */
+  async assertUnlocked(): Promise<void> {
+    await this.secrets.settled();
     if (this.secrets.state === "locked") this.secrets.encrypt("");
   }
 
