@@ -4,7 +4,9 @@
 
      The plate is a squircle, not a rect: a superellipse outline (the iOS /
      Android app-icon silhouette) reads as an app rather than as a coloured
-     tile. Platforms that apply their own mask get the square PNGs instead.
+     tile. Platforms that apply their own mask get the square PNGs instead:
+     the maskable one is this mark at 0.9, the largest scale whose bounding
+     box still clears the 80% safe circle a launcher may crop to.
 
      Deck and piers are one closed path, and the joint is where every earlier
      version failed: three rects under a bar read as loose pills whatever their
