@@ -40,6 +40,7 @@ import { ACCENTS, DEFAULT_ACCENT, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
+import type { PasskeyStore } from "./passkeys.js";
 import type { ToolsSyncNote } from "./types.js";
 import { registerProviderRoutes } from "./providers.js";
 
@@ -123,6 +124,8 @@ export interface WebDeps {
   /** `null`/absent where nothing supervises this instance. */
   updater?: UpdateApplier | null;
   secrets: SecretsControl;
+  /** Passed to the instance routes: the public URL guard (passkeys.ts). */
+  passkeys?: PasskeyStore;
   /** A callback because web/ must not import channels/. */
   onUnlocked?: () => void;
   /** `pier reload`, defined by main.ts because half of it is the adapters. */
@@ -179,6 +182,7 @@ export function createServer(
     onToolsChanged,
     validateCustomTools,
     secrets,
+    passkeys,
     onUnlocked,
     reload,
     updates,
@@ -646,6 +650,7 @@ export function createServer(
     validateCustomTools,
     onUnlocked,
     onSettingsChanged: () => recycle("instance settings"),
+    passkeys,
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));
   registerConfigRoutes(app, { factory, config, onConfigWritten: () => recycle("an agent file") });

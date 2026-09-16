@@ -197,11 +197,13 @@ const hash = (password: string, salt: string): string =>
 
 const digest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
-/** The login form and `/p/*` — published boards and their stylesheet — are the
- *  one exempt prefix here (`/config-sync/:token` is mounted before this
- *  middleware, docs/architecture.md names both); `/boards/*` stays behind. */
+/** The login form, the passkey half of it (web/passkeys.ts) and `/p/*` —
+ *  published boards and their stylesheet — are the exemptions here
+ *  (`/config-sync/:token` is mounted before this middleware,
+ *  docs/architecture.md names both); `/boards/*` stays behind. */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
+  if (path === "/api/passkeys/login/options" || path === "/api/passkeys/login/verify") return method === "POST";
   if (method !== "GET" && method !== "HEAD") return false;
   return path.startsWith("/p/");
 }
@@ -216,7 +218,7 @@ function sameSecret(a: string, b: string): boolean {
  *  to it — and they strip whitespace and control characters from a Location
  *  first, which turns `/<TAB>/evil.example` into one as well. Only a plain
  *  path survives; anything else is an open redirect. */
-const safeNext = (raw: unknown): string =>
+export const safeNext = (raw: unknown): string =>
   typeof raw === "string" && /^\/(?![/\\])\S*$/.test(raw) &&
     ![...raw].some((ch) => ch <= "\u001f" || ch === "\u007f")
     ? raw
@@ -240,7 +242,7 @@ function remoteOf(c: Context): string | undefined {
 
 /** A forwarded address is trusted only from a local reverse proxy, and only
  *  the rightmost hop, which that proxy appended. */
-function clientOf(c: Context): string {
+export function clientOf(c: Context): string {
   const remote = remoteOf(c);
   if (remote && !loopback(remote)) return remote;
   return c.req.header("x-forwarded-for")?.split(",").at(-1)?.trim() || remote || "local";
@@ -251,18 +253,22 @@ function failureClient(client: string): string {
   return OVERFLOW_CLIENT;
 }
 
-function throttled(client: string): boolean {
+/** One throttle for every unauthenticated door: a passkey assertion is
+ *  guessed at from the same address as a password. */
+export function throttled(client: string): boolean {
   const now = Date.now();
   for (const [id, entry] of failures) if (entry.resetAt <= now) failures.delete(id);
   return (failures.get(failureClient(client))?.count ?? 0) >= MAX_FAILURES;
 }
 
-function noteFailure(client: string): void {
+export function noteFailure(client: string): void {
   client = failureClient(client);
   const entry = failures.get(client);
   if (entry && entry.resetAt > Date.now()) entry.count += 1;
   else failures.set(client, { count: 1, resetAt: Date.now() + WINDOW_MS });
 }
+
+export const forgetFailures = (client: string): void => void failures.delete(client);
 
 /** Hosts, not schemes: TLS commonly terminates at the reverse proxy. */
 function originMatches(origin: string | undefined, host: string | undefined): boolean {
@@ -333,8 +339,26 @@ export function requireAuth(store: AuthStore): MiddlewareHandler {
   };
 }
 
-export function registerAuthRoutes(app: Hono, store: AuthStore): void {
-  app.get("/login", (c) => c.html(loginPage(safeNext(c.req.query("next")))));
+/** Both sign-in doors end here: this browser's previous session is replaced,
+ *  never added to. Verified first: the id in an unverified cookie is a string
+ *  the caller chose, and `ALL` is one of them. */
+export function openSession(c: Context, store: AuthStore, client: string): void {
+  forgetFailures(client);
+  const previous = store.check(getCookie(c, COOKIE));
+  if (previous) store.revoke(previous.id);
+  setSessionCookie(c, store.open(client, c.req.header("user-agent") ?? ""));
+}
+
+export const PASSWORD_OFF = "Password sign-in is off while a passkey is registered.";
+
+export function registerAuthRoutes(
+  app: Hono,
+  store: AuthStore,
+  /** While it answers true the password is refused and the form offers only
+   *  the passkey; read per request, so removing the last passkey needs no restart. */
+  passkeysRegistered: () => boolean = () => false,
+): void {
+  app.get("/login", (c) => c.html(loginPage(safeNext(c.req.query("next")), undefined, passkeysRegistered())));
 
   app.post("/login", async (c) => {
     const client = clientOf(c);
@@ -343,7 +367,11 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     if (throttled(client)) {
       // A burst here is the only warning an operator gets that the port is being knocked on.
       log.warn(`login throttled for ${client}`);
-      return c.html(loginPage("/app/", "Too many attempts. Wait a few minutes."), 429);
+      return c.html(loginPage("/app/", "Too many attempts. Wait a few minutes.", passkeysRegistered()), 429);
+    }
+    if (passkeysRegistered()) {
+      log.warn(`password sign-in refused for ${client}: a passkey is registered`);
+      return c.html(loginPage("/app/", PASSWORD_OFF, true), 403);
     }
     if (!c.req.header("content-type")?.startsWith("application/x-www-form-urlencoded")) {
       return c.text("expected the sign-in form", 400);
@@ -364,14 +392,8 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
       log.warn(`wrong password from ${client}`);
       return c.html(loginPage(next, "Wrong password."), 401);
     }
-    failures.delete(client);
     log.info(`login from ${client}`);
-    // Replaces this browser's session rather than adding one. Verified first:
-    // the id in an unverified cookie is a string the caller chose, and `ALL` is
-    // one of them.
-    const previous = store.check(getCookie(c, COOKIE));
-    if (previous) store.revoke(previous.id);
-    setSessionCookie(c, store.open(client, c.req.header("user-agent") ?? ""));
+    openSession(c, store, client);
     return c.redirect(next);
   });
 
@@ -385,6 +407,10 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     const current = typeof body?.current === "string" ? body.current : "";
     const next = typeof body?.next === "string" ? body.next : "";
     if (throttled(client)) return c.json({ error: "Too many attempts. Wait a few minutes." }, 429);
+    if (passkeysRegistered()) {
+      log.warn(`password change refused for ${client}: a passkey is registered`);
+      return c.json({ error: PASSWORD_OFF }, 403);
+    }
     if (!store.verify(current)) {
       noteFailure(client);
       return c.json({ error: "Wrong current password." }, 403);
@@ -392,7 +418,7 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     if (next.length < MIN_LENGTH) {
       return c.json({ error: `Use at least ${MIN_LENGTH} characters.` }, 400);
     }
-    failures.delete(client);
+    forgetFailures(client);
     store.setPassword(next);
     // The rotation dropped this caller's row too; clear the dead cookie.
     deleteCookie(c, COOKIE, { path: "/" });
@@ -440,9 +466,58 @@ function setSessionCookie(c: Context, value: string): void {
   });
 }
 
-/** Self-contained: it links nothing the boundary would refuse to serve. */
-function loginPage(next: string, error?: string): string {
+/** Self-contained: it links nothing the boundary would refuse to serve. With a
+ *  passkey registered the form is the one button; its script does the
+ *  base64url ↔ bytes conversion by hand, since Safari lacks
+ *  `parseRequestOptionsFromJSON`. */
+function loginPage(next: string, error?: string, passkey = false): string {
   const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const fields = passkey
+    ? `<input type="hidden" name="next" value="${attr(next)}" />
+    <button type="submit" id="passkey" autofocus>Sign in with a passkey</button>`
+    : `<input type="password" name="password" placeholder="Password" autocomplete="current-password"
+      autofocus required />
+    <input type="hidden" name="next" value="${attr(next)}" />
+    <button type="submit">Sign in</button>`;
+  const script = passkey
+    ? `<script>
+(() => {
+  const form = document.querySelector("form"), button = document.getElementById("passkey");
+  const say = (text) => { document.getElementById("err").textContent = text; };
+  const bytes = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+  const text = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  if (!window.PublicKeyCredential) { say("This browser has no passkey support."); button.disabled = true; return; }
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    button.disabled = true;
+    say("");
+    try {
+      const opts = await fetch("/api/passkeys/login/options", { method: "POST" });
+      const publicKey = await opts.json().catch(() => ({}));
+      if (!opts.ok) throw new Error(publicKey.error || "Could not start the sign-in (" + opts.status + ")");
+      publicKey.challenge = bytes(publicKey.challenge);
+      publicKey.allowCredentials = publicKey.allowCredentials.map((cred) => ({ ...cred, id: bytes(cred.id) }));
+      const cred = await navigator.credentials.get({ publicKey });
+      const r = cred.response;
+      const res = await fetch("/api/passkeys/login/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: cred.id, type: cred.type, next: form.elements.next.value,
+          response: { clientDataJSON: text(r.clientDataJSON), authenticatorData: text(r.authenticatorData), signature: text(r.signature) },
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Sign-in refused (" + res.status + ")");
+      location.href = body.next;
+    } catch (err) {
+      say(String(err && err.message || err));
+      button.disabled = false;
+    }
+  };
+})();
+</script>`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -467,13 +542,10 @@ function loginPage(next: string, error?: string): string {
 <body>
   <form method="post" action="/login">
     <h1>Pier</h1>
-    ${error ? `<p>${attr(error)}</p>` : ""}
-    <input type="password" name="password" placeholder="Password" autocomplete="current-password"
-      autofocus required />
-    <input type="hidden" name="next" value="${attr(next)}" />
-    <button type="submit">Sign in</button>
+    <p id="err">${error ? attr(error) : ""}</p>
+    ${fields}
   </form>
-</body>
+${script}</body>
 </html>
 `;
 }

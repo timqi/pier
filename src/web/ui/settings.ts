@@ -9,6 +9,7 @@ import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus, swatches } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
+import { createPasskeysCard } from "./passkeys.js";
 import { openProviders } from "./providers.js";
 import { createVaultPane } from "./vault.js";
 
@@ -342,15 +343,18 @@ export function createSettingsView(
   }
 
   // --- Security: master key --------------------------------------------------------
-  // Only the key card re-renders; password and devices are built once.
+  // Only the key card re-renders; password, passkeys and devices are built once.
 
+  const passkeys = createPasskeysCard();
   const securityColumn = h("div", "mx-auto flex max-w-2xl flex-col gap-6");
-  const showKeyCard = (el: HTMLElement): void => securityColumn.replaceChildren(el, pwCard, devicesCard);
+  const showKeyCard = (el: HTMLElement): void => securityColumn.replaceChildren(el, pwCard, passkeys.el, devicesCard);
 
   async function loadSecurity(): Promise<void> {
     pwStatus.textContent = "";
     devicesStatus.textContent = "";
     void loadDevices();
+    // The passkey card says why the form is gone.
+    void passkeys.load().then((registered) => pwCard.classList.toggle("hidden", registered));
     const got = await getJson<SecretsStatus>("/api/secrets", "Could not load key status");
     if (!got.ok) {
       showKeyCard(empty(got.error));

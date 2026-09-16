@@ -15,6 +15,7 @@ import {
 } from "../settings.js";
 // Type-only: erased at build, so web/ runs nothing from tools.ts.
 import type { CustomTool } from "../tools.js";
+import { boundHost, type PasskeyStore } from "./passkeys.js";
 import type { ToolsSyncNote } from "./types.js";
 import type { UpdateCheck } from "../update.js";
 
@@ -76,10 +77,13 @@ export function registerInstanceRoutes(
     onUnlocked?: () => void;
     /** The public URL rides in the prompt a session opens with; idle ones are recycled. */
     onSettingsChanged?: () => void;
+    /** A passkey is bound to the public URL's host: moving it would lock the operator out. */
+    passkeys?: PasskeyStore;
   },
 ): void {
   const {
     settings,
+    passkeys,
     updates,
     updater = null,
     secrets,
@@ -222,6 +226,10 @@ export function registerInstanceRoutes(
       if (typeof body.publicUrl !== "string") return refuse("publicUrl must be a string");
       const publicUrl = normalizePublicUrl(body.publicUrl);
       if (publicUrl === null) return refuse("not a URL: expected http(s)://host, no query or fragment");
+      const bound = passkeys ? boundHost(passkeys, settings.get().publicUrl) : null;
+      if (bound && (!publicUrl.startsWith("https://") || new URL(publicUrl).hostname !== bound)) {
+        return refuse(`passkeys are bound to ${bound}; remove them first`);
+      }
       writes.push(() => settings.setPublicUrl(publicUrl));
     }
     if (body?.accent !== undefined) {

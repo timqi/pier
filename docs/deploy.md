@@ -96,7 +96,14 @@ pier restart
 ```
 
 - Changing or recovering the password signs out every browser.
-- One browser: Settings → Instance → Signed-in devices.
+- One browser: Settings → Security → Signed-in devices.
+- Passkeys (Settings → Security, needs an https public URL): while one is
+  registered the password is refused. Locked out of every passkey? Drop the
+  rows; the table is read live, so no restart:
+
+```sh
+sqlite3 ~/.pier/db/pier.db 'DELETE FROM passkeys'
+```
 - A browser session expires 7 days after its last request, and 90 days after
   it signed in however often it is used.
 - However a session ends, its push subscription goes with it.

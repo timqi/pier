@@ -50,7 +50,8 @@ src/
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +
-               provider-flows.ts, auth.ts, config.ts (scoped agent-file
+               provider-flows.ts, auth.ts, passkeys.ts (WebAuthn: CBOR/COSE,
+               challenges, store, routes), config.ts (scoped agent-file
                editing), fs.ts (confined resolver + ls/file/mkdir), explorer.ts
                (git refs, worktrees, diffs), session-state.ts (unread, working
                set), push.ts + webpush.ts (RFC 8291/8292), ui/public/sw.js,
@@ -238,9 +239,11 @@ seams:
 One line each; the reasoning is in the commit that made it.
 
 - One shared password guards every HTTP surface (`web/auth.ts`); the exemptions
-  are `/p/*`, so a board's `public` flag is a real boundary, and
+  are `/p/*`, so a board's `public` flag is a real boundary, the two passkey
+  login routes (`web/passkeys.ts`, on the password's throttle) and
   `/config-sync/:token`, guarded by its token. Single-account on purpose: Pier
-  has one workspace.
+  has one workspace; a registered passkey replaces the password rather than
+  joining it.
 - Loopback bind, reached over a tunnel or reverse proxy. Updates run in the
   updater's own cgroup, never from a timer (`docs/deploy.md`).
 - Pi **SDK** over RPC; the seam stays RPC-compatible (no Pi types leave `agent/`).

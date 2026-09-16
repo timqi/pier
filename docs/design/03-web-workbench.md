@@ -76,7 +76,7 @@ surface owns its routes and is mounted beside it.
   a refusal stays under the picked row in the server's words.
 
 Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`,
-`/api/devices*`), `config.ts` (`/api/config*`), `config-sync.ts`
+`/api/devices*`), `passkeys.ts` (below), `config.ts` (`/api/config*`), `config-sync.ts`
 (`/api/config-sync`; `/config-sync/:token` is served before the password, the
 token being its guard), `packages.ts` (`/api/packages*`; a file of its
 own because the registry is not agent-file editing), `fs.ts` (`/api/fs/{ls,file,mkdir}` and the
@@ -86,6 +86,34 @@ headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below), `tasks/routes.ts`,
 `channels/routes.ts`, `vault.ts` (`/api/vault*`), `boards/boards.ts` (`/boards/*`, `/p/*`).
+
+## Passkeys (`src/web/passkeys.ts`)
+
+WebAuthn on `node:crypto` and a ~60-line CBOR decoder; no dependency, no
+attestation check (the operator registers their own authenticator from a page
+they are already signed into). The store is read live, no cache: while one
+row exists in `passkeys`, `POST /login` and `POST /api/password` answer 403
+and `GET /login` renders only **Sign in with a passkey** (inline script, no
+bundle; "This browser has no passkey support." without
+`window.PublicKeyCredential`). Removing the last passkey re-enables the
+password without a restart. Challenges live in memory for 5 minutes, single
+use, at most 100 outstanding.
+
+| Route | Behavior |
+| ----- | -------- |
+| `GET /api/passkeys` | `{enabled, reason?, passkeys: [{id, label, createdAt, lastUsedAt, transports}]}`; never the key. `enabled` is "`publicUrl` starts with `https://`" — RP ID is its hostname, expected origin its origin |
+| `POST /api/passkeys/register/options` | `PublicKeyCredentialCreationOptions` with base64url binaries: 32-byte challenge, a 16-byte user handle minted once (`settings.passkeyUserId`), ES256 and RS256, `residentKey`/`userVerification: "preferred"`, `attestation: "none"`, `excludeCredentials` = the stored ids; 409 with `reason` when not enabled |
+| `POST /api/passkeys/register/verify` | the credential JSON (`{id, type, response: {clientDataJSON, attestationObject, transports?}, label?}`): `webauthn.create`, challenge, origin, rpIdHash, UP flag, COSE key → JWK; `attStmt` is ignored whatever `fmt` says. `label` ≤80 chars, default "a passkey". 201 with the `GET` shape; 400 names what failed; 409 when already registered |
+| `DELETE /api/passkeys/:id` | the `GET` shape; 404 |
+| `POST /api/passkeys/login/options` | unauthenticated, on the password's throttle: `{challenge, rpId, allowCredentials, userVerification: "preferred", timeout}`; 409 when disabled or none registered |
+| `POST /api/passkeys/login/verify` | unauthenticated, throttled: `{id, response: {clientDataJSON, authenticatorData, signature}, next?}` → `webauthn.get`, challenge, origin, rpIdHash, UP, signature over `authenticatorData ‖ sha256(clientDataJSON)` with the stored JWK; a sign count that is `>0` and `≤` stored is a cloned authenticator: 401 and an error log line. Success updates `sign_count`/`last_used_at`, opens the session exactly as `POST /login` does (same cookie, same device row) and answers `{next}` (`safeNext`); every refusal counts toward the throttle |
+| `PUT /api/settings {publicUrl}` | 400 `passkeys are bound to <host>; remove them first` when the hostname would change or https drop while a passkey exists (`instance.ts`) |
+
+Security card **Passkeys**: the rows in the device row (label, `added <ago> ·
+last used <ago>|never used · transports`, **Remove**), "No passkey is
+registered." when empty, a label input and **Add a passkey**; without an https
+public URL one dim line with `reason` and no form. While any passkey exists the
+Password card is hidden and this card says why. Failures on the status line.
 
 ## Notifications (`src/web/push.ts` + `src/web/webpush.ts`)
 

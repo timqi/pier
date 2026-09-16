@@ -310,6 +310,19 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE conversations ADD COLUMN launch TEXT;
   CREATE INDEX conversations_session ON conversations(session_id);
   `,
+  // 27 — passkeys (web/passkeys.ts): while one row exists the password is off.
+  `
+  -- id is the credential id (base64url); public_key a JWK, never private material.
+  CREATE TABLE passkeys (
+    id TEXT PRIMARY KEY,
+    public_key TEXT NOT NULL,
+    sign_count INTEGER NOT NULL,
+    transports TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER
+  );
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

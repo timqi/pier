@@ -42,6 +42,7 @@ import { currentVersion, startAutoUpdate, UpdateCheck, type UpdateStart } from "
 import { Vault } from "./vault.js";
 import { servePier } from "./socket.js";
 import { AuthStore, registerAuthRoutes, requireAuth } from "./web/auth.js";
+import { PasskeyStore, registerPasskeyRoutes } from "./web/passkeys.js";
 import { registerConfigShareRoute, registerConfigSyncRoutes } from "./web/config-sync.js";
 import { PushStore, registerPushRoutes } from "./web/push.js";
 import { SessionStateStore } from "./web/session-state.js";
@@ -293,9 +294,11 @@ app.onError((err, c) => {
 // Before every route: Hono runs middleware in registration order, so a surface
 // added later is covered without knowing this exists.
 const auth = new AuthStore(db);
+const passkeys = new PasskeyStore(db);
 registerConfigShareRoute(app, configSync);
 app.use("*", requireAuth(auth));
-registerAuthRoutes(app, auth);
+registerAuthRoutes(app, auth, () => passkeys.any());
+registerPasskeyRoutes(app, { store: passkeys, auth, publicUrl: () => settings.get().publicUrl });
 registerConfigSyncRoutes(app, {
   sync: configSync,
   status: () => ({ ...configurationSync.status(), publicUrl: settings.get().publicUrl }),
@@ -337,6 +340,7 @@ app.route("/", createServer({
     return validated ? { tools: validated } : { error: CUSTOM_TOOL_RULES };
   },
   secrets,
+  passkeys,
   updates,
   updater,
   onUnlocked: () => void startChannels(),

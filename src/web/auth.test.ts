@@ -110,6 +110,10 @@ describe("requireAuth", () => {
     expect(form.status).toBe(200);
     expect(form.headers.get("x-frame-options")).toBe("DENY");
     expect(form.headers.get("x-content-type-options")).toBe("nosniff");
+    // No passkey registered: the password form, and no passkey script (passkeys.test.ts has the other state).
+    const html = await form.text();
+    expect(html).toContain('type="password"');
+    expect(html).not.toContain("passkey");
   });
 
   // Pre-setting them on the context is not enough: the route's own Response
