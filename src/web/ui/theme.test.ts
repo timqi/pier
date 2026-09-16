@@ -1,7 +1,6 @@
 // Installed chrome must match the canvas before boot and after theme changes.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import html from "./index.html?raw";
-import manifestText from "./public/manifest.webmanifest?raw";
 
 const canvases = ["#f1f4f3", "#14171a"];
 const boot = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
@@ -43,10 +42,8 @@ it.each(["light", "dark", "system", "denied"])("sets early chrome color with %s 
   expect(ui.meta.content).toBe(canvases[mode === "dark" ? 1 : 0]);
 });
 
-it("keeps manifest and initial HTML fallbacks on the light canvas", () => {
-  const manifest = JSON.parse(manifestText);
-  expect(manifest.theme_color).toBe(canvases[0]);
-  expect(manifest.background_color).toBe(canvases[0]);
+// The manifest's own colours are the server's (web/server.test.ts).
+it("keeps the initial HTML fallback on the light canvas", () => {
   expect(html).toContain(`name="theme-color" content="${canvases[0]}"`);
 });
 

@@ -34,13 +34,13 @@ import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import type { TaskRun } from "../tasks/types.js";
-import { SettingsStore } from "../settings.js";
+import { ACCENTS, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
 import { MAX_FILE_BYTES } from "./fs.js";
-import { createServer, tabPrefix, withTabPrefix } from "./server.js";
+import { createServer, ICON_PLATE, instanceManifest, tabPrefix, withAccent, withAccentIcon, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
 import type { ToolsSyncNote } from "./types.js";
 
@@ -138,6 +138,8 @@ const SETTINGS_JSON = {
   skillsOff: [],
   tools: [],
   customTools: [],
+  accent: "",
+  accents: ACCENTS,
   catalog: TOOLS.map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,
 };
@@ -2438,6 +2440,56 @@ describe("the app shell", () => {
     for (const url of urls) expect(url).toMatch(/^\/app\//);
     // Nothing is served at the old root any more.
     expect((await app.request("/icon.svg")).status).toBe(404);
+  });
+
+  it("carries the instance's accent on <html>, so the first paint is already in it", () => {
+    const html = readFileSync(new URL("./ui/index.html", import.meta.url), "utf8");
+    expect(withAccent(html, "teal")).toContain('<html lang="en" data-accent="teal">');
+    expect(withAccent(html, "")).toBe(html);
+  });
+
+  it("names and colours the manifest and the icon per instance", () => {
+    const template = JSON.parse(readFileSync(new URL("./ui/public/manifest.webmanifest", import.meta.url), "utf8"));
+    const svg = readFileSync(new URL("./ui/public/icon.svg", import.meta.url), "utf8");
+    // The substitution is by exact string: a re-authored mark has to keep this plate or fail here.
+    expect(svg).toContain(`fill="${ICON_PLATE}"`);
+    const teal = instanceManifest(template, "staging box for the team", "teal");
+    expect(teal.name).toBe("staging box for the team");
+    expect((teal.short_name as string).length).toBeLessThanOrEqual(12);
+    expect(teal.theme_color).toBe("#037f75");
+    expect(withAccentIcon(svg, "teal")).toContain('fill="#037f75"');
+    expect(withAccentIcon(svg, "teal")).not.toContain(ICON_PLATE);
+    // Unset: Pier, in the default ramp's blue — the same on both assets.
+    const plain = instanceManifest(template, undefined, "");
+    expect(plain.name).toBe("Pier");
+    expect(plain.short_name).toBe("Pier");
+    expect(plain.theme_color).toBe("#0066df");
+    expect(withAccentIcon(svg, "")).toContain('fill="#0066df"');
+    // Everything else is the shipped file's.
+    expect(plain.scope).toBe("/app/");
+    expect(plain.background_color).toBe(template.background_color);
+  });
+
+  it("stores an accent preset and refuses a colour", async () => {
+    const { app, settings } = setup();
+    const json = (body: unknown) => ({
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const ok = await app.request("/api/settings", json({ accent: "rose" }));
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body.accent).toBe("rose");
+    expect(Object.keys(body.accents)).toContain("rose");
+    expect(settings.get().accent).toBe("rose");
+    const bad = await app.request("/api/settings", json({ accent: "#ff0000" }));
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toContain("rose");
+    expect(settings.get().accent).toBe("rose");
+    // The default's own name clears the override.
+    const back = await app.request("/api/settings", json({ accent: "indigo" }));
+    expect((await back.json()).accent).toBe("");
   });
 
   it("names the instance in the tab title", () => {

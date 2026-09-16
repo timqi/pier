@@ -2,7 +2,7 @@
 // Every control is uncontrolled and callback-driven; nothing here knows what a
 // channel or a task is.
 
-import { CircleQuestionMark, type IconNode } from "lucide";
+import { Check, CircleQuestionMark, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { h, prose } from "./dom.js";
 
@@ -51,6 +51,55 @@ export function segmented<K extends string>(options: [string, K, IconNode?][], v
     el.append(opt);
   }
   return el;
+}
+
+/** A radio group of colour swatches. The pick is ringed and carries a check,
+ *  so it reads without the colour; the name is the accessible label. Arrow
+ *  keys move the pick like a native radio group, with one tab stop. Repaints
+ *  itself on a pick — uncontrolled, like every control here; a caller whose
+ *  write failed redraws it from the server's answer. */
+export function swatches(options: [string, string][], value: string, onChange: (key: string) => void): HTMLElement {
+  const group = h("div", "flex flex-wrap items-center gap-2");
+  group.setAttribute("role", "radiogroup");
+  const keys = options.map(([key]) => key);
+  const buttons = options.map(([key, color]) => {
+    const opt = btn(
+      "",
+      "flex h-10 w-10 cursor-pointer items-center justify-center rounded-full ring-neutral-800 ring-offset-2 ring-offset-white transition-shadow hover:ring-2",
+    );
+    opt.style.background = color;
+    opt.setAttribute("role", "radio");
+    opt.setAttribute("aria-label", key);
+    opt.title = key;
+    return opt;
+  });
+  const paint = (picked: string): void => {
+    buttons.forEach((opt, i) => {
+      const active = keys[i] === picked;
+      opt.classList.toggle("ring-2", active);
+      opt.setAttribute("aria-checked", String(active));
+      opt.tabIndex = active ? 0 : -1;
+      opt.replaceChildren(...(active ? [icon(Check, "h-4 w-4 text-white dark:text-neutral-950")] : []));
+    });
+  };
+  const pick = (key: string): void => {
+    paint(key);
+    onChange(key);
+  };
+  buttons.forEach((opt, i) => {
+    opt.onclick = () => pick(keys[i]!);
+    opt.onkeydown = (ev) => {
+      const step = ev.key === "ArrowRight" || ev.key === "ArrowDown" ? 1 : ev.key === "ArrowLeft" || ev.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      ev.preventDefault();
+      const next = (i + step + keys.length) % keys.length;
+      buttons[next]!.focus();
+      pick(keys[next]!);
+    };
+  });
+  paint(value);
+  group.append(...buttons);
+  return group;
 }
 
 /** A pill tab — the topic strips (Settings, Automation, Channels platforms).

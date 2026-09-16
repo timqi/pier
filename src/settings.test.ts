@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "./db.js";
 import {
+  ACCENTS,
+  normalizeAccent,
   normalizeModelMenu,
   normalizePublicUrl,
   normalizeTools,
@@ -17,6 +19,7 @@ const EMPTY = {
   skillsOff: [],
   tools: [],
   customTools: [],
+  accent: "",
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");
@@ -34,6 +37,23 @@ describe("normalizePublicUrl", () => {
     for (const bad of ["ftp://example.com", "https://example.com/?a=1", "https://e.com/#x", "https://u:p@e.com", "not a url"]) {
       expect(normalizePublicUrl(bad)).toBeNull();
     }
+  });
+});
+
+describe("normalizeAccent", () => {
+  it("stores a preset name, and nothing for the default", () => {
+    for (const name of Object.keys(ACCENTS).filter((n) => n !== "indigo")) expect(normalizeAccent(name)).toBe(name);
+    expect(normalizeAccent(" teal ")).toBe("teal");
+    expect(normalizeAccent("")).toBe("");
+    expect(normalizeAccent("indigo")).toBe("");
+  });
+
+  it("rejects anything the stylesheet has no ramp for", () => {
+    for (const bad of ["#0066df", "Teal", "blue", "toString"]) expect(normalizeAccent(bad)).toBeNull();
+  });
+
+  it("names a 600 step the stylesheet's ramps are authored from", () => {
+    for (const hex of Object.values(ACCENTS)) expect(hex).toMatch(/^#[0-9a-f]{6}$/);
   });
 });
 

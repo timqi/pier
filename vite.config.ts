@@ -31,8 +31,9 @@ const chunkBudget = (): Plugin => ({
 // 325 kB through an encoder on every request would spend CPU per client to
 // arrive at the identical bytes — and at a worse ratio, since a request-time
 // encoder cannot afford brotli's maximum quality. The icons and any font stay
-// out: they are compressed already and would only grow.
-const COMPRESSIBLE = /\.(?:js|css|html|svg|json|webmanifest)$/;
+// out: they are compressed already and would only grow. The manifest and
+// icon.svg stay out too: the server renders both per instance (web/server.ts).
+const COMPRESSIBLE = /\.(?:js|css|html)$/;
 // Under a packet the encodings buy nothing and only add files to stat; the
 // empty vite shim chunk is the case in point.
 const MIN_BYTES = 1024;

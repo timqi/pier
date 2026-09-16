@@ -60,8 +60,9 @@ surface owns its routes and is mounted beside it.
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /` | 302 to `/app/` |
-| `GET /app`, `/app/` | the shell, `PIER_TITLE` patched into the tab title, `no-cache` |
-| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the manifest and icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*` and `/p/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*` and `/p/*` stay where they are, and the cookie's `Path` stays `/` |
+| `GET /app`, `/app/` | the shell, `PIER_TITLE` patched into the tab title and the accent onto `<html data-accent>`, `no-cache` |
+| `GET /app/manifest.webmanifest`, `/app/icon.svg` | the shipped files, rendered per instance and `no-cache`: `name`/`short_name` (≤12) are `PIER_TITLE` (`Pier` when unset), `theme_color` and the icon's plate the accent's 600 step (`ACCENTS` in `settings.ts`). The PNG icons stay static and Pier-blue |
+| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*` and `/p/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*` and `/p/*` stay where they are, and the cookie's `Path` stays `/` |
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
@@ -310,8 +311,10 @@ browser keeps no second session order.
   where its keys are set. Models: Default model is the launch picker written on
   change, redrawn from the server's answer; a pinned row's ∧/∨ arrows move it,
   staged like any menu edit until Save, since the stored order is the one every
-  picker and `pier task --model ?` list. Instance: Public URL, the browser's
-  notification switch, Reload.
+  picker and `pier task --model ?` list. Instance: Public URL, Accent (a
+  swatch radio group over `GET /api/settings`' `accents`; a pick sets
+  `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
+  refusal), the browser's notification switch, Reload.
 - **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
   was opened from): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to

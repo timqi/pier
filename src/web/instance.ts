@@ -6,6 +6,8 @@ import type { CatalogBinary, CatalogEntry } from "../core/types.js";
 import { logger } from "../log.js";
 import type { SecretsMode } from "../secrets.js";
 import {
+  ACCENTS,
+  normalizeAccent,
   normalizeModelMenu,
   normalizeModelRef,
   normalizePublicUrl,
@@ -127,6 +129,8 @@ export function registerInstanceRoutes(
     const shown = await catalog?.();
     return {
       ...settings.get(),
+      /** The presets the swatches are drawn from: one table, the server's. */
+      accents: ACCENTS,
       catalog: shown?.entries ?? [],
       /** The install and every daily update is one task's history. */
       toolsTaskId: shown?.toolsTaskId ?? null,
@@ -199,14 +203,15 @@ export function registerInstanceRoutes(
         autoUpdate?: unknown;
         customTools?: unknown;
         tool?: unknown;
+        accent?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool]
+      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools or tool required",
+        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, tool or accent required",
       }, 400);
     }
     // One transaction: a new custom tool and the switch that turns it on must
@@ -218,6 +223,12 @@ export function registerInstanceRoutes(
       const publicUrl = normalizePublicUrl(body.publicUrl);
       if (publicUrl === null) return refuse("not a URL: expected http(s)://host, no query or fragment");
       writes.push(() => settings.setPublicUrl(publicUrl));
+    }
+    if (body?.accent !== undefined) {
+      if (typeof body.accent !== "string") return refuse("accent must be a string");
+      const accent = normalizeAccent(body.accent);
+      if (accent === null) return refuse(`accent must be one of ${Object.keys(ACCENTS).join(", ")}, or empty`);
+      writes.push(() => settings.setAccent(accent));
     }
     if (body?.modelMenu !== undefined) {
       const menu = normalizeModelMenu(body.modelMenu);

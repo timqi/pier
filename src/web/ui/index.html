@@ -31,7 +31,8 @@
   <link rel="apple-touch-icon" href="/app/icon-touch-192.png" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="Pier" />
+  <!-- No apple-mobile-web-app-title: it would override the manifest's
+       short_name, which is where the instance's name is (web/server.ts). -->
   <!-- Without this iOS paints the status-bar strip in a system grey that
        belongs to no part of the app. Translucent hands the strip to the page,
        which style.css pays for with the safe-area inset. -->

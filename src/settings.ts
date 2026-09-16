@@ -38,6 +38,29 @@ export interface Settings {
   tools: string[];
   /** Beside the enabled set, not inside it: a tool switched off must not lose its spec. */
   customTools: CustomTool[];
+  /** The workbench's accent, one of `ACCENTS`; `""` is the default ramp. */
+  accent: string;
+}
+
+/** The presets, each with the hex of its 600 step — what the manifest and the
+ *  icon paint with, since neither can read a CSS variable. The ramps
+ *  themselves are style.css's; this table must name the same colours. */
+export const ACCENTS: Readonly<Record<string, string>> = {
+  indigo: "#0066df",
+  teal: "#037f75",
+  emerald: "#028355",
+  amber: "#b17000",
+  rose: "#c51b53",
+  violet: "#7a49d3",
+};
+export const DEFAULT_ACCENT = "indigo";
+
+/** `""` and the default's own name both mean "no override"; anything not in
+ *  the table is rejected, never stored as a name the stylesheet lacks. */
+export function normalizeAccent(raw: string): string | null {
+  const name = raw.trim();
+  if (!name || name === DEFAULT_ACCENT) return "";
+  return Object.hasOwn(ACCENTS, name) ? name : null;
 }
 
 /** `""` clears it, `null` rejects it: a mistyped host quietly turned into a URL
@@ -117,6 +140,8 @@ export class SettingsStore {
 
   get(): Settings {
     const titleModel = this.#json("titleModel", normalizeModelRef, "a {provider, id}");
+    const accent = normalizeAccent(this.#value("accent") ?? "");
+    if (accent === null) log.warn("settings.accent is not a preset — ignoring it");
     return {
       publicUrl: this.#value("publicUrl") ?? "",
       modelMenu: this.#json("modelMenu", normalizeModelMenu, "a valid menu") ?? [],
@@ -130,6 +155,7 @@ export class SettingsStore {
         (raw) => normalizeCustomTools(raw, "drop"),
         "a list of {name, toml}",
       ) ?? [],
+      accent: accent ?? "",
     };
   }
 
@@ -152,6 +178,11 @@ export class SettingsStore {
   /** Setters take already-normalized values: validation belongs at the boundary. */
   setPublicUrl(publicUrl: string): Settings {
     this.#set("publicUrl", publicUrl);
+    return this.get();
+  }
+
+  setAccent(accent: string): Settings {
+    this.#set("accent", accent);
     return this.get();
   }
 

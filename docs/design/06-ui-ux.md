@@ -29,6 +29,12 @@ updates this document.
 - Canvas: pale neutral page edge, matched by installed-window theme metadata in
   both themes including startup (`--workbench-canvas`). Mist-blue and mint
   accents confined to the lower conversation area.
+- Accent: the `--color-indigo-*` ramp is the one accent mechanism — every
+  primary action, selection, focus ring and user bubble is an `indigo-*`
+  utility, never a literal colour. An instance's accent (Settings → Instance)
+  is that ramp re-authored per preset in `style.css`, light and dark, keyed by
+  `<html data-accent>`; the manifest and icon take the preset's 600 step from
+  the server's table. No colour math at runtime, no second palette.
 
 ## Layout
 

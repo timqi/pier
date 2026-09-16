@@ -152,6 +152,131 @@ html[data-theme="dark"] {
   --color-blue-700: oklch(80% 0.115 264.376);
 }
 
+/* --- accent presets ---------------------------------------------------------
+   The `--color-indigo-*` ramp above is the workbench's whole accent — every
+   primary button, selected tab, focus ring and user bubble resolves to it —
+   so an instance's colour (Settings → Instance, carried as `data-accent` on
+   <html> by web/server.ts) is that ramp re-authored per hue, light and dark,
+   and nothing else. Same lightness steps as indigo; chroma held to the sRGB
+   gamut, which is why teal and emerald sit duller. The dark half follows the
+   flattened-top rule the dark indigo ramp states. settings.ts's ACCENTS names
+   each 600 step in hex for the manifest and the icon, which cannot read a
+   variable — a new preset lands in both places or in neither. */
+html[data-accent="teal"] {
+  --color-indigo-50: oklch(96.8% 0.015 185);
+  --color-indigo-100: oklch(93.6% 0.031 185);
+  --color-indigo-200: oklch(87.7% 0.061 185);
+  --color-indigo-300: oklch(79.6% 0.103 185);
+  --color-indigo-400: oklch(68.1% 0.120 185);
+  --color-indigo-500: oklch(58.5% 0.103 185);
+  --color-indigo-600: oklch(53.7% 0.094 185);
+  --color-indigo-700: oklch(46.6% 0.082 185);
+  --color-indigo-800: oklch(39.8% 0.070 185);
+}
+html[data-theme="dark"][data-accent="teal"] {
+  --color-indigo-50: oklch(24.5% 0.028 185);
+  --color-indigo-100: oklch(32% 0.057 185);
+  --color-indigo-200: oklch(40% 0.071 185);
+  --color-indigo-300: oklch(50% 0.088 185);
+  --color-indigo-400: oklch(62% 0.109 185);
+  --color-indigo-500: oklch(68% 0.120 185);
+  --color-indigo-600: oklch(70% 0.123 185);
+  --color-indigo-700: oklch(80% 0.115 185);
+  --color-indigo-800: oklch(86% 0.080 185);
+}
+
+html[data-accent="emerald"] {
+  --color-indigo-50: oklch(96.8% 0.015 160);
+  --color-indigo-100: oklch(93.6% 0.031 160);
+  --color-indigo-200: oklch(87.7% 0.061 160);
+  --color-indigo-300: oklch(79.6% 0.103 160);
+  --color-indigo-400: oklch(68.1% 0.153 160);
+  --color-indigo-500: oklch(58.5% 0.132 160);
+  --color-indigo-600: oklch(53.7% 0.121 160);
+  --color-indigo-700: oklch(46.6% 0.105 160);
+  --color-indigo-800: oklch(39.8% 0.090 160);
+}
+html[data-theme="dark"][data-accent="emerald"] {
+  --color-indigo-50: oklch(24.5% 0.028 160);
+  --color-indigo-100: oklch(32% 0.065 160);
+  --color-indigo-200: oklch(40% 0.090 160);
+  --color-indigo-300: oklch(50% 0.113 160);
+  --color-indigo-400: oklch(62% 0.140 160);
+  --color-indigo-500: oklch(68% 0.154 160);
+  --color-indigo-600: oklch(70% 0.158 160);
+  --color-indigo-700: oklch(80% 0.115 160);
+  --color-indigo-800: oklch(86% 0.080 160);
+}
+
+html[data-accent="amber"] {
+  --color-indigo-50: oklch(96.8% 0.015 70);
+  --color-indigo-100: oklch(93.6% 0.031 70);
+  --color-indigo-200: oklch(87.7% 0.061 70);
+  --color-indigo-300: oklch(79.6% 0.103 70);
+  --color-indigo-400: oklch(74% 0.150 70);
+  --color-indigo-500: oklch(66% 0.143 70);
+  --color-indigo-600: oklch(60% 0.130 70);
+  --color-indigo-700: oklch(52% 0.113 70);
+  --color-indigo-800: oklch(44% 0.096 70);
+}
+html[data-theme="dark"][data-accent="amber"] {
+  --color-indigo-50: oklch(24.5% 0.028 70);
+  --color-indigo-100: oklch(32% 0.065 70);
+  --color-indigo-200: oklch(40% 0.087 70);
+  --color-indigo-300: oklch(50% 0.108 70);
+  --color-indigo-400: oklch(62% 0.134 70);
+  --color-indigo-500: oklch(68% 0.147 70);
+  --color-indigo-600: oklch(70% 0.151 70);
+  --color-indigo-700: oklch(80% 0.115 70);
+  --color-indigo-800: oklch(86% 0.080 70);
+}
+
+html[data-accent="rose"] {
+  --color-indigo-50: oklch(96.8% 0.015 10);
+  --color-indigo-100: oklch(93.6% 0.031 10);
+  --color-indigo-200: oklch(87.7% 0.061 10);
+  --color-indigo-300: oklch(79.6% 0.103 10);
+  --color-indigo-400: oklch(68.1% 0.153 10);
+  --color-indigo-500: oklch(58.5% 0.197 10);
+  --color-indigo-600: oklch(53.7% 0.201 10);
+  --color-indigo-700: oklch(46.6% 0.170 10);
+  --color-indigo-800: oklch(39.8% 0.138 10);
+}
+html[data-theme="dark"][data-accent="rose"] {
+  --color-indigo-50: oklch(24.5% 0.028 10);
+  --color-indigo-100: oklch(32% 0.065 10);
+  --color-indigo-200: oklch(40% 0.090 10);
+  --color-indigo-300: oklch(50% 0.125 10);
+  --color-indigo-400: oklch(62% 0.155 10);
+  --color-indigo-500: oklch(68% 0.165 10);
+  --color-indigo-600: oklch(70% 0.175 10);
+  --color-indigo-700: oklch(80% 0.115 10);
+  --color-indigo-800: oklch(86% 0.077 10);
+}
+
+html[data-accent="violet"] {
+  --color-indigo-50: oklch(96.8% 0.015 295);
+  --color-indigo-100: oklch(93.6% 0.031 295);
+  --color-indigo-200: oklch(87.7% 0.061 295);
+  --color-indigo-300: oklch(79.6% 0.103 295);
+  --color-indigo-400: oklch(68.1% 0.153 295);
+  --color-indigo-500: oklch(58.5% 0.197 295);
+  --color-indigo-600: oklch(53.7% 0.201 295);
+  --color-indigo-700: oklch(46.6% 0.170 295);
+  --color-indigo-800: oklch(39.8% 0.138 295);
+}
+html[data-theme="dark"][data-accent="violet"] {
+  --color-indigo-50: oklch(24.5% 0.028 295);
+  --color-indigo-100: oklch(32% 0.065 295);
+  --color-indigo-200: oklch(40% 0.090 295);
+  --color-indigo-300: oklch(50% 0.125 295);
+  --color-indigo-400: oklch(62% 0.155 295);
+  --color-indigo-500: oklch(68% 0.165 295);
+  --color-indigo-600: oklch(70% 0.175 295);
+  --color-indigo-700: oklch(80% 0.113 295);
+  --color-indigo-800: oklch(86% 0.077 295);
+}
+
 /* --- global UI scale --------------------------------------------------------
    One knob for how big the whole workbench reads. Tailwind's spacing and sizing
    utilities are rem-based, so the root size scales padding, row heights and

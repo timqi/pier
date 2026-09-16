@@ -36,7 +36,7 @@ import { isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
-import type { SettingsStore } from "../settings.js";
+import { ACCENTS, DEFAULT_ACCENT, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
@@ -75,6 +75,35 @@ export const withTabPrefix = (html: string, prefix: string): string =>
       `<title>${prefix.replace(/&/g, "&amp;").replace(/</g, "&lt;")} - Pier</title>`,
     )
     : html;
+
+/** The accent rides on `<html>` so the first paint is already in it; the
+ *  stylesheet's `[data-accent]` ramps do the rest (style.css). A preset name,
+ *  already validated — never a colour. */
+export const withAccent = (html: string, accent: string): string =>
+  accent ? html.replace('<html lang="en">', `<html lang="en" data-accent="${accent}">`) : html;
+
+/** Two Piers on one phone need two names and two colours: the manifest names
+ *  the instance (`$PIER_TITLE`) and paints its chrome with the accent's 600
+ *  step, the same one the icon's plate takes. */
+export const instanceManifest = (
+  template: Record<string, unknown>,
+  title: string | undefined,
+  accent: string,
+): Record<string, unknown> => {
+  const name = title?.trim() || "Pier";
+  return {
+    ...template,
+    name,
+    short_name: name.slice(0, 12),
+    theme_color: ACCENTS[accent || DEFAULT_ACCENT],
+  };
+};
+
+/** The plate colour is the one thing the served SVG changes; the mark stays
+ *  white. The PNG fallbacks beside it are static and keep the shipped blue. */
+export const ICON_PLATE = "#4f46e5";
+export const withAccentIcon = (svg: string, accent: string): string =>
+  svg.replace(`fill="${ICON_PLATE}"`, `fill="${ACCENTS[accent || DEFAULT_ACCENT]}"`);
 
 export interface WebDeps {
   factory: AgentFactory;
@@ -650,7 +679,8 @@ export function createServer(
         return next();
       }
     }
-    return c.html(shell);
+    // Per request, not cached: the accent is a setting.
+    return c.html(withAccent(shell, settings.get().accent));
   };
   // Answers from the patched string, not from disk, so the precompressed
   // siblings below cannot cover it. Exact paths: never the SSE streams.
@@ -658,6 +688,28 @@ export function createServer(
     app.use(path, compress());
     app.get(path, serveShell);
   }
+
+  // The two install assets that carry the instance's identity, rendered from
+  // the shipped files; `no-cache` so a changed accent shows on the next load.
+  // Unreadable → the static copy below, and the log says so.
+  const identity = (file: string, render: (text: string, accent: string) => string, type: string) =>
+    async (c: Context, next: Next): Promise<Response | void> => {
+      let text: string;
+      try {
+        text = await readFile(join(bundle, file), "utf8");
+      } catch (err) {
+        log.warn(`${file} unreadable, serving it unpatched: ${String(err)}`);
+        return next();
+      }
+      c.header("cache-control", "private, no-cache");
+      return c.body(render(text, settings.get().accent), 200, { "content-type": type });
+    };
+  app.get("/app/manifest.webmanifest", identity(
+    "manifest.webmanifest",
+    (text, accent) => JSON.stringify(instanceManifest(JSON.parse(text), process.env.PIER_TITLE, accent)),
+    "application/manifest+json",
+  ));
+  app.get("/app/icon.svg", identity("icon.svg", withAccentIcon, "image/svg+xml"));
 
   // The one unhashed asset: an installed app keeps its worker until the
   // re-fetched script differs, so a cached copy is a fix that never ships.

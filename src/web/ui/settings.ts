@@ -6,7 +6,7 @@ import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus } from "./form.js";
+import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus, swatches } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
@@ -113,6 +113,46 @@ export function createSettingsView(
         "Nothing here changes what Pier serves; leave it empty if Pier is only reachable locally.",
     }),
     h("div", "flex items-center gap-3", urlSave, urlStatus),
+  );
+
+  // --- Instance: accent ------------------------------------------------------------
+  // Applied to <html> before the write lands (principle 7): the stylesheet's
+  // ramps repaint the whole workbench from that one attribute.
+
+  const accentBox = h("div", "");
+  const accentStatus = h("span", "text-[11.5px]", "");
+  const applyAccent = (accent: string): void => {
+    if (accent) document.documentElement.dataset.accent = accent;
+    else delete document.documentElement.dataset.accent;
+  };
+
+  /** What the server holds; `""` for the default, whose swatch is the table's first row. */
+  let storedAccent = "";
+  function renderAccent(accents: Record<string, string>): void {
+    const [fallback = ""] = Object.keys(accents);
+    accentBox.replaceChildren(swatches(Object.entries(accents), storedAccent || fallback, (picked) => {
+      applyAccent(picked === fallback ? "" : picked);
+      setStatus(accentStatus, "saving", "saving…");
+      void (async () => {
+        const res = await sendJson("/api/settings", { accent: picked }, "PUT");
+        if (!res.ok) {
+          // Back to what is stored, on screen and in the swatches.
+          applyAccent(storedAccent);
+          renderAccent(accents);
+          return setStatus(accentStatus, "failed", await failure(res, "Could not save"));
+        }
+        storedAccent = ((await res.json()) as { accent: string }).accent;
+        applyAccent(storedAccent);
+        setStatus(accentStatus, "saved", "Saved — the icon follows on the next load.");
+      })();
+    }));
+  }
+
+  const accentCard = card(
+    "Accent",
+    "The workbench's colour and the installed app's icon — so two Piers on one machine are told apart at a glance.",
+    accentBox,
+    accentStatus,
   );
 
   // --- Security: password ----------------------------------------------------------
@@ -258,6 +298,7 @@ export function createSettingsView(
     "div",
     "mx-auto flex max-w-2xl flex-col gap-6",
     urlCard,
+    accentCard,
     // Per browser, not per instance — but this is the page a person opens to
     // configure Pier, and a second place for one toggle would be a third copy
     // of the same vocabulary.
@@ -287,10 +328,16 @@ export function createSettingsView(
   function loadInstance(): void {
     notifications.load();
     void (async () => {
-      const got = await getJson<{ publicUrl: string }>("/api/settings", "Could not load settings");
+      const got = await getJson<{ publicUrl: string; accent: string; accents: Record<string, string> }>(
+        "/api/settings",
+        "Could not load settings",
+      );
       if (!got.ok) return setStatus(urlStatus, "failed", got.error);
       urlInput.value = got.value.publicUrl;
       urlStatus.textContent = "";
+      storedAccent = got.value.accent;
+      renderAccent(got.value.accents);
+      accentStatus.textContent = "";
     })();
   }
 
