@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -2446,6 +2447,18 @@ describe("the app shell", () => {
     const html = readFileSync(new URL("./ui/index.html", import.meta.url), "utf8");
     expect(withAccent(html, "teal")).toContain('<html lang="en" data-accent="teal">');
     expect(withAccent(html, "")).toBe(html);
+  });
+
+  it("points Safari's PNG icons at the preset's pre-rendered copy, which exists for every preset", () => {
+    const html = readFileSync(new URL("./ui/index.html", import.meta.url), "utf8");
+    const pub = new URL("./ui/public/", import.meta.url);
+    for (const name of Object.keys(ACCENTS).filter((n) => n !== "indigo")) {
+      const patched = withAccent(html, name);
+      for (const file of [`icon-32-${name}.png`, `icon-touch-192-${name}.png`]) {
+        expect(patched).toContain(`/app/${file}`);
+        expect(existsSync(new URL(file, pub))).toBe(true);
+      }
+    }
   });
 
   it("names and colours the manifest and the icon per instance", () => {

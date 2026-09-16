@@ -78,10 +78,18 @@ export const withTabPrefix = (html: string, prefix: string): string =>
     : html;
 
 /** The accent rides on `<html>` so the first paint is already in it; the
- *  stylesheet's `[data-accent]` ramps do the rest (style.css). A preset name,
- *  already validated — never a colour. */
+ *  stylesheet's `[data-accent]` ramps do the rest (style.css). Safari and the
+ *  iOS Home Screen take the PNG links, never the SVG or the manifest, so those
+ *  point at the preset's pre-rendered copy (`icon-32-<accent>.png`,
+ *  `icon-touch-192-<accent>.png`, beside the defaults in public/). A preset
+ *  name, already validated — never a colour. */
 export const withAccent = (html: string, accent: string): string =>
-  accent ? html.replace('<html lang="en">', `<html lang="en" data-accent="${accent}">`) : html;
+  accent
+    ? html
+      .replace('<html lang="en">', `<html lang="en" data-accent="${accent}">`)
+      .replace('/app/icon-32.png', `/app/icon-32-${accent}.png`)
+      .replace('/app/icon-touch-192.png', `/app/icon-touch-192-${accent}.png`)
+    : html;
 
 /** Two Piers on one phone need two names and two colours: the manifest names
  *  the instance (`$PIER_TITLE`) and paints its chrome with the accent's 600
