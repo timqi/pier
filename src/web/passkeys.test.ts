@@ -378,6 +378,16 @@ describe("passkey login", () => {
     expect(await open.json()).toEqual({ next: "/app/" });
   });
 
+  it("keeps welcoming an authenticator that never counts", async () => {
+    const { app, password } = setup();
+    const { authenticator } = await registered(app, password);
+    for (let i = 0; i < 2; i++) {
+      const { challenge } = await loginOptions(app);
+      const res = await app.request("/api/passkeys/login/verify", json(authenticator.assert(challenge, { counter: 0 })));
+      expect(res.status).toBe(200);
+    }
+  });
+
   it("refuses a wrong origin, a reused challenge, a bad signature, a missing presence flag and a regressed counter", async () => {
     const { app, password } = setup();
     const { authenticator, cookie } = await registered(app, password);
@@ -414,8 +424,8 @@ describe("passkey login", () => {
     expect(stuck.error).toMatch(/counter/);
     const back = await attempt(authenticator.assert((await loginOptions(app)).challenge, { counter: 1 }));
     expect(back.status).toBe(401);
-    // An authenticator that does not count (always 0) stays welcome.
-    expect((await attempt(authenticator.assert((await loginOptions(app)).challenge, { counter: 0 }))).status).toBe(200);
+    // Once it has counted, a zero is a regression too; a fresh higher value is not.
+    expect((await attempt(authenticator.assert((await loginOptions(app)).challenge, { counter: 0 }))).status).toBe(401);
     expect((await attempt(authenticator.assert((await loginOptions(app)).challenge, { counter: 9 }))).status).toBe(200);
 
     const stranger = await attempt({ id: "nope", response: {} });

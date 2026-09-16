@@ -453,8 +453,9 @@ export function registerPasskeyRoutes(
       if (!verifySignature("sha256", signed, key, bytesOf(response.signature, "signature"))) {
         throw new Refusal("signature does not verify", 401);
       }
-      // A counter that went backwards means two authenticators hold this key.
-      if (authData.signCount > 0 && authData.signCount <= stored.signCount) {
+      // A counter that did not advance means two authenticators hold this key;
+      // one that never counts (always 0, synced passkeys) is exempt (WebAuthn §7.2).
+      if ((authData.signCount || stored.signCount) && authData.signCount <= stored.signCount) {
         log.error(
           `passkey ${stored.label} (${id.slice(0, 8)}…) presented sign count ${String(authData.signCount)} ≤ stored ${String(stored.signCount)} — cloned authenticator?`,
         );
