@@ -214,6 +214,35 @@ export const badge = (text: string, cls: string, dot?: string): HTMLElement =>
     text,
   );
 
+/** One device in a Console list — Security's signed-in browsers and
+ *  Notifications' subscribed ones are the same row: name, a dim second line,
+ *  its one action. `tag` marks the row that is this browser. */
+export function deviceRow(
+  name: string,
+  meta: string,
+  action: HTMLElement,
+  opts: { tag?: HTMLElement; title?: string } = {},
+): HTMLElement {
+  const line = h(
+    "div",
+    "flex min-w-0 flex-col",
+    h(
+      "span",
+      "flex min-w-0 items-center gap-2",
+      h("span", "truncate text-[12.5px] text-neutral-700", name),
+      ...(opts.tag ? [opts.tag] : []),
+    ),
+    h("span", "truncate text-[11.5px] text-neutral-400", meta),
+  );
+  if (opts.title) line.title = opts.title;
+  return h(
+    "div",
+    "flex items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2",
+    line,
+    action,
+  );
+}
+
 export const empty = (text: string): HTMLElement =>
   h(
     "p",

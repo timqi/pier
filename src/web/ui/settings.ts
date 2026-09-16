@@ -6,7 +6,7 @@ import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, empty, field, input, pageTitle, PANEL, pill, setStatus } from "./form.js";
+import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { openProviders } from "./providers.js";
@@ -226,24 +226,13 @@ export function createSettingsView(
           void loadDevices();
         });
       };
-      const line = h("div", "flex min-w-0 flex-col", h(
-        "span",
-        "truncate text-[12.5px] text-neutral-700",
-        deviceName(d.agent),
-      ));
       // The raw agent string stays reachable: the pretty name is a guess, and
       // "is that mine?" is answered by the thing the browser actually sent.
-      line.title = d.agent;
-      line.append(h(
-        "span",
-        "truncate text-[11.5px] text-neutral-400",
+      return deviceRow(
+        deviceName(d.agent),
         `${d.ip} · seen ${agoLabel(d.seenAt)} · signed in ${agoLabel(d.createdAt)}`,
-      ));
-      return h(
-        "div",
-        "flex items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2",
-        line,
         end,
+        { title: d.agent },
       );
     }));
   }
@@ -264,6 +253,7 @@ export function createSettingsView(
     h("div", "flex items-center gap-3", signOut, devicesStatus),
   );
 
+  const notifications = createNotificationsCard();
   const instanceColumn = h(
     "div",
     "mx-auto flex max-w-2xl flex-col gap-6",
@@ -271,7 +261,7 @@ export function createSettingsView(
     // Per browser, not per instance — but this is the page a person opens to
     // configure Pier, and a second place for one toggle would be a third copy
     // of the same vocabulary.
-    createNotificationsCard(),
+    notifications.el,
     reloadCard,
   );
 
@@ -295,6 +285,7 @@ export function createSettingsView(
   const filesChild = createConfigView(filesHost, getCwds, openFiles);
 
   function loadInstance(): void {
+    notifications.load();
     void (async () => {
       const got = await getJson<{ publicUrl: string }>("/api/settings", "Could not load settings");
       if (!got.ok) return setStatus(urlStatus, "failed", got.error);

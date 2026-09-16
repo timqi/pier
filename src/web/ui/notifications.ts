@@ -3,9 +3,9 @@
 // invisible from the inside when missing, so this module never shows a control
 // it cannot honour and offers a test notification for "did it actually arrive?".
 
-import { failure, mustGetJson, sendJson } from "./api.js";
-import { h } from "./dom.js";
-import { button, card, setStatus, toggle } from "./form.js";
+import { failure, getJson, mustGetJson, sendJson } from "./api.js";
+import { agoLabel, h } from "./dom.js";
+import { badge, button, card, deviceRow, setStatus, toggle } from "./form.js";
 
 /** Whether this browser was asked to notify. Kept locally because permission
  *  is not intent: a granted permission that the person then switched off here
@@ -167,13 +167,76 @@ export function setUnreadBadge(count: number): void {
   void (count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.())?.catch(() => {});
 }
 
-export function createNotificationsCard(): HTMLElement {
+/** What /api/push/subscriptions answers: one subscribed browser, never its keys. */
+interface PushDevice {
+  endpoint: string;
+  label: string;
+  createdAt: number;
+  current: boolean;
+}
+
+export function createNotificationsCard(): { el: HTMLElement; load(): void } {
   const status = h("span", "text-[11.5px]", "");
   const test = button("Send a test notification");
   const controls = h("div", "flex items-center gap-3", test, status);
   const body = h("div", "flex flex-col gap-4");
 
   const wanted = (): boolean => localStorage.getItem(WANTED_KEY) === "on";
+
+  // --- every subscribed device -----------------------------------------------------
+  // Listed even where this browser cannot subscribe: a phone's row is removed
+  // from the desktop.
+
+  const devicesBody = h("div", "flex flex-col gap-2");
+  const devicesStatus = h("span", "text-[11.5px]", "");
+  const devices = h("div", "flex flex-col gap-2", devicesBody, devicesStatus);
+
+  /** Forget it on the server; when it is this browser's own row, in the
+   *  browser too, or the next load would quietly subscribe it again. */
+  async function remove(d: PushDevice): Promise<void> {
+    setStatus(devicesStatus, "saving", "removing…");
+    try {
+      const res = await sendJson("/api/push/unsubscribe", { endpoint: d.endpoint });
+      if (!res.ok) {
+        setStatus(devicesStatus, "failed", await failure(res, "Could not remove it"));
+      } else {
+        const sub = await (await register())?.pushManager.getSubscription();
+        if (sub?.endpoint === d.endpoint) {
+          localStorage.setItem(WANTED_KEY, "off");
+          await sub.unsubscribe();
+          render();
+        }
+        setStatus(devicesStatus, "saved", "Removed.");
+      }
+    } catch (err) {
+      setStatus(devicesStatus, "failed", `Could not remove it: ${String(err)}`);
+    }
+    // Redrawn either way: the rows are the truth, and a refused row's button
+    // comes back with them.
+    await loadDevices();
+  }
+
+  async function loadDevices(): Promise<void> {
+    const got = await getJson<{ devices: PushDevice[] }>(
+      "/api/push/subscriptions",
+      "Could not load subscribed devices",
+    );
+    if (!got.ok) return setStatus(devicesStatus, "failed", got.error);
+    if (!got.value.devices.length) {
+      devicesBody.replaceChildren(h("p", "text-[12.5px] text-neutral-400", "No device is subscribed."));
+      return;
+    }
+    devicesBody.replaceChildren(...got.value.devices.map((d) => {
+      const end = button("Remove");
+      end.onclick = () => {
+        end.disabled = true;
+        void remove(d);
+      };
+      return deviceRow(d.label, `subscribed ${agoLabel(d.createdAt)}`, end, {
+        tag: d.current ? badge("This browser", "bg-neutral-50 text-neutral-500 ring-neutral-200") : undefined,
+      });
+    }));
+  }
 
   async function enable(): Promise<void> {
     setStatus(status, "saving", "asking this browser…");
@@ -200,6 +263,7 @@ export function createNotificationsCard(): HTMLElement {
       localStorage.setItem(WANTED_KEY, "on");
       render();
       setStatus(status, "saved", "This browser will be notified when a turn finishes unseen.");
+      void loadDevices();
     } catch (err) {
       setStatus(status, "failed", `Could not subscribe: ${String(err)}`);
     }
@@ -214,6 +278,7 @@ export function createNotificationsCard(): HTMLElement {
       await sub.unsubscribe();
     }
     setStatus(status, "idle", "This browser will not be notified.");
+    void loadDevices();
   }
 
   test.onclick = () => {
@@ -264,6 +329,7 @@ export function createNotificationsCard(): HTMLElement {
       body.replaceChildren(
         ...installRow(),
         h("p", "text-[12.5px] leading-snug text-neutral-500", why),
+        devices,
       );
       return;
     }
@@ -278,14 +344,22 @@ export function createNotificationsCard(): HTMLElement {
         (checked) => void (checked ? enable() : disable()),
       ),
       controls,
+      devices,
     );
   }
 
   onInstallability = render;
   render();
-  return card(
+  const el = card(
     "Notifications",
     "Web Push, so a finished turn reaches you with the workbench closed. Installed — Chrome's address-bar icon, or Share → Add to Home Screen on iOS — Pier notifies you the way an app does.",
     body,
   );
+  return {
+    el,
+    load: () => {
+      devicesStatus.textContent = "";
+      void loadDevices();
+    },
+  };
 }

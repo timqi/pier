@@ -93,6 +93,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 | ----- | -------- |
 | `GET /api/push` | `{publicKey}` — the instance's VAPID public key, what a browser subscribes with |
 | `POST /api/push/subscribe` | a `PushSubscription` (`{endpoint, keys:{p256dh, auth}, label}`) → stored; upsert, so a browser re-posting on every load repairs a lost row. 400 on anything that is not one |
+| `GET /api/push/subscriptions` | `{devices: [{endpoint, label, createdAt, current}]}` — every subscribed device, `current` on the row the calling session saved; never the keys |
 | `POST /api/push/unsubscribe` | body `{endpoint}` → forgotten |
 | `POST /api/push/test` | send a test notification to every subscribed device, `{sent, failed}`; 409 when none is subscribed |
 
@@ -107,6 +108,12 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   a notification only ever opens a same-origin URL.
 - One VAPID key pair per instance, minted on first use, never rotated on its
   own; the private half is sealed by `Secrets` in `push_identity`.
+- The Notifications card lists every subscribed device under the switch, in
+  the Security card's device row (label, `subscribed <ago>`, **This browser**
+  on the caller's own, **Remove**), refetched after every change; removing this
+  browser's row also unsubscribes it locally, so the next load does not
+  re-register it. Shown even where this browser cannot subscribe.
+  "No device is subscribed." when empty.
 
 ## Frontend (`src/web/ui/`, Vite + Tailwind, vanilla TS, no framework)
 

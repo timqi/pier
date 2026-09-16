@@ -32,6 +32,8 @@ export interface PushSubscriptionRow extends PushTarget {
   /** The only way to tell two rows apart in the Console. */
   label: string;
   createdAt: number;
+  /** The web session that saved it: "this browser" in the Console. */
+  sessionId: string;
 }
 
 /** SQLite's "that parent row does not exist": the session ended. */
@@ -80,7 +82,7 @@ export class PushStore {
   list(): PushSubscriptionRow[] {
     return this.#db
       .prepare(
-        `SELECT endpoint, p256dh, auth, label, created_at AS createdAt
+        `SELECT endpoint, p256dh, auth, label, created_at AS createdAt, session_id AS sessionId
          FROM push_subscriptions ORDER BY created_at DESC`,
       )
       .all() as unknown as PushSubscriptionRow[];
@@ -249,6 +251,19 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
   // --- routes ---------------------------------------------------------------------
 
   app.get("/api/push", (c) => c.json({ publicKey: store.identity().publicKey }));
+
+  // Never the keys: a row with them is a sender, not a device.
+  app.get("/api/push/subscriptions", (c) => {
+    const me = sessionIdOf(c);
+    return c.json({
+      devices: store.list().map(({ endpoint, label, createdAt, sessionId }) => ({
+        endpoint,
+        label,
+        createdAt,
+        current: sessionId === me,
+      })),
+    });
+  });
 
   app.post("/api/push/subscribe", async (c) => {
     const body = await c.req.json().catch(() => null);

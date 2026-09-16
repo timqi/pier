@@ -184,6 +184,40 @@ describe("push routes", () => {
     expect(store.list()).toHaveLength(0);
   });
 
+  it("lists every subscribed device, marks the caller's own, and keeps the keys", async () => {
+    const { app, auth, cookie } = setup();
+    const other = `pier_session=${auth.open("10.0.0.2", "a phone")}`;
+    const subscribe = (sub: ReturnType<typeof fakeSubscription>, label: string, cookie: string) =>
+      app.request("/api/push/subscribe", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ ...sub, label }),
+      });
+    const mine = fakeSubscription("https://push.example.net/s/mine");
+    await subscribe(mine, "Mac · Chrome", cookie);
+    await subscribe(fakeSubscription("https://push.example.net/s/phone"), "iPhone · Safari", other);
+
+    const res = await app.request("/api/push/subscriptions", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const { devices } = (await res.json()) as { devices: Record<string, unknown>[] };
+    // Newest first, but two rows saved in the same millisecond tie.
+    expect(devices.map((d) => [d.label, d.current]).sort()).toEqual([
+      ["Mac · Chrome", true],
+      ["iPhone · Safari", false],
+    ]);
+    for (const d of devices) {
+      expect(Object.keys(d).sort()).toEqual(["createdAt", "current", "endpoint", "label"]);
+      expect(typeof d.createdAt).toBe("number");
+    }
+    expect(JSON.stringify(devices)).not.toContain(mine.keys.p256dh);
+    expect(JSON.stringify(devices)).not.toContain(mine.keys.auth);
+
+    // Nobody's row from a browser that made none.
+    const anon = await app.request("/api/push/subscriptions");
+    const { devices: none } = (await anon.json()) as { devices: { current: boolean }[] };
+    expect(none.every((d) => !d.current)).toBe(true);
+  });
+
   it("stops notifying a browser whose session ended, however it ended", async () => {
     const { app, store, auth } = setup();
     const subscribe = async (endpoint: string, cookie: string, status = 201) => {
