@@ -5,7 +5,7 @@
 
 import { failure, getJson, mustGetJson, sendJson } from "./api.js";
 import { agoLabel, h } from "./dom.js";
-import { badge, button, card, deviceRow, setStatus, toggle } from "./form.js";
+import { badge, button, card, deviceRow, empty, setStatus, toggle } from "./form.js";
 
 /** Whether this browser was asked to notify. Kept locally because permission
  *  is not intent: a granted permission that the person then switched off here
@@ -223,7 +223,7 @@ export function createNotificationsCard(): { el: HTMLElement; load(): void } {
     );
     if (!got.ok) return setStatus(devicesStatus, "failed", got.error);
     if (!got.value.devices.length) {
-      devicesBody.replaceChildren(h("p", "text-[12.5px] text-neutral-400", "No device is subscribed."));
+      devicesBody.replaceChildren(empty("No device is subscribed."));
       return;
     }
     devicesBody.replaceChildren(...got.value.devices.map((d) => {
@@ -358,7 +358,7 @@ export function createNotificationsCard(): { el: HTMLElement; load(): void } {
   return {
     el,
     load: () => {
-      devicesStatus.textContent = "";
+      setStatus(devicesStatus, "idle", "");
       void loadDevices();
     },
   };

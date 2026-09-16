@@ -184,7 +184,7 @@ describe("push routes", () => {
     expect(store.list()).toHaveLength(0);
   });
 
-  it("lists every subscribed device, marks the caller's own, and keeps the keys", async () => {
+  it("lists every subscribed device, marks the caller's own, never the keys", async () => {
     const { app, auth, cookie } = setup();
     const other = `pier_session=${auth.open("10.0.0.2", "a phone")}`;
     const subscribe = (sub: ReturnType<typeof fakeSubscription>, label: string, cookie: string) =>
