@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -54,6 +54,14 @@ describe("normalizeAccent", () => {
 
   it("names a 600 step the stylesheet's ramps are authored from", () => {
     for (const hex of Object.values(ACCENTS)) expect(hex).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it("has a light and a dark ramp in style.css for every preset", () => {
+    const css = readFileSync(new URL("./web/ui/style.css", import.meta.url), "utf8");
+    for (const name of Object.keys(ACCENTS).filter((n) => n !== "indigo")) {
+      expect(css).toContain(`html[data-accent="${name}"] {`);
+      expect(css).toContain(`html[data-theme="dark"][data-accent="${name}"] {`);
+    }
   });
 });
 
