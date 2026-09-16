@@ -240,7 +240,8 @@ One line each; the reasoning is in the commit that made it.
 
 - One shared password guards every HTTP surface (`web/auth.ts`); the exemptions
   are `/p/*`, so a board's `public` flag is a real boundary, the two passkey
-  login routes (`web/passkeys.ts`, on the password's throttle) and
+  login routes (`web/passkeys.ts`, on the password's throttle), `/login/:token`
+  (the one-time link `pier login` mints over the CLI socket, same throttle) and
   `/config-sync/:token`, guarded by its token. Single-account on purpose: Pier
   has one workspace; a registered passkey replaces the password rather than
   joining it.

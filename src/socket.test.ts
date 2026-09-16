@@ -47,6 +47,10 @@ function start(path = sockPath(), over: Partial<SocketHosts> & { locked?: boolea
       return { text: `searched ${JSON.stringify(params)}` };
     },
     knows: async (id) => KNOWN.includes(id),
+    login: () => {
+      calls.push("login");
+      return "https://pier.example/login/tok";
+    },
     ...over,
   }, path);
   servers.push(server);
@@ -81,6 +85,14 @@ describe("cli socket", () => {
         .toEqual({ status: 403, body: { error: "nope is not a session of this Pier" } });
     }
     expect(calls).toEqual([]);
+  });
+
+  it("mints a sign-in link with no session behind the call", async () => {
+    const { path, calls } = start();
+    await listening(servers[0]!);
+    expect(await call(path, "{}", "POST", "/login")).toEqual({ status: 200, body: { url: "https://pier.example/login/tok" } });
+    expect(await call(path, "[]", "POST", "/login")).toEqual({ status: 400, body: { error: "body must be a JSON object" } });
+    expect(calls).toEqual(["login"]);
   });
 
   it("resolves names for the caller and names its session in the log line", async () => {

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openDb } from "../db.js";
 import { ALL, AuthStore, requireAuth, registerAuthRoutes} from "./auth.js";
 
@@ -317,6 +317,76 @@ describe("login", () => {
 
     // Not a password guess: the same client's real sign-in still works.
     expect((await login(a, password, "10.0.0.40")).status).toBe(302);
+  });
+});
+
+describe("pier login link", () => {
+  const follow = (a: Hono, token: string, client: string = crypto.randomUUID()): Promise<Response> =>
+    Promise.resolve(a.request(`/login/${token}`, { headers: { "x-forwarded-for": client } }));
+
+  it("signs a browser in once, with the password off", async () => {
+    const { store: s } = store();
+    const a = new Hono();
+    a.use("*", requireAuth(s));
+    registerAuthRoutes(a, s, () => true);
+    a.get("/api/sessions", (c) => c.json([]));
+    const token = s.mintLink();
+    expect(token).toMatch(/^[\w-]{43}$/);
+    const res = await follow(a, token);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/app/");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    const cookie = cookieOf(res);
+    expect((await a.request("/api/sessions", { headers: { cookie } })).status).toBe(200);
+    // Single use: the URL sat in a terminal and a proxy log.
+    const again = await follow(a, token);
+    expect(again.status).toBe(401);
+    expect(await again.text()).toContain("expired");
+    expect(again.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses an unknown token on the login throttle and caps what is outstanding", async () => {
+    const { store: s } = store();
+    const a = app(s);
+    const client = "10.0.0.41";
+    for (let i = 0; i < 10; i++) expect((await follow(a, "nope", client)).status).toBe(401);
+    expect((await follow(a, s.mintLink(), client)).status).toBe(429);
+    const first = s.mintLink();
+    for (let i = 0; i < 10; i++) s.mintLink();
+    expect(s.redeemLink(first)).toBe(false);
+    expect(s.redeemLink("")).toBe(false);
+  });
+
+  it("is spent by neither HEAD nor a signed-in browser's link checker", async () => {
+    const { store: s, password } = store();
+    const a = app(s);
+    const token = s.mintLink();
+    // Without a cookie the boundary sends HEAD to the form like any navigation.
+    expect((await a.request(`/login/${token}`, { method: "HEAD" })).status).toBe(302);
+    const cookie = cookieOf(await login(a, password));
+    const head = await a.request(`/login/${token}`, { method: "HEAD", headers: { cookie } });
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET");
+    expect(s.redeemLink(token)).toBe(true);
+  });
+
+  it("dies with every session when the password rotates or everyone is signed out", () => {
+    const { store: s } = store();
+    const rotated = s.mintLink();
+    s.setPassword("correct-horse-battery");
+    expect(s.redeemLink(rotated)).toBe(false);
+    const revoked = s.mintLink();
+    s.revoke(ALL);
+    expect(s.redeemLink(revoked)).toBe(false);
+    // Expired on the clock, not only by eviction.
+    const now = Date.now();
+    const spy = vi.spyOn(Date, "now");
+    spy.mockReturnValue(now);
+    const old = s.mintLink();
+    spy.mockReturnValue(now + 2 * 60_000);
+    expect(s.redeemLink(old)).toBe(false);
+    spy.mockRestore();
   });
 });
 

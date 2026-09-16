@@ -27,6 +27,7 @@ Usage
   pier restart                finish running turns first, then restart the service
   pier reload                 re-read channel config and recycle idle sessions
   pier backup                 snapshot pier.db before a manual update
+  pier login                  print a one-time sign-in link for the workbench (2 minutes)
   pier vault run [ENV=NAME | NAME]... -- <command> [args...]
                               run a command with named secrets in its env
   pier slack <subcommand> ... Slack from a shell, token from the vault (pier slack --help)
@@ -124,6 +125,11 @@ if (values.help || command === "help") {
 } else if (command === "web") {
   const { runWebCli } = await import("./websearch/cli.js");
   process.exitCode = await runWebCli(argv.slice(1), (params) => askPier("/web", { params }, WEB_TIMEOUT_MS));
+} else if (command === "login") {
+  if (subcommand) fail(`unexpected argument "${subcommand}"`);
+  allowOnly([], "pier login");
+  const { status, body } = await askPier<{ url?: string; error?: string }>("/login", {});
+  say(status === 200 && body.url ? body.url : fail(body.error ?? `socket answered ${String(status)}`));
 } else if (command === "restart" || command === "reload") {
   if (subcommand) fail(`unexpected argument "${subcommand}"`);
   allowOnly([], `pier ${command}`);

@@ -28,7 +28,13 @@ export interface SocketHosts {
   /** Identity, not authentication: the 0600 bits are the boundary, this is the
    *  audit key. A session Pier can locate is known; nothing else is. */
   knows: (sessionId: string) => Promise<boolean>;
+  /** `pier login`: a one-time sign-in URL for the workbench. */
+  login: () => string;
 }
+
+/** Typed by the operator in a terminal, not by an agent in a turn: the one
+ *  route with no session behind it. */
+const ANONYMOUS = new Set(["/login"]);
 
 type Answer = (status: number, body: Record<string, unknown>) => void;
 
@@ -48,6 +54,11 @@ const ROUTES: Record<string, (hosts: SocketHosts, body: Record<string, unknown>,
   },
   "/task": operation("task"),
   "/web": operation("web"),
+  async "/login"({ login }, _body, _sessionId, answer) {
+    const url = login();
+    log.info("sign-in link minted for pier login");
+    answer(200, { url });
+  },
 };
 
 /** A CLI verb's params under the caller's session. 422, not 400: the request
@@ -104,7 +115,9 @@ async function handle(hosts: SocketHosts, req: IncomingMessage, res: ServerRespo
   } catch {
     return answer(400, { error: "body must be a JSON object" });
   }
-  const { sessionId, ...fields } = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return answer(400, { error: "body must be a JSON object" });
+  const { sessionId, ...fields } = body as Record<string, unknown>;
+  if (ANONYMOUS.has(req.url ?? "")) return route(hosts, fields, "", answer);
   if (typeof sessionId !== "string" || !sessionId) return answer(400, { error: "PIER_SESSION_ID is required" });
   if (!(await hosts.knows(sessionId))) return answer(403, { error: `${sessionId} is not a session of this Pier` });
   await route(hosts, fields, sessionId, answer);

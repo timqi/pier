@@ -75,7 +75,8 @@ surface owns its routes and is mounted beside it.
   already answering a chat has the row disabled with `answers in <platform>`;
   a refusal stays under the picked row in the server's words.
 
-Other route owners: `auth.ts` (`/login`, `/logout`, `/api/password`,
+Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` link,
+[08-cli-socket.md](08-cli-socket.md) — `/logout`, `/api/password`,
 `/api/devices*`), `passkeys.ts` (below), `config.ts` (`/api/config*`), `config-sync.ts`
 (`/api/config-sync`; `/config-sync/:token` is served before the password, the
 token being its guard), `packages.ts` (`/api/packages*`; a file of its

@@ -25,6 +25,10 @@ const MAX_AGE_MS = 90 * 24 * 60 * 60_000;
 const TOUCH_MS = 5 * 60_000;
 /** Not an id any row can have. */
 export const ALL = "*";
+/** A `pier login` link is walked to a browser within this; single use. */
+const LINK_TTL_MS = 2 * 60_000;
+/** Outstanding links at once — an operator minting a handful, not a queue. */
+const MAX_LINKS = 10;
 
 /** The token is never in here. */
 export interface Device {
@@ -61,6 +65,8 @@ export class AuthStore {
   readonly #db: DatabaseSync;
   readonly #sql: (sql: string) => StatementSync;
   readonly #revokeListeners = new Set<(id: string) => void>();
+  /** In memory only: a link outlives neither the process nor two minutes. */
+  readonly #links = new Map<string, number>();
 
   constructor(db: DatabaseSync = pierDb(), print: (message: string) => void = (m) => log.info(m)) {
     this.#db = db;
@@ -122,6 +128,7 @@ export class AuthStore {
         .run(salt, hash(password, salt), Date.now());
       this.#dropSessions();
     });
+    this.#links.clear();
     this.#revoked(ALL);
   }
 
@@ -163,8 +170,11 @@ export class AuthStore {
 
   /** Listeners hear the same id: a revoked cookie must also close what it opened. */
   revoke(id: string): void {
-    if (id === ALL) this.#dropSessions();
-    else this.#sql("DELETE FROM web_sessions WHERE id = ?").run(id);
+    // An unspent link is a session about to exist: "sign everyone out" ends it too.
+    if (id === ALL) {
+      this.#dropSessions();
+      this.#links.clear();
+    } else this.#sql("DELETE FROM web_sessions WHERE id = ?").run(id);
     this.#revoked(id);
   }
 
@@ -173,6 +183,24 @@ export class AuthStore {
       "SELECT id, created_at AS createdAt, seen_at AS seenAt, ip, agent" +
         " FROM web_sessions WHERE seen_at > ? ORDER BY seen_at DESC",
     ).all(Date.now() - TTL_MS) as unknown as Device[];
+  }
+
+  /** A one-time sign-in token for `pier login`: the terminal on Pier's own
+   *  machine is the door, not the password or a passkey. Oldest evicted at cap. */
+  mintLink(): string {
+    const now = Date.now();
+    for (const [token, expiresAt] of this.#links) if (expiresAt <= now) this.#links.delete(token);
+    while (this.#links.size >= MAX_LINKS) this.#links.delete(this.#links.keys().next().value!);
+    const token = randomBytes(32).toString("base64url");
+    this.#links.set(token, now + LINK_TTL_MS);
+    return token;
+  }
+
+  /** Consumed on the first look, valid or not. */
+  redeemLink(token: string): boolean {
+    const expiresAt = this.#links.get(token);
+    this.#links.delete(token);
+    return expiresAt !== undefined && expiresAt > Date.now();
   }
 
   /** A long-lived authenticated surface (SSE) closes itself when its cookie is revoked. */
@@ -203,6 +231,7 @@ const digest = (token: string): string => createHash("sha256").update(token).dig
  *  docs/architecture.md names both); `/boards/*` stays behind. */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
+  if (path.startsWith("/login/")) return method === "GET";
   if (path === "/api/passkeys/login/options" || path === "/api/passkeys/login/verify") return method === "POST";
   if (method !== "GET" && method !== "HEAD") return false;
   return path.startsWith("/p/");
@@ -395,6 +424,32 @@ export function registerAuthRoutes(
     log.info(`login from ${client}`);
     openSession(c, store, client);
     return c.redirect(next);
+  });
+
+  // The link `pier login` printed. Both refusals read the same and count on
+  // the throttle: a stranger must not learn whether a token was ever minted.
+  app.get("/login/:token", (c) => {
+    // The URL is the credential: no cache may hold the answer, no referrer carry it.
+    c.header("cache-control", "no-store");
+    c.header("referrer-policy", "no-referrer");
+    // Hono routes HEAD through GET: a link checker with a live cookie would spend the token.
+    if (c.req.method !== "GET") {
+      c.header("allow", "GET");
+      return c.body(null, 405);
+    }
+    const client = clientOf(c);
+    if (throttled(client)) {
+      log.warn(`login throttled for ${client}`);
+      return c.html(loginPage("/app/", "Too many attempts. Wait a few minutes.", passkeysRegistered()), 429);
+    }
+    if (!store.redeemLink(c.req.param("token"))) {
+      noteFailure(client);
+      log.warn(`stale or unknown sign-in link from ${client}`);
+      return c.html(loginPage("/app/", "That sign-in link has expired. Run pier login again.", passkeysRegistered()), 401);
+    }
+    log.info(`login from ${client} by link`);
+    openSession(c, store, client);
+    return c.redirect("/app/");
   });
 
   // Re-authenticates: the boundary requires a live cookie, and knowing a

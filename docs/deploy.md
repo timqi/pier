@@ -98,8 +98,15 @@ pier restart
 - Changing or recovering the password signs out every browser.
 - One browser: Settings → Security → Signed-in devices.
 - Passkeys (Settings → Security, needs an https public URL): while one is
-  registered the password is refused. Locked out of every passkey? Drop the
-  rows; the table is read live, so no restart:
+  registered the password is refused. A browser without your passkey signs in
+  through a one-time link (two minutes, single use) from a shell on the host:
+
+```sh
+pier login
+```
+
+- Locked out of every passkey? Drop the rows; the table is read live, so no
+  restart:
 
 ```sh
 sqlite3 ~/.pier/db/pier.db 'DELETE FROM passkeys'

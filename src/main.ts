@@ -370,6 +370,7 @@ servePier({
   },
   // Live in the router, or on disk: the same two places a callback target is looked for.
   knows: async (id) => router.stateOf(id) !== undefined || (await factory.find(id)) !== undefined,
+  login: () => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/login/${auth.mintLink()}`,
 });
 
 // Every command a turn runs inherits this env: `NODE_ENV=production` makes an
