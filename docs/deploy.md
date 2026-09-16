@@ -245,7 +245,10 @@ Loopback bind; reach it over a tunnel, not a wider bind:
 
 - `ssh -L 3141:localhost:3141 server`
 - Tailscale, or Cloudflare Tunnel — no open port, TLS terminates outside.
-- A reverse proxy (Caddy, nginx): terminate TLS there, preserve the external
+- A reverse proxy (Caddy, nginx) **on the same host**, connecting over
+  loopback: forwarded headers are trusted from a loopback peer only, so a proxy
+  on another machine gets one throttle bucket for all its clients and a cookie
+  without `Secure`. Terminate TLS there, preserve the external
   `Host` (or pass `X-Forwarded-Host`), and **set** `X-Forwarded-For` to the
   client — nginx `proxy_set_header X-Forwarded-For $remote_addr;`, Caddy by
   default. Pier reads the rightmost hop, so appending the peer is safe too
