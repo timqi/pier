@@ -23,12 +23,12 @@
   </script>
   <!-- Installed as a home-screen app: standalone window, own icon. The
        manifest shares the workbench's cookie boundary. -->
-  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+  <link rel="manifest" href="/app/manifest.webmanifest" crossorigin="use-credentials" />
   <!-- SVG first (scales to any tab/bookmark size), 32px PNG for the engines
        that still ignore it. iOS wants an opaque square and rounds it itself. -->
-  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-  <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
-  <link rel="apple-touch-icon" href="/icon-touch-192.png" />
+  <link rel="icon" type="image/svg+xml" href="/app/icon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/app/icon-32.png" />
+  <link rel="apple-touch-icon" href="/app/icon-touch-192.png" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Pier" />
@@ -58,7 +58,7 @@
     <header class="flex h-12 flex-none items-center gap-2 px-3">
       <!-- The same mark as the tab and the home-screen icon, so an installed
            Pier looks like the thing you installed. -->
-      <img src="/icon.svg" alt="" width="20" height="20" class="h-7 w-7 flex-none rounded-lg border border-neutral-200/70 bg-white p-1 shadow-xs" />
+      <img src="/app/icon.svg" alt="" width="20" height="20" class="h-7 w-7 flex-none rounded-lg border border-neutral-200/70 bg-white p-1 shadow-xs" />
       <h1 class="text-[17px] font-semibold tracking-tight">Pier</h1>
       <!-- A link, not a label: AGPL-3.0 section 13 asks a network service to
            point its users at the source it is running. Beside the title

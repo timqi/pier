@@ -400,7 +400,7 @@ describe("the finished-turn trigger", () => {
     expect(payload).toEqual({
       title: "pier",
       body: "… the answer",
-      url: "/#/session/s1",
+      url: "/app/#/session/s1",
       tag: "s1",
     });
   });

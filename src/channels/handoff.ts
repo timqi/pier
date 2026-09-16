@@ -100,7 +100,7 @@ export function createHandoff(deps: HandoffDeps): Handoff {
       const base = publicUrl();
       const note = {
         title: sessionLabel(summary),
-        url: base ? `${base}/#/session/${encodeURIComponent(sessionId)}` : "",
+        url: base ? `${base}/app/#/session/${encodeURIComponent(sessionId)}` : "",
       };
       let conversationId: string;
       try {

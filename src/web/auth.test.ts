@@ -57,7 +57,7 @@ async function login(a: Hono, password: string, client: string = crypto.randomUU
   return a.request("/login", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": client },
-    body: new URLSearchParams({ password, next: "/" }),
+    body: new URLSearchParams({ password, next: "/app/" }),
   });
 }
 
@@ -182,7 +182,7 @@ describe("login", () => {
     const a = app(s);
     const res = await login(a, password);
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("location")).toBe("/app/");
     const cookie = cookieOf(res);
     expect(cookie).toMatch(/^pier_session=[\w-]+\.[\w-]{43}$/);
     expect(res.headers.get("set-cookie")).toContain("HttpOnly");
@@ -216,16 +216,16 @@ describe("login", () => {
       return res.headers.get("location");
     };
     // Both spellings of protocol-relative, and anything that is not a path.
-    expect(await to("//evil.example/")).toBe("/");
-    expect(await to("/\\evil.example/")).toBe("/");
-    expect(await to("https://evil.example/")).toBe("/");
+    expect(await to("//evil.example/")).toBe("/app/");
+    expect(await to("/\\evil.example/")).toBe("/app/");
+    expect(await to("https://evil.example/")).toBe("/app/");
     // A browser strips these from a Location before parsing it, so each of
     // them is `//evil.example` by the time it navigates.
-    expect(await to("/\t/evil.example")).toBe("/");
-    expect(await to("/\n/evil.example")).toBe("/");
-    expect(await to("/\0/evil.example")).toBe("/");
+    expect(await to("/\t/evil.example")).toBe("/app/");
+    expect(await to("/\n/evil.example")).toBe("/app/");
+    expect(await to("/\0/evil.example")).toBe("/app/");
     // A real in-app destination survives, hash and all.
-    expect(await to("/#/session/abc")).toBe("/#/session/abc");
+    expect(await to("/app/#/session/abc")).toBe("/app/#/session/abc");
   });
 
   it("throttles a client after too many failures", async () => {
@@ -464,7 +464,7 @@ describe("the cookie", () => {
           "x-forwarded-proto": "https",
           "x-forwarded-for": crypto.randomUUID(),
         },
-        body: new URLSearchParams({ password, next: "/" }),
+        body: new URLSearchParams({ password, next: "/app/" }),
       }, { incoming: { socket: { remoteAddress, remotePort: 443, remoteFamily: "IPv4" } } });
 
     // A local TLS proxy is believed; a stranger writing the same header is not,
@@ -475,7 +475,7 @@ describe("the cookie", () => {
     const direct = await a.request("https://pier.example/login", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ password, next: "/" }),
+      body: new URLSearchParams({ password, next: "/app/" }),
     });
     expect(direct.headers.get("set-cookie")).toContain("Secure");
   });
@@ -598,7 +598,7 @@ describe("signed-in devices", () => {
         "x-forwarded-for": "10.0.0.22",
         cookie: first,
       },
-      body: new URLSearchParams({ password, next: "/" }),
+      body: new URLSearchParams({ password, next: "/app/" }),
     });
     // One row, not two — and the cookie that was displaced is dead, rather than
     // good for another week as a device nobody recognizes.

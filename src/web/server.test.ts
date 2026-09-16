@@ -2417,8 +2417,27 @@ describe("configuration reaching live sessions", () => {
 describe("the app shell", () => {
   it("loads protected install metadata without browser deprecation warnings", () => {
     const html = readFileSync(new URL("./ui/index.html", import.meta.url), "utf8");
-    expect(html).toContain('rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"');
+    expect(html).toContain('rel="manifest" href="/app/manifest.webmanifest" crossorigin="use-credentials"');
     expect(html).toContain('<meta name="mobile-web-app-capable" content="yes" />');
+  });
+
+  it("lives under /app/, so an installed Pier never captures the Show pages", async () => {
+    const { app } = setup();
+    const root = await app.request("/");
+    expect(root.status).toBe(302);
+    expect(root.headers.get("location")).toBe("/app/");
+    // Every path the manifest names is inside its own scope; /boards and /p are not.
+    const manifest = JSON.parse(readFileSync(new URL("./ui/public/manifest.webmanifest", import.meta.url), "utf8"));
+    expect(manifest.scope).toBe("/app/");
+    expect(manifest.start_url).toBe("/app/");
+    expect(manifest.id).toBe("/app/");
+    const urls = [
+      ...manifest.icons.map((i: { src: string }) => i.src),
+      ...manifest.shortcuts.flatMap((s: { url: string; icons: { src: string }[] }) => [s.url, ...s.icons.map((i) => i.src)]),
+    ];
+    for (const url of urls) expect(url).toMatch(/^\/app\//);
+    // Nothing is served at the old root any more.
+    expect((await app.request("/icon.svg")).status).toBe(404);
   });
 
   it("names the instance in the tab title", () => {

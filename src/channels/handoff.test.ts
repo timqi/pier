@@ -152,7 +152,7 @@ describe("continueIn", () => {
     expect(result).toEqual({ conversationId: "C100/1717.1" });
     expect(opened).toEqual([{
       platform: "slack", chatId: "C100",
-      note: { title: "Fix the parser", url: "https://pier.example/#/session/s1" },
+      note: { title: "Fix the parser", url: "https://pier.example/app/#/session/s1" },
     }]);
     const key = { channelId: "slack", conversationId: "C100/1717.1" };
     expect(conversations.keyOf("s1")).toEqual(key);

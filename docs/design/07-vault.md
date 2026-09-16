@@ -96,7 +96,7 @@ line ([08-cli-socket.md](08-cli-socket.md)); the vault's own are:
 
 | Condition | stderr |
 | --- | --- |
-| unknown name | `vault: no secret named X — file it at <publicUrl>/#/settings/vault?name=X` |
+| unknown name | `vault: no secret named X — file it at <publicUrl>/app/#/settings/vault?name=X` |
 | store locked | `vault: locked — unlock() has not run` |
 | `vt` not on PATH with `record` values | `vault: vt is required for X (approve level) and was not found` |
 | bad syntax | the usage line |

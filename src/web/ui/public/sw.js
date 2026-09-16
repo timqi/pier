@@ -19,11 +19,11 @@ button{margin-top:1rem;padding:.5rem 1rem;border:1px solid light-dark(#d4d4d4,#3
 <button onclick="location.reload()">Try again</button></main></body></html>`;
 
 /** A payload URL is data: resolved against this origin, and replaced by the
- *  root if it lands anywhere else — a notification may not open a foreign page. */
+ *  workbench if it lands anywhere else — a notification may not open a foreign page. */
 const here = (url) => {
-  const root = new URL("/", self.location.origin);
+  const root = new URL("/app/", self.location.origin);
   try {
-    const target = new URL(url || "/", self.location.origin);
+    const target = new URL(url || "/app/", self.location.origin);
     return target.origin === root.origin ? target : root;
   } catch {
     return root;
@@ -75,8 +75,8 @@ self.addEventListener("push", (event) => {
       // second turn silently replaces the first — no sound, no re-alert, which
       // reads as "notifications stopped working". Ignored where unsupported.
       renotify: true,
-      icon: "/icon-192.png",
-      badge: "/icon-32.png",
+      icon: "/app/icon-192.png",
+      badge: "/app/icon-32.png",
       timestamp: Date.now(),
       data: { url: here(data.url).href },
     });

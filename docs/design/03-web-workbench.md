@@ -59,7 +59,9 @@ surface owns its routes and is mounted beside it.
 | `GET /api/task-groups/:id` | a batch and its members; 404 |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
-| `GET /*` | static frontend from `src/web/public/` (`/sw.js` is served `no-cache`: a cached worker is a released fix that never ships) |
+| `GET /` | 302 to `/app/` |
+| `GET /app`, `/app/` | the shell, `PIER_TITLE` patched into the tab title, `no-cache` |
+| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the manifest and icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*` and `/p/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*` and `/p/*` stay where they are, and the cookie's `Path` stays `/` |
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
@@ -104,8 +106,9 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
   `node:crypto`, the RFC's worked example as the golden test. No dependency.
 - Only 404/410 costs a subscription; every other failure is logged with the
   push service's answer (principle 5).
-- `sw.js` caches nothing; its one `fetch` handler is a navigation fallback, and
-  a notification only ever opens a same-origin URL.
+- `sw.js` is registered with scope `/app/`; it caches nothing, its one `fetch`
+  handler is a navigation fallback inside that scope, and a notification only
+  ever opens a same-origin URL (anything else opens `/app/`).
 - One VAPID key pair per instance, minted on first use, never rotated on its
   own; the private half is sealed by `Secrets` in `push_identity`.
 - The Notifications card lists every subscribed device under the switch, in

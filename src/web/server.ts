@@ -7,7 +7,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
+import { type Context, Hono, type Next } from "hono";
 import { compress } from "hono/compress";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
 import { EventHub } from "../core/hub.js";
@@ -628,15 +628,17 @@ export function createServer(
   // Pier is started from wherever the operator happens to be.
   const bundle = fileURLToPath(new URL("./public", import.meta.url));
 
+  // The workbench lives under /app/ (vite.config.ts `base`): a manifest scope
+  // is a path prefix with no exclusions, so at `/` an installed Pier would
+  // capture the Show pages at /boards/* and /p/*.
+  app.get("/", (c) => c.redirect("/app/"));
+
   // The tab says which instance this is: mistaking staging for production is
   // the mistake worth a few lines. Behind the auth guard, so a stranger at
   // /login learns neither fact.
   const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
   let shell: string | null = null;
-  // Answers from the patched string, not from disk, so the precompressed
-  // siblings below cannot cover it. Exact path: never the SSE streams.
-  app.use("/", compress());
-  app.get("/", async (c, next) => {
+  const serveShell = async (c: Context, next: Next): Promise<Response | void> => {
     // A cached index must not name bundles a release has replaced.
     c.header("cache-control", "private, no-cache");
     if (shell === null) {
@@ -649,27 +651,37 @@ export function createServer(
       }
     }
     return c.html(shell);
-  });
+  };
+  // Answers from the patched string, not from disk, so the precompressed
+  // siblings below cannot cover it. Exact paths: never the SSE streams.
+  for (const path of ["/app", "/app/"]) {
+    app.use(path, compress());
+    app.get(path, serveShell);
+  }
 
   // The one unhashed asset: an installed app keeps its worker until the
   // re-fetched script differs, so a cached copy is a fix that never ships.
-  app.get("/sw.js", async (c, next) => {
+  app.get("/app/sw.js", async (c, next) => {
     c.header("cache-control", "private, no-cache");
     await next();
   });
   // Hashed bundles never change under their name; without this the auth
   // layer's bare `private` costs a revalidation round trip per bundle per open.
-  app.get("/assets/*", async (c, next) => {
+  app.get("/app/assets/*", async (c, next) => {
     c.header("cache-control", "private, max-age=31536000, immutable");
     await next();
   });
   // The build writes `.br`/`.gz` siblings (vite.config.ts). serveStatic sets
   // Vary only when it selects one; identity must carry it too, or a cache can
   // reuse that response for a later Brotli request.
-  app.use("/*", async (c, next) => {
+  app.use("/app/*", async (c, next) => {
     await next();
     c.header("Vary", "Accept-Encoding");
   });
-  app.use("/*", serveStatic({ root: relative(process.cwd(), bundle) || ".", precompressed: true }));
+  app.use("/app/*", serveStatic({
+    root: relative(process.cwd(), bundle) || ".",
+    rewriteRequestPath: (path) => path.replace(/^\/app/, ""),
+    precompressed: true,
+  }));
   return app;
 }

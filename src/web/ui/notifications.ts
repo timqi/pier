@@ -11,7 +11,7 @@ import { badge, button, card, deviceRow, empty, setStatus, toggle } from "./form
  *  is not intent: a granted permission that the person then switched off here
  *  must not be re-subscribed on the next load. */
 const WANTED_KEY = "pier.push";
-const SW_URL = "/sw.js";
+const SW_URL = "/app/sw.js";
 
 const isIOS = (): boolean =>
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -76,7 +76,7 @@ let registration: ServiceWorkerRegistration | null = null;
  *  installable and what answers a navigation when the network is gone. */
 async function register(): Promise<ServiceWorkerRegistration | null> {
   if (!("serviceWorker" in navigator) || !window.isSecureContext) return null;
-  registration ??= await navigator.serviceWorker.register(SW_URL, { scope: "/" })
+  registration ??= await navigator.serviceWorker.register(SW_URL, { scope: "/app/" })
     .catch((err: unknown) => {
       console.warn("service worker registration failed", err);
       return null;

@@ -220,7 +220,7 @@ const safeNext = (raw: unknown): string =>
   typeof raw === "string" && /^\/(?![/\\])\S*$/.test(raw) &&
     ![...raw].some((ch) => ch <= "\u001f" || ch === "\u007f")
     ? raw
-    : "/";
+    : "/app/";
 
 // In memory: the window is minutes, and the point is to make guessing slow.
 // Fresh identities spill into one overflow bucket once the cap is reached.
@@ -343,7 +343,7 @@ export function registerAuthRoutes(app: Hono, store: AuthStore): void {
     if (throttled(client)) {
       // A burst here is the only warning an operator gets that the port is being knocked on.
       log.warn(`login throttled for ${client}`);
-      return c.html(loginPage("/", "Too many attempts. Wait a few minutes."), 429);
+      return c.html(loginPage("/app/", "Too many attempts. Wait a few minutes."), 429);
     }
     if (!c.req.header("content-type")?.startsWith("application/x-www-form-urlencoded")) {
       return c.text("expected the sign-in form", 400);

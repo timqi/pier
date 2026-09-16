@@ -239,7 +239,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
         await deliver({
           title: sessionLabel(await summary(e.sessionId)),
           body: preview(text) || "Turn finished.",
-          url: `/#/session/${encodeURIComponent(e.sessionId)}`,
+          url: `/app/#/session/${encodeURIComponent(e.sessionId)}`,
           tag: e.sessionId,
         });
       })().catch((err: unknown) => log.error(`delivering a push for ${e.sessionId} failed`, err));
@@ -296,7 +296,7 @@ export function registerPushRoutes(app: Hono, deps: PushDeps): void {
     const { sent, failed } = await deliver({
       title: "Pier",
       body: "Notifications are working.",
-      url: "/",
+      url: "/app/",
       tag: "pier-test",
     });
     if (!sent && !failed) return c.json({ error: "no device is subscribed" }, 409);

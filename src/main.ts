@@ -354,7 +354,7 @@ servePier({
   vault,
   // The deep link an agent's "no secret named X" error carries; loopback when
   // no public URL is set, since nothing in the process can discover one.
-  fileUrl: (name) => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/#/settings/vault?name=${name}`,
+  fileUrl: (name) => `${settings.get().publicUrl || `http://127.0.0.1:${String(port)}`}/app/#/settings/vault?name=${name}`,
   task: (params, callerSessionId) => tasks.handle(params, callerSessionId),
   // Progress and cost go to the log: the CLI's answer is the text alone.
   web: async (params, callerSessionId) => {

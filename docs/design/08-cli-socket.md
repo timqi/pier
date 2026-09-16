@@ -32,7 +32,7 @@ for an answer — 120 s on `/web`, the one route that waits on a provider.
 
 | Route | Body | Answers |
 | --- | --- | --- |
-| `/resolve` | `{sessionId, names: string[]}` | `200 {values}` — `{NAME: {kind: "plain" \| "record", value}}`; `404 {error: "no secret named X", file}` where `file` is `<publicUrl>/#/settings/vault?name=X` (loopback when no public URL is set); `423 {error: "locked — <reason>"}`; `400` for names that are not a non-empty list of vault names; `500 {error}` for anything else ([07-vault.md](07-vault.md)) |
+| `/resolve` | `{sessionId, names: string[]}` | `200 {values}` — `{NAME: {kind: "plain" \| "record", value}}`; `404 {error: "no secret named X", file}` where `file` is `<publicUrl>/app/#/settings/vault?name=X` (loopback when no public URL is set); `423 {error: "locked — <reason>"}`; `400` for names that are not a non-empty list of vault names; `500 {error}` for anything else ([07-vault.md](07-vault.md)) |
 | `/task` | `{sessionId, params}` — `params.operation` is `run`, `message`, `save`, `list`, `cancel` or `recover` ([09-tasks-cli.md](09-tasks-cli.md)) | `200 {result}`; `422 {error}` with the operation's own message for anything it refused — `handleTask` (`tasks/operations.ts`) is the one validator, and the CLI does none |
 | `/web` | `{sessionId, params}` — `params.op` is `search` (`query`, `language_mode?`, `allowed_domains?`, `blocked_domains?`, `backend?`) or `fetch` (`url`, `prompt?`, `mode?`) | `200 {result: {text, details}}`; `422 {error}` for a refused field, no backend with auth, a URL that is not public HTTP(S), or a provider failure — `parseWebParams`/`runWeb` (`websearch/run.ts`) validate, the CLI checks argv shape only; the model auth is the instance's (`WebContext`), the caller's active model a candidate |
 
