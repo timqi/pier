@@ -54,6 +54,9 @@ export const ACCENTS: Readonly<Record<string, string>> = {
   violet: "#7a49d3",
 };
 export const DEFAULT_ACCENT = "indigo";
+/** The plate colour icon.svg is authored in; what the served SVG and the
+ *  rendered PNGs replace with the accent's 600 step. */
+export const ICON_PLATE = "#4f46e5";
 
 /** `""` and the default's own name both mean "no override"; anything not in
  *  the table is rejected, never stored as a name the stylesheet lacks. */

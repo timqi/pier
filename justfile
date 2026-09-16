@@ -17,6 +17,10 @@ release bump="patch":
     git push --follow-tags
     gh run watch --exit-status $(sleep 5 && gh run list --workflow=release.yml -L1 --json databaseId -q '.[0].databaseId')
 
+# Every PNG icon from icon.svg, one per accent preset; the renderer is fetched, not a dependency.
+icons:
+    npx -y -p @resvg/resvg-js -p tsx tsx scripts/render-icons.ts
+
 # Non-blank, non-comment lines per area, tests excluded — the Budgets table in AGENTS.md.
 size:
     #!/usr/bin/env bash

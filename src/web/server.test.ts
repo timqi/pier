@@ -35,13 +35,13 @@ import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
 import type { TaskRun } from "../tasks/types.js";
-import { ACCENTS, SettingsStore } from "../settings.js";
+import { ACCENTS, ICON_PLATE, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
 import { ProviderFlows } from "./provider-flows.js";
 import { SessionStateStore } from "./session-state.js";
 import { MAX_FILE_BYTES } from "./fs.js";
-import { createServer, ICON_PLATE, instanceManifest, tabPrefix, withAccent, withAccentIcon, withTabPrefix } from "./server.js";
+import { createServer, instanceManifest, tabPrefix, withAccent, withAccentIcon, withTabPrefix } from "./server.js";
 import type { SecretsControl } from "./instance.js";
 import type { ToolsSyncNote } from "./types.js";
 
@@ -2470,6 +2470,17 @@ describe("the app shell", () => {
     expect(teal.name).toBe("staging box for the team");
     expect((teal.short_name as string).length).toBeLessThanOrEqual(12);
     expect(teal.theme_color).toBe("#037f75");
+    // The Dock reads the manifest's PNGs, icons and shortcuts alike: every one
+    // has a pre-rendered copy per preset, and the SVG entry stays.
+    const pub = new URL("./ui/public/", import.meta.url);
+    const pngs = (m: Record<string, unknown>) => JSON.stringify(m).match(/\/app\/icon-[\w-]+\.png/g) ?? [];
+    expect(new Set(pngs(template))).toEqual(new Set(["/app/icon-192.png", "/app/icon-512.png", "/app/icon-maskable-512.png"]));
+    for (const name of Object.keys(ACCENTS).filter((n) => n !== "indigo")) {
+      const m = instanceManifest(template, undefined, name);
+      expect(JSON.stringify(m)).toContain('"/app/icon.svg"');
+      expect(new Set(pngs(m))).toEqual(new Set([`/app/icon-192-${name}.png`, `/app/icon-512-${name}.png`, `/app/icon-maskable-512-${name}.png`]));
+      for (const src of new Set(pngs(m))) expect(existsSync(new URL(src.slice("/app/".length), pub))).toBe(true);
+    }
     expect(withAccentIcon(svg, "teal")).toContain('fill="#037f75"');
     expect(withAccentIcon(svg, "teal")).not.toContain(ICON_PLATE);
     // Unset: Pier, in the default ramp's blue — the same on both assets.
@@ -2477,6 +2488,7 @@ describe("the app shell", () => {
     expect(plain.name).toBe("Pier");
     expect(plain.short_name).toBe("Pier");
     expect(plain.theme_color).toBe("#0066df");
+    expect(plain.icons).toEqual(template.icons);
     expect(withAccentIcon(svg, "")).toContain('fill="#0066df"');
     // Everything else is the shipped file's.
     expect(plain.scope).toBe("/app/");

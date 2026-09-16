@@ -36,7 +36,7 @@ import { isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
-import { ACCENTS, DEFAULT_ACCENT, type SettingsStore } from "../settings.js";
+import { ACCENTS, DEFAULT_ACCENT, ICON_PLATE, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
 import type { UpdateCheck } from "../update.js";
 import { registerInstanceRoutes, type SecretsControl, type UpdateApplier } from "./instance.js";
@@ -77,18 +77,19 @@ export const withTabPrefix = (html: string, prefix: string): string =>
     )
     : html;
 
+/** Safari, the iOS Home Screen, the Dock and launchers take PNG links, never
+ *  the served SVG, so every `/app/icon-*.png` reference (shell and manifest)
+ *  is pointed at the preset's pre-rendered copy, `icon-<size>-<accent>.png`
+ *  beside the defaults in public/ (`just icons`). A preset name, already
+ *  validated — never a colour. */
+const accentPngs = (text: string, accent: string): string =>
+  text.replace(/\/app\/icon-[\w-]+\.png/g, (src) => src.replace(/\.png$/, `-${accent}.png`));
+
 /** The accent rides on `<html>` so the first paint is already in it; the
- *  stylesheet's `[data-accent]` ramps do the rest (style.css). Safari and the
- *  iOS Home Screen take the PNG links, never the SVG or the manifest, so those
- *  point at the preset's pre-rendered copy (`icon-32-<accent>.png`,
- *  `icon-touch-192-<accent>.png`, beside the defaults in public/). A preset
- *  name, already validated — never a colour. */
+ *  stylesheet's `[data-accent]` ramps do the rest (style.css). */
 export const withAccent = (html: string, accent: string): string =>
   accent
-    ? html
-      .replace('<html lang="en">', `<html lang="en" data-accent="${accent}">`)
-      .replace('/app/icon-32.png', `/app/icon-32-${accent}.png`)
-      .replace('/app/icon-touch-192.png', `/app/icon-touch-192-${accent}.png`)
+    ? accentPngs(html.replace('<html lang="en">', `<html lang="en" data-accent="${accent}">`), accent)
     : html;
 
 /** Two Piers on one phone need two names and two colours: the manifest names
@@ -100,8 +101,9 @@ export const instanceManifest = (
   accent: string,
 ): Record<string, unknown> => {
   const name = title?.trim() || "Pier";
+  const rendered = accent ? JSON.parse(accentPngs(JSON.stringify(template), accent)) as Record<string, unknown> : template;
   return {
-    ...template,
+    ...rendered,
     name,
     short_name: name.slice(0, 12),
     theme_color: ACCENTS[accent || DEFAULT_ACCENT],
@@ -109,8 +111,7 @@ export const instanceManifest = (
 };
 
 /** The plate colour is the one thing the served SVG changes; the mark stays
- *  white. The PNG fallbacks beside it are static and keep the shipped blue. */
-export const ICON_PLATE = "#4f46e5";
+ *  white. */
 export const withAccentIcon = (svg: string, accent: string): string =>
   svg.replace(`fill="${ICON_PLATE}"`, `fill="${ACCENTS[accent || DEFAULT_ACCENT]}"`);
 
