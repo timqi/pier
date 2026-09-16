@@ -12,11 +12,13 @@ import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import type { QueueRecovery, SessionState } from "../../core/types.js";
 
-/** A file picked but not yet sent; uploaded to the inbox on send. */
+/** A file picked but not yet sent. The upload starts on attach, so Enter
+ *  usually finds its marker already there and the send paints at once. */
 interface PendingFile {
   data: string; // base64
   mimeType: string;
   name?: string; // absent for a pasted screenshot — the server derives one
+  marker: Promise<string | null>; // null: the upload failed
 }
 
 /** Everything the composer needs from the orchestrator (main.ts). */
@@ -255,27 +257,29 @@ function addFile(file: File): void {
   const reader = new FileReader();
   reader.onload = () => {
     const url = reader.result as string;
-    pendingFiles.push({
+    pendingFiles.push(withUpload({
       data: url.slice(url.indexOf(",") + 1),
       mimeType: file.type || "application/octet-stream",
       name: file.name || undefined,
-    });
+    }));
     renderFileStrip();
   };
   reader.readAsDataURL(file);
 }
 
-/** Marker lines built with the shared grammar (core/inbound-file.ts), so the
+/** Marker line built with the shared grammar (core/inbound-file.ts), so the
  *  optimistic render is exactly what every other surface will see. */
+function withUpload({ data, mimeType, name }: Omit<PendingFile, "marker">): PendingFile {
+  const f = { data, mimeType, name };
+  const marker = sendJson("/api/inbox", f)
+    .then(async (res) => (res.ok ? fileMarker(((await res.json()) as { path: string }).path) : null))
+    .catch(() => null); // a failed send reports it (§5) and re-arms the upload
+  return { ...f, marker };
+}
+
 async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
-  const markers: string[] = [];
-  for (const f of files) {
-    const res = await sendJson("/api/inbox", f);
-    if (!res.ok) return null;
-    const { path } = (await res.json()) as { path: string };
-    markers.push(fileMarker(path));
-  }
-  return markers;
+  const markers = await Promise.all(files.map((f) => f.marker));
+  return markers.every((m): m is string => m !== null) ? markers : null;
 }
 
 // --- composer drafts -------------------------------------------------------------------
@@ -373,7 +377,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
         input.value = [typed, input.value.trim()].filter(Boolean).join("\n");
         autosize();
         saveDraft();
-        pendingFiles = files;
+        pendingFiles = files.map(withUpload); // fresh uploads: the failed ones are spent
         renderFileStrip();
         return;
       }

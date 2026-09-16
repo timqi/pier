@@ -393,7 +393,14 @@ describe("pending attachments", () => {
   };
   const staged = (): number => state.nodes.get("#image-strip")!.children.length;
 
+  it("uploads a file as it is attached, so Enter does not wait on it", () => {
+    state.fetch.mockResolvedValueOnce(Response.json({ path: "/inbox/shot.png" }));
+    paste("shot.png");
+    expect(state.fetch.mock.calls.map(([url]) => url)).toEqual(["/api/inbox"]);
+  });
+
   it("leaves a session's staged files where they were when it comes back", () => {
+    state.fetch.mockResolvedValue(Response.json({ path: "/inbox/x.png" }));
     paste("shot.png");
     paste("other.png");
     expect(staged()).toBe(2);

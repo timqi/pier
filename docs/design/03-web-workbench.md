@@ -274,11 +274,13 @@ browser keeps no second session order.
 - **Queue panel**: `queue-state` snapshots with mode chips; **Send now**
   (steer), **Abort & send** (abort, fresh prompt), **Recall all** (append to the
   composer draft). Queued messages join with newlines.
-- **Attachments**: paste, drag-drop, `+` → pending strip; on send each file goes
-  to `POST /api/inbox` and its `[name](file:///…)` marker joins the text, so
-  sent, optimistic and echoed text are identical. The strip is per session, in
-  memory only. User bubbles strip markers and render them via
-  `web/ui/attachments.ts`; images open in the lightbox.
+- **Attachments**: paste, drag-drop, `+` → pending strip; each file goes to
+  `POST /api/inbox` as it is attached, and on send its `[name](file:///…)`
+  marker joins the text, so sent, optimistic and echoed text are identical and
+  Enter does not wait on the upload. A file removed before sending stays in
+  the inbox. The strip is per session, in memory only. User bubbles strip
+  markers and render them via `web/ui/attachments.ts`; images open in the
+  lightbox.
 - **Speaker caption**: a user bubble whose text opens with the speaker header
   (`core/identity.ts`) shows the name above the message and, when the session
   answers an IM, the channel beside it in muted uppercase (`qiqi` `LARK`); the
