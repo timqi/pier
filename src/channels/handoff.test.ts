@@ -26,7 +26,7 @@ let events: WorkspaceEvent[];
 let logs: string[];
 let publicUrl: string;
 
-const SLACK_OPS = { platform: "slack" as const, chatId: "C100" };
+const SLACK_DM = { platform: "slack" as const, chatId: "D100" };
 
 function handoff() {
   return createHandoff({
@@ -62,6 +62,7 @@ beforeEach(() => {
   const vault = new Map<string, string>();
   store = new ChannelStore(db, { get: (n) => vault.get(n), seal: (n, v) => void vault.set(n, v), remove: (n) => vault.delete(n) });
   store.discoverChat("slack", { id: "C100", name: "#ops", kind: "group" });
+  store.discoverChat("slack", { id: "D100", name: "Qi", kind: "dm" });
   store.discoverChat("lark", { id: "oc_1", name: "DM · Qi", kind: "dm" });
   conversations = new ConversationStore(db);
   running = ["slack", "lark"];
@@ -86,10 +87,10 @@ const refused = async (req: Parameters<ReturnType<typeof handoff>["continueIn"]>
 };
 
 describe("targets", () => {
-  it("lists running platforms × enabled chats", () => {
+  it("lists running platforms × enabled DMs, never a group", () => {
     expect(handoff().targets()).toEqual([
-      { platform: "slack", chatId: "C100", name: "#ops", kind: "group" },
-      { platform: "lark", chatId: "oc_1", name: "DM · Qi", kind: "dm" },
+      { platform: "slack", chatId: "D100", name: "Qi" },
+      { platform: "lark", chatId: "oc_1", name: "DM · Qi" },
     ]);
     running = ["lark"];
     const lark = store.get("lark");
@@ -102,7 +103,7 @@ describe("targets", () => {
 describe("continueIn refuses", () => {
   it("a platform that is not running", async () => {
     running = ["lark"];
-    const err = await refused({ sessionId: "s1", ...SLACK_OPS });
+    const err = await refused({ sessionId: "s1", ...SLACK_DM });
     expect(err.status).toBe(409);
     expect(err.message).toBe("Slack is not running — enable it in Settings → Channels.");
     expect(opened).toEqual([]);
@@ -113,21 +114,28 @@ describe("continueIn refuses", () => {
       status: 404, message: "That chat is not enabled for the bot.",
     });
     const slack = store.get("slack");
-    slack.chats[0]!.enabled = false;
+    slack.chats.find((c) => c.id === "D100")!.enabled = false;
     store.save("slack", slack);
-    expect(await refused({ sessionId: "s1", ...SLACK_OPS })).toMatchObject({ status: 409 });
+    expect(await refused({ sessionId: "s1", ...SLACK_DM })).toMatchObject({ status: 409 });
+    expect(opened).toEqual([]);
+  });
+
+  it("a group chat, even enabled and running", async () => {
+    const err = await refused({ sessionId: "s1", platform: "slack", chatId: "C100" });
+    expect(err.status).toBe(409);
+    expect(err.message).toBe("Only a direct message can continue a web session.");
     expect(opened).toEqual([]);
   });
 
   it("a session not on disk — never prompted", async () => {
-    const err = await refused({ sessionId: "nascent1", ...SLACK_OPS });
+    const err = await refused({ sessionId: "nascent1", ...SLACK_DM });
     expect(err.status).toBe(404);
     expect(err.message).toBe("Session nascent1 has no transcript yet — send it one message first.");
   });
 
   it("a session that already answers in a chat, naming it", async () => {
     conversations.set({ channelId: "lark", conversationId: "oc_1/om_9" }, "s1");
-    const err = await refused({ sessionId: "s1", ...SLACK_OPS });
+    const err = await refused({ sessionId: "s1", ...SLACK_DM });
     expect(err.status).toBe(409);
     expect(err.message).toBe("Already answers in lark · DM · Qi.");
     expect(opened).toEqual([]);
@@ -148,26 +156,26 @@ describe("continueIn", () => {
   it("posts once, writes the row, attaches when loaded, emits sessions-changed", async () => {
     const session = { id: "s1" } as AgentSession;
     loaded.set("s1", session);
-    const result = await handoff().continueIn({ sessionId: "s1", ...SLACK_OPS });
-    expect(result).toEqual({ conversationId: "C100/1717.1" });
+    const result = await handoff().continueIn({ sessionId: "s1", ...SLACK_DM });
+    expect(result).toEqual({ conversationId: "D100/1717.1" });
     expect(opened).toEqual([{
-      platform: "slack", chatId: "C100",
+      platform: "slack", chatId: "D100",
       note: { title: "Fix the parser", url: "https://pier.example/app/#/session/s1" },
     }]);
-    const key = { channelId: "slack", conversationId: "C100/1717.1" };
+    const key = { channelId: "slack", conversationId: "D100/1717.1" };
     expect(conversations.keyOf("s1")).toEqual(key);
     expect(conversations.launchOf(key)).toBeUndefined();
     expect(attached).toEqual([[key, session]]);
     expect(events).toEqual([{ type: "sessions-changed" }]);
-    expect(logs[0]).toContain("s1 continued in slack:C100/1717.1");
+    expect(logs[0]).toContain("s1 continued in slack:D100/1717.1");
     // Bound now: a second handoff is refused by the first chat's name.
     expect(await refused({ sessionId: "s1", platform: "lark", chatId: "oc_1" })).toMatchObject({
-      status: 409, message: "Already answers in slack · #ops.",
+      status: 409, message: "Already answers in slack · Qi.",
     });
   });
 
   it("a session not loaded gets its row and nothing else — the row is enough", async () => {
-    await handoff().continueIn({ sessionId: "s1", ...SLACK_OPS });
+    await handoff().continueIn({ sessionId: "s1", ...SLACK_DM });
     expect(attached).toEqual([]);
     expect(conversations.keyOf("s1")?.channelId).toBe("slack");
   });
@@ -175,14 +183,14 @@ describe("continueIn", () => {
   it("the note's title is `sessionLabel` (identity.test.ts): header off, one line, directory as fallback", async () => {
     onDisk.set("s3", { id: "s3", cwd: "/srv/parser", createdAt: 1, title: "[qi<U1> 12:01 slack:C1/2]\nfix the parser\nthen the tests" });
     onDisk.set("s2", { id: "s2", cwd: "/srv/parser", createdAt: 1 });
-    await handoff().continueIn({ sessionId: "s3", ...SLACK_OPS });
-    await handoff().continueIn({ sessionId: "s2", ...SLACK_OPS });
+    await handoff().continueIn({ sessionId: "s3", ...SLACK_DM });
+    await handoff().continueIn({ sessionId: "s2", ...SLACK_DM });
     expect(opened.map((o) => o.note.title)).toEqual(["fix the parser then the tests", "parser"]);
   });
 
   it("no public URL → empty link", async () => {
     publicUrl = "";
-    await handoff().continueIn({ sessionId: "s1", ...SLACK_OPS });
+    await handoff().continueIn({ sessionId: "s1", ...SLACK_DM });
     expect(opened[0]!.note.url).toBe("");
   });
 });

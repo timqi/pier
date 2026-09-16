@@ -83,11 +83,13 @@ export function createHandoff(deps: HandoffDeps): Handoff {
   };
 
   return {
+    // DMs only: a group's thread belongs to the group, and a session pushed
+    // into one answers everyone there.
     targets: () =>
       runtime.running().flatMap((platform) =>
         store.get(platform).chats
-          .filter((chat) => chat.enabled)
-          .map((chat) => ({ platform, chatId: chat.id, name: chat.name, kind: chat.kind }))
+          .filter((chat) => chat.enabled && chat.kind === "dm")
+          .map((chat) => ({ platform, chatId: chat.id, name: chat.name }))
       ),
 
     async continueIn({ sessionId, platform, chatId }) {
@@ -96,6 +98,7 @@ export function createHandoff(deps: HandoffDeps): Handoff {
       }
       const chat = store.chat(platform, chatId);
       if (!chat?.enabled) throw new HandoffError(chat ? 409 : 404, "That chat is not enabled for the bot.");
+      if (chat.kind !== "dm") throw new HandoffError(409, "Only a direct message can continue a web session.");
       const summary = await claimable(sessionId);
       const base = publicUrl();
       const note = {

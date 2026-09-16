@@ -403,8 +403,8 @@ async function handoffPicker(anchor: HTMLElement, s: SessionInfo): Promise<void>
   const status = h("p", "px-3 py-2 text-[15px] text-neutral-500", "Loading chats…");
   const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full",
     panelHead(anchor, s, "Close chat picker"),
-    h("div", "px-3 pb-1 text-sm font-medium text-neutral-500", "Continue in a chat"),
-    h("p", "px-3 pb-2 text-[13px] text-neutral-500", "Chats the bot has seen. A chat appears here after its first message to the bot."),
+    h("div", "px-3 pb-1 text-sm font-medium text-neutral-500", "Continue in a direct message"),
+    h("p", "px-3 pb-2 text-[13px] text-neutral-500", "DMs the bot has seen. A DM appears here after its first message to the bot."),
     status);
   openPanel(anchor, content);
   const got = await getJson<{ targets: HandoffTarget[] }>("/api/handoff/targets", "Could not list chats");
@@ -415,7 +415,7 @@ async function handoffPicker(anchor: HTMLElement, s: SessionInfo): Promise<void>
     return;
   }
   if (!got.value.targets.length) {
-    status.textContent = "No chats yet — message the bot once in Lark or Slack, then come back.";
+    status.textContent = "No DMs yet — message the bot once in Lark or Slack, then come back.";
     return;
   }
   const error = h("p", "hidden px-3 pt-1 text-[13px] text-red-600");
@@ -424,7 +424,7 @@ async function handoffPicker(anchor: HTMLElement, s: SessionInfo): Promise<void>
   list.dataset.list = "";
   for (const t of got.value.targets) {
     const row = h("button", "flex w-full min-h-10 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100",
-      h("span", "min-w-0 truncate", `${t.platform[0]!.toUpperCase()}${t.platform.slice(1)} · ${t.kind === "dm" ? "DM" : "group"} · ${t.name || t.chatId}`));
+      h("span", "min-w-0 truncate", `${t.platform[0]!.toUpperCase()}${t.platform.slice(1)} · ${t.name || t.chatId}`));
     row.onclick = async () => {
       const res = await sendJson("/api/handoff", { sessionId: s.id, platform: t.platform, chatId: t.chatId });
       if (res.ok) return closeMenu();

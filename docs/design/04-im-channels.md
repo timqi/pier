@@ -27,7 +27,7 @@ Platform adapters in front of Pi sessions: Slack and Lark (Feishu).
 | Console tab | One page per platform: token, defaults, bound users, discovered chats; autosaved, token masked | shared (`routes.ts`, `web/ui/channels.ts`) | ✅ | ✅ |
 | Setup walkthrough | Hover help for getting a token and enabling threads | adapter copy, shared badge | ✅ | ✅ |
 | Settings panel | In-chat panel: a thread without a session drafts one (cwd, pinned model & reasoning, a pending question) and Starts it; a thread with one reads it out, picks model & reasoning, stops | shared control, adapter renders | ✅ | ✅ |
-| Continue from web | The workbench binds a web session to a new thread in a chat the bot knows; Pier posts the one root message | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
+| Continue from web | The workbench binds a web session to a new thread in a DM the bot knows; Pier posts the one root message | shared (`handoff.ts`), adapter posts the root (`openThread`) | ✅ | ✅ |
 | Continue in this thread | The panel of a thread with no session binds it to an unbound web session | shared (`handoff.ts` → `panel.ts`) | ✅ | ✅ |
 | Agent access | An agent session reads/posts through the platform from a shell, with the token from the vault | `pier <platform>` subcommand (`slack-cli.ts`) + skill (`skills/pier-slack/`) | ✅ | —¹ |
 
@@ -101,6 +101,7 @@ Both directions share the guards and the binding, in this order:
 | --- | --- |
 | `continueIn` only: platform running | 409 `Slack is not running — enable it in Settings → Channels.` |
 | `continueIn` only: chat known, enabled | 404 / 409 `That chat is not enabled for the bot.` |
+| `continueIn` only: the chat is a DM | 409 `Only a direct message can continue a web session.` |
 | `continueHere` only: thread has no row | 409 `This thread already has a session.` |
 | session on disk | 404 `Session <id8> has no transcript yet — send it one message first.` |
 | not already bound | 409 `Already answers in <platform> · <chat name>.` |
@@ -371,7 +372,7 @@ channel row holds no credential.
 | `DELETE /api/channels/:platform/users/:id` | unbind |
 | `GET /api/models` | backend model catalog, no session needed |
 | `GET /api/fs/ls`, `POST /api/fs/mkdir` | directory browsing / mkdir for the cwd picker |
-| `GET /api/handoff/targets` | `{targets: HandoffTarget[]}` — running platforms × enabled chats |
+| `GET /api/handoff/targets` | `{targets: HandoffTarget[]}` — running platforms × enabled DMs |
 | `POST /api/handoff` | body `HandoffRequest` → 201 `HandoffResult`; 400 invalid body; 404 / 409 / 502 `{error}` per the order above |
 
 The save is **non-destructive** (stored chat list overlaid with the client's

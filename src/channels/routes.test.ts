@@ -12,7 +12,7 @@ let app: Hono;
 let reloads: number;
 let handoffs: HandoffRequest[];
 let refuse: HandoffError | undefined;
-const TARGETS: HandoffTarget[] = [{ platform: "slack", chatId: "C100", name: "#ops", kind: "group" }];
+const TARGETS: HandoffTarget[] = [{ platform: "slack", chatId: "D100", name: "Qi" }];
 
 beforeEach(() => {
   const vault = new Map<string, string>();
