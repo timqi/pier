@@ -122,7 +122,7 @@ findings and actions first, then evidence; fold only supplementary detail.
   boards can become public with one Console toggle.
 - **Self-contained:** assets live under `site/` with relative paths, except
   the shipped stylesheet; no CDN, external fonts, analytics or `fetch()`
-  (blocked by the public CSP).
+  (blocked by the board CSP).
 - **Interaction:** prefer `<details>` and anchors; local JS may sort, filter or
   inspect embedded data, without network calls or server runtime. With JS off,
   keep the answer and evidence readable; hide or disable unavailable controls.

@@ -120,7 +120,7 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
   // Public first, because that is the list worth double-checking.
   const SECTIONS = [
     { title: "Public", hint: "Readable at /p/<slug>-<token>/ by anyone holding the link.", wanted: true },
-    { title: "Private", hint: "Reachable from the Console only.", wanted: false },
+    { title: "Private", hint: "Opened from here; the address that opens is a temporary link, good for 8 hours.", wanted: false },
   ];
 
   function render(): void {

@@ -62,7 +62,7 @@ surface owns its routes and is mounted beside it.
 | `GET /` | 302 to `/app/` |
 | `GET /app`, `/app/` | the shell, `PIER_TITLE` patched into the tab title and the accent onto `<html data-accent>`, `no-cache` |
 | `GET /app/manifest.webmanifest`, `/app/icon.svg` | the shipped files, rendered per instance and `no-cache`: `name`/`short_name` (≤12) are `PIER_TITLE` (`Pier` when unset), `theme_color` and the icon's plate the accent's 600 step (`ACCENTS` in `settings.ts`). Safari and the iOS Home Screen read only the PNG links, so the shell points `icon-32` and `apple-touch-icon` at the preset's pre-rendered `icon-32-<accent>.png` / `icon-touch-192-<accent>.png`; the Dock and launchers read the manifest's PNGs, so its `icons` are rewritten to `icon-192-<accent>.png` / `icon-512-<accent>.png` / `icon-maskable-512-<accent>.png` the same way (all rendered from `icon.svg` by `just icons` — `scripts/render-icons.ts`, `@resvg/resvg-js` fetched by npx, not a dependency). An installed app keeps the icon it was installed with |
-| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*` and `/p/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*` and `/p/*` stay where they are, and the cookie's `Path` stays `/` |
+| `GET /app/*` | the rest of `src/web/public/` — hashed bundles (`immutable`), `sw.js` (`no-cache`: a cached worker is a released fix that never ships), the PNG icons. The workbench lives under `/app/` because a manifest `scope` is a path prefix with no exclusions: at `/` an installed Pier would capture `/boards/*`, `/b/*` and `/p/*`. Hash routes are `/app/#/…`; `/api/*`, `/login`, `/boards/*`, `/b/*` and `/p/*` stay where they are, and the cookie's `Path` stays `/` |
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
@@ -70,7 +70,8 @@ surface owns its routes and is mounted beside it.
 - **Continue in a chat** (`GET /api/handoff/targets`, `POST /api/handoff`;
   owned by `channels/routes.ts`, contract in
   [04-im-channels.md](04-im-channels.md#continue-from-web-and-from-a-thread-handoffts)):
-  the ⋯ menu's *Continue in Lark/Slack…* lists the targets; a pick posts the
+  the ⋯ menu's *Continue in Lark/Slack…* lists the DMs the bot has seen (a
+  group's thread belongs to the group, so it is never a target); a pick posts the
   handoff and the rail's chip follows from `sessions-changed`. A session
   already answering a chat has the row disabled with `answers in <platform>`;
   a refusal stays under the picked row in the server's words.
@@ -86,7 +87,7 @@ headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below), `tasks/routes.ts`,
-`channels/routes.ts`, `vault.ts` (`/api/vault*`), `boards/boards.ts` (`/boards/*`, `/p/*`).
+`channels/routes.ts`, `vault.ts` (`/api/vault*`), `boards/boards.ts` (`/boards/*`, `/b/*`, `/p/*`).
 
 ## Passkeys (`src/web/passkeys.ts`)
 

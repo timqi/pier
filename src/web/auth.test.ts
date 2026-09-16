@@ -48,6 +48,9 @@ function app(s: AuthStore): Hono {
   a.all("/p/report/", (c) => c.text("published write"));
   a.get("/p/_assets/pier.css", (c) => c.text("css"));
   a.all("/p/_assets/pier.css", (c) => c.text("css write"));
+  // The signed prefix a board is served on once this boundary has been passed.
+  a.get("/b/report/1a-sig/", (c) => c.text("viewed"));
+  a.all("/b/report/1a-sig/", (c) => c.text("viewed write"));
   a.get("/boards/report/", (c) => c.text("private"));
   return a;
 }
@@ -138,7 +141,7 @@ describe("requireAuth", () => {
 
   it("serves only read methods for published boards and their stylesheet", async () => {
     const a = app(store().store);
-    for (const path of ["/p/report/", "/p/_assets/pier.css"]) {
+    for (const path of ["/p/report/", "/p/_assets/pier.css", "/b/report/1a-sig/"]) {
       expect((await a.request(path)).status).toBe(200);
       expect((await a.request(path, { method: "HEAD" })).status).toBe(200);
       for (const method of ["POST", "PATCH", "DELETE"]) {

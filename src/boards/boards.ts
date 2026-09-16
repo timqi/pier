@@ -1,9 +1,10 @@
 // Boards: static pages an agent writes, derived by scanning $PIER_HOME/boards,
 // never registered (docs/design/05-boards.md). Only <board>/site is reachable
-// over HTTP, so a public board leaks nothing about how it was made. `/p/*` is
-// the only password-free prefix, stylesheet included, and runs sandboxed.
+// over HTTP, so a public board leaks nothing about how it was made. Bytes are
+// served on two password-free prefixes, `/p/*` (published) and `/b/*` (a
+// signed prefix the boundary mints), stylesheet included, and run sandboxed.
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context, Hono } from "hono";
@@ -54,18 +55,51 @@ const TYPES: Record<string, string> = {
   ".csv": "text/plain; charset=utf-8",
 };
 
-// Active content on the workbench origin: the sandbox removes forms, frames,
-// popups and subresource requests. A private board keeps `allow-same-origin`
-// for the session cookie, so its script reads this origin's storage and
-// top-level navigation remains a way out (docs/design/05-boards.md). Public
-// pages omit same-origin, so their scripts inherit no authority at all.
+// Agent-written script, so it runs in an opaque origin: no `allow-same-origin`
+// on any board, published or not, and the sandbox also removes forms, frames,
+// popups and subresource requests. What that costs is the session cookie —
+// an opaque-origin document sends none with its own assets — which is why a
+// board is never served on a cookie-authorized URL (docs/design/05-boards.md).
 const CSP =
-  "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
-  "script-src 'self' 'unsafe-inline'; connect-src 'none'; frame-src 'none'; " +
-  "worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; " +
-  "frame-ancestors 'none'";
-const PRIVATE_CSP = `sandbox allow-scripts allow-same-origin; ${CSP}`;
-const PUBLIC_CSP = `sandbox allow-scripts; ${CSP}`;
+  "sandbox allow-scripts; default-src 'self'; img-src 'self' data:; " +
+  "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; " +
+  "connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; " +
+  "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/** Long enough to read a board without a second thought, short enough that a
+ *  URL left in a history or a chat log stops working the same day. */
+const VIEW_TTL_MS = 8 * 60 * 60_000;
+/** Process-scoped: a view prefix is a read capability for one board, and
+ *  nothing may outlive the instance that vouched for it. */
+let viewKey = randomBytes(32);
+
+/** Signing out must end the boards that session opened too — the pages carry
+ *  no cookie to revoke, so the key they were signed with is what goes. */
+export const rotateBoardViews = (): void => {
+  viewKey = randomBytes(32);
+};
+
+const sign = (slug: string, expires: number): string =>
+  createHmac("sha256", viewKey).update(`${slug}\0${String(expires)}`).digest("base64url").slice(0, 22);
+
+/** `<expiry in base36>-<signature>`: its own path segment, so the first hyphen
+ *  is the cut and a hyphenated slug stays unambiguous. */
+const mintView = (slug: string): string => {
+  const expires = Date.now() + VIEW_TTL_MS;
+  return `${expires.toString(36)}-${sign(slug, expires)}`;
+};
+
+function validView(slug: string, view: string): boolean {
+  const cut = view.indexOf("-");
+  if (cut < 1) return false;
+  const stamp = view.slice(0, cut);
+  const expires = Number.parseInt(stamp, 36);
+  // Canonical only: `parseInt` stops at the first stray character, which would
+  // make one signature valid under several spellings of its own prefix.
+  if (!Number.isSafeInteger(expires) || expires.toString(36) !== stamp) return false;
+  if (expires <= Date.now()) return false;
+  return sameToken(sign(slug, expires), view.slice(cut + 1));
+}
 
 /** Malformed boards are reported once, not on every scan. */
 const warned = new Set<string>();
@@ -196,14 +230,7 @@ const sameToken = (want: string, got: string): boolean => {
   return timingSafeEqual(digest(want), digest(got));
 };
 
-async function serveFile(c: Context, dir: string, key: string, rest: string, publicOnly: boolean) {
-  const { slug, token } = publicOnly ? publicKey(key) : { slug: key, token: "" };
-  const manifest = await readManifest(dir, slug);
-  // 404, never 403: a private board's existence is not public information, and
-  // a wrong token is the same non-answer as a wrong name.
-  if (!manifest || (publicOnly && (!manifest.public || !sameToken(manifest.token, token)))) {
-    return c.notFound();
-  }
+async function serveFile(c: Context, dir: string, slug: string, rest: string) {
   const file = await resolveFile(dir, slug, rest);
   if (!file) return c.notFound();
   const type = TYPES[extname(file).toLowerCase()];
@@ -211,16 +238,16 @@ async function serveFile(c: Context, dir: string, key: string, rest: string, pub
   const headers: Record<string, string> = {
     "content-type": type,
     "x-content-type-options": "nosniff",
-    // Every public request rechecks the manifest, so unpublishing cannot leave
-    // a shared-cache copy reachable. Private assets may stay in one browser.
-    "cache-control": publicOnly || type.startsWith("text/html")
-      ? "no-store"
-      : "private, max-age=300",
-    "content-security-policy": publicOnly ? PUBLIC_CSP : PRIVATE_CSP,
+    // Nothing is cached: both prefixes are revocable (unpublish, sign out,
+    // expiry), and a stored copy would outlive the revocation.
+    "cache-control": "no-store",
+    "content-security-policy": CSP,
+    // The URL is the credential on both prefixes; an outbound link must not carry it.
+    "referrer-policy": "no-referrer",
+    // A sandboxed page has an opaque origin. Fonts and module scripts need CORS
+    // even when their URLs are under the same board.
+    "access-control-allow-origin": "*",
   };
-  // Public sandboxed pages have an opaque origin. Fonts and module scripts need
-  // CORS even when their URLs are under the same published board.
-  if (publicOnly) headers["access-control-allow-origin"] = "*";
   return c.body(await readFile(file), 200, headers);
 }
 
@@ -247,6 +274,9 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
     const slug = c.req.param("slug");
     if (!(await readManifest(dir, slug))) return c.json({ error: "no such board" }, 404);
     await rename(join(dir, slug), join(dir, `${slug}.deleted-${Date.now()}`));
+    // A capability names a slug, and a slug can be taken again: the prefixes
+    // handed out for the board that just died must not open its successor.
+    rotateBoardViews();
     return c.json({ deleted: slug });
   });
 
@@ -260,13 +290,48 @@ export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir())
   });
 
   // Trailing slash matters: without it a board's relative asset paths resolve
-  // against /boards instead of the board.
-  for (const prefix of ["/boards", "/p"]) {
-    app.get(`${prefix}/:key`, (c) => c.redirect(`${prefix}/${c.req.param("key")}/`));
-    app.get(`${prefix}/:key/*`, (c) => {
-      const key = c.req.param("key");
-      const rest = c.req.path.slice(`${prefix}/${key}/`.length);
-      return serveFile(c, dir, key, rest, prefix === "/p");
-    });
-  }
+  // against the prefix instead of the board.
+  app.get("/p/:key", (c) => c.redirect(`/p/${c.req.param("key")}/`));
+  app.get("/p/:key/*", async (c) => {
+    const key = c.req.param("key");
+    const { slug, token } = publicKey(key);
+    const manifest = await readManifest(dir, slug);
+    // 404, never 403: a private board's existence is not public information,
+    // and a wrong token is the same non-answer as a wrong name.
+    if (!manifest || !manifest.public || !sameToken(manifest.token, token)) return c.notFound();
+    return serveFile(c, dir, slug, c.req.path.slice(`/p/${key}/`.length));
+  });
+
+  // The operator's link, and the one place the password is spent on a board:
+  // it hands out a signed prefix instead of bytes, so the page that follows
+  // needs no cookie and can be sandboxed into an opaque origin.
+  const mint = async (c: Context) => {
+    const slug = c.req.param("slug") ?? "";
+    // Signed before the read: a sign-out landing during it would otherwise
+    // hand this request a capability made with the key that replaced the
+    // revoked one.
+    const view = SLUG.test(slug) ? mintView(slug) : "";
+    // A board that is gone says so here, rather than after a redirect.
+    if (!view || !(await readManifest(dir, slug))) return c.notFound();
+    const rest = c.req.path.slice(`/boards/${slug}`.length).replace(/^\//, "");
+    return c.redirect(`/b/${slug}/${view}/${rest}${new URL(c.req.url).search}`);
+  };
+  app.get("/boards/:slug", mint);
+  app.get("/boards/:slug/*", mint);
+
+  app.get("/b/:slug/:view", (c) => c.redirect(`${c.req.path}/${new URL(c.req.url).search}`));
+  app.get("/b/:slug/:view/*", async (c) => {
+    const slug = c.req.param("slug");
+    const view = c.req.param("view");
+    const rest = c.req.path.slice(`/b/${slug}/${view}/`.length);
+    if (!SLUG.test(slug)) return c.notFound();
+    // Expired, forged, or signed with a key that has since rotated: send it
+    // back through the boundary, which re-mints for a live session in one hop
+    // and asks a stranger for the password. Existence stays unsaid either way.
+    if (!validView(slug, view)) {
+      return c.redirect(`/boards/${slug}/${rest}${new URL(c.req.url).search}`);
+    }
+    if (!(await readManifest(dir, slug))) return c.notFound();
+    return serveFile(c, dir, slug, rest);
+  });
 }

@@ -3,8 +3,10 @@
 A **Board** is a folder of static files an agent writes to present something at
 a stable URL, readable on a phone, with no server-side runtime. Every surface
 is behind the instance password (`src/web/auth.ts`); `/p/*` (published boards
-plus the stylesheet they link) is exempt — the other exemption is
-`/config-sync/:token`, not a board — so `public` is a security boundary.
+plus the stylesheet they link) and `/b/*` (the signed prefix `/boards/*`
+redirects to once the password has been spent) are exempt — the other
+exemption is `/config-sync/:token`, not a board — so `public` is a security
+boundary.
 
 ## Product decisions
 
@@ -68,7 +70,7 @@ The [skill](../../skills/pier-boards/SKILL.md) owns their usage and presentation
 guidance: content determines layout, status has text labels, graphics serve
 understanding. Custom CSS must preserve contrast and phone reflow; no linter.
 
-## Routes (`src/boards/boards.ts`, ≤ 200 lines of code incl. the filesystem side)
+## Routes (`src/boards/boards.ts`, ≤ 240 lines of code incl. the filesystem side)
 
 | Route | Behavior |
 | ----- | -------- |
@@ -76,32 +78,46 @@ understanding. Custom CSS must preserve contrast and phone reflow; no linter.
 | `PATCH /api/boards/:slug` | body `{public}` → write `board.json`, minting `token` on the first publish; every other field is agent-owned |
 | `DELETE /api/boards/:slug` | rename to `<slug>.deleted-<ts>` in place |
 | `GET /p/_assets/pier.css` | the shipped stylesheet |
-| `GET /boards/:slug/*` | static from `<board>/site/`, public or not — the operator surface |
+| `GET /boards/:slug/*` | the operator surface: 404 if the board is gone, else 302 to `/b/:slug/:view/*`, path and query kept |
+| `GET /b/:slug/:view/*` | static from `<board>/site/`, **only** if `view` is a live signature for that slug; otherwise 302 back to `/boards/:slug/*`, path and query kept |
 | `GET /p/:slug-:token/*` | static from `<board>/site/`, **only** if `public: true` and the token matches; otherwise 404 (never 403 — do not leak existence) |
 
 `token` is 32 random bits, minted the first time a manifest is seen public (by
 the Console's toggle or by `readManifest` when an agent set `public: true`).
 The flag decides; the token only hides the door.
 
+`view` is `<expiry in base36>-<HMAC(slug, expiry) truncated to 128 bits>`,
+signed with a process-scoped key and valid for 8 hours. Its own path segment,
+so the first hyphen is the cut and a hyphenated slug stays unambiguous; the
+stamp must be the canonical base36 of the expiry it signs, or one signature
+would be valid under several spellings. The key is rotated on every session
+revocation (`main.ts`) and after a delete (a slug can be taken again), because
+the page carries no cookie a sign-out could end. A dead prefix is not a 404: it
+redirects to `/boards/:slug/*`, so a live session re-mints in one hop and a
+stranger meets the login form.
+
+A `/b/` URL is a bearer credential for one board until it expires: copied out
+of the address bar it reads that board without the password, and the Public
+toggle does not revoke it. The Console's Private section says so.
+
 Both static handlers: realpath containment against `<board>/site`, extension
 whitelist extended with `html/css/js/svg/woff2/ico`, no directory listing,
-`X-Content-Type-Options: nosniff`, and on `/p/*` a CSP of `default-src 'self';
-img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'
-'unsafe-inline'; connect-src 'none'; frame-ancestors 'none'`.
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (the URL is
+the credential on both prefixes), `Cache-Control: no-store` (every board URL is
+revocable, and a stored copy would outlive the revocation),
+`Access-Control-Allow-Origin: *` (an opaque
+origin needs CORS for its own fonts and modules), and a CSP of `sandbox
+allow-scripts; default-src 'self'; img-src 'self' data:; style-src 'self'
+'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none';
+frame-ancestors 'none'`.
 
-Both handlers also send `sandbox allow-scripts` — a private board adds
-`allow-same-origin`, because the session cookie is what authorizes it:
-
-- Its script runs on the workbench origin: it reads that origin's
-  `localStorage`, and top-level navigation is not something the CSP removes, so
-  what it reads can leave.
-- Nothing secret belongs in `localStorage`; unsent composer drafts live in
-  tab-scoped `sessionStorage`, and a board opens in its own tab. A private
-  board's URL pasted into the workbench tab does read that tab's drafts; the
-  UI never opens one there.
-- Dropping `allow-same-origin` is not the answer: an opaque-origin document
-  sends no `SameSite=Lax` cookie with its own sub-resources, so a private
-  board's stylesheet and images 302 to `/login` (verified in Chromium).
+No board gets `allow-same-origin`, published or not — the page is agent-written
+script, and on the workbench origin it would read that origin's `localStorage`
+and carry what it read out by top-level navigation, which no CSP directive
+removes. The signed prefix exists to pay for that: an opaque-origin document
+sends no `SameSite=Lax` cookie with its own sub-resources (verified in
+Chromium), so a cookie-authorized board URL would 302 its own stylesheet and
+images to `/login`.
 
 One module owns scan, manifest read/write, rename-delete and the routes.
 `readManifest` is the single place a slug becomes a path and is validated;

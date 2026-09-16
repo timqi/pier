@@ -225,16 +225,17 @@ const hash = (password: string, salt: string): string =>
 
 const digest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
-/** The login form, the passkey half of it (web/passkeys.ts) and `/p/*` —
- *  published boards and their stylesheet — are the exemptions here
- *  (`/config-sync/:token` is mounted before this middleware,
- *  docs/architecture.md names both); `/boards/*` stays behind. */
+/** The login form, the passkey half of it (web/passkeys.ts), `/p/*` —
+ *  published boards and their stylesheet — and `/b/*`, the signed prefix
+ *  `/boards/*` redirects to once this boundary has passed, are the exemptions
+ *  here (`/config-sync/:token` is mounted before this middleware,
+ *  docs/architecture.md names them); `/boards/*` itself stays behind. */
 function isPublic(method: string, path: string): boolean {
   if (path === "/login") return method === "GET" || method === "HEAD" || method === "POST";
   if (path.startsWith("/login/")) return method === "GET";
   if (path === "/api/passkeys/login/options" || path === "/api/passkeys/login/verify") return method === "POST";
   if (method !== "GET" && method !== "HEAD") return false;
-  return path.startsWith("/p/");
+  return path.startsWith("/p/") || path.startsWith("/b/");
 }
 
 /** Constant-time equality that also hides length: both sides are digested. */

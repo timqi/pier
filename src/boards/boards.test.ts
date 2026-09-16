@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
-import { listBoards, registerBoardRoutes } from "./boards.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { listBoards, registerBoardRoutes, rotateBoardViews } from "./boards.js";
 
 let dir: string;
 let app: Hono;
@@ -13,6 +13,15 @@ let app: Hono;
 const TOKEN = "0123abcd";
 const published = { public: true, token: TOKEN };
 const key = (slug: string): string => `${slug}-${TOKEN}`;
+
+/** The operator prefix hands out a signed prefix instead of bytes; a test
+ *  follows that redirect the way a browser does. `/b/<slug>/<view>` without
+ *  the trailing slash, so a caller can append its own path. */
+async function view(slug: string): Promise<string> {
+  const res = await app.request(`/boards/${slug}/`);
+  expect(res.status).toBe(302);
+  return (res.headers.get("location") ?? "").replace(/\/$/, "");
+}
 
 /** Hermetic: every test gets its own boards dir, never $HOME. */
 function makeBoard(
@@ -89,23 +98,73 @@ describe("scanning", () => {
 });
 
 describe("serving", () => {
-  it("serves a board's page on the operator prefix, public or not", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("exchanges the operator prefix for a signed one, keeping the path", async () => {
     makeBoard("digest");
-    const res = await app.request("/boards/digest/");
+    const at = await view("digest");
+    expect(at).toMatch(/^\/b\/digest\/[0-9a-z]+-[\w-]{22}$/);
+    expect((await app.request("/boards/digest/style.css?v=2")).headers.get("location"))
+      .toMatch(/^\/b\/digest\/[0-9a-z]+-[\w-]{22}\/style\.css\?v=2$/);
+
+    const res = await app.request(`${at}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(res.headers.get("content-security-policy")).toContain(
-      "sandbox allow-scripts allow-same-origin",
-    );
-    expect(res.headers.get("content-security-policy")).toContain("frame-src 'none'");
-    expect(res.headers.get("content-security-policy")).toContain("form-action 'none'");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    // The whole point of the signed prefix: no board runs with same-origin.
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("sandbox allow-scripts;");
+    expect(csp).not.toContain("allow-same-origin");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp).toContain("form-action 'none'");
     expect(await res.text()).toBe("<h1>hi</h1>");
   });
 
-  it("redirects a missing trailing slash so relative assets resolve", async () => {
+  it("sends a prefix that expired, was forged or lost its key back through the boundary", async () => {
     makeBoard("digest");
-    expect((await app.request("/boards/digest")).headers.get("location")).toBe("/boards/digest/");
+    const at = await view("digest");
+    const stamp = at.split("/").at(-1)?.split("-")[0] ?? "";
+    expect((await app.request(`${at}/`)).status).toBe(200);
+
+    // Another board's page is not what this prefix was signed for.
+    makeBoard("other");
+    const elsewhere = await app.request(at.replace("digest", "other") + "/");
+    expect(elsewhere.headers.get("location")).toBe("/boards/other/");
+    // The signature is base64url and may hold a hyphen: only the stamp moves.
+    for (const bad of [
+      at.replace(`/${stamp}-`, `/${stamp}x-`),
+      at.replace(`/${stamp}-`, `/${(Date.now() + 9 * 3600_000).toString(36)}-`),
+      // A stamp `parseInt` would read as the real one, spelled differently.
+      at.replace(`/${stamp}-`, `/${stamp}!-`),
+    ]) {
+      const res = await app.request(`${bad}/index.html?v=1`);
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe("/boards/digest/index.html?v=1");
+    }
+
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 8 * 3600_000 + 1000);
+    expect((await app.request(`${at}/`)).status).toBe(302);
+    vi.useRealTimers();
+
+    // Signing out rotates the key, so prefixes handed to that browser die with it.
+    const live = await view("digest");
+    rotateBoardViews();
+    expect((await app.request(`${live}/`)).status).toBe(302);
+    // A board deleted while a prefix is live cannot be reopened under its slug.
+    const reused = await view("digest");
+    await app.request("/api/boards/digest", { method: "DELETE" });
+    makeBoard("digest", {}, "<h1>someone else</h1>");
+    expect((await app.request(`${reused}/`)).status).toBe(302);
+  });
+
+  it("redirects a missing trailing slash so relative assets resolve, query kept", async () => {
+    makeBoard("digest");
+    const at = await view("digest");
+    expect((await app.request(`${at}?tab=2`)).headers.get("location")).toBe(`${at}/?tab=2`);
     expect((await app.request("/p/digest")).headers.get("location")).toBe("/p/digest/");
   });
 
@@ -145,7 +204,7 @@ describe("serving", () => {
 
     // Encoded, because a literal `../` is collapsed by URL parsing long before
     // it reaches us — the escape attempt that actually arrives is this one.
-    for (const at of ["/boards/digest", `/p/${key("digest")}`]) {
+    for (const at of [await view("digest"), `/p/${key("digest")}`]) {
       expect((await app.request(`${at}/..%2Fboard.json`)).status).toBe(404);
       expect((await app.request(`${at}/..%2FREADME.md`)).status).toBe(404);
       expect((await app.request(`${at}/..%2Fsrc%2Findex.html`)).status).toBe(404);
@@ -181,15 +240,17 @@ describe("serving", () => {
     expect((await app.request(`/p/${key("digest")}/link.html`)).status).toBe(404);
   });
 
-  it("serves only whitelisted extensions and never shares private assets", async () => {
+  it("serves only whitelisted extensions, and caches nothing", async () => {
     const board = makeBoard("digest", published);
     writeFileSync(join(board, "site", "style.css"), "body{}");
     writeFileSync(join(board, "site", "notes.exe"), "x");
-    const privateAsset = await app.request("/boards/digest/style.css");
+    const viewed = await app.request(`${await view("digest")}/style.css`);
     const publicAsset = await app.request(`/p/${key("digest")}/style.css`);
-    expect(privateAsset.status).toBe(200);
-    expect(privateAsset.headers.get("cache-control")).toBe("private, max-age=300");
-    expect(privateAsset.headers.get("access-control-allow-origin")).toBeNull();
+    expect(viewed.status).toBe(200);
+    // Every board URL is revocable, so no copy may outlive the revocation.
+    expect(viewed.headers.get("cache-control")).toBe("no-store");
+    // Opaque origin on both prefixes: a font or module asset needs CORS.
+    expect(viewed.headers.get("access-control-allow-origin")).toBe("*");
     expect(publicAsset.status).toBe(200);
     expect(publicAsset.headers.get("cache-control")).toBe("no-store");
     expect(publicAsset.headers.get("access-control-allow-origin")).toBe("*");

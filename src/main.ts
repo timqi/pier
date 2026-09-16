@@ -12,7 +12,7 @@ import { CredentialStore } from "./agent/credentials.js";
 import { IndexedListing } from "./agent/listing.js";
 import { PiPackageStore } from "./agent/packages.js";
 import { PiAgentFactory } from "./agent/pi.js";
-import { defaultBoardsDir, registerBoardRoutes } from "./boards/boards.js";
+import { defaultBoardsDir, registerBoardRoutes, rotateBoardViews } from "./boards/boards.js";
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
@@ -294,6 +294,8 @@ app.onError((err, c) => {
 // Before every route: Hono runs middleware in registration order, so a surface
 // added later is covered without knowing this exists.
 const auth = new AuthStore(db);
+// A board page carries no cookie, so the signing key is what a sign-out revokes.
+auth.onRevoke(rotateBoardViews);
 const passkeys = new PasskeyStore(db);
 registerConfigShareRoute(app, configSync);
 app.use("*", requireAuth(auth));
