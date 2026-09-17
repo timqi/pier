@@ -1,150 +1,112 @@
 ---
 name: pier-boards
-description: Publish a Board — a folder of static HTML Pier serves at a stable URL. Read before building any page-shaped deliverable (report, digest, dashboard) or editing an existing board.
+description: Publish a Board — static HTML at a stable Pier URL. Read before creating or editing a page-shaped deliverable (report, digest, dashboard).
 ---
 
-# Building a Pier board
+# Boards
 
-A **board** lives in the exact boards folder named under "This Pier instance"
-in `<pier>/AGENTS.md`; do not assume `~/.pier`. Only `<board>/site/` is served.
-Boards survive sessions; any session may read or update them.
+Use the exact boards folder and instance address in "This Pier instance" in
+`<pier>/AGENTS.md`, not an assumed `~/.pier`. Only `<slug>/site/` is served;
+boards persist across sessions. Update existing boards in place, preserving URLs.
+Before editing, read the board's README if present; change sources and rebuild.
 
-## Create one
+## Files and visibility
 
-```
-<boards folder>/weekly-digest/
-  board.json
-  site/index.html
-```
+Create `<boards folder>/<slug>/board.json` and `site/index.html`:
 
 ```json
-{
-  "title": "Weekly digest — infra",
-  "description": "What changed in infra this week and what needs a decision.",
-  "sessions": ["<your session id>"],
-  "public": false
-}
+{"title":"Weekly digest","description":"What changed and needs a decision","sessions":["<session id>"],"public":false}
 ```
 
-- `slug`: `[a-z0-9][a-z0-9-]{0,63}`; keep it short and stable, without random suffixes.
-- `description`: Console list text, understandable without this conversation.
-- `sessions`: append your id; preserve others as provenance.
+Slug: `[a-z0-9][a-z0-9-]{0,63}`, meaningful without random suffixes. Description
+is Console list text; append your session id, preserving existing provenance.
 
-## Publish, then hand over the link
+`public: true` removes the password. Set it only when this request asks for a
+public/shareable board; otherwise keep it private. Never publish personal data
+or content the user has not seen. Preserve the manifest's token; if missing,
+generate eight hex characters with `openssl rand -hex 4`, never invent/reuse one.
 
-`"public": true` serves the board **with no password**. Set it only if the user
-asked for a public or shareable board *in this request*; otherwise leave it
-`false` and say the board is private. Never publish personal data or anything
-the user has not seen.
+Return one bare URL using the configured instance address:
 
-For publishing, preserve the manifest's `token` or add eight hex characters
-from `openssl rand -hex 4`; never invent or reuse another board's token.
+- Private: `/boards/<slug>/` (password required).
+- Public: `/p/<slug>-<token>/` (copy the token verbatim; requires `public: true`).
 
-Use the instance address from `<pier>/AGENTS.md` plus:
+Never return both URLs, link labels or filesystem paths. Without a configured
+address, return the path and point to Console → Settings; never guess a host.
+For publish-only requests, set visibility/token and return the URL; skip layout
+checks and narration. Console → Boards can also publish.
 
-| Visibility | Path |
-| --- | --- |
-| Private (default) | `/boards/<slug>/` — password required; Console → Boards can publish |
-| Public | `/p/<slug>-<token>/` — copy the token verbatim; 404 unless `public: true` |
+## Page
 
-Return **one bare URL**, never both, Markdown link labels or filesystem paths.
-If no address is configured, give the path and point to Console → Settings;
-never guess a host. For a publish-only request, set `public: true` and a token
-if missing, then return only the public URL; no page verification or narration.
-
-## Writing the page
-
-Let the question and evidence determine layout; no sections are required.
-Use semantic HTML without a framework. Adapt this shell's language and content:
+Semantic HTML, the user's language, no framework. Include doctype, `lang`, UTF-8,
+viewport metadata, a descriptive title and:
 
 ```html
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weekly digest — infra</title>
 <link rel="stylesheet" href="/p/_assets/pier.css">
-</head>
-<body>
-<h1>Weekly digest — infra</h1>
-<p class="lede">The main finding, grounded in the available evidence.</p>
-<footer>Data as of … · sources … · how to refresh …</footer>
-</body>
-</html>
 ```
 
-Lead with the verdict; headings state findings ("Payments alone is degraded").
-Numbers carry units and baselines ("142 ms p95, was 120", "12 of 40"), without
-false precision. End without filler or a closing summary; put the data
-timestamp, sources and refresh instructions in the footer.
+- Lead with the finding; headings state findings. No required sections or emoji chrome.
+- Match the form to the evidence: prose for explanations, cards for metrics,
+  tables for comparisons (problems first), timelines for events. Use units,
+  baselines and honest precision; every number needs evidence or an explicit
+  illustrative calculation. Label uncertainty and stale/unverified claims.
+- Put decisions and evidence first; fold supplementary detail with `<details>`.
+  End with data date, checkable sources and refresh instructions, not a recap.
+- No secrets, credentials, internal hostnames or private paths, even in folds:
+  private boards can become public with one toggle.
+- Assets belong under `site/`, using relative URLs except the shared stylesheet.
+  No CDN, external fonts, analytics or network fetches; board CSP blocks them.
+- Prefer native links/disclosures. Local JS may sort/filter embedded data;
+  keep content readable without JS and hide/disable unavailable controls.
+- Charts must explain something; prefer inline SVG with text/table fallback,
+  or a small bundled library only when interaction helps.
 
-## What `pier.css` gives you
+## Layout and type
 
-Classless defaults include readable prose, responsive widths, dark mode,
-scrolling zebra tables and print styles. Override widths only as needed.
+Inherit the shared responsive canvas: wide desktop, padded/reflowing phone.
+Do not lock the whole page to a narrow article width unless requested.
+Sibling blocks share container edges; put long-form chapters in
+`<section class="prose">` (44rem), never limit individual paragraphs.
+Keep tables/diagrams needing width outside those reading sections.
 
-| Class | Use it for |
+Use the shared system fonts and palette; no downloaded fonts. Body defaults to
+17px/1.7, headings to serif, KPI numbers to body type. Sans-serif headings are an
+optional page choice; code identifiers use monospace, formulas body/math type.
+Preserve contrast and avoid long unbroken identifiers widening grids.
+
+Wrap tables in a labeled, keyboard-focusable scrolling region:
+
+```html
+<div class="table-scroll" role="region" aria-label="Comparison" tabindex="0">
+  <table>…</table>
+</div>
+```
+
+Use native table layout; add a table minimum width only when columns would become
+unreadable on phones. Reuse helpers before adding CSS:
+
+| Helpers | Purpose |
 | --- | --- |
-| `.lede` / `.hero` | opening answer / tinted opening panel |
-| `.grid` + `.card` + `.kpi` | responsive cards with headline numbers |
-| `.callout` / `.tag` | takeaway or ask / status pill |
-| `.num` | right-aligned tabular numbers |
-| `.bar` | proportion: `style="--v:62%"` |
-| `.split` | two columns, stacking on phones |
-| `.muted` | dates, deltas, units, scope |
+| `.hero`, `.lede` | opening panel, answer |
+| `.grid`, `.card`, `.kpi` | responsive metric cards |
+| `.split` | two columns that stack |
+| `.prose`, `.table-scroll` | reading chapter, scrollable table |
+| `.callout`, `.tag`, `.muted` | takeaway, status, supporting text |
+| `.num`, `.bar` | aligned numbers, proportion (`style="--v:62%"`) |
 
-Status modifiers: `.good` healthy/done, `.warn` attention/pending, `.bad`
-broken/blocked; express status in words too. These colour text, cards,
-callouts, tags and bars; cards and tags also accept `.info` for neutral emphasis.
-All helpers are optional. Custom `<style>` or CSS under `site/` may change
-layout and palette while preserving contrast and phone reflow.
+`.good` / `.warn` / `.bad` express status with words as well as color;
+`.info` is available on cards/tags. Custom CSS must retain phone reflow and
+contrast; do not copy shared helpers into pages once the deployed CSS has them.
 
-## Pick the form from the content
+## Verify
 
-| Content | Possible form |
-| --- | --- |
-| One finding or 1–2 values | sentence; if nothing changed, say so and stop |
-| Headline metrics | KPI cards with deltas; progress includes the total |
-| Required action | prominent ask with deadline |
-| States, rankings or shared comparison criteria | table; worst states first |
-| Alternatives needing separate explanations | parallel sections; recommendation first |
-| Events / trends | dated list / endpoints and delta; chart when shape explains the finding |
-| Large datasets or raw output | aggregate, show relevant rows, fold the rest with a count; trim code/logs |
+For layout/interaction changes, check phone/desktop and light/dark: aligned block
+edges, readable line lengths/contrast, no page overflow (including long code),
+tables scroll internally. Exercise keyboard/touch, visible focus and usable
+targets; check assets/console and JS-off readability. Report actual browser
+coverage and gaps; Chromium emulation is not Safari/iOS. For content-only edits,
+check changed content and links.
 
-Repeat forms for comparable items; vary them when information changes. Put
-findings and actions first, then evidence; fold only supplementary detail.
-
-## Rules
-
-- **No secrets:** no tokens, API keys, credentials, internal hostnames or
-  private paths in page content, including folds and code samples; private
-  boards can become public with one Console toggle.
-- **Self-contained:** assets live under `site/` with relative paths, except
-  the shipped stylesheet; no CDN, external fonts, analytics or `fetch()`
-  (blocked by the board CSP).
-- **Interaction:** prefer `<details>` and anchors; local JS may sort, filter or
-  inspect embedded data, without network calls or server runtime. With JS off,
-  keep the answer and evidence readable; hide or disable unavailable controls.
-- **Charts:** use when data shape explains the finding; prefer inline SVG,
-  a small bundled library only for needed interaction, with text/table fallback.
-- **Real data:** every figure traces to evidence seen this session; expose
-  gaps and uncertainty ("no data since Tue", "~3 weeks", "n=3").
-- **Update in place:** edit the existing board; preserve its URL.
-- Write in the user's language, with short headings and no emoji chrome.
-
-## Check the page
-
-For new pages or layout/interaction changes, run the checks below; for content
-edits, check the affected content and links. Report actual coverage or gaps.
-
-- Phone/desktop, light/dark: readable contrast, no page overflow, tables scroll internally.
-- Keyboard/touch: working links and controls, visible focus, usable targets, text status labels.
-- Assets load without console errors; answer and evidence remain readable with JS off.
-
-## If a board needs a build
-
-Pier ships no toolchain. If a build is needed, keep sources outside `site/`,
-emit into `site/`, and document install/build commands, output path and data
-sources in `<board>/README.md`. Before editing an existing board, check for
-that README; update sources and rebuild so `site/` stays consistent.
+If a build is necessary, keep sources outside `site/`, emit into `site/`, and
+record install/build commands, output path and data sources in `<board>/README.md`.
+Pier ships no build toolchain.
