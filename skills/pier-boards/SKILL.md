@@ -55,7 +55,9 @@ viewport metadata, a descriptive title and:
 - No secrets, credentials, internal hostnames or private paths, even in folds:
   private boards can become public with one toggle.
 - Assets belong under `site/`, using relative URLs except the shared stylesheet.
-  No CDN, external fonts, analytics or network fetches; board CSP blocks them.
+  Illustrate freely with inline SVG or images you draw, render or save into
+  `site/`: CSP allows `img-src 'self' data:`. No CDN, external fonts, analytics
+  or network fetches; board CSP blocks them.
 - Prefer native links/disclosures. Local JS may sort/filter embedded data;
   keep content readable without JS and hide/disable unavailable controls.
 - Charts must explain something; prefer inline SVG with text/table fallback,
