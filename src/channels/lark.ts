@@ -140,6 +140,8 @@ export class LarkChannel implements Channel {
       // Every chat with require-mention on goes silent; loud, not a debug line.
       this.log("bot info returned no open_id: mention detection is disabled");
     }
+    const dropped = this.deps.control?.claimBot("lark", this.me) ?? [];
+    if (dropped.length) this.log(`bot is now ${this.me}: forgot ${dropped.length} DM(s) the previous bot opened`);
     this.running = true;
     void this.receipts.sweep(true);
     this.socket = await this.api.connect({

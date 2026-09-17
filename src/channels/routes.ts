@@ -96,6 +96,9 @@ export function registerChannelRoutes(
       users: current.users,
       chats: parseChats(body.chats, current.chats),
       bindCode: current.bindCode,
+      // Learned at start, never edited here: a save that reset it would make the
+      // next start read as the first one and skip the swapped bot's cleanup.
+      botId: current.botId,
     };
     store.save(platform, next);
     await runtime.reload();

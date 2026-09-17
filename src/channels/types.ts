@@ -74,6 +74,9 @@ export interface ChannelConfig {
   users: BoundUser[];
   chats: ChatConfig[];
   bindCode: BindCode | null;
+  /** The bot identity `chats` were discovered under — Slack's bot user id,
+   *  Lark's bot open_id. "" until the first start that learns it. */
+  botId: string;
 }
 
 /** What the runtime asks about one chat. */
@@ -114,4 +117,5 @@ export const defaultChannelConfig = (): ChannelConfig => ({
   users: [],
   chats: [],
   bindCode: null,
+  botId: "",
 });

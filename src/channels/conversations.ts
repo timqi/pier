@@ -63,6 +63,16 @@ export class ConversationStore {
     return new Set(rows.map((r) => r.session_id));
   }
 
+  /** Every thread of one chat: a chat that is gone would otherwise keep its
+   *  sessions bound to a conversation nothing can reach. */
+  forgetChat(channelId: string, chatId: string): void {
+    const prefix = `${chatId}/`;
+    this.db.prepare(`
+      DELETE FROM conversations
+      WHERE channel_id = ? AND (conversation_id = ? OR substr(conversation_id, 1, ?) = ?)
+    `).run(channelId, chatId, prefix.length, prefix);
+  }
+
   forget(key: ConversationKey): void {
     this.db.prepare(`
       DELETE FROM conversations WHERE channel_id = ? AND conversation_id = ?

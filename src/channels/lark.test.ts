@@ -239,6 +239,7 @@ function fakeControl() {
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel,
     launchFor: () => ({}),
+    claimBot: () => [] as string[],
     knows: (key: ConversationKey) => known.has(key.conversationId),
     abort: (key: ConversationKey) => {
       aborted.push(key.conversationId);

@@ -311,3 +311,43 @@ describe("a row whose transcript is gone", () => {
     expect(stale[0]![1]).toMatch(/^Session vanished is gone from disk/);
   });
 });
+
+describe("claimBot", () => {
+  const DM: ConversationKey = { channelId: "slack", conversationId: "D1/1717.7" };
+
+  beforeEach(() => {
+    store.discoverChat("slack", { id: "D1", name: "DM · qiqi", kind: "dm" });
+    conversations.set(DM, "s-dm");
+    conversations.set(KEY, "s-group");
+  });
+
+  it("records the first identity and forgets nothing", () => {
+    expect(control.claimBot("slack", "U1")).toEqual([]);
+    expect(store.get("slack").botId).toBe("U1");
+    expect(store.chat("slack", "D1")).toBeDefined();
+    expect(conversations.get(DM)).toBe("s-dm");
+  });
+
+  it("is a no-op on every later start under the same bot", () => {
+    control.claimBot("slack", "U1");
+    expect(control.claimBot("slack", "U1")).toEqual([]);
+    expect(store.chat("slack", "D1")).toBeDefined();
+  });
+
+  it("drops the previous bot's DMs and their threads, keeping groups", () => {
+    control.claimBot("slack", "U1");
+    expect(control.claimBot("slack", "U2")).toEqual(["D1"]);
+    expect(store.get("slack").botId).toBe("U2");
+    expect(store.chat("slack", "D1")).toBeUndefined();
+    expect(conversations.get(DM)).toBeUndefined();
+    // A group keeps its id across the swap, so its threads keep their sessions.
+    expect(store.chat("slack", "C100")).toBeDefined();
+    expect(conversations.get(KEY)).toBe("s-group");
+  });
+
+  it("ignores an identity the platform did not give", () => {
+    control.claimBot("slack", "U1");
+    expect(control.claimBot("slack", "")).toEqual([]);
+    expect(store.get("slack").botId).toBe("U1");
+  });
+});

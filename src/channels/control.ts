@@ -1,6 +1,7 @@
-// What an adapter may do to a session beyond handing it a prompt. Not part of
-// the `Channel` seam: the channel layer owns the router and hands adapters this
-// narrow interface instead. Thin wrappers over core; no policy.
+// What an adapter may do beyond handing a prompt over: act on a thread's
+// session, and claim the identity its chats belong to. Not part of the
+// `Channel` seam: the channel layer owns the router and the stores and hands
+// adapters this narrow interface instead. Thin wrappers; no policy.
 
 import { projectCwds } from "../core/identity.js";
 import type { Router } from "../core/router.js";
@@ -16,7 +17,7 @@ import type {
 import type { ModelMenuEntry } from "../settings.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
-import { chatOf, isChannelPlatform } from "./types.js";
+import { type ChannelPlatform, chatOf, isChannelPlatform } from "./types.js";
 
 export const NO_SESSION = "No session in this thread yet — start one first (Start in the panel).";
 export const HAS_SESSION = "This thread already has a session — send your question as a message.";
@@ -35,6 +36,10 @@ export interface ConversationStatus {
 
 export interface ChannelControl {
   launchFor(key: ConversationKey): Partial<AgentLaunchOptions>;
+  /** The identity an adapter starts under. A different one than last time means
+   *  a new bot: its DMs are new chats, so the old ones and every thread in them
+   *  are forgotten. Returns the chat ids dropped, for the adapter's log. */
+  claimBot(platform: ChannelPlatform, botId: string): string[];
   /** Has this conversation ever had a session? Durable: a reply inside a
    *  thread Pier owns is addressed, and that must hold across a reload. */
   knows(key: ConversationKey): boolean;
@@ -92,6 +97,12 @@ export function createControl({ router, factory, conversations, store, modelMenu
 
   return {
     launchFor,
+
+    claimBot(platform, botId) {
+      const dropped = store.claimBot(platform, botId);
+      for (const chatId of dropped) conversations.forgetChat(platform, chatId);
+      return dropped;
+    },
 
     knows: (key) => conversations.get(key) !== undefined,
 

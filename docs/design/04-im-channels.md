@@ -310,6 +310,12 @@ conversation id is the adapter's business.
 - Chats are discovered from inbound traffic and arrive enabled behind the
   gates — groups always, a DM only from a bound sender (`gate.mayDiscover()`),
   so a stranger's DM writes no row.
+- **A DM belongs to one bot.** `start()` claims the identity it authenticated
+  as (`control.claimBot`, Slack's user id / Lark's bot open_id); a different one
+  than the stored `botId` means a new app or a rotated token, so that
+  platform's DM chats and every conversation row in them are dropped — their
+  ids are unreachable and read the same on screen as the live ones. Groups keep
+  their ids across the swap. The first identity ever seen drops nothing.
 - **Bind**: a Console-issued single-use code with a TTL, redeemed by `/bind
   <code>` in a DM; bind requests pass the bind gate. Five wrong tries void the
   code, and the fifth reply says so.

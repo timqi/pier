@@ -99,6 +99,13 @@ describe("channel config routes", () => {
     expect(saved.chats[0]).toMatchObject({ model: null, thinking: null, requireMention: false, cwd: "/srv/ops" });
   });
 
+  it("keeps the claimed bot identity, which the page never edits", async () => {
+    store.claimBot("slack", "U1");
+    await put({ ...(await get()), enabled: true });
+    // Reset here, the next start would read as the first and skip the cleanup.
+    expect(store.get("slack").botId).toBe("U1");
+  });
+
   it("drops chat ids the store never discovered", async () => {
     await put({ enabled: false, chats: [{ id: "C999", enabled: true }] });
     expect(store.get("slack").chats).toEqual([]);

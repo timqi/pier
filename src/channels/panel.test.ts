@@ -43,6 +43,7 @@ class FakeControl implements ChannelControl {
   aborted = 0;
   launch: Partial<AgentLaunchOptions> = {};
   launchFor = (): Partial<AgentLaunchOptions> => this.launch;
+  claimBot = (): string[] => [];
   knows = (): boolean => this.current !== null;
   abort = (): Promise<void> => {
     this.aborted++;

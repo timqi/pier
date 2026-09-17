@@ -156,6 +156,8 @@ let inbound: InboundMessage[];
 let dropped: string[];
 let receipts: ReceiptLedger;
 let aborted: string[];
+/** Bot identities `start` claimed, so a swap's cleanup cannot be dropped silently. */
+let claimed: string[];
 let known: Set<string>;
 /** Conversations mid-turn: what keeps a receipt off the stale sweep. */
 let working: Set<string>;
@@ -225,6 +227,10 @@ function fakeControl() {
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel | undefined,
     launchFor: () => ({}),
+    claimBot: (_p: string, botId: string) => {
+      claimed.push(botId);
+      return [] as string[];
+    },
     knows: (key: ConversationKey) => known.has(key.conversationId),
     abort: (key: ConversationKey) => {
       aborted.push(key.conversationId);
@@ -273,6 +279,7 @@ beforeEach(async () => {
   dropped = [];
   receipts = new ReceiptLedger("slack", openDb(":memory:"));
   aborted = [];
+  claimed = [];
   known = new Set();
   working = new Set();
   control = fakeControl();
@@ -1292,6 +1299,10 @@ describe("receipts", () => {
 });
 
 describe("lifecycle", () => {
+  it("claims the bot identity on start, so a swapped bot's DMs are dropped", () => {
+    expect(claimed).toEqual([ME]);
+  });
+
   it("closes the socket on stop", async () => {
     await channel.stop();
     expect(client.socketClosed).toBe(true);

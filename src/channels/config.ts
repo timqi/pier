@@ -107,6 +107,22 @@ export class ChannelStore {
     this.save(platform, config);
   }
 
+  /** A DM's id belongs to the bot it was opened with, so a new app or a rotated
+   *  token leaves DMs no one can reach and nothing on screen tells them apart
+   *  from the live ones — they are dropped. Group ids survive the swap. Returns
+   *  the chat ids forgotten; the first identity ever seen forgets nothing. */
+  claimBot(platform: ChannelPlatform, botId: string): string[] {
+    const known = this.cached(platform).botId;
+    if (!botId || known === botId) return [];
+    const config = this.get(platform);
+    const keep = (chat: ChatConfig): boolean => !known || chat.kind !== "dm";
+    const dropped = config.chats.filter((c) => !keep(c)).map((c) => c.id);
+    config.chats = config.chats.filter(keep);
+    config.botId = botId;
+    this.save(platform, config);
+    return dropped;
+  }
+
   // On the per-message path: no clone, nothing here escapes.
   policy(platform: ChannelPlatform, chatId: string): ChatPolicy {
     const config = this.cached(platform);

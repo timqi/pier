@@ -186,6 +186,8 @@ export class SlackChannel implements Channel {
       // Every channel with require-mention on goes silent; loud, not a debug line.
       this.log("auth.test returned no user id: mention detection is disabled");
     }
+    const dropped = this.deps.control?.claimBot("slack", this.me) ?? [];
+    if (dropped.length) this.log(`bot is now ${this.me}: forgot ${dropped.length} DM(s) the previous bot opened`);
     this.running = true;
     void this.receipts.sweep(true);
     this.socket = await this.api.connect((env) => this.onEnvelope(env, onMessage));
