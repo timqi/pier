@@ -6,7 +6,7 @@ import { Plus } from "lucide";
 import { icon } from "./icons.js";
 import { getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
-import { btn } from "./form.js";
+import { btn, CONTROL } from "./form.js";
 import { closeMenu, openMenu, openPanel } from "./menu.js";
 
 export interface Listing {
@@ -174,10 +174,9 @@ const writer =
 
 /** Fires `onPick` so a caller can mark itself dirty without listening to input events. */
 function browseButton(input: HTMLInputElement, onPick?: (path: string) => void): HTMLElement {
-  const button = btn(
-    "Browse…",
-    "flex-none cursor-pointer rounded-md border border-neutral-300 px-2 py-1 text-[12px] text-neutral-600 hover:bg-neutral-100",
-  );
+  // Sized off the control beside it, not the form's default button: the two are
+  // one field, so they share a height and a radius.
+  const button = btn("Browse…", "btn flex-none self-stretch rounded-xl px-3 text-[12.5px] text-neutral-600");
   // Start where the field points, falling back to the user's home directory.
   button.onclick = () => openBrowser(button, input.value.trim() || undefined, writer(input, onPick));
   return button;
@@ -190,8 +189,7 @@ export function dirInput(
   onChange: (v: string) => void,
 ): { el: HTMLElement; input: HTMLInputElement } {
   const input = document.createElement("input");
-  input.className =
-    "min-w-0 flex-1 rounded-md border border-neutral-300 bg-white px-2 py-1 font-mono text-[12.5px] focus:border-indigo-400 focus:outline-none";
+  input.className = `${CONTROL} min-w-0 flex-1 font-mono`;
   input.value = value;
   input.placeholder = placeholder;
   input.oninput = () => onChange(input.value);
