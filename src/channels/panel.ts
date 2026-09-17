@@ -93,11 +93,8 @@ export interface PanelState {
 
 const btn = (label: string, action: string): PanelButton => ({ label, action });
 
-/** A button label is the last two segments; the numbered line above has the whole path. */
-const shortDir = (path: string): string => {
-  const parts = path.split("/").filter(Boolean);
-  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
-};
+/** A button label is the last segment; the numbered line above has the whole path. */
+const shortDir = (path: string): string => path.split("/").filter(Boolean).at(-1) ?? path;
 
 /** One transcript line as a reader sees it: what was said, minus what was
  *  written for the model (the speaker header, attachment markers, the
@@ -421,7 +418,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
         lines: slice.length
           ? slice.map((s, i) =>
             `${String(from + i + 1)}. ${this.esc(shortTitle(s))} · ${
-              this.code(s.cwd.split("/").filter(Boolean).at(-1) ?? s.cwd)
+              this.code(shortDir(s.cwd))
             } · ${age(s.modified ?? s.createdAt, now)}`)
           : [unavailable ?? "No unbound sessions."],
       }],

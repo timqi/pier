@@ -444,7 +444,7 @@ describe("draft panel (no session in the thread)", () => {
     expect(text(blocks[0]!)).toContain("*Directory*");
     expect(text(blocks[0]!)).toContain("1. `/home/qiqi/code/dev/pier`");
     expect(text(blocks[0]!)).toContain("2. `/srv/ops`");
-    expect(labels(blocks[1]!)).toEqual(["1 …/dev/pier", "2 /srv/ops"]);
+    expect(labels(blocks[1]!)).toEqual(["1 pier", "2 ops"]);
     expect(labels(blocks[2]!)).toEqual(["Type a path…", "‹ Back"]);
     expect(api.views).toEqual([]);
   });
