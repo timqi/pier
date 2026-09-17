@@ -540,8 +540,12 @@ main {
   :is(#queue-panel, #recovery-panel) button { min-height: 44px; }
   #queue-panel button { min-width: 44px; }
   #queue-panel > div:first-child { height: auto; }
-  /* Chat steps: the activity group, its tool rows and thinking rows. */
-  #turns details > summary { min-height: 44px; }
+  /* Chat steps: the group head is a control; its full-width log rows take a
+     lower floor, packed, and the log shows more of them, or a 256px box holds
+     five rows of air. */
+  #turns [data-kind="activity"] > summary { min-height: 44px; }
+  #turns [data-kind="activity"] details > summary { min-height: 36px; }
+  #turns [data-kind="activity"] > summary + div { gap: 0; max-height: 20rem; }
 }
 /* One selection vocabulary: the rail's rows, the Console's, and the palette's. */
 #console-section button.bg-indigo-50, #session-list li.bg-indigo-50, .palette-row.bg-indigo-50,
