@@ -66,8 +66,9 @@ Timestamps come from the filesystem (`site/` mtime), not the manifest.
 
 [`pier.css`](../../src/boards/pier.css) is served from Pier's package directory;
 it styles semantic HTML with responsive widths, dark mode and optional helpers.
-Sibling blocks share their responsive container width; `.prose` bounds long-form
-chapters, and `.table-scroll` keeps full-width native tables scrollable on phones.
+Sibling blocks share their responsive container width, which is also the reading
+measure; `.prose` caps that column on an ultrawide canvas, and `.table-scroll`
+keeps full-width native tables scrollable on phones.
 Table regions and disclosures have visible keyboard focus; disclosures retain
 44px touch targets. Body and KPI use system sans-serif, headings system serif.
 The [skill](../../skills/pier-boards/SKILL.md) owns their usage and presentation

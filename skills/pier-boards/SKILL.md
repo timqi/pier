@@ -66,10 +66,11 @@ viewport metadata, a descriptive title and:
 ## Layout and type
 
 Inherit the shared responsive canvas: wide desktop, padded/reflowing phone.
-Do not lock the whole page to a narrow article width unless requested.
-Sibling blocks share container edges; put long-form chapters in
-`<section class="prose">` (44rem), never limit individual paragraphs.
-Keep tables/diagrams needing width outside those reading sections.
+The container is the reading measure: text runs its full width and every
+sibling block shares the same two edges. Do not lock the page, a section or a
+paragraph to a narrower article width unless requested; `.prose` caps the
+column on an ultrawide canvas and belongs on one page-level wrapper, never on
+chapters alternating with full-width blocks.
 
 Use the shared system fonts and palette; no downloaded fonts. Body defaults to
 17px/1.7, headings to serif, KPI numbers to body type. Sans-serif headings are an
@@ -92,7 +93,7 @@ unreadable on phones. Reuse helpers before adding CSS:
 | `.hero`, `.lede` | opening panel, answer |
 | `.grid`, `.card`, `.kpi` | responsive metric cards |
 | `.split` | two columns that stack |
-| `.prose`, `.table-scroll` | reading chapter, scrollable table |
+| `.prose`, `.table-scroll` | page reading column, scrollable table |
 | `.callout`, `.tag`, `.muted` | takeaway, status, supporting text |
 | `.num`, `.bar` | aligned numbers, proportion (`style="--v:62%"`) |
 

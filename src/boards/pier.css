@@ -51,8 +51,9 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
-/* Sibling blocks share the page width; a narrower reading measure belongs
-   on the whole page or section, not on individual paragraphs. */
+/* The container is the reading measure: text runs as wide as the page on a
+   desktop and reflows on a phone. A narrower measure belongs to the whole
+   page, never to one section among full-width siblings. */
 body {
   margin: 0 auto;
   max-width: 44rem;
@@ -77,8 +78,12 @@ body {
   }
 }
 
+/* Only the ultrawide canvas is wider than a line should be read: `.prose`
+   caps a reading column there and is a no-op below, so mixing it with
+   full-width siblings cannot ragged the page's edges. */
 .prose {
-  max-width: 44rem;
+  max-width: 62rem;
+  margin-inline: auto;
 }
 
 /* Serif headings against a sans body: the contrast is what makes a plain
