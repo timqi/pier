@@ -255,10 +255,10 @@ browser keeps no second session order.
   messages, preserving user/system boundaries. Gap/day separators carry an age
   refreshed every minute; exact timestamps on hover.
 - **Activity groups**: collapsible work log before the reply — thinking,
-  progress, tool activity; headline shows status, tool count (progress not
-  counted), duration; tool rows reveal args/output, thinking rows tail-capped
-  text; expanded logs scroll independently; simple replies leave no empty log;
-  interrupted work stays visible. System input cards: four-line preview,
+  progress, tool activity; headline shows status, step count (every row:
+  thinking, progress, tool), duration; tool rows reveal args/output, thinking
+  rows tail-capped text; expanded logs scroll independently; simple replies
+  leave no empty log; interrupted work stays visible. System input cards: four-line preview,
   type/status chips, expandable.
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events; the header's running chip (`activeRuns`

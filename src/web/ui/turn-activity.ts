@@ -132,7 +132,7 @@ export function runHead(o: RunHead): HTMLElement {
 /** Run state colours are shared by detached runs and callback summaries. */
 export const STATE_STYLE: Record<BackgroundRun["state"], { edge: string; label: string; glyph: IconNode }> = {
   queued: { edge: "border-l-amber-400", label: "text-amber-700", glyph: LoaderCircle },
-  running: { edge: "border-l-fuchsia-500", label: "text-fuchsia-700", glyph: LoaderCircle },
+  running: { edge: "border-l-neutral-400", label: "text-neutral-600", glyph: LoaderCircle },
   succeeded: { edge: "border-l-green-500", label: "text-green-700", glyph: Check },
   failed: { edge: "border-l-red-500", label: "text-red-600", glyph: X },
   cancelled: { edge: "border-l-neutral-300", label: "text-neutral-500", glyph: Minus },
@@ -234,7 +234,8 @@ function drawThinking(): void {
   if (!think) return;
   think.text = think.text.slice(-4000);
   think.pre.textContent = think.text;
-  const line = think.text.split("\n").filter(Boolean).pop() ?? "thinking…";
+  // Markdown emphasis and heading marks on the label line read as noise.
+  const line = (think.text.split("\n").filter(Boolean).pop() ?? "").replace(/^[\s*_#]+|[\s*_]+$/g, "") || "thinking…";
   const label = think.summary.lastElementChild as HTMLElement;
   label.textContent = line.length > 90 ? "…" + line.slice(-90) : line;
 }
@@ -312,7 +313,7 @@ export function takeActivityGroup(): HTMLElement | null {
 
 /** Work stays on its own line above the reply; status colour names the outcome. */
 const STATUS_STYLE: Record<ActivityStatus, string> = {
-  running: "text-green-700 open:bg-green-50",
+  running: "text-neutral-500 open:bg-black/[0.02] dark:open:bg-neutral-100",
   done: "text-neutral-400 hover:text-neutral-600 open:bg-black/[0.02] open:text-neutral-500 dark:open:bg-neutral-100",
   failed: "text-red-600 open:bg-red-50",
   interrupted: "text-amber-700 open:bg-amber-50",
@@ -360,9 +361,12 @@ export function activityProgress(ts: number, text = ""): HTMLElement {
   const a = ensureActivity(ts);
   flushThinking();
   a.thinking = null;
-  const node = h("div", "whitespace-pre-wrap break-words text-[13px] text-neutral-600", text);
+  a.steps += 1;
+  const node = h("div", "whitespace-pre-wrap break-words text-[12.5px] text-neutral-600", text);
   node.dataset.raw = text;
-  const row = h("div", "rounded-lg bg-neutral-50 px-2 py-1.5", h("span", "text-[10px] font-medium text-neutral-400", "Update"), node);
+  // 2px edge + pl-5 lands the text on the tool rows' column (px-1 + h-3 chevron + gap-1.5);
+  // the hairline is the one mark that says the model is speaking.
+  const row = h("div", "border-l-2 border-neutral-200 py-0.5 pl-5", node);
   row.dataset.kind = "progress";
   a.rowsEl.append(row);
   activityHeadline(a, "running", "writing…");
@@ -406,13 +410,9 @@ function tailSteps(a: Activity): void {
 
 function activityHeadline(a: Activity, status: ActivityStatus, latest?: string): void {
   const secs = Math.max(1, Math.round((Date.now() - a.startTs) / 1000));
-  const base = `${a.steps ? `${a.steps} step${a.steps === 1 ? "" : "s"}` : "Progress"} · ${secs}s`;
-  a.headline.textContent =
-    status === "running" && latest
-      ? `${base} · ${latest}`
-      : status === "done"
-        ? `Completed · ${base}`
-        : `${base} · ${status}`;
+  const outcome = status === "running" ? "working" : status === "done" ? "Completed" : status;
+  const parts = [outcome, a.steps ? `${a.steps} step${a.steps === 1 ? "" : "s"}` : "", `${secs}s`, status === "running" ? latest : ""];
+  a.headline.textContent = parts.filter(Boolean).join(" · ");
   styleGroup(a.el, status);
   const icon = statusIconEl(status);
   a.statusIcon.replaceWith(icon);
@@ -423,12 +423,13 @@ export function finishActivity(status: ActivityStatus): void {
   if (!activity) return;
   flushThinking(); // the last tokens of the turn are part of the turn
   // Any still-running tool rows were cut short.
-  for (const { statusEl } of activity.toolRows.values()) {
-    if (statusEl.textContent === "running…") statusEl.textContent = "interrupted";
+  for (const row of activity.toolRows.values()) {
+    if (row.el.dataset.state === "running") toolState(row, "interrupted");
   }
   // One failed step doesn't fail the group — its red row says enough. All-red
-  // is reserved for every step failing, or a turn-level error (sawError).
-  const allFailed = activity.steps > 0 && activity.failedSteps === activity.steps;
+  // is reserved for every tool step failing, or a turn-level error (sawError).
+  const toolSteps = rowsOf(activity.el).length;
+  const allFailed = toolSteps > 0 && activity.failedSteps === toolSteps;
   activityHeadline(
     activity,
     (activity.sawError || allFailed) && status === "done" ? "failed"
@@ -455,7 +456,7 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   flushThinking(); // the preceding thinking row stops receiving text here
   a.thinking = null;
   const argsText = JSON.stringify(args, null, 2) ?? "";
-  const statusEl = h("span", "ml-auto flex-none text-neutral-400", "running…");
+  const statusEl = h("span", "ml-auto flex flex-none");
   // min-w-0, or a flex item's min-content floor keeps an unbreakable argument
   // (a path, a URL) at full width and truncate never gets to run.
   const preview = h("span", "min-w-0 truncate text-neutral-500", argsPreview(argsText));
@@ -470,11 +471,24 @@ export function activityToolStart(ts: number, id: string, name: string, args: un
   // A replayed row arrives without args or output — they are fetched when the
   // group is opened, and this is where that fill writes.
   rowsOf(a.el).push({ tool: name, call: id, preview, argsPre, outputPre });
-  a.toolRows.set(id, { el, statusEl, outputPre });
+  const row = { el, statusEl, outputPre };
+  toolState(row, "running");
+  a.toolRows.set(id, row);
   a.rowsEl.append(el);
   tailSteps(a);
   activityHeadline(a, "running", name);
   turns.scroll();
+}
+
+/** The row's state is on its element, the glyph its only rendering: the same
+ *  vocabulary as a run card's. Failure colours the summary alone, so args and
+ *  output below it stay readable. */
+function toolState(row: ToolRow, state: "running" | "succeeded" | "failed" | "interrupted"): void {
+  row.el.dataset.state = state;
+  row.statusEl.replaceChildren(stateGlyph(state));
+  row.statusEl.title = state;
+  const summary = row.el.firstElementChild as HTMLElement;
+  for (const cls of ["rounded", "bg-red-50", "text-red-700"]) summary.classList.toggle(cls, state === "failed");
 }
 
 export function activityToolEnd(id: string, isError: boolean, output: string): void {
@@ -483,10 +497,7 @@ export function activityToolEnd(id: string, isError: boolean, output: string): v
   const row = a.toolRows.get(id);
   a.toolRows.delete(id);
   if (row) {
-    row.statusEl.textContent = isError ? "failed" : "ok";
-    row.statusEl.className = `ml-auto flex-none ${isError ? "text-red-600" : "text-green-700"}`;
-    row.el.classList.toggle("bg-red-50", isError);
-    row.el.classList.toggle("text-red-700", isError);
+    toolState(row, isError ? "failed" : "succeeded");
     if (output) {
       row.outputPre.textContent =
         output.length > MAX_STEP_OUTPUT ? output.slice(0, MAX_STEP_OUTPUT) + "…" : output;
@@ -507,6 +518,7 @@ export function activityThinking(ts: number, text: string): void {
     const pre = h("div", "mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words pl-4 not-italic text-neutral-500", "");
     el.append(pre);
     a.rowsEl.append(el);
+    a.steps += 1;
     a.thinking = { pre, summary, text: "" };
     think = a.thinking;
     tailSteps(a);

@@ -112,7 +112,8 @@ updates this document.
 - System notices: wide neutral panels with visible outlines; topic first; four
   rendered lines by default, expandable; IDs are supporting details.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback
-  not yet landed), clear success/failure/interruption for results. Accents small.
+  not yet landed), clear success/failure/interruption for results; running is
+  neutral — the spinner carries the motion. Accents small.
 - Time separators at the first user message, after a ten-minute gap, across
   dates; absolute plus relative. Essential context never depends on hover.
 
