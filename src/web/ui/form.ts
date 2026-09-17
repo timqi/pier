@@ -263,6 +263,11 @@ export const badge = (text: string, cls: string, dot?: string): HTMLElement =>
     text,
   );
 
+/** A row's secondary action: quiet until its `group` row is hovered, always
+ *  visible where there is no hover to reveal it. `tone` is the hover colour. */
+export const rowActionClass = (tone = "hover:text-red-600"): string =>
+  `flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity ${tone} group-hover:opacity-100 pointer-coarse:opacity-100`;
+
 /** One device in a Console list — Security's signed-in browsers and
  *  Notifications' subscribed ones are the same row: name, a dim second line,
  *  its one action. `tag` marks the row that is this browser. */

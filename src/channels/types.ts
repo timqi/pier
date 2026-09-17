@@ -34,6 +34,11 @@ export interface ChatConfig {
   model: ModelRef | null;
   /** null → the project/Pi default. Pi clamps a level a model cannot do. */
   thinking: ThinkingLevel | null;
+  /** The bot identity this chat was last seen under, restamped by every
+   *  message: a DM's id means nothing to any other bot, so the Console can name
+   *  the owner and show which rows no longer have one. "" until traffic or a
+   *  start records it. */
+  botId: string;
 }
 
 export interface BoundUser {
@@ -80,7 +85,7 @@ export interface ChannelConfig {
 }
 
 /** What the runtime asks about one chat. */
-export type ChatPolicy = Omit<ChatConfig, "id" | "name" | "kind">;
+export type ChatPolicy = Omit<ChatConfig, "id" | "name" | "kind" | "botId">;
 
 /** A chat a web session can be continued in: a running platform × an enabled DM. */
 export interface HandoffTarget {

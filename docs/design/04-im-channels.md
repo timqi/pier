@@ -316,6 +316,14 @@ conversation id is the adapter's business.
   platform's DM chats and every conversation row in them are dropped — their
   ids are unreachable and read the same on screen as the live ones. Groups keep
   their ids across the swap. The first identity ever seen drops nothing.
+- **Every chat carries its owner.** Discovery stamps the row with the bot
+  running now (`ChatConfig.botId`) and restamps it on every message, so traffic
+  is the proof the chat is reachable; `""` is a row discovered before the stamp
+  existed. The Console names the current bot, marks a row whose owner differs
+  (`other bot` / `no bot`) and removes it —
+  `DELETE /api/channels/:platform/chats/:id` drops the chat and its
+  conversation rows, and a chat still alive is re-discovered by its next
+  message. That is the only way out for a stale DM the first claim kept.
 - **Bind**: a Console-issued single-use code with a TTL, redeemed by `/bind
   <code>` in a DM; bind requests pass the bind gate. Five wrong tries void the
   code, and the fifth reply says so.

@@ -329,7 +329,9 @@ browser keeps no second session order.
   keeps unmatched probes in its filter group; date fields start collapsed
   unless active; Reset covers all active filters.
 - **Settings**: cards or panels on the canvas. Channels: segmented platform
-  switch, sticky in the topic's scroller. Vault (`#/settings/vault`): the
+  switch, sticky in the topic's scroller; the chats card names the current bot,
+  and a row whose owner differs wears an amber badge, a one-line reason and
+  Remove (confirms). Vault (`#/settings/vault`): the
   rows `name · level · updated` with Remove (confirms), and the add row —
   name, `auto|approve` segmented with its one-line note, a password field;
   no reveal, filing an existing name replaces it. `?name=X` opens with the

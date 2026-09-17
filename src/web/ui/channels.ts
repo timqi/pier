@@ -14,7 +14,7 @@ import {
 } from "./channel-help.js";
 import { dirInput } from "./dir-picker.js";
 import { consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, btn, button, card, empty, field, segmented, STATUS_TONE, textInput, toggle } from "./form.js";
+import { badge, btn, button, card, empty, field, rowActionClass, segmented, STATUS_TONE, textInput, toggle } from "./form.js";
 import { launchField } from "./model-picker.js";
 
 const PLATFORMS: [ChannelPlatform, string][] = [["slack", "Slack"], ["lark", "Lark"]];
@@ -23,6 +23,8 @@ const KIND_STYLE: Record<ChatKind, string> = {
   dm: "bg-sky-50 text-sky-700 ring-sky-200",
   group: "bg-neutral-100 text-neutral-600 ring-neutral-200",
 };
+
+const CHATS_NOTE = "Discovered from inbound traffic — no platform reliably lists every chat a bot is in.";
 
 // --- view ---------------------------------------------------------------------
 
@@ -219,7 +221,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     const list = h("div", "flex flex-col");
     if (!cfg.users.length) list.append(empty("No bound users yet."));
     for (const user of cfg.users) {
-      const remove = btn("Remove", "cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100 pointer-coarse:opacity-100");
+      const remove = btn("Remove", rowActionClass());
       remove.onclick = async () => {
         await fetch(`/api/channels/${platform}/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
         await load();
@@ -242,13 +244,27 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
   }
 
   function chatRow(cfg: ChannelConfig, chat: ChatConfig): HTMLElement {
-    const box = h("div", `rounded-xl border px-3.5 py-3 transition-colors ${chat.enabled ? "border-neutral-200 bg-white" : "border-neutral-200 bg-neutral-50/60"}`);
+    const box = h("div", `group rounded-xl border px-3.5 py-3 transition-colors ${chat.enabled ? "border-neutral-200 bg-white" : "border-neutral-200 bg-neutral-50/60"}`);
+    // A DM's id belongs to the bot that opened it, and two DMs with the same
+    // person read identically: the row says whose it is, or nobody's.
+    const stale = chat.botId !== cfg.botId;
+    const remove = btn("Remove", rowActionClass());
+    remove.onclick = async () => {
+      const name = chat.name || chat.id;
+      if (!window.confirm(`Remove ${name}? Threads in it lose their sessions; a chat the bot can still reach comes back on its next message.`)) return;
+      await fetch(`/api/channels/${platform}/chats/${encodeURIComponent(chat.id)}`, { method: "DELETE" });
+      await load();
+    };
+    // The phone gives the name its own line: badges, id and the two actions
+    // together leave it nothing to truncate into.
     const head = h(
       "div",
-      "flex items-center gap-2",
-      h("span", `min-w-0 flex-1 truncate text-[13px] font-medium ${chat.enabled ? "text-neutral-800" : "text-neutral-400"}`, chat.name || chat.id),
+      "flex flex-wrap items-center gap-2",
+      h("span", `min-w-0 flex-1 basis-full truncate text-[13px] font-medium sm:basis-0 ${chat.enabled ? "text-neutral-800" : "text-neutral-400"}`, chat.name || chat.id),
       badge(chat.kind, KIND_STYLE[chat.kind]),
+      ...(stale ? [badge(chat.botId ? "other bot" : "no bot", "bg-amber-50 text-amber-700 ring-amber-200")] : []),
       h("span", "flex-none font-mono text-[11px] text-neutral-400", chat.id),
+      remove,
     );
     const enabled = toggle("", "", chat.enabled, set((v) => {
       chat.enabled = v;
@@ -267,6 +283,15 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
         toggle("Require mention", "", chat.requireMention, set((v) => (chat.requireMention = v))),
         toggle("Require bind", "", chat.requireBind, set((v) => (chat.requireBind = v))),
       );
+    }
+    if (stale) {
+      switches.append(h(
+        "span",
+        "w-full text-[12.5px] text-amber-700",
+        chat.botId
+          ? `Last seen under bot ${chat.botId}${cfg.botId ? `, not the current ${cfg.botId}` : ""} — remove it if nothing arrives here.`
+          : "No message since Pier started recording bot identities — remove it if nothing arrives here.",
+      ));
     }
 
     const cwd = dirInput(chat.cwd, "", set((v) => (chat.cwd = v)));
@@ -290,7 +315,7 @@ export function createChannelsView(root: HTMLElement): ConsoleView {
     else list.append(empty("None yet. Chats appear here after the bot sees a message in them."));
     return card(
       platform === "slack" ? "Channels" : "Chats",
-      "Discovered from inbound traffic — no platform reliably lists every chat a bot is in.",
+      cfg.botId ? `${CHATS_NOTE} Current bot: ${cfg.botId}.` : CHATS_NOTE,
       list,
     );
   }

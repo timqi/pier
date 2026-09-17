@@ -4,6 +4,7 @@
 import type { Hono } from "hono";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
+import type { ConversationStore } from "./conversations.js";
 import { type Handoff, HandoffError } from "./handoff.js";
 import type { ChannelRuntime } from "./runtime.js";
 import {
@@ -61,6 +62,7 @@ export function registerChannelRoutes(
   store: ChannelStore,
   runtime: Pick<ChannelRuntime, "reload">,
   handoff: Handoff,
+  conversations: Pick<ConversationStore, "forgetChat">,
 ): void {
   app.get("/api/channels/:platform", (c) => {
     const platform = c.req.param("platform");
@@ -109,6 +111,17 @@ export function registerChannelRoutes(
     const platform = c.req.param("platform");
     if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
     return c.json(store.issueBindCode(platform));
+  });
+
+  app.delete("/api/channels/:platform/chats/:id", (c) => {
+    const platform = c.req.param("platform");
+    if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
+    const chatId = c.req.param("id");
+    if (!store.removeChat(platform, chatId)) return c.json({ error: "unknown chat" }, 404);
+    // The threads go with the chat: a binding to a chat nobody lists is a
+    // session no message can ever reach.
+    conversations.forgetChat(platform, chatId);
+    return c.json({ ok: true });
   });
 
   app.delete("/api/channels/:platform/users/:id", (c) => {

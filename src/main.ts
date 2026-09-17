@@ -308,7 +308,7 @@ registerConfigSyncRoutes(app, {
   run: configurationSync.run,
 });
 registerTaskRoutes(app, tasks, { factory, router });
-registerChannelRoutes(app, channelStore, channels, handoff);
+registerChannelRoutes(app, channelStore, channels, handoff, conversations);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 registerPushRoutes(app, {

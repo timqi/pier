@@ -12,6 +12,7 @@ let app: Hono;
 let reloads: number;
 let handoffs: HandoffRequest[];
 let refuse: HandoffError | undefined;
+let forgotten: string[];
 const TARGETS: HandoffTarget[] = [{ platform: "slack", chatId: "D100", name: "Qi" }];
 
 beforeEach(() => {
@@ -27,6 +28,7 @@ beforeEach(() => {
   } as unknown as ChannelRuntime;
   handoffs = [];
   refuse = undefined;
+  forgotten = [];
   registerChannelRoutes(app, store, runtime, {
     unbound: () => Promise.resolve([]),
     continueHere: () => Promise.resolve(),
@@ -35,7 +37,7 @@ beforeEach(() => {
       handoffs.push(req);
       return refuse ? Promise.reject(refuse) : Promise.resolve({ conversationId: `${req.chatId}/1.0` });
     },
-  });
+  }, { forgetChat: (channelId, chatId) => void forgotten.push(`${channelId}:${chatId}`) });
 });
 
 const get = async (path = "/api/channels/slack"): Promise<ChannelConfig & { supported: boolean }> => {
@@ -122,6 +124,15 @@ describe("channel config routes", () => {
     expect((await app.request("/api/channels/slack/users/7", { method: "DELETE" })).status).toBe(200);
     expect(store.isBound("slack", "7")).toBe(false);
     expect(reloads).toBe(1);
+  });
+
+  it("deletes a chat with the threads bound to it, and 404s on one it never knew", async () => {
+    store.discoverChat("slack", { id: "D1", name: "DM · qiqi", kind: "dm" });
+    expect((await app.request("/api/channels/slack/chats/D404", { method: "DELETE" })).status).toBe(404);
+    expect((await app.request("/api/channels/lark/chats/D1", { method: "DELETE" })).status).toBe(404);
+    expect((await app.request("/api/channels/slack/chats/D1", { method: "DELETE" })).status).toBe(200);
+    expect(store.get("slack").chats).toEqual([]);
+    expect(forgotten).toEqual(["slack:D1"]);
   });
 
   it("rejects a body that is not an object", async () => {

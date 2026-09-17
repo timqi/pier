@@ -109,6 +109,7 @@ describe("channel config store", () => {
       cwd: "/srv/work",
       model: { provider: "anthropic", id: "claude-opus-4-5" },
       thinking: "high",
+      botId: "",
     }]);
     // Seeds, not inheritance: moving the platform default leaves the chat put.
     const moved = store.get("slack");
@@ -119,6 +120,28 @@ describe("channel config store", () => {
       requireMention: true,
       cwd: "/srv/work",
     });
+  });
+
+  it("stamps every chat with the bot that saw it, and restamps on the next message", () => {
+    store.claimBot("slack", "U1");
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    expect(store.chat("slack", "C100")?.botId).toBe("U1");
+    // A group survives the swap carrying the old stamp; its next message
+    // proves it is reachable under the new bot.
+    store.claimBot("slack", "U2");
+    expect(store.chat("slack", "C100")?.botId).toBe("U1");
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    expect(store.chat("slack", "C100")?.botId).toBe("U2");
+  });
+
+  it("removes a chat by id and says when there was none", () => {
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    expect(store.removeChat("slack", "C404")).toBe(false);
+    expect(store.removeChat("slack", "C100")).toBe(true);
+    expect(store.get("slack").chats).toEqual([]);
+    // Undone by using it: the next message discovers the chat again.
+    store.discoverChat("slack", { id: "C100", name: "Ops", kind: "group" });
+    expect(store.chat("slack", "C100")).toBeDefined();
   });
 
   it("renames a known chat without losing its overrides", () => {
@@ -138,7 +161,7 @@ describe("channel config store", () => {
     const config = store.get("slack");
     config.requireMention = true;
     config.cwd = "/srv/work";
-    const seed = { requireMention: true, requireBind: true, cwd: "/srv/work", model: null, thinking: null };
+    const seed = { requireMention: true, requireBind: true, cwd: "/srv/work", model: null, thinking: null, botId: "" };
     config.chats = [
       { id: "a", name: "a", kind: "group", enabled: true, ...seed, requireMention: false },
       { id: "b", name: "b", kind: "group", enabled: false, ...seed, cwd: "/srv/b" },

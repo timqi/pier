@@ -54,6 +54,9 @@ export class ChannelStore {
     for (const [key, name] of credentials(platform)) {
       config[key] = this.vault.get(name) ?? "";
     }
+    // A row written before chats carried an owner: "" is "never stamped", which
+    // is what the Console shows.
+    for (const chat of config.chats) chat.botId ??= "";
     this.cache.set(platform, config);
     return config;
   }
@@ -89,22 +92,40 @@ export class ChannelStore {
    *  and happens on every message: the unchanged case must cost no clone. A new
    *  chat copies the platform defaults and owns them from then on. */
   discoverChat(platform: ChannelPlatform, chat: { id: string; name: string; kind: ChatKind }): void {
-    const cached = this.cached(platform).chats.find((c) => c.id === chat.id);
-    if (cached && cached.name === chat.name && cached.kind === chat.kind) return;
+    // Traffic is the proof of ownership: a message in this chat reached the bot
+    // running now, so the row is stamped with it and a row no message renews
+    // keeps the identity it was last reachable under.
+    const { botId, chats } = this.cached(platform);
+    const cached = chats.find((c) => c.id === chat.id);
+    if (cached && cached.name === chat.name && cached.kind === chat.kind && cached.botId === botId) return;
     const config = this.get(platform);
     const known = config.chats.find((c) => c.id === chat.id);
     if (known) {
       known.name = chat.name || known.name;
       known.kind = chat.kind;
+      known.botId = botId;
     } else {
       config.chats.push({
         id: chat.id,
         name: chat.name,
         kind: chat.kind,
+        botId,
         ...this.policy(platform, chat.id),
       });
     }
     this.save(platform, config);
+  }
+
+  /** The Console's delete, for the chat no swap will ever claim: a row nothing
+   *  can reach reads like a live one. Traffic re-discovers a chat that is still
+   *  alive, so this is undone by using it. */
+  removeChat(platform: ChannelPlatform, chatId: string): boolean {
+    const config = this.get(platform);
+    const rest = config.chats.filter((c) => c.id !== chatId);
+    if (rest.length === config.chats.length) return false;
+    config.chats = rest;
+    this.save(platform, config);
+    return true;
   }
 
   /** A DM's id belongs to the bot it was opened with, so a new app or a rotated

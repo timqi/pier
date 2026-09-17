@@ -3,7 +3,7 @@
 
 import { failure, getJson, refused, sendJson } from "./api.js";
 import { consoleView, copyBtn, h, relTime, type ConsoleView } from "./dom.js";
-import { btn, card, empty, pageTitle, toggle } from "./form.js";
+import { btn, card, empty, pageTitle, rowActionClass, toggle } from "./form.js";
 
 interface Board {
   slug: string;
@@ -79,17 +79,14 @@ export function createBoardsView(root: HTMLElement, openSession: (id: string) =>
     label.append(h("span", "", "Public"));
     // Hover-revealed, like the channel user rows: deleting only renames the
     // folder, so the undo is on disk and a modal would be theatre.
-    const del = btn(
-      "Delete",
-      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100 pointer-coarse:opacity-100",
-    );
+    const del = btn("Delete", rowActionClass());
     del.title = "Renames the folder on disk; nothing is erased";
     del.onclick = () => void remove(board.slug);
     // Absolute, because a copied link is going somewhere else: a chat, a mail,
     // another machine. `board` is read at click time, so a toggle flipped a
     // second ago copies the URL the row now shows.
     const copyLink = copyBtn(
-      "flex-none cursor-pointer text-[11.5px] text-neutral-400 opacity-0 transition-opacity hover:text-indigo-600 group-hover:opacity-100 pointer-coarse:opacity-100",
+      rowActionClass("hover:text-indigo-600"),
       () => `${location.origin}${boardPath(board)}`,
     );
     copyLink.title = "Copy the board's link";
