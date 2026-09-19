@@ -542,9 +542,10 @@ main {
   #queue-panel > div:first-child { height: auto; }
   /* Chat steps: the group head is a control; its full-width log rows take a
      lower floor, packed, and the log shows more of them, or a 256px box holds
-     five rows of air. */
+     five rows of air. The row's own py-0.5 is outside the floor, so a row's
+     pitch is 4px more than the floor says. */
   #turns [data-kind="activity"] > summary { min-height: 44px; }
-  #turns [data-kind="activity"] details > summary { min-height: 36px; }
+  #turns [data-kind="activity"] details > summary { min-height: 28px; }
   #turns [data-kind="activity"] > summary + div { gap: 0; max-height: 20rem; }
 }
 /* One selection vocabulary: the rail's rows, the Console's, and the palette's. */
