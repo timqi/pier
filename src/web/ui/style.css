@@ -613,7 +613,10 @@ main {
   /* scrollIntoView aims at the same edge, so a revealed row's top clears the
      heading instead of landing behind it (chat.ts revealTurn). */
   scroll-padding-block: calc(var(--head-h) + 0.75rem) calc(var(--dock-h, 4rem) + 0.5rem);
-  mask-image: linear-gradient(to bottom, transparent, black 2.5rem, black calc(100% - 2rem), transparent);
+  /* The fade is complete across the heading's 8px inset (margin above): a row
+     showing through that strip is a ghost line over the bar, which iOS 26's
+     scroll edge effect smears into the status bar. */
+  mask-image: linear-gradient(to bottom, transparent 8px, black 2.5rem, black calc(100% - 2rem), transparent);
 }
 #turns > :is([data-kind="user"], [data-kind="assistant"], [data-kind="system"], [data-kind="error"]) {
   width: fit-content;
