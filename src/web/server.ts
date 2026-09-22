@@ -736,9 +736,13 @@ export function createServer(
   });
   // Hashed bundles never change under their name; without this the auth
   // layer's bare `private` costs a revalidation round trip per bundle per open.
+  // Never on a miss: a build replaces `public/assets`, and a year-long 404 is a
+  // stale shell's blank page that no longer even reaches the server.
   app.get("/app/assets/*", async (c, next) => {
-    c.header("cache-control", "private, max-age=31536000, immutable");
     await next();
+    if (c.res.status === 200 || c.res.status === 206) {
+      c.header("cache-control", "private, max-age=31536000, immutable");
+    } else c.header("cache-control", "private, no-store");
   });
   // The build writes `.br`/`.gz` siblings (vite.config.ts). serveStatic sets
   // Vary only when it selects one; identity must carry it too, or a cache can

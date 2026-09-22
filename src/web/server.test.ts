@@ -2443,6 +2443,18 @@ describe("the app shell", () => {
     expect((await app.request("/icon.svg")).status).toBe(404);
   });
 
+  it("keeps no copy a rebuild would invalidate: the shell, and a bundle it no longer names", async () => {
+    const { app } = setup();
+    const shell = await app.request("/app/");
+    expect(shell.status).toBe(200);
+    // Safari restores a no-cache document without revalidating it, and the
+    // hashes it names are gone the moment the next build runs.
+    expect(shell.headers.get("cache-control")).toBe("private, no-store");
+    const gone = await app.request("/app/assets/index-DeadBeef.css");
+    expect(gone.status).toBe(404);
+    expect(gone.headers.get("cache-control")).toBe("private, no-store");
+  });
+
   it("carries the instance's accent on <html>, so the first paint is already in it", () => {
     const html = readFileSync(new URL("./ui/index.html", import.meta.url), "utf8");
     expect(withAccent(html, "teal")).toContain('<html lang="en" data-accent="teal">');
