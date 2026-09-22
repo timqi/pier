@@ -682,8 +682,11 @@ export function createServer(
   const prefix = tabPrefix(process.env.PIER_TITLE, hostname().split(".")[0] ?? "");
   let shell: string | null = null;
   const serveShell = async (c: Context, next: Next): Promise<Response | void> => {
-    // A cached index must not name bundles a release has replaced.
-    c.header("cache-control", "private, no-cache");
+    // A cached index must not name bundles a release has replaced: the build
+    // replaces `public/assets`, so an old shell's hashes are 404s and the page
+    // renders unstyled. `no-store`, not `no-cache` — Safari restores a
+    // no-cache document from its cache without revalidating it.
+    c.header("cache-control", "private, no-store");
     if (shell === null) {
       try {
         shell = withTabPrefix(await readFile(join(bundle, "index.html"), "utf8"), prefix);
