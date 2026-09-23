@@ -42,8 +42,9 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run lint
-      - run: npm test
+      # Before the tests: the app shell they request is this build's output.
       - run: npm run build
+      - run: npm test
 
       - name: Notes from the log
         run: |
