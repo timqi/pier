@@ -10,11 +10,6 @@ import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
-  ModelRef,
-  SessionEventPayload,
-  SessionState,
-  SystemInputOrigin,
-  ThinkingLevel,
 } from "../core/types.js";
 import { runResultText, TaskCallbacks } from "./callbacks.js";
 import { idSymbol, newId } from "./definitions.js";
@@ -23,107 +18,13 @@ import { registerTaskRoutes } from "./routes.js";
 import { TaskService } from "./service.js";
 import type { GroupSummary, RunSummary } from "./operations.js";
 import { TaskStore } from "./store.js";
+import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import {
   MAX_DELIVERY_ATTEMPTS,
   retryDelay,
   type TaskDefinition,
   type TaskRun,
 } from "./types.js";
-
-function fakeSession(id = "s1", reply = "agent result"): AgentSession & {
-  prompts: string[];
-  systemInputs: { text: string; origin: SystemInputOrigin; mode: "prompt" | "steer" | "followUp" }[];
-  setState(state: SessionState): void;
-  emit(event: SessionEventPayload): void;
-} {
-  let state: SessionState = "idle";
-  const listeners = new Set<(event: SessionEventPayload) => void>();
-  const prompts: string[] = [];
-  const systemInputs: { text: string; origin: SystemInputOrigin; mode: "prompt" | "steer" | "followUp" }[] = [];
-  const model: ModelRef = { provider: "test", id: "model" };
-  const runPrompt = async (text: string): Promise<void> => {
-    prompts.push(text);
-    state = "streaming";
-    listeners.forEach((fn) => fn({ type: "turn-start" }));
-    await Promise.resolve();
-    listeners.forEach((fn) => fn({ type: "turn-end", text: reply }));
-    state = "idle";
-    listeners.forEach((fn) => fn({ type: "state", state: "idle" }));
-  };
-  return {
-    id,
-    prompts,
-    systemInputs,
-    get state() { return state; },
-    // Real sessions emit a state event on every transition; the task runner
-    // relies on that stream (not polling) to notice idle.
-    setState(next) {
-      state = next;
-      listeners.forEach((fn) => fn({ type: "state", state: next }));
-    },
-    /** For the turns this fake does not run itself — the ones that end on
-     *  something other than an answer. */
-    emit(event) {
-      listeners.forEach((fn) => fn(event));
-    },
-    model,
-    thinkingLevel: "off" as ThinkingLevel,
-    contextUsage: undefined,
-    history: async (): Promise<ChatTurn[]> => [
-      ...systemInputs.map(({ text, origin }) => ({ role: "system" as const, text, origin })),
-      { role: "assistant", text: reply },
-    ],
-    setModel: async () => {},
-    availableModels: async () => [model],
-    availableThinkingLevels: () => ["off"],
-    setThinkingLevel: () => {},
-    setCacheRetention: () => {},
-    pendingQueue: async () => ({ steering: [], followUp: [] }),
-    pendingSystemInputs: async () => [],
-    clearQueue: async () => ({ steering: [], followUp: [] }),
-    rewindToUserTurn: async () => {},
-    compact: async () => {},
-    rename: async () => {},
-    prompt: runPrompt,
-    steer: async () => {},
-    followUp: async () => {},
-    systemInput: async (text, origin, mode) => {
-      systemInputs.push({ text, origin, mode });
-      await runPrompt(text);
-    },
-    abort: async () => { state = "idle"; },
-    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    dispose: async () => {},
-  };
-}
-
-/** A session whose turn ends the way a provider outage ends one: no text, and
- *  the reason on the turn (what agent/events.ts emits for an assistant message
- *  that stopped with `stopReason: "error"`). */
-function outageSession(id: string, error: string): ReturnType<typeof fakeSession> {
-  const session = fakeSession(id);
-  session.systemInput = async (text, origin, mode) => {
-    session.systemInputs.push({ text, origin, mode });
-    session.setState("streaming");
-    await Promise.resolve();
-    session.emit({ type: "turn-end", text: "", error });
-    session.setState("idle");
-  };
-  return session;
-}
-
-/** A session whose turn never ends until it is aborted — for cancel paths. */
-function hangingSession(id: string): ReturnType<typeof fakeSession> {
-  const session = fakeSession(id);
-  let release = (): void => {};
-  session.systemInput = async (text, origin, mode) => {
-    session.systemInputs.push({ text, origin, mode });
-    await new Promise<void>((resolve) => { release = resolve; });
-  };
-  const abort = session.abort.bind(session);
-  session.abort = async () => { release(); await abort(); };
-  return session;
-}
 
 function setup(session = fakeSession(), instance?: ConstructorParameters<typeof TaskService>[4]) {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
@@ -577,7 +478,7 @@ describe("task service", () => {
     expect(run.result).toEqual({ type: "agent", text: "agent result", sessionId: "s1" });
     expect(run.context.model).toEqual({ provider: "test", id: "model" });
     expect(run.context.renderedPrompt).toContain('"pr":7');
-    expect(session.prompts).toHaveLength(1);
+    expect(session.systemInputs).toHaveLength(1);
     expect(session.systemInputs[0]).toMatchObject({
       // The card rendering this input names what produced it without fetching
       // the run: the task, and the model and effort the session settled on.
@@ -616,7 +517,7 @@ describe("task service", () => {
   });
 
   it("strips chat-only markup from a child result", async () => {
-    const { service, session } = setup(fakeSession("s1", "Done.\n\n---\n[Merge it] | [Show diff]"));
+    const { service, session } = setup(fakeSession("s1", { reply: "Done.\n\n---\n[Merge it] | [Show diff]" }));
     const task = await service.create({
       name: "buttons",
       trigger: { type: "manual" },
@@ -644,7 +545,7 @@ describe("task service", () => {
 
   it("caps a chatty callback but recovers the full result", async () => {
     const long = `start ${"x".repeat(9000)}`;
-    const { service, session } = setup(fakeSession("s1", long));
+    const { service, session } = setup(fakeSession("s1", { reply: long }));
     const task = await service.create({
       name: "chatty",
       trigger: { type: "manual" },
@@ -659,7 +560,7 @@ describe("task service", () => {
   });
 
   it("names a silent child turn instead of storing an empty result", async () => {
-    const { service, session } = setup(fakeSession("s1", "<silent>humans talking</silent>"));
+    const { service, session } = setup(fakeSession("s1", { reply: "<silent>humans talking</silent>" }));
     const task = await service.create({
       name: "quiet",
       trigger: { type: "manual" },
@@ -720,7 +621,7 @@ describe("task service", () => {
 
   it("hands off a control message without awaiting the recipient, then sweeps a failed one", async () => {
     const { cwd, service, factory } = setup();
-    const child = hangingSession("steer-child");
+    const child = fakeSession("steer-child", { hold: true });
     const hangingInput = child.systemInput;
     child.systemInput = async (text, origin, mode) => {
       if (origin.kind === "task-message") throw new Error("session gone");
@@ -760,15 +661,10 @@ describe("task service", () => {
   });
 
   it("records callback delivery from the transcript, without waiting out the recipient's turn", async () => {
-    const { cwd, service, session } = setup();
-    let release = (): void => {};
     // Pi resolves `systemInput` only when the turn it triggers settles; the
     // proof is in the transcript as the turn starts, so a recipient turn
     // running for minutes must not leave the run "pending".
-    session.systemInput = async (text, origin, mode) => {
-      session.systemInputs.push({ text, origin, mode });
-      await new Promise<void>((resolve) => { release = resolve; });
-    };
+    const { cwd, service, session } = setup(fakeSession("s1", { hold: true }));
     const task = await service.handle({ operation: "save", task: bashDraft(cwd, "echo accepted") }, "s1") as TaskDefinition;
     const queued = await service.handle({ operation: "run", task_id: task.id }, "s1") as RunSummary;
     const done = await service.waitForRun(queued.runId);
@@ -782,7 +678,7 @@ describe("task service", () => {
       origin: { kind: "task-callback", runId: done.id },
       mode: "followUp",
     });
-    release();
+    await session.abort();
   });
 
   it("will not call a callback delivered on a recipient that recorded nothing", async () => {
@@ -843,11 +739,11 @@ describe("task service", () => {
     }));
     // Its last attempt did reach the transcript; the proof read happens before
     // the ceiling, or a delivered result would be reported as undeliverable.
-    session.systemInputs.push({
-      text: "result",
-      origin: { kind: "task-callback", taskId: task.id, runId: "landed", sourceSessionId: null },
-      mode: "followUp",
-    });
+    await session.systemInput(
+      "result",
+      { kind: "task-callback", taskId: task.id, runId: "landed", sourceSessionId: null },
+      "followUp",
+    );
     const told: string[] = [];
     const callbacks = new TaskCallbacks(store, router, () => {}, (...args) => told.push(args.join("|")));
 
@@ -857,51 +753,35 @@ describe("task service", () => {
     expect(hub.lastSeq(session.id)).toBeDefined();
   });
 
-  /** A recipient that is mid-turn, queueing what it is handed the way Pi does:
-   *  the input goes into the agent's queue — not the transcript, and not the
-   *  text queue `pendingQueue` reads — until the turn drains it. */
-  function streamingRecipient(id: string) {
-    const session = fakeSession(id);
-    const queued: { text: string; origin: SystemInputOrigin }[] = [];
-    session.systemInput = async (text, origin) => { queued.push({ text, origin }); };
-    session.pendingSystemInputs = async () => queued.map((entry) => entry.origin);
-    session.setState("streaming");
-    /** The turn ends and takes the queue with it, into the transcript. */
-    const drain = (): void => {
-      for (const entry of queued) session.systemInputs.push({ ...entry, mode: "steer" });
-      queued.length = 0;
-    };
-    return { session, queued, drain };
-  }
-
   it("does not send a steer twice while the first one waits in Pi's queue", async () => {
     // A steer is not deferred on a busy target — reaching the running turn is
     // the point — so it sits in Pi's in-memory queue, invisible in the
     // transcript until the turn drains it. Re-sending it there is a duplicate.
-    const busy = streamingRecipient("busy");
-    const { cwd, service, store, router, hub } = setup(busy.session);
+    const busy = fakeSession("busy");
+    busy.setState("streaming");
+    const { cwd, service, store, router, hub } = setup(busy);
     const messenger = new TaskMessenger(store, router, hub, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("steered", task, now, {
       state: "running", finishedAt: null, result: null,
-      targetSessionId: busy.session.id, sessionMode: "reuse", invokedBySessionId: "owner",
+      targetSessionId: busy.id, sessionMode: "reuse", invokedBySessionId: "owner",
     }));
     const message = await messenger.control(store.getRun("steered")!, "owner", "steer", "Change direction");
 
-    await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
+    await vi.waitFor(async () => expect(await busy.pendingSystemInputs()).toHaveLength(1));
     for (let i = 1; i <= 3; i++) {
       messenger.retryUndelivered(now + i * 600_000);
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(busy.queued).toHaveLength(1);
+    expect(await busy.pendingSystemInputs()).toHaveLength(1);
     expect(store.getMessage(message.id)).toMatchObject({ state: "pending", attempts: 1 });
 
     // The turn drains it: now it is in the transcript, and only now delivered.
-    busy.drain();
+    busy.deliverSteering();
     messenger.retryUndelivered(now + 999 * 600_000);
     await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
-    expect(busy.queued).toHaveLength(0);
+    expect(await busy.pendingSystemInputs()).toHaveLength(0);
   });
 
   it("waits out a long turn instead of spending a follow-up's attempts on it", async () => {
@@ -909,28 +789,29 @@ describe("task service", () => {
     // for an hour holds it that long. Every sweep in between is a wait, not an
     // attempt: counting them expires a message that was never undeliverable —
     // and queues a copy of it per sweep, all of which land at once.
-    const busy = streamingRecipient("long-turn");
-    const { cwd, service, store, router, hub } = setup(busy.session);
+    const busy = fakeSession("long-turn");
+    busy.setState("streaming");
+    const { cwd, service, store, router, hub } = setup(busy);
     const told: string[] = [];
     const messenger = new TaskMessenger(store, router, hub, (...args) => told.push(args.join("|")));
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("guided", task, now, {
       state: "running", finishedAt: null, result: null,
-      targetSessionId: busy.session.id, sessionMode: "reuse", invokedBySessionId: "owner",
+      targetSessionId: busy.id, sessionMode: "reuse", invokedBySessionId: "owner",
     }));
     const message = await messenger.control(store.getRun("guided")!, "owner", "follow_up", "Also check the tests");
 
-    await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
+    await vi.waitFor(async () => expect(await busy.pendingSystemInputs()).toHaveLength(1));
     for (let i = 1; i <= MAX_DELIVERY_ATTEMPTS + 2; i++) {
       messenger.retryUndelivered(now + i * 600_000);
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(busy.queued).toHaveLength(1);
+    expect(await busy.pendingSystemInputs()).toHaveLength(1);
     expect(store.getMessage(message.id)).toMatchObject({ state: "pending", attempts: 1 });
     expect(told).toEqual([]);
 
-    busy.drain();
+    busy.setState("idle");
     messenger.retryUndelivered(now + 999 * 600_000);
     await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
   });
@@ -1038,11 +919,9 @@ describe("task service", () => {
   });
 
   it("steers a callback into the running turn only when the delegation asked for it", async () => {
-    // A busy recipient that records what it is handed without ending its turn:
-    // the steer has to land mid-stream, and the follow-up beside it must not.
-    const session = fakeSession();
-    session.systemInput = async (text, origin, mode) => { session.systemInputs.push({ text, origin, mode }); };
-    const { cwd, service } = setup(session);
+    // A busy recipient: the steer has to land mid-stream, and the follow-up
+    // beside it must not.
+    const { cwd, service, session } = setup();
     const advance = skewClock();
     service.start(20);
     const task = await service.handle({ operation: "save", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
@@ -1056,7 +935,13 @@ describe("task service", () => {
 
     // The steer rides the running turn; the default callback keeps waiting for
     // it to end, and is not batched into the delivery that overtook it.
-    await vi.waitFor(() => expect(service.getRun(urgent.runId).callbackState).toBe("delivered"));
+    await vi.waitFor(() => expect(session.systemInputs).toHaveLength(1));
+    // Pi takes it in at the next tool boundary; the sweep past the backoff reads the proof.
+    session.deliverSteering();
+    await vi.waitFor(() => {
+      advance(1100);
+      expect(service.getRun(urgent.runId).callbackState).toBe("delivered");
+    });
     expect(session.systemInputs).toHaveLength(1);
     expect(session.systemInputs[0]).toMatchObject({ mode: "steer" });
     expect(session.systemInputs[0]!.text).toContain(urgent.runId);
@@ -1078,26 +963,27 @@ describe("task service", () => {
     // A steer is handed to a running turn, so until that turn drains it the
     // result is in Pi's memory queue and nowhere in the transcript. Proof by
     // transcript alone would read that as "never arrived" and send it again.
-    const busy = streamingRecipient("s1");
-    const { cwd, service, store } = setup(busy.session);
+    const busy = fakeSession("s1");
+    busy.setState("streaming");
+    const { cwd, service, store } = setup(busy);
     const advance = skewClock();
     service.start(20);
     const task = await service.handle({ operation: "save", task: bashDraft(cwd, "echo busy") }, "s1") as TaskDefinition;
     const urgent = await service.handle({ operation: "run", task_id: task.id, callback: "steer" }, "s1") as RunSummary;
     await service.waitForRun(urgent.runId);
 
-    await vi.waitFor(() => expect(busy.queued).toHaveLength(1));
+    await vi.waitFor(async () => expect(await busy.pendingSystemInputs()).toHaveLength(1));
     // Past the first retry's backoff, which is when the re-send would happen.
     advance(retryDelay(1) + 100);
     await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(busy.queued).toHaveLength(1);
+    expect(await busy.pendingSystemInputs()).toHaveLength(1);
     // Waiting on the queue is not an attempt either: one send, one count.
     expect(store.getRun(urgent.runId)).toMatchObject({ callbackState: "pending", callbackAttempts: 1 });
 
-    busy.drain();
+    busy.deliverSteering();
     advance(1100);
     await vi.waitFor(() => expect(store.getRun(urgent.runId)?.callbackState).toBe("delivered"));
-    expect(busy.queued).toHaveLength(0);
+    expect(await busy.pendingSystemInputs()).toHaveLength(0);
     service.stop();
   });
 
@@ -1178,9 +1064,9 @@ describe("task service", () => {
   ])("keeps six agent slots instance-wide, queued cancellation: $cancelQueued", async ({ cancelQueued }) => {
     const { cwd, service, factory } = setup();
     onTestFinished(() => service.stop());
-    const sessions: ReturnType<typeof hangingSession>[] = [];
+    const sessions: FakeSession[] = [];
     vi.mocked(factory.create).mockImplementation(async () => {
-      const session = hangingSession(`worker-${sessions.length}`);
+      const session = fakeSession(`worker-${sessions.length}`, { hold: true });
       sessions.push(session);
       return session;
     });
@@ -1219,7 +1105,7 @@ describe("task service", () => {
   });
 
   it("leaves slots available to a fresh run behind six runs reusing one session", async () => {
-    const { cwd, service, session, factory } = setup(hangingSession("shared"));
+    const { cwd, service, session, factory } = setup(fakeSession("shared", { hold: true }));
     onTestFinished(() => service.stop());
     const reuse = await service.create({
       name: "reuse", trigger: { type: "manual" },
@@ -1246,7 +1132,7 @@ describe("task service", () => {
   });
 
   it("cancels a session waiter promptly without letting later arrivals pass its predecessor", async () => {
-    const { service, session } = setup(hangingSession("shared"));
+    const { service, session } = setup(fakeSession("shared", { hold: true }));
     onTestFinished(() => service.stop());
     const task = await service.create({
       name: "serial", trigger: { type: "manual" },
@@ -1274,7 +1160,7 @@ describe("task service", () => {
   it("leaves a session wait outside the timeout, which the waiter's own turn arms", async () => {
     vi.useFakeTimers();
     onTestFinished(() => { vi.useRealTimers(); });
-    const { service, session } = setup(hangingSession("shared"));
+    const { service, session } = setup(fakeSession("shared", { hold: true }));
     onTestFinished(() => service.stop());
     const task = await service.create({
       name: "serial timeout", trigger: { type: "manual" },
@@ -1303,9 +1189,9 @@ describe("task service", () => {
     onTestFinished(() => { vi.useRealTimers(); });
     const { cwd, service, factory } = setup();
     onTestFinished(() => service.stop());
-    const sessions: ReturnType<typeof hangingSession>[] = [];
+    const sessions: FakeSession[] = [];
     vi.mocked(factory.create).mockImplementation(async () => {
-      const session = hangingSession(`worker-${sessions.length}`);
+      const session = fakeSession(`worker-${sessions.length}`, { hold: true });
       sessions.push(session);
       return session;
     });
@@ -1389,6 +1275,9 @@ describe("task service", () => {
 
   it("persists steering and resumes a completed Agent run in the same session", async () => {
     const { service, session } = setup();
+    const advance = skewClock();
+    service.start(20);
+    onTestFinished(() => service.stop());
     const task = await service.create({
       name: "controlled agent",
       trigger: { type: "manual" },
@@ -1403,6 +1292,9 @@ describe("task service", () => {
       mode: "steer",
     })));
     // Delivered once the recipient's own transcript carries it, not before.
+    expect(service.listMessages(queued.id)[0]?.state).toBe("pending");
+    session.deliverSteering();
+    advance(retryDelay(1) + 100);
     await vi.waitFor(() => expect(service.listMessages(queued.id)[0]?.state).toBe("delivered"));
     session.setState("idle");
     const done = await service.waitForRun(queued.id);
@@ -1613,7 +1505,7 @@ describe("task service", () => {
 
   it("fails a run whose turn died on the provider, instead of reporting 'no reply'", async () => {
     const outage = '503 {"error":{"message":"Upstream service overloaded"},"type":"error"}';
-    const { service, session } = setup(outageSession("s1", outage));
+    const { service, session } = setup(fakeSession("s1", { error: outage }));
     const task = await service.create({
       name: "review",
       trigger: { type: "manual" },
@@ -1686,7 +1578,7 @@ describe("task service", () => {
   });
 
   it("cancels a run while its final history read is stalled", async () => {
-    const { cwd, service, session } = setup(fakeSession("history", ""));
+    const { cwd, service, session } = setup(fakeSession("history", { reply: "" }));
     session.history = vi.fn(() => new Promise<ChatTurn[]>(() => {}));
     const task = await service.create({ name: "history", action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "Work" } });
     const run = service.run(task.id);
@@ -1698,11 +1590,7 @@ describe("task service", () => {
   it.each(["ignore", "reject", "throw"] as const)("releases the slot when a hung session's abort will %s", async (abortMode) => {
     const { cwd, service, factory } = setup();
     // A session that ignores its abort: systemInput never settles.
-    const deaf = fakeSession("deaf");
-    deaf.systemInput = async (text, origin, mode) => {
-      deaf.systemInputs.push({ text, origin, mode });
-      await new Promise<void>(() => {});
-    };
+    const deaf = fakeSession("deaf", { hold: true });
     deaf.abort = () => {
       if (abortMode === "throw") throw new Error("fixture abort threw");
       return abortMode === "reject" ? Promise.reject(new Error("fixture abort rejected")) : Promise.resolve();
@@ -1754,7 +1642,7 @@ describe("task service", () => {
     const { cwd, service, session, factory } = setup();
     vi.mocked(factory.create)
       .mockResolvedValueOnce(fakeSession("fast-member"))
-      .mockResolvedValueOnce(hangingSession("slow-member"));
+      .mockResolvedValueOnce(fakeSession("slow-member", { hold: true }));
     const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name } });
     const group = await service.handle({ operation: "run", tasks: [draft("fast"), draft("slow")], join: "first" }, "s1") as GroupSummary;
     await vi.waitFor(() => expect(service.getGroup(group.groupId).group.callbackState).toBe("delivered"));
@@ -1778,8 +1666,8 @@ describe("task service", () => {
     expect((await service.waitForRun(child.id)).state).toBe("cancelled");
 
     vi.mocked(factory.create)
-      .mockResolvedValueOnce(hangingSession("hang-a"))
-      .mockResolvedValueOnce(hangingSession("hang-b"));
+      .mockResolvedValueOnce(fakeSession("hang-a", { hold: true }))
+      .mockResolvedValueOnce(fakeSession("hang-b", { hold: true }));
     const draft = (name: string) => ({ name, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: name } });
     const group = await service.handle({ operation: "run", tasks: [draft("one"), draft("two")] }, "s1") as GroupSummary;
     await service.handle({ operation: "cancel", group_id: group.groupId }, "s1");

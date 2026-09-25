@@ -12,11 +12,9 @@ import type {
   ChatTurn,
   ConversationKey,
   ModelRef,
-  SessionEventPayload,
-  SessionState,
   SessionSummary,
-  ThinkingLevel,
 } from "../core/types.js";
+import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import { openDb } from "../db.js";
 import { ChannelStore } from "./config.js";
 import { ConversationStore, resolveConversation } from "./conversations.js";
@@ -25,45 +23,11 @@ import { type ChannelControl, createControl, HAS_SESSION, NO_SESSION } from "./c
 const KEY: ConversationKey = { channelId: "slack", conversationId: "C100/1717.7" };
 const SONNET: ModelRef = { provider: "anthropic", id: "sonnet" };
 
-/** The members control and the router read; the rest of the seam is unused. */
-function fakeSession(id: string, turns: ChatTurn[] = []) {
-  const listeners = new Set<(e: SessionEventPayload) => void>();
-  const session = {
-    id,
-    state: "idle" as SessionState,
-    model: SONNET,
-    thinkingLevel: "medium" as ThinkingLevel,
-    contextUsage: undefined,
-    models: [] as ModelRef[],
-    levels: [] as ThinkingLevel[],
-    history: () => Promise.resolve(turns),
-    setModel(model: ModelRef) {
-      session.models.push(model);
-      return Promise.resolve();
-    },
-    availableThinkingLevels: () => ["off", "medium", "high"] as ThinkingLevel[],
-    setThinkingLevel(level: ThinkingLevel) {
-      session.levels.push(level);
-    },
-    subscribe(fn: (e: SessionEventPayload) => void) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    pendingQueue: () => Promise.resolve({ steering: [], followUp: [] }),
-    disposed: 0,
-    dispose: () => {
-      session.disposed++;
-      return Promise.resolve();
-    },
-  };
-  return session;
-}
-
-type Fake = ReturnType<typeof fakeSession>;
+const fake = (id: string, history: ChatTurn[] = []): FakeSession => fakeSession(id, { model: SONNET, history });
 
 /** Like Pi: a created session is an object, and on disk — resumable,
  *  findable — only once written. `created` records every launch. */
-function fakeFactory(onDisk: Fake[] = []) {
+function fakeFactory(onDisk: FakeSession[] = []) {
   const created: AgentLaunchOptions[] = [];
   const resumed: string[] = [];
   const written = new Map(onDisk.map((s) => [s.id, s]));
@@ -75,12 +39,12 @@ function fakeFactory(onDisk: Fake[] = []) {
     availableModels: () => Promise.resolve([SONNET]),
     create(opts: AgentLaunchOptions) {
       created.push(opts);
-      return Promise.resolve(fakeSession(`new${String(++next)}`) as unknown as AgentSession);
+      return Promise.resolve(fake(`new${String(++next)}`));
     },
     resume(id: string) {
       resumed.push(id);
       const s = written.get(id);
-      return s ? Promise.resolve(s as unknown as AgentSession) : Promise.reject(new Error(`unknown session: ${id}`));
+      return s ? Promise.resolve(s) : Promise.reject(new Error(`unknown session: ${id}`));
     },
     listed: [] as SessionSummary[],
     list() {
@@ -126,7 +90,7 @@ describe("status", () => {
   });
 
   it("resumes an evicted session instead of answering null", async () => {
-    const s = fakeSession("s1", [{ role: "user", text: "hi" }]);
+    const s = fake("s1", [{ role: "user", text: "hi" }]);
     wire(fakeFactory([s]));
     conversations.set(KEY, "s1");
     // Nothing attached in the router: the eviction already happened.
@@ -138,7 +102,7 @@ describe("status", () => {
   });
 
   it("reports a session with no turn as empty", async () => {
-    wire(fakeFactory([fakeSession("s1")]));
+    wire(fakeFactory([fake("s1")]));
     conversations.set(KEY, "s1");
     expect((await control.status(KEY))?.empty).toBe(true);
   });
@@ -146,14 +110,14 @@ describe("status", () => {
 
 describe("working", () => {
   it("is the attached session's turn, and asking resumes nothing", () => {
-    const s = fakeSession("s1");
+    const s = fake("s1");
     wire(fakeFactory([s]));
     conversations.set(KEY, "s1");
     // Evicted, so idle: the sweep must not open a session to find that out.
     expect(control.working(KEY)).toBe(false);
-    router.attach(KEY, s as unknown as AgentSession);
+    router.attach(KEY, s);
     expect(control.working(KEY)).toBe(false);
-    s.state = "streaming";
+    s.setState("streaming");
     expect(control.working(KEY)).toBe(true);
     expect(factory.resumed).toEqual([]);
   });
@@ -167,21 +131,21 @@ describe("setModel / setThinking", () => {
   });
 
   it("setThinking resumes then applies", async () => {
-    const s = fakeSession("s1");
+    const s = fake("s1");
     wire(fakeFactory([s]));
     conversations.set(KEY, "s1");
     await control.setThinking(KEY, "high");
-    expect(s.levels).toEqual(["high"]);
+    expect(s.calls).toEqual(["setThinkingLevel:high"]);
     expect(factory.resumed).toEqual(["s1"]);
   });
 
   it("setModel applies to the live session without a second open", async () => {
-    const s = fakeSession("s1");
+    const s = fake("s1");
     wire(fakeFactory([s]));
     conversations.set(KEY, "s1");
-    router.attach(KEY, s as unknown as AgentSession);
+    router.attach(KEY, s);
     await control.setModel(KEY, SONNET);
-    expect(s.models).toEqual([SONNET]);
+    expect(s.calls).toEqual(["setModel:anthropic/sonnet"]);
     expect(factory.resumed).toEqual([]);
   });
 });
@@ -199,15 +163,15 @@ describe("the launch record", () => {
 
   it("a row written while Pi was opening wins; the session nobody routes to is let go", async () => {
     // A message already inside resolveConversation when Start was tapped.
-    let born: Fake | undefined;
+    let born: FakeSession | undefined;
     factory.create = () => {
       conversations.set(KEY, "raced");
-      born = fakeSession("loser");
-      return Promise.resolve(born as unknown as AgentSession);
+      born = fake("loser");
+      return Promise.resolve(born);
     };
     await expect(control.newSession(KEY, { cwd: "/srv/pier" })).rejects.toThrow(HAS_SESSION);
     expect(conversations.get(KEY)).toBe("raced");
-    expect(born!.disposed).toBe(1);
+    expect(born!.calls).toEqual(["dispose"]);
     // Nothing attached: the thread keeps answering from the row that won.
     expect(router.sessionOf(KEY)).toBeUndefined();
   });
@@ -282,7 +246,7 @@ describe("recent", () => {
   });
 
   it("pairs each user turn with the reply that followed it, oldest last, resuming an evicted session", async () => {
-    wire(fakeFactory([fakeSession("s1", turns)]));
+    wire(fakeFactory([fake("s1", turns)]));
     conversations.set(KEY, "s1");
     expect(await control.recent(KEY, 2)).toEqual([{ user: "two", assistant: "second" }, { user: "three" }]);
     expect(factory.resumed).toEqual(["s1"]);
@@ -294,7 +258,7 @@ describe("recent", () => {
   });
 
   it("a session with no turn yet has no exchange", async () => {
-    wire(fakeFactory([fakeSession("s1")]));
+    wire(fakeFactory([fake("s1")]));
     conversations.set(KEY, "s1");
     expect(await control.recent(KEY, 2)).toEqual([]);
   });

@@ -9,23 +9,23 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { openDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger, type DrainDeps } from "./drain.js";
+import { fakeSession } from "./core/session.testkit.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
 
+/** Mid-turn, and its pending-queue reads recorded: a drain snapshots before it aborts. */
 function busySession(id: string, queued: string[] = [], hang: "abort" | null = null) {
-  const calls: string[] = [];
-  const session = {
-    id,
-    state: "streaming" as const,
-    pendingQueue: () => {
-      calls.push("pendingQueue");
-      return Promise.resolve({ steering: queued, followUp: [] });
-    },
-    abort: () => {
-      calls.push("abort");
-      return hang === "abort" ? new Promise<void>(() => {}) : Promise.resolve();
-    },
+  const session = fakeSession(id, { queue: { steering: queued } });
+  session.setState("streaming");
+  const snapshot = session.pendingQueue;
+  session.pendingQueue = () => {
+    session.calls.push("pendingQueue");
+    return snapshot();
   };
-  return { session: session as unknown as AgentSession, calls };
+  if (hang === "abort") session.abort = () => {
+    session.calls.push("abort");
+    return new Promise<void>(() => {});
+  };
+  return { session, calls: session.calls };
 }
 
 function deps(
@@ -56,7 +56,7 @@ describe("drainForRestart", () => {
 
   it("ledgers an idle attached session's queue — the runtime is its only home", async () => {
     const idle = busySession("s1", ["first", "second"]);
-    Object.assign(idle.session, { state: "idle" });
+    idle.session.setState("idle");
     const key = { channelId: "slack" as const, conversationId: "42" };
     const rig = deps(() => [], () => 0, () => [{ session: idle.session, key }]);
     await drainForRestart(rig.deps, 1000, 1);
@@ -97,7 +97,7 @@ describe("drainForRestart", () => {
 
   it("waits for an answer still going out, and owns up to one the deadline cuts off", async () => {
     const idle = busySession("s1");
-    Object.assign(idle.session, { state: "idle" });
+    idle.session.setState("idle");
     const sending = { session: idle.session, key: { channelId: "slack", conversationId: "C1:t1" }, sending: true as const };
     let polls = 0;
     const rig = deps(() => (polls++ < 2 ? [sending] : []), () => 0);

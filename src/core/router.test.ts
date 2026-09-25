@@ -5,70 +5,26 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
+import { fakeSession as sharedFake } from "./session.testkit.js";
 import type {
   AgentReply,
   AgentSession,
   Channel,
-  SessionEventPayload,
   NoteOrigin,
   SystemInputOrigin,
 } from "./types.js";
 
-/** Only the surface the router touches; the rest of AgentSession is unused. */
+/** Pi's side is scripted by each test. `failPrompts` rejects prompts after
+ *  recording them, as a session that took the text and then failed does. */
 function fakeSession(id: string) {
-  const listeners = new Set<(e: SessionEventPayload) => void>();
-  const calls: string[] = [];
-  /** Every text that reached the session, prefix and all. */
-  const prompts: string[] = [];
-  let promptError: Error | undefined;
-  let queued: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
-  const session = {
-    id,
-    state: "idle" as const,
-    subscribe(fn: (e: SessionEventPayload) => void) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    abort: () => {
-      calls.push("abort");
-      return Promise.resolve();
-    },
-    prompt: (text: string) => {
-      calls.push("prompt");
-      prompts.push(text);
-      return promptError ? Promise.reject(promptError) : Promise.resolve();
-    },
-    steer: () => Promise.resolve(),
-    followUp: () => Promise.resolve(),
-    clearQueue: () => {
-      calls.push("clearQueue");
-      const drained = queued;
-      queued = { steering: [], followUp: [] };
-      for (const fn of listeners) fn({ type: "queue-state", ...queued });
-      return Promise.resolve(drained);
-    },
-    pendingQueue: () => Promise.resolve(structuredClone(queued)),
-    dispose: () => {
-      calls.push("dispose");
-      return Promise.resolve();
-    },
+  const session = sharedFake(id, { scripted: true });
+  let failure: Error | undefined;
+  const record = session.prompt;
+  session.prompt = async (text) => {
+    await record(text);
+    if (failure) throw failure;
   };
-  return {
-    // The router reads a handful of members; a full double would be noise.
-    session: session as unknown as AgentSession,
-    calls,
-    prompts,
-    /** Park messages in Pi's queue, as a steer delivered too late does. */
-    setQueue: (q: { steering?: string[]; followUp?: string[] }) => {
-      queued = { steering: q.steering ?? [], followUp: q.followUp ?? [] };
-    },
-    failPrompts: (err: Error | undefined) => {
-      promptError = err;
-    },
-    emit: (e: SessionEventPayload) => {
-      for (const fn of listeners) fn(e);
-    },
-  };
+  return Object.assign(session, { failPrompts: (err: Error | undefined) => { failure = err; } });
 }
 
 function fakeChannel(id: string) {
@@ -106,7 +62,7 @@ let im: ReturnType<typeof fakeChannel>;
 beforeEach(() => {
   hub = new EventHub();
   fake = fakeSession("s1");
-  router = new Router(hub, () => Promise.resolve(fake.session));
+  router = new Router(hub, () => Promise.resolve(fake));
   im = fakeChannel("slack");
   router.registerChannel(im.channel);
 });
@@ -279,8 +235,7 @@ describe("channel fan-out", () => {
   it("tells the conversation when the prompt itself fails", async () => {
     const { channel, notes } = fakeChannel("slack");
     router.registerChannel(channel);
-    // The double is cast to AgentSession; reach the real object to break it.
-    Object.assign(fake.session, { prompt: () => Promise.reject(new Error("session gone")) });
+    fake.failPrompts(new Error("session gone"));
     await router.dispatch({
       key: KEY,
       senderId: "u",
@@ -327,7 +282,7 @@ describe("idle eviction", () => {
     const opened: string[] = [];
     router = new Router(hub, (key) => {
       opened.push(key.conversationId);
-      return Promise.resolve(fake.session);
+      return Promise.resolve(fake);
     });
     await router.ensure(KEY);
     expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(1);
@@ -352,12 +307,12 @@ describe("idle eviction", () => {
     const task = { channelId: "task", conversationId: "s1" };
     const fresh = fakeSession("s1");
     let opened = 0;
-    router = new Router(hub, () => Promise.resolve(++opened === 1 ? fake.session : fresh.session));
+    router = new Router(hub, () => Promise.resolve(++opened === 1 ? fake : fresh));
     await router.ensure(web);
     await router.ensure(task);
     expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(1);
     expect(router.sessionOf(task)).toBeUndefined();
-    expect(await router.ensure(task)).toBe(fresh.session);
+    expect(await router.ensure(task)).toBe(fresh);
   });
 
   it("keeps a session someone is still watching, or still streaming", async () => {
@@ -365,7 +320,7 @@ describe("idle eviction", () => {
     const stop = hub.subscribe("s1", () => {});
     expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(0);
     stop();
-    Object.assign(fake.session, { state: "streaming" });
+    fake.setState("streaming");
     expect(await router.evictIdle(60_000, Date.now() + 61_000)).toBe(0);
     expect(fake.calls).toEqual([]);
   });
@@ -389,8 +344,8 @@ describe("idle eviction", () => {
     const dispatch = router.dispatch({ key: KEY, senderId: "u1", text: "accepted during sweep", mode: "auto" });
     expect(await sweep).toBe(0);
     await dispatch;
-    expect(fake.calls).toEqual(["prompt"]);
-    expect(router.sessionOf(KEY)).toBe(fake.session);
+    expect(fake.calls).toEqual([expect.stringMatching(/^prompt:/)]);
+    expect(router.sessionOf(KEY)).toBe(fake);
     expect(router.stateOf("s1")).toBe("idle");
   });
 
@@ -399,9 +354,9 @@ describe("idle eviction", () => {
     hub.subscribe("s1", () => {});
     const opts = { includeWatched: true };
     // Watching is no longer the exemption; a turn in flight still is.
-    Object.assign(fake.session, { state: "streaming" });
+    fake.setState("streaming");
     expect(await router.evictIdle(0, Date.now(), opts)).toBe(0);
-    Object.assign(fake.session, { state: "idle" });
+    fake.setState("idle");
     expect(await router.evictIdle(0, Date.now(), opts)).toBe(1);
     expect(fake.calls).toEqual(["dispose"]);
   });
@@ -428,7 +383,7 @@ describe("opening a session", () => {
     router = new Router(hub, () => {
       opened += 1;
       // Resolve on a later tick: the whole point is the window in between.
-      return new Promise((res) => setTimeout(() => res(fakeSession("s1").session), 5));
+      return new Promise((res) => setTimeout(() => res(fakeSession("s1")), 5));
     });
     const [a, b, c] = await Promise.all([
       router.ensure({ channelId: "web", conversationId: "s1" }),
@@ -455,7 +410,7 @@ describe("opening a session", () => {
       hub,
       () => {
         opened += 1;
-        return new Promise((res) => setTimeout(() => res(fake.session), 5));
+        return new Promise((res) => setTimeout(() => res(fake), 5));
       },
       (key) => (key.channelId === KEY.channelId ? "s1" : undefined),
     );
@@ -463,7 +418,7 @@ describe("opening a session", () => {
     let a: AgentSession, b: AgentSession;
     if (when === "mid-turn") {
       a = await router.ensure(keyOf(first));
-      Object.assign(fake.session, { state: "streaming" });
+      fake.setState("streaming");
       b = await router.ensure(keyOf(second));
     } else {
       [a, b] = await Promise.all([router.ensure(keyOf(first)), router.ensure(keyOf(second))]);
@@ -481,14 +436,14 @@ describe("opening a session", () => {
     // A task callback opens a workbench session under task:<id> whenever
     // nothing had it attached; the workbench asking for it again makes it a web
     // session, or the notification for its next turn is never sent (web/push.ts).
-    router = new Router(hub, () => Promise.resolve(fakeSession("s1").session));
+    router = new Router(hub, () => Promise.resolve(fakeSession("s1")));
     await router.ensure({ channelId: "task", conversationId: "s1" });
     expect(router.conversationOf("s1")?.channelId).toBe("task");
     await router.ensure({ channelId: "web", conversationId: "s1" });
     expect(router.conversationOf("s1")?.channelId).toBe("web");
     // The chat key is where turn-ends go: a task callback into an IM session
     // must not make the router think it is answering the workbench.
-    router = new Router(hub, () => Promise.resolve(fake.session));
+    router = new Router(hub, () => Promise.resolve(fake));
     await router.ensure(KEY);
     await router.ensure({ channelId: "task", conversationId: "s1" });
     expect(router.conversationOf("s1")).toEqual(KEY);
@@ -499,7 +454,7 @@ describe("opening a session", () => {
     // loaded, but its row is, and the reply belongs in the thread.
     router = new Router(
       hub,
-      () => Promise.resolve(fake.session),
+      () => Promise.resolve(fake),
       (key) => (key.channelId === KEY.channelId ? "s1" : undefined),
       (id) => (id === "s1" ? KEY : undefined),
     );
@@ -507,13 +462,13 @@ describe("opening a session", () => {
     await router.ensure({ channelId: "web", conversationId: "s1" });
     expect(router.conversationOf("s1")).toEqual(KEY);
     // The chat key is live too: its next message shares the object.
-    expect(router.sessionOf(KEY)).toBe(fake.session);
+    expect(router.sessionOf(KEY)).toBe(fake);
     fake.emit({ type: "turn-end", text: "done" });
     expect(im.sent).toEqual([["C100/1717.7", { text: "done", suggestions: [], meta: undefined }]]);
   });
 
   it("a later alias reach does not take the key back", async () => {
-    router = new Router(hub, () => Promise.resolve(fake.session), () => undefined, () => KEY);
+    router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => KEY);
     router.registerChannel(im.channel);
     await router.ensure({ channelId: "web", conversationId: "s1" });
     await router.ensure({ channelId: "task", conversationId: "s1" });
@@ -522,7 +477,7 @@ describe("opening a session", () => {
   });
 
   it("no chat key → alias behaviour unchanged", async () => {
-    router = new Router(hub, () => Promise.resolve(fake.session), () => undefined, () => undefined);
+    router = new Router(hub, () => Promise.resolve(fake), () => undefined, () => undefined);
     await router.ensure({ channelId: "web", conversationId: "s1" });
     expect(router.conversationOf("s1")).toEqual({ channelId: "web", conversationId: "s1" });
   });
@@ -551,7 +506,7 @@ describe("drain", () => {
   it("refuses a dispatch that was inside a slow ensure when the gate closed", async () => {
     let release = (): void => {};
     router = new Router(hub, () => new Promise((resolve) => {
-      release = () => resolve(fake.session);
+      release = () => resolve(fake);
     }));
     router.registerChannel(im.channel);
     const dispatched = router.dispatch({ key: KEY, senderId: "u1", text: "hi", mode: "auto" });
@@ -565,10 +520,8 @@ describe("drain", () => {
   it("busy() lists only mid-turn sessions", async () => {
     await router.ensure(KEY);
     expect(router.busy()).toEqual([]);
-    fake.emit({ type: "state", state: "streaming" });
-    // The fake's state field is static; busy() reads the live session state.
-    Object.assign(fake.session, { state: "streaming" });
-    expect(router.busy()).toEqual([{ session: fake.session, key: KEY }]);
+    fake.setState("streaming");
+    expect(router.busy()).toEqual([{ session: fake, key: KEY }]);
   });
 
   it("busy() counts an answer the adapter has not finished sending", async () => {
@@ -577,7 +530,7 @@ describe("drain", () => {
     await router.ensure(KEY);
     fake.emit({ type: "turn-end", text: "done" });
     // The turn is over and the session idle, but the chat has nothing yet.
-    expect(router.busy()).toEqual([{ session: fake.session, key: KEY, sending: true }]);
+    expect(router.busy()).toEqual([{ session: fake, key: KEY, sending: true }]);
     release();
     await new Promise((r) => setTimeout(r, 0));
     expect(router.busy()).toEqual([]);
@@ -625,7 +578,7 @@ describe("a queue with no turn left to drain it", () => {
 
   it("leaves a queue alone while a turn is running — that turn drains it", async () => {
     await router.ensure(KEY);
-    Object.assign(fake.session, { state: "streaming" });
+    fake.setState("streaming");
     fake.setQueue({ steering: ["one"] });
     fake.emit({ type: "queue-state", steering: ["one"], followUp: [] });
     await settle();
@@ -668,7 +621,7 @@ describe("a queue with no turn left to drain it", () => {
     fake.emit({ type: "queue-state", steering: ["the thing I typed"], followUp: [] });
     await settle();
     expect(fake.prompts).toEqual([]);
-    expect(await fake.session.pendingQueue()).toEqual({ steering: ["the thing I typed"], followUp: [] });
+    expect(await fake.pendingQueue()).toEqual({ steering: ["the thing I typed"], followUp: [] });
     expect(im.notes.at(-1)?.[1].text).toContain("restarting");
     expect(im.notes.at(-1)?.[1].origin).toEqual({ kind: "error" });
   });
@@ -701,8 +654,8 @@ describe("queue promotion recovery", () => {
   });
 
   it.each(["steer", "restart", "auto"] as const)("retains originals when drain begins during %s clear", async (mode) => {
-    const clear = fake.session.clearQueue;
-    fake.session.clearQueue = async () => {
+    const clear = fake.clearQueue;
+    fake.clearQueue = async () => {
       const queue = await clear();
       router.beginDrain();
       return queue;
@@ -715,7 +668,7 @@ describe("queue promotion recovery", () => {
 
   it.each(["reject", "drain"])("retains originals after abort %s and does not touch new arrivals", async (outcome) => {
     const abort = deferred();
-    fake.session.abort = () => abort.promise;
+    fake.abort = () => abort.promise;
     const deliver = router.deliverQueue("s1", "restart");
     await settle();
     fake.setQueue({ followUp: ["new arrival"] });
@@ -723,13 +676,13 @@ describe("queue promotion recovery", () => {
     else { router.beginDrain(); abort.resolve(); }
     await expect(deliver).rejects.toThrow(outcome === "reject" ? "abort failed" : "restarting");
     expect(router.recoveryOf("s1")[0]).toMatchObject({ ...originals, status: "not-submitted" });
-    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
+    expect(await fake.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
     expect(fake.prompts).toEqual([]);
   });
 
   it.each([false, true])("retains a rejection with uncertain acceptance, observed user-message=%s", async (accepted) => {
     const prompt = deferred();
-    fake.session.prompt = (text) => {
+    fake.prompt = (text) => {
       if (accepted) fake.emit({ type: "user-message", text });
       return prompt.promise;
     };
@@ -750,12 +703,12 @@ describe("queue promotion recovery", () => {
 
   it.each(["success", "failure"])("releases exclusion at launch and survives late %s after another batch's ACK", async (outcome) => {
     const first = deferred(), second = deferred();
-    fake.session.prompt = () => first.promise;
+    fake.prompt = () => first.promise;
     await router.deliverQueue("s1", "steer");
     const firstId = router.recoveryOf("s1")[0]!.id;
-    Object.assign(fake.session, { state: "streaming" });
+    fake.setState("streaming");
     fake.setQueue({ followUp: ["second"] });
-    fake.session.steer = () => second.promise;
+    fake.steer = () => second.promise;
     await router.deliverQueue("s1", "steer");
     const secondId = router.recoveryOf("s1")[1]!.id;
     fake.setQueue({ steering: ["third"] });
@@ -774,7 +727,7 @@ describe("queue promotion recovery", () => {
 
   it("keeps settled recovery through eviction but pins a pending preflight", async () => {
     const prompt = deferred();
-    fake.session.prompt = () => prompt.promise;
+    fake.prompt = () => prompt.promise;
     await router.deliverQueue("s1", "steer");
     expect(await router.evictIdle(0, Date.now() + 1)).toBe(0);
     prompt.reject(new Error("preflight failed"));
@@ -788,9 +741,9 @@ describe("queue promotion recovery", () => {
   });
 
   it.each(["manual", "automatic"])("shares exclusion with %s promotion and recall", async (owner) => {
-    const clear = fake.session.clearQueue;
+    const clear = fake.clearQueue;
     const gate = deferred<Awaited<ReturnType<typeof clear>>>();
-    fake.session.clearQueue = () => { fake.calls.push("blocked clear"); return gate.promise; };
+    fake.clearQueue = () => { fake.calls.push("blocked clear"); return gate.promise; };
     let deliver: Promise<string> | undefined;
     if (owner === "manual") deliver = router.deliverQueue("s1", "steer");
     else fake.emit({ type: "queue-state", ...originals });
@@ -798,7 +751,7 @@ describe("queue promotion recovery", () => {
     await expect(router.deliverQueue("s1", "restart")).rejects.toThrow("in progress");
     await expect(router.recallQueue("s1")).rejects.toThrow("in progress");
     fake.emit({ type: "queue-state", ...originals });
-    fake.session.clearQueue = clear;
+    fake.clearQueue = clear;
     gate.resolve(await clear());
     await deliver;
     await settle();
@@ -807,8 +760,8 @@ describe("queue promotion recovery", () => {
 
   it("does not clear reentrantly before the backend enqueue has completed", async () => {
     let notifying = true;
-    const clear = fake.session.clearQueue;
-    fake.session.clearQueue = () => {
+    const clear = fake.clearQueue;
+    fake.clearQueue = () => {
       expect(notifying).toBe(false);
       return clear();
     };
@@ -820,21 +773,19 @@ describe("queue promotion recovery", () => {
 
   it.each(["preflight", "turn"])("handles fresh queue events during successful %s exactly once", async (phase) => {
     const first = deferred();
-    const prompt = fake.session.prompt;
-    fake.session.prompt = () => first.promise;
+    const prompt = fake.prompt;
+    fake.prompt = () => first.promise;
     await router.deliverQueue("s1", "steer");
     if (phase === "turn") {
-      Object.assign(fake.session, { state: "streaming" });
-      fake.emit({ type: "state", state: "streaming" });
+      fake.setState("streaming");
       // The turn became idle, but its promise has not settled yet.
-      Object.assign(fake.session, { state: "idle" });
-      fake.emit({ type: "state", state: "idle" });
+      fake.setState("idle");
     }
     fake.setQueue({ followUp: ["new arrival"] });
     fake.emit({ type: "queue-state", steering: [], followUp: ["new arrival"] });
     await settle();
-    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
-    fake.session.prompt = prompt;
+    expect(await fake.pendingQueue()).toEqual({ steering: [], followUp: ["new arrival"] });
+    fake.prompt = prompt;
     first.resolve();
     await settle();
     expect(fake.prompts).toEqual(["new arrival"]);
@@ -843,7 +794,7 @@ describe("queue promotion recovery", () => {
 
   it("does not blindly promote an enqueue followed by rejection, even after ACK", async () => {
     let submissions = 0;
-    fake.session.prompt = async (text) => {
+    fake.prompt = async (text) => {
       submissions++;
       fake.setQueue({ followUp: [text] });
       fake.emit({ type: "queue-state", steering: [], followUp: [text] });
@@ -857,26 +808,26 @@ describe("queue promotion recovery", () => {
     router.acknowledgeRecovery("s1", batch.id);
     await settle();
     expect(submissions).toBe(1);
-    expect((await fake.session.pendingQueue()).followUp).toHaveLength(1);
+    expect((await fake.pendingQueue()).followUp).toHaveLength(1);
     expect(router.recoveryOf("s1")).toEqual([]);
   });
 
   it("does not promote a deferred queue event after /stop", async () => {
     const prompt = deferred();
-    fake.session.prompt = () => prompt.promise;
+    fake.prompt = () => prompt.promise;
     await router.deliverQueue("s1", "steer");
     fake.setQueue({ followUp: ["still queued"] });
     fake.emit({ type: "queue-state", steering: [], followUp: ["still queued"] });
     await router.abortConversation(KEY);
     prompt.resolve();
     await settle();
-    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: ["still queued"] });
+    expect(await fake.pendingQueue()).toEqual({ steering: [], followUp: ["still queued"] });
     expect(fake.calls.filter((c) => c === "clearQueue")).toHaveLength(1);
   });
 
   it("does not resend uncertain live input on a NEW queue event after ACK", async () => {
     let submissions = 0;
-    fake.session.prompt = async (text) => {
+    fake.prompt = async (text) => {
       submissions++;
       fake.setQueue({ followUp: [text] });
       fake.emit({ type: "queue-state", steering: [], followUp: [text] });
@@ -885,13 +836,13 @@ describe("queue promotion recovery", () => {
     await router.deliverQueue("s1", "steer");
     await settle();
     router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
-    const queue = await fake.session.pendingQueue();
+    const queue = await fake.pendingQueue();
     queue.followUp.push("a genuinely new arrival");
     fake.setQueue(queue);
     fake.emit({ type: "queue-state", ...queue });
     await settle();
     expect(submissions).toBe(1);
-    expect(await fake.session.pendingQueue()).toEqual(queue);
+    expect(await fake.pendingQueue()).toEqual(queue);
     expect(router.queueUncertain("s1")).toBe(true);
   });
 
@@ -921,12 +872,12 @@ describe("queue promotion recovery", () => {
     await router.deliverQueue("s1", "steer");
     await settle();
     router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
-    const clear = fake.session.clearQueue;
-    fake.session.clearQueue = async () => { throw new Error("clear failed"); };
+    const clear = fake.clearQueue;
+    fake.clearQueue = async () => { throw new Error("clear failed"); };
     await expect(router.deliverQueue("s1", mode)).rejects.toThrow("clear failed");
     await expect(router.recallQueue("s1")).rejects.toThrow("clear failed");
     expect(router.queueUncertain("s1")).toBe(true);
-    fake.session.clearQueue = clear;
+    fake.clearQueue = clear;
     fake.failPrompts(undefined);
     fake.setQueue({ followUp: ["explicitly delivered"] });
     await router.deliverQueue("s1", mode);
@@ -942,7 +893,7 @@ describe("queue promotion recovery", () => {
     router.acknowledgeRecovery("s1", router.recoveryOf("s1")[0]!.id);
     expect(await router.evictIdle(0, Date.now() + 1)).toBe(1);
     await router.ensure(KEY);
-    expect(await fake.session.pendingQueue()).toEqual({ steering: [], followUp: [] });
+    expect(await fake.pendingQueue()).toEqual({ steering: [], followUp: [] });
     expect(router.recoveryOf("s1")).toEqual([]);
     expect(router.queueUncertain("s1")).toBe(true);
     expect(hub.replay("s1", 0)).toEqual([]); // eviction dropped replay, not the hold
@@ -952,15 +903,15 @@ describe("queue promotion recovery", () => {
 
   it.each(["during clear", "after clear"])("retains a later rejection %s and ignores unrelated success", async (when) => {
     const late = deferred(), success = deferred();
-    fake.session.prompt = () => late.promise;
+    fake.prompt = () => late.promise;
     await router.deliverQueue("s1", "steer");
     fake.setQueue({ followUp: ["another submission"] });
-    fake.session.prompt = () => success.promise;
+    fake.prompt = () => success.promise;
     await router.deliverQueue("s1", "steer");
-    const clear = fake.session.clearQueue;
+    const clear = fake.clearQueue;
     const gate = deferred<Awaited<ReturnType<typeof clear>>>();
     const taken = await clear();
-    fake.session.clearQueue = () => gate.promise;
+    fake.clearQueue = () => gate.promise;
     const recall = router.recallQueue("s1");
     await settle();
     if (when === "during clear") { late.reject(new Error("late rejection")); await settle(); }
@@ -978,14 +929,14 @@ describe("the speaker a session has been told about", () => {
   const ada = { id: "U1", name: "Ada" };
 
   it.each(["before submission", "uncertain"])("restores attribution after promotion fails %s, without resetting again on ACK", async (failure) => {
-    Object.assign(fake.session, { state: "streaming" });
-    fake.session.followUp = async (text) => { fake.setQueue({ followUp: [text] }); };
+    fake.setState("streaming");
+    fake.followUp = async (text) => { fake.setQueue({ followUp: [text] }); };
     await router.dispatch({ key: KEY, senderId: ada.id, sender: ada, text: "queued", mode: "auto" });
-    expect((await fake.session.pendingQueue()).followUp[0]).toContain("Ada<U1>");
-    Object.assign(fake.session, { state: "idle" });
-    const clear = fake.session.clearQueue;
+    expect((await fake.pendingQueue()).followUp[0]).toContain("Ada<U1>");
+    fake.setState("idle");
+    const clear = fake.clearQueue;
     if (failure === "before submission") {
-      fake.session.clearQueue = async () => {
+      fake.clearQueue = async () => {
         const queue = await clear();
         router.beginDrain();
         return queue;

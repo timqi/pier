@@ -16,19 +16,16 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
+import { fakeSession as sharedFake, type FakeSession } from "../core/session.testkit.js";
 import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
   ConfigScope,
   ConfigStore,
-  ModelRef,
   PackageStore,
   ProviderManager,
-  SessionEventPayload,
   QueueRecovery,
-  SessionState,
-  ThinkingLevel,
 } from "../core/types.js";
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { registerTaskRoutes } from "../tasks/routes.js";
@@ -45,80 +42,17 @@ import { createServer, instanceManifest, tabPrefix, withAccent, withAccentIcon, 
 import type { SecretsControl } from "./instance.js";
 import type { ToolsSyncNote } from "./types.js";
 
-/** Scripted in-memory AgentSession for seam tests. */
-function fakeSession(id: string): AgentSession & {
-  emit: (p: SessionEventPayload) => void;
-  calls: string[];
-  setState: (s: SessionState) => void;
-} {
-  let state: SessionState = "idle";
-  let model: ModelRef = { provider: "anthropic", id: "claude-opus-4-5" };
-  let thinkingLevel: ThinkingLevel = "medium";
-  const listeners = new Set<(e: SessionEventPayload) => void>();
-  const calls: string[] = [];
-  return {
-    id,
-    get model() {
-      return model;
-    },
-    setModel: async (m: ModelRef) => {
-      if (m.id === "nope") throw new Error("unknown model");
-      model = m;
-      calls.push(`setModel:${m.provider}/${m.id}`);
-    },
-    get thinkingLevel() {
-      return thinkingLevel;
-    },
-    availableThinkingLevels: () => ["off", "low", "medium", "high"],
-    setThinkingLevel: (level: ThinkingLevel) => {
-      thinkingLevel = level;
-      calls.push(`setThinkingLevel:${level}`);
-    },
-    setCacheRetention: () => {},
-    contextUsage: { tokens: 1200, contextWindow: 200_000 },
-    availableModels: async (): Promise<ModelRef[]> => [
-      { provider: "anthropic", id: "claude-opus-4-5" },
-      { provider: "openai", id: "gpt-5.2" },
-    ],
-    get state() {
-      return state;
-    },
-    setState: (s: SessionState) => {
-      state = s;
-    },
-    emit: (p: SessionEventPayload) => listeners.forEach((fn) => fn(p)),
-    calls,
-    history: async (): Promise<ChatTurn[]> => [
-      { role: "user", text: "hi" },
-      { role: "assistant", text: "hello" },
-    ],
-    prompt: async (t: string) => void calls.push(`prompt:${t}`),
-    steer: async (t: string) => void calls.push(`steer:${t}`),
-    followUp: async (t: string) => void calls.push(`followUp:${t}`),
-    systemInput: async (text, origin, mode) => {
-      calls.push(`systemInput:${origin.kind}:${mode}:${text}`);
-    },
-    // Pi's abort resolves only once the agent is idle again.
-    abort: async () => {
-      calls.push("abort");
-      state = "idle";
-    },
-    rewindToUserTurn: async (i: number) => void calls.push(`rewind:${i}`),
-    compact: async () => void calls.push("compact"),
-    rename: async (name: string) => void calls.push(`rename:${name}`),
-    pendingQueue: async () => ({ steering: ["s-msg"], followUp: ["f-msg"] }),
-    pendingSystemInputs: async () => [],
-    clearQueue: async () => {
-      calls.push("clearQueue");
-      return { steering: ["s-msg"], followUp: ["f-msg"] };
-    },
-    subscribe(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    dispose: async () => {},
-  };
-}
+/** Pi's side scripted by each test, on a two-model menu, with a queue to recall. */
+const fakeSession = (id: string): FakeSession => sharedFake(id, {
+  scripted: true,
+  model: { provider: "anthropic", id: "claude-opus-4-5" },
+  models: [{ provider: "anthropic", id: "claude-opus-4-5" }, { provider: "openai", id: "gpt-5.2" }],
+  thinkingLevel: "medium",
+  levels: ["off", "low", "medium", "high"],
+  contextUsage: { tokens: 1200, contextWindow: 200_000 },
+  history: [{ role: "user", text: "hi" }, { role: "assistant", text: "hello" }],
+  queue: { steering: ["s-msg"], followUp: ["f-msg"] },
+});
 
 /** The managed CLI tools this test pretends Pier can install, as main.ts
  *  assembles them. */
