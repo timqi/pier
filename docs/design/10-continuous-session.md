@@ -138,9 +138,10 @@ Gaps (required new work):
   `AgentSession.setCompactionCap` applies it in memory
   (`settingsManager.applyOverrides({compaction})`, the session's own manager),
   never later than the instance's reserve, and recomputes it on `setModel`.
-  While the switch is on, a chain member gets main's cap on every open
-  (`MainChain.opened` in the router's resolver) and a task-run child gets its
-  cap at run start (`tasks/agent.ts`).
+  While the switch is on, a chain member gets main's cap and a task-run child
+  (a session a fresh run made) the children's on every open — a run's start
+  (`tasks/agent.ts`) or any reopen (`MainChain.opened`, `TaskService.opened`
+  in the router's resolver).
 - The seed is the `SystemInputOrigin` kind `session-seed` (`core/types.ts`),
   sent with `systemInput` mode `append`; it renders as a system input card.
   A part that cannot be read says so in the seed.
@@ -199,7 +200,8 @@ CREATE TABLE main_chain (
   time, with a divider naming the rotation after it (`new session — idle 1h ·
   <time>`); a session that cannot be read pages in as an error row.
 - No paging within a session in the trial. Risk: a busy day without a 1h gap
-  is one large session and one large `/history`; a page re-reads the head.
+  is one large session and one large `/history`; a page re-reads the head,
+  and the pane stays as it is until that answer is in.
 - Only the head's turns are editable or rewindable; older sessions render
   read-only (no edit, no next-step buttons), and the composer always sends to
   the head.

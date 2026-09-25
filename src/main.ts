@@ -123,7 +123,7 @@ const router = new Router(hub, (key) => {
   // Web conversation ids are session ids; an IM id is a chat, resolved through
   // the durable map so a restart does not re-route a group.
   if (key.channelId === "web" || key.channelId === "task") {
-    return factory.resume(key.conversationId).then(chain.opened);
+    return factory.resume(key.conversationId).then(chain.opened).then(tasks.opened);
   }
   return resolveIm(key);
 }, (key) => conversations.get(key), (id) => conversations.keyOf(id));

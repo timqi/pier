@@ -28,6 +28,7 @@ function rig(on = true) {
     list: async () => [...sessions.keys(), "child"].map((id) => ({ id, cwd, createdAt: 1 })),
     find: async (id) => ({ id, cwd, createdAt: 1 }),
     search: async () => [],
+    readHistory: async () => undefined,
   };
   const members = ["h1", "h0"];
   const chain: TaskChain = {
@@ -101,6 +102,25 @@ describe("tasks under the continuous conversation", () => {
   it("refuses runs while the switch is off", async () => {
     const { service } = rig(false);
     await expect(service.handle({ operation: "runs" }, "h1")).rejects.toThrow(/not one of its sessions/);
+  });
+
+  it("caps a child reopened outside any run, and no other session", async () => {
+    const { child, service, cwd } = rig();
+    const task = await service.create({ name: "worker", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } });
+    await service.waitForRun(service.run(task.id, null, "agent", null, { invokedBySessionId: "h1", callbackSessionId: null }).id);
+    const reopened = fakeSession(child.id);
+    service.opened(reopened);
+    expect(reopened.calls).toEqual([`compactionCap:${String(CHILD_COMPACTION_CAP)}`]);
+    const own = fakeSession("stranger");
+    service.opened(own);
+    expect(own.calls).toEqual([]);
+
+    const off = rig(false);
+    const offTask = await off.service.create({ name: "worker", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } });
+    await off.service.waitForRun(off.service.run(offTask.id, null, "agent", null, { invokedBySessionId: "h1", callbackSessionId: null }).id);
+    const offReopened = fakeSession(off.child.id);
+    off.service.opened(offReopened);
+    expect(offReopened.calls).toEqual([]);
   });
 
   it.each([[true, [`compactionCap:${String(CHILD_COMPACTION_CAP)}`]], [false, []]])(

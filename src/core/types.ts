@@ -572,9 +572,8 @@ export interface AgentFactory {
    *  evidence that a session does not exist. */
   find(sessionId: string): Promise<SessionSummary | undefined>;
   /** A session's `history({branch: true})` read off disk without opening it
-   *  live; undefined for a session that does not exist. Optional: a backend
-   *  without it has the session opened to be read. */
-  readHistory?(sessionId: string): Promise<ChatTurn[] | undefined>;
+   *  live; undefined for a session that does not exist. */
+  readHistory(sessionId: string): Promise<ChatTurn[] | undefined>;
   /** Sessions by what was said in them — user messages and replies, never
    *  steps — at most one hit per session, best first. How the text is indexed
    *  is the backend's business; core sees the hits. */

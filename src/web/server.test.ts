@@ -222,6 +222,7 @@ function setup(
     // two independently can agree with nothing.
     find: vi.fn(async (id: string) => (await factory.list()).find((s) => s.id === id)),
     search: vi.fn(async () => []),
+    readHistory: vi.fn(async () => undefined),
   };
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("s1"));
@@ -572,6 +573,7 @@ describe("workbench server", () => {
       list: vi.fn(async () => listed),
       find: vi.fn(async (id: string) => listed.find((s) => s.id === id)),
       search: vi.fn(async () => []),
+      readHistory: vi.fn(async () => undefined),
     };
     const hub = new EventHub();
     const app = createServer({

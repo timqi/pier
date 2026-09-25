@@ -281,7 +281,8 @@ browser keeps no second session order.
 - **Continuous conversation**: the head's snapshot, with earlier sessions
   paged in above it read-only (no pencil, no next-step buttons), each closed
   by a divider naming the rotation after it. **Earlier session** at the top —
-  or scrolling there — pages one more in and keeps the reader's position; a
+  or scrolling there — pages one more in and keeps the reader's position, the
+  pane left as it is until the head's snapshot is back; a
   keyboard page keeps focus on the pager. The trim cap stands down while
   earlier sessions are on screen. Before its first session exists the pane
   says the first message starts it. Sends go through the alias route; one

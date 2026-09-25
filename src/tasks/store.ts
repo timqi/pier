@@ -224,6 +224,14 @@ export class TaskStore {
     return new Set(rows.map((row) => row.id));
   }
 
+  /** One session of `taskOwnedSessionIds`, without reading them all. */
+  isTaskSession(sessionId: string): boolean {
+    return this.sql(`
+      SELECT 1 FROM task_runs
+      WHERE json_extract(json, '$.context.sessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh' LIMIT 1
+    `).get(sessionId) !== undefined;
+  }
+
   listRunsForSession(sessionId: string, limit = 50): TaskRun[] {
     return this.#many(`
       SELECT json FROM task_runs

@@ -41,6 +41,7 @@ function rig({ runs = [] as LedgerRun[], on = true } = {}) {
     list: async () => [],
     find: async (id: string) => (onDisk.has(id) ? { id, cwd: home, createdAt: 0 } : undefined),
     search: async () => [],
+    readHistory: async () => undefined,
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
   const router = new Router(new EventHub(), (key) => factory.resume(key.conversationId).then(chain.opened));

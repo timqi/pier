@@ -376,6 +376,18 @@ describe("the continuous conversation", () => {
     expect(h.appendPager).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the pane as it is while a page's head snapshot is on its way", async () => {
+    await boot([member("h1", "idle", 5), member("h0", "first")]);
+    const head = deferred();
+    h.history.mockImplementation((url: string) => Promise.resolve(url.includes("/h0/") ? earlier("h0") : head.promise));
+    (h.appendPager.mock.calls.at(-1)![0] as () => void)();
+    await settled();
+    expect(h.content).toEqual(["head"]);
+    head.resolve(snapshot("head"));
+    await settled();
+    expect(h.content).toEqual(["said in h0", "head"]);
+  });
+
   it("follows a send that landed on a new head, keeping the session just left in view", async () => {
     await boot([member("h1"), member("h0", "first")]);
     chain = [member("h2"), member("h1"), member("h0", "first")];

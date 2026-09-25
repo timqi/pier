@@ -228,7 +228,7 @@ async function page(): Promise<void> {
     const fromBottom = turnsPane.scrollHeight - turnsPane.scrollTop;
     // A keyboard page keeps the keyboard on the pager, which the reload replaced.
     const focused = document.activeElement?.id === "chain-pager";
-    await loadSession(head);
+    await loadSession(head, true);
     turnsPane.scrollTop = turnsPane.scrollHeight - fromBottom;
     if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
     pagedAt = Date.now();
@@ -546,25 +546,32 @@ async function select(id: string): Promise<void> {
 }
 
 /** (Re)load the current session's snapshot and reconnect its event stream. */
-async function loadSession(id: string): Promise<void> {
+async function loadSession(id: string, keep = false): Promise<void> {
   if (currentId !== id) return;
   const generation = ++loadSeq;
   source?.close();
   source = null;
   loading = true;
-  resetChat();
-  renderQueue([], []);
-  renderRecovery([]);
-  resetHeaderState();
-  turnOpen = false;
-  clearOptimistic();
-  lastSeq = 0;
+  const reset = (): void => {
+    resetChat();
+    renderQueue([], []);
+    renderRecovery([]);
+    resetHeaderState();
+    turnOpen = false;
+    clearOptimistic();
+    lastSeq = 0;
+  };
   // Painted before the fetch: a long transcript takes a moment to arrive and
-  // render, and until then the pane would look like an empty session.
-  chatLoading(true);
+  // render, and until then the pane would look like an empty session. A page
+  // (`keep`) leaves the pane as it is until the snapshot is in hand.
+  if (!keep) {
+    reset();
+    chatLoading(true);
+  }
   const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   loading = false;
+  if (keep) reset();
   if (!got.ok) {
     chatLoading(false);
     appendTurn("error", got.error);

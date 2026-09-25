@@ -250,7 +250,7 @@ export function createServer(
   const older = (id: string): boolean => member(id) && continuous?.members()[0]?.sessionId !== id;
   const turnsOf = async (id: string): Promise<ChatTurn[]> => {
     if (!older(id)) return (await ensure(id)).history({ branch: member(id) });
-    const turns = await (factory.readHistory ? factory.readHistory(id) : (await ensure(id)).history({ branch: true }));
+    const turns = await factory.readHistory(id);
     if (!turns) throw new Error(`unknown session: ${id}`);
     return turns;
   };
