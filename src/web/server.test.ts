@@ -14,6 +14,8 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
+import { MainChain } from "../core/chain.js";
+import { CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession as sharedFake, type FakeSession } from "../core/session.testkit.js";
@@ -2477,5 +2479,121 @@ describe("the app shell", () => {
     // Nothing to say, and any shell that does not say Pier: served as built.
     expect(withTabPrefix(html, "")).toBe(html);
     expect(withTabPrefix("<title>Other</title>", "g1")).toBe("<title>Other</title>");
+  });
+});
+
+describe("the continuous conversation's routes", () => {
+  /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
+  function chainRig(on = true) {
+    const db = openDb(":memory:");
+    const settings = new SettingsStore(db);
+    settings.setContinuous(on);
+    const sessions = new Map<string, FakeSession>();
+    let n = 0;
+    const factory = {
+      availableModels: vi.fn(async () => []),
+      create: vi.fn(async () => {
+        const s = sharedFake(`m${String(++n)}`);
+        sessions.set(s.id, s);
+        return s;
+      }),
+      resume: vi.fn(async (id: string) => {
+        const s = sessions.get(id);
+        if (!s) throw new Error(`unknown session: ${id}`);
+        return s;
+      }),
+      list: vi.fn(async () => []),
+      find: vi.fn(async (id: string) => (sessions.has(id) ? { id, cwd: "/h", createdAt: 1 } : undefined)),
+      search: vi.fn(async () => []),
+      readHistory: vi.fn(async (id: string): Promise<ChatTurn[] | undefined> =>
+        sessions.has(id) ? [{ role: "user", text: `on disk: ${id}` }, { role: "assistant", text: "ok" }] : undefined),
+    } satisfies AgentFactory;
+    const hub = new EventHub();
+    const router = new Router(hub, (key) => factory.resume(key.conversationId));
+    const clock = { now: Date.now() };
+    const chain = new MainChain(db, {
+      factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
+      enabled: () => settings.get().continuous, ledger: () => [], now: () => clock.now,
+    });
+    const app = createServer({
+      factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
+      providers: fakeProviders(), settings, updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
+      secrets: fakeSecrets(), continuous: chain,
+    });
+    const workspace: string[] = [];
+    hub.subscribeWorkspace((e) => workspace.push(e.type));
+    const post = (path: string, body: unknown) => app.request(path, { method: "POST", body: JSON.stringify(body) });
+    /** Two members as a restart finds them: on disk, neither open. */
+    const restarted = () => {
+      for (const [id, at] of [["old", clock.now - 3 * IDLE_MS], ["head", clock.now]] as const) {
+        sessions.set(id, sharedFake(id));
+        db.prepare("INSERT INTO main_chain VALUES (?, ?, 'idle')").run(id, at);
+      }
+    };
+    return { app, factory, sessions, clock, workspace, post, restarted };
+  }
+
+  it("answers 404 while the switch is off, and the switch is an instance setting", async () => {
+    const { app, post } = chainRig(false);
+    expect((await app.request("/api/continuous")).status).toBe(404);
+    expect((await post("/api/continuous/messages", { text: "hi" })).status).toBe(404);
+    expect((await post("/api/continuous", {})).status).toBe(404);
+    const put = (body: unknown) => app.request("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+    expect((await put({ continuous: "yes" })).status).toBe(400);
+    expect(await (await put({ continuous: true })).json()).toMatchObject({ continuous: true });
+    expect(await (await app.request("/api/continuous")).json()).toEqual({ chain: [] });
+  });
+
+  it("sends to the head through the alias, and to the next head across a rotation", async () => {
+    const { app, sessions, clock, workspace, post } = chainRig();
+    const first = await post("/api/continuous/messages", { text: "one" });
+    expect(first.status).toBe(202);
+    expect(await first.json()).toEqual({ sessionId: "m1", rotated: "first" });
+    expect((await post("/api/continuous/messages", { text: "" })).status).toBe(400);
+
+    // The client still thinks m1 is the head; the server decides.
+    clock.now += 2 * IDLE_MS;
+    const second = await post("/api/continuous/messages", { text: "two" });
+    expect(await second.json()).toEqual({ sessionId: "m2", rotated: "idle" });
+    expect(sessions.get("m1")!.prompts.map((p) => p.includes("two"))).toEqual([false]);
+    expect(sessions.get("m2")!.prompts.some((p) => p.includes("two"))).toBe(true);
+    expect(workspace).toContain("sessions-changed");
+    const { chain } = await (await app.request("/api/continuous")).json() as { chain: { sessionId: string; reason: string }[] };
+    expect(chain.map((m) => [m.sessionId, m.reason])).toEqual([["m2", "idle"], ["m1", "first"]]);
+  });
+
+  it("resolves the head ahead of a send, so the send that follows lands there without rotating", async () => {
+    const { sessions, post } = chainRig();
+    const resolved = await post("/api/continuous", {});
+    expect(await resolved.json()).toEqual({ sessionId: "m1", rotated: "first" });
+    expect(sessions.get("m1")!.prompts).toEqual([]);
+    expect(await (await post("/api/continuous/messages", { text: "one" })).json()).toEqual({ sessionId: "m1" });
+  });
+
+  it("reads an earlier session off disk without opening it, and refuses to edit it", async () => {
+    const { app, factory, post, restarted } = chainRig();
+    restarted();
+    const history = await app.request("/api/sessions/old/history");
+    expect(await history.json()).toEqual({
+      turns: [{ role: "user", text: "on disk: old" }, { role: "assistant", text: "ok" }], backgroundRuns: [], readonly: true,
+    });
+    expect((await app.request("/api/sessions/old/turns/1/steps")).status).toBe(200);
+    const edit = await post("/api/sessions/old/turns/0/edit", { text: "rewrite" });
+    expect(edit.status).toBe(409);
+    expect(await edit.json()).toEqual({ error: "an earlier session of the continuous conversation is read-only" });
+    expect(factory.resume).not.toHaveBeenCalled();
+  });
+
+  it("reads the head on its branch, and edits it there", async () => {
+    const { app, sessions, post, restarted } = chainRig();
+    restarted();
+    const head = sessions.get("head")!;
+    const read = vi.spyOn(head, "history");
+    const rewind = vi.spyOn(head, "rewindToUserTurn");
+    expect((await app.request("/api/sessions/head/history")).status).toBe(200);
+    expect(read).toHaveBeenCalledWith({ branch: true });
+    head.history = async () => [{ role: "user", text: "compacted away" }, { role: "user", text: "kept" }];
+    expect((await post("/api/sessions/head/turns/0/edit", { text: "again" })).status).toBe(202);
+    expect(rewind).toHaveBeenCalledWith(0, { branch: true });
   });
 });

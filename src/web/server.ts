@@ -10,6 +10,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { type Context, Hono, type Next } from "hono";
 import { compress } from "hono/compress";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
+import type { MainChain } from "../core/chain.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
 import { QueueOperationError, Router } from "../core/router.js";
@@ -148,6 +149,8 @@ export interface WebDeps {
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
   channelOf?: (sessionId: string) => string | undefined;
+  /** The continuous conversation (docs/design/10-continuous-session.md); its routes answer 404 while the switch is off. */
+  continuous?: MainChain;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -200,6 +203,7 @@ export function createServer(
     activeBackgroundRunCounts,
     taskSessions,
     channelOf,
+    continuous,
   }: WebDeps,
 ): Hono {
   const app = new Hono();
@@ -239,6 +243,17 @@ export function createServer(
   const activeRuns = (): Map<string, number> => activeBackgroundRunCounts?.() ?? new Map();
 
   const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id });
+
+  // A chain member is read on its branch, compacted turns included; an older
+  // one is read off disk and never opened, so it can be neither edited nor resumed.
+  const member = (id: string): boolean => continuous?.enabled() === true && continuous.isMember(id);
+  const older = (id: string): boolean => member(id) && continuous?.members()[0]?.sessionId !== id;
+  const turnsOf = async (id: string): Promise<ChatTurn[]> => {
+    if (!older(id)) return (await ensure(id)).history({ branch: member(id) });
+    const turns = await (factory.readHistory ? factory.readHistory(id) : (await ensure(id)).history({ branch: true }));
+    if (!turns) throw new Error(`unknown session: ${id}`);
+    return turns;
+  };
 
   // Pi persists a session only once the first assistant message lands; until
   // then the rail lists it from here.
@@ -364,12 +379,14 @@ export function createServer(
 
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
+    // Nothing live to snapshot: no cursor, no state, the transcript and its run cards.
+    if (older(id)) return c.json({ turns: (await turnsOf(id)).map(slim), backgroundRuns: backgroundRuns?.(id) ?? [], readonly: true });
     const session = await ensureLoadable(id);
     // Async seam reads can straddle an event. Never label older content with a
     // newer cursor, and never spin indefinitely if the session stays busy.
     for (let attempt = 0; attempt < 3; attempt++) {
       const lastSeq = hub.lastSeq(id);
-      const turns = (await session.history()).map(slim);
+      const turns = (await session.history({ branch: member(id) })).map(slim);
       const queue = await session.pendingQueue();
       if (hub.lastSeq(id) !== lastSeq) continue;
       return c.json({
@@ -395,7 +412,7 @@ export function createServer(
   guarded(app, "GET", "/api/sessions/:id/turns/:index/steps", 404, async (c) => {
     const index = Number(c.req.param("index"));
     if (!Number.isInteger(index) || index < 0) return c.json({ error: "index required" }, 400);
-    const turn = (await (await ensure(c.req.param("id"))).history())[index];
+    const turn = (await turnsOf(c.req.param("id")))[index];
     if (!turn) return c.json({ error: `no turn at index ${index}` }, 404);
     return c.json({ steps: turn.steps ?? [] });
   });
@@ -498,6 +515,31 @@ export function createServer(
     return c.json({ sessionId }, 202);
   });
 
+  // The chain, newest first; the client pages back through it with /history.
+  app.get("/api/continuous", (c) =>
+    continuous?.enabled() ? c.json({ chain: continuous.members() }) : c.json({ error: "the continuous session is off" }, 404));
+
+  // Resolved ahead of a send the client expects to rotate, so it watches the
+  // new head before the message lands there.
+  guarded(app, "POST", "/api/continuous", 400, async (c) => {
+    if (!continuous?.enabled()) return c.json({ error: "the continuous session is off" }, 404);
+    const { sessionId, rotated } = await continuous.resolve();
+    if (rotated) hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ sessionId, ...(rotated ? { rotated } : {}) });
+  });
+
+  // The alias send: the head is resolved (and rotated) here, so a rotation
+  // between the client's snapshot and its send cannot land on an old head.
+  guarded(app, "POST", "/api/continuous/messages", 400, async (c) => {
+    if (!continuous?.enabled()) return c.json({ error: "the continuous session is off" }, 404);
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
+    const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
+    const { sessionId, rotated } = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode });
+    if (rotated) hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ sessionId, ...(rotated ? { rotated } : {}) }, 202);
+  });
+
   // Edit a user turn: rewind to just before it — dropping every turn after it —
   // then re-dispatch the edited text.
   guarded(app, "POST", "/api/sessions/:id/turns/:index/edit", 400, async (c) => {
@@ -509,12 +551,14 @@ export function createServer(
     }
     // Before touching anything: a refused dispatch must not cost a rewound transcript.
     if (router.isDraining()) return c.json({ error: "Pier is restarting — try again in a moment" }, 503);
+    if (older(id)) return c.json({ error: "an earlier session of the continuous conversation is read-only" }, 409);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-    const users = (await session.history()).filter((turn) => turn.role === "user").length;
+    const branch = member(id);
+    const users = (await session.history({ branch })).filter((turn) => turn.role === "user").length;
     if (index >= users) return c.json({ error: "that message is gone — refresh and try again" }, 409);
     if (session.state !== "idle") return c.json({ error: "busy — stop the turn first" }, 409);
-    await session.rewindToUserTurn(index);
+    await session.rewindToUserTurn(index, { branch });
     // The rewind took the speaker headers out of the context too.
     router.forgetSender(id);
     await router.dispatch({
@@ -658,7 +702,11 @@ export function createServer(
     onToolsChanged,
     validateCustomTools,
     onUnlocked,
-    onSettingsChanged: () => recycle("instance settings"),
+    // Re-listed too: the switch is what the rail is drawn from.
+    onSettingsChanged: () => {
+      recycle("instance settings");
+      hub.emitWorkspace({ type: "sessions-changed" });
+    },
     passkeys,
   });
   registerProviderRoutes(app, providers, () => recycle("provider configuration"));

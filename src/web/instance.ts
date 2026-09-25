@@ -208,14 +208,15 @@ export function registerInstanceRoutes(
         customTools?: unknown;
         tool?: unknown;
         accent?: unknown;
+        continuous?: unknown;
       }
       | null;
     const fields = body
-      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent]
+      ? [body.publicUrl, body.modelMenu, body.titleModel, body.autoUpdate, body.customTools, body.tool, body.accent, body.continuous]
       : [];
     if (!fields.some((v) => v !== undefined)) {
       return c.json({
-        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, tool or accent required",
+        error: "publicUrl, modelMenu, titleModel, autoUpdate, customTools, tool, accent or continuous required",
       }, 400);
     }
     // One transaction: a new custom tool and the switch that turns it on must
@@ -253,6 +254,11 @@ export function registerInstanceRoutes(
       const { autoUpdate } = body;
       if (typeof autoUpdate !== "boolean") return refuse("autoUpdate must be a boolean");
       writes.push(() => settings.setAutoUpdate(autoUpdate));
+    }
+    if (body?.continuous !== undefined) {
+      const { continuous } = body;
+      if (typeof continuous !== "boolean") return refuse("continuous must be a boolean");
+      writes.push(() => settings.setContinuous(continuous));
     }
     /** Null when the request does not touch them; a name declared here is
      *  switchable in the same write. */
@@ -327,7 +333,8 @@ export function registerInstanceRoutes(
     // cannot start, and then says why.
     const note = toolsChanged ? await onToolsChanged?.() : null;
     // Read when a session opens; the model menu is read per picker call.
-    if (body?.publicUrl !== undefined) onSettingsChanged?.();
+    // Both are read when a session opens: the surface prompt, the dispatcher contract.
+    if (body?.publicUrl !== undefined || body?.continuous !== undefined) onSettingsChanged?.();
     return c.json({ ...(await instanceSettings()), ...(note ? { toolsSync: note } : {}) });
   });
 

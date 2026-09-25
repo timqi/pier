@@ -358,6 +358,7 @@ app.route("/", createServer({
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
   taskSessions: () => tasks.taskSessions(),
   channelOf: (id) => conversations.keyOf(id)?.channelId,
+  continuous: chain,
 }));
 
 const port = Number(process.env.PORT ?? 3141);
