@@ -30,6 +30,7 @@ export class TaskGroups {
     private readonly host: GroupHost,
     private readonly changed: (group: TaskGroup) => void,
     private readonly unreachable: (sessionId: string, what: string, why: string) => void,
+    private readonly headOf: (sessionId: string) => string = (id) => id,
   ) {
     this.outbox = new Outbox<TaskGroup>(router, {
       id: (group) => group.id,
@@ -159,7 +160,7 @@ export class TaskGroups {
   async deliver(candidate: TaskGroup): Promise<void> {
     const group = this.store.getGroup(candidate.id);
     if (!group?.callbackSessionId || (group.callbackState !== "pending" && group.callbackState !== "failed")) return;
-    await this.outbox.deliver(group.callbackSessionId, [group]);
+    await this.outbox.deliver(this.headOf(group.callbackSessionId), [group]);
   }
 
   private text(group: TaskGroup): string {

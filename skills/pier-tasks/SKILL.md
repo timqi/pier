@@ -5,7 +5,7 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 
 # Pier tasks
 
-`pier task --help` lists the five commands and their flags. Each prints one
+`pier task --help` lists the six commands and their flags. Each prints one
 JSON receipt (`--model ?` one pin per line), exit 0; a refusal is a `task:`
 line, exit 1 (`--model` with no or several hits lists the menu under it); a
 bad flag is `task:` plus the usage, exit 2. `--prompt -` reads stdin.
@@ -61,6 +61,10 @@ result after its callback settled, for text the callback truncated (8 000
 chars per run, a group's members included) or lost to compaction. `--group`
 caps each member at 2 000, so a long member is recovered with `--run`.
 **Never to check progress**: the refusal reveals no state.
+
+`pier task runs` — only in a session of the continuous conversation: the runs
+it launched, in flight and finished in the last 24h, as JSON. For orientation,
+never to wait on a result.
 
 ## Saved definitions
 

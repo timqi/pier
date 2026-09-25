@@ -7,7 +7,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { ModelRef } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
-import type { TaskService } from "./service.js";
+import type { TaskChain, TaskService } from "./service.js";
 import type { TaskStore } from "./store.js";
 import { isTerminal, type CallbackFields, type CallbackMode, type TaskDefinition, type TaskGroup, type TaskResult, type TaskRun } from "./types.js";
 
@@ -159,6 +159,8 @@ const summarizeGroup = (group: TaskGroup, members: TaskRun[]): GroupSummary => d
 });
 
 const CANCEL_WAIT_MS = 2000;
+/** `pier task runs`: in flight, plus what finished in the last day. */
+const RUNS_WINDOW_MS = 24 * 60 * 60_000;
 
 /** The run once terminal, or as it stands after `ms`. */
 function cancelledOrCurrent(host: TaskService, id: string, ms: number): Promise<TaskRun> {
@@ -174,7 +176,16 @@ export async function handleTask(
   store: TaskStore,
   raw: unknown,
   callerSessionId: string,
+  chain?: TaskChain,
 ): Promise<unknown> {
+  // The launching session controls a run, and so does the run's own; every
+  // member of the continuous conversation counts as the one that launched it.
+  const assertOwns = (target: TaskRun): void => {
+    const launchers = chain?.launchers(callerSessionId) ?? [callerSessionId];
+    if (!launchers.includes(target.invokedBySessionId ?? "") && target.targetSessionId !== callerSessionId) {
+      throw new Error("session does not own this run");
+    }
+  };
   const input = record(raw);
   if (!input) throw new Error("task parameters required");
   // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
@@ -184,6 +195,10 @@ export async function handleTask(
   if (active?.state === "running" && store.supervised(active)) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
+  if (input.operation === "runs") {
+    if (!chain?.enabled() || !chain.isMember(callerSessionId)) throw new Error("runs lists the continuous conversation's runs; this session is not one of its sessions");
+    return host.ledger(chain.launchers(callerSessionId), Date.now() - RUNS_WINDOW_MS);
+  }
   if (input.operation === "save") {
     const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
     if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);
@@ -268,12 +283,12 @@ export async function handleTask(
   if (input.operation === "cancel") {
     if (typeof input.group_id === "string") {
       const { group, members } = host.getGroup(input.group_id);
-      for (const member of members) assertOwns(callerSessionId, member);
+      for (const member of members) assertOwns(member);
       const cancelled = host.cancelGroup(group.id);
       return summarizeGroup(cancelled, cancelled.memberRunIds.map((id) => host.getRun(id)));
     }
     const run = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(callerSessionId, run);
+    assertOwns(run);
     // cancel() only aborts; the row flips ~100 ms later. A receipt still saying
     // `running` reads as "cancel failed", so wait for the flip, briefly.
     host.cancel(run.id);
@@ -284,7 +299,7 @@ export async function handleTask(
     // caller, decides whether the text steers, queues or resumes, so a status
     // query never has to exist.
     const run = host.getRun(requiredString(input.run_id, "run_id"));
-    assertOwns(callerSessionId, run);
+    assertOwns(run);
     const message = requiredString(input.message, "message");
     if (isTerminal(run.state)) {
       // A resumed run is a new run with its own callback.
@@ -391,12 +406,4 @@ async function resolveDraft(
     throw new Error("an inline task draft cannot set callback; use the top-level callback / callback_session_id");
   }
   return definitions.create({ ...draft, trigger: { type: "manual" } }, `session:${callerSessionId}`, "subagent");
-}
-
-/** The session that launched a run controls it, and so does the run's own
- *  session; a `task` action's child inherits its parent's launcher. */
-function assertOwns(callerSessionId: string, target: TaskRun): void {
-  if (target.invokedBySessionId !== callerSessionId && target.targetSessionId !== callerSessionId) {
-    throw new Error("session does not own this run");
-  }
 }

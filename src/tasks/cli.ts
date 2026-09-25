@@ -44,6 +44,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
     help: "file a definition the operator sees, or update one by --task-id; no trigger means manual",
   },
   list: { usage: "list", help: "stored definitions, as JSON" },
+  runs: { usage: "runs", help: "the continuous conversation's runs, in flight and finished in the last 24h, as JSON; its sessions only" },
   cancel: { usage: "cancel (--run <id> | --group <id>)", help: "a run or a group, descendants included" },
   recover: { usage: "recover (--run <id> | --group <id>) --reason <text>", help: "a finished result after its callback settled; never a progress check" },
 };
@@ -144,7 +145,7 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
   };
   if (parsed.some((v) => v.model === "?")) return { operation: "run", launch: { model: "?" } };
   const [values, ...members] = parsed as [Values, ...Values[]];
-  if (name === "list") return { operation: "list" };
+  if (name === "list" || name === "runs") return { operation: name };
   if (name === "cancel" || name === "recover") {
     if ((values.run === undefined) === (values.group === undefined)) refuse(`${name} takes exactly one of --run or --group`);
     if (name === "recover" && values.reason === undefined) refuse("recover needs --reason");

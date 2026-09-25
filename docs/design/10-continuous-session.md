@@ -150,18 +150,20 @@ Gaps (required new work):
 Today `pier task list` shows definitions only and the skill forbids status
 checks; the dispatcher needs the runs it launched.
 
-- Source: `task_runs` via `TaskStore.listRunsForSession` (`invokedBySessionId`),
-  unioned over every session in the chain.
-- Surface (required new work): `pier task runs` → JSON, in-flight runs plus
-  runs finished in the last 24h, each `{runId, name, state, targetSessionId,
-  cwd, queuedAt, finishedAt}`; refused outside a main session, except in a
-  lead session, where it lists the runs that lead launched (Phase 2).
+- Source: `task_runs` via `TaskStore.activityRuns` (in flight, plus at most
+  200 finished runs queued in the window), filtered to `invokedBySessionId`
+  in the chain (`TaskService.ledger`).
+- Surface: `pier task runs` → JSON, in-flight runs plus runs finished in the
+  last 24h, each `{runId, name, state, targetSessionId, cwd, queuedAt,
+  finishedAt}`; refused outside a chain session and while the switch is off;
+  in a lead session it will list the runs that lead launched (Phase 2).
 - The same read feeds the rotation seed and IM `/status`; `skills/pier-tasks`
   names it for the dispatcher.
-- Gap: callbacks and ownership follow the chain. A run launched by an earlier
-  head calls back to the current head (`tasks/callbacks.ts`), and every chain
-  member counts as its launcher for `--run`, `cancel` and `recover`
-  (`tasks/operations.ts`).
+- Callbacks and ownership follow the chain: a run or group launched by an
+  earlier head calls back to the current head (`MainChain.headOf` in
+  `tasks/callbacks.ts`, `tasks/groups.ts`), and every chain member counts as
+  its launcher for `--run` and `cancel` (`tasks/operations.ts`; `recover`
+  checks no ownership).
 
 ## Storage (chain)
 

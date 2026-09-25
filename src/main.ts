@@ -136,6 +136,7 @@ const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
   systemActions: { "config-sync": (signal) => configSync.sync(signal) },
+  continuous: chain,
 });
 const configurationSync = configSyncTask(tasks, configSync);
 

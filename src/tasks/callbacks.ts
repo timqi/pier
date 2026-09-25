@@ -37,6 +37,8 @@ export class TaskCallbacks {
     router: Router,
     changed: (run: TaskRun) => void,
     unreachable: (sessionId: string, what: string, why: string) => void,
+    /** Where a result owed to a session goes now: the continuous conversation's head, for a member. */
+    private readonly headOf: (sessionId: string) => string = (id) => id,
   ) {
     this.outbox = new Outbox<TaskRun>(router, {
       id: (run) => run.id,
@@ -75,10 +77,10 @@ export class TaskCallbacks {
   async deliver(candidate: TaskRun): Promise<void> {
     const first = this.store.getRun(candidate.id);
     if (!first?.callbackSessionId || (first.callbackState !== "pending" && first.callbackState !== "failed")) return;
-    const sessionId = first.callbackSessionId;
+    const sessionId = this.headOf(first.callbackSessionId);
     // Once one callback is deliverable, everything pending for the session rides along.
     const batch = this.store.listPendingCallbacks(Number.MAX_SAFE_INTEGER)
-      .filter((run) => run.callbackSessionId === sessionId);
+      .filter((run) => run.callbackSessionId !== null && this.headOf(run.callbackSessionId) === sessionId);
     if (!batch.some((run) => run.id === first.id)) return;
     await this.outbox.deliver(sessionId, batch);
   }

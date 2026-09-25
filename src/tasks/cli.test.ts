@@ -30,6 +30,7 @@ describe("pier task", () => {
     const { run, posted, out } = rig();
     const cases: [string[], Record<string, unknown>][] = [
       [["list"], { operation: "list" }],
+      [["runs"], { operation: "runs" }],
       [["cancel", "--run", "r1"], { operation: "cancel", run_id: "r1" }],
       [["cancel", "--group", "g1"], { operation: "cancel", group_id: "g1" }],
       [["recover", "--run", "r1", "--reason", "truncated"], { operation: "recover", run_id: "r1", reason: "truncated" }],

@@ -3,7 +3,7 @@
 // drain needs. Decisions belong to the files beside it.
 
 import type { AgentFactory, BackgroundRun } from "../core/types.js";
-import type { LedgerRun } from "../core/chain.js";
+import type { LedgerRun, MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
@@ -30,6 +30,8 @@ const runPrompt = (run: TaskRun): string | null => {
 };
 
 type TriggerSource = TaskRun["triggerSource"];
+/** The continuous conversation as tasks see it: its members launch and receive as one. */
+export type TaskChain = Pick<MainChain, "enabled" | "isMember" | "launchers" | "headOf">;
 type Waiter = (run: TaskRun) => void;
 
 export class TaskService {
@@ -52,13 +54,15 @@ export class TaskService {
     private readonly instance?: {
       modelMenu(): { provider: string; id: string; thinking?: string; note?: string }[];
       systemActions?: SystemActions;
+      continuous?: TaskChain;
     },
   ) {
+    const headOf = (id: string): string => instance?.continuous?.headOf(id) ?? id;
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable);
     this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
-    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable);
+    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },
@@ -70,8 +74,9 @@ export class TaskService {
         groupId,
       }),
       startMember: (run) => this.runs.start(run),
-    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable);
-    const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run));
+    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable, headOf);
+    const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run),
+      () => instance?.continuous?.enabled() ?? false);
     this.execution = new TaskExecution(store, this.definitions, this.callbacks, agent, {
       runChild: (taskId, parent) => this.run(taskId, parent.input, "task", parent.id, {
         invokedBySessionId: parent.invokedBySessionId,
@@ -361,7 +366,7 @@ export class TaskService {
 
   /** What `pier task` asks, under the calling session's identity. */
   handle(raw: unknown, callerSessionId: string): Promise<unknown> {
-    return handleTask(this, this.definitions, this.store, raw, callerSessionId);
+    return handleTask(this, this.definitions, this.store, raw, callerSessionId, this.instance?.continuous);
   }
 
   /** An agent picks from names that exist right now, never from memory. */

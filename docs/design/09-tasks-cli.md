@@ -1,6 +1,6 @@
 # `pier task` (design)
 
-The whole agent-collaboration surface: five shell commands over the CLI
+The whole agent-collaboration surface: six shell commands over the CLI
 socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 (`tasks/operations.ts`). Scheduling, delivery, limits and callbacks are
 `tasks/`'s and unchanged by this surface.
@@ -12,6 +12,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
 | `list` | stored definitions, as JSON |
+| `runs` | the continuous conversation's run ledger, in flight and finished in the last 24h, as JSON; its sessions only ([10](10-continuous-session.md#run-ledger)) |
 | `cancel` | `--run <id>` or `--group <id>`, descendants included |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
@@ -105,7 +106,8 @@ waits on (`--callback none`; a cron, watch or Console run whose definition
 names no `--callback-session`), may.
 
 Ownership: the session that launched a run controls it, and so does the run's
-own session. `parentRunId` links only a `task` action's child, which a cancel
+own session; every session of the continuous conversation counts as the one
+that launched it. `parentRunId` links only a `task` action's child, which a cancel
 walks. The run preamble (`tasks/agent.ts`) tells a supervised run in one
 sentence that `pier task` is refused.
 
@@ -123,4 +125,5 @@ models by name. Its size is measured in the commit that changes it.
 running run (server answer), `--prompt -` once, usage exit 2 without the
 socket. `tasks/operations.test.ts`: the supervised-run gate, ownership,
 `message`'s three branches, `recover`'s refusals, model matching (one, none,
-many, full id, `?`).
+many, full id, `?`). `tasks/continuous.test.ts`: callbacks and ownership
+following the chain, `runs`, the children's compaction cap.
