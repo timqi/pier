@@ -19,17 +19,66 @@ exist yet.
 - A follow-up on an existing feature continues that child (`--run <id>`, or
   `--session <id>` once idle), never a new one; the user's words go through
   verbatim, the dispatcher's additions after them, never a re-summary.
-- Children are ordinary supervised runs: they do not delegate (09 §Two levels),
-  count against the 6-run instance limit, and never rotate.
+- Children are ordinary supervised runs: a worker does not delegate (09 §Two
+  levels), a feature lead does (below); both count against the 6-run instance
+  limit and never rotate.
 - Callbacks stay the only delivery (`skills/pier-tasks`); the ledger below is
   for orientation, never for waiting.
+
+## Feature lead
+
+Three roles, not three mandatory tiers: main (dispatcher) → feature lead
+(optional) → workers. A small task is a worker main launches directly.
+
+| Role | Session | Model | Delegates |
+| --- | --- | --- | --- |
+| main | the chain head, cwd `$PIER_HOME/home` | instance default, `low` | leads and workers |
+| lead | an ordinary child, cwd = the feature's own worktree, long-lived | strong (`--model`), `high` | workers only |
+| worker | an ordinary child, one worktree each | as launched | never |
+
+- A lead never rotates; Pi auto-compaction stays on, since its state is the
+  design doc on disk in its worktree.
+- "I want X" → main launches a lead (`--role lead`) and its card is posted
+  like any child's.
+- Design phase: the user talks to the lead directly — its card thread on IM,
+  its session on web; the dispatcher is never in that path.
+- Build phase, once the design is final: the lead decomposes the work, launches
+  workers (one `wt` worktree each), reviews and integrates their results.
+- Main receives milestones only: each lead callback becomes one line in the
+  main flow. Workers get no card of their own; their callbacks are system notes
+  in the lead's thread and Background Run rows in the lead's session.
+- A lead's card follows its session's latest run (a resume is a new run on the
+  same session).
+- The lead contract is injected from code as `<pier>/lead.md`, for a session
+  whose run carries the role; it is never written to disk.
+- Both role contracts are string constants in `src/agent/roles.ts`, read by
+  `agent/pi.ts`'s `agentsFilesOverride`.
+
+Gaps (required new work):
+
+- Role marking: `pier task run --role lead` rides as `launch.role: "lead"`
+  (`AgentLaunchPolicy`, `tasks/types.ts`), parsed in `tasks/cli.ts` and
+  `parseDraft`; `AgentLaunchOptions` (`core/types.ts`) carries it to the
+  factory, and a session reopened outside a run (a thread reply, a restart)
+  gets it from an injected `roleOf(sessionId)` answered from `task_runs`.
+- Delegation: `tasks/operations.ts:184` refuses `pier task` while a supervised
+  run is running on the caller's session; a run whose `launch.role` is `lead`
+  passes, and a lead launching `--role lead` is refused (`task: a feature lead
+  cannot launch a lead`), so depth stays 2.
+- The run preamble (`tasks/agent.ts:31`) says "you may delegate to workers" to a
+  lead instead of "`pier task` is refused".
+- Milestones: a worker callback, or a user reply in the lead's thread, starts
+  a lead turn outside any run, so nothing reaches main; a callback delivered
+  into a lead session is delivered as a resume of the lead's last run
+  (`tasks/callbacks.ts`), whose own callback then reaches main.
 
 ## Home and memory
 
 - The main session's cwd is `$PIER_HOME/home` (`pierPath("home")`,
   `paths.ts`), created at first use.
 - The dispatcher contract is injected from code, beside `<pier>/AGENTS.md`
-  (`agent/pi.ts` `agentsFilesOverride`), as `<pier>/dispatcher.md`, only for a
+  (`agent/pi.ts` `agentsFilesOverride`, text in `agent/roles.ts`), as
+  `<pier>/dispatcher.md`, only for a
   session whose cwd is the home; it is never written to disk. Gap: the
   factory's `instructions` getter is instance-wide, so `resourceLoader(cwd)`
   gains the cwd test.
@@ -207,7 +256,15 @@ thread and session. Group chats never change.
 - `channels/slack.ts`, `channels/lark.ts`: main-flow DM reply, card root and
   edit, `/status`.
 - `channels/handoff.ts`: card binding on `task-status`.
-- `skills/pier-tasks/SKILL.md`: the ledger line for the dispatcher.
+- `skills/pier-tasks/SKILL.md`: the ledger line for the dispatcher; `--role
+  lead` and the lead's right to delegate.
+- `agent/roles.ts` (new: the two role contracts' text), `agent/pi.ts`: lead
+  contract injected by role.
+- `tasks/types.ts`, `tasks/cli.ts`, `core/types.ts`: `launch.role`, `--role
+  lead`, `roleOf(sessionId)`.
+- `tasks/operations.ts:184`, `tasks/agent.ts:31`: leads delegate, depth 2;
+  the lead preamble.
+- `tasks/callbacks.ts`: a callback into a lead session resumes its run.
 
 ## Acceptance
 
@@ -220,5 +277,9 @@ thread and session. Group chats never change.
   head, `/status` is right.
 - The main session writes no code: its transcript shows no edits outside
   `$PIER_HOME/home`.
+- At least one feature runs through a lead: the design conversation never
+  passes through main's transcript, workers each have their own worktree, and
+  main's flow shows only the lead's milestone lines.
+- No worker ever delegates, and no lead launches a lead.
 - The largest head of the week is recorded; above ~300K transcript tokens,
   intra-session paging is next work.
