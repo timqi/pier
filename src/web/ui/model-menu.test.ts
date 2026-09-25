@@ -1,62 +1,20 @@
 // Pinning goes through the shared picker: it offers what is not pinned yet,
 // and a pick stages a row — with the reasoning level the picker was left on,
 // because a pin never has none — that Save writes.
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ModelRef, ThinkingLevel } from "../../core/types.js";
 import { getJson, sendJson } from "./api.js";
 import { openPanel } from "./menu.js";
 import { launchField, modelPicker } from "./model-picker.js";
 import { createModelMenuPane } from "./model-menu.js";
+import { button, fake, installDom, labelled, type FakeElement } from "./dom.testkit.js";
 
 vi.mock("./api.js", () => ({ failure: vi.fn(async () => "failed"), getJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./menu.js", () => ({ closeMenu: vi.fn(), openPanel: vi.fn() }));
 vi.mock("./model-picker.js", () => ({
-  modelPicker: vi.fn(() => new Element("div")),
-  launchField: vi.fn(() => new Element("div")),
+  modelPicker: vi.fn(() => document.createElement("div")),
+  launchField: vi.fn(() => document.createElement("div")),
 }));
-vi.mock("./icons.js", () => ({ icon: () => new Element("svg") }));
-
-class Element {
-  children: (Element | string)[] = [];
-  className = "";
-  value = "";
-  type = "";
-  placeholder = "";
-  title = "";
-  disabled = false;
-  onclick: (() => void) | null = null;
-  onchange: (() => void) | null = null;
-  oninput: (() => void) | null = null;
-  classList = { add: vi.fn(), remove: vi.fn(), replace: vi.fn(), toggle: vi.fn() };
-  attrs: Record<string, string> = {};
-  focus = vi.fn();
-  constructor(readonly tag: string) {}
-  append(...kids: (Element | string)[]): void {
-    this.children.push(...kids);
-  }
-  prepend(...kids: (Element | string)[]): void {
-    this.children.unshift(...kids);
-  }
-  replaceChildren(...kids: (Element | string)[]): void {
-    this.children = kids;
-  }
-  setAttribute = vi.fn((name: string, value: string) => {
-    this.attrs[name] = value;
-  });
-  get textContent(): string {
-    return this.children.map((c) => (typeof c === "string" ? c : c.textContent)).join("");
-  }
-  set textContent(text: string) {
-    this.children = [text];
-  }
-}
-
-const walk = (el: Element): Element[] => [el, ...el.children.flatMap((c) => (typeof c === "string" ? [] : walk(c)))];
-const button = (root: Element, text: string): Element => {
-  const found = walk(root).find((e) => e.tag === "button" && e.textContent.includes(text));
-  if (!found) throw new Error(`no button: ${text}`);
-  return found;
-};
 
 const pinned: ModelRef = { provider: "anthropic", id: "pinned-model" };
 const free: ModelRef = { provider: "openai", id: "free-model" };
@@ -64,16 +22,7 @@ const stored = { ...pinned, thinking: "high" as ThinkingLevel };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal("document", {
-    createElement: (tag: string) => new Element(tag),
-    createElementNS: (_ns: string, tag: string) => new Element(tag),
-  });
-  vi.stubGlobal("Option", class extends Element {
-    constructor(label = "") {
-      super("option");
-      this.textContent = label;
-    }
-  });
+  installDom();
   vi.mocked(getJson).mockImplementation((url: string) =>
     Promise.resolve(
       url.startsWith("/api/models")
@@ -85,17 +34,19 @@ beforeEach(() => {
   );
 });
 
-async function pane(): Promise<Element> {
+afterEach(() => vi.unstubAllGlobals());
+
+async function pane(): Promise<FakeElement> {
   const built = createModelMenuPane();
   built.load();
   await vi.waitFor(() => expect(getJson).toHaveBeenCalledTimes(3));
   await Promise.resolve();
-  return built.el as unknown as Element;
+  return fake(built.el);
 }
 
 it("offers only what is not pinned yet, and a pick stages the row", async () => {
   const el = await pane();
-  button(el, "Pin model").onclick!();
+  button(el, /Pin model/)!.onclick!();
   expect(openPanel).toHaveBeenCalledTimes(1);
   const props = vi.mocked(modelPicker).mock.lastCall![0];
   expect(props).toMatchObject({
@@ -113,7 +64,7 @@ it("offers only what is not pinned yet, and a pick stages the row", async () => 
   expect(el.textContent).toContain("openai/free-model");
   expect(el.textContent).toContain("unsaved changes");
 
-  button(el, "Save menu").onclick!();
+  button(el, /Save menu/)!.onclick!();
   await vi.waitFor(() => expect(sendJson).toHaveBeenCalled());
   expect(vi.mocked(sendJson).mock.lastCall).toMatchObject([
     "/api/settings",
@@ -139,11 +90,7 @@ it("reorders the menu by the row arrows, ends included, and saves the new order"
     ) as never
   );
   const el = await pane();
-  const arrow = (label: string): Element => {
-    const found = walk(el).find((e) => e.attrs["aria-label"] === label);
-    if (!found) throw new Error(`no arrow: ${label}`);
-    return found;
-  };
+  const arrow = (label: string): FakeElement => labelled(el, label)!;
   // The first row cannot go up, the last cannot go down.
   expect(arrow("Move up: anthropic/pinned-model").disabled).toBe(true);
   expect(arrow("Move down: openai/free-model").disabled).toBe(true);
@@ -156,7 +103,7 @@ it("reorders the menu by the row arrows, ends included, and saves the new order"
   vi.mocked(sendJson).mockResolvedValue(
     { ok: true, json: async () => ({ modelMenu: [second, stored] }) } as unknown as Response,
   );
-  button(el, "Save menu").onclick!();
+  button(el, /Save menu/)!.onclick!();
   await vi.waitFor(() => expect(sendJson).toHaveBeenCalled());
   expect(vi.mocked(sendJson).mock.lastCall![1]).toEqual({
     modelMenu: [
@@ -177,7 +124,7 @@ it("has nothing to pin once every model is pinned", async () => {
     ) as never
   );
   const el = await pane();
-  expect(button(el, "Pin model").disabled).toBe(true);
+  expect(button(el, /Pin model/)!.disabled).toBe(true);
 });
 
 it("draws the default model from settings.json, writes a change at once and redraws from the answer", async () => {

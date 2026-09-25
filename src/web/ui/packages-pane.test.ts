@@ -4,65 +4,27 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Package, PackageRegistry } from "../../core/types.js";
+import { h as make } from "./dom.js";
+import { button as buttonIn, installDom, walk, type FakeElement } from "./dom.testkit.js";
 
-class Element {
-  children: (Element | string)[] = [];
-  classList = { add: vi.fn(), remove: vi.fn() };
-  className = "";
-  value = "";
-  checked = false;
-  disabled = false;
-  title = "";
-  type = "";
-  style: Record<string, string> = {};
-  onclick: (() => void) | null = null;
-  onchange: (() => void) | null = null;
-  oninput: (() => void) | null = null;
-  onkeydown: ((ev: { key: string }) => void) | null = null;
-  attrs: Record<string, string> = {};
-  constructor(readonly tag: string) {}
-  setAttribute(name: string, value: string) { this.attrs[name] = value; }
-  querySelectorAll(selector: string): Element[] { return walk(this).filter((el) => el.tag === selector); }
-  get options(): Element[] { return this.children.filter((c): c is Element => typeof c !== "string"); }
-  append(...children: (Element | string)[]) { this.children.push(...children); }
-  replaceChildren(...children: (Element | string)[]) { this.children = children; }
-  focus = vi.fn();
-  get textContent(): string { return this.children.map((c) => typeof c === "string" ? c : c.textContent).join(""); }
-  set textContent(text: string) { this.children = [text]; }
-}
-const walk = (el: Element): Element[] => [el, ...el.children.flatMap((c) => typeof c === "string" ? [] : walk(c))];
-const make = (tag: string, cls = "", ...children: (Element | string)[]): Element => {
-  const el = new Element(tag);
-  el.className = cls;
-  el.append(...children);
-  return el;
-};
-
-vi.mock("./dom.js", () => ({
-  h: (...args: Parameters<typeof make>) => make(...args),
-  basename: (p: string) => p.split("/").filter(Boolean).pop() ?? p,
-  agoLabel: () => "just now",
-  consoleView: (_root: Element, load: () => void) => ({ visible: false, show() { load(); }, hide() {} }),
-}));
 vi.mock("./form.js", () => ({
   CONTROL: "", CONTROL_TRIGGER: "", PANEL: "", PANEL_HEAD: "", PANE: "", BAND: "",
   badge: (text: string) => make("span", "badge", text),
   btn: (label: string, cls = "") => make("button", cls, label),
   empty: (text: string) => make("p", "empty", text),
-  field: (label: string, control: Element) => make("div", "", label, control),
-  setStatus: (el: Element, state: string, text: string) => { el.className = state; el.textContent = text; },
+  field: (label: string, control: HTMLElement) => make("div", "", label, control),
+  setStatus: (el: HTMLElement, state: string, text: string) => { el.className = state; el.textContent = text; },
   textInput: (value: string, _ph: string, onInput: (v: string) => void) => {
-    const el = make("input"); el.value = value; el.oninput = () => onInput(el.value); return el;
+    const el = make("input", "") as HTMLInputElement; el.value = value; el.oninput = () => onInput(el.value); return el;
   },
   toggle: (label: string, hint: string, checked: boolean, onChange: (v: boolean) => void) => {
-    const box = make("input"); box.type = "checkbox"; box.checked = checked; box.onchange = () => onChange(box.checked);
+    const box = make("input", "") as HTMLInputElement; box.type = "checkbox"; box.checked = checked; box.onchange = () => onChange(box.checked);
     return make("label", "", box, label, make("span", "hint", hint));
   },
 }));
 vi.mock("./code.js", () => ({ fileRows: (text: string) => text, codePane: (text: string) => make("pre", "", text) }));
-vi.mock("./icons.js", () => ({ icon: () => make("svg", "chev") }));
 vi.mock("./highlight.js", () => ({ langFor: async () => null }));
-vi.mock("./config-sync.js", () => ({ configSyncPane: () => ({ el: make("div"), dispose() {} }) }));
+vi.mock("./config-sync.js", () => ({ configSyncPane: () => ({ el: make("div", ""), dispose() {} }) }));
 
 import { createConfigView } from "./config.js";
 
@@ -84,7 +46,7 @@ const demo: Package = {
   updateAvailable: false, resources: [resource("extension", "hello", "/pi/packages/npm/demo/extensions/hello.ts", true)],
 };
 let registry: PackageRegistry;
-let root: Element;
+let root: FakeElement;
 let fetcher: ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
 /** What Browse files handed the router: `#/files/<dir>?select=<file>` in parts. */
 let browsed: [string, string | undefined][];
@@ -94,8 +56,8 @@ const settled = async () => { for (let i = 0; i < 50; i++) await Promise.resolve
 const rows = () => walk(root).filter((el) => el.className.includes("config-row"));
 const row = (label: string) => rows().find((el) => el.title === label);
 const rowText = (label: string) => row(label)!.textContent;
-const button = (text: string) => walk(root).find((el) => el.tag === "button" && el.textContent === text);
-const chevron = (label: string) => walk(root).find((el) => el.attrs["aria-label"]?.endsWith(` ${label}`))!;
+const button = (text: string) => buttonIn(root, text);
+const chevron = (label: string) => walk(root).find((el) => el.getAttribute("aria-label")?.endsWith(` ${label}`))!;
 const checkbox = () => walk(root).find((el) => el.type === "checkbox")!;
 const sent = (method: string) =>
   fetcher.mock.calls.filter(([, init]) => init?.method === method).map(([url, init]) => [url, JSON.parse(String(init?.body))]);
@@ -104,11 +66,7 @@ const status = () => walk(root).find((el) => el.className === "saved" || el.clas
 beforeEach(async () => {
   // A copy: the fetcher's PUT mutates the row it answers with.
   registry = structuredClone({ packages: [pier, local, demo], checkedAt: null, busy: null });
-  root = new Element("div");
-  vi.stubGlobal("document", { createElement: (tag: string) => new Element(tag) });
-  vi.stubGlobal("Option", class extends Element {
-    constructor(label: string, value: string) { super("option"); this.append(label); this.value = value; }
-  });
+  root = installDom().createElement("div");
   vi.stubGlobal("window", { confirm: vi.fn(() => true) });
   install = async () => Response.json({ package: { ...demo, source: "npm:new", version: "2.0.0" } });
   fetcher = vi.fn(async (url: string, init?: RequestInit) => {
@@ -135,7 +93,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("Settings → Agent", () => {
   it("draws one tree from the registry: a package row, its resources grouped by kind under it", () => {
-    const sections = walk(root).filter((el) => el.className.includes("uppercase") && el.tag === "div").map((el) => el.textContent);
+    const sections = walk(root).filter((el) => el.className.includes("uppercase") && el.localName === "div").map((el) => el.textContent);
     expect(sections).toEqual(["Instance", "Files", "PackagesAdd package", "extensions", "skills", "extensions", "Tools"]);
     // pier and local open by default, a third-party package closed.
     expect(rows().map((el) => el.textContent)).toEqual([
@@ -145,7 +103,7 @@ describe("Settings → Agent", () => {
       "demoon",
       "command-line tools",
     ]);
-    expect(chevron("demo").attrs["aria-expanded"]).toBe("false");
+    expect(chevron("demo").getAttribute("aria-expanded")).toBe("false");
     // A switched-off resource reads dim; its state is a line in the row, not a tooltip.
     expect(row("web")!.className).toContain("text-neutral-400");
     expect(row("rtk")!.className).not.toContain("text-neutral-400");
@@ -154,7 +112,7 @@ describe("Settings → Agent", () => {
   it("expands and collapses a package from its chevron, and keeps that across redraws", async () => {
     chevron("demo").onclick!();
     expect(rowText("hello")).toBe("hello");
-    expect(chevron("demo").attrs["aria-expanded"]).toBe("true");
+    expect(chevron("demo").getAttribute("aria-expanded")).toBe("true");
     chevron("pier").onclick!();
     expect(row("web")).toBeUndefined();
     // A switch elsewhere redraws the nav; the fold state is the operator's.
@@ -203,7 +161,7 @@ describe("Settings → Agent", () => {
       "/api/fs/file?root=%2Fpier%2Fskills%2Fpier-help&path=SKILL.md",
       expect.anything(),
     );
-    expect(walk(root).find((el) => el.tag === "pre")?.textContent).toBe("# help");
+    expect(walk(root).find((el) => el.localName === "pre")?.textContent).toBe("# help");
   });
 
   it("Browse files opens the Files view on a skill's directory, an extension's, or the package's install path", async () => {
@@ -243,7 +201,7 @@ describe("Settings → Agent", () => {
     };
     button("Add package")!.onclick!();
     await settled();
-    const input = walk(root).find((el) => el.tag === "input")!;
+    const input = walk(root).find((el) => el.localName === "input")!;
     input.value = " npm:new ";
     input.oninput!();
     button("Install")!.onclick!();
@@ -262,7 +220,7 @@ describe("Settings → Agent", () => {
     install = async () => Response.json({ error: "npm:other is being changed; try again when it finishes" }, { status: 409 });
     button("Add package")!.onclick!();
     await settled();
-    const input = walk(root).find((el) => el.tag === "input")!;
+    const input = walk(root).find((el) => el.localName === "input")!;
     input.value = "npm:new";
     input.oninput!();
     button("Install")!.onclick!();
@@ -271,6 +229,6 @@ describe("Settings → Agent", () => {
     expect(status()?.className).toBe("failed");
     expect(status()?.textContent).toBe("npm:other is being changed; try again when it finishes");
     // What was typed is still there for the retry.
-    expect(walk(root).find((el) => el.tag === "input")!.value).toBe("npm:new");
+    expect(walk(root).find((el) => el.localName === "input")!.value).toBe("npm:new");
   });
 });

@@ -1,46 +1,22 @@
-// Real queue controls with deferred HTTP; only DOM rendering is replaced.
+// Real queue controls with deferred HTTP, drawn into the shell's own markup.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-class Element {
-  value = "";
-  style = { height: "" };
-  scrollHeight = 24;
-  children: Element[] = [];
-  onclick: (() => void | Promise<void>) | null = null;
-  oninput: (() => void) | null = null;
-  onpaste: ((ev: unknown) => void) | null = null;
-  classList = { toggle: vi.fn() };
-  focus = vi.fn();
-  setAttribute = vi.fn();
-  constructor(readonly text = "") {}
-  append(...children: Element[]) { this.children.push(...children); }
-  prepend(...children: Element[]) { this.children.unshift(...children); }
-  replaceChildren(...children: Element[]) { this.children = children; }
-  after() {}
-  get childElementCount() { return this.children.length; }
-}
+import { button, fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
 const state = vi.hoisted(() => ({
-  nodes: new Map<string, Element>(), created: [] as Element[],
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
   observed: [] as (ResizeObserverOptions | undefined)[],
-}));
-vi.mock("./dom.js", () => ({
-  $: (selector: string) => {
-    if (!state.nodes.has(selector)) state.nodes.set(selector, new Element());
-    return state.nodes.get(selector);
-  },
-  h: (_tag: string, _classes: string, text?: string) => {
-    const el = new Element(text); state.created.push(el); return el;
-  },
-  copyBtn: () => new Element(),
 }));
 vi.mock("./chat.js", () => ({
   appendTurn: state.appendTurn, followTail: vi.fn(), scrollBottom: vi.fn(), turnsPane: {},
 }));
-vi.mock("./attachments.js", () => ({ imageThumb: vi.fn() }));
-vi.mock("./icons.js", () => ({ icon: () => ({}) })); // lucide wants a real document
+vi.mock("./attachments.js", () => ({ imageThumb: () => document.createElement("img") }));
 vi.mock("./shortcut.js", () => ({ escapeKey: vi.fn(), letterKey: vi.fn() }));
+
+const node = (selector: string): FakeElement => fake(document.querySelector(selector));
+/** The nodes on screen right now: a redraw replaces them even when it reads the same. */
+const onScreen = (selector: string): FakeElement[] => [...node(selector).children];
+const same = (before: FakeElement[], after: FakeElement[]): boolean =>
+  before.length === after.length && before.every((el, i) => el === after[i]);
 
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 /** Enough of the Storage interface for a draft: the migration enumerates it. */
@@ -53,16 +29,17 @@ const storage = (entries: Map<string, string>) => ({
 });
 
 let composer: typeof import("./composer.js");
+let doc: FakeDocument;
 let drafts: Map<string, string>;
 let stored: Map<string, string>;
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
-  state.nodes.clear(); state.created = []; state.id = "a"; state.visible = true; state.observed = [];
+  state.id = "a"; state.visible = true; state.observed = [];
   drafts = new Map();
   stored = new Map();
   vi.stubGlobal("window", {});
-  vi.stubGlobal("document", { activeElement: null });
+  doc = installPage();
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   vi.stubGlobal("confirm", () => true);
   vi.stubGlobal("ResizeObserver", class {
@@ -88,15 +65,15 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function click(control: "recall" | "ack"): void {
-  if (control === "recall") state.nodes.get("#queue-recall")!.onclick!();
+  if (control === "recall") node("#queue-recall").onclick!();
   else {
     composer.renderRecovery([{ id: "batch", steering: ["original"], followUp: [], status: "uncertain" }]);
-    void state.created.find((el) => el.text === "Acknowledge")!.onclick!();
+    void button(doc.body, "Acknowledge")!.onclick!();
   }
 }
 
 function type(text: string): void {
-  const input = state.nodes.get("#input")!;
+  const input = node("#input");
   input.value = text;
   input.oninput!();
 }
@@ -176,17 +153,17 @@ describe("queue recall drafts", () => {
     select("b");
     type(" B draft \n");
     composer.renderQueue([], ["B queue"]);
-    const rows = state.nodes.get("#queue-rows")!.children;
-    const toggles = state.nodes.get("#queue-panel")!.classList.toggle.mock.calls.length;
-    const input = state.nodes.get("#input")!;
+    const rows = onScreen("#queue-rows");
+    const panel = node("#queue-panel").className;
+    const input = node("#input");
     const height = input.style.height;
     await finish([" steer\nline ", "", "follow up\n"]);
     expect(input.value).toBe(" B draft \n");
     expect(drafts.get("pier.draft.b")).toBe(" B draft \n");
     expect(input.style.height).toBe(height);
-    expect(input.focus).not.toHaveBeenCalled();
-    expect(state.nodes.get("#queue-rows")!.children).toBe(rows);
-    expect(state.nodes.get("#queue-panel")!.classList.toggle).toHaveBeenCalledTimes(toggles);
+    expect(doc.activeElement).not.toBe(input);
+    expect(same(rows, onScreen("#queue-rows"))).toBe(true);
+    expect(node("#queue-panel").className).toBe(panel);
     select("a");
     expect(input.value).toBe(" A draft \n\n steer\nline \n\nfollow up\n");
     select("b");
@@ -202,12 +179,12 @@ describe("queue recall drafts", () => {
     select("a");
     type(" edited A \n");
     composer.renderQueue([], ["new A queue"]);
-    const rows = state.nodes.get("#queue-rows")!.children;
+    const rows = onScreen("#queue-rows");
     await finish(["recalled"]);
-    const input = state.nodes.get("#input")!;
+    const input = node("#input");
     expect(input.value).toBe(" edited A \n\nrecalled");
-    expect(input.focus).not.toHaveBeenCalled();
-    expect(state.nodes.get("#queue-rows")!.children).toBe(rows);
+    expect(doc.activeElement).not.toBe(input);
+    expect(same(rows, onScreen("#queue-rows"))).toBe(true);
     select("b");
     expect(input.value).toBe("B stays");
     select("a");
@@ -221,10 +198,10 @@ describe("queue recall drafts", () => {
     type(latest);
     await finish(["recalled", "second\nline"]);
     const expected = `${latest ? `${latest}\n` : ""}recalled\nsecond\nline`;
-    expect(state.nodes.get("#input")!.value).toBe(expected);
+    expect(node("#input").value).toBe(expected);
     expect(drafts.get("pier.draft.a")).toBe(expected);
-    expect(state.nodes.get("#input")!.focus).toHaveBeenCalledOnce();
-    expect(state.nodes.get("#queue-rows")!.children).toEqual([]);
+    expect(doc.activeElement).toBe(node("#input"));
+    expect(onScreen("#queue-rows")).toEqual([]);
   });
 
   it("does not resurrect text sent while recall was pending", async () => {
@@ -235,20 +212,20 @@ describe("queue recall drafts", () => {
     expect(drafts.has("pier.draft.a")).toBe(false);
     type("next draft");
     await finish(["recalled"]);
-    expect(state.nodes.get("#input")!.value).toBe("next draft\nrecalled");
+    expect(node("#input").value).toBe("next draft\nrecalled");
     expect(state.fetch.mock.calls[1]?.[0]).toBe("/api/sessions/a/messages");
   });
 
   it("checkpoints A before createSession removes its selection", async () => {
-    state.nodes.get("#input")!.value = "A unsaved input";
+    node("#input").value = "A unsaved input";
     const finish = await recallPending("fetch");
     state.id = null;
     type("new session input");
     await finish(["recalled"]);
-    expect(state.nodes.get("#input")!.value).toBe("new session input");
-    expect(state.nodes.get("#input")!.focus).not.toHaveBeenCalled();
+    expect(node("#input").value).toBe("new session input");
+    expect(doc.activeElement).not.toBe(node("#input"));
     select("a");
-    expect(state.nodes.get("#input")!.value).toBe("A unsaved input\nrecalled");
+    expect(node("#input").value).toBe("A unsaved input\nrecalled");
   });
 
   it("retains selected recalled text in the input when storage fills up", async () => {
@@ -256,7 +233,7 @@ describe("queue recall drafts", () => {
     const finish = await recallPending("body");
     vi.spyOn(sessionStorage, "setItem").mockImplementation(() => { throw new Error("quota exceeded"); });
     await finish([" first\n", "second"]);
-    expect(state.nodes.get("#input")!.value).toBe("draft\n first\n\nsecond");
+    expect(node("#input").value).toBe("draft\n first\n\nsecond");
     expect(drafts.get("pier.draft.a")).toBe("draft");
     expect(state.appendTurn).toHaveBeenCalledWith("error",
       "Could not save recalled messages for session a: Error: quota exceeded\nRecalled messages (not saved):\n first\n\nsecond");
@@ -268,12 +245,12 @@ describe("queue recall drafts", () => {
     select("b");
     type("B draft");
     composer.renderQueue([], ["B queue"]);
-    const rows = state.nodes.get("#queue-rows")!.children;
+    const rows = onScreen("#queue-rows");
     vi.spyOn(sessionStorage, method).mockImplementation(() => { throw new Error("storage unavailable"); });
     await finish([" first\n", "second"]);
-    expect(state.nodes.get("#input")!.value).toBe("B draft");
-    expect(state.nodes.get("#input")!.focus).not.toHaveBeenCalled();
-    expect(state.nodes.get("#queue-rows")!.children).toBe(rows);
+    expect(node("#input").value).toBe("B draft");
+    expect(doc.activeElement).not.toBe(node("#input"));
+    expect(same(rows, onScreen("#queue-rows"))).toBe(true);
     expect(drafts.get("pier.draft.a")).toBe("A draft");
     expect(drafts.get("pier.draft.b")).toBe("B draft");
     expect(state.appendTurn).toHaveBeenCalledWith("error",
@@ -283,38 +260,38 @@ describe("queue recall drafts", () => {
   it.each([{ messages: [] }, { messages: ["recalled"] }])("preserves a newer authoritative queue for response $messages", async ({ messages }) => {
     const finish = await recallPending("body");
     composer.renderQueue([], ["new queue"]);
-    const rows = state.nodes.get("#queue-rows")!.children;
+    const rows = onScreen("#queue-rows");
     await finish(messages);
-    expect(state.nodes.get("#queue-rows")!.children).toBe(rows);
+    expect(same(rows, onScreen("#queue-rows"))).toBe(true);
   });
 
   it("keeps an empty response from changing the draft or focus", async () => {
     type("unchanged");
     const finish = await recallPending("body");
     await finish([]);
-    expect(state.nodes.get("#input")!.value).toBe("unchanged");
-    expect(state.nodes.get("#input")!.focus).not.toHaveBeenCalled();
+    expect(node("#input").value).toBe("unchanged");
+    expect(doc.activeElement).not.toBe(node("#input"));
   });
 
   it.each(["focus", "view"])("does not steal focus after a %s change", async (change) => {
     const finish = await recallPending("body");
     if (change === "view") state.visible = false;
-    else Object.assign(document, { activeElement: new Element() });
+    else node("#send").focus();
     await finish(["recalled"]);
-    expect(state.nodes.get("#input")!.value).toBe("recalled");
-    expect(state.nodes.get("#input")!.focus).not.toHaveBeenCalled();
+    expect(node("#input").value).toBe("recalled");
+    expect(doc.activeElement).not.toBe(node("#input"));
   });
 
   it("coalesces same-session clicks through body parsing and allows the next recall", async () => {
     const finish = await recallPending("body");
     click("recall");
     composer.renderRecovery([], true);
-    state.created.find((el) => el.text === "Recall queue")!.onclick!();
+    button(doc.body, "Recall queue")!.onclick!();
     expect(state.fetch).toHaveBeenCalledOnce();
     await finish(["first"]);
     const next = await recallPending("fetch");
     await next(["second"]);
-    expect(state.nodes.get("#input")!.value).toBe("first\nsecond");
+    expect(node("#input").value).toBe("first\nsecond");
     expect(state.fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -326,7 +303,7 @@ describe("queue recall drafts", () => {
     const finishB = await recallPending("fetch");
     await finishB(["B recalled"]);
     await finishA(["A recalled"]);
-    expect(state.nodes.get("#input")!.value).toBe("B\nB recalled");
+    expect(node("#input").value).toBe("B\nB recalled");
     expect(drafts.get("pier.draft.a")).toBe("A\nA recalled");
     expect(state.fetch.mock.calls.map(([url]) => url)).toEqual([
       "/api/sessions/a/queue/recall", "/api/sessions/b/queue/recall",
@@ -338,8 +315,8 @@ describe("queue control failures", () => {
   it("offers the existing recall action from an empty acknowledged pause notice", async () => {
     composer.renderQueue([], []);
     composer.renderRecovery([], true);
-    expect(state.created.some((el) => el.text === "Automatic queue paused: acceptance unknown (in memory)")).toBe(true);
-    const recall = state.created.find((el) => el.text === "Recall queue")!;
+    expect(doc.body.textContent).toContain("Automatic queue paused: acceptance unknown (in memory)");
+    const recall = button(doc.body, "Recall queue")!;
     state.fetch.mockResolvedValueOnce(Response.json({ messages: [] }));
     recall.onclick!();
     await settled();
@@ -356,15 +333,15 @@ describe("queue control failures", () => {
   it("allows retry after a failed recall without changing draft or queue", async () => {
     type("draft");
     composer.renderQueue([], ["queued"]);
-    const rows = state.nodes.get("#queue-rows")!.children;
+    const rows = onScreen("#queue-rows");
     state.fetch.mockResolvedValueOnce(Response.json({ error: "Queue operation in progress" }, { status: 409 }));
     click("recall");
     await settled();
-    expect(state.nodes.get("#input")!.value).toBe("draft");
-    expect(state.nodes.get("#queue-rows")!.children).toBe(rows);
+    expect(node("#input").value).toBe("draft");
+    expect(same(rows, onScreen("#queue-rows"))).toBe(true);
     const finish = await recallPending("fetch");
     await finish(["queued"]);
-    expect(state.nodes.get("#input")!.value).toBe("draft\nqueued");
+    expect(node("#input").value).toBe("draft\nqueued");
   });
 
   it.each(["recall", "ack"] as const)("does not put a delayed %s error body in another session", async (control) => {
@@ -384,14 +361,14 @@ describe("queue control failures", () => {
 
 describe("pending attachments", () => {
   const paste = (name: string): void => {
-    state.nodes.get("#input")!.onpaste!({
+    node("#input").onpaste!({
       clipboardData: {
         items: [{ kind: "file", getAsFile: () => ({ name, size: 4, type: "image/png" }) }],
         getData: () => "",
       },
     });
   };
-  const staged = (): number => state.nodes.get("#image-strip")!.children.length;
+  const staged = (): number => node("#image-strip").childElementCount;
 
   it("uploads a file as it is attached, so Enter does not wait on it", () => {
     state.fetch.mockResolvedValueOnce(Response.json({ path: "/inbox/shot.png" }));
