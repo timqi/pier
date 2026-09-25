@@ -14,6 +14,7 @@
   "files": [
     "dist",
     "!dist/**/*.test.js",
+    "!dist/**/*.testkit.js",
     "skills",
     "docs/deploy.md"
   ],

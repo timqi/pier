@@ -414,10 +414,11 @@ browser keeps no second session order.
 
 ## Tests
 
-- Backend: vitest + a fake `AgentFactory`/`AgentSession` (scripted event
-  emitter). Cover: message → router → session call; SSE replay from
+- Backend: vitest + a fake `AgentFactory`/`AgentSession` (the shared one:
+  `src/core/session.testkit.ts`). Cover: message → router → session call; SSE replay from
   `Last-Event-ID`; abort route.
-- Frontend: Vitest in `src/web/ui/*.test.ts`, plus browser interaction checks
+- Frontend: Vitest in `src/web/ui/*.test.ts` on the shared fake DOM
+  `src/web/ui/dom.testkit.ts`, plus browser interaction checks
   for layout, edit lifecycle, overlays, disclosures and replay. Use the UI/UX
   guide's validation matrix; state browser coverage explicitly.
 
