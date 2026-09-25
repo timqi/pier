@@ -35,8 +35,7 @@ exist yet.
   gains the cwd test.
 - The home holds memory only:
   - `MEMORY.md` — durable facts, decisions, the project index (repo → path,
-    worktree convention); injected as a context file at session open, same
-    override.
+    worktree convention); injected once at session open, in the seed.
   - `memory/YYYY-MM-DD.md` — daily notes, instance-local date.
   - `AGENTS.md` — optional user additions, loaded by Pi as the cwd's own file.
 - The dispatcher writes a note when a callback settles or a decision is made;
@@ -52,17 +51,18 @@ exist yet.
 
 | Event | Rule |
 | --- | --- |
-| Inbound (user message or callback) to the main session, head idle ≥ 1h since its last inbound or turn end | rotate before delivering: create the next session, append a chain row, deliver to it |
+| User message to the main session, head ≥ 1h since its last user message | rotate before delivering: create the next session, append a chain row, deliver to it |
+| Callback to the main session | delivered to the head, whatever its idle time; never rotates |
 | Rotation | the new session opens with the previous head's model and thinking level, then gets one seed system input |
-| Seed | the run ledger (in flight, and finished since the previous rotation), today's and yesterday's daily notes, the previous head's last 3 exchanges verbatim |
-| Surface | one line where the inbound came from: `new session — idle 1h` |
+| Seed (every chain session, the first included) | `MEMORY.md`, the run ledger (in flight, and finished since the previous rotation), today's and yesterday's daily notes, the previous head's last 3 exchanges verbatim |
+| Surface | one line where the user message came from: `new session — idle 1h` |
 | Within a stretch | Pi auto-compaction on, triggered near 100K context, the last ~20K kept |
 | Head missing from Pi | a new head with reason `lost`, said on the surface, as `onStale` does for IM rows |
 
 - 1h matches the `"long"` cache retention Pier requests for interactive
   sessions (`CacheRetentionBox`, `agent/pi.ts`); past it the cache is cold
   anyway.
-- Rotation is lazy, on the next inbound; no timer.
+- Rotation is lazy, on the next user message; no timer.
 - Launch: the instance default model (`GET /api/config/defaults`) at `low`
   thinking; the operator's header pick sticks to the head and is inherited on
   rotation.
@@ -150,7 +150,7 @@ thread and session. Group chats never change.
 | --- | --- | --- |
 | DM, top-level message | main session | the DM's main flow, no thread |
 | DM, reply in a bound card thread | that child session, bypassing the dispatcher | the thread |
-| DM, reply in another bound thread (handoff, or a thread from before the switch) | its session, as today | the thread |
+| DM, reply in another bound thread (web handoff, or a thread from before the switch) | its session; the binding is kept | the thread |
 | DM, reply in an unbound thread | main session | the DM's main flow |
 | DM, `/status` (Slack: `status`) | not a prompt; Pier answers from the ledger | the main flow |
 | Group chat | unchanged | unchanged |
@@ -160,8 +160,9 @@ thread and session. Group chats never change.
   Gap: Slack's send refuses an empty `thread_ts` and Lark always replies in
   thread; both adapters gain a chat-level conversation id for the DM.
 - Gap: the router delivers a session's replies to one attached chat; the main
-  session answers the surface each turn's input came from, and a callback turn
-  the surface of the turn that launched the run.
+  session answers only the surface each user message came from, and a callback
+  turn only the surface the run was launched from; no other IM surface mirrors
+  it.
 - `/status` lists in-flight runs one line each: `<name> · <state> · <age> ·
   <thread link>`; nothing in flight says so.
 
@@ -190,8 +191,8 @@ thread and session. Group chats never change.
 
 ## Required new work
 
-- `agent/pi.ts`: dispatcher contract and `MEMORY.md` injected for the home
-  cwd; per-session compaction override.
+- `agent/pi.ts`: dispatcher contract injected for the home cwd; per-session
+  compaction override.
 - `core/types.ts`: `session-seed` system-input kind.
 - `db.ts` + a chain store: `main_chain`, head lookup, rotation.
 - `main.ts` / `core/router.ts`: alias key → head, re-pointed on rotation;
