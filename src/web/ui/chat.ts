@@ -1,7 +1,7 @@
 // The turns pane: chat rows, markdown, streaming text, system-input rows and
 // inline user-message edit. Renders into #turns only.
 
-import { ArrowUpRight, CornerDownLeft, Pencil, type IconNode } from "lucide";
+import { ArrowUpRight, CornerDownLeft, History, Pencil, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -294,6 +294,7 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
 const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> = {
   "task-delegation": [ArrowUpRight, "delegated", "text-cyan-700"],
   "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
+  "session-seed": [History, "session seed", "text-cyan-700"],
 };
 
 /** Every task text opens with `Key: value` lines naming the run, which the
@@ -315,16 +316,18 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const row = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   row.dataset.kind = "system";
   const [meta, body] = splitMetaBlock(text);
-  const head = runHead({
-    glyph: state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`),
-    label: state ? `${label} \u00b7 ${state}` : label,
-    labelCls: state ? STATE_STYLE[state].label : cls,
-    ...(origin.source
-      ? { taskName: origin.source.taskName, model: origin.source.model, thinking: origin.source.thinking }
-      : meta ? { taskName: meta.split("\n")[0]! } : {}),
-    runId: origin.runId,
-    sessionId: origin.sourceSessionId,
-  });
+  const head = origin.kind === "session-seed"
+    ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label, labelCls: cls, taskName: `new session — ${origin.reason}`, sessionId: origin.previousSessionId })
+    : runHead({
+      glyph: state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`),
+      label: state ? `${label} \u00b7 ${state}` : label,
+      labelCls: state ? STATE_STYLE[state].label : cls,
+      ...(origin.source
+        ? { taskName: origin.source.taskName, model: origin.source.model, thinking: origin.source.thinking }
+        : meta ? { taskName: meta.split("\n")[0]! } : {}),
+      runId: origin.runId,
+      sessionId: origin.sourceSessionId,
+    });
   row.append(head);
   row.append(...clampedBody(body));
   turnsPane.append(row);
@@ -741,7 +744,7 @@ export function renderSnapshot(
       if (!t.text) continue;
       if (t.role === "system" && t.origin) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
-        placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
+        if (t.origin.kind !== "session-seed") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
         appendSystemInput(t.text, t.origin);
         continue;
       }

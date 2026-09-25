@@ -121,7 +121,29 @@ export type SystemInputOrigin = {
   messageId: string;
   messageKind: "steer" | "follow_up";
   source?: SystemInputSource;
+} | {
+  /** What a new session of the continuous conversation opens with: memory,
+   *  the run ledger and the previous session's last exchanges (core/chain.ts). */
+  kind: "session-seed";
+  reason: ChainReason;
+  previousSessionId: string | null;
 };
+
+/** Why a session joined the continuous conversation's chain: the first one,
+ *  the previous one idle past the rotation boundary, or the previous one gone. */
+export type ChainReason = "first" | "idle" | "lost";
+
+/** How long the continuous conversation's head may go without a user message
+ *  before the next one starts a new session: the "long" prompt-cache TTL
+ *  interactive sessions request, past which the cache is cold anyway. */
+export const CHAIN_IDLE_MS = 60 * 60_000;
+
+/** One session of the continuous conversation, as `GET /api/continuous` lists it. */
+export interface ChainMember {
+  sessionId: string;
+  startedAt: number;
+  reason: ChainReason;
+}
 
 export interface BackgroundRun {
   runId: string;
@@ -285,8 +307,10 @@ export interface AgentSession {
   readonly model: ModelRef | undefined;
   readonly thinkingLevel: ThinkingLevel;
   readonly contextUsage: ContextUsage | undefined;
-  /** Completed turns of the persisted transcript (no partial streaming). */
-  history(): Promise<ChatTurn[]>;
+  /** Completed turns of the persisted transcript (no partial streaming): the
+   * model's context, or with `branch` every turn of the transcript's current
+   * branch, those a compaction summarized away included. */
+  history(opts?: { branch?: boolean }): Promise<ChatTurn[]>;
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;
@@ -297,6 +321,10 @@ export interface AgentSession {
    * requests arrive seconds apart, the 1h write premium never pays off).
    * Read per request, so it may change after open; other providers ignore it. */
   setCacheRetention(retention: "short" | "long"): void;
+  /** Auto-compaction triggers once the context passes `tokens`, for this
+   * session only and in memory; never later than the instance's own setting,
+   * and kept across a model switch. */
+  setCompactionCap(tokens: number): void;
   /** Pending queue as-is, for snapshotting a session into a fresh client. */
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** System inputs handed over while the session was streaming and not in the
@@ -310,11 +338,11 @@ export interface AgentSession {
   clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /**
    * Rewind the transcript to just before the index-th user turn (as counted
-   * in history()), dropping it and everything after from the context — the
+   * in history(opts)), dropping it and everything after from the context — the
    * edit-message primitive. The caller re-prompts with the edited text.
    * Rejects while streaming.
    */
-  rewindToUserTurn(index: number): Promise<void>;
+  rewindToUserTurn(index: number, opts?: { branch?: boolean }): Promise<void>;
   /**
    * Shrink the context: summarize the older transcript and continue from the
    * summary. Backend-neutral — anything that can compact its own context can
@@ -337,8 +365,9 @@ export interface AgentSession {
   /** Persisted non-user input with provenance. Resolves when the turn the input
    * triggers settles — immediately for a queued mode the recipient is already
    * streaming through. Resolution is not an acceptance signal: callers that
-   * need "the session took it" must not wait for this promise. */
-  systemInput(text: string, origin: SystemInputOrigin, mode: "prompt" | "steer" | "followUp"): Promise<void>;
+   * need "the session took it" must not wait for this promise. `append` starts
+   * no turn: the input enters the context and the next prompt carries it. */
+  systemInput(text: string, origin: SystemInputOrigin, mode: "prompt" | "steer" | "followUp" | "append"): Promise<void>;
   abort(): Promise<void>;
   /** Emits payloads only; core/hub.ts owns seq/ts stamping. */
   subscribe(fn: (e: SessionEventPayload) => void): () => void;
@@ -542,6 +571,10 @@ export interface AgentFactory {
    *  every caller reads `undefined` as a fact, and a cached listing is not
    *  evidence that a session does not exist. */
   find(sessionId: string): Promise<SessionSummary | undefined>;
+  /** A session's `history({branch: true})` read off disk without opening it
+   *  live; undefined for a session that does not exist. Optional: a backend
+   *  without it has the session opened to be read. */
+  readHistory?(sessionId: string): Promise<ChatTurn[] | undefined>;
   /** Sessions by what was said in them — user messages and replies, never
    *  steps — at most one hit per session, best first. How the text is indexed
    *  is the backend's business; core sees the hits. */

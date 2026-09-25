@@ -580,3 +580,87 @@ describe("titleFromAnswer", () => {
     expect(titleFromAnswer("x".repeat(100))).toHaveLength(80);
   });
 });
+
+describe("the continuous conversation's seam", () => {
+  type Files = { agentsFiles: { path: string; content: string }[] };
+  const injected = async (cwd: string, continuous: boolean): Promise<string[]> => {
+    const factory = new PiAgentFactory(() => "pier notes", [], undefined, undefined, undefined,
+      () => ({ skillsOff: [], continuous }));
+    await (await factory.create({ cwd })).dispose();
+    const override = (loaders.at(-1) as unknown as { agentsFilesOverride: (f: Files) => Files }).agentsFilesOverride;
+    return override({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path);
+  };
+
+  it("injects the dispatcher contract only into a session in the home, and only while the switch is on", async () => {
+    const home = join(process.env.PIER_HOME!, "home");
+    expect(await injected(home, true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
+    expect(await injected(home, false)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
+    expect(await injected("/tmp/elsewhere", true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
+  });
+
+  /** A session whose model and settings manager are what the cap reads and writes. */
+  function capped(window: number, instanceReserve = 16_384) {
+    const { fake, session: s } = session();
+    const overrides: unknown[] = [];
+    const models: Record<string, { provider: string; id: string; contextWindow: number }> = {
+      big: { provider: "p", id: "big", contextWindow: 1_000_000 },
+      small: { provider: "p", id: "small", contextWindow: 64_000 },
+    };
+    Object.assign(fake.pi, {
+      model: { provider: "p", id: "m", contextWindow: window },
+      settingsManager: {
+        getCompactionSettings: () => ({ enabled: true, reserveTokens: instanceReserve, keepRecentTokens: 20_000 }),
+        applyOverrides: (o: unknown) => overrides.push(o),
+      },
+      modelRuntime: { getModel: (_p: string, id: string) => models[id] },
+      setModel(m: { contextWindow: number }) { (fake.pi as unknown as { model: unknown }).model = m; },
+    });
+    return { s, overrides };
+  }
+
+  it("turns a cap into a reserve for the model's window, and recomputes it on a model switch", async () => {
+    const { s, overrides } = capped(400_000);
+    s.setCompactionCap(100_000);
+    expect(overrides).toEqual([{ compaction: { reserveTokens: 300_000 } }]);
+    await s.setModel({ provider: "p", id: "big" });
+    // A window no larger than the cap keeps the instance's reserve, never compacting later than it would.
+    await s.setModel({ provider: "p", id: "small" });
+    expect(overrides.slice(1)).toEqual([
+      { compaction: { reserveTokens: 900_000 } },
+      { compaction: { reserveTokens: 16_384 } },
+    ]);
+  });
+
+  it("leaves a session without a cap on the instance's setting", async () => {
+    const { s, overrides } = capped(400_000);
+    await s.setModel({ provider: "p", id: "big" });
+    expect(overrides).toEqual([]);
+  });
+
+  it("appends a seed without starting a turn", async () => {
+    const { fake, session: s } = session();
+    const sent: unknown[] = [];
+    fake.pi.sendCustomMessage = (...args: unknown[]) => {
+      sent.push(args[1]);
+      return Promise.resolve();
+    };
+    await s.systemInput("seed", { kind: "session-seed", reason: "first", previousSessionId: null }, "append");
+    expect(sent).toEqual([{ triggerTurn: false, deliverAs: undefined }]);
+    expect(await s.pendingSystemInputs()).toEqual([]);
+  });
+
+  it("reads the branch, compacted turns included, when asked for it", async () => {
+    const { fake, session: s } = session();
+    const user = (text: string) => ({ role: "user", content: text, timestamp: 1 });
+    Object.assign(fake.pi.sessionManager, {
+      getBranch: () => [
+        { type: "message", message: user("before the compaction") },
+        { type: "compaction", summary: "summary", tokensBefore: 9, timestamp: "2026-01-01T00:00:00Z" },
+        { type: "message", message: user("after") },
+      ],
+    });
+    fake.pi.messages = [user("after")] as PiMessage[];
+    expect((await s.history()).map((t) => t.text)).toEqual(["after"]);
+    expect((await s.history({ branch: true })).map((t) => t.text)).toEqual(["before the compaction", "after"]);
+  });
+});

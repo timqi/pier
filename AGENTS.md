@@ -61,7 +61,7 @@ scheduled tasks, live observability, and static Show pages.
 - **Browser-safe core.** `web/ui/` bundles `core/types.ts`, `core/reply.ts`,
   `core/identity.ts` and `core/inbound-file.ts`, so those four import no
   `node:*`, directly or transitively; `core/` modules that need Node
-  (`router.ts`, `inbox.ts`) are never imported from `web/ui/`.
+  (`router.ts`, `inbox.ts`, `chain.ts`) are never imported from `web/ui/`.
 
 ## UI/UX
 
@@ -124,12 +124,12 @@ exists to catch.
 
 | Area | Ceiling | What the size is |
 | --- | --- | --- |
-| `core/` | 1.5k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate |
+| `core/` | 1.6k | platform- and Pi-blind: presentation vocabulary, sender prefix, inbound-file convention, provider seam, routing failure paths, restart gate, the continuous conversation's chain (its store, the lazy rotation, the seed) |
 | `channels/` | 4.6k | two adapters in one shape (adapter, api, render, panel, outbound); Slack also `slack-cli` (`pier slack`) and `slack-transcript`; the shared layer holds what would otherwise be copied: the panel's two states and its draft, the transcript excerpt that makes a continued session recognisable on the phone, the web ↔ IM handoff (one binding, one guard table), the launch record a lost session is re-created from, the bot-identity claim that keeps a swapped bot's unreachable DMs out of the picker |
 | `web/` | 14k | password boundary, chat, Settings console, Files, Web Push (RFC 8291/8292, no dependency), palette; every pane is the only implementation of its surface — the Pi SDK ships no browser UI — and duplication across the area measures 0.4%; still the least tested area |
 | `agent/` | 2.5k | the Pi side of the seam: open/resume, event translation, one-pass transcript listing and index, the package registry |
 | `tasks/` | 3.2k | one delivery engine, durable control messages, a scheduler that isolates each due task, bounded watch history, owner seam |
-| root `src/*.ts` | 3.3k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix, the vault — store, socket and injector; the vault, the CLI socket and `pier task`'s dispatch are the right things in there, as is the accent preset table, the one server-side copy of what the stylesheet paints |
+| root `src/*.ts` | 3.35k | one reason per file: credentials, service/update ops, restart ledger, managed CLI tools via ubix, the vault — store, socket and injector; the vault, the CLI socket and `pier task`'s dispatch are the right things in there, as is the accent preset table, the one server-side copy of what the stylesheet paints, and the continuous switch, its table and wiring |
 | `websearch/` | 1.2k | two hosted tools on two wire formats, the language audit, the fetched copy on disk, the `/web` validator and `pier web`'s argv |
 | one module | 750 | rule 2 before splitting; `agent/pi.ts` (sessions) and `agent/packages.ts` (the package registry) are the two files that may touch the Pi SDK, and every block in each does |
 | channel adapter file | 400 | transport, render and panel counted separately |

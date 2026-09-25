@@ -460,6 +460,14 @@ describe("toChatTurns", () => {
     ]);
   });
 
+  it("rebuilds a session seed, and drops one whose reason it cannot name", () => {
+    const origin = { kind: "session-seed" as const, reason: "idle" as const, previousSessionId: "s0" };
+    expect(toChatTurns([
+      { role: "custom", customType: "pier.system-input", content: "seed", details: origin, timestamp: 1 },
+      { role: "custom", customType: "pier.system-input", content: "odd", details: { ...origin, reason: "bored" }, timestamp: 2 },
+    ])).toEqual([{ role: "system", text: "seed", origin, at: 1 }]);
+  });
+
   it("stamps user and system turns with when they arrived, and invents nothing", () => {
     // An assistant turn carries `meta.completedAt`; these two had no time at
     // all after a reload, so the hover chip had nothing to show.

@@ -16,7 +16,7 @@ import type {
   ThinkingLevel,
 } from "./types.js";
 
-type Mode = "prompt" | "steer" | "followUp";
+type Mode = "prompt" | "steer" | "followUp" | "append";
 type Queue = { steering: string[]; followUp: string[] };
 
 export interface FakeSessionOptions {
@@ -157,6 +157,7 @@ export function fakeSession(id = "s1", opts: FakeSessionOptions = {}): FakeSessi
       session.calls.push(`setThinkingLevel:${level}`);
     },
     setCacheRetention: () => {},
+    setCompactionCap: (tokens) => void session.calls.push(`compactionCap:${tokens}`),
     pendingQueue: async () => structuredClone(queue),
     // Like PiSession: anything still queued on an idle session was aborted.
     pendingSystemInputs: async () => (state === "idle" ? [] : queuedInputs.map((q) => q.origin)),
@@ -191,6 +192,12 @@ export function fakeSession(id = "s1", opts: FakeSessionOptions = {}): FakeSessi
       session.calls.push(`systemInput:${origin.kind}:${mode}:${text}`);
       session.systemInputs.push({ text, origin, mode });
       if (opts.scripted) return;
+      // Pi appends it to the context at once and starts nothing.
+      if (mode === "append" && state === "idle") {
+        transcript.push({ role: "system", text, origin, at: Date.now() });
+        emit({ type: "system-input", text, origin, at: Date.now() });
+        return;
+      }
       if (state === "streaming") queuedInputs.push({ text, origin, mode });
       else await turn({ text, origin });
     },

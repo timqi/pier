@@ -74,6 +74,13 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   const value = message.details;
   if (!value || typeof value !== "object") return null;
   const { source: raw, ...origin } = value as Record<string, unknown>;
+  if (origin.kind === "session-seed") {
+    const { reason, previousSessionId } = origin;
+    return (reason === "first" || reason === "idle" || reason === "lost") &&
+      (previousSessionId === null || typeof previousSessionId === "string")
+      ? { kind: "session-seed", reason, previousSessionId }
+      : null;
+  }
   if (
     typeof origin.taskId !== "string" ||
     typeof origin.runId !== "string" ||

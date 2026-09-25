@@ -93,10 +93,9 @@ Gaps (required new work):
   `paths.ts`), created at first use.
 - The dispatcher contract is injected from code, beside `<pier>/AGENTS.md`
   (`agent/pi.ts` `agentsFilesOverride`, text in `agent/roles.ts`), as
-  `<pier>/dispatcher.md`, only for a
-  session whose cwd is the home; it is never written to disk. Gap: the
-  factory's `instructions` getter is instance-wide, so `resourceLoader(cwd)`
-  gains the cwd test.
+  `<pier>/dispatcher.md`, only while the switch is on and only for a session
+  whose cwd is the home (`resourceLoader(cwd)`); it is never written to disk.
+  Flipping the switch recycles idle sessions, as a Console save does.
 - The home holds memory only:
   - `MEMORY.md` — durable facts, decisions, the project index (repo → path,
     worktree convention); injected once at session open, in the seed.
@@ -115,14 +114,14 @@ Gaps (required new work):
 
 | Event | Rule |
 | --- | --- |
-| User message to the main session, head ≥ 1h since its last user message | rotate before delivering: create the next session, append a chain row, deliver to it |
+| User message to the main session, head ≥ 1h since its last user message (its start, before it has one) | rotate before delivering: create the next session, append a chain row, deliver to it; a head mid-turn never rotates |
 | Callback to the main session | delivered to the head, whatever its idle time; never rotates |
-| Rotation | the new session opens with the previous head's model and thinking level, then gets one seed system input |
+| Rotation | the new session opens with the previous head's model and thinking level (`lost` and `first`: the instance default at `low`), then gets one seed system input, appended without a turn so the user's message is the turn that reads it |
 | Seed (every chain session, the first included) | `MEMORY.md`, the run ledger (in flight, and finished since the previous rotation), today's and yesterday's daily notes, the previous head's last 3 exchanges verbatim |
-| Surface | one line where the user message came from: `new session — idle 1h` |
+| Surface | one line where the user message came from; on the web, the chain divider (`new session — idle 1h`) |
 | Within a stretch | Pi auto-compaction on, triggered near 100K context, the last ~20K kept |
 | Task-run children (workers, leads) | never rotate; auto-compaction triggered near 150K context |
-| Head missing from Pi | a new head with reason `lost`, said on the surface, as `onStale` does for IM rows |
+| Head missing from Pi (not live, not on disk) | a new head with reason `lost`; on the web its divider reads `new session — the previous one was lost` and the lost session's place an error row |
 
 - 1h matches the `"long"` cache retention Pier requests for interactive
   sessions (`CacheRetentionBox`, `agent/pi.ts`); past it the cache is cold
@@ -135,12 +134,16 @@ Gaps (required new work):
   reserveTokens` and keeps `keepRecentTokens` (default 20000,
   `DEFAULT_COMPACTION_SETTINGS`), so the target is `reserveTokens =
   contextWindow − cap`, per model: main 100K, children 150K. No session grows
-  past 200K input, where 1M-context models price higher. Gap: settings.json
-  is instance-wide; the cap is applied in memory with
-  `live.settingsManager.applyOverrides({compaction})` after open, and
-  recomputed on `setModel`.
-- Gap: the seed is a new `SystemInputOrigin` kind (`session-seed`) in
-  `core/types.ts`, so it renders as a system input card, not a user bubble.
+  past 200K input, where 1M-context models price higher.
+  `AgentSession.setCompactionCap` applies it in memory
+  (`settingsManager.applyOverrides({compaction})`, the session's own manager),
+  never later than the instance's reserve, and recomputes it on `setModel`.
+  While the switch is on, a chain member gets main's cap on every open
+  (`MainChain.opened` in the router's resolver) and a task-run child gets its
+  cap at run start (`tasks/agent.ts`).
+- The seed is the `SystemInputOrigin` kind `session-seed` (`core/types.ts`),
+  sent with `systemInput` mode `append`; it renders as a system input card.
+  A part that cannot be read says so in the seed.
 
 ## Run ledger
 
@@ -174,10 +177,11 @@ CREATE TABLE main_chain (
 );
 ```
 
-- The head is the row with the greatest `started_at`.
-- Every surface addresses the conversation by one alias key resolved to the
-  head in the router's resolver (`main.ts`), never by a session id. Gap: the
-  router's in-memory key → session map is re-pointed on rotation.
+- The head is the row with the greatest `started_at` (`core/chain.ts`).
+- Every surface addresses the conversation through the chain, never by a
+  session id: `MainChain.send` resolves the head — rotating first when due,
+  one send at a time — and dispatches to the head's own `web:<id>` key.
+  `core/router.ts` is unchanged.
 
 ## Web
 

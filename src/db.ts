@@ -323,6 +323,15 @@ const MIGRATIONS: readonly string[] = [
     last_used_at INTEGER
   );
   `,
+  // 28 — the continuous conversation's sessions in order (core/chain.ts); the
+  // head is the newest, and the transcripts are the record.
+  `
+  CREATE TABLE main_chain (
+    session_id TEXT PRIMARY KEY,
+    started_at INTEGER NOT NULL,
+    reason TEXT NOT NULL
+  );
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

@@ -3,6 +3,7 @@
 // drain needs. Decisions belong to the files beside it.
 
 import type { AgentFactory, BackgroundRun } from "../core/types.js";
+import type { LedgerRun } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
@@ -224,6 +225,20 @@ export class TaskService {
       .filter((run) => run.background)
       .reverse()
       .map((run) => this.backgroundRun(run));
+  }
+
+  /** The run ledger: runs any of `sessionIds` launched, in flight or finished
+   *  since `since`. Read off the activity window, which caps finished runs at 200. */
+  ledger(sessionIds: string[], since: number): LedgerRun[] {
+    const launchers = new Set(sessionIds);
+    return this.store.activityRuns(since)
+      .filter((run) => run.invokedBySessionId !== null && launchers.has(run.invokedBySessionId))
+      .filter((run) => !isTerminal(run.state) || (run.finishedAt ?? 0) >= since)
+      .map((run) => {
+        const action = run.context.definition.action;
+        const cwd = run.context.cwd ?? (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
+        return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd, queuedAt: run.queuedAt, finishedAt: run.finishedAt };
+      });
   }
 
   activeBackgroundRunCounts(): Map<string, number> {

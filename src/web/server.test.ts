@@ -74,6 +74,7 @@ const SETTINGS_JSON = {
   tools: [],
   customTools: [],
   accent: "",
+  continuous: false,
   accents: ACCENTS,
   catalog: TOOLS.map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,

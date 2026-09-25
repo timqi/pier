@@ -19,6 +19,7 @@ import { ConversationStore, resolveConversation } from "./channels/conversations
 import { createHandoff } from "./channels/handoff.js";
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
+import { MainChain } from "./core/chain.js";
 import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
@@ -122,10 +123,15 @@ const router = new Router(hub, (key) => {
   // Web conversation ids are session ids; an IM id is a chat, resolved through
   // the durable map so a restart does not re-route a group.
   if (key.channelId === "web" || key.channelId === "task") {
-    return factory.resume(key.conversationId);
+    return factory.resume(key.conversationId).then(chain.opened);
   }
   return resolveIm(key);
 }, (key) => conversations.get(key), (id) => conversations.keyOf(id));
+const chain = new MainChain(db, {
+  factory, router, home: pierPath("home"),
+  enabled: () => settings.get().continuous,
+  ledger: (ids, since) => tasks.ledger(ids, since),
+});
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(new TaskStore(db), factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,

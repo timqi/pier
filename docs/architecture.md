@@ -27,13 +27,15 @@ Slack / Lark                     Web workbench (browser)       Tasks
 ```
 src/
   core/        types.ts (the seams), router.ts, hub.ts, queue.ts, reply.ts,
-               identity.ts, inbox.ts, inbound-file.ts
+               identity.ts, inbox.ts, inbound-file.ts, chain.ts (the
+               continuous conversation: its sessions, rotation, seed)
   agent/       pi.ts (sessions) and packages.ts (the package registry: Pi's
                DefaultPackageManager behind `PackageStore`) — the two files
                importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, credentials.ts (sealed store +
-               auth.json import), models.ts
+               auth.json import), models.ts, roles.ts (the role contracts
+               injected from code)
   websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
                operations and the validator), cli.ts (argv), provider.ts
                (backend + auth over core's `WebContext`), anthropic.ts /
@@ -217,7 +219,9 @@ seams:
   task definitions persist their target, IM channels keep
   `channels/conversations.ts`. A mapping whose session Pi no longer has is
   dropped and re-created, never retried forever
-  ([04](design/04-im-channels.md#conversation-identity)).
+  ([04](design/04-im-channels.md#conversation-identity)). The continuous
+  conversation (`core/chain.ts`) resolves its head, rotating first when due,
+  and dispatches to the head's own `web:` key; the router knows nothing of it.
 - **Outbound to IM channels**: on `turn-end`, core sends the turn's full text
   to the owning channel, one reply at a time per conversation. Only the web
   gets deltas; reasoning and tool events never leave core for IM. Adapters

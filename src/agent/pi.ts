@@ -11,6 +11,7 @@ import {
   ModelRegistry,
   ModelRuntime,
   SessionManager,
+  sessionEntryToContextMessages,
   type AgentSession as PiAgentSession,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
@@ -40,6 +41,8 @@ import type {
 } from "../core/types.js";
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
+import { pierPath } from "../paths.js";
+import { DISPATCHER } from "./roles.js";
 import {
   textOf,
   toChatTurns,
@@ -169,6 +172,10 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
   });
 };
 
+/** The transcript's current branch in order, compacted entries included. */
+const branchMessages = (sessionManager: SessionManager): PiMessage[] =>
+  sessionManager.getBranch().flatMap((entry) => sessionEntryToContextMessages(entry)) as PiMessage[];
+
 /** Read per request by the runtime wrapper in `open()`, so a task can
  *  downgrade the cache TTL after the session is open. */
 type CacheRetentionBox = { value: "short" | "long" };
@@ -224,6 +231,8 @@ export class PiSession implements AgentSession {
       throw new Error(`unknown model: ${ref.provider}/${ref.id}; available: ${available}`);
     }
     await this.pi.setModel(m);
+    // The reserve is per context window, so a cap outlives a model switch only if recomputed.
+    this.applyCap();
   }
 
   async availableModels(): Promise<ModelRef[]> {
@@ -254,6 +263,24 @@ export class PiSession implements AgentSession {
     this.retention.value = retention;
   }
 
+  private cap?: number;
+  private instanceReserve?: number;
+
+  setCompactionCap(tokens: number): void {
+    this.cap = tokens;
+    this.applyCap();
+  }
+
+  /** Pi compacts past `contextWindow − reserveTokens`; this session's settings
+   *  manager is its own, so the override reaches no other session. */
+  private applyCap(): void {
+    const window = this.pi.model?.contextWindow;
+    if (this.cap === undefined || !window) return;
+    const settings = this.pi.settingsManager;
+    this.instanceReserve ??= settings.getCompactionSettings().reserveTokens;
+    settings.applyOverrides({ compaction: { reserveTokens: Math.max(window - this.cap, this.instanceReserve) } });
+  }
+
   async pendingQueue(): Promise<{ steering: string[]; followUp: string[] }> {
     return {
       steering: [...this.pi.getSteeringMessages()],
@@ -281,13 +308,13 @@ export class PiSession implements AgentSession {
     return this.pi.clearQueue();
   }
 
-  async history(): Promise<ChatTurn[]> {
+  async history({ branch = false }: { branch?: boolean } = {}): Promise<ChatTurn[]> {
     this.live();
-    return toChatTurns(this.pi.messages as PiMessage[]);
+    return toChatTurns(branch ? branchMessages(this.pi.sessionManager) : this.pi.messages as PiMessage[]);
   }
 
-  async rewindToUserTurn(index: number): Promise<void> {
-    const total = (await this.history()).filter((t) => t.role === "user").length;
+  async rewindToUserTurn(index: number, opts?: { branch?: boolean }): Promise<void> {
+    const total = (await this.history(opts)).filter((t) => t.role === "user").length;
     // Branch entries keep compacted-away history that history() no longer
     // shows, so only end-relative indices line up.
     const back = total - index;
@@ -360,19 +387,20 @@ export class PiSession implements AgentSession {
   async systemInput(
     text: string,
     origin: SystemInputOrigin,
-    mode: "prompt" | "steer" | "followUp",
+    mode: "prompt" | "steer" | "followUp" | "append",
   ): Promise<void> {
     this.live();
     // Same gate as prompt(): an idle session takes a system input as a turn.
     await this.whenCompacted();
     this.live();
     // Read after the wait: a running turn means the call below queues.
-    const queued = this.pi.isStreaming;
+    const queued = this.pi.isStreaming && mode !== "append";
     if (queued) this.queuedInputs.push(origin);
     try {
+      // Without a turn Pi appends it now, or after a running turn's tool results.
       return await this.pi.sendCustomMessage(
         { customType: "pier.system-input", content: text, display: true, details: origin },
-        { triggerTurn: true, deliverAs: mode === "prompt" ? undefined : mode },
+        { triggerTurn: mode !== "append", deliverAs: mode === "prompt" || mode === "append" ? undefined : mode },
       );
     } catch (error) {
       // Refused: nothing is in flight. The entry may be gone already.
@@ -460,7 +488,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
     private readonly pinned: () => ModelRef[] = () => [],
     /** The built-in `pier` package's one switch list: Pier's own skills switched off. */
-    private readonly pier: () => { skillsOff: string[] } = () => ({ skillsOff: [] }),
+    private readonly pier: () => { skillsOff: string[]; continuous?: boolean } = () => ({ skillsOff: [] }),
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -700,10 +728,14 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
       agentsFilesOverride: (current) => {
         const content = this.instructions();
+        // The home is where the continuous conversation's sessions run, and only they dispatch.
+        const dispatcher = this.pier().continuous === true && realPath(cwd) === realPath(pierPath("home"));
         return {
-          agentsFiles: content
-            ? [...current.agentsFiles, { path: "<pier>/AGENTS.md", content }]
-            : current.agentsFiles,
+          agentsFiles: [
+            ...current.agentsFiles,
+            ...(content ? [{ path: "<pier>/AGENTS.md", content }] : []),
+            ...(dispatcher ? [{ path: "<pier>/dispatcher.md", content: DISPATCHER }] : []),
+          ],
         };
       },
     });
@@ -781,6 +813,11 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     const reused = this.listing;
     return find(await this.listed()) ??
       (reused && this.listing === reused ? find(await this.listed(true)) : undefined);
+  }
+
+  async readHistory(sessionId: string): Promise<ChatTurn[] | undefined> {
+    const info = await this.locate(sessionId);
+    return info && toChatTurns(branchMessages(SessionManager.open(info.path)));
   }
 
   async find(sessionId: string): Promise<SessionSummary | undefined> {

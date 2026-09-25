@@ -44,7 +44,8 @@ export interface RunHead {
   thinking?: string;
   /** Plain facts between the name and the ids: mode, duration. */
   note?: string;
-  runId: string;
+  /** Absent on a card no run produced (a session seed). */
+  runId?: string;
   /** The session doing the work when it is not this one; "console" is nobody. */
   sessionId?: string | null;
 }
@@ -112,10 +113,13 @@ export function runHead(o: RunHead): HTMLElement {
   }
   // Grey opens the run, indigo the session (boards.ts's session-chip colour);
   // what each is stays in its tooltip.
-  const run = h("button", "flex-none hover:underline", shortId(o.runId));
-  run.title = `Run ${o.runId}`;
-  run.onclick = () => deps.showRun(o.runId);
-  meta.append(run);
+  const runId = o.runId;
+  if (runId) {
+    const run = h("button", "flex-none hover:underline", shortId(runId));
+    run.title = `Run ${runId}`;
+    run.onclick = () => deps.showRun(runId);
+    meta.append(run);
+  }
   if (o.sessionId && o.sessionId !== "console") {
     const id = o.sessionId;
     const session = h("button", "flex-none text-indigo-600 hover:underline", shortId(id));
