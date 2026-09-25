@@ -26,8 +26,8 @@ size:
     #!/usr/bin/env bash
     count() { cat "$@" | grep -v '^\s*$' | grep -vcE '^\s*(//|/\*|\*)'; }
     for a in core channels web agent tasks websearch boards; do
-        printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts'))"
+        printf '%-11s %6s\n' "$a" "$(count $(find src/$a -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'))"
     done
-    printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -v '\.test\.ts$'))"
+    printf '%-11s %6s\n' root "$(count $(ls src/*.ts | grep -vE '\.test(kit)?\.ts$'))"
     echo; echo "modules over 750:"
-    for f in $(find src -name '*.ts' -not -name '*.test.ts'); do n=$(count "$f"); [ "$n" -gt 750 ] && echo "  $n $f"; done | sort -rn
+    for f in $(find src -name '*.ts' -not -name '*.test.ts' -not -name '*.testkit.ts'); do n=$(count "$f"); [ "$n" -gt 750 ] && echo "  $n $f"; done | sort -rn
