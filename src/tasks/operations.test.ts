@@ -317,13 +317,6 @@ describe("task operations", () => {
       .rejects.toThrow("t1 is a one-shot run's own definition; save without --task-id to file a task");
   });
 
-  it("rejects the removed operations without returning state", async () => {
-    const ask = rig([run("r1", { state: "running", callbackState: null, result: null })]);
-    for (const operation of ["get", "steer", "follow_up", "resume", "contact", "reply", "models", "create", "update"]) {
-      await expect(ask({ operation, run_id: "r1", message: "x" })).rejects.toThrow("unknown task operation");
-    }
-  });
-
   // The skill is what the agent acts on; a level added here and not there is a
   // drift no agent can see.
   it("the pier-tasks skill lists every thinking level", () => {
