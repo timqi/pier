@@ -176,8 +176,13 @@ let trimmedRows = 0;
  *  is indistinguishable from a transcript that lost its beginning. */
 let trimNotice: HTMLElement | null = null;
 
-/** Called after every append: the pane grows only from the bottom. */
+/** An earlier session of the continuous conversation, rendered read-only above the head. */
+let readonlyRows = false;
+
+/** Called after every append: the pane grows only from the bottom. Never while
+ *  earlier sessions are paged in above: they are exactly what was asked for. */
 function trimRows(): void {
+  if (turnsPane.querySelector("[data-readonly]")) return;
   while (turnsPane.childElementCount > MAX_ROWS) {
     const row = turnsPane.firstElementChild as HTMLElement;
     row.remove();
@@ -221,6 +226,7 @@ export function appendTurn(
     (turnsPane.lastElementChild as HTMLElement | null)?.dataset.kind === kind;
   const row = h("div", `group relative ${s.row}`);
   row.dataset.kind = kind;
+  if (readonlyRows) row.dataset.readonly = "";
   if (grouped) row.dataset.grouped = "";
   if (!bulk) row.dataset.enter = ""; // History replay must not animate every old message.
   const files = kind === "user" ? splitInboundFiles(text) : null;
@@ -246,7 +252,7 @@ export function appendTurn(
     const strip = imageRow(row);
     for (const path of files.paths) strip.append(inboundAttachment(sessionId, path));
   }
-  if (kind === "user") {
+  if (kind === "user" && !readonlyRows) {
     cancelEdit?.();
     const edit = h("button", "message-edit absolute right-full top-1 flex h-8 w-8 items-center justify-center rounded-full");
     edit.title = "Edit message — resends it and drops everything after it";
@@ -433,7 +439,7 @@ async function submitEdit(row: HTMLElement, text: string): Promise<void> {
   cancelEdit?.();
   // The Nth user row on screen is the Nth user turn of history() — plus the
   // ones the trim took off the top, which history() still holds.
-  const users = [...turnsPane.querySelectorAll<HTMLElement>('[data-kind="user"]')];
+  const users = [...turnsPane.querySelectorAll<HTMLElement>('[data-kind="user"]:not([data-readonly])')];
   const at = users.indexOf(row);
   const index = trimmedUserTurns + at;
   const previousTime = users[at - 1]?.dataset.at;
@@ -705,11 +711,34 @@ export function chatLoading(on: boolean): void {
   turnsPane.append(box);
 }
 
-/** Replay a session snapshot into the pane (main.ts fetches, this renders). */
+/** Where one session of the continuous conversation ends and the next begins. */
+export function appendDivider(text: string, at: number): void {
+  const line = h("div", "my-4 text-center text-[11px] text-neutral-400", `${text} · ${stampTime(at).slice(0, 16)}`);
+  line.dataset.kind = "divider";
+  line.title = stampTime(at);
+  turnsPane.append(line);
+  lastStampAt = null; // the next session's first message gets its own clock
+}
+
+/** Pages one earlier session in above the rest; also what scrolling to the top presses. */
+export function appendPager(onClick: () => void): HTMLButtonElement {
+  const more = button("Earlier session");
+  more.id = "chain-pager";
+  more.onclick = onClick;
+  const row = h("div", "my-3 flex justify-center", more);
+  row.dataset.kind = "pager";
+  turnsPane.append(row);
+  return more;
+}
+
+/** Replay a session snapshot into the pane (main.ts fetches, this renders).
+ *  `readonly`: an earlier session of the continuous conversation — no edits,
+ *  no next-step buttons. */
 export function renderSnapshot(
   turns: ChatTurn[],
   state: SessionState,
   backgroundRuns: BackgroundRun[],
+  readonly = false,
 ): void {
   chatLoading(false);
   // Run cards are placed where the run entered the conversation, so a reload
@@ -729,8 +758,9 @@ export function renderSnapshot(
   };
   // The final assistant turn keeps its next-step buttons across reloads and
   // on every client — an idle session is still waiting on exactly that choice.
-  const lastAssistant = turns.reduce((acc, t, i) => (t.role === "assistant" ? i : acc), -1);
+  const lastAssistant = readonly ? -1 : turns.reduce((acc, t, i) => (t.role === "assistant" ? i : acc), -1);
   bulk = true;
+  readonlyRows = readonly;
   try {
     for (const [i, t] of turns.entries()) {
       // The last assistant entry of a running snapshot is still provisional.
@@ -758,6 +788,7 @@ export function renderSnapshot(
     for (const run of unplacedRuns.values()) renderBackgroundRun(run);
   } finally {
     bulk = false; // a row that threw must not leave the pane unable to scroll
+    readonlyRows = false;
   }
   scrollBottom(true);
 }

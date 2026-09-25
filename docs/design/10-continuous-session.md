@@ -193,25 +193,36 @@ CREATE TABLE main_chain (
   it lists only the palette's Running set as **In progress**, and the group
   collapses when empty. Every other session is reached through ⌘K. The phone
   drawer shows the same two parts.
-- Opening it scrolls to the newest message; scrolling up pages back one chain
-  session at a time, with a divider naming the rotation (`new session — idle
-  1h · <time>`).
+- Opening it (the row, a bare address, or any chain member from ⌘K) shows
+  the head; the first message of an empty chain starts it. Scrolling to the
+  top, or **Earlier session** at the top, pages back one chain session at a
+  time, with a divider naming the rotation after it (`new session — idle 1h ·
+  <time>`); a session that cannot be read pages in as an error row.
 - No paging within a session in the trial. Risk: a busy day without a 1h gap
-  is one large session and one large `/history`.
+  is one large session and one large `/history`; a page re-reads the head.
 - Only the head's turns are editable or rewindable; older sessions render
-  read-only, and the composer always sends to the head.
+  read-only (no edit, no next-step buttons), and the composer always sends to
+  the head.
+- A send this tab expects to rotate (the head's last user message ≥ 1h old,
+  or no head) resolves the head first, so the pane is on the new head's
+  stream before its message — and any failure of it — lands there; a send the
+  server rotates anyway is followed after.
 - Children show as today's Background Run rows (`task-status`), never their
   content; a row opens the child session, which takes messages directly.
-- Required routes (gaps):
+- Routes (all 404 while the switch is off; [03](03-web-workbench.md) owns the
+  wire rows):
   - `GET /api/continuous` → `{chain: [{sessionId, startedAt, reason}]}`,
     newest first; the client pages with `/history` per member.
+  - `POST /api/continuous` → `{sessionId, rotated?}`: the head a send now
+    would reach, rotated first when due.
   - `POST /api/continuous/messages` — the alias send, so a rotation between
-    snapshot and send cannot land a message on an old head.
-  - `/history` for a non-head member without opening it live (today
-    `router.ensure` resumes it), and `turns/:index/edit` refused 409 there.
-  - `history()` reads `pi.messages`, the post-compaction context, so compacted
-    turns vanish from the view; the continuous view reads the branch
-    (`sessionManager.getBranch()`) instead.
+    snapshot and send cannot land a message on an old head; answers
+    `{sessionId, rotated?}`.
+  - `/history` for a non-head member reads the transcript off disk without
+    opening it (`AgentFactory.readHistory`) and answers `{turns,
+    backgroundRuns, readonly: true}`; `turns/:index/edit` is 409 there.
+  - A chain member's `/history`, steps and edit index read the branch
+    (`history({branch: true})`), so compacted turns stay in the view.
 
 ## IM
 

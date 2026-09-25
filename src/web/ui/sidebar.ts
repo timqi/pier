@@ -1,7 +1,7 @@
 // The left rail: one flat list of every session, the working set on top, and
 // the New-session menu. The palette borrows its order, dots and menu.
 
-import { Ellipsis } from "lucide";
+import { Ellipsis, MessagesSquare } from "lucide";
 import { icon } from "./icons.js";
 import { sendJson } from "./api.js";
 import { openBrowser, openPathMenu } from "./dir-picker.js";
@@ -12,7 +12,7 @@ import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { setAttention } from "./shell.js";
 import { chord, modalOpen, shortcut } from "./shortcut.js";
-import type { SessionState } from "../../core/types.js";
+import type { ChainMember, SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -42,11 +42,17 @@ export interface SidebarDeps {
   createSession: (cwd: string) => Promise<void>;
   /** The selected session's title changed — the chat header draws it too. */
   onTitleChanged: () => void;
+  /** The continuous conversation's sessions, newest first; null while the switch is off. */
+  chain: () => ChainMember[] | null;
+  /** The continuous conversation is what the pane shows. */
+  continuousOpen: () => boolean;
+  openContinuous: () => void;
 }
 
 let deps: SidebarDeps;
 
 const sessionList = $("#session-list");
+const sessionsLabel = $("#sessions-label");
 const newBtn = $("#new-session");
 
 // --- order -------------------------------------------------------------------------
@@ -183,7 +189,36 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 
 /** Short-circuit (as in ui/activity.ts): a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
-const renderKey = (): string => `${deps.currentId() ?? ""}\n${shown}\n${JSON.stringify(deps.sessions())}`;
+const renderKey = (): string =>
+  `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}`;
+
+/** Switch on, the rail below the conversation: the palette's Running set in
+ *  rail order, less the conversation's own sessions, which its row stands for. */
+export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
+  const members = new Set(chain.map((m) => m.sessionId));
+  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id)));
+  return [...top, ...rest];
+}
+
+/** Switch on, the rail is the conversation and what is in progress; every
+ *  other session is the palette's. */
+function continuousRail(chain: ChainMember[]): { entry: HTMLElement; live: SessionInfo[] } {
+  const head = deps.sessions().find((s) => s.id === chain[0]?.sessionId);
+  const open = deps.continuousOpen();
+  const entry = h("li", `flex items-center gap-1 hover:bg-neutral-100 ${open ? "bg-indigo-50 hover:bg-indigo-50" : ""}`);
+  const button = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
+    icon(MessagesSquare, "h-3.5 w-3.5 flex-none text-neutral-400"),
+    h("span", "min-w-0 flex-1 truncate", "Conversation"),
+    ...(head ? stateDot(head) : []),
+  );
+  button.setAttribute("type", "button");
+  if (open) button.setAttribute("aria-current", "page");
+  button.onclick = deps.openContinuous;
+  entry.dataset.sessionId = "continuous";
+  entry.title = "The continuous conversation — one per instance";
+  entry.append(button);
+  return { entry, live: inProgress(deps.sessions(), chain) };
+}
 
 let drawn = "";
 
@@ -199,7 +234,10 @@ export function renderSessions(): void {
   const waiting = sessions.filter(waitingForYou);
   setAttention(waiting.length);
   setUnreadBadge(waiting.length);
-  const { rows, hidden } = pageOf(sessions, shown);
+  const chain = deps.chain();
+  const rail = chain && continuousRail(chain);
+  const { rows, hidden } = rail ? { rows: rail.live, hidden: 0 } : pageOf(sessions, shown);
+  sessionsLabel.classList.toggle("hidden", !!rail);
   // Keep an open menu's trigger alive across refreshes so Escape can return focus.
   const expanded = sessionList.querySelector<HTMLElement>(".session-more[aria-expanded='true']");
   const expandedId = expanded?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
@@ -218,8 +256,12 @@ export function renderSessions(): void {
   const focused = document.activeElement;
   const focusId = focused?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
   const focusAction = focused?.classList.contains("session-more") ? ".session-more" : ".session-open";
+  const label = (text: string): HTMLElement => h("div", "px-3 pb-1 pt-2 text-xs font-semibold leading-5 text-neutral-500", text);
   sessionList.replaceChildren(
-    ...(nodes.length
+    ...(rail
+      // The group collapses when nothing is in progress.
+      ? [h("ul", "pb-1 pt-1", rail.entry), ...(nodes.length ? [label("In progress"), h("ul", "pb-1", ...nodes)] : [])]
+      : nodes.length
       ? [h("ul", "pb-1", ...nodes)]
       : [h("p", "px-3 py-2 text-sm leading-normal text-neutral-500", "No sessions yet — create one.")]),
   );
@@ -259,8 +301,18 @@ export function initSidebar(d: SidebarDeps): void {
   shortcut(newBtn, "shift+o", "New session", openNewSession, modalOpen);
   // The tab-switching chord, applied to sessions; the rail itself is the affordance.
   const step = (by: number): void => {
-    const next = neighbor(deps.sessions(), deps.currentId(), by);
-    if (next) deps.select(next);
+    const chain = deps.chain();
+    if (!chain) {
+      const next = neighbor(deps.sessions(), deps.currentId(), by);
+      if (next) deps.select(next);
+      return;
+    }
+    // Switch on, the rail's rows are the conversation and what is in progress.
+    const ids = ["continuous", ...inProgress(deps.sessions(), chain).map((s) => s.id)];
+    const at = deps.continuousOpen() ? 0 : ids.indexOf(deps.currentId() ?? "");
+    const next = ids[(Math.max(at, 0) + by + ids.length) % ids.length];
+    if (next === "continuous") deps.openContinuous();
+    else if (next) deps.select(next);
   };
   chord("shift+[", () => step(-1), modalOpen);
   chord("shift+]", () => step(1), modalOpen);

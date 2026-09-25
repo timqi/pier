@@ -116,6 +116,9 @@ updates this document.
   neutral — the spinner carries the motion. Accents small.
 - Time separators at the first user message, after a ten-minute gap, across
   dates; absolute plus relative. Essential context never depends on hover.
+- The continuous conversation's divider between two sessions is a time
+  separator naming the rotation; an earlier session reads like the head, less
+  its edit and next-step controls.
 
 ## Editing and forms
 

@@ -8,10 +8,12 @@ import { initIcons } from "./icons.js";
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
-import { coalesce, getJson, mustGetJson, sendJson } from "./api.js";
+import { coalesce, failure, getJson, mustGetJson, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
+  appendDivider,
+  appendPager,
   appendSystemInput,
   appendTurn,
   chatLoading,
@@ -22,6 +24,7 @@ import {
   renderSnapshot,
   resetChat,
   scrollBottom,
+  turnsPane,
 } from "./chat.js";
 import {
   clearOptimistic,
@@ -77,8 +80,11 @@ import {
 } from "./views.js";
 // Type-only import of the seam contract — erased at build, keeps the wire
 // shapes single-sourced in core/types.ts instead of hand-copied here.
+import { CHAIN_IDLE_MS } from "../../core/types.js";
 import type {
   BackgroundRun,
+  ChainMember,
+  ChainReason,
   ChatTurn,
   ContextUsage,
   ModelRef,
@@ -124,6 +130,135 @@ let turnOpen = false;
 // A session posted to Pi whose id hasn't come back: the pane is already its
 // own (createSession), so the header and the composer say it isn't ready yet.
 let starting = false;
+
+// --- the continuous conversation (docs/design/10-continuous-session.md) -------------
+
+/** Its sessions, newest first; null while the switch is off. */
+let chain: ChainMember[] | null = null;
+/** Earlier sessions paged in above the head, oldest first; `error` when one could not be read. */
+let earlier: { member: ChainMember; turns: ChatTurn[]; runs: BackgroundRun[]; error?: string }[] = [];
+/** On screen before its first session exists: the first message starts one. */
+let unstarted = false;
+let paging = false;
+let pagedAt = 0;
+/** When the head last heard the user, as far as this tab knows: whether a send is likely to rotate. */
+let headSpokeAt: number | null = null;
+
+const headId = (): string | null => chain?.[0]?.sessionId ?? null;
+const continuousOpen = (): boolean => chain !== null && (unstarted || (currentId !== null && currentId === headId()));
+
+const DIVIDER: Record<ChainReason, string> = {
+  first: "new session",
+  idle: "new session — idle 1h",
+  lost: "new session — the previous one was lost",
+};
+
+/** A 404 is the switch being off; anything else is a failure, not "off". */
+async function loadChain(): Promise<ChainMember[] | null> {
+  const res = await fetch("/api/continuous");
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await failure(res, "Could not load the continuous conversation"));
+  const { chain } = (await res.json()) as { chain?: unknown };
+  return Array.isArray(chain) ? chain as ChainMember[] : null;
+}
+
+function openContinuous(): void {
+  const head = headId();
+  if (head) return void select(head);
+  ++selectionSeq;
+  ++loadSeq;
+  saveDraft();
+  showChat();
+  closeDrawer();
+  source?.close();
+  source = null;
+  currentId = null;
+  detached = null;
+  currentState = "idle";
+  unstarted = true;
+  earlier = [];
+  resetChat();
+  renderQueue([], []);
+  renderRecovery([]);
+  resetHeaderState();
+  appendTurn("system", "The continuous conversation — your first message starts it.");
+  history.replaceState(null, "", "#/");
+  renderSessions();
+  renderHeader();
+  updateComposer();
+  focusInput();
+}
+
+/** A send the server will rotate is resolved first, so this tab is on the new
+ *  head's stream before the message — and any failure of it — lands there.
+ *  The server still decides: a send it rotates anyway is followed after. */
+async function prepareHead(): Promise<void> {
+  const head = chain?.[0];
+  const due = !head || unstarted || Date.now() - (headSpokeAt ?? head.startedAt) >= CHAIN_IDLE_MS;
+  headSpokeAt = Date.now();
+  if (!due) return;
+  const got = await getJson<{ sessionId: string }>("/api/continuous", "Could not open the conversation", { method: "POST" });
+  if (!got.ok) return void appendTurn("error", got.error);
+  await refreshSessions();
+  if (currentId !== got.value.sessionId) await followHead(got.value.sessionId);
+}
+
+/** The session just left stays in view above the new head. */
+async function followHead(head: string): Promise<void> {
+  earlier = [];
+  unstarted = false;
+  await select(head);
+  if ((chain?.length ?? 0) > 1) await page();
+}
+
+/** One earlier session in above the rest; the head is re-read with it, and the
+ *  reader stays where they were. */
+async function page(): Promise<void> {
+  const head = headId();
+  const member = chain?.[earlier.length + 1];
+  if (paging || !head || !member || currentId !== head) return;
+  paging = true;
+  try {
+    const got = await getJson<{ turns: ChatTurn[]; backgroundRuns: BackgroundRun[] }>(
+      `/api/sessions/${member.sessionId}/history`, "Could not load the earlier session");
+    if (currentId !== head) return;
+    earlier.unshift(got.ok
+      ? { member, turns: got.value.turns, runs: got.value.backgroundRuns }
+      : { member, turns: [], runs: [], error: got.error });
+    const fromBottom = turnsPane.scrollHeight - turnsPane.scrollTop;
+    // A keyboard page keeps the keyboard on the pager, which the reload replaced.
+    const focused = document.activeElement?.id === "chain-pager";
+    await loadSession(head);
+    turnsPane.scrollTop = turnsPane.scrollHeight - fromBottom;
+    if (focused) document.getElementById("chain-pager")?.focus({ preventScroll: true });
+    pagedAt = Date.now();
+  } finally {
+    paging = false;
+  }
+}
+
+/** Earlier sessions above the head, read-only, each closed by the divider naming the rotation after it. */
+function renderEarlier(): void {
+  if (!chain) return;
+  pageOnScroll();
+  if (earlier.length < chain.length - 1) appendPager(() => void page());
+  for (const [i, e] of earlier.entries()) {
+    if (e.error) appendTurn("error", e.error);
+    renderSnapshot(e.turns, "idle", e.runs, true);
+    const next = earlier[i + 1]?.member ?? chain[0]!;
+    appendDivider(DIVIDER[next.reason], next.startedAt);
+  }
+}
+
+let scrollPages = false;
+/** Scrolling to the top pages; not right after a page, whose restore may itself land there. */
+function pageOnScroll(): void {
+  if (scrollPages) return;
+  scrollPages = true;
+  turnsPane.addEventListener("scroll", () => {
+    if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && Date.now() - pagedAt > 500) void page();
+  }, { passive: true });
+}
 
 // --- sessions --------------------------------------------------------------------
 
@@ -186,7 +321,17 @@ function commitSessions(rows: SessionInfo[]): void {
 // handlers, and report.ts is listening for exactly that rejection — a rail
 // that quietly stopped updating is the shape of bug principle 5 is about.
 const refreshSessions = coalesce(async () => {
-  commitSessions(await mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"));
+  const [rows, next] = await Promise.all([
+    mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"),
+    loadChain(),
+  ]);
+  const was = continuousOpen() ? headId() : null;
+  chain = next;
+  if (!chain) unstarted = false;
+  commitSessions(rows);
+  // A rotation — this tab's send or another's — moves the open conversation to the new head.
+  const head = headId();
+  if (was && head && head !== was) await followHead(head);
 });
 
 /** Focus, not just visibility: an installed workbench behind another app is
@@ -258,6 +403,7 @@ function handleEvent(e: SessionEvent): void {
       // what was typed, and a session name is not a timestamp. Only the turn
       // itself keeps the header — chat.ts renders it as the row's caption.
       const typed = splitSpeaker(e.text).text;
+      if (continuousOpen()) headSpokeAt = e.ts;
       maybeSetTitle(e.sessionId, typed); // first prompt names the session
       // Already on screen from our own optimistic render? Just reconcile.
       if (reconcileOptimisticUser(typed)) break;
@@ -372,6 +518,12 @@ function connect(id: string, cursor: string, generation: number): void {
 // --- selection --------------------------------------------------------------------
 
 async function select(id: string): Promise<void> {
+  // Any session of the continuous conversation opens the conversation, at its head.
+  if (chain?.some((m) => m.sessionId === id)) id = headId()!;
+  if (id !== currentId || unstarted) {
+    earlier = [];
+    unstarted = false;
+  }
   // A session named from Activity or Runs is usually not in the list; the
   // snapshot's 404 says whether the id exists and why.
   showChat();
@@ -419,6 +571,10 @@ async function loadSession(id: string): Promise<void> {
     return;
   }
   const snap = got.value;
+  if (continuousOpen()) {
+    renderEarlier();
+    headSpokeAt = snap.turns.reduce<number | null>((at, t) => (t.role === "user" && t.at ? t.at : at), null);
+  }
   renderSnapshot(snap.turns, snap.state, snap.backgroundRuns);
   lastSeq = snap.lastSeq;
   // Server is the truth for everything the client would otherwise guess:
@@ -470,6 +626,13 @@ initComposer({
   chatVisible: isChatVisible,
   setState,
   reload: reloadIfCurrent,
+  continuous: continuousOpen,
+  prepareHead,
+  headMoved: (id) => void (async () => {
+    const was = continuousOpen();
+    await refreshSessions();
+    if (was && currentId !== id) await followHead(id);
+  })(),
 });
 initShell({
   sessionMenu: (anchor) => {
@@ -488,6 +651,9 @@ initSidebar({
   sessionMenu,
   createSession,
   onTitleChanged: renderHeader,
+  chain: () => chain,
+  continuousOpen,
+  openContinuous,
 });
 initPalette({
   sessions: () => sessions,
@@ -529,4 +695,5 @@ document.addEventListener("visibilitychange", maybeAckRead);
 window.addEventListener("focus", maybeAckRead);
 
 connectWorkspace();
-void refreshSessions().then(applyRoute);
+// With the switch on, a bare address opens the conversation, not the rail's first row.
+void refreshSessions().then(() => (chain && !location.hash.replace(/^#\/?/, "") ? openContinuous() : applyRoute()));

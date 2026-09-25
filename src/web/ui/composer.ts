@@ -31,6 +31,12 @@ export interface ComposerDeps {
   setState: (state: SessionState) => void;
   /** Reload the session snapshot if `id` is still the selected session. */
   reload: (id: string) => Promise<void>;
+  /** The continuous conversation is on screen: sends go to its head, whichever that is by then. */
+  continuous?: () => boolean;
+  /** Before a continuous send: may move the pane to the head the send will reach. */
+  prepareHead?: () => Promise<void>;
+  /** The head a continuous send landed on is not the one on screen. */
+  headMoved?: (sessionId: string) => void;
 }
 
 let deps: ComposerDeps;
@@ -119,7 +125,7 @@ export function updateComposer(): void {
   const streaming = deps.sessionState() === "streaming";
   // No id, nothing to send to: send() would drop the prompt on the floor, so
   // the button says so before it is pressed rather than after.
-  const ready = deps.sessionId() !== null;
+  const ready = deps.sessionId() !== null || deps.continuous?.() === true;
   const starting = deps.starting();
   sendBtn.disabled = !ready;
   sendBtn.className = `flex h-7 w-7 flex-none items-center justify-center rounded-lg ${
@@ -352,8 +358,9 @@ let sending = false; // uploads await; a second Enter meanwhile must not double-
 export async function send(mode: "auto" | "steer", label?: string): Promise<void> {
   const typed = (label ?? input.value).trim();
   const files = label === undefined ? pendingFiles : [];
-  const id = deps.sessionId();
-  if ((!typed && files.length === 0) || !id) return;
+  let id = deps.sessionId();
+  const continuous = deps.continuous?.() === true;
+  if ((!typed && files.length === 0) || (!id && !continuous)) return;
   if (label === undefined) {
     if (sending) return;
     sending = true;
@@ -384,6 +391,10 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
       markers = uploaded;
     }
     const text = [typed, ...markers].filter(Boolean).join("\n");
+    if (continuous) {
+      await deps.prepareHead?.();
+      id = deps.sessionId();
+    }
     const startsTurn = deps.sessionState() === "idle" && mode === "auto";
     if (startsTurn) deps.setState("streaming");
     else updateComposer();
@@ -394,13 +405,16 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
       appendTurn("user", text, false, Date.now());
       scrollBottom(true);
     }
-    const res = await sendJson(`/api/sessions/${id}/messages`, { text, mode });
+    const res = await sendJson(continuous ? "/api/continuous/messages" : `/api/sessions/${id}/messages`, { text, mode });
     if (!res.ok) {
       // The body names the cause when there is one — a draining restart, say.
       // After the reload, which wipes the pane an error row would go into.
       const why = await failure(res, "send failed");
-      await deps.reload(id);
+      if (id) await deps.reload(id);
       appendTurn("error", why);
+    } else if (continuous) {
+      const { sessionId } = (await res.json()) as { sessionId: string };
+      if (sessionId !== id) deps.headMoved?.(sessionId);
     }
   } finally {
     if (label === undefined) sending = false;

@@ -201,6 +201,12 @@ browser keeps no second session order.
   paths.
 - Chords: ⌘⇧[ / ⌘⇧] previous / next row (wrapping); ⌘⇧O New session menu; ⌘K
   palette. All stand down under a modal.
+- **Continuous session on** (Settings → Instance): the list is the
+  **Conversation** row (the head's dot), then **In progress** — the palette's
+  Running set in rail order, less the conversation's own sessions — which
+  disappears when empty; the "Sessions" label and Load more go, everything
+  else is ⌘K's. The phone drawer is the same list; picking a row closes it.
+  The chords walk these rows.
 - Focus: refreshes retain the focused control; Load more focuses the first
   added row; an open menu reuses its trigger across refreshes. The mobile
   drawer removes hidden controls from the tab order, contains focus, restores
@@ -272,6 +278,18 @@ browser keeps no second session order.
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy
   session and an index the transcript no longer holds.
+- **Continuous conversation**: the head's snapshot, with earlier sessions
+  paged in above it read-only (no pencil, no next-step buttons), each closed
+  by a divider naming the rotation after it. **Earlier session** at the top —
+  or scrolling there — pages one more in and keeps the reader's position; a
+  keyboard page keeps focus on the pager. The trim cap stands down while
+  earlier sessions are on screen. Before its first session exists the pane
+  says the first message starts it. Sends go through the alias route; one
+  expected to rotate resolves the head first (`POST /api/continuous`) so the
+  pane is on the new head's stream before the message lands, and a rotation
+  seen on `sessions-changed` moves the pane to the new head with the session
+  just left paged in above. A session's seed is a system input card
+  (`session seed · new session — <reason>`) linking the previous session.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during
   IME composition (`isComposing`/229).
@@ -351,7 +369,9 @@ browser keeps no second session order.
   picker and `pier task --model ?` list. Instance: Public URL, Accent (a
   swatch radio group over `GET /api/settings`' `accents`; a pick sets
   `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
-  refusal), the browser's notification switch, Reload.
+  refusal), **Continuous session** (one switch, `PUT {continuous}`; a
+  refusal flips it back with the server's words), the browser's notification
+  switch, Reload.
 - **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
   was opened from): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to

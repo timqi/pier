@@ -15,10 +15,14 @@ const h = vi.hoisted(() => ({
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
   renderRecovery: vi.fn(),
+  appendDivider: vi.fn(),
+  appendPager: vi.fn(),
   content: [] as string[],
 }));
 vi.mock("./auth.js", () => ({ guardFetch: vi.fn(), streamDied: h.streamDied }));
 vi.mock("./chat.js", () => ({
+  appendDivider: h.appendDivider, appendPager: h.appendPager,
+  turnsPane: { scrollHeight: 0, scrollTop: 0, addEventListener: vi.fn() },
   appendDelta: vi.fn(), appendSystemInput: vi.fn(), appendTurn: h.appendTurn,
   chatLoading: vi.fn(), completeTurn: vi.fn(), finalizeStreaming: vi.fn(),
   initChat: vi.fn(), interruptTurn: vi.fn(), renderSnapshot: h.renderSnapshot,
@@ -315,4 +319,89 @@ it("re-lists every view the workspace stream feeds when it reconnects", async ()
   expect(vi.mocked(views.refreshRuns)).toHaveBeenCalledOnce();
   expect(vi.mocked(views.refreshActivity)).toHaveBeenCalledOnce();
   expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
+});
+
+describe("the continuous conversation", () => {
+  const member = (sessionId: string, reason = "idle", startedAt = 1) => ({ sessionId, startedAt, reason });
+  let chain: ReturnType<typeof member>[] = [];
+  const posts: string[] = [];
+  const earlier = (id: string) => Response.json({ turns: [{ role: "user", text: `said in ${id}` }], backgroundRuns: [], readonly: true });
+
+  async function boot(members: ReturnType<typeof member>[]) {
+    chain = members;
+    vi.resetModules();
+    Stream.all = [];
+    Object.assign(installPage(), { hidden: true });
+    const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
+    const fetcher = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/continuous" && init?.method === "POST") {
+        posts.push(url);
+        chain = [member("h1", "first", Date.now())];
+        return Promise.resolve(Response.json({ sessionId: "h1", rotated: "first" }));
+      }
+      if (url === "/api/continuous") return Promise.resolve(Response.json({ chain }));
+      if (url.endsWith("/history")) return h.history(url);
+      return Promise.resolve(Response.json(rows));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubGlobal("location", { hash: "" });
+    vi.stubGlobal("history", { replaceState: vi.fn() });
+    h.history.mockReset();
+    h.history.mockImplementation((url: string) =>
+      Promise.resolve(url.includes("/h2/") || (chain[0]?.sessionId === "h1" && url.includes("/h1/")) ? snapshot("head") : earlier(url.split("/")[3]!)));
+    await import("./main.js");
+    await settled();
+  }
+  const historyCalls = () => h.history.mock.calls.map(([url]) => url);
+
+  it("opens at the head on a bare address, and any of its sessions opens the head", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+    expect(h.sidebar.continuousOpen()).toBe(true);
+    expect(h.composer.continuous?.()).toBe(true);
+    h.sidebar.select("h0");
+    await settled();
+    expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+  });
+
+  it("pages an earlier session in read-only above the head, closed by the rotation's divider", async () => {
+    await boot([member("h1", "idle", 5), member("h0", "first")]);
+    const pager = h.appendPager.mock.calls.at(-1)![0] as () => void;
+    pager();
+    await settled();
+    expect(historyCalls()).toEqual(["/api/sessions/h1/history", "/api/sessions/h0/history", "/api/sessions/h1/history"]);
+    expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h0" }], "idle", [], true);
+    expect(h.appendDivider).toHaveBeenCalledWith("new session — idle 1h", 5);
+    // Everything is paged in: no pager is drawn over the first session.
+    expect(h.appendPager).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a send that landed on a new head, keeping the session just left in view", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    chain = [member("h2"), member("h1"), member("h0", "first")];
+    h.composer.headMoved?.("h2");
+    await settled();
+    await settled();
+    expect(historyCalls().slice(1)).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);
+    expect(h.renderSnapshot).toHaveBeenCalledWith([{ role: "user", text: "said in h1" }], "idle", [], true);
+  });
+
+  it("opens before its first session exists, and is on the first session before its first message is sent", async () => {
+    posts.length = 0;
+    await boot([]);
+    expect(h.composer.sessionId()).toBeNull();
+    expect(h.composer.continuous?.()).toBe(true);
+    expect(h.content).toContain("The continuous conversation — your first message starts it.");
+    await h.composer.prepareHead?.();
+    expect(posts).toEqual(["/api/continuous"]);
+    expect(h.composer.sessionId()).toBe("h1");
+    expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+  });
+
+  it("sends straight through the alias when the head is not due to rotate", async () => {
+    posts.length = 0;
+    await boot([member("h1", "idle", Date.now())]);
+    await h.composer.prepareHead?.();
+    expect(posts).toEqual([]);
+  });
 });
