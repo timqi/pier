@@ -1,7 +1,9 @@
 // Exercise the real orchestrator with deferred HTTP and EventSource delivery;
-// surface renderers are spies, so no browser, Pi session or network is needed.
+// surface renderers are spies while the shell, palette, icons and error
+// reporting run on index.html's body, so no browser, Pi session or network is needed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatTurn } from "../../core/types.js";
+import { installPage } from "./dom.testkit.js";
 
 const h = vi.hoisted(() => ({
   sidebar: null as unknown as Parameters<typeof import("./sidebar.js").initSidebar>[0],
@@ -29,14 +31,10 @@ vi.mock("./composer.js", () => ({
   renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), updateComposer: vi.fn(),
 }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
-vi.mock("./palette.js", () => ({ initPalette: vi.fn() }));
-vi.mock("./report.js", () => ({ initReport: vi.fn() }));
 vi.mock("./session-header.js", () => ({
   initHeader: (deps: typeof h.header) => { h.header = deps; }, noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),
   sessionInfo: vi.fn(), sessionMenu: vi.fn(), setHeaderPending: vi.fn(), setHeaderState: vi.fn(),
 }));
-vi.mock("./shell.js", () => ({ closeDrawer: vi.fn(), initShell: vi.fn() }));
-vi.mock("./icons.js", () => ({ initIcons: vi.fn() }));
 vi.mock("./theme.js", () => ({ initTheme: vi.fn() }));
 vi.mock("./version.js", () => ({ initVersion: vi.fn() }));
 vi.mock("./sidebar.js", () => ({
@@ -88,10 +86,9 @@ beforeEach(async () => {
   h.appendTurn.mockImplementation((_role: string, text: string) => { h.content.push(text); });
   vi.stubGlobal("EventSource", Stream);
   vi.stubGlobal("__PIER_VERSION__", "test");
-  vi.stubGlobal("document", { hidden: true, addEventListener: vi.fn() });
-  vi.stubGlobal("window", { addEventListener: vi.fn() });
+  Object.assign(installPage(), { hidden: true });
   const rows = ["a", "b"].map((id) => ({ id, cwd: "/test", createdAt: 1, state: "idle" }));
-  vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+  const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
     if (url === "/api/sessions" && init?.method === "POST") return h.create();
     const one = /^\/api\/sessions\/([^/]+)$/.exec(url);
@@ -102,7 +99,10 @@ beforeEach(async () => {
         : Response.json({ id, cwd: "/run", createdAt: 2, state: "idle" }));
     }
     return Promise.resolve(Response.json(rows));
-  }));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  vi.stubGlobal("window", { addEventListener: vi.fn(), fetch: fetcher, matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
   await import("./main.js");
   await settled();
 });
