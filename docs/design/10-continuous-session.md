@@ -6,6 +6,17 @@ Behaviour not named here is today's, owned by [03](03-web-workbench.md),
 [04](04-im-channels.md) and [09](09-tasks-cli.md). "Gap" marks what does not
 exist yet.
 
+## Phases
+
+- **Phase 1 (web)**: the instance switch; `$PIER_HOME/home` and the
+  dispatcher contract injection; `main_chain`, lazy 1h rotation and
+  `session-seed`; the per-session compaction override (both caps below); the
+  run ledger `pier task runs`; callbacks and ownership follow the chain; the
+  web routes and UI (entry row, In progress group, chain paging, read-only
+  non-head, branch-based history).
+- **Phase 2 (IM)**: the DM switch, main-flow DM replies, cards, `/status`.
+- **Phase 3**: the feature lead.
+
 ## Model
 
 - The user talks to Pier as **one conversation per instance**, the same one on
@@ -36,19 +47,22 @@ Three roles, not three mandatory tiers: main (dispatcher) → feature lead
 | lead | an ordinary child, cwd = the feature's own worktree, long-lived | strong (`--model`), `high` | workers only |
 | worker | an ordinary child, one worktree each | as launched | never |
 
-- A lead never rotates; Pi auto-compaction stays on, since its state is the
-  design doc on disk in its worktree.
+- A lead never rotates; auto-compaction stays on at the children's cap
+  (§Main session lifecycle), since its state is the design doc on disk.
 - "I want X" → main launches a lead (`--role lead`) and its card is posted
   like any child's.
 - Design phase: the user talks to the lead directly — its card thread on IM,
   its session on web; the dispatcher is never in that path.
 - Build phase, once the design is final: the lead decomposes the work, launches
   workers (one `wt` worktree each), reviews and integrates their results.
-- Main receives milestones only: each lead callback becomes one line in the
-  main flow. Workers get no card of their own; their callbacks are system notes
-  in the lead's thread and Background Run rows in the lead's session.
+- Main receives milestones only, never one wake per worker result: each lead
+  callback becomes one line in the main flow. Workers get no card of their
+  own; their callbacks are system notes in the lead's thread and Background
+  Run rows in the lead's session.
 - A lead's card follows its session's latest run (a resume is a new run on the
   same session).
+- Build phase starts in a fresh lead session, seeded with the design doc's
+  path (the doc on disk is the state), thinking `high` → `medium`.
 - The lead contract is injected from code as `<pier>/lead.md`, for a session
   whose run carries the role; it is never written to disk.
 - Both role contracts are string constants in `src/agent/roles.ts`, read by
@@ -67,10 +81,11 @@ Gaps (required new work):
   cannot launch a lead`), so depth stays 2.
 - The run preamble (`tasks/agent.ts:31`) says "you may delegate to workers" to a
   lead instead of "`pier task` is refused".
-- Milestones: a worker callback, or a user reply in the lead's thread, starts
-  a lead turn outside any run, so nothing reaches main; a callback delivered
-  into a lead session is delivered as a resume of the lead's last run
-  (`tasks/callbacks.ts`), whose own callback then reaches main.
+- Milestones: a user reply in the lead's thread, or a worker callback while
+  another run the lead launched is still in flight, starts a lead turn outside
+  any run, so nothing reaches main; the callback that settles the lead's last
+  in-flight run is delivered as a resume of the lead's last run
+  (`tasks/callbacks.ts`), whose own callback then reaches main once.
 
 ## Home and memory
 
@@ -106,6 +121,7 @@ Gaps (required new work):
 | Seed (every chain session, the first included) | `MEMORY.md`, the run ledger (in flight, and finished since the previous rotation), today's and yesterday's daily notes, the previous head's last 3 exchanges verbatim |
 | Surface | one line where the user message came from: `new session — idle 1h` |
 | Within a stretch | Pi auto-compaction on, triggered near 100K context, the last ~20K kept |
+| Task-run children (workers, leads) | never rotate; auto-compaction triggered near 150K context |
 | Head missing from Pi | a new head with reason `lost`, said on the surface, as `onStale` does for IM rows |
 
 - 1h matches the `"long"` cache retention Pier requests for interactive
@@ -118,10 +134,11 @@ Gaps (required new work):
 - Compaction mapping: Pi compacts when `contextTokens > contextWindow −
   reserveTokens` and keeps `keepRecentTokens` (default 20000,
   `DEFAULT_COMPACTION_SETTINGS`), so the target is `reserveTokens =
-  contextWindow − 100000`, per model. Gap: settings.json is instance-wide;
-  the main session applies it in memory with
+  contextWindow − cap`, per model: main 100K, children 150K. No session grows
+  past 200K input, where 1M-context models price higher. Gap: settings.json
+  is instance-wide; the cap is applied in memory with
   `live.settingsManager.applyOverrides({compaction})` after open, and
-  recomputes on `setModel`.
+  recomputed on `setModel`.
 - Gap: the seed is a new `SystemInputOrigin` kind (`session-seed`) in
   `core/types.ts`, so it renders as a system input card, not a user bubble.
 
@@ -134,8 +151,10 @@ checks; the dispatcher needs the runs it launched.
   unioned over every session in the chain.
 - Surface (required new work): `pier task runs` → JSON, in-flight runs plus
   runs finished in the last 24h, each `{runId, name, state, targetSessionId,
-  cwd, queuedAt, finishedAt}`; refused outside a main session.
-- The same read feeds the rotation seed and IM `/status`.
+  cwd, queuedAt, finishedAt}`; refused outside a main session, except in a
+  lead session, where it lists the runs that lead launched (Phase 3).
+- The same read feeds the rotation seed and IM `/status`; `skills/pier-tasks`
+  names it for the dispatcher.
 - Gap: callbacks and ownership follow the chain. A run launched by an earlier
   head calls back to the current head (`tasks/callbacks.ts`), and every chain
   member counts as its launcher for `--run`, `cancel` and `recover`
@@ -238,33 +257,16 @@ thread and session. Group chats never change.
   Lark `message.patch`), and a consumer of the chain's `task-status` events
   drives it.
 
-## Required new work
+## Optimization notes (not implemented)
 
-- `agent/pi.ts`: dispatcher contract injected for the home cwd; per-session
-  compaction override.
-- `core/types.ts`: `session-seed` system-input kind.
-- `db.ts` + a chain store: `main_chain`, head lookup, rotation.
-- `main.ts` / `core/router.ts`: alias key → head, re-pointed on rotation;
-  reply to the originating surface.
-- `tasks/callbacks.ts`, `tasks/operations.ts`: callback and ownership follow
-  the chain.
-- `tasks/cli.ts`, `tasks/operations.ts`: `pier task runs`.
-- `web/server.ts`: `/api/continuous`, alias send, read-only non-head history,
-  branch-based history, edit refused off-head.
-- `web/ui/`: rail entry, In progress group, chain paging and divider.
-- `settings.ts`, `channels/config.ts`: the two switches.
-- `channels/slack.ts`, `channels/lark.ts`: main-flow DM reply, card root and
-  edit, `/status`.
-- `channels/handoff.ts`: card binding on `task-status`.
-- `skills/pier-tasks/SKILL.md`: the ledger line for the dispatcher; `--role
-  lead` and the lead's right to delegate.
-- `agent/roles.ts` (new: the two role contracts' text), `agent/pi.ts`: lead
-  contract injected by role.
-- `tasks/types.ts`, `tasks/cli.ts`, `core/types.ts`: `launch.role`, `--role
-  lead`, `roleOf(sessionId)`.
-- `tasks/operations.ts:184`, `tasks/agent.ts:31`: leads delegate, depth 2;
-  the lead preamble.
-- `tasks/callbacks.ts`: a callback into a lead session resumes its run.
+- A callback to a cold head (>1h) is deferred: card and ledger carry it, the
+  next seed reports it.
+- Pier filters lead results by a milestone marker, so a non-milestone never
+  wakes main.
+- A lead keeps `"long"` cache retention during runs (runs switch to `"short"`,
+  `src/tasks/agent.ts:67`).
+- The seed is capped near 8K: `MEMORY.md` capped, the ledger as compact lines,
+  the last 3 exchanges as text only, no tool output.
 
 ## Acceptance
 
