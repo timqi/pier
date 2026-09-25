@@ -14,8 +14,8 @@ exist yet.
   run ledger `pier task runs`; callbacks and ownership follow the chain; the
   web routes and UI (entry row, In progress group, chain paging, read-only
   non-head, branch-based history).
-- **Phase 2 (IM)**: the DM switch, main-flow DM replies, cards, `/status`.
-- **Phase 3**: the feature lead.
+- **Phase 2**: the feature lead.
+- **Phase 3 (IM)**: the DM switch, main-flow DM replies, cards, `/status`.
 
 ## Model
 
@@ -152,7 +152,7 @@ checks; the dispatcher needs the runs it launched.
 - Surface (required new work): `pier task runs` → JSON, in-flight runs plus
   runs finished in the last 24h, each `{runId, name, state, targetSessionId,
   cwd, queuedAt, finishedAt}`; refused outside a main session, except in a
-  lead session, where it lists the runs that lead launched (Phase 3).
+  lead session, where it lists the runs that lead launched (Phase 2).
 - The same read feeds the rotation seed and IM `/status`; `skills/pier-tasks`
   names it for the dispatcher.
 - Gap: callbacks and ownership follow the chain. A run launched by an earlier
