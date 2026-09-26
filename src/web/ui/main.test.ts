@@ -98,7 +98,7 @@ beforeEach(async () => {
   const rows = ["a", "b"].map((id, i) => ({ id, cwd: "/test", createdAt: 1 + i, modified: 9 - i, state: "idle" }));
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
-    if (url === "/api/continuous") return Promise.resolve(Response.json({ chain: [] }));
+    if (url === "/api/continuous") return Promise.resolve(Response.json({ chain: [], rotateAt: 60_000 }));
     if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [], designs: [] }));
     const one = /^\/api\/sessions\/([^/]+)$/.exec(url);
     if (one && !init?.method) {
@@ -367,7 +367,7 @@ describe("the continuous conversation", () => {
     Object.assign(installPage(), { hidden: true });
     const rows = ["h2", "h1", "h0", "other"].map((id) => ({ id, cwd: "/home", createdAt: 1, state: "idle" }));
     const fetcher = vi.fn((url: string) => {
-      if (url === "/api/continuous") return Promise.resolve(Response.json({ chain }));
+      if (url === "/api/continuous") return Promise.resolve(Response.json({ chain, rotateAt: 60_000 }));
       if (url.endsWith("/history")) return h.history(url);
       return Promise.resolve(Response.json(rows));
     });

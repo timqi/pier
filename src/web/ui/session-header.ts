@@ -28,6 +28,8 @@ export interface HeaderDeps {
   openSettings: () => void;
   /** The continuous conversation is what the pane shows. */
   continuousOpen: () => boolean;
+  /** The conversation's rotation threshold (`GET /api/continuous`); null before it answers. */
+  rotateAt: () => number | null;
   /** The `‹`: back to `#/conversation`. */
   openContinuous: () => void;
 }
@@ -127,16 +129,16 @@ export function renderHeader(): void {
  *  act on — the chip's amber, and the one size worth a phone's bar line. */
 const CONTEXT_WARN = 70;
 
-/** Percent used of the room before Pi compacts (capped at 100) — the window
- *  itself is never reached. */
-const contextUsed = (tokens: number, u: ContextUsage): number =>
-  Math.min(100, Math.round((tokens / u.compactAt) * 100));
+/** Percent used of the room before `limit` (capped at 100): where Pi compacts,
+ *  or where the conversation starts a new session — the window itself is never reached. */
+const contextUsed = (tokens: number, limit: number): number =>
+  Math.min(100, Math.round((tokens / limit) * 100));
 
-/** Full context reading for the session info panel: used against where it compacts. */
-const contextLabel = (u: ContextUsage): string =>
+/** Full context reading: used against `limit`, where it compacts unless said otherwise. */
+const contextLabel = (u: ContextUsage, limit = u.compactAt): string =>
   u.tokens === null
-    ? `?/${compact(u.compactAt)}`
-    : `${compact(u.tokens)}/${compact(u.compactAt)} · ${100 - contextUsed(u.tokens, u)}% left`;
+    ? `?/${compact(limit)}`
+    : `${compact(u.tokens)}/${compact(limit)} · ${100 - contextUsed(u.tokens, limit)}% left`;
 
 /** Title-row meta: model · reasoning · current context size. The
  *  conversation's model is the default and stays so, so its bar says only the
@@ -169,14 +171,17 @@ function renderSessionMeta(): void {
   }
   // Context pressure decides two things: the chip's tone, and — below md —
   // whether this row is worth a line of the bar at all.
+  // The conversation's head never reaches compaction: it is replaced past the
+  // rotation threshold, so that is the room it has.
+  const limit = conversation ? deps.rotateAt() : u?.compactAt;
   let pressure = 0;
-  if (u && tokens !== null) {
-    pressure = contextUsed(tokens, u);
+  if (u && tokens !== null && limit) {
+    pressure = contextUsed(tokens, limit);
     const tone = pressure >= 90 ? "text-red-700" : pressure >= CONTEXT_WARN ? "text-amber-700" : "text-neutral-500";
     if (conversation) {
       const chip = h("span", `flex-none rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[12px] ${tone}`,
-        `${compact(tokens)}/${compact(u.compactAt)}`.toLowerCase());
-      chip.title = `Context: ${contextLabel(u)} before compaction`;
+        `${compact(tokens)}/${compact(limit)}`.toLowerCase());
+      chip.title = `Context: ${contextLabel(u, limit)} before the next message starts a new session`;
       items.push(chip);
     } else items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
   }

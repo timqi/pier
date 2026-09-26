@@ -90,8 +90,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   price tier; a lead's state is its doc), any other at the instance's
   setting; `reserveTokens = window − cap`, never later than the instance's
   reserve, recomputed on `setModel`. Children never rotate.
-- `ContextUsage.compactAt` is that point, and the session header shows
-  `used/compactAt`.
+- `ContextUsage.compactAt` is that point, and a child's header reads against
+  it; the conversation's bar shows `used/rotateAt` (`CHAIN_FULL_TOKENS`).
 
 ### Cache
 

@@ -15,7 +15,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { MainChain } from "../core/chain.js";
-import { CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS as IDLE_MS } from "../core/types.js";
 import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession as sharedFake, type FakeSession } from "../core/session.testkit.js";
@@ -2530,8 +2530,9 @@ describe("the continuous conversation's routes", () => {
     expect(sessions.get("m1")!.prompts.map((p) => p.includes("two"))).toEqual([false]);
     expect(sessions.get("m2")!.prompts.some((p) => p.includes("two"))).toBe(true);
     expect(workspace).toContain("sessions-changed");
-    const { chain } = await (await app.request("/api/continuous")).json() as { chain: { sessionId: string; reason: string }[] };
+    const { chain, rotateAt } = await (await app.request("/api/continuous")).json() as { chain: { sessionId: string; reason: string }[]; rotateAt: number };
     expect(chain.map((m) => [m.sessionId, m.reason])).toEqual([["m2", "idle"], ["m1", "first"]]);
+    expect(rotateAt).toBe(CHAIN_FULL_TOKENS);
   });
 
   it("answers a send whose new session cannot be seeded with the reason, and creates none", async () => {

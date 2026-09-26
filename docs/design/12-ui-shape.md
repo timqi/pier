@@ -42,7 +42,7 @@ desktop / phone                         viewing a child session
 | --- | --- | --- |
 | left | **Conversation** (opens Session info) | **‹** back to the conversation, wearing the head's dot when it is streaming or unread; then the session's title and its `phase` tag |
 | status chip | `N running · M needs you` — opens the drawer; absent when both are 0 | the same chip, the same drawer |
-| meta chips | `used/compactAt` only, at every width beside the title; the model is the default and changes from `⋯` | model · reasoning · used tokens — open the model picker; below md only context ≥ 70% shows |
+| meta chips | `used/rotateAt` only — `rotateAt` is `CHAIN_FULL_TOKENS` as `GET /api/continuous` reports it, the size past which the next message starts a new session — at every width beside the title, amber ≥ 70%, red ≥ 90% of it; the model is the default and changes from `⋯` | model · reasoning · used tokens, amber/red against `compactAt` — open the model picker; below md only context ≥ 70% shows |
 | `⋯` | Search ⌘K · Status · Session info · Browse files · Model & reasoning · Settings | Status · Session info · Browse files · Model & reasoning · Settings |
 
 - `N running` counts the drawer's green and grey rows; `M needs you` its

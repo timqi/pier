@@ -35,7 +35,7 @@ import type {
   SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
-import { isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
+import { CHAIN_FULL_TOKENS, isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
@@ -518,7 +518,7 @@ export function createServer(
   };
 
   // The chain, newest first; the client pages back through it with /history.
-  app.get("/api/continuous", (c) => c.json({ chain: continuous.members() }));
+  app.get("/api/continuous", (c) => c.json({ chain: continuous.members(), rotateAt: CHAIN_FULL_TOKENS }));
 
   // The drawer's run rows.
   app.get("/api/continuous/open", (c) => c.json(continuous.openItems()));

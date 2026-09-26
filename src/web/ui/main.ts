@@ -124,6 +124,8 @@ let optimistic = false;
 
 /** Its sessions, newest first; empty before its first session exists. */
 let chain: ChainMember[] = [];
+/** The head's context size past which the next message starts a new session; null before the chain answers. */
+let rotateAt: number | null = null;
 /** Earlier sessions paged in above the head, oldest first; `error` when one could not be read. */
 let earlier: { member: ChainMember; turns: ChatTurn[]; runs: BackgroundRun[]; error?: string }[] = [];
 /** On screen before its first session exists: the first message starts one. */
@@ -145,12 +147,14 @@ const DIVIDER: Record<ChainReason, string> = {
   new: "new session — /new",
 };
 
-async function loadChain(): Promise<ChainMember[]> {
+async function loadChain(): Promise<{ chain: ChainMember[]; rotateAt: number }> {
   const res = await fetch("/api/continuous");
   if (!res.ok) throw new Error(await failure(res, "Could not load the continuous conversation"));
-  const { chain } = (await res.json()) as { chain?: unknown };
-  if (!Array.isArray(chain)) throw new Error("The continuous conversation's chain is malformed");
-  return chain as ChainMember[];
+  const { chain, rotateAt } = (await res.json()) as { chain?: unknown; rotateAt?: unknown };
+  if (!Array.isArray(chain) || typeof rotateAt !== "number" || !(rotateAt > 0)) {
+    throw new Error("The continuous conversation's chain is malformed");
+  }
+  return { chain: chain as ChainMember[], rotateAt };
 }
 
 async function loadOpenItems(): Promise<OpenItems> {
@@ -268,7 +272,8 @@ const refreshSessions = coalesce(async () => {
   ]);
   const following = continuousOpen();
   const was = headId();
-  chain = next;
+  chain = next.chain;
+  rotateAt = next.rotateAt;
   openItems = open;
   commitSessions(rows);
   // A rotation — this tab's send or another's — or the first send's new head moves the open conversation there.
@@ -611,6 +616,7 @@ initHeader({
   toggleFiles,
   openSettings: () => showConsole("settings"),
   continuousOpen,
+  rotateAt: () => rotateAt,
   openContinuous,
 });
 initViews({

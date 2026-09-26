@@ -78,6 +78,7 @@ beforeEach(async () => {
     toggleFiles: vi.fn(),
     openSettings,
     continuousOpen: () => conversation,
+    rotateAt: () => 60_000,
     openContinuous,
   });
   vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
@@ -206,17 +207,33 @@ it("keeps the meta row to model, reasoning and context, urgent only under contex
 
 // The conversation's model is the default and never moves: its bar reads the
 // context in full, inline at every width, and ⋯ keeps the model picker.
-it("shows only the context, used/compactAt, on the conversation's bar", () => {
+it("shows only the context, used/rotateAt, on the conversation's bar", () => {
   conversation = true;
   current = session(0);
-  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 52_000, compactAt: 160_000 }, "high", null);
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 16_000, compactAt: 984_000 }, "high", null);
   expect(chips()).toHaveLength(0);
-  expect(meta().textContent).toBe("52k/160k");
+  expect(meta().textContent).toBe("16k/60k");
+  expect(meta().firstElementChild!.className).toContain("text-neutral-500");
   expect(meta().hasAttribute("data-inline")).toBe(true);
   conversation = false;
   header.renderHeader();
   expect(chips().map((c) => c.textContent)).toEqual([model.id, "high"]);
   expect(meta().hasAttribute("data-inline")).toBe(false);
+});
+
+// Tone and urgency are read against the rotation threshold, not where Pi compacts.
+it("colours the conversation's context against the rotation threshold", () => {
+  conversation = true;
+  current = session(0);
+  const at = (tokens: number) => {
+    header.setHeaderState(model, { contextWindow: 1_000_000, tokens, compactAt: 984_000 }, "high", null);
+    return meta().firstElementChild!.className;
+  };
+  expect(at(45_000)).toContain("text-amber-700");
+  expect(meta().hasAttribute("data-urgent")).toBe(true);
+  expect(at(55_000)).toContain("text-red-700");
+  expect(at(30_000)).toContain("text-neutral-500");
+  expect(meta().hasAttribute("data-urgent")).toBe(false);
 });
 
 it("draws the second open from cache, before the read answers", async () => {
