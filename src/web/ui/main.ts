@@ -75,14 +75,13 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
-  OpenItems,
-  ParkedMessage,
   QueueRecovery,
   SessionEvent,
   SessionState,
   ThinkingLevel,
   WorkspaceEvent,
 } from "../../core/types.js";
+import type { OpenItems, ParkedMessage } from "../../tasks/types.js";
 
 /** GET /api/sessions/:id/history — the snapshot every delta is applied onto. */
 interface SessionSnapshot {

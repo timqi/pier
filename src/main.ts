@@ -30,6 +30,7 @@ import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
 import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
+import { openItemsStatus } from "./tasks/open-items.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
@@ -131,19 +132,14 @@ const router = new Router(hub, (key) => {
 const chain = new MainChain(db, {
   factory, router, home: pierPath("home"),
   ledger: (ids, since) => tasks.ledger(ids, since),
-  sessionOf: (id) => taskStore.getRun(id)?.targetSessionId ?? null,
-  roleOf: (id) => taskStore.roleOf(id),
-  designs: () => {
-    const flags = sessionState.flags();
-    return tasks.openDesigns().filter((r) => r.targetSessionId && !flags.get(r.targetSessionId)?.closed);
-  },
-  hub,
+  status: (now) => openItemsStatus(tasks.openItems(now), now),
 });
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(taskStore, factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
   systemActions: { "config-sync": (signal) => configSync.sync(signal) },
   continuous: chain,
+  closed: (id) => sessionState.flags().get(id)?.closed ?? false,
 });
 const configurationSync = configSyncTask(tasks, configSync);
 
@@ -365,6 +361,7 @@ app.route("/", createServer({
   parkedMessages: (id) => tasks.parkedMessages(id),
   taskSessions: () => tasks.taskSessions(),
   leads: () => taskStore.leads(),
+  openItems: () => tasks.openItems(),
   channelOf: (id) => conversations.keyOf(id)?.channelId,
   continuous: chain,
 }));

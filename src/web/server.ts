@@ -26,7 +26,6 @@ import type {
   ChatTurn,
   InboundMessage,
   LeadPhase,
-  ParkedMessage,
   SessionEvent,
   SessionSummary,
   ThinkingLevel,
@@ -40,6 +39,7 @@ import type {
 import { isThinkingLevel, SESSION_TITLE_MAX } from "../core/types.js";
 import { saveInbound } from "../core/inbox.js";
 import { MAX_INBOUND_BYTES } from "../core/inbound-file.js";
+import type { OpenItems, ParkedMessage } from "../tasks/types.js";
 import { type SessionFlags, type SessionStateStore } from "./session-state.js";
 import { ACCENTS, DEFAULT_ACCENT, ICON_PLATE, type SettingsStore } from "../settings.js";
 import type { CustomTool } from "../tools.js";
@@ -155,6 +155,8 @@ export interface WebDeps {
    *  the palette, `runLive` while a run targeting it is queued or running,
    *  `designOpen` while a design of it waits on the user to finalize. */
   leads?: () => Map<string, { phase: LeadPhase; runLive: boolean; designOpen: boolean }>;
+  /** `TaskService.openItems`: what `GET /api/continuous/open` answers. */
+  openItems?: () => OpenItems;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -214,6 +216,7 @@ export function createServer(
     parkedMessages,
     taskSessions,
     leads,
+    openItems,
     channelOf,
     continuous,
   }: WebDeps,
@@ -556,7 +559,7 @@ export function createServer(
   app.get("/api/continuous", (c) => c.json({ chain: continuous.members() }));
 
   // The drawer's run rows.
-  app.get("/api/continuous/open", (c) => c.json(continuous.openItems()));
+  app.get("/api/continuous/open", (c) => c.json(openItems?.() ?? { items: [], unlisted: [], designs: [] }));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.

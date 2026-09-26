@@ -3,6 +3,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
+import type { OpenItemMarker } from "../core/reply.js";
 import type { AgentRole, LeadPhase } from "../core/types.js";
 import { createdRole, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
@@ -381,5 +382,20 @@ export class TaskStore {
       this.saveRun(run);
       return run;
     });
+  }
+
+  /** The continuous conversation's open items, oldest first; `runIds` as main wrote them. */
+  openItems(): { problem: string; stage: string; runIds: string[] }[] {
+    return (this.sql("SELECT problem, stage, run_ids FROM open_items ORDER BY updated_at, rowid").all() as { problem: string; stage: string; run_ids: string }[])
+      .map((r) => ({ problem: r.problem, stage: r.stage, runIds: JSON.parse(r.run_ids) as string[] }));
+  }
+
+  /** Main's markers, in reply order, as one write; answers how many rows changed. */
+  markOpenItems(markers: OpenItemMarker[], now: number): number {
+    return this.transact(() => markers.reduce((n, m) => n + Number(m.op === "open"
+      ? this.sql(`INSERT INTO open_items(problem, stage, run_ids, updated_at) VALUES (?, ?, ?, ?)
+          ON CONFLICT(problem) DO UPDATE SET stage = excluded.stage, run_ids = excluded.run_ids, updated_at = excluded.updated_at`)
+        .run(m.problem, m.stage, JSON.stringify(m.runIds), now).changes
+      : this.sql("DELETE FROM open_items WHERE problem = ?").run(m.problem).changes), 0));
   }
 }

@@ -35,7 +35,7 @@ import type {
 import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
-import type { TaskDefinition, TaskRun } from "../tasks/types.js";
+import type { OpenItems, TaskDefinition, TaskRun } from "../tasks/types.js";
 import { ACCENTS, ICON_PLATE, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
@@ -98,7 +98,7 @@ const SETTINGS_JSON = {
 
 /** A chain with no members, for the rigs that never send to it. */
 const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
-  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], sessionOf: () => null, roleOf: () => undefined, designs: () => [], hub });
+  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], status: () => ({ text: "Nothing open.", sessions: {} }) });
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
@@ -2547,7 +2547,7 @@ describe("the app shell", () => {
 
 describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
-  function chainRig(ledger: () => LedgerRun[] = () => []) {
+  function chainRig(ledger: () => LedgerRun[] = () => [], open?: OpenItems) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
     const sessions = new Map<string, FakeSession>();
@@ -2575,12 +2575,12 @@ describe("the continuous conversation's routes", () => {
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
-      ledger, sessionOf: () => null, roleOf: () => undefined, designs: () => [], hub, now: () => clock.now,
+      ledger, status: () => ({ text: "Nothing open.", sessions: {} }), now: () => clock.now,
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
       providers: fakeProviders(), settings, updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
-      secrets: fakeSecrets(), continuous: chain,
+      secrets: fakeSecrets(), continuous: chain, ...(open ? { openItems: () => open } : {}),
     });
     const workspace: string[] = [];
     hub.subscribeWorkspace((e) => workspace.push(e.type));
@@ -2595,15 +2595,13 @@ describe("the continuous conversation's routes", () => {
     return { app, db, factory, sessions, clock, workspace, post, restarted };
   }
 
-  it("answers the open items, runs joined through the ledger", async () => {
+  it("answers the open items the task service lists", async () => {
     const live: LedgerRun = { runId: "r1", name: "Build it", state: "running", targetSessionId: "s-r1", cwd: "/w", queuedAt: 1, finishedAt: null };
     const stray: LedgerRun = { ...live, runId: "r2", name: "Review", state: "queued", targetSessionId: null };
-    const { app, db, restarted } = chainRig(() => [live, stray]);
-    restarted();
-    db.prepare("INSERT INTO open_items VALUES ('open items', 'worker running', '[\"r1\"]', 1)").run();
-    const res = await app.request("/api/continuous/open");
+    const open: OpenItems = { items: [{ problem: "open items", stage: "worker running", runs: [live], live: "running" }], unlisted: [stray], designs: [] };
+    const res = await chainRig(undefined, open).app.request("/api/continuous/open");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [{ problem: "open items", stage: "worker running", runs: [live], live: "running" }], unlisted: [stray], designs: [] });
+    expect(await res.json()).toEqual(open);
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

@@ -109,10 +109,11 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   adds or replaces the item keyed by `problem`, `<done>problem</done>` removes it;
   both are stripped beside `<silent>` and never read inside a fence
   (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
-- The head's `turn-end` writes them (`MainChain`, subscribed to the head) and
-  broadcasts `open-items-changed` when a row changed; a marker with no problem
-  is logged and dropped.
-- `MainChain.openItems()` resolves each run token to its session (the ledger,
+- The head's `turn-end` writes them (`TaskService`'s `Router.onTurnEnd`
+  listener, when the session is `members()[0]`) and broadcasts
+  `open-items-changed` when a row changed; a marker with no problem is logged
+  and dropped.
+- `TaskService.openItems()` (`tasks/open-items.ts`) resolves each run token to its session (the ledger,
   else `TaskStore.getRun`) and shows that session's newest run in the ledger's
   last 24h, so a lead woken again stays the same item (none there reads `run <id>
   — not in the ledger`, `NOT_IN_LEDGER`), a lead run's with its workers counted
@@ -132,7 +133,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   `Nothing open.` when all are empty.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
-  text as a `chat-command` system input, mode `append`, no turn, its origin
+  text (`ChainDeps.status`, `openItemsStatus`) as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run and listed design that has one; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card and the In progress drawer

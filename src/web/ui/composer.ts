@@ -11,7 +11,8 @@ import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { escapeKey, letterKey } from "./shortcut.js";
 import { listStep } from "./menu.js";
-import { CHAT_COMMANDS, type ChatCommand, type ParkedMessage, type QueueRecovery, type SessionState } from "../../core/types.js";
+import { CHAT_COMMANDS, type ChatCommand, type QueueRecovery, type SessionState } from "../../core/types.js";
+import type { ParkedMessage } from "../../tasks/types.js";
 
 /** A file picked but not yet sent. The upload starts on attach, so Enter
  *  usually finds its marker already there and the send paints at once. */

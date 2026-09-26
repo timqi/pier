@@ -7,7 +7,8 @@ import { closeMenu, openPanel } from "./menu.js";
 import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { chord, modalOpen } from "./shortcut.js";
-import { type ChainMember, type LeadPhase, type OpenItems, type OpenRun, type SessionState } from "../../core/types.js";
+import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
+import type { OpenItems, OpenRun } from "../../tasks/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {

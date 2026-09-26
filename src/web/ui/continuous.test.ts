@@ -2,7 +2,8 @@
 // conversation's own sessions are the bar, not rows; what is in progress is,
 // and so are the open items' live runs no session row stands for.
 import { beforeEach, expect, it, vi } from "vitest";
-import { NOT_IN_LEDGER, type ChainMember, type OpenItems, type OpenRun } from "../../core/types.js";
+import type { ChainMember } from "../../core/types.js";
+import { NOT_IN_LEDGER, type OpenItems, type OpenRun } from "../../tasks/types.js";
 import { installPage, type FakeDocument } from "./dom.testkit.js";
 
 vi.mock("./menu.js", () => ({

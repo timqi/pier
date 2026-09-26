@@ -3,7 +3,7 @@
 // messenger must agree on. Owner-defined and browser-importable type-only
 // (architecture.md), so nothing here may reach for a runtime or a node builtin.
 
-import type { AgentRole, ModelRef, TaskRunState, ThinkingLevel } from "../core/types.js";
+import type { AgentRole, LedgerRun, ModelRef, TaskRunState, ThinkingLevel } from "../core/types.js";
 
 export type TaskTrigger =
   | { type: "manual" }
@@ -223,3 +223,32 @@ export const isTerminal = (state: TaskRunState): boolean =>
  *  worker's when a session launched it; a cron or watch run's has none. */
 export const createdRole = ({ context: { definition: { action } }, invokedBySessionId }: TaskRun): AgentRole | undefined =>
   action.type === "agent" && action.launch?.role === "lead" ? "lead" : invokedBySessionId !== null ? "worker" : undefined;
+
+/** A run behind an open item; a lead's carries its own launches, counted by state. */
+export interface OpenRun extends LedgerRun {
+  workers?: Record<TaskRunState, number>;
+}
+
+/** What the continuous conversation is solving, as main last said it
+ *  (docs/design/10-continuous-session.md#open-items). */
+export interface OpenItems {
+  /** By `updated_at`, oldest first. */
+  /** `runs`: each named run's session, by its newest run; `live` whether any is working now. */
+  items: { problem: string; stage: string; runs: OpenRun[]; live?: "running" | "idle" }[];
+  /** Chain runs in flight in no item's session. */
+  unlisted: OpenRun[];
+  /** Design leads that have not reported `Design final:` and are not closed,
+   *  by their creating run: the user decides when each is final. */
+  designs: LedgerRun[];
+}
+
+/** The `state` of a run an item names that the ledger no longer holds; its `name` is the id. */
+export const NOT_IN_LEDGER = "not in the ledger";
+
+/** A `--after` follow-up waiting for its target session to idle, as that
+ *  session's queue shows it; `runName` is the run it was parked on. */
+export interface ParkedMessage {
+  messageId: string;
+  runName: string;
+  text: string;
+}

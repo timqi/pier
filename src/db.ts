@@ -340,7 +340,7 @@ const MIGRATIONS: readonly string[] = [
   // 30 — a session the operator closed leaves the session list until a human speaks to it (web/session-state.ts).
   `ALTER TABLE session_state ADD COLUMN closed INTEGER NOT NULL DEFAULT 0;`,
   // 31 — the continuous conversation's open items, written from the head's
-  // `<open>`/`<done>` markers (core/chain.ts); run_ids a JSON array.
+  // `<open>`/`<done>` markers (tasks/open-items.ts); run_ids a JSON array.
   `
   CREATE TABLE open_items (
     problem TEXT PRIMARY KEY,

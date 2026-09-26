@@ -293,7 +293,7 @@ const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> 
   "chat-command": [SquareSlash, "command", "text-cyan-700"],
 };
 
-/** `/status`'s text names a run as `run <id8>…` (core/chain.ts renderOpenItems);
+/** `/status`'s text names a run as `run <id8>…` (tasks/open-items.ts renderOpenItems);
  *  each one whose session the origin carries opens it. */
 function linkRuns(content: HTMLElement, sessions: Record<string, string>): void {
   const text = content.textContent ?? "";

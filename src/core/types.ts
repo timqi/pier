@@ -178,7 +178,7 @@ export interface ChainMember {
   reason: ChainReason;
 }
 
-/** Declared here, not in tasks/, because core counts runs by state too (a lead's workers, core/chain.ts).
+/** Declared here, not in tasks/, because `BackgroundRun`, the `task-status` event core carries, names it.
  *  In order: the Console lists them so, and a worker count reads so. */
 export const TASK_RUN_STATES = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"] as const;
 
@@ -194,27 +194,6 @@ export interface LedgerRun {
   queuedAt: number;
   finishedAt: number | null;
 }
-
-/** A run behind an open item; a lead's carries its own launches, counted by state. */
-export interface OpenRun extends LedgerRun {
-  workers?: Record<TaskRunState, number>;
-}
-
-/** What the continuous conversation is solving, as main last said it
- *  (docs/design/10-continuous-session.md#open-items). */
-export interface OpenItems {
-  /** By `updated_at`, oldest first. */
-  /** `runs`: each named run's session, by its newest run; `live` whether any is working now. */
-  items: { problem: string; stage: string; runs: OpenRun[]; live?: "running" | "idle" }[];
-  /** Chain runs in flight in no item's session. */
-  unlisted: OpenRun[];
-  /** Design leads that have not reported `Design final:` and are not closed,
-   *  by their creating run: the user decides when each is final. */
-  designs: LedgerRun[];
-}
-
-/** The `state` of a run an item names that the ledger no longer holds; its `name` is the id. */
-export const NOT_IN_LEDGER = "not in the ledger";
 
 export interface BackgroundRun {
   runId: string;
@@ -233,14 +212,6 @@ export interface BackgroundRun {
   finishedAt: number | null;
   /** `pier task run --run <id> --after` messages parked on this run, not yet delivered. */
   queuedMessages: number;
-}
-
-/** A `--after` follow-up waiting for its target session to idle, as that
- *  session's queue shows it; `runName` is the run it was parked on. */
-export interface ParkedMessage {
-  messageId: string;
-  runName: string;
-  text: string;
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */

@@ -62,7 +62,8 @@ src/
                ui/ (form.ts + dom.ts shared vocabulary; code.ts file viewer)
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,
-               messages, command, service, store, operations (the `/task`
+               messages, command, service, store, open-items (main's
+               markers joined to the ledger), operations (the `/task`
                route: who may ask for what, by the session's role),
                cli (`pier task`: argv → the params object over the socket)
   main.ts      wiring only
@@ -120,6 +121,8 @@ Dependency rules:
   `SettingsManager`.
 - The browser may import HTTP DTOs from `tasks/types.ts`, `channels/types.ts`
   and `web/types.ts` type-only.
+- `web/server.ts` may import `tasks/types.ts` type-only, for the DTOs it
+  serves from a callback `main.ts` injects.
 - Root leaves `paths.ts`, `db.ts`, `log.ts`, `secrets.ts`, `settings.ts`,
   `vault.ts`: every area may import them; they import nothing outside the root
   layer (`settings.ts` names `core/types.ts` types, type-only).

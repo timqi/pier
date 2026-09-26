@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, BackgroundRun, LedgerRun, ModelTier, ParkedMessage } from "../core/types.js";
+import type { AgentFactory, BackgroundRun, LedgerRun, ModelTier } from "../core/types.js";
 import type { MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -14,10 +14,11 @@ import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
 import { TaskGroups } from "./groups.js";
 import { TaskMessenger } from "./messages.js";
+import { openItems, recordOpenItems } from "./open-items.js";
 import { TaskRunQueue, type RunProvenance } from "./runs.js";
 import type { TaskStore } from "./store.js";
 import { handleTask } from "./operations.js";
-import type { CallbackMode, GroupJoinMode, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
+import type { CallbackMode, GroupJoinMode, OpenItems, ParkedMessage, SystemActions, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
@@ -58,6 +59,8 @@ export class TaskService {
       modelMenu(): { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
       continuous: TaskChain;
+      /** A session the operator closed: its open design leaves the open items. */
+      closed?: (sessionId: string) => boolean;
     },
   ) {
     const headOf = (id: string): string => instance.continuous.chainOf(id)?.[0] ?? id;
@@ -102,6 +105,14 @@ export class TaskService {
       (run) => this.changed(run),
     );
     router.onTurnEnd((sessionId, text) => {
+      // Only the head's turns write the list.
+      if (instance.continuous.members()[0]?.sessionId === sessionId) {
+        try {
+          if (recordOpenItems(store, text, Date.now())) hub.emitWorkspace({ type: "open-items-changed" });
+        } catch (err) {
+          log.warn(`open items: the markers in ${sessionId}'s reply could not be written`, err);
+        }
+      }
       if (!DESIGN_FINAL.test(text)) return;
       // On Pi's dispatch stack, which must not unwind.
       try {
@@ -278,6 +289,12 @@ export class TaskService {
       const run = lead.designOpen ? this.store.getRun(lead.runId) : undefined;
       return run ? [ledgerRun(run)] : [];
     });
+  }
+
+  openItems(now = Date.now()): OpenItems {
+    const closed = this.instance.closed ?? (() => false);
+    const designs = this.openDesigns().filter((r) => r.targetSessionId && !closed(r.targetSessionId));
+    return openItems(this, this.router, this.instance.continuous.members().map((m) => m.sessionId), designs, now);
   }
 
   activeBackgroundRunCounts(): Map<string, number> {
