@@ -63,8 +63,7 @@ const isAlias = (key: ConversationKey): boolean =>
 interface Attached {
   session: AgentSession;
   key: ConversationKey;
-  stateSince: number;
-  /** What eviction ages; distinct from stateSince, which the UI reads as "idle since". */
+  /** What eviction ages. */
   activeAt: number;
   /** Bumped with activeAt; the sweep compares it across its await, where a
    *  clock cannot tell a same-millisecond dispatch from none. */
@@ -204,10 +203,6 @@ export class Router {
     return this.bySession.get(sessionId)?.session.state;
   }
 
-  stateSinceOf(sessionId: string): number | undefined {
-    return this.bySession.get(sessionId)?.stateSince;
-  }
-
   /** Current in-memory model of a live session (undefined when not attached). */
   modelOf(sessionId: string): ModelRef | undefined {
     return this.bySession.get(sessionId)?.session.model;
@@ -249,7 +244,6 @@ export class Router {
     const attached: Attached = {
       session,
       key,
-      stateSince: Date.now(),
       activeAt: Date.now(),
       touched: 0,
       unsubscribe: session.subscribe((payload) => {
@@ -257,7 +251,7 @@ export class Router {
         this.hub.emit(session.id, payload);
         if (payload.type === "state") {
           // Every turn passes here, so it also proves liveness to the sweeper.
-          attached.stateSince = attached.activeAt = Date.now();
+          attached.activeAt = Date.now();
           attached.touched += 1;
           this.hub.emitWorkspace({
             type: "session-state",
