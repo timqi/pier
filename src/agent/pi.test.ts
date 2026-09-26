@@ -617,25 +617,23 @@ describe("titleFromAnswer", () => {
 });
 
 describe("the continuous conversation's seam", () => {
-  const injected = async (cwd: string, continuous: boolean): Promise<string[]> => {
-    const factory = new PiAgentFactory(() => "pier notes", [], undefined, undefined, undefined,
-      () => ({ skillsOff: [], continuous }));
+  const injected = async (cwd: string): Promise<string[]> => {
+    const factory = new PiAgentFactory(() => "pier notes", [], undefined, undefined, undefined, () => ({ skillsOff: [] }));
     await (await factory.create({ cwd })).dispose();
     return loaders.at(-1)!.agentsFilesOverride({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path);
   };
 
-  it("injects the dispatcher contract only into a session in the home, and only while the switch is on", async () => {
+  it("injects the dispatcher contract only into a session in the home", async () => {
     const home = join(process.env.PIER_HOME!, "home");
-    expect(await injected(home, true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
-    expect(await injected(home, false)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
-    expect(await injected("/tmp/elsewhere", true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
+    expect(await injected(home)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
+    expect(await injected("/tmp/elsewhere")).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
   });
 
-  it("compacts a main session at 100K and a run's child at 150K while the switch is on, and no other session", async () => {
+  it("compacts a main session at 100K and a run's child at 150K, and no other session", async () => {
     const home = join(process.env.PIER_HOME!, "home");
     const path = () => join(mkdtempSync(join(tmpdir(), "pier-cap-")), "f.jsonl");
-    const factory = (continuous: boolean) => new PiAgentFactory(() => "", [], undefined, undefined, undefined,
-      () => ({ skillsOff: [], continuous }), undefined, {
+    const factory = new PiAgentFactory(() => "", [], undefined, undefined, undefined,
+      () => ({ skillsOff: [] }), undefined, {
         scan: async () => [["member", home], ["worker-1", "/tmp/wt"], ["user-1", "/tmp/wt"]]
           .map(([id, cwd]) => ({ id: id!, path: path(), cwd: cwd!, created: 1, modified: 2 })),
       }, (id) => (id === "worker-1" ? "worker" : undefined));
@@ -645,18 +643,14 @@ describe("the continuous conversation's seam", () => {
     };
     const main = [{ compaction: { reserveTokens: 300_000 } }];
     const child = [{ compaction: { reserveTokens: 250_000 } }];
-    const on = factory(true);
-    expect(await reserves(on.create({ cwd: home }))).toEqual(main);
-    expect(await reserves(on.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(child);
-    expect(await reserves(on.resume("worker-1"))).toEqual(child);
+    expect(await reserves(factory.create({ cwd: home }))).toEqual(main);
+    expect(await reserves(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(child);
+    expect(await reserves(factory.resume("worker-1"))).toEqual(child);
     // Decided by what the session is, not by who opens it: a run reusing a
     // chain member leaves it at main's cap, and a user's session uncapped.
-    expect(await reserves(on.resume("member"))).toEqual(main);
-    expect(await reserves(on.resume("user-1"))).toEqual([]);
-    expect(await reserves(on.create({ cwd: "/tmp/wt" }))).toEqual([]);
-    const off = factory(false);
-    expect(await reserves(off.create({ cwd: home }))).toEqual([]);
-    expect(await reserves(off.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual([]);
+    expect(await reserves(factory.resume("member"))).toEqual(main);
+    expect(await reserves(factory.resume("user-1"))).toEqual([]);
+    expect(await reserves(factory.create({ cwd: "/tmp/wt" }))).toEqual([]);
   });
 
   /** A session whose model and settings manager are what the cap reads and writes. */

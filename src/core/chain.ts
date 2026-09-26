@@ -27,7 +27,6 @@ export interface ChainDeps {
   factory: AgentFactory;
   router: Router;
   home: string;
-  enabled: () => boolean;
   /** Runs launched by any of `sessionIds`, newest first: in flight, or finished at or after `since`. */
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
   /** The session a run ran in, the ledger's window or not: an item follows its lead across runs. */
@@ -114,10 +113,6 @@ export class MainChain {
   constructor(private readonly db: DatabaseSync, private readonly deps: ChainDeps) {
     const head = this.members()[0];
     if (head) this.watch(head.sessionId);
-  }
-
-  enabled(): boolean {
-    return this.deps.enabled();
   }
 
   /** Newest first. */

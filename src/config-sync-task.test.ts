@@ -31,7 +31,7 @@ function rig() {
     } },
   });
   const store = new TaskStore(db);
-  const tasks = new TaskService(store, factory, router, hub, { modelMenu: () => [], systemActions: { "config-sync": (signal) => sync.sync(signal) } });
+  const tasks = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] }, systemActions: { "config-sync": (signal) => sync.sync(signal) } });
   cleanups.push(() => { tasks.stop(); db.close(); });
   const owned = configSyncTask(tasks, sync);
   const enable = async () => {

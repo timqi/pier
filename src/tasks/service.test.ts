@@ -24,7 +24,10 @@ import {
   type TaskRun,
 } from "./types.js";
 
-function setup(session = fakeSession(), instance?: ConstructorParameters<typeof TaskService>[4]) {
+/** No model menu, and no session is a member of the continuous conversation. */
+const BARE = { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } };
+
+function setup(session = fakeSession(), instance: ConstructorParameters<typeof TaskService>[4] = BARE) {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
   const factory: AgentFactory = {
     availableModels: vi.fn(async () => []),
@@ -178,7 +181,7 @@ describe("callback recovery across database connections", () => {
       };
       const hub = new EventHub();
       const router = new Router(hub, (key) => factory.resume(key.conversationId));
-      const service = new TaskService(store, factory, router, hub);
+      const service = new TaskService(store, factory, router, hub, BARE);
       let closed = false;
       const rig = { store, service, parent, hub, close() {
         if (closed) return;
@@ -464,7 +467,7 @@ describe("task service", () => {
       { provider: "test", id: "model" },
     ]);
     const menu: { provider: string; id: string; tier?: "cheap" }[] = [];
-    const service = new TaskService(new TaskStore(openDb(":memory:")), factory, new Router(new EventHub(), () => factory.resume("s1")), new EventHub(), { modelMenu: () => menu });
+    const service = new TaskService(new TaskStore(openDb(":memory:")), factory, new Router(new EventHub(), () => factory.resume("s1")), new EventHub(), { ...BARE, modelMenu: () => menu });
     expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
       "the live catalog (no model pinned) — --model takes a tier, a provider/id or a unique substring of one:\ntest/model",
     );
@@ -536,7 +539,7 @@ describe("task service", () => {
     stored.callbackState = "pending";
     stored.callbackNextAttemptAt = null;
     store.saveRun(stored);
-    const restarted = new TaskService(store, factory, router, hub);
+    const restarted = new TaskService(store, factory, router, hub, BARE);
     restarted.start(60_000);
     await vi.waitFor(() => expect(restarted.getRun(done.id).callbackState).toBe("delivered"));
     expect(session.systemInputs).toHaveLength(callbackCount);
@@ -1879,7 +1882,7 @@ describe("owned system actions", () => {
     action: { type: "system", name },
   });
   const instance = (handler: (signal: AbortSignal) => Promise<string>) => ({
-    modelMenu: () => [], systemActions: { "config-sync": handler },
+    ...BARE, systemActions: { "config-sync": handler },
   });
 
   it("reconciles by owner, preserves scheduling policy, and runs in process", async () => {
@@ -1918,7 +1921,7 @@ describe("owned system actions", () => {
       await expect(service.create(draft(name), name)).rejects.toThrow(/unregistered/);
     }
     for (const name of ["http", "session:s1"]) {
-      const rig = setup(fakeSession(), { modelMenu: () => [], systemActions: { [name]: handler } });
+      const rig = setup(fakeSession(), { ...BARE, systemActions: { [name]: handler } });
       await expect(rig.service.create(draft(name), name)).rejects.toThrow(/trusted owner/);
     }
     await expect(service.create(spoofed)).rejects.toThrow(/trusted owner/);
@@ -1978,7 +1981,7 @@ describe("owned system actions", () => {
     const task = await service.create(draft(), "config-sync");
     const now = Date.now();
     store.saveRun(storedRun("interrupted-system", task, now, { state: "running", result: null, finishedAt: null }));
-    const restarted = new TaskService(store, factory, router, hub);
+    const restarted = new TaskService(store, factory, router, hub, BARE);
     restarted.start(60_000);
     onTestFinished(() => restarted.stop());
     expect(restarted.getRun("interrupted-system")).toMatchObject({ state: "interrupted", error: "Pier restarted while the run was active" });

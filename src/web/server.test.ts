@@ -89,11 +89,14 @@ const SETTINGS_JSON = {
   tools: [],
   customTools: [],
   accent: "",
-  continuous: false,
   accents: ACCENTS,
   catalog: TOOLS.map((entry) => ({ ...entry, enabled: false })),
   toolsTaskId: null,
 };
+
+/** A chain with no members, for the rigs that never send to it. */
+const idleChain = (factory: AgentFactory, router: Router, hub: EventHub, db = openDb(":memory:")): MainChain =>
+  new MainChain(db, { factory, router, home: join(tmpdir(), "pier-unused-home"), ledger: () => [], roleOf: () => undefined, designs: () => [], hub });
 
 /** Scripted ConfigStore — records calls, echoes canned content. */
 function fakeConfig(): ConfigStore & { calls: string[] } {
@@ -250,7 +253,8 @@ function setup(
   const updater = update.updater
     ? { apply: update.updater.apply, problem: update.updater.problem ?? (() => null) }
     : null;
-  const tasks = new TaskService(new TaskStore(db), factory, router, hub);
+  const continuous = idleChain(factory, router, hub, db);
+  const tasks = new TaskService(new TaskStore(db), factory, router, hub, { modelMenu: () => [], continuous });
   const app = new Hono();
   const onUnlocked = vi.fn();
   // Stands in for channels/conversations.ts: session id → the IM channel that owns it.
@@ -272,6 +276,7 @@ function setup(
   };
   app.route("/", createServer({
     factory, router, hub, sessions: state, config, packages: fakePackages(), providers, settings, updates, updater, secrets, onUnlocked,
+    continuous,
     // Assembled like main.ts does: data only, never a subprocess — spawning
     // ubix is the instance layer's business.
     catalog: async () => {
@@ -592,9 +597,10 @@ describe("workbench server", () => {
       readHistory: vi.fn(async () => undefined),
     };
     const hub = new EventHub();
+    const router = new Router(hub, () => factory.resume("s2"));
     const app = createServer({
       factory,
-      router: new Router(hub, () => factory.resume("s2")),
+      router,
       hub,
       sessions: new SessionStateStore(openDb(":memory:")),
       config: fakeConfig(),
@@ -603,6 +609,7 @@ describe("workbench server", () => {
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
+      continuous: idleChain(factory, router, hub),
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
@@ -1403,6 +1410,7 @@ describe("workbench server", () => {
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
+      continuous: idleChain(factory, router, hub),
     });
     expect((await app.request("/api/sessions/nope/history")).status).toBe(404);
     expect((await app.request("/api/sessions/nope/compact", { method: "POST" })).status).toBe(404);
@@ -1431,6 +1439,7 @@ describe("workbench server", () => {
       settings: new SettingsStore(openDb(":memory:")),
       updates: new UpdateCheck("0.0.1", () => Promise.resolve("0.0.1")),
       secrets: fakeSecrets(),
+      continuous: idleChain(factory, router, hub),
     });
     const res = await app.request("/api/sessions/ghost/history");
     expect(res.status).toBe(404);
@@ -2536,10 +2545,9 @@ describe("the app shell", () => {
 
 describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
-  function chainRig(on = true, ledger: () => LedgerRun[] = () => []) {
+  function chainRig(ledger: () => LedgerRun[] = () => []) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
-    settings.setContinuous(on);
     const sessions = new Map<string, FakeSession>();
     let n = 0;
     const factory = {
@@ -2565,7 +2573,7 @@ describe("the continuous conversation's routes", () => {
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
-      enabled: () => settings.get().continuous, ledger, sessionOf: () => null, roleOf: () => undefined, designs: () => [], hub, now: () => clock.now,
+      ledger, sessionOf: () => null, roleOf: () => undefined, designs: () => [], hub, now: () => clock.now,
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
@@ -2584,17 +2592,6 @@ describe("the continuous conversation's routes", () => {
     };
     return { app, db, factory, sessions, clock, workspace, post, restarted };
   }
-
-  it("answers 404 while the switch is off, and the switch is an instance setting", async () => {
-    const { app, post } = chainRig(false);
-    expect((await app.request("/api/continuous")).status).toBe(404);
-    expect((await post("/api/continuous/messages", { text: "hi" })).status).toBe(404);
-    expect((await app.request("/api/continuous/open")).status).toBe(404);
-    const put = (body: unknown) => app.request("/api/settings", { method: "PUT", body: JSON.stringify(body) });
-    expect((await put({ continuous: "yes" })).status).toBe(400);
-    expect(await (await put({ continuous: true })).json()).toMatchObject({ continuous: true });
-    expect(await (await app.request("/api/continuous")).json()).toEqual({ chain: [] });
-  });
 
   it("answers the open items, runs joined through the ledger", async () => {
     const live: LedgerRun = { runId: "r1", name: "Build it", state: "running", targetSessionId: "s-r1", cwd: "/w", queuedAt: 1, finishedAt: null };
@@ -2626,7 +2623,7 @@ describe("the continuous conversation's routes", () => {
   });
 
   it("answers a send whose new session cannot be seeded with the reason, and creates none", async () => {
-    const { factory, post } = chainRig(true, () => {
+    const { factory, post } = chainRig(() => {
       throw new Error("database is locked");
     });
     const sent = await post("/api/continuous/messages", { text: "hi" });

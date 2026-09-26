@@ -41,9 +41,6 @@ export interface Settings {
   customTools: CustomTool[];
   /** The workbench's accent, one of `ACCENTS`; `""` is the default ramp. */
   accent: string;
-  /** One continuous conversation in front of a dispatcher session
-   *  (docs/design/10-continuous-session.md); off is today's workbench. */
-  continuous: boolean;
 }
 
 /** The presets, each with the hex of its 600 step — what the manifest and the
@@ -168,7 +165,6 @@ export class SettingsStore {
         "a list of {name, toml}",
       ) ?? [],
       accent: accent ?? "",
-      continuous: this.#value("continuous") === "1",
     };
   }
 
@@ -212,11 +208,6 @@ export class SettingsStore {
 
   setAutoUpdate(on: boolean): Settings {
     this.#set("autoUpdate", on ? "1" : "0");
-    return this.get();
-  }
-
-  setContinuous(on: boolean): Settings {
-    this.#set("continuous", on ? "1" : "0");
     return this.get();
   }
 

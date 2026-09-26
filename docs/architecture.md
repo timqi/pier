@@ -76,9 +76,9 @@ src/
   socket.ts    the Unix socket (`$PIER_HOME/pier.sock`, 0600) the `pier` CLI
                reaches the running instance through — `/resolve`, `/task` —
                every request naming its session; the bits are the auth
-  settings.ts  instance facts a human owns (public URL, model menu, auto-update
-               and continuous-session switches, which of the built-in `pier`
-               package's resources are on)
+  settings.ts  instance facts a human owns (public URL, model menu, the
+               auto-update switch, which of the built-in `pier` package's
+               resources are on)
   update.ts    whether a newer release exists and when this instance may become
                it; the install is handed to service.ts's unit
   drain.ts     graceful restart: finish running turns and outbound sends,

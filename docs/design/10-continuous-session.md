@@ -1,8 +1,7 @@
 # Continuous session
 
 The contract for one continuous conversation per instance, in front of a
-dispatcher session that routes work to task-run children: a trial behind the
-instance switch `continuous` (`settings.ts`, Settings → Instance), default off.
+dispatcher session that routes work to task-run children; every instance has it.
 Behaviour not named here is [03](03-web-workbench.md)'s,
 [04](04-im-channels.md)'s and [09](09-tasks-cli.md)'s; what is not built is
 §Not built.
@@ -20,8 +19,8 @@ child, and callbacks are the only delivery.
 | lead | a `--role lead` run's, cwd the feature's worktree, long-lived | workers only |
 | worker | any other run's launched from a session | never |
 
-- The run that made a session fixes its role for the session's life, switch
-  on or off (`createdRole`, `TaskStore.roleOf`); the gate is
+- The run that made a session fixes its role for the session's life
+  (`createdRole`, `TaskStore.roleOf`); the gate is
   [09 §Two levels](09-tasks-cli.md#two-levels-no-tree).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
   (`LEAD`), never on disk; when its session shows in the rail is
@@ -68,9 +67,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   (one-line facts), `memory/YYYY-MM-DD.md` (daily notes, local date), an
   optional `AGENTS.md` Pi loads as the cwd's own.
 - `<pier>/dispatcher.md` is injected beside `<pier>/AGENTS.md`
-  (`agentsFilesOverride`, `agent/pi.ts`) only while the switch is on and only
-  for a session whose real cwd is the home; flipping the switch recycles idle
-  sessions.
+  (`agentsFilesOverride`, `agent/pi.ts`) only for a session whose real cwd is
+  the home.
 - Repo knowledge goes in that repo's `AGENTS.md`, written by a child. Recall
   is `rg` over `memory/` and the Pi session directory; no vector store.
 
@@ -87,7 +85,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
   one at a time, so a race rotates once.
-- Compaction, decided at open (`agent/pi.ts`) while the switch is on: a
+- Compaction, decided at open (`agent/pi.ts`): a
   session in the home at 100K, a lead's or worker's at 150K (under the 200K
   price tier; a lead's state is its doc), any other at the instance's
   setting; `reserveTokens = window − cap`, never later than the instance's
@@ -164,7 +162,7 @@ error: the composer is not a shell.
   sessions, in flight or finished since a time, at most 200; the seed reads it
   since the previous head's start, `pier task runs` over the last 24h
   ([09 §`runs`](09-tasks-cli.md#runs)).
-- Callbacks and ownership follow the chain, switch on or off: a result owed to
+- Callbacks and ownership follow the chain: a result owed to
   any member goes to the head (`MainChain.chainOf` in `TaskService`), and every
   member counts as a run's launcher (`tasks/operations.ts`).
 
@@ -189,9 +187,9 @@ The routes (`/api/continuous*`), the rail, the pane and its composer are
 
 ## Not built
 
-- Phase 3, the IM DM: a platform-level switch, effective only while the
-  instance switch is on, sends a DM's top-level messages and unbound-thread
-  replies to the main session (answers in the DM's main flow), a bound
+- Phase 3, the IM DM: a platform-level switch sends a DM's top-level
+  messages and unbound-thread replies to the main session (answers in the
+  DM's main flow), a bound
   thread's replies to its session, and the chat commands bare on Slack
   (`status`, as `stop` and `settings` are) to one message in the main flow;
   group chats never change.

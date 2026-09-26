@@ -68,7 +68,7 @@ export class TaskCallbacks {
     /** Where a result owed to a session goes now: the continuous conversation's head, for a member. */
     private readonly headOf: (sessionId: string) => string = (id) => id,
     milestone?: Milestone,
-    /** The continuous conversation's head while its switch is on. */
+    /** The continuous conversation's head, null before its first message. */
     private readonly conversation: () => string | null = () => null,
   ) {
     this.outbox = new Outbox<TaskRun>(router, {

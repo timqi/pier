@@ -20,7 +20,6 @@ const EMPTY = {
   tools: [],
   customTools: [],
   accent: "",
-  continuous: false,
 };
 
 const dbPath = (): string => join(mkdtempSync(join(tmpdir(), "pier-settings-")), "pier.db");

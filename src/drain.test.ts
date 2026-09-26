@@ -267,7 +267,7 @@ const processScript = `
   const router = new Router(hub, key => factory.resume(key.conversationId));
   router.registerChannel({ id: "slack", notify: async (id, note) => notes.push({ id, ...note }), send: async () => {} });
   router.attach({ channelId: "slack", conversationId: "parent-thread" }, parent);
-  const tasks = new TaskService(store, factory, router, hub);
+  const tasks = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } });
   if (mode.startsWith("recover")) {
     const recovered = deferred();
     const complete = () => {

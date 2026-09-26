@@ -35,11 +35,10 @@ truth.
   re-reading rather than recalling. The web session header shows context used
   and how much is left.
 
-## The continuous conversation (a trial, off by default)
+## The continuous conversation
 
-- The operator's switch (Settings → Instance) makes the web one conversation:
-  the rail's **Conversation**, then **In progress**; the rest is in ⌘K. IM is
-  unchanged.
+- The web is one conversation: the rail's **Conversation**, then
+  **In progress**; the rest is in ⌘K. IM is unchanged.
 - After an idle hour, or past 60K tokens, the next message starts a fresh
   session, seeded with `$PIER_HOME/home`'s memory, the open items, its runs
   and the last exchanges.

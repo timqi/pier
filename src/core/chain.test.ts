@@ -19,7 +19,6 @@ const day = (d: Date): string =>
 
 function rig({
   runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
-  on = true,
   roles = {} as Record<string, AgentRole>,
   head = undefined as string | undefined,
   designs = [] as LedgerRun[],
@@ -62,7 +61,6 @@ function rig({
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const chain = new MainChain(db, {
     factory, router, home, hub,
-    enabled: () => on,
     ledger: (ids, since) => {
       ledger.push({ ids, since });
       return typeof runs === "function" ? runs(ids, since) : runs;

@@ -31,7 +31,7 @@ function setup() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-task-"));
   const hub = new EventHub();
   const router = new Router(hub, () => factory.resume("none"));
-  const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub);
+  const service = new TaskService(new TaskStore(openDb(":memory:")), factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } });
   return { cwd, service };
 }
 

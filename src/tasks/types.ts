@@ -40,7 +40,7 @@ export type TaskAction =
 export type SystemActions = Record<string, (signal: AbortSignal) => Promise<string>>;
 
 /** `conversation`: the continuous conversation's head when the run is
- *  prepared, nobody while its switch is off — a saved definition's default. */
+ *  prepared, nobody before its first message — a saved definition's default. */
 export type TaskCallback =
   | { type: "conversation" }
   | { type: "none" }

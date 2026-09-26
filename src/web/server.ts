@@ -157,8 +157,8 @@ export interface WebDeps {
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
   channelOf?: (sessionId: string) => string | undefined;
-  /** The continuous conversation (docs/design/10-continuous-session.md); its routes answer 404 while the switch is off. */
-  continuous?: MainChain;
+  /** The continuous conversation (docs/design/10-continuous-session.md). */
+  continuous: MainChain;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -256,8 +256,7 @@ export function createServer(
 
   // An earlier member of the continuous conversation is read off disk and
   // never opened, so it can be neither edited nor resumed.
-  const older = (id: string): boolean =>
-    continuous?.enabled() === true && (continuous.chainOf(id)?.[0] ?? id) !== id;
+  const older = (id: string): boolean => (continuous.chainOf(id)?.[0] ?? id) !== id;
   const turnsOf = async (id: string): Promise<ChatTurn[]> => {
     if (!older(id)) return (await ensure(id)).history();
     const turns = await factory.readHistory(id);
@@ -395,7 +394,7 @@ export function createServer(
     if (typeof body?.closed !== "boolean") return c.json({ error: "closed (boolean) required" }, 400);
     const id = c.req.param("id");
     // The rail's conversation row is drawn from its members; one closed would blank it.
-    if (continuous?.enabled() && continuous.chainOf(id)) return c.json({ error: "the continuous conversation stays in the rail" }, 409);
+    if (continuous.chainOf(id)) return c.json({ error: "the continuous conversation stays in the rail" }, 409);
     state.setClosed(id, body.closed);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
@@ -545,7 +544,6 @@ export function createServer(
     return c.json({ sessionId }, 202);
   });
 
-  const chainOff = (c: Context) => c.json({ error: "the continuous session is off" }, 404);
   /** A rotation re-lists every surface. */
   const reached = <T extends { rotated?: unknown }>(head: T): T => {
     if (head.rotated) hub.emitWorkspace({ type: "sessions-changed" });
@@ -553,15 +551,14 @@ export function createServer(
   };
 
   // The chain, newest first; the client pages back through it with /history.
-  app.get("/api/continuous", (c) => (continuous?.enabled() ? c.json({ chain: continuous.members() }) : chainOff(c)));
+  app.get("/api/continuous", (c) => c.json({ chain: continuous.members() }));
 
   // The rail's Open block.
-  app.get("/api/continuous/open", (c) => (continuous?.enabled() ? c.json(continuous.openItems()) : chainOff(c)));
+  app.get("/api/continuous/open", (c) => c.json(continuous.openItems()));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.
   guarded(app, "POST", "/api/continuous/messages", 400, async (c) => {
-    if (!continuous?.enabled()) return chainOff(c);
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
     const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";

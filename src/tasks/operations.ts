@@ -182,11 +182,11 @@ export async function handleTask(
   store: TaskStore,
   raw: unknown,
   callerSessionId: string,
-  chain?: TaskChain,
+  chain: TaskChain,
 ): Promise<unknown> {
   // The launching session controls a run, and so does the run's own; every
   // member of the continuous conversation counts as the one that launched it.
-  const launchers = (): string[] => chain?.chainOf(callerSessionId) ?? [callerSessionId];
+  const launchers = (): string[] => chain.chainOf(callerSessionId) ?? [callerSessionId];
   const assertOwns = (target: TaskRun): void => {
     if (!launchers().includes(target.invokedBySessionId ?? "") && target.targetSessionId !== callerSessionId) {
       throw new Error("session does not own this run");

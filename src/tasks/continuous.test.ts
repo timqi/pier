@@ -30,10 +30,8 @@ function rig() {
     readHistory: async () => undefined,
   };
   const members = ["h1", "h0"];
-  const switched = { on: true };
   const chain: TaskChain = {
     chainOf: (id) => (members.includes(id) ? members : undefined),
-    enabled: () => switched.on,
     members: () => members.map((sessionId) => ({ sessionId, startedAt: 1, reason: "first" as const })),
   };
   const hub = new EventHub();
@@ -41,7 +39,7 @@ function rig() {
   const store = new TaskStore(openDb(":memory:"));
   const service = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: chain });
   const bash = () => service.create({ name: "command", trigger: { type: "manual" }, action: { type: "bash", cwd, script: "echo done" }, timeoutSeconds: 5 });
-  return { cwd, sessions, child, service, store, bash, members, switched };
+  return { cwd, sessions, child, service, store, bash, members };
 }
 
 const stored = (id: string, task: TaskDefinition, over: Partial<TaskRun>): TaskRun => ({
@@ -86,8 +84,8 @@ describe("tasks under the continuous conversation", () => {
     service.stop();
   });
 
-  it("keeps a definition saved with callback none silent, and every definition silent with the switch off", async () => {
-    const { service, switched, cwd } = rig();
+  it("keeps a definition saved with callback none silent, and every definition silent before the conversation has a head", async () => {
+    const { service, members, cwd } = rig();
     const silent = await service.handle({ operation: "save", task: { name: "quiet", callback: { type: "none" }, action: { type: "bash", cwd, script: "true" } } }, "h1") as TaskDefinition;
     expect(service.run(silent.id, null, "cron", null, {}).callbackSessionId).toBeNull();
     // A probe that did not match is the interval passing: nothing to deliver.
@@ -95,7 +93,7 @@ describe("tasks under the continuous conversation", () => {
     const probe = await service.waitForRun(service.run(watch.id, null, "watch", null, {}).id);
     expect([probe.callbackSessionId, probe.callbackState]).toEqual(["h1", null]);
     const nightly = await service.handle({ operation: "save", task: { name: "nightly", action: { type: "bash", cwd, script: "true" } } }, "h1") as TaskDefinition;
-    switched.on = false;
+    members.length = 0;
     expect(service.run(nightly.id, null, "cron", null, {}).callbackSessionId).toBeNull();
     service.stop();
   });

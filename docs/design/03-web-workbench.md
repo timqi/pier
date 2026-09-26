@@ -18,7 +18,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/close` | body `{closed}` → keep the session out of `GET /api/sessions` (and out of the working set), or back in; returns `{ok}` and broadcasts `sessions-changed`; 409 on a continuous-conversation member. Nothing is deleted: the by-id route, the URL and search still reach it, and a human message to it clears the flag |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
-| `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md); every `/api/continuous*` route is 404 while the switch is off)* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}]}`, newest first |
+| `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md))* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}]}`, newest first |
 | `GET /api/continuous/open` | `MainChain.openItems()`: `{items: [{problem, stage, runs, live}], unlisted, designs}`, each run a ledger row (`LedgerRun`, a lead's with `workers` counted by state) |
 | `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?, command?}`, `command` naming a chat command answered without a turn (the composer drops its optimistic streaming state), 400 without text, 409 with the refusal when `/new` meets a replying head. A rotation re-lists every surface (`sessions-changed`) |
 | `GET /api/sessions/:id/turns/:index/steps` | one turn's thinking/progress/tool steps; tool args and output are fetched when its Activity group opens, while progress text and step identities remain in the snapshot |
@@ -187,8 +187,7 @@ browser keeps no second session order.
   paths.
 - Chords: ⌘⇧[ / ⌘⇧] previous / next row (wrapping); ⌘⇧O New session menu; ⌘K
   palette. All stand down under a modal.
-- **Continuous session on** (Settings → Instance): the list is the
-  **Conversation** row (the head's dot), then **In progress** — the palette's
+- The list is the **Conversation** row (the head's dot), then **In progress** — the palette's
   Running set in rail order, less the conversation's own sessions — one set,
   so the rail and ⌘K never disagree — then the open items'
   ([10 §Open items](10-continuous-session.md#open-items)) live (running,
@@ -393,9 +392,7 @@ section is one row.
   shows the server's error, which names the row and field. Instance: Public URL, Accent (a
   swatch radio group over `GET /api/settings`' `accents`; a pick sets
   `<html data-accent>` at once and `PUT {accent}` behind it, reverting on a
-  refusal), **Continuous session** (one switch, `PUT {continuous}`; a
-  refusal flips it back with the server's words), the browser's notification
-  switch, Reload.
+  refusal), the browser's notification switch, Reload.
 - **Files** (`explorer.ts`, an overlay: `#/files/<dir>`, its ✖ returns where it
   was opened from): a directory tree beside a viewer; in a git checkout the
   tree filters to the picked diff's files and unfolds to each change (up to

@@ -1,7 +1,7 @@
 // Session roles (docs/design/10-continuous-session.md §Feature lead): a worker
 // never delegates; a lead delegates, never to a lead; its workers' results wake
 // it, and only the last of a wave reaches its supervisor, as one resumed run.
-// No rig here turns the continuous switch on: the role does not need it.
+// No rig here has a continuous-conversation member: the role does not need one.
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +43,7 @@ function rig() {
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));
-  const service = new TaskService(store, factory, router, hub, { modelMenu: () => [] });
+  const service = new TaskService(store, factory, router, hub, { modelMenu: () => [], continuous: { chainOf: () => undefined, members: () => [] } });
   const agent = (name: string, role?: "lead", design?: true) => service.create({
     name, trigger: { type: "manual" },
     action: { type: "agent", session: { mode: "fresh", cwd }, prompt: `be ${name}`, ...(role ? { launch: { role, ...(design ? { design } : {}) } } : {}) },
@@ -123,7 +123,7 @@ describe("a feature lead", () => {
     service.stop();
   });
 
-  it("lists only the runs it launched, with the continuous switch off", async () => {
+  it("lists only the runs it launched, outside the continuous conversation", async () => {
     const { service, bash, leadRan } = rig();
     await leadRan();
     const task = await bash("echo w");

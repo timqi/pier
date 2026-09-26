@@ -93,7 +93,7 @@ pier task save --name nightly --bash "make check" --cwd /repo --cron "0 3 * * *"
 ```
 
 Only for schedules or roles run more than once; `--task-id` updates, restating
-every flag. Results reach the continuous conversation while it is on;
+every flag. Results reach the continuous conversation;
 `--callback-session <id>` pins a session, `--callback-session none` silences.
 `pier task list` shows definitions with `nextRun` and `lastRun`, never runs.
 

@@ -34,7 +34,7 @@ type TriggerSource = TaskRun["triggerSource"];
 type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">;
 
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
-export type TaskChain = Pick<MainChain, "chainOf" | "enabled" | "members">;
+export type TaskChain = Pick<MainChain, "chainOf" | "members">;
 type Waiter = (run: TaskRun) => void;
 
 export class TaskService {
@@ -53,23 +53,22 @@ export class TaskService {
     private readonly factory: AgentFactory,
     private readonly router: Router,
     private readonly hub: EventHub,
-    /** Structural: tasks/ must not import settings.ts. Absent in bare test rigs. */
-    private readonly instance?: {
+    /** Structural: tasks/ must not import settings.ts. */
+    private readonly instance: {
       modelMenu(): { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
-      continuous?: TaskChain;
+      continuous: TaskChain;
     },
   ) {
-    const headOf = (id: string): string => instance?.continuous?.chainOf(id)?.[0] ?? id;
-    const conversation = (): string | null =>
-      instance?.continuous?.enabled() ? instance.continuous.members()[0]?.sessionId ?? null : null;
+    const headOf = (id: string): string => instance.continuous.chainOf(id)?.[0] ?? id;
+    const conversation = (): string | null => instance.continuous.members()[0]?.sessionId ?? null;
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable, (runId) => {
       const run = store.getRun(runId);
       if (run) this.status(run);
     });
-    this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
+    this.definitions = new TaskDefinitions(store, factory, router, hub, instance.systemActions);
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf, this.milestone, conversation);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
@@ -437,7 +436,7 @@ export class TaskService {
 
   /** What `pier task` asks, under the calling session's identity. */
   handle(raw: unknown, callerSessionId: string): Promise<unknown> {
-    return handleTask(this, this.definitions, this.store, raw, callerSessionId, this.instance?.continuous);
+    return handleTask(this, this.definitions, this.store, raw, callerSessionId, this.instance.continuous);
   }
 
   /** An agent picks from names that exist right now, never from memory. */
@@ -445,7 +444,7 @@ export class TaskService {
     source: "menu" | "catalog";
     models: { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
   }> {
-    const menu = this.instance?.modelMenu() ?? [];
+    const menu = this.instance.modelMenu();
     if (menu.length) return { source: "menu", models: menu };
     return { source: "catalog", models: await this.factory.availableModels() };
   }

@@ -177,7 +177,7 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
 const branchMessages = (sessionManager: SessionManager): PiMessage[] =>
   sessionManager.getBranch().flatMap((entry) => sessionEntryToContextMessages(entry)) as PiMessage[];
 
-/** Where a session compacts while the continuous switch is on — a main session
+/** Where a session compacts — a main session
  *  and a session a run launched from a session made (a lead or a worker, which
  *  never rotate); above 200K input, 1M-context models price higher. */
 const MAIN_COMPACTION_CAP = 100_000;
@@ -503,7 +503,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     private readonly providerConfig: PiConfigStore = new PiConfigStore(),
     private readonly pinned: () => ModelRef[] = () => [],
     /** The built-in `pier` package's one switch list: Pier's own skills switched off. */
-    private readonly pier: () => { skillsOff: string[]; continuous?: boolean } = () => ({ skillsOff: [] }),
+    private readonly pier: () => { skillsOff: string[] } = () => ({ skillsOff: [] }),
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
@@ -766,11 +766,10 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
 
   private async openSnapshot(sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
     const { cwd, role } = opts;
-    // While the switch is on, the home is where the continuous conversation's
-    // sessions run: only they dispatch, and they compact at main's cap.
-    const continuous = this.pier().continuous === true;
-    const main = continuous && realPath(cwd) === realPath(pierPath("home"));
-    const cap = main ? MAIN_COMPACTION_CAP : continuous && role ? CHILD_COMPACTION_CAP : undefined;
+    // The home is where the continuous conversation's sessions run: only they
+    // dispatch, and they compact at main's cap.
+    const main = realPath(cwd) === realPath(pierPath("home"));
+    const cap = main ? MAIN_COMPACTION_CAP : role ? CHILD_COMPACTION_CAP : undefined;
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.
     await this.credentials?.assertUnlocked();

@@ -130,7 +130,6 @@ const router = new Router(hub, (key) => {
 }, (key) => conversations.get(key), (id) => conversations.keyOf(id));
 const chain = new MainChain(db, {
   factory, router, home: pierPath("home"),
-  enabled: () => settings.get().continuous,
   ledger: (ids, since) => tasks.ledger(ids, since),
   sessionOf: (id) => taskStore.getRun(id)?.targetSessionId ?? null,
   roleOf: (id) => taskStore.roleOf(id),

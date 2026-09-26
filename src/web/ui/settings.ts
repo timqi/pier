@@ -6,7 +6,7 @@ import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
 import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
-import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus, swatches, toggle } from "./form.js";
+import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus, swatches } from "./form.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { createPasskeysCard } from "./passkeys.js";
@@ -156,33 +156,6 @@ export function createSettingsView(
     accentStatus,
   );
 
-  // --- Instance: continuous session ---------------------------------------------------
-
-  const continuousStatus = h("span", "text-[11.5px]", "");
-  const continuousBox = h("div", "");
-  function renderContinuous(on: boolean): void {
-    continuousBox.replaceChildren(toggle(
-      "One continuous conversation",
-      "The rail becomes that conversation and what is in progress; it dispatches real work to task runs. Every other session stays reachable through ⌘K.",
-      on,
-      (next) => void (async () => {
-        setStatus(continuousStatus, "saving", "saving…");
-        const res = await sendJson("/api/settings", { continuous: next }, "PUT");
-        if (res.ok) return setStatus(continuousStatus, "saved", next ? "On." : "Off — the rail lists every session again.");
-        // The server is the truth: a switch that silently did not take is worse than one that visibly failed.
-        renderContinuous(!next);
-        setStatus(continuousStatus, "failed", await failure(res, "Could not save"));
-      })(),
-    ));
-  }
-
-  const continuousCard = card(
-    "Continuous session",
-    "A trial: one conversation per instance in front of a dispatcher session, which rotates to a fresh session after an idle hour.",
-    continuousBox,
-    continuousStatus,
-  );
-
   // --- Security: password ----------------------------------------------------------
 
   const current = input("", "password");
@@ -327,7 +300,6 @@ export function createSettingsView(
     "mx-auto flex max-w-2xl flex-col gap-6",
     urlCard,
     accentCard,
-    continuousCard,
     // Per browser, not per instance — but this is the page a person opens to
     // configure Pier, and a second place for one toggle would be a third copy
     // of the same vocabulary.
@@ -357,7 +329,7 @@ export function createSettingsView(
   function loadInstance(): void {
     notifications.load();
     void (async () => {
-      const got = await getJson<{ publicUrl: string; accent: string; accents: Record<string, string>; continuous: boolean }>(
+      const got = await getJson<{ publicUrl: string; accent: string; accents: Record<string, string> }>(
         "/api/settings",
         "Could not load settings",
       );
@@ -367,8 +339,6 @@ export function createSettingsView(
       storedAccent = got.value.accent;
       renderAccent(got.value.accents);
       accentStatus.textContent = "";
-      renderContinuous(got.value.continuous);
-      continuousStatus.textContent = "";
     })();
   }
 

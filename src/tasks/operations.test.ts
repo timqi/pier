@@ -98,7 +98,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] 
       return task;
     },
   } as unknown as TaskDefinitions;
-  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1");
+  const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1", { chainOf: () => undefined, members: () => [] });
   return Object.assign(ask, { created, changed });
 }
 
