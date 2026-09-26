@@ -56,7 +56,7 @@ async function queueResponse(action: () => Promise<unknown>, status: 200 | 202 =
     return Response.json(await action(), { status });
   } catch (err) {
     const code = err instanceof QueueOperationError
-      ? err.reason === "draining" ? 503 : err.reason === "missing" ? 404 : 409
+      ? err.reason === "draining" ? 503 : 409
       : 404;
     return Response.json({ error: String(err) }, { status: code });
   }
@@ -429,8 +429,6 @@ export function createServer(
         context: session.contextUsage ?? null,
         thinkingLevel: session.thinkingLevel,
         queue: { ...queue, parked: parkedMessages?.(id) ?? [] },
-        queueRecovery: router.recoveryOf(id),
-        queueUncertain: router.queueUncertain(id),
         backgroundRuns: backgroundRuns?.(id) ?? [],
         skills: session.skills(),
       });
@@ -605,7 +603,7 @@ export function createServer(
     return c.json({ ok: true }, 202);
   });
 
-  // Core owns exclusion and retains originals through the asynchronous handoff.
+  // Core owns exclusion and reports a failed handoff with the originals.
   guarded(app, "POST", "/api/sessions/:id/queue/deliver", 404, async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json().catch(() => null);
@@ -623,13 +621,6 @@ export function createServer(
       return { messages: [...steering, ...followUp] };
     });
   });
-
-  guarded(app, "POST", "/api/sessions/:id/queue/recovery/:batchId/ack", 404, async (c) =>
-    queueResponse(async () => {
-      router.acknowledgeRecovery(c.req.param("id"), c.req.param("batchId"));
-      return { ok: true };
-    }),
-  );
 
   // Refused while streaming: Pi's compaction aborts a running turn, and losing
   // one is not what the button offered. The result arrives on the stream as

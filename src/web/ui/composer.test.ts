@@ -1,6 +1,6 @@
 // Real queue controls with deferred HTTP, drawn into the shell's own markup.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { button, fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
+import { fake, installPage, type FakeDocument, type FakeElement } from "./dom.testkit.js";
 
 const state = vi.hoisted(() => ({
   appendTurn: vi.fn(), fetch: vi.fn(), reload: vi.fn(), id: "a" as string | null, visible: true,
@@ -64,12 +64,8 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function click(control: "recall" | "ack"): void {
-  if (control === "recall") node("#queue-recall").onclick!();
-  else {
-    composer.renderRecovery([{ id: "batch", steering: ["original"], followUp: [], status: "uncertain" }]);
-    void button(doc.body, "Acknowledge")!.onclick!();
-  }
+function click(): void {
+  node("#queue-recall").onclick!();
 }
 
 function type(text: string): void {
@@ -96,7 +92,7 @@ async function recallPending(stage: "fetch" | "body") {
   const body = deferred<{ messages: string[] }>();
   const json = vi.fn(() => body.promise);
   state.fetch.mockReturnValueOnce(stage === "fetch" ? response.promise : Promise.resolve({ ok: true, json }));
-  click("recall");
+  click();
   await settled();
   if (stage === "body") expect(json).toHaveBeenCalledOnce();
   return async (messages: string[]) => {
@@ -111,7 +107,7 @@ async function recallPending(stage: "fetch" | "body") {
 // pays back — measured that way, --dock-h stayed 34px short and the last
 // transcript row sat under the input pill.
 it("measures the dock's parts as border-box", () => {
-  expect(state.observed.length).toBe(3);
+  expect(state.observed.length).toBe(2);
   expect(state.observed).toEqual(state.observed.map(() => ({ box: "border-box" })));
 });
 
@@ -284,9 +280,8 @@ describe("queue recall drafts", () => {
 
   it("coalesces same-session clicks through body parsing and allows the next recall", async () => {
     const finish = await recallPending("body");
-    click("recall");
-    composer.renderRecovery([], true);
-    button(doc.body, "Recall queue")!.onclick!();
+    click();
+    click();
     expect(state.fetch).toHaveBeenCalledOnce();
     await finish(["first"]);
     const next = await recallPending("fetch");
@@ -336,20 +331,9 @@ describe("parked task messages", () => {
 });
 
 describe("queue control failures", () => {
-  it("offers the existing recall action from an empty acknowledged pause notice", async () => {
-    composer.renderQueue([], []);
-    composer.renderRecovery([], true);
-    expect(doc.body.textContent).toContain("Automatic queue paused: acceptance unknown (in memory)");
-    const recall = button(doc.body, "Recall queue")!;
-    state.fetch.mockResolvedValueOnce(Response.json({ messages: [] }));
-    recall.onclick!();
-    await settled();
-    expect(state.fetch).toHaveBeenCalledWith("/api/sessions/a/queue/recall", { method: "POST" });
-    expect(state.appendTurn).not.toHaveBeenCalled();
-  });
-  it.each(["recall", "ack"] as const)("shows the %s conflict reason", async (control) => {
+  it("shows the recall conflict reason", async () => {
     state.fetch.mockResolvedValueOnce(Response.json({ error: "Queue operation in progress" }, { status: 409 }));
-    click(control);
+    click();
     await settled();
     expect(state.appendTurn).toHaveBeenCalledWith("error", "Queue operation in progress");
   });
@@ -359,7 +343,7 @@ describe("queue control failures", () => {
     composer.renderQueue([], ["queued"]);
     const rows = onScreen("#queue-rows");
     state.fetch.mockResolvedValueOnce(Response.json({ error: "Queue operation in progress" }, { status: 409 }));
-    click("recall");
+    click();
     await settled();
     expect(node("#input").value).toBe("draft");
     expect(same(rows, onScreen("#queue-rows"))).toBe(true);
@@ -368,11 +352,11 @@ describe("queue control failures", () => {
     expect(node("#input").value).toBe("draft\nqueued");
   });
 
-  it.each(["recall", "ack"] as const)("does not put a delayed %s error body in another session", async (control) => {
+  it("does not put a delayed recall error body in another session", async () => {
     let finish!: (value: unknown) => void;
     const json = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
     state.fetch.mockResolvedValueOnce({ ok: false, json });
-    click(control);
+    click();
     await settled();
     expect(json).toHaveBeenCalledOnce();
     state.id = "b";

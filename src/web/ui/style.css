@@ -318,14 +318,14 @@ html {
 /* The transcript runs the full pane and the glass chrome floats over it, so a
    message slides under the bar and the dock instead of being cut off at
    their edges — the same on a phone as on a desktop. One
-   column, four rows: the heading pins to the top of row 1, the dock (queue,
-   recovery, composer) owns rows 2–4 by height, and the transcript spans all
-   four, padding its ends by what covers them — the heading's fixed height,
+   column, three rows: the heading pins to the top of row 1, the dock (queue,
+   composer) owns rows 2–3 by height, and the transcript spans all
+   three, padding its ends by what covers them — the heading's fixed height,
    and the dock's live one (composer.ts). */
 main {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   /* What the floating heading covers: its 8px top inset plus the 3rem height
      both of them are (`h-12` on the bar, the height rule below on the rest).
      Everything that pads by the heading reads it from here — the dock's own
@@ -338,15 +338,14 @@ main > * { grid-column: 1; }
 main > section, #turns { grid-row: 1 / -1; }
 #bar { grid-row: 1; align-self: start; }
 #queue-panel { grid-row: 2; }
-#recovery-panel { grid-row: 3; }
-#composer { grid-row: 4; }
-:is(#bar, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
-/* The two panels are cards on the dock, not bars over the transcript: the
+#composer { grid-row: 3; }
+:is(#bar, #queue-panel, #composer) { position: relative; z-index: 1; }
+/* The queue panel is a card on the dock, not a bar over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the
-   composer's top padding already leaves between the stack and the input.
-   Attaching them to the pill instead would have to unround its top corners
+   composer's top padding already leaves between it and the input.
+   Attaching it to the pill instead would have to unround its top corners
    and hide its top border in two more states, for a seam either way. */
-#queue-panel, #recovery-panel {
+#queue-panel {
   width: calc(100% - 2rem);
   max-width: 58rem;
   margin-inline: auto;
@@ -354,7 +353,6 @@ main > section, #turns { grid-row: 1 / -1; }
   border-radius: 1.25rem;
   box-shadow: var(--glass-shadow);
 }
-#queue-panel:not(.hidden) + #recovery-panel { margin-top: 0.5rem; }
 
 /* Desktop has the width to keep title, tabs and action on one line, so the
    head is exactly the bar's strip: one row, and its floor is its height. */
@@ -425,11 +423,10 @@ main {
      heat-map marks are sized from the diff, so the floor may not reach them. */
   #files-view :is(summary, button:not(.map-mark), a.btn) { min-height: 44px; }
   #files-view .icon-btn { min-width: 44px; }
-  /* The dock's cards are on the same thumb: the queue's whole-queue actions and
-     the recovery card's buttons. Their header row is a fixed cursor height, so
-     it gives that up rather than clipping what now stands in it. */
-  :is(#queue-panel, #recovery-panel) button { min-height: 44px; }
-  #queue-panel button { min-width: 44px; }
+  /* The dock's card is on the same thumb: the queue's whole-queue actions. Its
+     header row is a fixed cursor height, so it gives that up rather than
+     clipping what now stands in it. */
+  #queue-panel button { min-height: 44px; min-width: 44px; }
   #queue-panel > div:first-child { height: auto; }
   /* Chat steps: the group head is a control; its full-width log rows take a
      lower floor, packed, and the log shows more of them, or a 256px box holds
@@ -456,7 +453,7 @@ main {
    amber the send button, the label and the queue actions already carry. Solid,
    for the reason a menu is — these are messages, and a transcript coming
    through the text you are about to send is noise. */
-#queue-panel, #recovery-panel {
+#queue-panel {
   background: color-mix(in oklab, var(--color-amber-50) 55%, var(--color-white));
   border-color: var(--glass-edge);
 }
@@ -707,7 +704,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: scale(0.95); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.glass, .glass-menu, #bar, #queue-panel, #recovery-panel, .pagehead) {
+  :is(.glass, .glass-menu, #bar, #queue-panel, .pagehead) {
     background: var(--color-white);
     backdrop-filter: none;
     border-color: var(--color-neutral-400);
@@ -717,10 +714,10 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 
 @media (width < 48rem) {
   #composer { --composer-control-size: 2.25rem; padding-inline: 0.75rem; }
-  /* The cards take the composer's inset, which is narrower here than the 1rem
+  /* The card takes the composer's inset, which is narrower here than the 1rem
      its px-4 leaves above md — two edges a few pixels apart in the same dock
      read as a misalignment, not as two elements. */
-  #queue-panel, #recovery-panel { width: calc(100% - 1.5rem); }
+  #queue-panel { width: calc(100% - 1.5rem); }
   /* At this width the meta chips do not fit beside a session's name, so they
      wrap to a second line of the bar, and only when they are the kind that has
      to be seen without opening anything (data-urgent, session-header.ts). The

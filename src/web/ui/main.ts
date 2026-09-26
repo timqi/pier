@@ -34,7 +34,6 @@ import {
   markOptimisticUser,
   reconcileOptimisticUser,
   renderQueue,
-  renderRecovery,
   restoreDraft,
   saveDraft,
   send,
@@ -75,7 +74,6 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
-  QueueRecovery,
   SessionEvent,
   SessionState,
   ThinkingLevel,
@@ -93,8 +91,6 @@ interface SessionSnapshot {
   context: ContextUsage | null;
   thinkingLevel: ThinkingLevel;
   queue: { steering: string[]; followUp: string[]; parked: ParkedMessage[] };
-  queueRecovery: QueueRecovery[];
-  queueUncertain: boolean;
   backgroundRuns: BackgroundRun[];
   skills: { name: string; description: string }[];
 }
@@ -380,9 +376,6 @@ function handleEvent(e: SessionEvent): void {
     case "queue-state":
       renderQueue(e.steering, e.followUp);
       break;
-    case "queue-recovery":
-      renderRecovery(e.batches, e.uncertain);
-      break;
     case "context-compacted":
       // The transcript keeps no trace of a compaction, so this line is the
       // only place the button's effect — or an automatic one — is ever seen.
@@ -494,7 +487,6 @@ async function select(id: string): Promise<void> {
 function resetPane(): void {
   resetChat();
   renderQueue([], [], []);
-  renderRecovery([]);
   setSkills([]);
   resetHeaderState();
   turnOpen = false;
@@ -535,7 +527,6 @@ async function loadSession(id: string, keep = false): Promise<void> {
   turnOpen = snap.state === "streaming";
   setState(snap.state);
   renderQueue(snap.queue.steering, snap.queue.followUp, snap.queue.parked);
-  renderRecovery(snap.queueRecovery, snap.queueUncertain);
   setSkills(snap.skills);
   // meta is assistant-only (core/types.ts), so the last one that carries it is
   // the last reply — no role test, and none of Array#findLast (web target).

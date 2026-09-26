@@ -31,7 +31,6 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/abort` | abort the current run |
 | `POST /api/sessions/:id/queue/deliver` | body `{mode:"steer"\|"restart"}` → clear the queue and re-dispatch it: steer into the running turn, or abort the turn and send as a fresh prompt. 202 with `{delivered}`, 409 if the queue is empty |
 | `POST /api/sessions/:id/queue/recall` | clear pending queue, returns `{messages}` for composer restore |
-| `POST /api/sessions/:id/queue/recovery/:batchId/ack` | acknowledge a failed promotion batch (architecture.md, queue promotion recovery): the copy leaves the history snapshot; returns `{ok}`, 404 for an unknown batch, 409 while its submission has not settled |
 | `GET /api/sessions/:id/files?path=` | one file by absolute path for the chat's previews and attachment cards; 400 without `path`, 404 when not a file, 413 over the size cap it shares with `fs.ts` |
 | `GET /api/search?q=` | content hits for the palette (below): `{hits}`, empty for an empty query |
 | `POST /api/sessions/:id/compact` | compact the transcript now (API only; no session-menu action). 202 when it starts; 409 while a turn runs, and 409 again when the seam says it is already compacting — relayed as itself, not flattened to a 404. The one system line it leaves in the transcript is the only trace a compaction leaves anywhere (§5), automatic ones included |

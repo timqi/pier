@@ -14,7 +14,6 @@ const h = vi.hoisted(() => ({
   renderSnapshot: vi.fn(),
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
-  renderRecovery: vi.fn(),
   setSkills: vi.fn(),
   appendDivider: vi.fn(),
   appendPager: vi.fn(),
@@ -33,7 +32,7 @@ vi.mock("./composer.js", () => ({
   clearOptimistic: vi.fn(), dropParked: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
-  renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
+  renderQueue: vi.fn(), restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
 }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
 vi.mock("./session-header.js", () => ({
@@ -79,7 +78,7 @@ function deferred<T = Response>() {
 }
 const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
   turns: [{ role: "user", text }], lastSeq, epoch, model: null, state: "idle",
-  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [], parked: [] }, queueRecovery: [], queueUncertain: false, backgroundRuns: [], skills: [],
+  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [], parked: [] }, backgroundRuns: [], skills: [],
 });
 const latest = () => Stream.all.at(-1)!;
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -123,19 +122,6 @@ it("orders the sessions by birth, newest first, once for every surface", () => {
 });
 
 describe("session loads", () => {
-  it("restores queue recovery from the snapshot and reconciles it from the same event stream", async () => {
-    const batch = { id: "batch", steering: ["[Ada<U1>]\nfirst", "second"], followUp: [], status: "uncertain" };
-    const response = await snapshot("loaded").json();
-    h.history.mockResolvedValueOnce(Response.json({ ...response, queueRecovery: [batch], queueUncertain: true }));
-    h.drawer.select("a");
-    await settled();
-    expect(h.renderRecovery).toHaveBeenLastCalledWith([batch], true);
-    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 1, ts: 1, type: "queue-recovery", batches: [], uncertain: true }) });
-    expect(h.renderRecovery).toHaveBeenLastCalledWith([], true);
-    latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 2, ts: 1, type: "queue-recovery", batches: [], uncertain: false }) });
-    expect(h.renderRecovery).toHaveBeenLastCalledWith([], false);
-  });
-
   it("hands the snapshot's skills to the composer, and clears them with the pane", async () => {
     const skills = [{ name: "pier-tasks", description: "Delegate." }];
     h.history.mockResolvedValueOnce(Response.json({ ...await snapshot("loaded").json(), skills }));

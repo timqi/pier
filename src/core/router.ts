@@ -1,7 +1,6 @@
 // Conversation → session routing plus event wiring. In-memory on purpose:
 // the durable chat → session map lives in channels/conversations.ts.
 
-import { randomUUID } from "node:crypto";
 import { logger } from "../log.js";
 import { EventHub } from "./hub.js";
 import { SenderPrefix, withPrefix } from "./identity.js";
@@ -13,7 +12,6 @@ import type {
   ConversationKey,
   InboundMessage,
   ModelRef,
-  QueueRecovery,
   SessionState,
 } from "./types.js";
 
@@ -46,7 +44,7 @@ interface Attached {
 }
 
 export class QueueOperationError extends Error {
-  constructor(readonly reason: "busy" | "empty" | "draining" | "missing", message: string) {
+  constructor(readonly reason: "busy" | "empty" | "draining", message: string) {
     super(message);
   }
 }
@@ -137,7 +135,7 @@ export class Router {
     // Snapshot: the loop awaits dispose(), and the map may change meanwhile.
     // oxlint-disable-next-line unicorn/no-useless-spread
     for (const [id, attached] of [...this.bySession]) {
-      if (this.queueOperations.has(id) || this.recoveries.get(id)?.some((b) => b.status === "submitting")) continue;
+      if (this.queueOperations.has(id) || this.submitting.has(id)) continue;
       if (!includeWatched && this.hub.hasSubscribers(id)) continue;
       if (now - attached.activeAt < ttlMs) continue;
       const touched = attached.touched;
@@ -319,35 +317,9 @@ export class Router {
 
   private readonly queueOperations = new Set<string>();
   private readonly promotionRequested = new Set<string>();
-  private readonly recoveries = new Map<string, QueueRecovery[]>();
-  // Latest failed batch id, so a clear cannot erase a newer rejection that
-  // arrived while it awaited the backend.
-  private readonly uncertaintyHeld = new Map<string, string>();
-
-  queueUncertain(sessionId: string): boolean {
-    return this.uncertaintyHeld.has(sessionId);
-  }
-
-  recoveryOf(sessionId: string): QueueRecovery[] {
-    return structuredClone(this.recoveries.get(sessionId) ?? []);
-  }
-
-  private recoveryChanged(sessionId: string): void {
-    if (!this.recoveries.get(sessionId)?.length) this.recoveries.delete(sessionId);
-    this.hub.emit(sessionId, {
-      type: "queue-recovery", batches: this.recoveryOf(sessionId), uncertain: this.queueUncertain(sessionId),
-    });
-  }
-
-  acknowledgeRecovery(sessionId: string, batchId: string): void {
-    const batches = this.recoveries.get(sessionId);
-    const batch = batches?.find((b) => b.id === batchId);
-    if (!batch) throw new QueueOperationError("missing", "No such recovery batch");
-    if (batch.status === "submitting") throw new QueueOperationError("busy", "Submission has not settled");
-    this.recoveries.set(sessionId, batches!.filter((b) => b !== batch));
-    this.promotionRequested.delete(sessionId);
-    this.recoveryChanged(sessionId);
-  }
+  // Promotions launched but not settled, per session: automatic promotion
+  // waits for them, and eviction must not dispose a preflight.
+  private readonly submitting = new Map<string, number>();
 
   /** Only queue mutation holds this lock; a running turn does not, so manual
    *  controls stay available while it runs. */
@@ -368,9 +340,7 @@ export class Router {
 
   async recallQueue(sessionId: string): Promise<{ steering: string[]; followUp: string[] }> {
     return this.useQueue(sessionId, async (session) => {
-      const held = this.uncertaintyHeld.get(sessionId);
       const queue = await session.clearQueue();
-      if (this.uncertaintyHeld.get(sessionId) === held && this.uncertaintyHeld.delete(sessionId)) this.recoveryChanged(sessionId);
       if (queue.steering.length || queue.followUp.length) this.forgetSender(sessionId);
       return queue;
     });
@@ -380,31 +350,23 @@ export class Router {
     if (this.draining) throw new QueueOperationError("draining", "Pier is restarting; queued messages were not submitted");
   }
 
+  /** Once cleared, the originals exist only here: a failure hands them back
+   *  to the conversation with the error, and nothing is kept for a resend. */
   async deliverQueue(sessionId: string, mode: "steer" | "restart" | "auto"): Promise<string> {
-    let retained = false;
+    let cleared = false;
     try {
       this.checkQueueDrain();
       return await this.useQueue(sessionId, async (session) => {
         this.checkQueueDrain();
-        if (mode === "auto" && (session.state !== "idle" || this.queueUncertain(sessionId) || this.recoveries.get(sessionId)?.length)) return "";
-        const held = this.uncertaintyHeld.get(sessionId);
+        if (mode === "auto" && session.state !== "idle") return "";
         const queue = await session.clearQueue();
-        if (mode !== "auto" && this.uncertaintyHeld.get(sessionId) === held && this.uncertaintyHeld.delete(sessionId)) this.recoveryChanged(sessionId);
         if (!queue.steering.length && !queue.followUp.length) throw new QueueOperationError("empty", "Queue is empty");
-        const batch: QueueRecovery = { id: randomUUID(), ...queue, status: "submitting" };
-        this.recoveries.set(sessionId, [...(this.recoveries.get(sessionId) ?? []), batch]);
-        retained = true;
-        this.recoveryChanged(sessionId);
-        const text = [...batch.steering, ...batch.followUp].join("\n");
-        let invoked = false;
+        cleared = true;
+        const text = [...queue.steering, ...queue.followUp].join("\n");
         const failed = (err: unknown): void => {
           this.forgetSender(sessionId);
           this.promotionRequested.delete(sessionId);
-          batch.status = invoked ? "uncertain" : "not-submitted";
-          if (invoked) this.uncertaintyHeld.set(sessionId, batch.id);
-          batch.error = String(err);
-          this.recoveryChanged(sessionId);
-          this.reportTo(sessionId, `Queue promotion failed (${batch.status}); automatic queue paused, originals remain available in queue recovery: ${String(err)}`);
+          this.reportTo(sessionId, `Queued messages were not delivered — send them again: ${String(err)}\n\n${text}`);
         };
         try {
           this.checkQueueDrain();
@@ -412,13 +374,15 @@ export class Router {
           this.checkQueueDrain();
           // Not via dispatch: the text was headed at original dispatch, and a
           // second pass could attribute these words to the operator.
-          invoked = true;
           const submitted = mode === "steer" && session.state === "streaming"
             ? session.steer(text) : session.prompt(text);
-          void submitted.then(() => {
-            this.recoveries.set(sessionId, (this.recoveries.get(sessionId) ?? []).filter((b) => b !== batch));
-            this.recoveryChanged(sessionId);
-          }, failed).finally(() => this.resumePromotion(sessionId));
+          this.submitting.set(sessionId, (this.submitting.get(sessionId) ?? 0) + 1);
+          void submitted.catch(failed).finally(() => {
+            const left = this.submitting.get(sessionId)! - 1;
+            if (left) this.submitting.set(sessionId, left);
+            else this.submitting.delete(sessionId);
+            this.resumePromotion(sessionId);
+          });
           return text;
         } catch (err) {
           failed(err);
@@ -426,7 +390,7 @@ export class Router {
         }
       }, mode === "auto" ? this.conversationOf(sessionId) : undefined);
     } catch (err) {
-      if (!retained && !(err instanceof QueueOperationError && (err.reason === "busy" || err.reason === "empty"))) {
+      if (!cleared && !(err instanceof QueueOperationError && (err.reason === "busy" || err.reason === "empty"))) {
         this.reportTo(sessionId, `Could not promote queued messages: ${String(err)}`);
       }
       throw err;
@@ -445,9 +409,7 @@ export class Router {
   private resumePromotion(sessionId: string): void {
     // queue_update precedes the backend's enqueue. Never clear it reentrantly.
     queueMicrotask(() => {
-      if (!this.promotionRequested.has(sessionId) || this.queueOperations.has(sessionId)) return;
-      // Retained failures require a human decision, not an automatic resend.
-      if (this.queueUncertain(sessionId) || this.recoveries.get(sessionId)?.length) return;
+      if (!this.promotionRequested.has(sessionId) || this.queueOperations.has(sessionId) || this.submitting.has(sessionId)) return;
       this.promotionRequested.delete(sessionId);
       const attached = this.bySession.get(sessionId);
       if (!attached || attached.session.state !== "idle") return;

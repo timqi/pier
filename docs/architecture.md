@@ -193,20 +193,10 @@ mirror them. The seams:
   Explicit `mode` always wins and takes the text verbatim: IM sends steer for
   every message, so a `!` there is content. This is the whole policy; do not
   add options.
-- **Queue promotion recovery** (`core/router.ts`): promotions (manual,
-  automatic, recall) exclude each other only through queue removal, optional
-  abort and submission launch — never for a whole turn — and retain the
-  original queue arrays until the submission promise settles. Failure before
-  invocation is `not-submitted`; rejection after is `uncertain`. Failed batches
-  stay outside the agent queue, visible in the event stream and history
-  snapshot, until acknowledged; recovery copies the exact messages without an
-  operator prefix and never resends automatically. Records are memory-only:
-  not crash-durable, not exactly-once. Unresolved recovery holds automatic
-  promotion only. Post-invocation rejection also sets one memory-only
-  uncertainty hold per session: ACK removes the copy, not the hold; only a
-  manual deliver/recall whose queue clear succeeds removes it. The recovery
-  event carries the hold, and its pause notice offers recall even for an empty
-  live queue.
+- **Queue promotion** (`core/router.ts`): manual, automatic and recall
+  exclude each other only for the queue clear, optional abort and submission
+  launch — never for a whole turn. A failed promotion reports the error with
+  the original text to the conversation (`reportTo`) and keeps nothing.
 - **Event hub** (`core/hub.ts`): per-session monotonic `seq`, in-memory ring
   buffer (last 1000 events) for SSE replay via `Last-Event-ID`, synchronous
   fan-out. Text deltas are fanned out but not buffered; `turn-end` carries the
