@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
 import { MainChain, renderOpenItems } from "./chain.js";
+import { agoLabel } from "./reply.js";
 import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS, NOT_IN_LEDGER } from "./types.js";
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
@@ -21,6 +22,7 @@ function rig({
   on = true,
   roles = {} as Record<string, AgentRole>,
   head = undefined as string | undefined,
+  designs = [] as LedgerRun[],
 } = {}) {
   const home = join(mkdtempSync(join(tmpdir(), "pier-chain-")), "home");
   const db = openDb(":memory:");
@@ -65,6 +67,7 @@ function rig({
       return typeof runs === "function" ? runs(ids, since) : runs;
     },
     roleOf: (id) => roles[id],
+    designs: () => designs,
     now: () => clock.now,
   });
   /** A head already in the chain, as a restart finds it: on disk, not live. */
@@ -291,6 +294,22 @@ describe("the open items", () => {
       "- Build it — running 5m",
       "- Review src/auth — failed 2h ago",
     ].join("\n"));
+  });
+
+  // A design lead's turn ends on the user; until it reports `Design final:` it is theirs to decide.
+  it("lists the designs waiting on the user last, each linking its session from `/status`", async () => {
+    const design = run("d1abcdefgh", { name: "Rail redesign", state: "succeeded", targetSessionId: "s-d1", finishedAt: 0 });
+    const r = rig({ designs: [design] });
+    const now = r.clock.now;
+    r.item("model menu", "merged", [], 1);
+    expect(renderOpenItems(r.chain.openItems(), now)).toBe([
+      "Open",
+      "- model menu — merged",
+      "Designs for you to finalize",
+      `- Rail redesign · run d1abcdef… succeeded ${agoLabel(0, now)}`,
+    ].join("\n"));
+    await r.say("/status");
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.origin).toEqual({ kind: "chat-command", command: "status", sessions: { d1abcdefgh: "s-d1" } });
   });
 
   it("says nothing is open when nothing is, and asks no ledger before the first head", () => {

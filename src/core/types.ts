@@ -205,6 +205,9 @@ export interface OpenItems {
   items: { problem: string; stage: string; runs: OpenRun[] }[];
   /** Chain runs no item names: in flight, or not `succeeded` in the last 24h. */
   unlisted: OpenRun[];
+  /** Design leads that have not reported `Design final:` and are not closed,
+   *  by their creating run: the user decides when each is final. */
+  designs: LedgerRun[];
 }
 
 /** The `state` of a run an item names that the ledger no longer holds; its `name` is the id. */

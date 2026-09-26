@@ -36,6 +36,8 @@ export interface SessionInfo {
   phase?: LeadPhase;
   /** That lead's: a run targeting its session is queued or running. */
   runLive?: true;
+  /** A design lead's that has not reported `Design final:`: the user finalizes it. */
+  designOpen?: true;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -117,13 +119,13 @@ const waitingForYou = (s: SessionInfo): boolean => s.unread;
 export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
 
 /** A session with something going on in it: running, waiting for a look,
- *  subagents in flight, or a lead's run queued — what the dot marks, and what
- *  the palette lists first. */
+ *  subagents in flight, a lead's run queued, or a design waiting on the user
+ *  to finalize — what the dot marks, and what the palette lists first. */
 export const isLive = (s: SessionInfo): boolean =>
-  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.runLive === true;
+  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.runLive === true || s.designOpen === true;
 
 /** Green = running, amber = waiting for a look, sky = subagents in flight,
- *  grey = a lead's run queued. Idle has no mark or slot. */
+ *  grey = a lead's run queued or its design waiting on you. Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   if (!isLive(s)) return [];
   return markDot(
@@ -133,7 +135,7 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
           ? ["bg-sky-500", runsLabel(s.activeRuns)]
-          : ["bg-neutral-400", "lead — run queued"],
+          : ["bg-neutral-400", s.runLive ? "lead — run queued" : "design — waiting for you to finalize"],
   );
 }
 
@@ -222,14 +224,14 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 const renderKey = (): string =>
   `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
-/** No run of its queued or running, no subagent, no turn streaming: what is
- *  left waits on the user, and `/status` and search reach it. */
+/** No run of its queued or running, no subagent, no turn streaming, no design
+ *  left for the user to finalize: `/status` and search reach it. */
 const leadFinished = (s: SessionInfo): boolean =>
-  s.phase !== undefined && s.state !== "streaming" && s.runLive !== true && s.activeRuns === 0;
+  s.phase !== undefined && s.state !== "streaming" && s.runLive !== true && s.activeRuns === 0 && s.designOpen !== true;
 
 /** Switch on, the rail below the conversation: the palette's Running set in
  *  rail order, less the conversation's own sessions, which its row stands for,
- *  and finished leads. */
+ *  and finished leads; a design waiting on the user stays until it is final or closed. */
 export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
   const members = new Set(chain.map((m) => m.sessionId));
   const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id) && !leadFinished(s)));

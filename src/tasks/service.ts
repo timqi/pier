@@ -248,10 +248,14 @@ export class TaskService {
 
   /** The run ledger: runs any of `sessionIds` launched, in flight or finished since `since`, at most 200. */
   ledger(sessionIds: string[], since: number): LedgerRun[] {
-    return this.store.ledgerRuns(sessionIds, since).map((run) => {
-      const action = run.context.definition.action;
-      const cwd = run.context.cwd ?? (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
-      return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd, queuedAt: run.queuedAt, finishedAt: run.finishedAt };
+    return this.store.ledgerRuns(sessionIds, since).map(ledgerRun);
+  }
+
+  /** Design leads no run of which has reported `Design final:`, by their creating run: the user's to finalize. */
+  openDesigns(): LedgerRun[] {
+    return [...this.store.leads().values()].flatMap((lead) => {
+      const run = lead.designOpen ? this.store.getRun(lead.runId) : undefined;
+      return run ? [ledgerRun(run)] : [];
     });
   }
 
@@ -501,4 +505,10 @@ export class TaskService {
       this.hub.emit(run.invokedBySessionId, { type: "task-status", run: this.backgroundRun(run) });
     }
   }
+}
+
+function ledgerRun(run: TaskRun): LedgerRun {
+  const action = run.context.definition.action;
+  const cwd = run.context.cwd ?? (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
+  return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd, queuedAt: run.queuedAt, finishedAt: run.finishedAt };
 }

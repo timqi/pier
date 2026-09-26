@@ -455,7 +455,7 @@ describe("workbench server", () => {
     await lead("build-run", "builder", "Build per /tmp/design.md: go", true);
     expect(await (await app.request("/api/sessions")).json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 1, channel: "web" },
-      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "design" },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "design", designOpen: true },
       { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "build", runLive: true },
     ]);
   });
@@ -2594,7 +2594,7 @@ describe("the continuous conversation's routes", () => {
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
-      enabled: () => settings.get().continuous, ledger, roleOf: () => undefined, hub, now: () => clock.now,
+      enabled: () => settings.get().continuous, ledger, roleOf: () => undefined, designs: () => [], hub, now: () => clock.now,
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
@@ -2633,7 +2633,7 @@ describe("the continuous conversation's routes", () => {
     db.prepare("INSERT INTO open_items VALUES ('open items', 'worker running', '[\"r1\"]', 1)").run();
     const res = await app.request("/api/continuous/open");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [{ problem: "open items", stage: "worker running", runs: [live] }], unlisted: [stray] });
+    expect(await res.json()).toEqual({ items: [{ problem: "open items", stage: "worker running", runs: [live] }], unlisted: [stray], designs: [] });
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

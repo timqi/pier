@@ -97,14 +97,16 @@ it("leaves the conversation's own sessions out of In progress", () => {
     .toEqual(["c"]);
 });
 
-// A lead is in progress while something of it runs; after that, seen or not, it is `/status`'s and search's.
-it("keeps a lead in progress only while a run, a subagent or a turn of it is live", () => {
+// A lead is in progress while something of it runs, or while its design waits on
+// the user to finalize; after that, seen or not, it is `/status`'s and search's.
+it("keeps a lead in progress while a run, a subagent or a turn of it is live, or its design awaits you", () => {
   const lead = (id: string, over: Partial<Row> = {}) => row(id, { phase: "design", ...over });
   const rows = [
     lead("done"), lead("unread", { unread: true }), lead("queued", { runLive: true }),
     lead("workers", { activeRuns: 1 }), lead("talking", { state: "streaming", unread: true }),
+    lead("awaiting", { designOpen: true }), row("built", { phase: "build" }),
   ];
-  expect(sidebar.inProgress(rows, []).map((s) => s.id).sort()).toEqual(["queued", "talking", "workers"]);
+  expect(sidebar.inProgress(rows, []).map((s) => s.id).sort()).toEqual(["awaiting", "queued", "talking", "workers"]);
 });
 
 const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
@@ -123,6 +125,7 @@ it("lists the open items in progress: a worker's live run as a row, nothing that
       { problem: "auth review", stage: "worker running", runs: [ledgerRun("w1", { name: "Review src/auth" })] },
     ],
     unlisted: [ledgerRun("r-failed", { name: "Old review", state: "failed", finishedAt: 1 }), ledgerRun("q1", { name: "Queued one", state: "queued", targetSessionId: null })],
+    designs: [],
   };
   sidebar.renderSessions();
   expect(labels()).toEqual(["In progress"]);
@@ -148,13 +151,13 @@ it("lists the open items in progress: a worker's live run as a row, nothing that
 it("adds no row when nothing is open, and none while the switch is off", () => {
   state.chain = [member("h1")];
   sessions = [row("h1")];
-  state.items = { items: [], unlisted: [] };
+  state.items = { items: [], unlisted: [], designs: [] };
   sidebar.renderSessions();
   expect(texts()).toEqual(["Conversation"]);
   expect(labels()).toEqual([]);
 
   state.chain = null;
-  state.items = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [] };
+  state.items = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [], designs: [] };
   sidebar.renderSessions();
   expect(list().textContent).not.toContain("Open");
 });

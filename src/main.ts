@@ -134,6 +134,10 @@ const chain = new MainChain(db, {
   enabled: () => settings.get().continuous,
   ledger: (ids, since) => tasks.ledger(ids, since),
   roleOf: (id) => taskStore.roleOf(id),
+  designs: () => {
+    const flags = sessionState.flags();
+    return tasks.openDesigns().filter((r) => r.targetSessionId && !flags.get(r.targetSessionId)?.closed);
+  },
   hub,
 });
 const stopEviction = router.startIdleEviction();

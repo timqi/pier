@@ -330,7 +330,7 @@ it("re-reads the open items when a turn end wrote a marker", async () => {
   const sidebar = await import("./sidebar.js");
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
   const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-  const open = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [] };
+  const open = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [], designs: [] };
   fetcher.mockClear();
   fetcher.mockImplementationOnce(() => Promise.resolve(Response.json(open)));
   vi.mocked(sidebar.renderSessions).mockClear();

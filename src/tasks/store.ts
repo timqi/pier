@@ -259,12 +259,14 @@ export class TaskStore {
     return run.context.definition.action.prompt.startsWith(BUILD_PROMPT) ? "build" : "design";
   }
 
-  /** Every lead session with its phase (as `leadPhaseOf`) and whether a run
-   *  targeting it is queued or running, in one statement for the rail's listing. */
-  leads(): Map<string, { phase: LeadPhase; runLive: boolean }> {
+  /** Every lead session with its phase (as `leadPhaseOf`), its creating run,
+   *  whether a run targeting it is queued or running, and — a design lead's —
+   *  whether no run of it has reported `Design final:` yet, which leaves the
+   *  design on the user; in one statement for the rail's listing. */
+  leads(): Map<string, { phase: LeadPhase; runId: string; runLive: boolean; designOpen: boolean }> {
     const rows = this.sql(`
-      SELECT c.id, c.prompt, l.id IS NOT NULL AS live FROM (
-        SELECT json_extract(json, '$.targetSessionId') AS id,
+      SELECT c.id, c.run_id, c.prompt, l.id IS NOT NULL AS live, f.id IS NOT NULL AS final FROM (
+        SELECT id AS run_id, json_extract(json, '$.targetSessionId') AS id,
           json_extract(json, '$.context.definition.action.launch.role') AS role,
           json_extract(json, '$.context.definition.action.prompt') AS prompt,
           ROW_NUMBER() OVER (PARTITION BY json_extract(json, '$.targetSessionId') ORDER BY queued_at) AS n
@@ -274,9 +276,17 @@ export class TaskStore {
       LEFT JOIN (
         SELECT DISTINCT json_extract(json, '$.targetSessionId') AS id FROM task_runs WHERE state IN ('queued', 'running')
       ) l ON l.id = c.id
+      LEFT JOIN (
+        SELECT DISTINCT json_extract(json, '$.targetSessionId') AS id FROM task_runs
+        WHERE json_extract(json, '$.result.type') = 'agent'
+          AND instr(char(10) || json_extract(json, '$.result.text'), char(10) || 'Design final:') > 0
+      ) f ON f.id = c.id
       WHERE c.n = 1 AND c.role = 'lead'
-    `).all() as unknown as { id: string; prompt: string; live: number }[];
-    return new Map(rows.map((r) => [r.id, { phase: r.prompt.startsWith(BUILD_PROMPT) ? "build" : "design", runLive: r.live === 1 }]));
+    `).all() as unknown as { id: string; run_id: string; prompt: string; live: number; final: number }[];
+    return new Map(rows.map((r) => {
+      const phase: LeadPhase = r.prompt.startsWith(BUILD_PROMPT) ? "build" : "design";
+      return [r.id, { phase, runId: r.run_id, runLive: r.live === 1, designOpen: phase === "design" && r.final === 0 }];
+    }));
   }
 
   /** What a milestone resumes, and whose supervisor it reports to. */

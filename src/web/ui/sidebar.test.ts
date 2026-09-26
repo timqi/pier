@@ -64,6 +64,7 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
   expect(dot({ phase: "design" })).toBeUndefined();
   expect(dot({ phase: "design", runLive: true })).toMatchObject({ title: "lead — run queued" });
+  expect(dot({ phase: "design", designOpen: true })).toMatchObject({ cls: expect.stringContaining("bg-neutral-400"), title: "design — waiting for you to finalize" });
 });
 
 // The phase is English whatever the title's language; no phase, no tag.

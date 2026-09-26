@@ -30,6 +30,8 @@ export interface ChainDeps {
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
   /** `TaskStore.roleOf`: a lead run's item line counts the lead's own workers. */
   roleOf: (sessionId: string) => AgentRole | undefined;
+  /** `TaskService.openDesigns`, less closed sessions: the designs waiting on the user. */
+  designs: () => LedgerRun[];
   /** The head's turn ends carry the open-item markers. */
   hub: EventHub;
   now?: () => number;
@@ -88,11 +90,16 @@ const runText = (r: OpenRun, now: number): string =>
     : `run ${r.runId.length > 8 ? `${r.runId.slice(0, 8)}…` : r.runId} ${runStatus(r, now)}${workersText(r.workers)}`;
 
 /** The one string every surface shows for the open items: `/status`, the seed, the rail. */
-export function renderOpenItems({ items, unlisted }: OpenItems, now: number): string {
-  if (!items.length && !unlisted.length) return "Nothing open.";
+export function renderOpenItems({ items, unlisted, designs }: OpenItems, now: number): string {
+  if (!items.length && !unlisted.length && !designs.length) return "Nothing open.";
   const open = items.map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.map((r) => ` · ${runText(r, now)}`).join("")}`);
   const rest = unlisted.map((r) => `- ${r.name} — ${runStatus(r, now)}${workersText(r.workers)}`);
-  return [...(open.length ? ["Open", ...open] : []), ...(rest.length ? ["Not on the list", ...rest] : [])].join("\n");
+  const decide = designs.map((r) => `- ${r.name} · ${runText(r, now)}`);
+  return [
+    ...(open.length ? ["Open", ...open] : []),
+    ...(rest.length ? ["Not on the list", ...rest] : []),
+    ...(decide.length ? ["Designs for you to finalize", ...decide] : []),
+  ].join("\n");
 }
 
 export class MainChain {
@@ -149,7 +156,7 @@ export class MainChain {
       return undefined;
     }
     const open = this.openItems();
-    const sessions = Object.fromEntries(open.items.flatMap((i) => i.runs)
+    const sessions = Object.fromEntries([...open.items.flatMap((i) => i.runs), ...open.designs]
       .flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
     await session.systemInput(renderOpenItems(open, this.now()), { ...origin, sessions }, "append");
     return undefined;
@@ -183,7 +190,7 @@ export class MainChain {
       }),
     }));
     const unlisted = runs.filter((r) => !named.has(r.runId) && r.state !== "succeeded").map(withWorkers);
-    return { items, unlisted };
+    return { items, unlisted, designs: this.deps.designs() };
   }
 
   /** Only the head's turns write the list: a new head takes the subscription over. */

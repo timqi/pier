@@ -91,9 +91,16 @@ describe("a feature lead", () => {
     expect(store.leadPhaseOf(build.targetSessionId!)).toBe("build");
     expect(store.leadPhaseOf("main")).toBeUndefined();
     expect(store.leads()).toEqual(new Map([
-      [run.targetSessionId!, { phase: "design", runLive: false }],
-      [build.targetSessionId!, { phase: "build", runLive: false }],
+      [run.targetSessionId!, { phase: "design", runId: run.id, runLive: false, designOpen: true }],
+      [build.targetSessionId!, { phase: "build", runId: build.id, runLive: false, designOpen: false }],
     ]));
+    expect(service.openDesigns().map((r) => [r.runId, r.targetSessionId])).toEqual([[run.id, run.targetSessionId]]);
+    // Only a line that opens with it is the milestone; one mid-sentence is not.
+    store.saveRun({ ...run, id: "mention", queuedAt: run.queuedAt + 1, sessionMode: "reuse", result: { type: "agent", text: "not yet: Design final: comes later", sessionId: run.targetSessionId! } });
+    expect(store.leads().get(run.targetSessionId!)?.designOpen).toBe(true);
+    store.saveRun({ ...run, id: "final", queuedAt: run.queuedAt + 2, sessionMode: "reuse", result: { type: "agent", text: "Agreed.\nDesign final: /repo/design.md", sessionId: run.targetSessionId! } });
+    expect(store.leads().get(run.targetSessionId!)?.designOpen).toBe(false);
+    expect(service.openDesigns()).toEqual([]);
     await expect(service.handle({ operation: "run", prompt: "x", launch: { role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
   });
 

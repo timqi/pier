@@ -115,13 +115,17 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
   backlog in MEMORY.md.
+- `designs`: every design lead not closed whose runs have not reported
+  `Design final:` (`TaskService.openDesigns` over `TaskStore.leads`), by its
+  creating run — the user's to finalize.
 - The text: `Open`, one line per item, each run token rendered
   ` · run <id8>… <state> <age>` and a lead's ` · workers: <counts>`, then `Not
-  on the list`; `Nothing open.` when both are empty.
+  on the list`, then `Designs for you to finalize`, `- <name> · run <id8>… …`;
+  `Nothing open.` when all are empty.
 - `/status`, trimmed and case-insensitive with nothing else on the message, is
   taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
   text as a `chat-command` system input, mode `append`, no turn, its origin
-  carrying `sessions`, run id → session id for every named run that has one; any
+  carrying `sessions`, run id → session id for every named run and listed design that has one; any
   other text, `/tmp is full` included, is a message.
 - Surfaces: the `/status` card and the rail's In progress rows
   (`GET /api/continuous/open`), [03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts).

@@ -150,8 +150,9 @@ export interface WebDeps {
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
   /** `TaskStore.leads`: every lead session, tagged by its phase in the rail and
-   *  the palette, `runLive` while a run targeting it is queued or running. */
-  leads?: () => Map<string, { phase: LeadPhase; runLive: boolean }>;
+   *  the palette, `runLive` while a run targeting it is queued or running,
+   *  `designOpen` while a design of it waits on the user to finalize. */
+  leads?: () => Map<string, { phase: LeadPhase; runLive: boolean; designOpen: boolean }>;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -312,8 +313,8 @@ export function createServer(
 
   // `rank` is the place in the rail's working set; `modified` is for the
   // row's tooltip and orders nothing.
-  const leadOf = (lead: { phase: LeadPhase; runLive: boolean } | undefined) =>
-    (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}) } : {});
+  const leadOf = (lead: { phase: LeadPhase; runLive: boolean; designOpen: boolean } | undefined) =>
+    (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}), ...(lead.designOpen ? { designOpen: true } : {}) } : {});
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>, lead: ReturnType<NonNullable<WebDeps["leads"]>>) => ({
     ...s,
     ...(own?.rank === undefined ? {} : { rank: own.rank }),
