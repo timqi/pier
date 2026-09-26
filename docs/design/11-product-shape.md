@@ -218,7 +218,7 @@ Phase B (the switch goes, after [10 §Acceptance](10-continuous-session.md#accep
 
 ## Open
 
-- Needs-you: unread keeps a finished lead in In progress (this doc), or
-  waiting-on-user is `/status` only (today's build)?
-- Doc language: this file is English like its siblings; say if the design
-  docs should switch.
+Taken as built (Phase A): needs-you is unread — a finished lead stays in In
+progress until viewed, and `/status` alone spells out what waits on the user;
+a design lead waiting on Finalize (`designOpen`) still holds its row. Design
+docs stay English.
