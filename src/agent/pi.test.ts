@@ -662,6 +662,7 @@ describe("the continuous conversation's seam", () => {
     };
     Object.assign(fake.pi, {
       model: { provider: "p", id: "m", contextWindow: window },
+      getContextUsage: () => ({ tokens: 50_000, contextWindow: window }),
       settingsManager: {
         getCompactionSettings: () => ({ enabled: true, reserveTokens: instanceReserve, keepRecentTokens: 20_000 }),
         applyOverrides: (o: unknown) => overrides.push(o),
@@ -682,6 +683,11 @@ describe("the continuous conversation's seam", () => {
       { compaction: { reserveTokens: 900_000 } },
       { compaction: { reserveTokens: 16_384 } },
     ]);
+  });
+
+  it("reports where the session compacts: at its cap, else at the instance's reserve", () => {
+    expect(capped(400_000, 100_000).s.contextUsage).toEqual({ tokens: 50_000, contextWindow: 400_000, compactAt: 100_000 });
+    expect(capped(400_000).s.contextUsage?.compactAt).toBe(400_000 - 16_384);
   });
 
   it("leaves a session without a cap on the instance's setting", async () => {

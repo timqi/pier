@@ -33,7 +33,7 @@ import { CUSTOM_TOOL_RULES, normalizeCustomTools } from "../tools.js";
 import { registerTaskRoutes } from "../tasks/routes.js";
 import { TaskService } from "../tasks/service.js";
 import { TaskStore } from "../tasks/store.js";
-import type { TaskRun } from "../tasks/types.js";
+import type { TaskDefinition, TaskRun } from "../tasks/types.js";
 import { ACCENTS, ICON_PLATE, SettingsStore } from "../settings.js";
 import { UpdateCheck } from "../update.js";
 import { openDb } from "../db.js";
@@ -51,9 +51,22 @@ const fakeSession = (id: string): FakeSession => sharedFake(id, {
   models: [{ provider: "anthropic", id: "claude-opus-4-5" }, { provider: "openai", id: "gpt-5.2" }],
   thinkingLevel: "medium",
   levels: ["off", "low", "medium", "high"],
-  contextUsage: { tokens: 1200, contextWindow: 200_000 },
+  contextUsage: { tokens: 1200, contextWindow: 200_000, compactAt: 183_616 },
   history: [{ role: "user", text: "hi" }, { role: "assistant", text: "hello" }],
   queue: { steering: ["s-msg"], followUp: ["f-msg"] },
+});
+
+/** A run row as the store keeps it: queued, background, launched by s1. */
+const storedRun = (task: TaskDefinition, id: string, over: Partial<TaskRun> = {}): TaskRun => ({
+  id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+  resumedFromRunId: null, triggerSource: "agent",
+  invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
+  sessionMode: null, callbackSessionId: null, background: true, callbackState: null,
+  callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+  state: "queued", input: null, context: { definition: task }, probe: null,
+  matched: null, result: null, error: null, skipReason: null,
+  queuedAt: 1, startedAt: null, finishedAt: null,
+  ...over,
 });
 
 /** The managed CLI tools this test pretends Pier can install, as main.ts
@@ -307,7 +320,9 @@ function setup(
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
+    parkedMessages: (id) => tasks.parkedMessages(id),
     taskSessions: () => tasks.taskSessions(),
+    roleOf: (id) => tasks.store.roleOf(id),
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -377,20 +392,9 @@ describe("workbench server", () => {
       action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "work" },
     });
     const store = new TaskStore(db);
-    const run = (id: string, over: Partial<TaskRun>): TaskRun => ({
-      id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      resumedFromRunId: null, triggerSource: "agent",
-      invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
-      sessionMode: null, callbackSessionId: null, background: true, callbackState: null,
-      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
-      state: "queued", input: null, context: { definition: task }, probe: null,
-      matched: null, result: null, error: null, skipReason: null,
-      queuedAt: 1, startedAt: null, finishedAt: null,
-      ...over,
-    });
-    store.saveRun(run("in-flight", {}));
-    store.saveRun(run("finished", { state: "succeeded", finishedAt: 2 }));
-    store.saveRun(run("foreground", { background: false, state: "running" }));
+    store.saveRun(storedRun(task, "in-flight"));
+    store.saveRun(storedRun(task, "finished", { state: "succeeded", finishedAt: 2 }));
+    store.saveRun(storedRun(task, "foreground", { background: false, state: "running" }));
     const rows = (await (await app.request("/api/sessions")).json()) as
       { id: string; activeRuns: number }[];
     expect(rows.map((row) => [row.id, row.activeRuns])).toEqual([["s1", 1], ["s2", 0]]);
@@ -412,19 +416,9 @@ describe("workbench server", () => {
       action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "work" },
     });
     const store = new TaskStore(db);
-    const run = (id: string, over: Partial<TaskRun>): TaskRun => ({
-      id, taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      resumedFromRunId: null, triggerSource: "agent",
-      invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: null,
-      sessionMode: "fresh", callbackSessionId: null, background: true, callbackState: null,
-      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
-      state: "succeeded", input: null, context: { definition: task }, probe: null,
-      matched: null, result: null, error: null, skipReason: null,
-      queuedAt: 1, startedAt: 1, finishedAt: 2,
-      ...over,
-    });
-    store.saveRun(run("made-one", { targetSessionId: "child", context: { definition: task, sessionId: "child" } }));
-    store.saveRun(run("borrowed", { sessionMode: "reuse", targetSessionId: "s1", context: { definition: task, sessionId: "s1" } }));
+    const done = { state: "succeeded", startedAt: 1, finishedAt: 2 } as const;
+    store.saveRun(storedRun(task, "made-one", { ...done, sessionMode: "fresh", targetSessionId: "child", context: { definition: task, sessionId: "child" } }));
+    store.saveRun(storedRun(task, "borrowed", { ...done, sessionMode: "reuse", targetSessionId: "s1", context: { definition: task, sessionId: "s1" } }));
     const rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows.map((row) => row.id)).toEqual(["s1"]);
     // Not a row, but a header and an info panel of its own: the by-id route
@@ -433,6 +427,29 @@ describe("workbench server", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ id: "child", cwd: "/tmp", createdAt: 2, state: "idle" });
     expect((await app.request("/api/sessions/gone")).status).toBe(404);
+  });
+
+  // The rail keeps a lead in progress for its life (ui/sidebar.ts); the role
+  // is the task store's, and only a lead's row says one.
+  it("marks a lead's session with its role", async () => {
+    const { app, db, factory, tasks } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1 },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2 },
+    ]);
+    const task = await tasks.create({
+      name: "feature",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "design", launch: { role: "lead" } },
+    });
+    new TaskStore(db).saveRun(storedRun(task, "lead-run", {
+      sourceSessionId: "s1", targetSessionId: "lead", sessionMode: "fresh", callbackSessionId: "s1",
+      state: "succeeded", context: { definition: task, sessionId: "lead" }, startedAt: 1, finishedAt: 2,
+    }));
+    expect(await (await app.request("/api/sessions")).json()).toEqual([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead" },
+    ]);
   });
 
   // The badge counts "web" rows only (ui/sidebar.ts): an IM turn is delivered
@@ -508,16 +525,10 @@ describe("workbench server", () => {
       trigger: { type: "manual" },
       action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "work" },
     });
-    new TaskStore(db).saveRun({
-      id: "made-one", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
-      resumedFromRunId: null, triggerSource: "agent",
-      invokedBySessionId: "s1", sourceSessionId: null, targetSessionId: "child",
-      sessionMode: "fresh", callbackSessionId: null, background: true, callbackState: null,
-      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
-      state: "succeeded", input: null, context: { definition: task, sessionId: "child" }, probe: null,
-      matched: null, result: null, error: null, skipReason: null,
-      queuedAt: 1, startedAt: 1, finishedAt: 2,
-    });
+    new TaskStore(db).saveRun(storedRun(task, "made-one", {
+      targetSessionId: "child", sessionMode: "fresh",
+      state: "succeeded", context: { definition: task, sessionId: "child" }, startedAt: 1, finishedAt: 2,
+    }));
 
     // Attached before the subscription: reaching a session promotes it, and
     // that broadcast is not the one under test.
@@ -639,6 +650,32 @@ describe("workbench server", () => {
 
     expect((await app.request("/api/sessions/s1/rename", { method: "POST", body: "{}" })).status)
       .toBe(400);
+  });
+
+  // Closed is out of the rail and nothing else: the by-id read still answers,
+  // and the next human message brings the row back.
+  it("closes a session out of the listing until it is spoken to", async () => {
+    const { app, factory, state, hub } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1 },
+      { id: "s2", cwd: "/tmp", createdAt: 2 },
+    ]);
+    const changed = vi.fn();
+    hub.subscribeWorkspace(changed);
+    const close = (body: string) => app.request("/api/sessions/s1/close", { method: "POST", body });
+
+    expect((await close("{}")).status).toBe(400);
+    expect((await close(JSON.stringify({ closed: "yes" }))).status).toBe(400);
+    expect(changed).not.toHaveBeenCalled();
+
+    const res = await close(JSON.stringify({ closed: true }));
+    expect(await res.json()).toEqual({ ok: true });
+    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
+    expect((await rail(app)).map((s) => s.id)).toEqual(["s2"]);
+    expect((await app.request("/api/sessions/s1")).status).toBe(200);
+
+    state.promote("s1");
+    expect((await rail(app)).map((s) => s.id)).toEqual(["s1", "s2"]);
   });
 
   // A row that predates all of this holds a rank and a directory and nothing
@@ -806,9 +843,9 @@ describe("workbench server", () => {
       epoch: expect.any(String),
       model: { provider: "anthropic", id: "claude-opus-4-5" },
       state: "streaming",
-      context: { tokens: 1200, contextWindow: 200_000 },
+      context: { tokens: 1200, contextWindow: 200_000, compactAt: 183_616 },
       thinkingLevel: "medium",
-      queue: { steering: ["s-msg"], followUp: ["f-msg"] },
+      queue: { steering: ["s-msg"], followUp: ["f-msg"], parked: [] },
       queueRecovery: [],
       queueUncertain: false,
       backgroundRuns: [],
@@ -819,6 +856,33 @@ describe("workbench server", () => {
     hub.subscribe("s1", seen);
     session.emit({ type: "turn-start" });
     expect(seen).toHaveBeenCalledOnce();
+  });
+
+  // A `--after` follow-up waits in the outbox, not in Pi's queue: the snapshot
+  // is the only place its target can see it.
+  it("snapshots a parked task message beside Pi's queue, named by its run", async () => {
+    const { app, db, tasks } = setup();
+    const task = await tasks.create({
+      name: "review worker",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "review" },
+    });
+    const store = new TaskStore(db);
+    store.saveRun(storedRun(task, "worker-run", {
+      invokedBySessionId: "lead", sourceSessionId: "lead", targetSessionId: "s1", sessionMode: "reuse",
+      state: "running", context: { definition: task, sessionId: "s1" }, startedAt: 1,
+    }));
+    store.saveMessage({
+      id: "m1", runId: "worker-run", kind: "follow_up", fromSessionId: "lead", toSessionId: "s1",
+      state: "pending", content: "then run the tests", createdAt: 2, deliveredAt: null,
+      error: null, attempts: 1, nextAttemptAt: null,
+    });
+    const snapshot = await (await app.request("/api/sessions/s1/history")).json() as { queue: unknown };
+    expect(snapshot.queue).toEqual({
+      steering: ["s-msg"],
+      followUp: ["f-msg"],
+      parked: [{ messageId: "m1", runName: "review worker", text: "then run the tests" }],
+    });
   });
 
   it("leaves a step's args and output off the snapshot, and serves them per turn", async () => {
@@ -2594,5 +2658,15 @@ describe("the continuous conversation's routes", () => {
     expect(edit.status).toBe(409);
     expect(await edit.json()).toEqual({ error: "an earlier session of the continuous conversation is read-only" });
     expect(factory.resume).not.toHaveBeenCalled();
+  });
+
+  it("refuses to close any of its sessions", async () => {
+    const { post, restarted } = chainRig();
+    restarted();
+    for (const id of ["old", "head"]) {
+      const res = await post(`/api/sessions/${id}/close`, { closed: true });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "the continuous conversation stays in the rail" });
+    }
   });
 });

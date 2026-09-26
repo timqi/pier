@@ -10,7 +10,7 @@ import { appendTurn, followTail, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { escapeKey, letterKey } from "./shortcut.js";
-import type { QueueRecovery, SessionState } from "../../core/types.js";
+import type { ParkedMessage, QueueRecovery, SessionState } from "../../core/types.js";
 
 /** A file picked but not yet sent. The upload starts on attach, so Enter
  *  usually finds its marker already there and the send paints at once. */
@@ -50,6 +50,7 @@ const stopBtn = $("#stop");
 const queuePanel = $("#queue-panel");
 const queueRows = $("#queue-rows");
 const queueLabel = $("#queue-label");
+const queueActions = $("#queue-actions");
 const recoveryPanel = h("div", "hidden max-h-48 overflow-y-auto border-t border-neutral-200 px-4 py-2 text-[13px]");
 recoveryPanel.id = "recovery-panel";
 queuePanel.after(recoveryPanel);
@@ -58,6 +59,10 @@ const attachInput = $<HTMLInputElement>("#attach-input");
 
 let queueHasRows = false;
 let queueVersion = 0;
+// Only the snapshot knows these (Pi's queue-state events do not), so a render
+// without them keeps the last ones.
+let parked: ParkedMessage[] = [];
+let piQueue: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
 const recalling = new Set<string>();
 let pendingFiles: PendingFile[] = [];
 // Texts already rendered optimistically, awaiting their user-message event so
@@ -196,28 +201,45 @@ export function renderRecovery(batches: QueueRecovery[], uncertain = false): voi
   syncQueuePanel();
 }
 
-export function renderQueue(steering: string[], followUp: string[]): void {
+export function renderQueue(steering: string[], followUp: string[], parkedNow = parked): void {
   ++queueVersion;
+  parked = parkedNow;
+  piQueue = { steering, followUp };
   const rows = [
     ...steering.map((text) => ({ mode: "steer", text })),
     ...followUp.map((text) => ({ mode: "queued", text })),
+    ...parked.map((p) => ({ mode: `after this turn · ${p.runName}`, text: p.text })),
   ];
   queueHasRows = rows.length > 0;
   // The count sits on the label so the header actions read as queue-wide.
   queueLabel.textContent = rows.length > 1 ? `Queued · ${rows.length}` : "Queued";
+  // The actions are Pi's whole-queue primitives; a parked row is its sender's
+  // to `pier task cancel`, never recalled or sent from here.
+  const own = steering.length + followUp.length > 0;
+  queueActions.classList.toggle("hidden", !own);
+  queueActions.classList.toggle("flex", own);
   syncQueuePanel();
   queueRows.replaceChildren(
     ...rows.map((r) => {
       const li = h("li", "flex items-start gap-2 text-[13px] leading-[18px]");
-      // Only "steer" earns a badge: it deviates from the panel's own label,
-      // which already says these messages are queued.
+      // Plain queued rows need no badge: the panel's own label already says so;
+      // a steer deviates from it, a parked row names whose it is.
       if (r.mode === "steer") {
         li.append(h("span", "flex-none rounded bg-indigo-100 px-1 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-indigo-700", r.mode));
+      } else if (r.mode !== "queued") {
+        li.append(h("span", "max-w-[40%] flex-none truncate rounded bg-neutral-100 px-1 py-0.5 text-[10.5px] font-semibold text-neutral-600", r.mode));
       }
       li.append(h("span", "min-w-0 whitespace-pre-wrap break-words text-neutral-700", r.text));
       return li;
     }),
   );
+}
+
+/** A parked follow-up reached the session's transcript. */
+export function dropParked(messageId: string): void {
+  if (parked.some((p) => p.messageId === messageId)) {
+    renderQueue(piQueue.steering, piQueue.followUp, parked.filter((p) => p.messageId !== messageId));
+  }
 }
 
 // --- pending attachment strip ------------------------------------------------------

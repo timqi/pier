@@ -27,6 +27,8 @@ vi.mock("./sidebar.js", () => ({
 const model: ModelRef = { provider: "test", id: "test-model" };
 const levels: ThinkingLevel[] = ["low", "high"];
 
+const closeSession = vi.fn();
+
 /** What the orchestrator's list says about the selected session. */
 let current: SessionInfo | undefined;
 
@@ -66,6 +68,8 @@ beforeEach(async () => {
     syncBar: vi.fn(),
     openFiles: vi.fn(),
     toggleFiles: vi.fn(),
+    closeSession,
+    inConversation: (id) => id === "head",
   });
   vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
     Promise.resolve(url.endsWith("/models") ? [model] : { level: "high", levels }) as never
@@ -78,11 +82,43 @@ afterEach(() => vi.unstubAllGlobals());
 // Below md the chips cost the bar a line, so only the row that has to be seen
 // without opening anything keeps it (style.css reads the mark).
 it("marks the meta row urgent only once the context is near full", () => {
-  const usage = { contextWindow: 100_000, tokens: 20_000 };
+  // 75K is 7.5% of the window but 75% of the way to compaction: the latter warns.
+  const usage = { contextWindow: 1_000_000, tokens: 20_000, compactAt: 100_000 };
   header.setHeaderState(model, usage, "high", null);
   expect(meta().hasAttribute("data-urgent")).toBe(false);
   header.setHeaderState(model, { ...usage, tokens: 75_000 }, "high", null);
   expect(meta().hasAttribute("data-urgent")).toBe(true);
+});
+
+// The distance that matters is to compaction, not to a window it never reaches.
+it("reads the context against where the session compacts", async () => {
+  const context = async (): Promise<string> => {
+    header.sessionInfo(document.createElement("button"), { id: "s1", cwd: "/tmp", createdAt: 0 });
+    const panel = fake(vi.mocked((await import("./menu.js")).openPanel).mock.lastCall?.[1]);
+    const row = panel.querySelectorAll("div").find((d) => d.firstElementChild?.textContent === "Context");
+    return fake(row?.querySelector("dd")).textContent;
+  };
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 50_000, compactAt: 100_000 }, "high", null);
+  expect(await context()).toBe("50K/100K · 50% left");
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: null, compactAt: 100_000 }, "high", null);
+  expect(await context()).toBe("?/100K");
+});
+
+// Close sits after Rename and is handed to the orchestrator, which owns the
+// list it optimistically edits — except on the conversation's own sessions.
+it("offers Close after Rename, disabled on the continuous conversation", async () => {
+  const { openMenu } = await import("./menu.js");
+  const items = (s: SessionInfo) => {
+    header.sessionMenu(document.createElement("button"), s);
+    return vi.mocked(openMenu).mock.lastCall![1];
+  };
+  const own = items(session(0));
+  expect(own.map((i) => i.label).slice(0, 2)).toEqual(["Rename…", "Close"]);
+  expect(own[1]).toMatchObject({ hint: "leaves the rail; a message reopens it" });
+  expect(own[1]!.disabled).toBeUndefined();
+  own[1]!.onSelect();
+  expect(closeSession).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
+  expect(items({ ...session(0), id: "head" })[1]).toMatchObject({ disabled: true });
 });
 
 // A background run is the other kind of "nothing happening": the card sits far

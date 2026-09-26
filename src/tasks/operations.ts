@@ -4,7 +4,7 @@
 // who may ask for what.
 
 import { isAbsolute, resolve } from "node:path";
-import type { ModelRef } from "../core/types.js";
+import { isModelTier, type ModelRef } from "../core/types.js";
 import { logger } from "../log.js";
 import { type TaskDefinitions, record, requiredString } from "./definitions.js";
 import type { TaskChain, TaskService } from "./service.js";
@@ -217,7 +217,7 @@ export async function handleTask(
     if (record(input.launch)?.model === "?") {
       const { source, models } = await host.models();
       const head = source === "menu" ? "the operator's menu" : "the live catalog (no model pinned)";
-      return `${head} — --model takes a provider/id or a unique substring of one:\n${menuLines(models)}`;
+      return `${head} — --model takes a tier, a provider/id or a unique substring of one:\n${menuLines(models)}`;
     }
     const callbackMode = callbackModeOf(input);
     if (Array.isArray(input.tasks)) {
@@ -340,10 +340,16 @@ function nameFrom(text: string): string {
 
 /** `launch.model` by name (docs/design/09-tasks-cli.md §Models). Anything but
  *  one pin or an unpinned `provider/id` is refused with the lines to pick
- *  from, so the agent never guesses an id. */
+ *  from, so the agent never guesses an id. A tier is never a substring:
+ *  "cheap" matching a note would pick a pin the operator did not assign. */
 function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; thinking?: string } {
   const needle = name.trim().toLowerCase();
   const full = (pin: MenuEntry): string => `${pin.provider}/${pin.id}`;
+  if (isModelTier(needle)) {
+    const pin = menu.find((p) => p.tier === needle);
+    if (pin) return { model: { provider: pin.provider, id: pin.id }, thinking: pin.thinking };
+    throw new Error(`model "${name}": tier ${needle} is unassigned — the operator's menu:\n${menuLines(menu)}`);
+  }
   const exact = menu.find((pin) => full(pin).toLowerCase() === needle);
   const hits = exact ? [exact] : menu.filter((pin) => `${full(pin)} ${pin.note ?? ""}`.toLowerCase().includes(needle));
   if (hits.length === 1) return { model: { provider: hits[0]!.provider, id: hits[0]!.id }, thinking: hits[0]!.thinking };
@@ -354,7 +360,7 @@ function resolveModel(name: string, menu: MenuEntry[]): { model: ModelRef; think
 
 /** One pin per line, the only shape a menu is ever printed in. */
 const menuLines = (menu: MenuEntry[]): string =>
-  menu.map((pin) => `${pin.provider}/${pin.id}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`).join("\n")
+  menu.map((pin) => `${pin.tier ? `${pin.tier} · ` : ""}${pin.provider}/${pin.id}${pin.thinking ? ` · ${pin.thinking}` : ""}${pin.note ? ` — ${pin.note}` : ""}`).join("\n")
   || "(no model is pinned or available)";
 
 /** A `prompt` shorthand becomes a fresh Agent action in the caller's own

@@ -5,7 +5,7 @@ import type { SystemInputSource } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
-import type { TaskCallback, TaskRun } from "./types.js";
+import { createdRole, type TaskCallback, type TaskRun } from "./types.js";
 
 /** The run id and the session that did the work: a relayer's next move is a
  *  deep link to it, and without this that costs a second call. */
@@ -18,6 +18,23 @@ export const runSource = (run: TaskRun): SystemInputSource => ({
   ...(run.context.model ? { model: run.context.model } : {}),
   ...(run.context.thinking ? { thinking: run.context.thinking } : {}),
 });
+
+/** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
+export const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
+
+/** On the record of a lead run that owed its supervisor nothing, so the Console says why. */
+export const LEAD_TURN = "a lead's turn, not a milestone";
+
+/** Decided once, as the run finishes. A lead reports milestones only: any
+ *  other turn of its the user reads in its session, and settles as `--callback none`.
+ *  A turn that did not succeed is not a turn the user read: it calls back. */
+export function settleCallback(run: TaskRun): void {
+  if (!run.callbackSessionId) return;
+  const milestone = run.context.resumePrompt?.startsWith(MILESTONE) === true ||
+    (run.result?.type === "agent" && /^Design final:/m.test(run.result.text));
+  if (createdRole(run) === "lead" && run.state === "succeeded" && !milestone) run.callbackError = LEAD_TURN;
+  else run.callbackState = "pending";
+}
 
 export function runResultText(run: TaskRun): string {
   let result = run.error ?? "No result";

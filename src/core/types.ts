@@ -130,13 +130,19 @@ export type SystemInputOrigin = {
 };
 
 /** Why a session joined the continuous conversation's chain: the first one,
- *  the previous one idle past the rotation boundary, or the previous one gone. */
-export type ChainReason = "first" | "idle" | "lost";
+ *  the previous one idle past the rotation boundary, the previous one gone, or
+ *  the previous one's context past the size ceiling. */
+export type ChainReason = "first" | "idle" | "lost" | "full";
 
 /** How long the continuous conversation's head may go without a user message
  *  before the next one starts a new session: the "long" prompt-cache TTL
  *  interactive sessions request, past which the cache is cold anyway. */
 export const CHAIN_IDLE_MS = 60 * 60_000;
+
+/** How large the continuous conversation's head's context may grow before the
+ *  next user message starts a new session: past it, a turn costs more than the
+ *  rotation's one cache write pays back. */
+export const CHAIN_FULL_TOKENS = 60_000;
 
 /** One session of the continuous conversation, as `GET /api/continuous` lists it. */
 export interface ChainMember {
@@ -160,6 +166,16 @@ export interface BackgroundRun {
   queuedAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  /** `pier task run --run <id> --after` messages parked on this run, not yet delivered. */
+  queuedMessages: number;
+}
+
+/** A `--after` follow-up waiting for its target session to idle, as that
+ *  session's queue shows it; `runName` is the run it was parked on. */
+export interface ParkedMessage {
+  messageId: string;
+  runName: string;
+  text: string;
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */
@@ -283,6 +299,7 @@ export interface TurnMeta {
 export interface ContextUsage {
   tokens: number | null; // null right after compaction, before the next response
   contextWindow: number;
+  compactAt: number; // where Pi compacts: the window minus this session's reserve
 }
 
 /** Backend-neutral model reference. */
@@ -299,6 +316,15 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export const isThinkingLevel = (v: unknown): v is ThinkingLevel =>
   typeof v === "string" && (THINKING_LEVELS as readonly string[]).includes(v);
+
+/** The work classes a dispatcher names instead of a model; the operator pins
+ *  at most one menu entry to each. Here, not in settings.ts, so the browser shares it. */
+export const MODEL_TIERS = ["hardest", "balanced", "cheap"] as const;
+
+export type ModelTier = (typeof MODEL_TIERS)[number];
+
+export const isModelTier = (v: unknown): v is ModelTier =>
+  typeof v === "string" && (MODEL_TIERS as readonly string[]).includes(v);
 
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {

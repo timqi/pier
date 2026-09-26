@@ -311,6 +311,30 @@ describe("queue recall drafts", () => {
   });
 });
 
+// A `--after` task message is its sender's to cancel: shown, never recalled.
+describe("parked task messages", () => {
+  const parked = [{ messageId: "m1", runName: "review worker", text: "then run the tests" }];
+
+  it("shows parked rows by run name with no queue actions when they are all there is", () => {
+    composer.renderQueue([], [], parked);
+    expect(node("#queue-panel").classList.contains("hidden")).toBe(false);
+    expect(node("#queue-rows").textContent).toBe("after this turn · review workerthen run the tests");
+    expect(node("#queue-label").textContent).toBe("Queued");
+    expect(node("#queue-actions").classList.contains("hidden")).toBe(true);
+  });
+
+  it("counts them beside Pi's queue and keeps them across its queue-state events", () => {
+    composer.renderQueue([], ["mine"], parked);
+    expect(node("#queue-label").textContent).toBe("Queued · 2");
+    expect(node("#queue-actions").classList.contains("hidden")).toBe(false);
+    composer.renderQueue([], []);
+    expect(onScreen("#queue-rows")).toHaveLength(1);
+    expect(node("#queue-actions").classList.contains("hidden")).toBe(true);
+    composer.dropParked("m1");
+    expect(node("#queue-panel").classList.contains("hidden")).toBe(true);
+  });
+});
+
 describe("queue control failures", () => {
   it("offers the existing recall action from an empty acknowledged pause notice", async () => {
     composer.renderQueue([], []);

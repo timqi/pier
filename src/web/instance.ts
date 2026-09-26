@@ -241,7 +241,7 @@ export function registerInstanceRoutes(
     }
     if (body?.modelMenu !== undefined) {
       const menu = normalizeModelMenu(body.modelMenu);
-      if (menu === null) return refuse("modelMenu must be [{provider, id, note?}] (≤32 entries)");
+      if (menu === null) return refuse("modelMenu must be [{provider, id, thinking?, note?, tier?}] (≤32 entries, one pin per tier)");
       writes.push(() => settings.setModelMenu(menu));
     }
     if (body?.titleModel !== undefined) {

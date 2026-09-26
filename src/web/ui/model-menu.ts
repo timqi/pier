@@ -4,7 +4,7 @@
 
 import { ChevronDown, ChevronUp, Plus, type IconNode } from "lucide";
 import { icon } from "./icons.js";
-import { THINKING_LEVELS, type AgentDefaults, type ModelRef, type ThinkingLevel } from "../../core/types.js";
+import { MODEL_TIERS, THINKING_LEVELS, type AgentDefaults, type ModelRef, type ModelTier, type ThinkingLevel } from "../../core/types.js";
 import { thinkingLabel } from "../../core/reply.js";
 import { failure, getJson, sendJson } from "./api.js";
 import { h } from "./dom.js";
@@ -15,6 +15,7 @@ import { launchField, modelPicker, type LaunchChoice } from "./model-picker.js";
 interface MenuEntry extends ModelRef {
   thinking: ThinkingLevel;
   note?: string;
+  tier?: ModelTier;
 }
 
 /** What a pin is set to when the operator pins one without saying — the same
@@ -27,16 +28,6 @@ const asChoice = (d: AgentDefaults): LaunchChoice => ({ model: d.defaultModel, t
 
 /** What no title model means, on the trigger and on the row that clears it. */
 const TITLE_OFF = "Off — the first message is the title";
-
-/** The intents that keep coming up — offered in the note's dropdown so "what
- * do I write here" has answers to pick from, not just a blank line. */
-const NOTE_PRESETS = [
-  "hardest reasoning — architecture, gnarly debugging",
-  "long autonomous implementation runs",
-  "balanced default — implementation, review",
-  "cheap & fast — listings, extraction, simple checks",
-  "cross-vendor second opinion",
-];
 
 export function createModelMenuPane(): { el: HTMLElement; load(): void } {
   let entries: MenuEntry[] = [];
@@ -90,8 +81,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     const note = input(entry.note ?? "");
     note.classList.remove("w-full");
     note.classList.add("min-w-0", "flex-1");
-    note.placeholder = "why this one — pick a preset or write your own";
-    note.setAttribute("list", "model-menu-notes");
+    note.placeholder = "when to reach for it";
     note.oninput = () => {
       entry.note = note.value;
       markDirty();
@@ -101,12 +91,24 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
       THINKING_LEVELS.map((l): [string, string] => [`thinking: ${thinkingLabel(l)}`, l]),
       entry.thinking,
     );
-    // The row is a flex line: fixed widths for the two flanks, the note takes
+    // The row is a flex line: fixed widths for the selects, the note takes
     // the rest. CONTROL's w-full would blow the line apart, so it goes.
     thinking.classList.replace("w-full", "w-44");
     thinking.classList.add("flex-none");
     thinking.onchange = () => {
       entry.thinking = thinking.value as ThinkingLevel;
+      markDirty();
+    };
+    // `pier task --model <tier>` resolves to this row; the server refuses two rows on one tier.
+    const tier = select(
+      [["tier: none", ""], ...MODEL_TIERS.map((t): [string, string] => [`tier: ${t}`, t])],
+      entry.tier ?? "",
+    );
+    tier.classList.replace("w-full", "w-36");
+    tier.classList.add("flex-none");
+    tier.onchange = () => {
+      if (tier.value) entry.tier = tier.value as ModelTier;
+      else delete entry.tier;
       markDirty();
     };
     const remove = button("Remove");
@@ -132,6 +134,7 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
       h("span", "flex flex-none items-center", up, down),
       name,
       thinking,
+      tier,
       note,
       remove,
     );
@@ -259,11 +262,12 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
 
   async function saveMenu(): Promise<void> {
     setStatus(status, "saving", "saving…");
-    const menu = entries.map(({ provider, id, thinking, note }) => ({
+    const menu = entries.map(({ provider, id, thinking, note, tier }) => ({
       provider,
       id,
       thinking,
       ...(note?.trim() ? { note: note.trim() } : {}),
+      ...(tier ? { tier } : {}),
     }));
     const res = await sendJson("/api/settings", { modelMenu: menu }, "PUT");
     if (!res.ok) return setStatus(status, "failed", await failure(res, "Could not save"));
@@ -295,10 +299,6 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
     })();
   }
 
-  const presets = h("datalist", "");
-  presets.id = "model-menu-notes";
-  presets.append(...NOTE_PRESETS.map((n) => new Option(n)));
-
   el.append(
     card(
       "Model menu",
@@ -306,13 +306,13 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         "Pinned entries lead every model picker, and agents delegating work match your notes against the task " +
         "instead of guessing ids.",
       field("Pinned models", listBox, {
-        hint: "The note is what an agent matches a task against — say when to reach for it, not what it is, "
+        hint: "The tier is what a dispatcher names — `--model balanced` is the balanced row; one row per tier. "
+          + "The note is what an agent matches a task against — say when to reach for it, not what it is, "
           + "and keep every note distinct: two pins reading alike are refused as ambiguous. The arrows set the "
           + "order pickers and `pier task --model ?` list.",
       }),
       field("Add", adder, { hint: "The list is the live catalog — only models that exist right now can be pinned." }),
       h("div", "flex items-center gap-3", save, status),
-      presets,
     ),
     card(
       "New sessions",

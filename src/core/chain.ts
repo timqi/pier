@@ -1,6 +1,6 @@
 // The continuous conversation: an ordered chain of main sessions in
 // `$PIER_HOME/home`, whose newest — the head — takes every user message,
-// rotated lazily once idle past an hour (docs/design/10-continuous-session.md).
+// rotated lazily once idle past an hour or full (docs/design/10-continuous-session.md).
 
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { logger } from "../log.js";
 import type { Router } from "./router.js";
-import { CHAIN_IDLE_MS } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS } from "./types.js";
 import type { AgentFactory, AgentSession, ChainMember, ChainReason, ChatTurn, ConversationKey, InboundMessage } from "./types.js";
 
 const log = logger("core");
@@ -40,6 +40,7 @@ const WHY: Record<ChainReason, string> = {
   first: "the first one",
   idle: "the previous one was idle for an hour",
   lost: "the previous one is gone from Pi",
+  full: `the previous one reached ${String(CHAIN_FULL_TOKENS / 1000)}K tokens`,
 };
 
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
@@ -55,6 +56,9 @@ function lastExchanges(turns: ChatTurn[], n: number): string {
   return turns.slice(from).filter((t) => t.role !== "system" && t.text)
     .map((t) => `${t.role}: ${t.text}`).join("\n\n");
 }
+
+const ledgerLine = (r: LedgerRun): string =>
+  `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
 
 export class MainChain {
   /** Sends pass one at a time, so two cannot both find the head idle and rotate twice. */
@@ -118,8 +122,11 @@ export class MainChain {
     const session = await this.deps.router.ensure(webKey(head.sessionId));
     // A head with no user message yet counts from its start: its seed is not the user speaking.
     const spoke = (await session.history()).reduce((at, t) => (t.role === "user" && t.at ? t.at : at), head.startedAt);
-    if (session.state === "streaming" || this.now() - spoke < CHAIN_IDLE_MS) return { session };
-    return { session: await this.rotate("idle", head, session), rotated: "idle" };
+    if (session.state === "streaming") return { session };
+    if (this.now() - spoke >= CHAIN_IDLE_MS) return { session: await this.rotate("idle", head, session), rotated: "idle" };
+    // Unknown right after a compaction: that head is small again, not full.
+    if ((session.contextUsage?.tokens ?? 0) <= CHAIN_FULL_TOKENS) return { session };
+    return { session: await this.rotate("full", head, session), rotated: "full" };
   }
 
   private async rotate(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<AgentSession> {
@@ -150,7 +157,7 @@ export class MainChain {
     return [
       `[Pier: a new session of the continuous conversation — ${WHY[reason]}. The rest of this note is context, not a message.]`,
       section("MEMORY.md", await this.read("MEMORY.md")),
-      section("Runs — in flight, and finished since the previous session started", runs.map((r) => JSON.stringify(r)).join("\n") || "none"),
+      section("Runs — in flight, and finished since the previous session started", runs.map(ledgerLine).join("\n") || "none"),
       ...(await Promise.all(days.map(async (day) => section(`memory/${day}.md`, await this.read(join("memory", `${day}.md`)))))),
       section("The previous session's last exchanges", open ? lastExchanges(await open.history(), EXCHANGES) : ""),
     ].filter(Boolean).join("\n\n");

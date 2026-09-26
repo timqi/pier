@@ -21,6 +21,7 @@ import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
 import type {
   AgentFactory,
+  AgentRole,
   AgentSession,
   BackgroundRun,
   CatalogEntry,
@@ -28,6 +29,7 @@ import type {
   ConfigStore,
   InboundMessage,
   PackageStore,
+  ParkedMessage,
   ProviderManager,
   SessionEvent,
   SessionSummary,
@@ -143,8 +145,12 @@ export interface WebDeps {
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
   activeBackgroundRunCounts?: () => Map<string, number>;
+  /** `pier task run --run <id> --after` messages waiting for the session to idle. */
+  parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
+  /** `TaskStore.roleOf`: a lead's session stays in the rail for its life. */
+  roleOf?: (sessionId: string) => AgentRole | undefined;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -201,7 +207,9 @@ export function createServer(
     updater,
     backgroundRuns,
     activeBackgroundRunCounts,
+    parkedMessages,
     taskSessions,
+    roleOf,
     channelOf,
     continuous,
   }: WebDeps,
@@ -310,6 +318,7 @@ export function createServer(
     unread: own?.unread ?? false,
     channel: channelOf?.(s.id) ?? "web",
     activeRuns: active.get(s.id) ?? 0,
+    ...(roleOf?.(s.id) === "lead" ? { role: "lead" as const } : {}),
   });
 
   // The rail's top rows are maintained here and nowhere else: a session a
@@ -323,7 +332,9 @@ export function createServer(
   app.get("/api/sessions", async (c) => {
     const flags = state.flags();
     const active = activeRuns();
-    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active)));
+    // A closed session is out of the list only: its URL, the by-id read below
+    // and search still reach it.
+    return c.json((await allSessions()).filter((s) => !flags.get(s.id)?.closed).map((s) => present(s, flags.get(s.id), active)));
   });
 
   // One session by id, the listing's filters aside: a task run's own session is
@@ -372,6 +383,19 @@ export function createServer(
     return c.json({ ok: true });
   });
 
+  // Reversible and file-free: the transcript stays, and the next human message
+  // reopens it (session-state.ts `promote`).
+  app.post("/api/sessions/:id/close", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.closed !== "boolean") return c.json({ error: "closed (boolean) required" }, 400);
+    const id = c.req.param("id");
+    // The rail's conversation row is drawn from its members; one closed would blank it.
+    if (continuous?.enabled() && continuous.chainOf(id)) return c.json({ error: "the continuous conversation stays in the rail" }, 409);
+    state.setClosed(id, body.closed);
+    hub.emitWorkspace({ type: "sessions-changed" });
+    return c.json({ ok: true });
+  });
+
   // Only these two: compressing the SSE streams would sit on events until the
   // encoder's buffer filled.
   app.use("/api/sessions/:id/history", compress());
@@ -395,7 +419,7 @@ export function createServer(
         state: session.state,
         context: session.contextUsage ?? null,
         thinkingLevel: session.thinkingLevel,
-        queue,
+        queue: { ...queue, parked: parkedMessages?.(id) ?? [] },
         queueRecovery: router.recoveryOf(id),
         queueUncertain: router.queueUncertain(id),
         backgroundRuns: backgroundRuns?.(id) ?? [],

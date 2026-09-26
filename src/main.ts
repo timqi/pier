@@ -358,7 +358,9 @@ app.route("/", createServer({
   reload: () => reloadInstance(true),
   backgroundRuns: (id) => tasks.backgroundRuns(id),
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
+  parkedMessages: (id) => tasks.parkedMessages(id),
   taskSessions: () => tasks.taskSessions(),
+  roleOf: (id) => taskStore.roleOf(id),
   channelOf: (id) => conversations.keyOf(id)?.channelId,
   continuous: chain,
 }));

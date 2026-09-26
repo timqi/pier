@@ -27,7 +27,7 @@ const preamble = (run: TaskRun, supervised: boolean, role: AgentRole | undefined
       : "read by the operator";
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
-    `next-step buttons and file:// attachments do not render there. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.` +
+    `next-step buttons and file:// attachments do not render there. Return the conclusion and the paths it rests on — no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.` +
     (role === "lead"
       ? " You are a feature lead: you may delegate to workers with `pier task run` (never `--role lead`), and their results come back to you."
       : supervised || role === "worker" ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +

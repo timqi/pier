@@ -45,11 +45,20 @@ members by hand.
 
 ## Model choice
 
-Default: your model. Harder reasoning: `--thinking` first
-(`off/minimal/low/medium/high/xhigh/max`). `--model <name>` is matched
-against the operator's menu (substring of provider, id or note — "let gpt
-review it" is `--model gpt`); none or several hits lists the pins, pick one.
-`--model ?` prints the menu, one pin per line. Never name a model id from memory.
+Default: your model. `--model hardest | balanced | cheap` are tiers the
+operator pinned on the menu; thinking follows the pin, `--thinking` overrides
+(`off/minimal/low/medium/high/xhigh/max`).
+
+| Work | `--model` |
+| --- | --- |
+| lead; design, architecture, review of a hard change | `hardest` |
+| coding a feature or a fix; integration | `balanced` |
+| research, summaries, lookups, transcripts, bulk mechanical edits | `cheap` |
+
+Any other name is a substring of provider, id or note ("let gpt review it" is
+`--model gpt`); none or several hits lists the pins. `--model ?` prints the
+menu, the tier in front of each pinned line; an unassigned tier refuses with
+the menu. Never name a model id from memory.
 
 ## Cancel · recover
 

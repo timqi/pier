@@ -8,7 +8,7 @@ import { initIcons } from "./icons.js";
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
-import { coalesce, failure, getJson, mustGetJson, sendJson } from "./api.js";
+import { coalesce, failure, getJson, mustGetJson, postJson, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -28,6 +28,7 @@ import {
 } from "./chat.js";
 import {
   clearOptimistic,
+  dropParked,
   focusInput,
   initComposer,
   markOptimisticUser,
@@ -88,6 +89,7 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
+  ParkedMessage,
   QueueRecovery,
   SessionEvent,
   SessionState,
@@ -104,7 +106,7 @@ interface SessionSnapshot {
   state: SessionState;
   context: ContextUsage | null;
   thinkingLevel: ThinkingLevel;
-  queue: { steering: string[]; followUp: string[] };
+  queue: { steering: string[]; followUp: string[]; parked: ParkedMessage[] };
   queueRecovery: QueueRecovery[];
   queueUncertain: boolean;
   backgroundRuns: BackgroundRun[];
@@ -151,6 +153,7 @@ const DIVIDER: Record<ChainReason, string> = {
   first: "new session",
   idle: "new session — idle 1h",
   lost: "new session — the previous one was lost",
+  full: "new session — the previous one was full",
 };
 
 /** A 404 is the switch being off; anything else is a failure, not "off". */
@@ -337,6 +340,19 @@ function maybeAckRead(): void {
   void fetch(`/api/sessions/${s.id}/read`, { method: "POST" });
 }
 
+/** Gone from the rail at once, back if the write fails. A closed current
+ *  session keeps its pane and is named from `detached`, like a task run's. */
+async function closeSession(s: SessionInfo): Promise<void> {
+  if (s.id === currentId) detached = s;
+  sessions = sessions.filter((x) => x.id !== s.id);
+  renderSessions();
+  const got = await postJson(`/api/sessions/${s.id}/close`, { closed: true }, "Could not close the session");
+  if (got.ok) return;
+  if (!sessions.some((x) => x.id === s.id)) sessions = [...sessions, s].sort((a, b) => b.createdAt - a.createdAt);
+  renderSessions();
+  appendTurn("error", got.error);
+}
+
 /** The selected session's persisted summary, when it exists. */
 function currentSession(): SessionInfo | undefined {
   return sessions.find((s) => s.id === currentId)
@@ -385,6 +401,7 @@ function handleEvent(e: SessionEvent): void {
     case "system-input":
       finalizeStreaming();
       appendSystemInput(e.text, e.origin);
+      if (e.origin.kind === "task-message") dropParked(e.origin.messageId);
       break;
     case "task-status":
       renderBackgroundRun(e.run);
@@ -538,7 +555,7 @@ async function select(id: string): Promise<void> {
 
 function resetPane(): void {
   resetChat();
-  renderQueue([], []);
+  renderQueue([], [], []);
   renderRecovery([]);
   resetHeaderState();
   turnOpen = false;
@@ -580,7 +597,7 @@ async function loadSession(id: string, keep = false): Promise<void> {
   // run state (composer buttons) and the pending queue panel.
   turnOpen = snap.state === "streaming";
   setState(snap.state);
-  renderQueue(snap.queue.steering, snap.queue.followUp);
+  renderQueue(snap.queue.steering, snap.queue.followUp, snap.queue.parked);
   renderRecovery(snap.queueRecovery, snap.queueUncertain);
   // meta is assistant-only (core/types.ts), so the last one that carries it is
   // the last reply — no role test, and none of Array#findLast (web target).
@@ -666,6 +683,8 @@ initHeader({
   syncBar,
   openFiles: showFiles,
   toggleFiles,
+  closeSession: (s) => void closeSession(s),
+  inConversation: (id) => chain?.some((m) => m.sessionId === id) ?? false,
 });
 initViews({
   sessions: () => sessions,

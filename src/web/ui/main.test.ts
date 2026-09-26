@@ -29,7 +29,7 @@ vi.mock("./chat.js", () => ({
   resetChat: () => { h.content = []; }, scrollBottom: vi.fn(),
 }));
 vi.mock("./composer.js", () => ({
-  clearOptimistic: vi.fn(), focusInput: vi.fn(),
+  clearOptimistic: vi.fn(), dropParked: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
   renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), updateComposer: vi.fn(),
@@ -76,7 +76,7 @@ function deferred<T = Response>() {
 }
 const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
   turns: [{ role: "user", text }], lastSeq, epoch, model: null, state: "idle",
-  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [] }, queueRecovery: [], queueUncertain: false, backgroundRuns: [],
+  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [], parked: [] }, queueRecovery: [], queueUncertain: false, backgroundRuns: [],
 });
 const latest = () => Stream.all.at(-1)!;
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };

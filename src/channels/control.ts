@@ -31,7 +31,7 @@ export interface ConversationStatus {
   model: ModelRef | undefined;
   thinking: ThinkingLevel;
   tokens: number | null;
-  contextWindow: number | null;
+  compactAt: number | null; // where Pi compacts, as the web header shows it
 }
 
 export interface ChannelControl {
@@ -124,7 +124,7 @@ export function createControl({ router, factory, conversations, store, modelMenu
         model: session.model,
         thinking: session.thinkingLevel,
         tokens: usage?.tokens ?? null,
-        contextWindow: usage?.contextWindow ?? null,
+        compactAt: usage?.compactAt ?? null,
       };
     },
 

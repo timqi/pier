@@ -12,6 +12,7 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import type { AgentFactory, AgentLaunchOptions } from "../core/types.js";
+import { LEAD_TURN, MILESTONE } from "./callbacks.js";
 import { TaskService } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
@@ -233,6 +234,41 @@ describe("a feature lead", () => {
     expect(store.latestRunForTarget("lead")!.id).toBe("lead-run");
     expect(sessions.get("main")!.systemInputs).toEqual([]);
     service.stop();
+  });
+
+  // docs/design/10-continuous-session.md §Milestones: the user reads every other turn in the lead's session.
+  it("reports to main only a milestone: a plain turn owes nothing and says why, a milestone or a Design final: delivers", async () => {
+    const { service, sessions, store, leadRan } = rig();
+    await leadRan();
+    const main = sessions.get("main")!;
+    const owed = { invokedBySessionId: "main", callbackSessionId: "main", background: true };
+    const plain = await service.waitForRun(service.resume("lead-run", "what do you propose?", owed).id);
+    expect(store.getRun(plain.id)).toMatchObject({ state: "succeeded", callbackState: null, callbackError: LEAD_TURN, callbackSessionId: "main" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(main.systemInputs).toEqual([]);
+
+    const milestone = service.resume(plain.id, `${MILESTONE}\n\nworker says done`, owed);
+    await vi.waitFor(() => expect(store.getRun(milestone.id)!.callbackState).toBe("delivered"));
+    expect(main.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("lead says done")]);
+    service.stop();
+
+    const other = rig();
+    await other.leadRan();
+    other.sessions.set("lead", fakeSession("lead", { reply: "Plan agreed.\nDesign final: /repo/docs/design.md" }));
+    const final = other.service.resume("lead-run", "go", owed);
+    await vi.waitFor(() => expect(other.store.getRun(final.id)!.callbackState).toBe("delivered"));
+    expect(other.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("Design final: /repo/docs/design.md")]);
+    other.service.stop();
+
+    // A failure is not a turn the user read in the lead's session.
+    const broken = rig();
+    await broken.leadRan();
+    broken.sessions.set("lead", fakeSession("lead", { error: "provider down" }));
+    const failed = broken.service.resume("lead-run", "go", owed);
+    await vi.waitFor(() => expect(broken.store.getRun(failed.id)!.callbackState).toBe("delivered"));
+    expect(broken.store.getRun(failed.id)!.state).toBe("failed");
+    expect(broken.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("provider down")]);
+    broken.service.stop();
   });
 
   it("is a session of the user's, not one of the runs' own the rail hides", async () => {

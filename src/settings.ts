@@ -2,7 +2,7 @@
 // nor per-session. A key-value table, so the next setting is not the next table.
 
 import type { DatabaseSync } from "node:sqlite";
-import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "./core/types.js";
+import { isModelTier, isThinkingLevel, type ModelRef, type ModelTier, type ThinkingLevel } from "./core/types.js";
 import { pierDb, transact } from "./db.js";
 import { logger } from "./log.js";
 import { normalizeCustomTools, type CustomTool } from "./tools.js";
@@ -18,6 +18,8 @@ export interface ModelMenuEntry {
   thinking: ThinkingLevel;
   /** Intent, not documentation — "hardest reasoning", "cheap bulk". */
   note?: string;
+  /** The work class `pier task --model <tier>` resolves to this pin; one pin per tier. */
+  tier?: ModelTier;
 }
 
 export interface Settings {
@@ -93,17 +95,21 @@ export function normalizeModelMenu(raw: unknown): ModelMenuEntry[] | null {
   for (const item of raw) {
     const ref = normalizeModelRef(item);
     if (!ref) return null;
-    const { thinking, note } = item as Record<string, unknown>;
+    const { thinking, note, tier } = item as Record<string, unknown>;
     // Repaired, not rejected: rows stored before the level was required have
     // none, and dropping the menu over it would lose the pins.
     const level = thinking === undefined ? "medium" : thinking;
     if (!isThinkingLevel(level)) return null;
     if (note !== undefined && typeof note !== "string") return null;
+    if (tier !== undefined && !isModelTier(tier)) return null;
+    // Two pins on one tier would make `--model <tier>` a guess.
+    if (tier !== undefined && menu.some((pin) => pin.tier === tier)) return null;
     const cleaned = note?.trim().slice(0, 200);
     menu.push({
       ...ref,
       thinking: level,
       ...(cleaned ? { note: cleaned } : {}),
+      ...(tier !== undefined ? { tier } : {}),
     });
   }
   return menu;

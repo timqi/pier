@@ -41,6 +41,8 @@ export class TaskMessenger {
     private readonly hub: EventHub,
     /** Reports a delivery nobody can complete (service.ts owns the surfaces). */
     private readonly unreachable: (sessionId: string, what: string, why: string) => void,
+    /** A follow-up's run card counts it while it is pending (service.ts). */
+    private readonly runChanged: (runId: string) => void,
   ) {
     this.outbox = new Outbox<Carried>(router, {
       id: ({ message }) => message.id,
@@ -203,5 +205,6 @@ export class TaskMessenger {
   /** Publish only after any transaction changing this message has committed. */
   changed(message: TaskMessage): void {
     this.hub.emitWorkspace({ type: "task-message-changed", runId: message.runId, messageId: message.id });
+    if (message.kind === "follow_up") this.runChanged(message.runId);
   }
 }

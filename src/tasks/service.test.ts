@@ -514,6 +514,7 @@ describe("task service", () => {
     expect(manual.context.renderedPrompt).toContain(`[Pier task run ${manual.id} — "review"]`);
     expect(manual.context.renderedPrompt).toContain("read by the operator");
     expect(manual.context.renderedPrompt).toContain("the answer resumes this session");
+    expect(manual.context.renderedPrompt).toContain("render there. Return the conclusion and the paths it rests on — no process, no log of attempts; a deliverable longer than a screen goes to a file the result names. A question");
     // Nobody waits on a manual run, so it may delegate and is not told otherwise.
     expect(manual.context.renderedPrompt).not.toContain("You cannot delegate from here");
 
@@ -545,11 +546,11 @@ describe("task service", () => {
     const menu: { provider: string; id: string; note?: string }[] = [];
     const service = new TaskService(new TaskStore(openDb(":memory:")), factory, new Router(new EventHub(), () => factory.resume("s1")), new EventHub(), { modelMenu: () => menu });
     expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
-      "the live catalog (no model pinned) — --model takes a provider/id or a unique substring of one:\ntest/model",
+      "the live catalog (no model pinned) — --model takes a tier, a provider/id or a unique substring of one:\ntest/model",
     );
     menu.push({ provider: "test", id: "model", note: "the one we pay for" });
     expect(await service.handle({ operation: "run", launch: { model: "?" } }, "s1")).toBe(
-      "the operator's menu — --model takes a provider/id or a unique substring of one:\ntest/model — the one we pay for",
+      "the operator's menu — --model takes a tier, a provider/id or a unique substring of one:\ntest/model — the one we pay for",
     );
   });
 
@@ -770,7 +771,7 @@ describe("task service", () => {
     const busy = fakeSession("busy");
     busy.setState("streaming");
     const { cwd, service, store, router, hub } = setup(busy);
-    const messenger = new TaskMessenger(store, router, hub, () => {});
+    const messenger = new TaskMessenger(store, router, hub, () => {}, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("steered", task, now, {
@@ -803,7 +804,7 @@ describe("task service", () => {
     busy.setState("streaming");
     const { cwd, service, store, router, hub } = setup(busy);
     const told: string[] = [];
-    const messenger = new TaskMessenger(store, router, hub, (...args) => told.push(args.join("|")));
+    const messenger = new TaskMessenger(store, router, hub, (...args) => told.push(args.join("|")), () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("guided", task, now, {
@@ -824,6 +825,41 @@ describe("task service", () => {
     busy.setState("idle");
     messenger.retryUndelivered(now + 999 * 600_000);
     await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
+  });
+
+  // One task-status per transition is all the card has: nothing polls the count.
+  it("shows a parked follow-up in its target's queue and on its sender's run card until it lands", async () => {
+    const busy = fakeSession("busy-target");
+    busy.setState("streaming");
+    const { service, store, hub } = setup(busy);
+    const advance = skewClock();
+    const queued: number[] = [];
+    hub.subscribe("owner", (event) => { if (event.type === "task-status") queued.push(event.run.queuedMessages); });
+    const task = await service.create({
+      name: "worker",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: busy.id }, prompt: "Work" },
+    });
+    const now = Date.now();
+    store.saveRun(storedRun("guided", task, now, {
+      state: "running", finishedAt: null, result: null, background: true,
+      targetSessionId: busy.id, sessionMode: "reuse", invokedBySessionId: "owner",
+    }));
+
+    const message = await service.control("guided", "owner", "follow_up", "Also check the tests");
+    expect(queued).toEqual([1]);
+    expect(store.countPendingFollowUps("guided")).toBe(1);
+    expect(service.parkedMessages(busy.id)).toEqual([{ messageId: message.id, runName: "worker", text: "Also check the tests" }]);
+    expect(service.backgroundRuns("owner")[0]?.queuedMessages).toBe(1);
+
+    // The sweep alone, not start(): its boot recovery expires pending messages.
+    service.unpause(20);
+    onTestFinished(() => service.stop());
+    busy.setState("idle");
+    advance(retryDelay(1) + 100);
+    await vi.waitFor(() => expect(store.getMessage(message.id)?.state).toBe("delivered"));
+    expect(queued).toEqual([1, 0]);
+    expect(service.parkedMessages(busy.id)).toEqual([]);
   });
 
   it("gives up on an unreachable callback target and reports it instead of retrying forever", async () => {
@@ -852,7 +888,7 @@ describe("task service", () => {
 
   it("counts a message pass that dies before the send, so its ceiling arrives too", async () => {
     const { cwd, service, store, hub } = setup();
-    const messenger = new TaskMessenger(store, new Router(hub, () => Promise.reject(new Error("unknown session"))), hub, () => {});
+    const messenger = new TaskMessenger(store, new Router(hub, () => Promise.reject(new Error("unknown session"))), hub, () => {}, () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("gone", task, now, {
@@ -876,7 +912,7 @@ describe("task service", () => {
     amnesiac.systemInput = async () => {};
     const { cwd, service, store, router, hub } = setup(amnesiac);
     const told: string[] = [];
-    const messenger = new TaskMessenger(store, router, hub, (sessionId, what, why) => told.push(`${sessionId}|${what}|${why}`));
+    const messenger = new TaskMessenger(store, router, hub, (sessionId, what, why) => told.push(`${sessionId}|${what}|${why}`), () => {});
     const task = await service.create(bashDraft(cwd, "true"));
     const now = Date.now();
     store.saveRun(storedRun("live", task, now, {

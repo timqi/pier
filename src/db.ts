@@ -337,6 +337,8 @@ const MIGRATIONS: readonly string[] = [
   `
   CREATE INDEX task_runs_target ON task_runs(json_extract(json, '$.targetSessionId'), queued_at);
   `,
+  // 30 — a session the operator closed leaves the rail until a human speaks to it (web/session-state.ts).
+  `ALTER TABLE session_state ADD COLUMN closed INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

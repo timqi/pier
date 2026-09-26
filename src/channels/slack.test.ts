@@ -248,7 +248,7 @@ function fakeControl() {
           model: state.model,
           thinking: state.thinking ?? "medium",
           tokens: 32_140,
-          contextWindow: 200_000,
+          compactAt: 200_000,
         }
         : null),
     pins: () => state.pins_,

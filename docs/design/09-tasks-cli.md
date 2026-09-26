@@ -42,13 +42,17 @@ pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--ta
 - **`--role lead`**: rides as `launch.role` on a fresh `--prompt` run, whose
   session is a feature lead's for its life (§Two levels); any other value, and
   `--role` beside `--session`, is refused by the server; beside `--task-id` or
-  `--bash`, by argv.
+  `--bash`, by argv. A lead run's callback fires only for a milestone resume or
+  a result with a `Design final:` line, or a run that did not succeed; any
+  other settles as `--callback none`, `callbackError` "a lead's turn, not a
+  milestone".
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
-  turn; terminal → resumed as a new run on the same session, taking
-  `--callback*` like any new run (`--after` has no turn to wait for and
-  changes nothing). Receipt: `{delivery: "steer" | "follow_up",
+  turn, shown in the target's queue panel under the run's name and as `1 queued`
+  on the sender's Background Run row while pending; terminal → resumed as a new
+  run on the same session, taking `--callback*` like any new run (`--after`
+  has no turn to wait for and changes nothing). Receipt: `{delivery: "steer" | "follow_up",
   message}` or `{delivery: "resume", run}`. `--callback*` on a run that is not
   terminal is refused (`task: run <id> is <state>: callback options apply to a
   resumed run only; drop them to steer or follow up`). `--run` takes nothing
@@ -90,12 +94,17 @@ continuous conversation — in flight plus finished in the last 24h, at most 200
 against the operator's menu (`settings.modelMenu`; the live catalog when
 none is pinned):
 
+- a tier (`hardest`, `balanced`, `cheap`) is the one pin the operator assigned
+  it, `--thinking` defaulting to the pin's, never a substring match; an
+  unassigned tier is `task: model "<name>": tier <tier> is unassigned — the
+  operator's menu:` then the whole menu, exit 1;
 - an exact `provider/id` on the menu is that pin;
 - else one case-insensitive substring hit over `provider/id` and `note` is
   that pin, `--thinking` defaulting to the pin's;
 - else no hit and a `provider/id` shape is taken as written, no thinking;
 - else `task: model "<name>" matches <n> of the menu:` then one line per pin
-  (`provider/id · thinking — note`; the hits when several, the whole menu
+  (`tier · provider/id · thinking — note`, the tier only on a pin that has
+  one; the hits when several, the whole menu
   when none), exit 1.
 
 `--model ?` prints the menu instead of running, exit 0: a line naming its
