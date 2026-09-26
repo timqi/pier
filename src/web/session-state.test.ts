@@ -56,3 +56,20 @@ it("frees the slot when a session is forgotten", () => {
   state.forget("ghost");
   expect(order(state)).toEqual([]);
 });
+
+// Closing is reversible and leaves no hidden member holding a slot; a human
+// speaking to the session is what reopens it, back at the front.
+it("closes a session out of the working set, and reopens it when it is spoken to", () => {
+  const state = store();
+  state.promote("a");
+  state.promote("b");
+  state.setClosed("a", true);
+  expect(state.flags().get("a")).toEqual({ unread: false, closed: true });
+  expect(order(state)).toEqual(["b"]);
+  expect(state.promote("a")).toBe(true);
+  expect(state.flags().get("a")?.closed).toBe(false);
+  expect(order(state)).toEqual(["a", "b"]);
+  state.setClosed("b", true);
+  state.setClosed("b", false);
+  expect(state.flags().has("b")).toBe(false); // nothing left to remember
+});

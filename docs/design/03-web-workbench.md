@@ -15,6 +15,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
+| `POST /api/sessions/:id/close` | body `{closed}` → keep the session out of `GET /api/sessions` (and out of the working set), or back in; returns `{ok}` and broadcasts `sessions-changed`. Nothing is deleted: the by-id route, the URL and search still reach it, and a human message to it clears the flag |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, readonly: true}` |
 | `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md); every `/api/continuous*` route is 404 while the switch is off)* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"}]}`, newest first |
@@ -208,7 +209,7 @@ browser keeps no second session order.
   else is ⌘K's. The phone drawer is the same list; picking a row closes it.
   The chords walk these rows.
 - A lead's session (`role: "lead"`) is in that set for its life, idle and read
-  included, its dot "lead — waiting for you"; it leaves when deleted.
+  included, its dot "lead — waiting for you"; it leaves when closed.
 - Focus: refreshes retain the focused control; Load more focuses the first
   added row; an open menu reuses its trigger across refreshes. The mobile
   drawer removes hidden controls from the tab order, contains focus, restores
@@ -247,8 +248,10 @@ browser keeps no second session order.
   that is (`data-list`, the directory tree's folders) and keeps Home/End for
   its text field. An open menu owns those keys: ⌘K/⌃K stands down. ⌘N/⌘P are
   never bound.
-- Session menu: Rename / Session info, New session here / Browse files /
-  Continue in Lark/Slack…, Model & reasoning. Model loading is immediate; a
+- Session menu: Rename / Close / Session info, New session here / Browse files /
+  Continue in Lark/Slack…, Model & reasoning. Close takes the row off the rail
+  at once (back if the write fails), leaves an open pane open, and is disabled
+  on the continuous conversation's sessions; a message to the session reopens it. Model loading is immediate; a
   cancelled load cannot reopen the panel. A disabled row stays visible with
   its hint and is skipped by the arrow keys. Manual compaction is API-only.
 - Session info: directory/ID (copy buttons), model/context, time groups; a

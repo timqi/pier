@@ -8,7 +8,7 @@ import { initIcons } from "./icons.js";
 import { compact as tokens } from "../../core/reply.js";
 // Same reason: a header this deployment wrote is read back, not re-parsed here.
 import { readableTitle, splitSpeaker } from "../../core/identity.js";
-import { coalesce, failure, getJson, mustGetJson, sendJson } from "./api.js";
+import { coalesce, failure, getJson, mustGetJson, postJson, sendJson } from "./api.js";
 import { guardFetch, streamDied } from "./auth.js";
 import {
   appendDelta,
@@ -338,6 +338,19 @@ function maybeAckRead(): void {
   s.unread = false;
   renderSessions();
   void fetch(`/api/sessions/${s.id}/read`, { method: "POST" });
+}
+
+/** Gone from the rail at once, back if the write fails. A closed current
+ *  session keeps its pane and is named from `detached`, like a task run's. */
+async function closeSession(s: SessionInfo): Promise<void> {
+  if (s.id === currentId) detached = s;
+  sessions = sessions.filter((x) => x.id !== s.id);
+  renderSessions();
+  const got = await postJson(`/api/sessions/${s.id}/close`, { closed: true }, "Could not close the session");
+  if (got.ok) return;
+  if (!sessions.some((x) => x.id === s.id)) sessions = [...sessions, s].sort((a, b) => b.createdAt - a.createdAt);
+  renderSessions();
+  appendTurn("error", got.error);
 }
 
 /** The selected session's persisted summary, when it exists. */
@@ -670,6 +683,8 @@ initHeader({
   syncBar,
   openFiles: showFiles,
   toggleFiles,
+  closeSession: (s) => void closeSession(s),
+  inConversation: (id) => chain?.some((m) => m.sessionId === id) ?? false,
 });
 initViews({
   sessions: () => sessions,

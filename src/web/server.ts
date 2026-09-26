@@ -332,7 +332,9 @@ export function createServer(
   app.get("/api/sessions", async (c) => {
     const flags = state.flags();
     const active = activeRuns();
-    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active)));
+    // A closed session is out of the list only: its URL, the by-id read below
+    // and search still reach it.
+    return c.json((await allSessions()).filter((s) => !flags.get(s.id)?.closed).map((s) => present(s, flags.get(s.id), active)));
   });
 
   // One session by id, the listing's filters aside: a task run's own session is
@@ -378,6 +380,16 @@ export function createServer(
       state.setUnread(id, false);
       hub.emitWorkspace({ type: "sessions-changed" });
     }
+    return c.json({ ok: true });
+  });
+
+  // Reversible and file-free: the transcript stays, and the next human message
+  // reopens it (session-state.ts `promote`).
+  app.post("/api/sessions/:id/close", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (typeof body?.closed !== "boolean") return c.json({ error: "closed (boolean) required" }, 400);
+    state.setClosed(c.req.param("id"), body.closed);
+    hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
   });
 

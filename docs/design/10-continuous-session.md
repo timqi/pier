@@ -27,7 +27,8 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
   [09 §Two levels](09-tasks-cli.md#two-levels-no-tree).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
   (`LEAD`), never on disk; its session stays in the rail for its life (idle
-  dot "lead — waiting for you") and leaves it when the session is deleted.
+  dot "lead — waiting for you") and leaves it when the operator closes it
+  (Session menu → Close; a message reopens it).
 - The user designs with the lead in its session, main not in that path; the
   lead's `Design final: <absolute path>` has main launch a new build lead on
   that doc, which launches and integrates workers; main gets milestones only.

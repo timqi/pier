@@ -30,6 +30,10 @@ export interface HeaderDeps {
   openFiles: (cwd?: string) => void;
   /** Same view, but a second press closes it — what the chord binds to. */
   toggleFiles: (cwd?: string) => void;
+  /** Take a session out of the rail, optimistically (main.ts). */
+  closeSession: (s: SessionInfo) => void;
+  /** One of the continuous conversation's sessions, which its row stands for. */
+  inConversation: (id: string) => boolean;
 }
 
 let deps: HeaderDeps;
@@ -131,9 +135,10 @@ export function renderHeader(): void {
  *  act on — the chip's amber, and the one size worth a phone's bar line. */
 const CONTEXT_WARN = 70;
 
-/** Percent of the context window used (capped at 100). */
+/** Percent used of the room before Pi compacts (capped at 100) — the window
+ *  itself is never reached. */
 const contextUsed = (tokens: number, u: ContextUsage): number =>
-  Math.min(100, Math.round((tokens / u.contextWindow) * 100));
+  Math.min(100, Math.round((tokens / u.compactAt) * 100));
 
 /** Full context reading for the session info panel: used against where it compacts. */
 const contextLabel = (u: ContextUsage): string =>
@@ -446,6 +451,17 @@ export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
       onSelect: () => {
         closeMenu();
         void renameSession(s);
+      },
+    },
+    {
+      label: "Close",
+      // The conversation's row is drawn from its sessions; closing one would blank it.
+      ...(deps.inConversation(s.id)
+        ? { hint: "the conversation stays in the rail", disabled: true }
+        : { hint: "leaves the rail; a message reopens it" }),
+      onSelect: () => {
+        closeMenu();
+        deps.closeSession(s);
       },
     },
     {

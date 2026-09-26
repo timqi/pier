@@ -672,6 +672,32 @@ describe("workbench server", () => {
       .toBe(400);
   });
 
+  // Closed is out of the rail and nothing else: the by-id read still answers,
+  // and the next human message brings the row back.
+  it("closes a session out of the listing until it is spoken to", async () => {
+    const { app, factory, state, hub } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1 },
+      { id: "s2", cwd: "/tmp", createdAt: 2 },
+    ]);
+    const changed = vi.fn();
+    hub.subscribeWorkspace(changed);
+    const close = (body: string) => app.request("/api/sessions/s1/close", { method: "POST", body });
+
+    expect((await close("{}")).status).toBe(400);
+    expect((await close(JSON.stringify({ closed: "yes" }))).status).toBe(400);
+    expect(changed).not.toHaveBeenCalled();
+
+    const res = await close(JSON.stringify({ closed: true }));
+    expect(await res.json()).toEqual({ ok: true });
+    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
+    expect((await rail(app)).map((s) => s.id)).toEqual(["s2"]);
+    expect((await app.request("/api/sessions/s1")).status).toBe(200);
+
+    state.promote("s1");
+    expect((await rail(app)).map((s) => s.id)).toEqual(["s1", "s2"]);
+  });
+
   // A row that predates all of this holds a rank and a directory and nothing
   // else. Everything the rail draws comes off the listing, so there is no
   // backfill to run and no stale summary to repair. Nothing dates a rank

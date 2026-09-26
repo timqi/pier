@@ -1,8 +1,9 @@
 // What the workbench decided about a session, and nothing a transcript already
-// knows: a finished turn nobody looked at (`unread`), and the rail's working
-// set (`sort`). A session enters the set at the front when a human speaks to it
-// and it is not already in; members never move relative to each other until one
-// is pushed out. Remembered, not derived: any order recomputed from activity
+// knows: a finished turn nobody looked at (`unread`), the rail's working set
+// (`sort`), and a session the operator closed out of the rail (`closed`), which
+// the next human message reopens. A session enters the set at the front when a
+// human speaks to it and it is not already in; members never move relative to
+// each other until one is pushed out. Remembered, not derived: any order recomputed from activity
 // jumps on every message. `cwd` and `project_sort` are columns nothing reads.
 
 import type { DatabaseSync } from "node:sqlite";
@@ -16,6 +17,8 @@ export interface SessionFlags {
   unread: boolean;
   /** Place in the working set on top of the rail; unset = not in it. */
   rank?: number;
+  /** Left out of the rail's listing until a human speaks to it. */
+  closed: boolean;
 }
 
 export class SessionStateStore {
@@ -39,14 +42,28 @@ export class SessionStateStore {
     ).run(sessionId, unread ? 1 : 0);
   }
 
-  /** Already in the working set: nothing moves. Answers whether the order
+  /** Out of the working set too: a hidden member would hold a slot nobody sees,
+   *  and the message that reopens it promotes it back to the front. */
+  setClosed(sessionId: string, closed: boolean): void {
+    this.#db.prepare(
+      `INSERT INTO session_state(session_id, closed) VALUES (?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET closed = excluded.closed,
+         sort = CASE WHEN excluded.closed = 1 THEN NULL ELSE sort END`,
+    ).run(sessionId, closed ? 1 : 0);
+  }
+
+  /** Already in the working set: nothing moves. Reopens a closed session — a
+   *  message to it must not happen out of sight. Answers whether the rail
    *  changed, so the caller re-lists only when there is something to see. */
   promote(sessionId: string): boolean {
+    const reopened = this.#db.prepare(
+      "UPDATE session_state SET closed = 0 WHERE session_id = ? AND closed = 1",
+    ).run(sessionId).changes > 0;
     // `session_id` breaks a tie migration 20 can leave behind (several rows at -1).
     const ranked = (this.#db.prepare(
       "SELECT session_id AS id FROM session_state WHERE sort IS NOT NULL ORDER BY sort, session_id",
     ).all() as unknown as { id: string }[]).map((r) => r.id);
-    if (ranked.includes(sessionId)) return false;
+    if (ranked.includes(sessionId)) return reopened;
     const kept = [sessionId, ...ranked].slice(0, WORKING_SET);
     const evicted = ranked.filter((id) => !kept.includes(id));
     const rank = this.#db.prepare(
@@ -70,15 +87,17 @@ export class SessionStateStore {
 
   flags(): Map<string, SessionFlags> {
     const rows = this.#db.prepare(
-      `SELECT session_id AS id, unread, sort
-       FROM session_state WHERE unread = 1 OR sort IS NOT NULL`,
+      `SELECT session_id AS id, unread, sort, closed
+       FROM session_state WHERE unread = 1 OR sort IS NOT NULL OR closed = 1`,
     ).all() as unknown as {
       id: string;
       unread: number;
       sort: number | null;
+      closed: number;
     }[];
     return new Map(rows.map((r) => [r.id, {
       unread: r.unread === 1,
+      closed: r.closed === 1,
       ...(r.sort === null ? {} : { rank: r.sort }),
     }]));
   }
