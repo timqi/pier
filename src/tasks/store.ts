@@ -238,14 +238,18 @@ export class TaskStore {
     return new Set(rows.map((row) => row.id));
   }
 
-  /** Answered by the run that made the session; a resume or a `--session`
-   *  continuation never changes it. */
-  roleOf(sessionId: string): AgentRole | undefined {
-    const run = this.#one<TaskRun>(`
+  /** The fresh run that made the session; a resume or a `--session`
+   *  continuation never does, so the session's role is this run's for its life. */
+  creatorOf(sessionId: string): TaskRun | undefined {
+    return this.#one(`
       SELECT json FROM task_runs
       WHERE json_extract(json, '$.targetSessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh'
       ORDER BY queued_at LIMIT 1
     `, sessionId);
+  }
+
+  roleOf(sessionId: string): AgentRole | undefined {
+    const run = this.creatorOf(sessionId);
     return run && createdRole(run);
   }
 
@@ -267,14 +271,6 @@ export class TaskStore {
           AND g.finished_at IS NULL AND json_extract(g.json, '$.callbackSessionId') = ?))
     `).get(sessionId, sessionId) as { n: number };
     return row.n;
-  }
-
-  /** One session of `taskOwnedSessionIds`, without reading them all. */
-  isTaskSession(sessionId: string): boolean {
-    return this.sql(`
-      SELECT 1 FROM task_runs
-      WHERE json_extract(json, '$.targetSessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh' LIMIT 1
-    `).get(sessionId) !== undefined;
   }
 
   listRunsForSession(sessionId: string, limit = 50): TaskRun[] {

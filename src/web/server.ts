@@ -246,8 +246,9 @@ export function createServer(
 
   // A chain member is read on its branch, compacted turns included; an older
   // one is read off disk and never opened, so it can be neither edited nor resumed.
-  const member = (id: string): boolean => continuous?.enabled() === true && continuous.isMember(id);
-  const older = (id: string): boolean => member(id) && continuous?.members()[0]?.sessionId !== id;
+  const chainOf = (id: string): string[] | undefined => (continuous?.enabled() ? continuous.chainOf(id) : undefined);
+  const member = (id: string): boolean => chainOf(id) !== undefined;
+  const older = (id: string): boolean => (chainOf(id)?.[0] ?? id) !== id;
   const turnsOf = async (id: string): Promise<ChatTurn[]> => {
     if (!older(id)) return (await ensure(id)).history({ branch: member(id) });
     const turns = await factory.readHistory(id);

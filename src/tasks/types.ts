@@ -249,11 +249,7 @@ export const isTerminal = (state: TaskRunState): boolean =>
   state === "interrupted" ||
   state === "skipped";
 
-/** A definition whose runs are a feature lead's. */
-export const isLead = (task: TaskDefinition): boolean =>
-  task.action.type === "agent" && task.action.launch?.role === "lead";
-
 /** The role a fresh run's session is created with and keeps: a lead's, or a
  *  worker's when a session launched it; a cron or watch run's has none. */
-export const createdRole = (run: TaskRun): AgentRole | undefined =>
-  isLead(run.context.definition) ? "lead" : run.invokedBySessionId !== null ? "worker" : undefined;
+export const createdRole = ({ context: { definition: { action } }, invokedBySessionId }: TaskRun): AgentRole | undefined =>
+  action.type === "agent" && action.launch?.role === "lead" ? "lead" : invokedBySessionId !== null ? "worker" : undefined;

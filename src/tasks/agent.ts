@@ -80,8 +80,8 @@ export class AgentTaskRunner {
         const input = run.input === undefined || run.input === null
           ? ""
           : `\n\n<task_input>\n${JSON.stringify(run.input).replaceAll("</task_input>", "<\\/task_input>")}\n</task_input>`;
-        const role = reused ? this.store.roleOf(session.id) : createdRole(run);
-        const prompt = run.context.resumePrompt ?? `${preamble(run, this.store.supervised(run), role)}${action.prompt}${input}`;
+        const prompt = run.context.resumePrompt ??
+          `${preamble(run, this.store.supervised(run), this.store.roleOf(session.id))}${action.prompt}${input}`;
         run.context.sessionId = session.id;
         run.context.model = session.model;
         // The level the session settled on: an unspecified effort inherits the caller's.

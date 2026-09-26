@@ -170,10 +170,8 @@ describe("the continuous conversation's chain", () => {
     const r = rig();
     r.existing("h0", r.clock.now - 10);
     r.existing("h1", r.clock.now);
-    expect(r.chain.launchers("h0")).toEqual(["h1", "h0"]);
-    expect(r.chain.launchers("child")).toEqual(["child"]);
-    expect(r.chain.headOf("h0")).toBe("h1");
-    expect(r.chain.headOf("child")).toBe("child");
+    expect(r.chain.chainOf("h0")).toEqual(["h1", "h0"]);
+    expect(r.chain.chainOf("child")).toBeUndefined();
     const opened = await r.router.ensure({ channelId: "web", conversationId: "h0" }) as FakeSession;
     expect(opened.calls).toEqual([`compactionCap:${String(MAIN_COMPACTION_CAP)}`]);
 

@@ -36,7 +36,7 @@ type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSess
 const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
 
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
-export type TaskChain = Pick<MainChain, "enabled" | "isMember" | "launchers" | "headOf">;
+export type TaskChain = Pick<MainChain, "enabled" | "chainOf">;
 type Waiter = (run: TaskRun) => void;
 
 export class TaskService {
@@ -62,7 +62,7 @@ export class TaskService {
       continuous?: TaskChain;
     },
   ) {
-    const headOf = (id: string): string => instance?.continuous?.headOf(id) ?? id;
+    const headOf = (id: string): string => instance?.continuous?.chainOf(id)?.[0] ?? id;
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable);
@@ -253,7 +253,7 @@ export class TaskService {
   /** For every open of a session: a child runs at the children's cap however it
    *  was opened — a run, or someone typing into it on the web. */
   readonly opened = (session: AgentSession): AgentSession => {
-    if (this.instance?.continuous?.enabled() && this.store.isTaskSession(session.id)) session.setCompactionCap(CHILD_COMPACTION_CAP);
+    if (this.instance?.continuous?.enabled() && this.store.creatorOf(session.id)) session.setCompactionCap(CHILD_COMPACTION_CAP);
     return session;
   };
 

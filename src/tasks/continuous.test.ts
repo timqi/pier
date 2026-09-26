@@ -31,12 +31,7 @@ function rig(on = true) {
     readHistory: async () => undefined,
   };
   const members = ["h1", "h0"];
-  const chain: TaskChain = {
-    enabled: () => on,
-    isMember: (id) => members.includes(id),
-    launchers: (id) => (members.includes(id) ? members : [id]),
-    headOf: (id) => (members.includes(id) ? "h1" : id),
-  };
+  const chain: TaskChain = { enabled: () => on, chainOf: (id) => (members.includes(id) ? members : undefined) };
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));

@@ -75,23 +75,16 @@ export class MainChain {
     return rows.map((r) => ({ sessionId: r.session_id, startedAt: r.started_at, reason: r.reason }));
   }
 
-  isMember(sessionId: string): boolean {
-    return this.db.prepare("SELECT 1 FROM main_chain WHERE session_id = ?").get(sessionId) !== undefined;
-  }
-
-  /** Who counts as `sessionId` for a run it launched: every member, for a member. */
-  launchers(sessionId: string): string[] {
-    return this.isMember(sessionId) ? this.members().map((m) => m.sessionId) : [sessionId];
-  }
-
-  /** Where a result owed to `sessionId` goes: the head, for any member. */
-  headOf(sessionId: string): string {
-    return this.isMember(sessionId) ? this.members()[0]!.sessionId : sessionId;
+  /** Every member's id, newest first, when `sessionId` is one: a member's
+   *  launches are the whole chain's, and a result owed to it goes to the head. */
+  chainOf(sessionId: string): string[] | undefined {
+    const ids = this.members().map((m) => m.sessionId);
+    return ids.includes(sessionId) ? ids : undefined;
   }
 
   /** For every open of a session: a member runs at the main cap however it was opened. */
   readonly opened = (session: AgentSession): AgentSession => {
-    if (this.enabled() && this.isMember(session.id)) session.setCompactionCap(MAIN_COMPACTION_CAP);
+    if (this.enabled() && this.chainOf(session.id)) session.setCompactionCap(MAIN_COMPACTION_CAP);
     return session;
   };
 
