@@ -221,4 +221,5 @@ Phase B (the switch goes, after [10 §Acceptance](10-continuous-session.md#accep
 Taken as built (Phase A): needs-you is unread — a finished lead stays in In
 progress until viewed, and `/status` alone spells out what waits on the user;
 a design lead waiting on Finalize (`designOpen`) still holds its row. Design
-docs stay English.
+docs stay English. Definitions saved before the `conversation` default keep
+their stored `none`; no migration — a `save --task-id` moves one.
