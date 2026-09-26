@@ -92,6 +92,7 @@ export class Router {
    *  that drains speculatively and may not get to exit. */
   private draining = false;
   private spokenTo?: (sessionId: string) => void;
+  private turnEnded?: (sessionId: string, text: string) => void;
 
   constructor(
     private readonly hub: EventHub,
@@ -115,6 +116,12 @@ export class Router {
    *  (web/session-state.ts) is built with the web surface. */
   onSpokenTo(listener: (sessionId: string) => void): void {
     this.spokenTo = listener;
+  }
+
+  /** Every attached session's answered turn, runs' and humans' alike; a failed
+   *  turn is not one. Registered by the task service (tasks/service.ts). */
+  onTurnEnd(listener: (sessionId: string, text: string) => void): void {
+    this.turnEnded = listener;
   }
 
   /** A failure reaches the chat as well as the hub (§5): on IM, silence is
@@ -297,6 +304,7 @@ export class Router {
           log.info(
             `turn end ${keyOf(key)} session ${session.id}: ${String(payload.text.length)} chars`,
           );
+          if (!payload.error) this.turnEnded?.(session.id, payload.text);
           const channel = this.channels.get(key.channelId);
           if (channel) {
             const reply = splitReply(payload.text, payload.meta);

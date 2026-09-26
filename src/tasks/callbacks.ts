@@ -22,6 +22,9 @@ export const runSource = (run: TaskRun): SystemInputSource => ({
 /** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
 export const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
 
+/** The line a design lead ends on once the user confirms: its milestone, whether a run's or a turn outside any. */
+export const DESIGN_FINAL = /^Design final:/m;
+
 /** On the record of a lead run that owed its supervisor nothing, so the Console says why. */
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
@@ -36,7 +39,7 @@ export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf
   const lead = run.targetSessionId;
   const phase = lead === null ? undefined : store.leadPhaseOf(lead);
   const milestone = (): boolean => run.context.resumePrompt?.startsWith(MILESTONE) === true ||
-    (run.result?.type === "agent" && /^Design final:/m.test(run.result.text)) ||
+    (run.result?.type === "agent" && DESIGN_FINAL.test(run.result.text)) ||
     (phase === "build" && lead !== null && !store.awaitsResults(lead));
   if (phase !== undefined && run.state === "succeeded" && !milestone()) run.callbackError = LEAD_TURN;
   else run.callbackState = "pending";

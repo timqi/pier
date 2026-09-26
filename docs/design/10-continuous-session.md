@@ -29,6 +29,12 @@ child, and callbacks are the only delivery.
 - A lead's run whose result carries a `Design final: <absolute path>` line
   owes main a callback (§Milestones); main launches a new build lead on that
   doc, its prompt opening `Build per ` (`BUILD_PROMPT`).
+- A design lead's turn outside any run (the user confirmed in its session)
+  that carries the line is recorded as a finished run of the lead — reuse,
+  resumed from its latest run, that run's callback target, the reply its
+  result — so it reports and clears the same way (`TaskService.designFinal`,
+  on `Router.onTurnEnd`); a failed turn, a run's own turn and a build lead's
+  record nothing.
 - A run's `--name` is its session's title; a lead's rail row carries its
   phase, `design` or `build` (`TaskStore.leads`, `build` when the prompt
   opens with `BUILD_PROMPT`).

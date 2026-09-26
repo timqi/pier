@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
-import { MILESTONE, TaskCallbacks } from "./callbacks.js";
+import { DESIGN_FINAL, MILESTONE, settleCallback, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -100,6 +100,49 @@ export class TaskService {
       (run) => this.execution.start(run),
       (run) => this.changed(run),
     );
+    router.onTurnEnd((sessionId, text) => {
+      if (!DESIGN_FINAL.test(text)) return;
+      // On Pi's dispatch stack, which must not unwind.
+      try {
+        this.designFinal(sessionId, text);
+      } catch (err) {
+        log.error(`lead ${sessionId}: a Design final: outside any run could not be recorded; main was not told`, err);
+      }
+    });
+  }
+
+  /** A design lead finalized in its own session, a turn outside any run (the
+   *  user confirmed there): recorded as a finished run of the lead whose result
+   *  is that reply, so it reports to the lead's supervisor, and the rail and
+   *  `/status` see it, exactly as a run's `Design final:` does. */
+  private designFinal(sessionId: string, text: string): void {
+    // A run's own turn reports through the run.
+    if (this.store.leadPhaseOf(sessionId) !== "design" || this.store.findActiveRunForTarget(sessionId)?.state === "running") return;
+    const last = this.store.latestRunForTarget(sessionId);
+    if (!last) return;
+    const run = this.store.transact(() => {
+      const run = this.runs.prepare(last.context.definition, null, "agent", null, {
+        invokedBySessionId: last.invokedBySessionId,
+        sourceSessionId: last.invokedBySessionId,
+        targetSessionId: sessionId,
+        sessionMode: "reuse",
+        resumedFromRunId: last.id,
+        callbackSessionId: last.callbackSessionId,
+        callbackMode: last.callbackMode,
+        background: last.background,
+      });
+      const now = Date.now();
+      run.state = "succeeded";
+      run.startedAt = run.finishedAt = now;
+      run.result = { type: "agent", text, sessionId };
+      run.context.sessionId = sessionId;
+      settleCallback(run, this.store);
+      this.store.saveRun(run);
+      return run;
+    });
+    if (run.callbackSessionId === null) log.warn(`lead ${sessionId}: Design final: recorded as run ${run.id}; the lead reports to no one`);
+    else log.info(`lead ${sessionId}: Design final: outside any run, recorded as run ${run.id} for ${run.callbackSessionId}`);
+    this.runs.start(run);
   }
 
   start(tickMs = 1000): void {

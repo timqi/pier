@@ -62,7 +62,7 @@ function rig() {
     return task;
   };
   const bash = (script: string) => service.create({ name: script, trigger: { type: "manual" }, action: { type: "bash", cwd, script }, timeoutSeconds: 5 });
-  return { cwd, sessions, created, service, store, leadRan, bash, agent };
+  return { cwd, sessions, created, service, store, leadRan, bash, agent, router };
 }
 
 /** The wall clock `ms` ahead, past a waiting result's backoff; timers stay real. */
@@ -292,6 +292,43 @@ describe("a feature lead", () => {
     expect(broken.store.getRun(failed.id)!.state).toBe("failed");
     expect(broken.sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("provider down")]);
     broken.service.stop();
+  });
+
+  // The user confirms in the lead's own session: that turn is no run, yet it is the milestone.
+  it("records a design lead's Design final: from a turn outside any run, reports it to main, and clears the design", async () => {
+    const { service, sessions, store, leadRan, router } = rig();
+    await leadRan();
+    const lead = sessions.get("lead")!;
+    router.attach({ channelId: "web", conversationId: "lead" }, lead);
+    lead.emit({ type: "turn-end", text: "Shall I finalize?" });
+    lead.emit({ type: "turn-end", text: "", error: "provider down" });
+    expect(store.latestRunForTarget("lead")!.id).toBe("lead-run");
+    expect(store.leads().get("lead")?.designOpen).toBe(true);
+
+    lead.emit({ type: "turn-end", text: "Confirmed.\nDesign final: /repo/docs/design.md" });
+    await vi.waitFor(() => expect(sessions.get("main")!.systemInputs.map((i) => i.text)).toEqual([expect.stringContaining("Design final: /repo/docs/design.md")]));
+    expect(store.latestRunForTarget("lead")).toMatchObject({
+      state: "succeeded", sessionMode: "reuse", resumedFromRunId: "lead-run", callbackSessionId: "main", callbackState: "delivered",
+    });
+    expect(store.leads().get("lead")?.designOpen).toBe(false);
+    expect(service.openDesigns()).toEqual([]);
+    service.stop();
+
+    // A run's own turn reports through the run; a build lead's and a main session's direct turns record nothing.
+    const other = rig();
+    await other.leadRan("running");
+    for (const id of ["lead", "main"]) other.router.attach({ channelId: "web", conversationId: id }, other.sessions.get(id)!);
+    other.sessions.get("lead")!.emit({ type: "turn-end", text: "Design final: /repo/docs/design.md" });
+    other.sessions.get("main")!.emit({ type: "turn-end", text: "Design final: /repo/docs/design.md" });
+    expect(other.store.latestRunForTarget("lead")!.id).toBe("lead-run");
+    expect(other.store.latestRunForTarget("main")).toBeUndefined();
+    other.service.stop();
+    const build = rig();
+    await build.leadRan("succeeded", `${BUILD_PROMPT}/repo/docs/design.md: go`);
+    build.router.attach({ channelId: "web", conversationId: "lead" }, build.sessions.get("lead")!);
+    build.sessions.get("lead")!.emit({ type: "turn-end", text: "Design final: /repo/docs/design.md" });
+    expect(build.store.latestRunForTarget("lead")!.id).toBe("lead-run");
+    build.service.stop();
   });
 
   // The session's creator fixes the role: a follow-up from main carries no launch config of its own.
