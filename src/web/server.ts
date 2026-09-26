@@ -21,6 +21,7 @@ import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
 import type {
   AgentFactory,
+  AgentRole,
   AgentSession,
   BackgroundRun,
   CatalogEntry,
@@ -145,6 +146,8 @@ export interface WebDeps {
   activeBackgroundRunCounts?: () => Map<string, number>;
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
+  /** `TaskStore.roleOf`: a lead's session stays in the rail for its life. */
+  roleOf?: (sessionId: string) => AgentRole | undefined;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -202,6 +205,7 @@ export function createServer(
     backgroundRuns,
     activeBackgroundRunCounts,
     taskSessions,
+    roleOf,
     channelOf,
     continuous,
   }: WebDeps,
@@ -310,6 +314,7 @@ export function createServer(
     unread: own?.unread ?? false,
     channel: channelOf?.(s.id) ?? "web",
     activeRuns: active.get(s.id) ?? 0,
+    ...(roleOf?.(s.id) === "lead" ? { role: "lead" as const } : {}),
   });
 
   // The rail's top rows are maintained here and nowhere else: a session a

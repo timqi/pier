@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner } from "./agent.js";
-import { TaskCallbacks } from "./callbacks.js";
+import { MILESTONE, TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
@@ -32,9 +32,6 @@ const runPrompt = (run: TaskRun): string | null => {
 
 type TriggerSource = TaskRun["triggerSource"];
 type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">;
-
-/** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
-const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
 
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
 export type TaskChain = Pick<MainChain, "chainOf">;

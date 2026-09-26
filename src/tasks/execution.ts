@@ -3,7 +3,7 @@
 
 import { logger } from "../log.js";
 import type { AgentTaskRunner } from "./agent.js";
-import type { TaskCallbacks } from "./callbacks.js";
+import { settleCallback, type TaskCallbacks } from "./callbacks.js";
 import { runBash } from "./command.js";
 import type { TaskDefinitions } from "./definitions.js";
 import type { TaskStore } from "./store.js";
@@ -97,7 +97,7 @@ export class TaskExecution {
       if (run.state === "failed") log.error(settled, cause);
       else if (run.matched === false) log.debug(`${settled} (watch did not match)`);
       else log.info(settled);
-      if (run.callbackSessionId) run.callbackState = "pending";
+      settleCallback(run);
       this.controllers.delete(run.id);
       try {
         this.store.saveRun(run);

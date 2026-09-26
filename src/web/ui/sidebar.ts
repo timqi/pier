@@ -31,6 +31,8 @@ export interface SessionInfo {
   channel: string;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
+  /** A feature lead's session (`pier task run --role lead`): in progress for its life. */
+  role?: "lead";
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -107,12 +109,14 @@ const waitingForYou = (s: SessionInfo): boolean => s.unread;
 /** One wording for the dot's title and the chat header's running chip. */
 export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
 
-/** A session with something going on in it: running, waiting for a look, or
- *  subagents in flight — what the dot marks, and what the palette lists first. */
-export const isLive = (s: SessionInfo): boolean => s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0;
+/** A session with something going on in it: running, waiting for a look,
+ *  subagents in flight, or a lead, live or not, until it is deleted — what the
+ *  dot marks, and what the palette lists first. */
+export const isLive = (s: SessionInfo): boolean =>
+  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.role === "lead";
 
-/** Green = running, amber = waiting for a look, sky = subagents in flight.
- *  Idle has no mark or slot. */
+/** Green = running, amber = waiting for a look, sky = subagents in flight,
+ *  grey = an idle lead, whose turn ended on the user. Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   if (!isLive(s)) return [];
   const mark: [string, string] =
@@ -120,7 +124,9 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
       ? ["bg-green-500 animate-pulse", "working…"]
       : waitingForYou(s)
         ? ["bg-amber-500", "turn finished — not viewed yet"]
-        : ["bg-sky-500", runsLabel(s.activeRuns)];
+        : s.activeRuns > 0
+          ? ["bg-sky-500", runsLabel(s.activeRuns)]
+          : ["bg-neutral-400", "lead — waiting for you"];
   const dot = h("span", `h-2 w-2 flex-none rounded-full ${mark[0]}`);
   dot.title = mark[1];
   return [dot];

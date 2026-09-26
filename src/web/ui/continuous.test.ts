@@ -71,3 +71,8 @@ it("leaves the conversation's own sessions out of In progress", () => {
   expect(sidebar.inProgress([row("h0", { state: "streaming" }), row("c", { unread: true }), row("i")], [member("h0")]).map((s) => s.id))
     .toEqual(["c"]);
 });
+
+// A lead's ended turn waits on the user: seen or not, it stays until deleted.
+it("keeps an idle, read lead in progress", () => {
+  expect(sidebar.inProgress([row("lead", { role: "lead" }), row("i")], []).map((s) => s.id)).toEqual(["lead"]);
+});
