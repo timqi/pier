@@ -41,6 +41,10 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
 - Models by tier: the dispatcher names `--model hardest|balanced|cheap`, the
   operator assigns the tiers on the menu ([09 §Models](09-tasks-cli.md#models)),
   a lead is `hardest --thinking high`; no model id appears in a prompt or here.
+  A tier follows the change's difficulty, not the task's kind: a review takes
+  the builder's tier, `hardest` only for a seam diff or a builder-reported risk
+  or unverified part; a model the user names overrides both ([pier-tasks §Model
+  choice](../../skills/pier-tasks/SKILL.md#model-choice)).
 - Every delegated run's preamble (`tasks/agent.ts`) asks for the conclusion and
   the paths it rests on, no process; a deliverable longer than a screen goes
   to a file the result names.

@@ -52,9 +52,15 @@ not available; thinking follows the pin, `--thinking` overrides
 
 | Work | `--model` |
 | --- | --- |
-| lead; design, architecture, review of a hard change | `hardest` |
+| lead; design, architecture | `hardest` |
 | coding a feature or a fix; integration | `balanced` |
 | research, summaries, lookups, transcripts, bulk mechanical edits | `cheap` |
+
+A tier follows the change's difficulty, not the task's kind: a review takes the
+builder's tier, `hardest` only when the diff touches a seam
+(`src/core/types.ts`, `src/channels/types.ts`, `src/tasks/types.ts`, `src/db.ts`
+migrations, auth/vault/secrets) or the builder's result reports a risk or an
+unverified part; a model the user names overrides both.
 
 Any other name is a substring of provider or id ("let gpt review it" is
 `--model gpt`); none or several hits lists the pins. `--model ?` prints the
