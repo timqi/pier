@@ -388,7 +388,10 @@ export function createServer(
   app.post("/api/sessions/:id/close", async (c) => {
     const body = await c.req.json().catch(() => null);
     if (typeof body?.closed !== "boolean") return c.json({ error: "closed (boolean) required" }, 400);
-    state.setClosed(c.req.param("id"), body.closed);
+    const id = c.req.param("id");
+    // The rail's conversation row is drawn from its members; one closed would blank it.
+    if (continuous?.enabled() && continuous.chainOf(id)) return c.json({ error: "the continuous conversation stays in the rail" }, 409);
+    state.setClosed(id, body.closed);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
   });
