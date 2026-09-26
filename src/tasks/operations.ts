@@ -209,7 +209,7 @@ export async function handleTask(
   };
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") {
-    // The Console's row: the next occurrence and the last run's state, not the run.
+    // What the schedule answer needs: the next occurrence and the last run's state, not the run.
     return definitions.list().filter((task) => task.kind !== "subagent").map(({ nextRunAt, ...task }) => {
       const last = host.listRuns(task.id, 1)[0];
       return { ...task, nextRun: nextRunAt, lastRun: last ? defined<LastRun>({ runId: last.id, state: last.state, startedAt: last.startedAt, finishedAt: last.finishedAt }) : null };

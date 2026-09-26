@@ -25,7 +25,7 @@ export const MILESTONE = "[Pier: the last result you were waiting on follows; no
 /** The line a design lead ends on once the user confirms: its milestone, whether a run's or a turn outside any. */
 export const DESIGN_FINAL = /^Design final:/m;
 
-/** On the record of a lead run that owed its supervisor nothing, so the Console says why. */
+/** On the record of a lead run that owed its supervisor nothing, so the run says why. */
 export const LEAD_TURN = "a lead's turn, not a milestone";
 
 /** Decided once, as the run finishes. A lead reports milestones only: any

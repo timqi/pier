@@ -109,9 +109,8 @@ pier task archive --task-id <id>
 ```
 
 One socket op each (`operation: "pause" | "resume" | "archive"`), calling
-`TaskService.setEnabled(id, false | true)` / `archive(id)` as the
-`/api/tasks/:id/*` routes do; a `subagent` definition and a Pier-owned one are
-refused. Receipt: the definition. Run now is `run --task-id`; a paused
+`TaskService.setEnabled(id, false | true)` / `archive(id)`; a `subagent`
+definition and a Pier-owned one are refused. Receipt: the definition. Run now is `run --task-id`; a paused
 definition still runs on demand, an archived one never.
 
 ## `runs`

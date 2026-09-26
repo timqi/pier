@@ -61,7 +61,7 @@ src/
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,
                messages, command, service, store, operations (the `/task`
-               route: who may ask for what, by the session's role), routes,
+               route: who may ask for what, by the session's role),
                cli (`pier task`: argv → the params object over the socket)
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
