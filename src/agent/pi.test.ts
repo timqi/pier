@@ -669,18 +669,18 @@ describe("the continuous conversation's seam", () => {
     expect(await s.pendingSystemInputs()).toEqual([]);
   });
 
-  it("reads the branch, compacted turns included, when asked for it", async () => {
+  it("reads the branch, so a compaction that kept no user turn still shows the last one", async () => {
     const { fake, session: s } = session();
-    const user = (text: string) => ({ role: "user", content: text, timestamp: 1 });
+    const reply = { role: "assistant", content: [{ type: "text", text: "a long answer" }], timestamp: 3 };
     Object.assign(fake.pi.sessionManager, {
       getBranch: () => [
-        { type: "message", message: user("before the compaction") },
+        { type: "message", message: { role: "user", content: "before the compaction", timestamp: 2 } },
         { type: "compaction", summary: "summary", tokensBefore: 9, timestamp: "2026-01-01T00:00:00Z" },
-        { type: "message", message: user("after") },
+        { type: "message", message: reply },
       ],
     });
-    fake.pi.messages = [user("after")] as PiMessage[];
-    expect((await s.history()).map((t) => t.text)).toEqual(["after"]);
-    expect((await s.history({ branch: true })).map((t) => t.text)).toEqual(["before the compaction", "after"]);
+    // The model's context after the compaction: not one user turn left in it.
+    fake.pi.messages = [reply] as PiMessage[];
+    expect((await s.history()).filter((t) => t.role === "user")).toEqual([{ role: "user", text: "before the compaction", at: 2 }]);
   });
 });

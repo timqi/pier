@@ -97,9 +97,7 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 The routes (`/api/continuous*`), the rail and the pane are
 [03](03-web-workbench.md)'s. A bare address or any chain member opens the
 conversation at its head; earlier members page in read-only, read off disk
-and never opened (`AgentFactory.readHistory`), each on its branch
-(`history({branch: true})`) so compacted turns stay in view; no paging within
-a session. Children show as Background Run rows opening their sessions.
+and never opened (`AgentFactory.readHistory`); no paging within a session. Children show as Background Run rows opening their sessions.
 
 ## IM
 

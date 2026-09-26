@@ -244,13 +244,12 @@ export function createServer(
 
   const ensure = (id: string) => router.ensure({ channelId: "web", conversationId: id });
 
-  // A chain member is read on its branch, compacted turns included; an older
-  // one is read off disk and never opened, so it can be neither edited nor resumed.
-  const chainOf = (id: string): string[] | undefined => (continuous?.enabled() ? continuous.chainOf(id) : undefined);
-  const member = (id: string): boolean => chainOf(id) !== undefined;
-  const older = (id: string): boolean => (chainOf(id)?.[0] ?? id) !== id;
+  // An earlier member of the continuous conversation is read off disk and
+  // never opened, so it can be neither edited nor resumed.
+  const older = (id: string): boolean =>
+    continuous?.enabled() === true && (continuous.chainOf(id)?.[0] ?? id) !== id;
   const turnsOf = async (id: string): Promise<ChatTurn[]> => {
-    if (!older(id)) return (await ensure(id)).history({ branch: member(id) });
+    if (!older(id)) return (await ensure(id)).history();
     const turns = await factory.readHistory(id);
     if (!turns) throw new Error(`unknown session: ${id}`);
     return turns;
@@ -387,7 +386,7 @@ export function createServer(
     // newer cursor, and never spin indefinitely if the session stays busy.
     for (let attempt = 0; attempt < 3; attempt++) {
       const lastSeq = hub.lastSeq(id);
-      const turns = (await session.history({ branch: member(id) })).map(slim);
+      const turns = (await session.history()).map(slim);
       const queue = await session.pendingQueue();
       if (hub.lastSeq(id) !== lastSeq) continue;
       return c.json({
@@ -555,11 +554,10 @@ export function createServer(
     if (older(id)) return c.json({ error: "an earlier session of the continuous conversation is read-only" }, 409);
     const session = await ensure(id);
     if (session.state === "streaming") return c.json({ error: "busy — stop the turn first" }, 409);
-    const branch = member(id);
-    const users = (await session.history({ branch })).filter((turn) => turn.role === "user").length;
+    const users = (await session.history()).filter((turn) => turn.role === "user").length;
     if (index >= users) return c.json({ error: "that message is gone — refresh and try again" }, 409);
     if (session.state !== "idle") return c.json({ error: "busy — stop the turn first" }, 409);
-    await session.rewindToUserTurn(index, { branch });
+    await session.rewindToUserTurn(index);
     // The rewind took the speaker headers out of the context too.
     router.forgetSender(id);
     await router.dispatch({

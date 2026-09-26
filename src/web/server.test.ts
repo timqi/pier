@@ -2585,17 +2585,4 @@ describe("the continuous conversation's routes", () => {
     expect(await edit.json()).toEqual({ error: "an earlier session of the continuous conversation is read-only" });
     expect(factory.resume).not.toHaveBeenCalled();
   });
-
-  it("reads the head on its branch, and edits it there", async () => {
-    const { app, sessions, post, restarted } = chainRig();
-    restarted();
-    const head = sessions.get("head")!;
-    const read = vi.spyOn(head, "history");
-    const rewind = vi.spyOn(head, "rewindToUserTurn");
-    expect((await app.request("/api/sessions/head/history")).status).toBe(200);
-    expect(read).toHaveBeenCalledWith({ branch: true });
-    head.history = async () => [{ role: "user", text: "compacted away" }, { role: "user", text: "kept" }];
-    expect((await post("/api/sessions/head/turns/0/edit", { text: "again" })).status).toBe(202);
-    expect(rewind).toHaveBeenCalledWith(0, { branch: true });
-  });
 });

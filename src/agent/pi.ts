@@ -309,15 +309,14 @@ export class PiSession implements AgentSession {
     return this.pi.clearQueue();
   }
 
-  async history({ branch = false }: { branch?: boolean } = {}): Promise<ChatTurn[]> {
+  async history(): Promise<ChatTurn[]> {
     this.live();
-    return toChatTurns(branch ? branchMessages(this.pi.sessionManager) : this.pi.messages as PiMessage[]);
+    return toChatTurns(branchMessages(this.pi.sessionManager));
   }
 
-  async rewindToUserTurn(index: number, opts?: { branch?: boolean }): Promise<void> {
-    const total = (await this.history(opts)).filter((t) => t.role === "user").length;
-    // Branch entries keep compacted-away history that history() no longer
-    // shows, so only end-relative indices line up.
+  async rewindToUserTurn(index: number): Promise<void> {
+    const total = (await this.history()).filter((t) => t.role === "user").length;
+    // End-relative: a user entry toChatTurns would not count cannot shift the target.
     const back = total - index;
     const users = this.pi.sessionManager
       .getBranch()

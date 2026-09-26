@@ -307,10 +307,9 @@ export interface AgentSession {
   readonly model: ModelRef | undefined;
   readonly thinkingLevel: ThinkingLevel;
   readonly contextUsage: ContextUsage | undefined;
-  /** Completed turns of the persisted transcript (no partial streaming): the
-   * model's context, or with `branch` every turn of the transcript's current
-   * branch, those a compaction summarized away included. */
-  history(opts?: { branch?: boolean }): Promise<ChatTurn[]>;
+  /** Completed turns of the transcript's current branch (no partial
+   * streaming), those a compaction summarized away included. */
+  history(): Promise<ChatTurn[]>;
   setModel(model: ModelRef): Promise<void>;
   /** Models with configured auth, selectable via setModel. */
   availableModels(): Promise<ModelRef[]>;
@@ -338,11 +337,11 @@ export interface AgentSession {
   clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /**
    * Rewind the transcript to just before the index-th user turn (as counted
-   * in history(opts)), dropping it and everything after from the context — the
+   * in history()), dropping it and everything after from the context — the
    * edit-message primitive. The caller re-prompts with the edited text.
    * Rejects while streaming.
    */
-  rewindToUserTurn(index: number, opts?: { branch?: boolean }): Promise<void>;
+  rewindToUserTurn(index: number): Promise<void>;
   /**
    * Shrink the context: summarize the older transcript and continue from the
    * summary. Backend-neutral — anything that can compact its own context can
@@ -577,7 +576,7 @@ export interface AgentFactory {
    *  every caller reads `undefined` as a fact, and a cached listing is not
    *  evidence that a session does not exist. */
   find(sessionId: string): Promise<SessionSummary | undefined>;
-  /** A session's `history({branch: true})` read off disk without opening it
+  /** A session's `history()` read off disk without opening it
    *  live; undefined for a session that does not exist. */
   readHistory(sessionId: string): Promise<ChatTurn[] | undefined>;
   /** Sessions by what was said in them — user messages and replies, never
