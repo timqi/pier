@@ -184,7 +184,7 @@ export function readableTitle(title: string | undefined): string | undefined {
   return said || title;
 }
 
-/** How a session is named where it is announced (a push, a handoff): its
+/** How a session is named where it is announced (a push): its
  *  readable title, else its directory. Never empty — a listing that could
  *  not answer must not silence the message. One line: every caller puts it
  *  inside emphasis or a button, where a newline breaks the markup. */

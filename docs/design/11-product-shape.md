@@ -26,9 +26,9 @@ the web experience settling, and nothing below is shaped for it.
 | Rail · Conversation row | the head's dot: streaming or unread | none |
 | Rail · In progress | rows for work in flight, §In progress | needs-you rule below |
 | Rail · New session / Search | ⌘K stays; New session is Phase B's deletion | see §Phases |
-| ⋯ on the conversation | Session info · Model & reasoning · Browse files | Rename, Close, Continue in… hidden (the head is not a session the user manages) |
+| ⋯ on the conversation | Session info · Model & reasoning · Browse files | Rename hidden (the head is not a session the user manages) |
 | ⌘K palette | Running = In progress; Recent = everything else (finished leads, IM sessions); content search | none |
-| Console | Settings only | Automation and Boards deleted; the rail's Console section is one row |
+| Console | Settings only | Automation deleted; Tasks and Boards are Settings tabs; the rail's Console section is one row |
 | Files | unchanged overlay | none |
 | Phone | the same list in the drawer; the same rules | none |
 
@@ -48,7 +48,7 @@ state it carries.
   marks attention: a failed run's callback reaches main, so a failure is the
   Conversation row's unread dot, never a row of its own; a decision main is
   waiting on is a message in the conversation and a `/status` line.
-- Order: rail order (working set, then creation). A lead's phase tag stays.
+- Order: rail order (creation). A lead's phase tag stays.
 - Empty → the group is absent. `/status` remains the full list, the only
   place stages and waiting-on-user items are spelled out.
 - What this reverts: "a lead leaves In progress once its runs are finished"
@@ -63,7 +63,7 @@ Cron is a thing the conversation does, not a Console the user edits.
   No editor form. Pause, resume, run now, archive: the user says it; main
   runs the CLI, which gains `pause`, `resume` and `archive` (`--task-id`, the
   Console's three routes behind one socket op each) beside `run --task-id`
-  for run now. The routes go with the page.
+  for run now. Settings → Tasks keeps pause/resume and the run log.
 - A saved task's callback defaults to the conversation while the switch is
   on (it follows the chain to the head, [10 §Run ledger](10-continuous-session.md#run-ledger)),
   so every cron result and failure is a card in the conversation with its
@@ -91,15 +91,15 @@ manifest, the skill, the list row and the API.
   Pier keeps no second copy.
 - The list: the user asks; main reads the folder (the skill says how) and
   answers public boards first with their `/p/<slug>-<token>/` URL, then
-  private with `/boards/<slug>/`; title, updated age. `GET /api/boards` goes
-  with the page: the folder is the API.
+  private with `/boards/<slug>/`; title, updated age. Settings → Boards reads
+  the same folder through `GET /api/boards`.
 - Publish, unpublish, delete: the user says it; main edits `board.json`
   (`public`, the token rule the skill states) or renames the directory
-  `<slug>.deleted-<ts>` as the route did, and answers with the URL. The
+  `<slug>.deleted-<ts>` as the route does, and answers with the URL. The
   skill's rule stands: `public: true` only when this request asks for it, and
   the skill gains the "anyone with the link" warning line main repeats when
   it publishes. The link is the row's URL, copied like any text.
-  `PATCH`/`DELETE /api/boards/:slug` go with the page.
+  `PATCH`/`DELETE /api/boards/:slug` serve the Settings tab.
 
 ## Chat commands
 
@@ -178,10 +178,12 @@ changes, 44px on touch).
   transcript is the picture Activity drew — every delegation and callback is a
   system-input card linking its session and run — and In progress + `/status`
   are the live view.
-- **Boards is deleted**: the folder and the skill are the surface.
-- The Console is Settings, with Files as its overlay. `/api/tasks*` and
-  `/api/task-runs*` stay only as far as the CLI socket and tests use them; a
-  route with no caller goes with the view.
+- **Boards is a Settings tab**, not a page: the folder and the skill stay the
+  agent's surface; the tab lists, publishes and deletes.
+- **Tasks is a Settings tab**: list, pause/resume, a task's runs and their
+  logs; no editor, no global Runs, no Activity.
+- The Console is Settings, with Files as its overlay; `/api/tasks*` and
+  `/api/boards*` serve those two tabs only.
 
 ## Wire contract
 
@@ -195,7 +197,7 @@ when it comes, reads that table and the four browser-safe `core/` modules
 | What | Where | Why |
 | --- | --- | --- |
 | Automation: Tasks, editor, Runs, Activity, graph, their routes | `web/ui/tasks.ts` (270), `task-editor.ts` (196), `runs.ts` (174), `task-runs.ts` (251), `activity.ts` (355), `tasks/routes.ts` (what the CLI does not call), `views.ts`/`index.html` | §Scheduled tasks, §Console |
-| Rename / Close / Continue in… on the conversation | `session-header.ts` | not a managed session |
+| Rename on the conversation | `session-header.ts` | not a managed session |
 | "finished lead leaves In progress" special case | `sidebar.ts`, `palette.ts` | §In progress; one set again |
 | Boards page, `/api/boards*`, `sessions` on a board | `web/ui/boards.ts` (118), `boards/boards.ts` (the static routes stay), `skills/pier-boards/SKILL.md`, `05-boards.md` | §Boards |
 
@@ -205,8 +207,8 @@ Phase B (the switch goes, after [10 §Acceptance](10-continuous-session.md#accep
 | --- | --- |
 | the `continuous` switch, both branches of every rail/pane rule | `settings.ts`, `sidebar.ts`, `views.ts`, `main.ts`, `chat.ts`, `composer.ts` |
 | New session menu, Browse…, recent directories | `dir-picker.ts` (166), `index.html`, `sidebar.ts` |
-| working-set rank, Load more, "Sessions" label | `web/session-state.ts` (84), `sidebar.ts` |
-| `POST /api/sessions` (create), `/close`, `/rename` from the UI | `server.ts` — routes stay for `pier task`/tests until nothing calls them |
+| Load more, "Sessions" label | `sidebar.ts` |
+| `POST /api/sessions` (create), `/rename` from the UI | `server.ts` — routes stay for `pier task`/tests until nothing calls them |
 
 ## Phases
 

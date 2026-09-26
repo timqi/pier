@@ -17,8 +17,9 @@ boundary.
 3. Private unless asked: `public` defaults `false`; the agent sets it only when
    the user asked for a public board in that request.
 4. The agent is the surface: listing, publishing, unpublishing and deleting are
-   file operations the skill describes; there is no Console page and no
-   `/api/boards*`.
+   file operations the skill describes; Settings → Boards
+   ([03](03-web-workbench.md)) lists them and writes only `public` or the
+   delete rename.
 5. HTML only: no markdown source, no renderer, no content negotiation.
 6. Static and self-contained: `site/index.html` plus relative assets under
    `site/` and the shipped stylesheet; no external resources, network data

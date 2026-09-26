@@ -90,8 +90,8 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   price tier; a lead's state is its doc), any other at the instance's
   setting; `reserveTokens = window − cap`, never later than the instance's
   reserve, recomputed on `setModel`. Children never rotate.
-- `ContextUsage.compactAt` is that point, and the session header shows
-  `used/compactAt`.
+- `ContextUsage.compactAt` is that point, and a child's header reads against
+  it; the conversation's bar shows `used/rotateAt` (`CHAIN_FULL_TOKENS`).
 
 ### Cache
 
@@ -185,7 +185,7 @@ never opened.
 - In progress is the palette's Running set less the conversation's sessions;
   needs you = unread: a finished lead stays while unread and leaves once viewed.
 - The conversation's ⋯ menu is Session info, Browse files,
-  Model & reasoning; no Rename, Close, New session here or Continue in….
+  Model & reasoning; no Rename or New session here.
 
 ## Not built
 
@@ -198,7 +198,7 @@ never opened.
 - With it, a run reporting its session posts a card (`<task name> · <state>`,
   cwd, web link) as a thread root bound to the child, edited in place; it
   needs a chat-level DM id in both adapters, replies to more than one attached
-  chat, and the card root and its edit in `handoff.ts`.
+  chat, and a way to post a card root and edit it.
 - A callback to a cold head (>1h) deferred to the next seed; a rotation on a
   callback to a full head.
 - A lead keeping the 1h cache TTL while its workers run.

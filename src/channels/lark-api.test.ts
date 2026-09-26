@@ -18,7 +18,6 @@ const sdk = {
   /** ws.start's promise never settles — connect() must not care. */
   request: vi.fn(),
   reply: vi.fn(),
-  create: vi.fn(),
   get: vi.fn(),
   reactionList: vi.fn(),
   reactionDelete: vi.fn(),
@@ -47,7 +46,7 @@ vi.mock("@larksuiteoapi/node-sdk", () => ({
     request = sdk.request;
     im = {
       v1: {
-        message: { reply: sdk.reply, create: sdk.create, patch: vi.fn(), delete: vi.fn(), get: sdk.get },
+        message: { reply: sdk.reply, create: vi.fn(), patch: vi.fn(), delete: vi.fn(), get: sdk.get },
         messageReaction: { create: vi.fn(), list: sdk.reactionList, delete: sdk.reactionDelete },
         messageResource: { get: sdk.resourceGet },
         chat: { get: vi.fn() },
@@ -66,7 +65,7 @@ beforeEach(() => {
   sdk.registered = {};
   sdk.wsStarted = 0;
   sdk.wsClosed = 0;
-  for (const fn of [sdk.request, sdk.reply, sdk.create, sdk.get, sdk.reactionList, sdk.reactionDelete, sdk.resourceGet]) {
+  for (const fn of [sdk.request, sdk.reply, sdk.get, sdk.reactionList, sdk.reactionDelete, sdk.resourceGet]) {
     fn.mockReset();
   }
   logs = [];
@@ -139,24 +138,6 @@ describe("business-code errors", () => {
     sdk.reply.mockResolvedValue({ code: 230002, msg: "bot not in chat" });
     await expect(api.replyCard("om_1", { schema: "2.0", body: { direction: "vertical", elements: [] } }))
       .rejects.toThrow("lark message.reply: 230002 bot not in chat");
-  });
-
-  it("createCard's refusal names its own call", async () => {
-    sdk.create.mockResolvedValue({ code: 99991672, msg: "permission denied" });
-    await expect(api.createCard("oc_1", { schema: "2.0", body: { direction: "vertical", elements: [] } }))
-      .rejects.toThrow("lark message.create: 99991672 permission denied");
-  });
-});
-
-describe("the one root", () => {
-  it("createCard sends receive_id_type chat_id and interactive", async () => {
-    sdk.create.mockResolvedValue({ code: 0, data: { message_id: "om_root" } });
-    const card = { schema: "2.0" as const, body: { direction: "vertical" as const, elements: [] } };
-    await expect(api.createCard("oc_1", card)).resolves.toEqual({ messageId: "om_root" });
-    expect(sdk.create).toHaveBeenCalledWith({
-      params: { receive_id_type: "chat_id" },
-      data: { receive_id: "oc_1", msg_type: "interactive", content: JSON.stringify(card) },
-    });
   });
 });
 

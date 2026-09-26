@@ -1,17 +1,14 @@
-// Settings → Channels HTTP surface: one document per platform, and the
-// web → IM handoff beside it.
+// Settings → Channels HTTP surface: one document per platform.
 
 import type { Hono } from "hono";
 import { isThinkingLevel, type ModelRef, type ThinkingLevel } from "../core/types.js";
 import type { ChannelStore } from "./config.js";
 import type { ConversationStore } from "./conversations.js";
-import { type Handoff, HandoffError } from "./handoff.js";
 import type { ChannelRuntime } from "./runtime.js";
 import {
   type ChannelConfig,
   type ChatConfig,
   defaultChannelConfig,
-  type HandoffRequest,
   isChannelPlatform,
 } from "./types.js";
 
@@ -61,7 +58,6 @@ export function registerChannelRoutes(
   app: Hono,
   store: ChannelStore,
   runtime: Pick<ChannelRuntime, "reload">,
-  handoff: Handoff,
   conversations: Pick<ConversationStore, "forgetChat">,
 ): void {
   app.get("/api/channels/:platform", (c) => {
@@ -129,21 +125,5 @@ export function registerChannelRoutes(
     if (!isChannelPlatform(platform)) return c.json({ error: "unknown platform" }, 404);
     store.unbind(platform, c.req.param("id"));
     return c.json({ ok: true });
-  });
-
-  app.get("/api/handoff/targets", (c) => c.json({ targets: handoff.targets() }));
-
-  app.post("/api/handoff", async (c) => {
-    const body = (await c.req.json().catch(() => null)) as Partial<HandoffRequest> | null;
-    const sessionId = asString(body?.sessionId);
-    const chatId = asString(body?.chatId);
-    const platform = body?.platform;
-    if (!sessionId || !chatId || !isChannelPlatform(platform)) return c.json({ error: "invalid body" }, 400);
-    try {
-      return c.json(await handoff.continueIn({ sessionId, platform, chatId }), 201);
-    } catch (err) {
-      if (err instanceof HandoffError) return c.json({ error: err.message }, err.status);
-      throw err;
-    }
   });
 }

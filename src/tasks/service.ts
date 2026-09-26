@@ -59,8 +59,6 @@ export class TaskService {
       modelMenu(): { provider: string; id: string; thinking?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
       continuous: TaskChain;
-      /** A session the operator closed: its open design leaves the open items. */
-      closed?: (sessionId: string) => boolean;
     },
   ) {
     const headOf = (id: string): string => instance.continuous.chainOf(id)?.[0] ?? id;
@@ -292,9 +290,7 @@ export class TaskService {
   }
 
   openItems(now = Date.now()): OpenItems {
-    const closed = this.instance.closed ?? (() => false);
-    const designs = this.openDesigns().filter((r) => r.targetSessionId && !closed(r.targetSessionId));
-    return openItems(this, this.router, this.instance.continuous.members().map((m) => m.sessionId), designs, now);
+    return openItems(this, this.router, this.instance.continuous.members().map((m) => m.sessionId), this.openDesigns(), now);
   }
 
   activeBackgroundRunCounts(): Map<string, number> {

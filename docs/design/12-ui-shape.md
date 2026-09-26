@@ -22,7 +22,7 @@ final.
 desktop / phone                         viewing a child session
 ┌─────────────────────────────────────┐ ┌─────────────────────────────────────┐
 │ Conversation   [2 running · 1 needs │ │ ‹ Conversation  Sleep worker  build │
-│                 you] [opus-5·low·8k]⋯│ │                 [running] [opus·hi]⋯│
+│                  you] [52k/160k]   ⋯ │ │                 [running] [opus·hi]⋯│
 ├─────────────────────────────────────┤ ├─────────────────────────────────────┤
 │                                     │ │                                     │
 │  ↺ session seed · lost · 01a0dd03   │ │  …the child's transcript…           │
@@ -42,11 +42,11 @@ desktop / phone                         viewing a child session
 | --- | --- | --- |
 | left | **Conversation** (opens Session info) | **‹** back to the conversation, wearing the head's dot when it is streaming or unread; then the session's title and its `phase` tag |
 | status chip | `N running · M needs you` — opens the drawer; absent when both are 0 | the same chip, the same drawer |
-| meta chips | model · reasoning · `used/compactAt` — open the model picker; below md only context ≥ 70% or "starting…" shows, as today | the same |
-| `⋯` | Search ⌘K · Session info · Browse files · Model & reasoning · Settings | Session info · Browse files · Model & reasoning · Settings |
+| meta chips | `used/rotateAt` only — `rotateAt` is `CHAIN_FULL_TOKENS` as `GET /api/continuous` reports it, the size past which the next message starts a new session — at every width beside the title, amber ≥ 70%, red ≥ 90% of it; the model is the default and changes from `⋯` | model · reasoning · used tokens, amber/red against `compactAt` — open the model picker; below md only context ≥ 70% shows |
+| `⋯` | Search ⌘K · Status · Session info · Browse files · Model & reasoning · Settings | Status · Session info · Browse files · Model & reasoning · Settings |
 
 - `N running` counts the drawer's green and grey rows; `M needs you` its
-  amber ones plus design leads waiting on Finalize. The chip is the drawer's
+  amber ones plus design leads waiting on Finalize. The chip is the rail's
   attention badge and the tab-title count, one number source
   (`setAttention`).
 - The bar is the only chrome. The transcript runs the full pane under it and
@@ -54,7 +54,7 @@ desktop / phone                         viewing a child session
 
 ## In progress drawer
 
-The In progress list ([03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts))
+The rail's In progress list ([03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts))
 as an overlay: a panel anchored under the chip at the right ≥ md (the
 sidebar's material, 20rem, over the transcript, not beside it), a bottom
 sheet below 640px (the menu primitive's sheet, `menu.ts`). Right because the
@@ -73,7 +73,22 @@ chip is right and the reading column keeps its left edge.
   returns focus to the chip. ⌘⇧[ / ⌘⇧] go: the drawer and ⌘K are the two
   walks.
 - Focus, inertness and the phone sheet's backdrop follow the menu primitive;
-  the drawer uses `menu.ts` (§Deletions).
+  nothing of `shell.ts`'s drawer/rail code survives (§Deletions).
+
+## Status
+
+`⋯` → Status opens `/status` as one card in a panel (the drawer's placement:
+popover ≥ 640px, sheet below), headed ← back to `⋯`, Status, ✕.
+
+- One `system-card`, `/status`'s sections in its order: Open (per item its
+  problem, stage, `running`/`idle`, and its runs), Not on the list, Designs for
+  you to finalize; empty → `Nothing open.`
+- A run is a line: state glyph, name, `<state> <age>` and a lead's
+  `workers: …` (`runStatus`/`workerCounts`, core/reply.ts, the text's own
+  words); a name with a session opens it and closes the panel.
+- Same source as the drawer (`GET /api/continuous/open`, re-read on
+  `sessions-changed`, `task-run-changed` and `open-items-changed`), refilled in
+  place while open. It posts nothing to the transcript; typing `/status` still does.
 
 ## Child session
 
@@ -129,7 +144,7 @@ menu's first item; there is no other way in and there need not be.
 A full-column view, as the Console is today, opened from `⋯` or ⌘K; its own
 head (title, topics, close) is the bar's strip. ✕ or Esc returns to where it
 was opened from. Files stays the overlay it is (`#/files/<dir>`). The
-Console's section, "Console › Settings", has nowhere to live and is the
+Console's rail section, "Console › Settings", has nowhere to live and is the
 `⋯` item.
 
 ## Phone
@@ -155,7 +170,7 @@ sources.
 | the permanent rail, its toggle, the phone drawer, the scrim, `data-rail`, `pier.railClosed` | `sidebar.ts` (391), `shell.ts` (240), `index.html`, `style.css` | §Frame; the rows move to the drawer module, the rest goes |
 | ⌘⇧[ / ⌘⇧] row chords, ⌘⇧O | `sidebar.ts`, `shortcut.ts` | the drawer and ⌘K are the two walks |
 | the desktop chat heading and the phone bar as two elements, `hostMeta` moving chips between them | `shell.ts`, `session-header.ts`, `index.html` | one bar at every width |
-| the Console section | `sidebar.ts`, `views.ts` | `⋯` → Settings |
+| the Console rail section | `sidebar.ts`, `views.ts` | `⋯` → Settings |
 | four-line preview on system cards | `chat.ts` | §Transcript density; the card is the expanded state |
 
 Renamed, not new: `sidebar.ts` becomes the drawer module (rows, order, dots,
@@ -167,9 +182,9 @@ one with the container swapped.
 - Requires Phase A of [11](11-product-shape.md) (this branch's base).
 - **This design is [11 §Phase B](11-product-shape.md#phases).** One shell:
   the `continuous` switch and every non-continuous branch of the sidebar and
-  pane rules, the New session menu, Browse… and the directory picker, the
-  working-set rank and Load more, and the UI's calls to `POST /api/sessions`,
-  `/close`, `/rename` go in the same change (the routes stay while
+  pane rules, the New session menu, Browse… and the directory picker, Load
+  more, and the UI's calls to `POST /api/sessions` and `/rename` go in the
+  same change (the routes stay while
   `pier task` and tests use them). The instance is always continuous;
   [10 §Acceptance](10-continuous-session.md#acceptance)'s week runs on this
   frame.

@@ -41,7 +41,7 @@ interface LarkPanelState extends PanelState {
 }
 
 const fresh = (root: string, messageId: string, draft: PanelDraft): LarkPanelState =>
-  ({ root, messageId, draft, dirs: [], sessions: [] });
+  ({ root, messageId, draft, dirs: [] });
 
 export class LarkPanel extends ChatPanel<LarkPanelState, LarkCardAction> {
   protected readonly fence: [string, string] = ["`", "`"];

@@ -45,12 +45,12 @@ src/
                language.ts, http.ts, artifacts.ts (the fetched copy on disk)
   channels/    shared: types, config (store + gate), gatekeeper, chains, attach,
                chunk, dedup, lines, commands, control, conversations, receipts,
-               panel, runtime, routes, handoff (web ↔ IM); per platform: slack / lark
+               panel, runtime, routes; per platform: slack / lark
                (+ -api, -render, -panel; slack also -outbound, -directory,
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
                also -outbound)
-  boards/      boards.ts (manifest + static serving), pier.css
+  boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +
@@ -65,7 +65,8 @@ src/
                messages, command, service, store, open-items (main's
                markers joined to the ledger), operations (the `/task`
                route: who may ask for what, by the session's role),
-               cli (`pier task`: argv → the params object over the socket)
+               cli (`pier task`: argv → the params object over the socket),
+               routes (Settings → Tasks: list, pause/resume, runs)
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME
@@ -277,5 +278,5 @@ One line each; the reasoning is in the commit that made it.
   written handoff in the prompt. `fork` was removed; stored runs with
   `sessionMode: "fork"` are refused by name.
 - No project concept: a flat rail, a directory chosen once at creation.
-- The rail never reorders itself: a working set of five on top, entered when a
-  human speaks to a session; everything else by birth (`web/session-state.ts`).
+- The session list never reorders itself: every session by birth; the store keeps only
+  the unread mark (`web/session-state.ts`).

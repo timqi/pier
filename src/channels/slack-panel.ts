@@ -56,7 +56,7 @@ const row = (buttons: PanelButton[], value: string | undefined): SlackBlock => (
 });
 
 const fresh = (channel: string, ts: string, draft: PanelDraft): SlackPanelState =>
-  ({ chatId: channel, ts, draft, dirs: [], sessions: [] });
+  ({ chatId: channel, ts, draft, dirs: [] });
 
 export class SlackPanel extends ChatPanel<SlackPanelState, SlackInteraction> {
   protected readonly fence: [string, string] = ["`", "`"];

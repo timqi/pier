@@ -349,6 +349,11 @@ const MIGRATIONS: readonly string[] = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // 32 — the working set and the closed flag go; unread is all the workbench keeps.
+  `
+  ALTER TABLE session_state DROP COLUMN sort;
+  ALTER TABLE session_state DROP COLUMN closed;
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

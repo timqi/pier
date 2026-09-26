@@ -5,7 +5,7 @@
 // signed prefix the boundary mints), stylesheet included, and run sandboxed.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import type { Context, Hono } from "hono";
 import { logger } from "../log.js";
@@ -27,6 +27,12 @@ export interface BoardManifest {
   description: string;
   public: boolean;
   token: string;
+}
+
+/** One row of `GET /api/boards`. */
+export interface BoardSummary extends BoardManifest {
+  slug: string;
+  updatedAt: string;
 }
 
 // A board ships fonts and images, so the list is wider than the attachment
@@ -156,6 +162,38 @@ async function readManifest(
 const writeManifest = (dir: string, slug: string, manifest: BoardManifest & Record<string, unknown>) =>
   writeFile(join(dir, slug, "board.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
+/** Freshness is the site's mtime, not a manifest field — the filesystem
+ *  already knows, and an agent rewriting a page cannot forget to say so. */
+async function updatedAt(dir: string, slug: string): Promise<string> {
+  const info =
+    (await stat(join(dir, slug, "site")).catch(() => null)) ??
+    (await stat(join(dir, slug)).catch(() => null));
+  return (info?.mtime ?? new Date()).toISOString();
+}
+
+async function listBoards(dir: string): Promise<BoardSummary[]> {
+  let entries: string[];
+  try {
+    entries = (await readdir(dir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory() && SLUG.test(e.name))
+      .map((e) => e.name);
+  } catch (err) {
+    // No directory is no boards yet; anything else hides every board at once.
+    if ((err as { code?: string }).code !== "ENOENT") logger("boards").warn(`cannot scan ${dir}`, err);
+    return [];
+  }
+  const boards = await Promise.all(entries.map(async (slug): Promise<BoardSummary | null> => {
+    const manifest = await readManifest(dir, slug);
+    if (!manifest) return null;
+    const { title, description, public: isPublic, token } = manifest;
+    return { slug, title, description, public: isPublic, token, updatedAt: await updatedAt(dir, slug) };
+  }));
+  // Freshest first; slug breaks ties so equal mtimes still list in a stable order.
+  return boards
+    .filter((board): board is BoardSummary => board !== null)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.slug.localeCompare(b.slug));
+}
+
 /** Containment, not normalization: the resolved realpath must sit inside the
  *  board's own site dir or nothing is served. */
 async function resolveFile(dir: string, slug: string, rest: string): Promise<string | null> {
@@ -222,6 +260,31 @@ async function serveFile(c: Context, dir: string, slug: string, rest: string) {
 }
 
 export function registerBoardRoutes(app: Hono, dir: string = defaultBoardsDir()): void {
+  app.get("/api/boards", async (c) => c.json(await listBoards(dir)));
+
+  // Publishing is the one manifest field a human owns; the rest is the agent's.
+  app.patch("/api/boards/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    const body = (await c.req.json().catch(() => null)) as { public?: unknown } | null;
+    if (typeof body?.public !== "boolean") return c.json({ error: "public must be a boolean" }, 400);
+    const manifest = await readManifest(dir, slug);
+    if (!manifest) return c.json({ error: "no such board" }, 404);
+    manifest.public = body.public;
+    // readManifest mints only for a manifest it read as public.
+    if (manifest.public && !manifest.token) manifest.token = mintToken();
+    await writeManifest(dir, slug, manifest);
+    return c.json({ public: manifest.public, token: manifest.token });
+  });
+
+  // A rename, so the undo is on disk; signed prefixes are bound to the
+  // directory's inode (boardOf), so none opens a successor on the same slug.
+  app.delete("/api/boards/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    if (!(await readManifest(dir, slug))) return c.json({ error: "no such board" }, 404);
+    await rename(join(dir, slug), join(dir, `${slug}.deleted-${Date.now()}`));
+    return c.json({ deleted: slug });
+  });
+
   // Declared before the wildcards below: `_assets` is not a slug.
   app.get("/p/_assets/pier.css", async (c) => {
     const file = new URL("./pier.css", import.meta.url);

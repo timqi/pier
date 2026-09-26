@@ -2,7 +2,7 @@
 // joined to the run ledger by session, a lead's workers counted by state, and
 // the one text every surface shows (docs/design/10-continuous-session.md#open-items).
 
-import { agoLabel, openItemMarkers, relTime } from "../core/reply.js";
+import { openItemMarkers, runStatus, workerCounts } from "../core/reply.js";
 import type { Router } from "../core/router.js";
 import { LEDGER_WINDOW_MS, TASK_RUN_STATES, type LedgerRun, type TaskRunState } from "../core/types.js";
 import { logger } from "../log.js";
@@ -54,14 +54,8 @@ export function recordOpenItems(store: Pick<TaskStore, "markOpenItems">, text: s
   return markers.length > 0 && store.markOpenItems(markers, now) > 0;
 }
 
-const runStatus = (r: LedgerRun, now: number): string =>
-  r.finishedAt === null ? `${r.state} ${relTime(r.queuedAt, now)}` : `${r.state} ${agoLabel(r.finishedAt, now)}`;
-
-function workersText(workers: Record<TaskRunState, number> | undefined): string {
-  if (!workers) return "";
-  const counts = TASK_RUN_STATES.filter((s) => workers[s] > 0).map((s) => `${String(workers[s])} ${s}`);
-  return ` · workers: ${counts.join(", ") || "none"}`;
-}
+const workersText = (workers: Record<TaskRunState, number> | undefined): string =>
+  workers ? ` · workers: ${workerCounts(workers)}` : "";
 
 const runText = (r: OpenRun, now: number): string =>
   r.state === NOT_IN_LEDGER

@@ -7,7 +7,7 @@ import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn } from "./chat.js";
 import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
-import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
+import { headSession, openStatus, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { togglePalette } from "./palette.js";
@@ -28,6 +28,8 @@ export interface HeaderDeps {
   openSettings: () => void;
   /** The continuous conversation is what the pane shows. */
   continuousOpen: () => boolean;
+  /** The conversation's rotation threshold (`GET /api/continuous`); null before it answers. */
+  rotateAt: () => number | null;
   /** The `‹`: back to `#/conversation`. */
   openContinuous: () => void;
 }
@@ -127,24 +129,27 @@ export function renderHeader(): void {
  *  act on — the chip's amber, and the one size worth a phone's bar line. */
 const CONTEXT_WARN = 70;
 
-/** Percent used of the room before Pi compacts (capped at 100) — the window
- *  itself is never reached. */
-const contextUsed = (tokens: number, u: ContextUsage): number =>
-  Math.min(100, Math.round((tokens / u.compactAt) * 100));
+/** Percent used of the room before `limit` (capped at 100): where Pi compacts,
+ *  or where the conversation starts a new session — the window itself is never reached. */
+const contextUsed = (tokens: number, limit: number): number =>
+  Math.min(100, Math.round((tokens / limit) * 100));
 
-/** Full context reading for the session info panel: used against where it compacts. */
-const contextLabel = (u: ContextUsage): string =>
+/** Full context reading: used against `limit`, where it compacts unless said otherwise. */
+const contextLabel = (u: ContextUsage, limit = u.compactAt): string =>
   u.tokens === null
-    ? `?/${compact(u.compactAt)}`
-    : `${compact(u.tokens)}/${compact(u.compactAt)} · ${100 - contextUsed(u.tokens, u)}% left`;
+    ? `?/${compact(limit)}`
+    : `${compact(u.tokens)}/${compact(limit)} · ${100 - contextUsed(u.tokens, limit)}% left`;
 
-/** Title-row meta: model · reasoning · current context size. */
+/** Title-row meta: model · reasoning · current context size. The
+ *  conversation's model is the default and stays so, so its bar says only the
+ *  context, in full and on one line at every width; ⋯ still changes the model. */
 function renderSessionMeta(): void {
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
+  const conversation = deps.continuousOpen();
   const items: HTMLElement[] = [];
-  if (id) {
+  if (id && !conversation) {
     const pickerButton = (text: string, cls: string): HTMLElement => {
       const button = h("button", `cursor-pointer font-mono ${cls}`, text);
       button.title = "Change model or reasoning";
@@ -166,11 +171,19 @@ function renderSessionMeta(): void {
   }
   // Context pressure decides two things: the chip's tone, and — below md —
   // whether this row is worth a line of the bar at all.
+  // The conversation's head never reaches compaction: it is replaced past the
+  // rotation threshold, so that is the room it has.
+  const limit = conversation ? deps.rotateAt() : u?.compactAt;
   let pressure = 0;
-  if (u && tokens !== null) {
-    pressure = contextUsed(tokens, u);
+  if (u && tokens !== null && limit) {
+    pressure = contextUsed(tokens, limit);
     const tone = pressure >= 90 ? "text-red-700" : pressure >= CONTEXT_WARN ? "text-amber-700" : "text-neutral-500";
-    items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
+    if (conversation) {
+      const chip = h("span", `flex-none rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[12px] ${tone}`,
+        `${compact(tokens)}/${compact(limit)}`.toLowerCase());
+      chip.title = `Context: ${contextLabel(u, limit)} before the next message starts a new session`;
+      items.push(chip);
+    } else items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
   }
   const children = items.flatMap((item, i) =>
     i === 0 ? [item] : [h("span", "flex-none text-neutral-300", "·"), item],
@@ -181,6 +194,7 @@ function renderSessionMeta(): void {
   // On a phone only one chip is worth a second line: a context near full,
   // which is acted on. style.css shows only this one below md.
   sessionMeta.toggleAttribute("data-urgent", pressure >= CONTEXT_WARN);
+  sessionMeta.toggleAttribute("data-inline", conversation);
 }
 
 /** Read-only details panel: what this session is and how full its context is.
@@ -248,7 +262,7 @@ async function pickModel(anchor: HTMLElement, id: string, session?: SessionInfo)
   // What the panel is showing right now — the placeholder, then the picker the
   // cache drew, then the picker the read reconciled.
   let shown: HTMLElement = loading;
-  if (session) content.prepend(panelHead(anchor, session, "Close model picker"));
+  if (session) content.prepend(panelHead(anchor, session.title ?? untitled(session.cwd), "Close model picker"));
   openPanel(anchor, content);
   // Closing or replacing the panel cancels presentation of an in-flight read.
   const visible = (): boolean => shown.isConnected && !shown.closest("[inert]");
@@ -349,15 +363,15 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
   }
 }
 
-/** Head of a follow-up panel: back to the menu, the session's name, close. */
-function panelHead(anchor: HTMLElement, s: SessionInfo, closeLabel: string): HTMLElement {
+/** Head of a follow-up panel: back to the menu, its title, close. */
+function panelHead(anchor: HTMLElement, text: string, closeLabel: string): HTMLElement {
   const arrow = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
   arrow.setAttribute("aria-label", "Back to session actions");
   arrow.onclick = () => barMenu(anchor);
   const close = h("button", "icon-btn h-11 w-11", icon(X));
   close.setAttribute("aria-label", closeLabel);
   close.onclick = closeMenu;
-  const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", s.title ?? untitled(s.cwd));
+  const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", text);
   title.title = title.textContent ?? "";
   return h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", arrow, title, close);
 }
@@ -378,8 +392,13 @@ export function barMenu(anchor: HTMLElement): void {
       },
     }] : []),
     {
+      label: "Status",
+      hint: "/status",
+      onSelect: () => openStatus(anchor, panelHead(anchor, "Status", "Close status")),
+    },
+    {
       label: "Session info",
-      separatorBefore: conversation,
+      separatorBefore: true,
       onSelect: () => s && sessionInfo(anchor, s, () => barMenu(anchor)),
       ...later,
     },

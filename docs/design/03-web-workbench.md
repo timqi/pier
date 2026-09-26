@@ -10,15 +10,14 @@ surface owns its routes and is mounted beside it.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/sessions` | `AgentFactory.list()` joined with live router state, unread flags and working-set `rank`; `modified` is metadata, not the drawer's ordering key |
+| `GET /api/sessions` | `AgentFactory.list()` joined with live router state and unread flags; `modified` is metadata, not the drawer's ordering key |
 | `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#roles)), and the header that opened it from its run card names it and fills its info panel from here; 404 if unknown |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
-| `POST /api/sessions/:id/close` | body `{closed}` → keep the session out of `GET /api/sessions` (and out of the working set), or back in; returns `{ok}` and broadcasts `sessions-changed`; 409 on a continuous-conversation member. Nothing is deleted: the by-id route, the URL and search still reach it, and a human message to it clears the flag |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
-| `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md))* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}]}`, newest first |
+| `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md))* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}], rotateAt}`, newest first; `rotateAt` is `CHAIN_FULL_TOKENS` |
 | `GET /api/continuous/open` | `TaskService.openItems()` (`WebDeps.openItems`): `{items: [{problem, stage, runs, live}], unlisted, designs}`, each run a ledger row (`LedgerRun`, a lead's with `workers` counted by state) |
 | `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?, command?}`, `command` naming a chat command answered without a turn (the composer drops its optimistic streaming state), 400 without text, 409 with the refusal when `/new` meets a replying head. A rotation re-lists every surface (`sessions-changed`) |
 | `GET /api/sessions/:id/turns/:index/steps` | one turn's thinking/progress/tool steps; tool args and output are fetched when its Activity group opens, while progress text and step identities remain in the snapshot |
@@ -45,6 +44,12 @@ surface owns its routes and is mounted beside it.
 | `GET /api/vault` | *(served by `web/vault.ts`, as are the two below; [07-vault.md](07-vault.md) owns the store)* `[{name, level: "auto"\|"approve", updatedAt}]` — names and levels, never values |
 | `PUT /api/vault/:name` | body `{level, value}` → `Vault.put`; answers the row. 400 for a name that is not `^[A-Z][A-Z0-9_]{0,63}$`, a level that is neither, or an empty value; 423 when `auto` cannot seal because the store is locked; 503 when `approve` could not create its `vt://` record, the error carrying `vt doctor`'s report; 504 when `vt create` is still waiting on an approval after 15s — the put keeps running and a late approval still files the row |
 | `DELETE /api/vault/:name` | remove; 204, or 404 `{error: "no secret named X"}` |
+| `GET /api/tasks` | *(served by `tasks/routes.ts`, as are the three below)* `TaskRow[]` (`tasks/types.ts`): every non-archived `kind: "task"` definition with `lastRun` |
+| `GET /api/tasks/:id/runs` | the task's newest 20 `TaskRun`s; 404 unknown task |
+| `POST /api/tasks/:id/pause`, `/resume` | `setEnabled`; answers the definition. 400 unknown, archived-on-resume, or a task Pier owns |
+| `GET /api/boards` | *(served by `boards/boards.ts`, as are the two below)* `[{slug, title, description, public, token, updatedAt}]`, freshest `site/` mtime first |
+| `PATCH /api/boards/:slug` | body `{public: boolean}`, minting the token on first publish; answers `{public, token}`. 400 bad body, 404 unknown slug |
+| `DELETE /api/boards/:slug` | renames the folder `<slug>.deleted-<ts>`; answers `{deleted}`, 404 unknown slug |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /` | 302 to `/app/` |
@@ -55,14 +60,6 @@ surface owns its routes and is mounted beside it.
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
   session for itself. One flag, read by the dot, the badges and Web Push.
-- **Continue in a chat** (`GET /api/handoff/targets`, `POST /api/handoff`;
-  owned by `channels/routes.ts`, contract in
-  [04-im-channels.md](04-im-channels.md#continue-from-web-and-from-a-thread-handoffts)):
-  the ⋯ menu's *Continue in Lark/Slack…* lists the DMs the bot has seen (a
-  group's thread belongs to the group, so it is never a target); a pick posts the
-  handoff and the status chip follows from `sessions-changed`. A session
-  already answering a chat has the row disabled with `answers in <platform>`;
-  a refusal stays under the picked row in the server's words.
 
 Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` link,
 [08-cli-socket.md](08-cli-socket.md) — `/logout`, `/api/password`,
@@ -75,7 +72,7 @@ headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below),
-`channels/routes.ts`, `vault.ts` (`/api/vault*`), `boards/boards.ts` (`/boards/*`, `/b/*`, `/p/*`).
+`channels/routes.ts`, `vault.ts` (`/api/vault*`), `tasks/routes.ts` (`/api/tasks*`), `boards/boards.ts` (`/api/boards*`, `/boards/*`, `/b/*`, `/p/*`).
 
 ## Passkeys (`src/web/passkeys.ts`)
 
@@ -144,7 +141,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 `.select`, `.md`, …). `npm run dev:web` gives HMR with an `/api` proxy to
 :3141; `tsconfig.web.json` is the typecheck gate.
 
-`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `palette.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Working-set rank and unread state live in `web/session-state.ts`.
+`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `palette.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Unread state lives in `web/session-state.ts`.
 
 ### Data flow
 
@@ -167,8 +164,8 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
 
-- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; it is absent at zero. Model, reasoning and context chips open model selection.
-- The ⋯ menu contains Search ⌘K, Session info, Browse files, Model & reasoning…, and Settings. Session info and model actions are disabled before the first reply; Search is shown on Conversation.
+- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; it is absent at zero. Conversation shows only its context, `used/rotateAt` ([12](12-ui-shape.md)); a child session's model, reasoning and context chips open model selection.
+- The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings. Status opens the open items as one card ([12 §Status](12-ui-shape.md#status)). Session info and model actions are disabled before the first reply; Search is shown on Conversation.
 - In progress lists live sessions outside the continuous conversation and live runs not represented by a session row. Rows open in the column; a child session's ‹ returns to Conversation. ⌘⇧P opens the drawer.
 - The drawer is a popover under the status chip at widths of 640px and above, and a bottom sheet below 640px. The sheet uses `menu.ts` focus, inertness and backdrop behavior.
 - Counts and rows share `drawer.ts` state; session and open-item changes refresh the drawer and palette.
@@ -185,7 +182,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 - One menu primitive allows one open panel at a time. Outside pointerdown, focus leaving, Esc and page scroll close it. Below 640px it is a bottom sheet with a title, close control and dismissing backdrop.
 - Menus support arrow keys, ⌃N ⌃P, ⌃J ⌃K, Home and End; focus returns to the trigger on dismissal. An open menu owns list navigation keys.
-- The bar menu provides Search, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
+- The bar menu provides Search, Status, Session info, Browse files, Model & reasoning… and Settings. The model picker groups options by provider and supports reasoning selection.
 - Session info shows directory, ID, model, reasoning, context and times, with copy controls for directory and ID.
 
 ### Chat pane (`chat.ts`, `composer.ts`)
@@ -295,7 +292,14 @@ The Console views are overlays: Settings and Files open over their origin, and �
   name, `auto|approve` segmented with its one-line note, a password field;
   no reveal, filing an existing name replaces it. `?name=X` opens with the
   name filled and the value field focused: the link an agent's `no secret
-  named X` error carries. Agent: two panels (what a session is
+  named X` error carries. Tasks (`#/settings/tasks`): one row per task —
+  name, last run's state and age, trigger and next run — with the pause switch
+  (not on manual tasks) and Runs, which opens the newest 20 as rows (state,
+  time, source, duration) whose log (error, result, probe, a link to the run's
+  session) unfolds in place; defining a task stays `pier task`'s. Boards
+  (`#/settings/boards`): one row per board — title linking where it is
+  readable, slug, age — with a Public switch, Copy link and Delete (a rename,
+  no confirm). A refused switch redraws from the server and says why. Agent: two panels (what a session is
   made of / what the selected item affords), Scope in the Console's control
   skin. An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
   rendering the editor's own text; Save keeps `expected` for the conflict check

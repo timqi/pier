@@ -37,11 +37,9 @@ import {
   type SlackMessageEvent,
   type SlackSocket,
 } from "./slack-api.js";
-import type { PanelHandoff } from "./panel.js";
 import { SlackOutbound } from "./slack-outbound.js";
 import { SlackPanel } from "./slack-panel.js";
 import { readThread } from "./slack-thread.js";
-import type { HandoffNote } from "./types.js";
 import { context, escapeMrkdwn, offeredLabel } from "./slack-render.js";
 
 const WORKING = "eyes";
@@ -116,8 +114,6 @@ export interface SlackDeps {
   receipts?: ReceiptLedger;
   /** Wired by runtime.ts, so `stop` and the panel never enter the Channel seam. */
   control?: ChannelControl;
-  /** With `control`: the panel's "Continue web session…". */
-  handoff?: PanelHandoff;
 }
 
 export class SlackChannel implements Channel {
@@ -163,13 +159,8 @@ export class SlackChannel implements Channel {
       RECEIPT_STALE_MS,
       (conversationId) => deps.control?.working({ channelId: this.id, conversationId }) ?? false,
     );
-    if (deps.control && deps.handoff) {
-      this.panel = new SlackPanel({
-        api: this.api,
-        control: deps.control,
-        handoff: deps.handoff,
-        log: this.log,
-      });
+    if (deps.control) {
+      this.panel = new SlackPanel({ api: this.api, control: deps.control, log: this.log });
     }
   }
 
@@ -553,12 +544,6 @@ export class SlackChannel implements Channel {
       () => this.out.reply(channel, threadTs, reply),
       reply.meta,
     );
-  }
-
-  /** A web session's thread: the root is the one message Pier posts into a
-   *  channel's main flow (channels/handoff.ts). */
-  async openThread(chatId: string, note: HandoffNote): Promise<string> {
-    return conversationId(chatId, await this.out.open(chatId, note));
   }
 
   /** The 👀 goes on the note itself: the turn it triggers has no message of

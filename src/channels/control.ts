@@ -63,10 +63,6 @@ export interface ChannelControl {
   /** Distinct cwds of the backend's session listing, newest first; the chat's
    *  own default first when set. */
   recentDirs(key: ConversationKey, limit?: number): Promise<string[]>;
-  /** The last `exchanges` user turns of the thread's transcript, each with the
-   *  reply that followed it, oldest → newest; texts as stored. Empty for a
-   *  thread without a session, as `status` is null for one. */
-  recent(key: ConversationKey, exchanges: number): Promise<{ user: string; assistant?: string }[]>;
 }
 
 export interface ControlDeps {
@@ -165,20 +161,6 @@ export function createControl({ router, factory, conversations, store, modelMenu
       // The web's rule (worktrees folded into their project); task runs' directories count too.
       const seen = new Set<string>([...(own ? [own] : []), ...projectCwds(await factory.list())]);
       return [...seen].slice(0, limit);
-    },
-
-    async recent(key, exchanges) {
-      const session = await live(key);
-      if (!session) return [];
-      const pairs: { user: string; assistant?: string }[] = [];
-      for (const turn of await session.history()) {
-        const last = pairs.at(-1);
-        if (turn.role === "user") pairs.push({ user: turn.text });
-        // The first reply after a user turn; later assistant turns of the same
-        // exchange are continuations of the same answer.
-        else if (turn.role === "assistant" && last && last.assistant === undefined) last.assistant = turn.text;
-      }
-      return pairs.slice(-exchanges);
     },
   };
 }

@@ -24,11 +24,6 @@ truth.
   web UI. The old transcript remains readable from the web workbench.
 - The web workbench can also rewind to an earlier user turn and re-prompt;
   IM surfaces cannot.
-- A web session can be continued in Slack or Lark — the web session menu's
-  "Continue in Lark/Slack…" opens a thread for it — or pulled from a thread
-  that has no session yet, through its panel's "Continue web session…".
-  Replies then land on both surfaces; a session already answering a chat
-  cannot be moved.
 - A long session does not hit a wall: when the context fills, Pi compacts it
   automatically — older turns become a summary. The transcript on disk keeps
   everything, but detail can leave *your* context, so a very old turn is worth

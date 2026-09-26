@@ -13,12 +13,10 @@ import type {
   InboundMessage,
   ModelRef,
   SessionState,
-  SessionSummary,
   ThinkingLevel,
 } from "../core/types.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
-import type { PanelHandoff } from "./panel.js";
 import { LarkChannel } from "./lark.js";
 import type {
   LarkCard,
@@ -64,16 +62,6 @@ class FakeClient implements LarkClient {
   replyCard(to: string, card: LarkCard): Promise<{ messageId: string }> {
     this.replied.push({ to, card });
     const messageId = `om_${this.nextId++}`;
-    this.cards.set(messageId, card);
-    return Promise.resolve({ messageId });
-  }
-
-  /** createCard calls: the chat posted into, with which card. */
-  readonly created: { chatId: string; card: LarkCard }[] = [];
-
-  createCard(chatId: string, card: LarkCard): Promise<{ messageId: string }> {
-    this.created.push({ chatId, card });
-    const messageId = `om_root_${this.nextId++}`;
     this.cards.set(messageId, card);
     return Promise.resolve({ messageId });
   }
@@ -142,18 +130,6 @@ let known: Set<string>;
 let control: ChannelControl & {
   created: ({ key: string } & Partial<AgentLaunchOptions>)[];
   sessionState: SessionState;
-  exchanges: { user: string; assistant?: string }[];
-};
-
-/** The panel's pull half: empty unless a test fills `unbound`. A pick binds the
- *  thread, as the real handoff's `conversations.set` does. */
-let unbound: SessionSummary[];
-const handoff: PanelHandoff = {
-  unbound: (limit) => Promise.resolve(unbound.slice(0, limit)),
-  continueHere: (key) => {
-    known.add(key.conversationId);
-    return Promise.resolve();
-  },
 };
 
 let eventSeq = 0;
@@ -235,7 +211,6 @@ function fakeControl() {
   const state = {
     created: [] as ({ key: string } & Partial<AgentLaunchOptions>)[],
     sessionState: "idle" as SessionState,
-    exchanges: [] as { user: string; assistant?: string }[],
     model: { provider: "anthropic", id: "claude-opus-4-5" } as ModelRef | undefined,
     thinking: "medium" as ThinkingLevel,
     launchFor: () => ({}),
@@ -265,7 +240,6 @@ function fakeControl() {
     setModel: () => Promise.resolve(),
     setThinking: () => Promise.resolve(),
     recentDirs: () => Promise.resolve(["/srv/ops"]),
-    recent: () => Promise.resolve(state.exchanges),
     newSession: (key: ConversationKey, over?: Partial<AgentLaunchOptions>) => {
       state.created.push({ key: key.conversationId, ...over });
       known.add(key.conversationId);
@@ -284,9 +258,8 @@ beforeEach(async () => {
   receipts = new ReceiptLedger("lark", openDb(":memory:"));
   aborted = [];
   known = new Set();
-  unbound = [];
   control = fakeControl();
-  channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
+  channel = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -368,41 +341,6 @@ describe("gate", () => {
     known.add(`${CHAT}/om_1`);
     await feed(message({ text: "continue", rootId: "om_1" }));
     expect(inbound).toHaveLength(1);
-  });
-
-  it("openThread creates a root card then one in-thread card and returns <chat>/<root>", async () => {
-    const id = await channel.openThread(CHAT, { title: "Fix the parser", url: "https://pier.example/#/session/s1" });
-    expect(client.created).toHaveLength(1);
-    expect(client.created[0]!.chatId).toBe(CHAT);
-    const root = bodyText(client.created[0]!.card);
-    expect(root).toContain("**Continued from web: Fix the parser**");
-    expect(root).toContain("[Open on the web](https://pier.example/#/session/s1)");
-    expect(root).toContain("Reply in this thread to continue.");
-    expect(client.replied).toHaveLength(1);
-    expect(client.replied[0]!.to).toBe("om_root_900");
-    expect(bodyText(client.replied[0]!.card)).toBe("Reply here to continue.");
-    expect(id).toBe(`${CHAT}/om_root_900`);
-  });
-
-  it("deletes the root when the in-thread card fails, leaving no orphan to reply to", async () => {
-    client.replyCard = () => Promise.reject(new Error("card too large"));
-    await expect(channel.openThread(CHAT, { title: "t", url: "" })).rejects.toThrow("card too large");
-    expect(client.deleted).toEqual(["om_root_900"]);
-  });
-
-  it("openThread without a public URL says so instead of linking nowhere", async () => {
-    await channel.openThread(CHAT, { title: "Fix the parser", url: "" });
-    expect(bodyText(client.created[0]!.card)).toContain("(no public URL set — Settings → Instance)");
-    expect(bodyText(client.created[0]!.card)).not.toContain("](");
-  });
-
-  it("a topic reply to a handoff root without a mention is admitted", async () => {
-    bind();
-    const id = await channel.openThread(CHAT, { title: "t", url: "" });
-    known.add(id); // the row handoff.ts writes
-    await feed(message({ text: "continue", rootId: "om_root_900" }));
-    expect(inbound).toHaveLength(1);
-    expect(inbound[0]!.key.conversationId).toBe(id);
   });
 
   it("ignores another app's messages", async () => {
@@ -562,7 +500,7 @@ describe("receipts", () => {
     // owner, so start() must sweep it.
     receipts.add({ conversationId: `${CHAT}/om_old`, chatId: CHAT, messageId: "om_old" });
     const fresh = new FakeClient();
-    const revived = new LarkChannel({ store, client: fresh, receipts, log: () => {}, control, handoff });
+    const revived = new LarkChannel({ store, client: fresh, receipts, log: () => {}, control });
     await revived.start(() => {});
     await new Promise((r) => setTimeout(r, 10));
     expect(fresh.reactions).toEqual([{ messageId: "om_old", emoji: "OnIt", add: false }]);
@@ -689,7 +627,7 @@ describe("next-step buttons", () => {
   it("a click on a card sent before this process still works; the row just stays", async () => {
     const offerId = await offer();
     // A fresh adapter (a restart): the retire cache is empty, the value is not.
-    const fresh = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
+    const fresh = new LarkChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
     await fresh.start((msg) => inbound.push(msg));
     client.handlers.onCardAction({
       messageId: offerId,
@@ -915,72 +853,6 @@ describe("the panel of a thread with a session", () => {
   it("offers Stop only while the session streams", async () => {
     control.sessionState = "streaming";
     expect(buttonLabels(await openPanel())).toEqual(["Model & reasoning", "⏹ Stop"]);
-  });
-});
-
-describe("the Continue picker", () => {
-  const ROOT = "om_pick";
-  const THREAD = `${CHAT}/${ROOT}`;
-  const HOUR = 3_600_000;
-
-  /** Ten unbound sessions: more than one page, so the pager has to appear. */
-  const listed = (): SessionSummary[] =>
-    Array.from({ length: 10 }, (_, i) => ({
-      id: `sess${String(i)}000000`,
-      cwd: `/srv/proj-${String(i)}`,
-      createdAt: Date.now() - (i + 1) * HOUR,
-      title: i === 0 ? "Fix the parser" : undefined,
-    }));
-
-  const tap = (key: string, messageId: string): Promise<void> =>
-    act({ messageId, chatId: CHAT, operatorId: USER, value: { key, root: ROOT } });
-
-  /** The draft panel, then its Continue web session… page. */
-  const picker = async (): Promise<{ panelId: string; card: LarkCard }> => {
-    openGates();
-    unbound = listed();
-    await feed(message({ text: "/settings", messageId: ROOT }));
-    const panelId = [...client.cards.keys()].at(-1)!;
-    await tap("cfg:sessions:0", panelId);
-    return { panelId, card: client.patched.at(-1)!.card };
-  };
-
-  it("lists eight of the unbound sessions with a pager", async () => {
-    const { card } = await picker();
-    const lines = bodyText(card).split("\n");
-    expect(lines[0]).toBe("**Continue web session** · page 1/2");
-    expect(lines).toHaveLength(9);
-    expect(lines[1]).toBe("1. Fix the parser · `proj-0` · 1h");
-    expect(lines[8]).toContain("8. proj-7");
-    expect(buttonLabels(card)).toEqual([
-      ...Array.from({ length: 8 }, (_, i) => `${String(i + 1)} ${i === 0 ? "Fix the parser" : `proj-${String(i)}`}`),
-      "Next ›",
-      "‹ Back",
-    ]);
-  });
-
-  it("pages forward to the rest", async () => {
-    const { panelId } = await picker();
-    await tap("cfg:sessions:1", panelId);
-    const card = client.patched.at(-1)!.card;
-    expect(bodyText(card).split("\n")[0]).toBe("**Continue web session** · page 2/2");
-    expect(buttonLabels(card)).toEqual(["9 proj-8", "10 proj-9", "‹ Prev", "‹ Back"]);
-  });
-
-  it("settles the card on the picked session with its Recent excerpt and no button", async () => {
-    control.exchanges = [{ user: "why is it slow?", assistant: "The parser\nrereads the file." }];
-    const { panelId } = await picker();
-    await tap("cfg:session:0", panelId);
-    const card = client.patched.at(-1)!.card;
-    const body = bodyText(card);
-    expect(known.has(THREAD)).toBe(true);
-    expect(body).toContain("**Session**");
-    expect(body).toContain("**Recent**");
-    expect(body).toContain("▸ why is it slow?");
-    // Flattened: one line each, as a phone reads it.
-    expect(body).toContain("◂ The parser rereads the file.");
-    expect(buttonLabels(card)).toEqual([]);
-    expect(body).toContain("Continuing session sess0000 — reply in this thread.");
   });
 });
 
