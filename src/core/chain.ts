@@ -40,7 +40,7 @@ const WHY: Record<ChainReason, string> = {
   first: "the first one",
   idle: "the previous one was idle for an hour",
   lost: "the previous one is gone from Pi",
-  full: "the previous one reached 60K tokens",
+  full: `the previous one reached ${String(CHAIN_FULL_TOKENS / 1000)}K tokens`,
 };
 
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
