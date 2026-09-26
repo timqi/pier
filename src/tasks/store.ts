@@ -236,6 +236,26 @@ export class TaskStore {
     `).get(sessionId) === undefined ? undefined : "lead";
   }
 
+  /** What a milestone resumes, and whose supervisor it reports to. */
+  latestRunForTarget(sessionId: string): TaskRun | undefined {
+    return this.#one(`
+      SELECT json FROM task_runs WHERE json_extract(json, '$.targetSessionId') = ? ORDER BY queued_at DESC, id DESC LIMIT 1
+    `, sessionId);
+  }
+
+  /** Runs in flight whose result is owed to the session, their own or their
+   *  unfinished group's; a finished group's losers still cancelling owe nothing. */
+  countOwedTo(sessionId: string): number {
+    const row = this.sql(`
+      SELECT COUNT(*) AS n FROM task_runs r
+      WHERE r.state IN ('queued', 'running') AND (
+        json_extract(r.json, '$.callbackSessionId') = ?
+        OR EXISTS (SELECT 1 FROM task_groups g WHERE g.id = json_extract(r.json, '$.groupId')
+          AND g.finished_at IS NULL AND json_extract(g.json, '$.callbackSessionId') = ?))
+    `).get(sessionId, sessionId) as { n: number };
+    return row.n;
+  }
+
   /** One session of `taskOwnedSessionIds`, without reading them all. */
   isTaskSession(sessionId: string): boolean {
     return this.sql(`

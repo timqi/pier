@@ -8,7 +8,7 @@ import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
 import { AgentTaskRunner, CHILD_COMPACTION_CAP } from "./agent.js";
-import { TaskCallbacks } from "./callbacks.js";
+import { TaskCallbacks, type Milestone } from "./callbacks.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
 import { TaskExecution } from "./execution.js";
 import { TaskGroups } from "./groups.js";
@@ -30,6 +30,11 @@ const runPrompt = (run: TaskRun): string | null => {
 };
 
 type TriggerSource = TaskRun["triggerSource"];
+type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">;
+
+/** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
+const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
+
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
 export type TaskChain = Pick<MainChain, "enabled" | "isMember" | "launchers" | "headOf">;
 type Waiter = (run: TaskRun) => void;
@@ -62,7 +67,7 @@ export class TaskService {
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable);
     this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
-    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf);
+    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf, this.milestone);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },
@@ -74,7 +79,7 @@ export class TaskService {
         groupId,
       }),
       startMember: (run) => this.runs.start(run),
-    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable, headOf);
+    }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable, headOf, this.milestone);
     const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run),
       () => instance?.continuous?.enabled() ?? false);
     this.execution = new TaskExecution(store, this.definitions, this.callbacks, agent, {
@@ -350,16 +355,25 @@ export class TaskService {
   resume(
     id: string,
     message: string,
-    provenance: Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background"> = {},
+    provenance: ResumeProvenance = {},
+  ): TaskRun {
+    const run = this.prepareResume(this.getRun(id), message, provenance);
+    this.runs.start(run);
+    return run;
+  }
+
+  private prepareResume(
+    prior: TaskRun,
+    message: string,
+    provenance: ResumeProvenance,
   ): TaskRun {
     this.refusePaused();
-    const prior = this.getRun(id);
     if (!isTerminal(prior.state)) throw new Error("run must be terminal before resume");
     if (prior.context.definition.action.type !== "agent" || !prior.targetSessionId) {
       throw new Error("only persisted Agent runs can be resumed");
     }
     const prompt = requiredString(message, "message");
-    const run = this.runs.prepare(prior.context.definition, null, "agent", null, {
+    return this.runs.prepare(prior.context.definition, null, "agent", null, {
       ...provenance,
       sourceSessionId: provenance.invokedBySessionId ?? prior.invokedBySessionId,
       targetSessionId: prior.targetSessionId,
@@ -367,13 +381,40 @@ export class TaskService {
       resumedFromRunId: prior.id,
       resumePrompt: prompt,
     });
-    this.runs.start(run);
-    return run;
   }
 
   roleOf(sessionId: string): AgentRole | undefined {
     return this.store.roleOf(sessionId);
   }
+
+  /** A lead reports once per wave (docs/design/10-continuous-session.md
+   *  §Feature lead): the result that leaves nothing owed to it in flight
+   *  resumes its last run, whose own callback reaches its supervisor. */
+  private readonly milestone: Milestone = (sessionId, text, settle) => {
+    if (this.store.roleOf(sessionId) !== "lead" || this.store.countOwedTo(sessionId) > 0) return "plain";
+    const last = this.store.latestRunForTarget(sessionId);
+    if (!last || last.callbackSessionId === null) return "plain";
+    // A running turn reports upstream when it ends; a drain leaves the result to the next boot.
+    if (!isTerminal(last.state) || this.paused) return "wait";
+    try {
+      // One transaction: a crash between the resume and the marks would resume twice.
+      const run = this.store.transact(() => {
+        const run = this.prepareResume(last, `${MILESTONE}\n\n${text()}`, {
+          invokedBySessionId: last.invokedBySessionId,
+          callbackSessionId: last.callbackSessionId,
+          callbackMode: last.callbackMode,
+          background: last.background,
+        });
+        settle();
+        return run;
+      });
+      this.runs.start(run);
+      return "resumed";
+    } catch (err) {
+      log.error(`lead ${sessionId}: the wave's last result could not resume run ${last.id}; delivering it as a plain callback`, err);
+      return "plain";
+    }
+  };
 
   /** What `pier task` asks, under the calling session's identity. */
   handle(raw: unknown, callerSessionId: string): Promise<unknown> {

@@ -4,7 +4,7 @@
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields } from "./types.js";
+import { DELIVERED, MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields } from "./types.js";
 
 const log = logger("tasks");
 
@@ -150,10 +150,7 @@ export class Outbox<T extends CallbackFields> {
   }
 
   private delivered(record: T): void {
-    record.callbackState = "delivered";
-    record.callbackError = null;
-    record.callbackNextAttemptAt = null;
-    this.write(record);
+    this.write(Object.assign(record, DELIVERED));
   }
 
   /** A failed pass costs one attempt, whether it died before or after send. */

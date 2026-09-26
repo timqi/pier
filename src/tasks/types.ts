@@ -206,7 +206,9 @@ export interface TaskMessage {
  *
  *  `delivered` means the input is in the recipient's own transcript, not that
  *  a send resolved: Pi's queues are memory, so an abort or a restart drops an
- *  accepted input, and reporting that as delivered loses it in silence.
+ *  accepted input, and reporting that as delivered loses it in silence; a
+ *  feature lead's milestone is the one other proof, the resumed run that
+ *  carries the text, committed with the mark (service.ts).
  *  `abandoned` is the end of the line — a target nothing can reach, reported
  *  instead of retried forever. */
 export interface CallbackFields {
@@ -232,6 +234,9 @@ export const retryDelay = (attempts: number): number =>
  *  above that is ~4 minutes: long enough to outlast a busy or restarting
  *  recipient, short enough that whoever is waiting still cares. */
 export const MAX_DELIVERY_ATTEMPTS = 8;
+
+/** The marks a delivered callback carries: nothing left to retry. */
+export const DELIVERED = { callbackState: "delivered", callbackError: null, callbackNextAttemptAt: null } as const;
 
 /** What a delivery says when it stops trying. */
 export const undeliverable = (attempts: number, error: string | null): string =>
