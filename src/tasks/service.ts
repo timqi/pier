@@ -34,7 +34,7 @@ type TriggerSource = TaskRun["triggerSource"];
 type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSessionId" | "callbackMode" | "background">;
 
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
-export type TaskChain = Pick<MainChain, "chainOf">;
+export type TaskChain = Pick<MainChain, "chainOf" | "enabled" | "members">;
 type Waiter = (run: TaskRun) => void;
 
 export class TaskService {
@@ -61,6 +61,8 @@ export class TaskService {
     },
   ) {
     const headOf = (id: string): string => instance?.continuous?.chainOf(id)?.[0] ?? id;
+    const conversation = (): string | null =>
+      instance?.continuous?.enabled() ? instance.continuous.members()[0]?.sessionId ?? null : null;
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
     this.messages = new TaskMessenger(store, router, hub, unreachable, (runId) => {
@@ -68,7 +70,7 @@ export class TaskService {
       if (run) this.status(run);
     });
     this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
-    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf, this.milestone);
+    this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf, this.milestone, conversation);
     this.groups = new TaskGroups(store, router, {
       getRun: (id) => this.getRun(id),
       cancel: (id) => { this.cancel(id); },

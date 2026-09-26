@@ -30,6 +30,9 @@ describe("pier task", () => {
     const { run, posted, out } = rig();
     const cases: [string[], Record<string, unknown>][] = [
       [["list"], { operation: "list" }],
+      [["pause", "--task-id", "t1"], { operation: "pause", task_id: "t1" }],
+      [["resume", "--task-id", "t1"], { operation: "resume", task_id: "t1" }],
+      [["archive", "--task-id", "t1"], { operation: "archive", task_id: "t1" }],
       [["runs"], { operation: "runs" }],
       [["run", "--prompt", "design it", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", launch: { model: "opus", role: "lead" } }],
       [["run", "--prompt", "design it", "--role", "lead", "--design"], { operation: "run", prompt: "design it", launch: { role: "lead", design: true } }],
@@ -103,13 +106,15 @@ describe("pier task", () => {
     expect(await run("save", "--name", "nightly", "--bash", "make", "--cwd", "/repo", "--cron", "0 3 * * *", "--tz", "UTC", "--timeout", "900")).toBe(0);
     expect(await run("save", "--task-id", "t1", "--name", "watcher", "--prompt", "Look", "--watch", "test -f flag", "--every", "30", "--repeat", "--cwd", "/repo", "--model", "gpt", "--callback-session", "s9")).toBe(0);
     expect(await run("save", "--name", "role", "--prompt", "Do the thing")).toBe(0);
+    expect(await run("save", "--name", "quiet", "--bash", "true", "--callback-session", "none")).toBe(0);
     expect(posted).toEqual([
-      { operation: "save", task: { name: "nightly", timeoutSeconds: 900, trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, action: { type: "bash", script: "make", cwd: "/repo" } } },
+      { operation: "save", task: { name: "nightly", timeoutSeconds: 900, trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, callback: { type: "conversation" }, action: { type: "bash", script: "make", cwd: "/repo" } } },
       { operation: "save", task_id: "t1", task: {
         name: "watcher", trigger: { type: "watch", script: "test -f flag", cwd: "/repo", intervalSeconds: 30, mode: "repeat" },
         callback: { type: "session", sessionId: "s9" }, prompt: "Look", cwd: "/repo", launch: { model: "gpt" },
       } },
-      { operation: "save", task: { name: "role", trigger: { type: "manual" }, prompt: "Do the thing" } },
+      { operation: "save", task: { name: "role", trigger: { type: "manual" }, callback: { type: "conversation" }, prompt: "Do the thing" } },
+      { operation: "save", task: { name: "quiet", trigger: { type: "manual" }, callback: { type: "none" }, action: { type: "bash", script: "true" } } },
     ]);
   });
 
@@ -122,7 +127,7 @@ describe("pier task", () => {
     expect(posted).toEqual([
       { operation: "message", run_id: "r1", message: "multi\nline\n" },
       { operation: "run", prompt: "multi\nline\n" },
-      { operation: "save", task: { name: "n", trigger: { type: "manual" }, prompt: "multi\nline\n" } },
+      { operation: "save", task: { name: "n", trigger: { type: "manual" }, callback: { type: "conversation" }, prompt: "multi\nline\n" } },
       { operation: "run", tasks: [{ prompt: "a" }, { prompt: "multi\nline\n" }] },
     ]);
     expect(reads()).toBe(4);
@@ -153,6 +158,8 @@ describe("pier task", () => {
       [[], "usage"],
       [["frobnicate"], 'task: unknown command "frobnicate"'],
       [["list", "--run", "r1"], "task: --run is not an option of list"],
+      [["pause"], "task: pause needs --task-id"],
+      [["archive", "--task-id", "t1", "--name", "x"], "task: --name is not an option of archive"],
       [["cancel", "--porrt", "1"], expect.stringMatching(/^task: Unknown option '--porrt'/)],
       [["cancel", "r1"], expect.stringMatching(/^task: Unexpected argument 'r1'/)],
       [["cancel"], "task: cancel takes exactly one of --run or --group"],

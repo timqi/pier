@@ -1,7 +1,7 @@
 // The `/task` socket route: every `pier task` operation — run, message, save,
-// list, cancel, recover — validated here once, answered with the summaries a
-// model reads. Scheduling and delivery stay in the service; this file decides
-// who may ask for what.
+// list, pause, resume, archive, cancel, recover — validated here once, answered
+// with the summaries a model reads. Scheduling and delivery stay in the
+// service; this file decides who may ask for what.
 
 import { isAbsolute, resolve } from "node:path";
 import { isModelTier, LEDGER_WINDOW_MS, type ModelRef } from "../core/types.js";
@@ -42,6 +42,14 @@ export interface RunSummary {
   /** On a run receipt only: how the result reaches the caller, so the receipt
    *  itself says there is nothing to query. */
   next?: string;
+}
+
+/** `pier task list`'s summary of a definition's most recent run. */
+export interface LastRun {
+  runId: string;
+  state: TaskRun["state"];
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface GroupSummary {
@@ -200,16 +208,27 @@ export async function handleTask(
     return draft;
   };
   const menu: Menu = () => host.models().then((listed) => listed.models);
-  if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
+  if (input.operation === "list") {
+    // The Console's row: the next occurrence and the last run's state, not the run.
+    return definitions.list().filter((task) => task.kind !== "subagent").map(({ nextRunAt, ...task }) => {
+      const last = host.listRuns(task.id, 1)[0];
+      return { ...task, nextRun: nextRunAt, lastRun: last ? defined<LastRun>({ runId: last.id, state: last.state, startedAt: last.startedAt, finishedAt: last.finishedAt }) : null };
+    });
+  }
   if (input.operation === "runs") return host.ledger(launchers(), Date.now() - LEDGER_WINDOW_MS);
+  // A one-shot's hidden definition is a run's record, not a task anyone filed.
+  const filed = (): string => {
+    const id = requiredString(input.task_id, "task_id");
+    if (definitions.get(id).kind === "subagent") throw new Error(`${id} is a one-shot run's own definition; save without --task-id to file a task`);
+    return id;
+  };
   if (input.operation === "save") {
     const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
     if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);
-    const id = requiredString(input.task_id, "task_id");
-    // A one-shot's hidden definition is a run's record, not a task anyone filed.
-    if (definitions.get(id).kind === "subagent") throw new Error(`${id} is a one-shot run's own definition; save without --task-id to file a task`);
-    return definitions.update(id, draft);
+    return definitions.update(filed(), draft);
   }
+  if (input.operation === "pause" || input.operation === "resume") return host.setEnabled(filed(), input.operation === "resume");
+  if (input.operation === "archive") return host.archive(filed());
   if (input.operation === "run") {
     // `--model ?`: the menu instead of a run, the one lookup the common case never pays.
     if (record(input.launch)?.model === "?") {
@@ -418,5 +437,5 @@ async function resolveDraft(
   if (draft.callback !== undefined || draft.callback_session_id !== undefined) {
     throw new Error("an inline task draft cannot set callback; use the top-level callback / callback_session_id");
   }
-  return definitions.create({ ...draft, trigger: { type: "manual" } }, `session:${callerSessionId}`, "subagent");
+  return definitions.create({ ...draft, trigger: { type: "manual" }, callback: { type: "none" } }, `session:${callerSessionId}`, "subagent");
 }
