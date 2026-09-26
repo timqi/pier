@@ -12,7 +12,7 @@ Behaviour not named here is [03](03-web-workbench.md)'s,
 ## Roles
 
 The **main session** (dispatcher) answers, remembers and launches work, never
-edits code; real work is a task-run child, one `wt` worktree per feature, and
+edits code; real work, multi-step research included, is a task-run child, one `wt` worktree per feature, and
 a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
 `agent/roles.ts`). Callbacks stay the only delivery.
 
