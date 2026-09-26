@@ -242,7 +242,7 @@ export class TaskService {
 
   /** `pier task list`'s last run: the newest `limit` of a definition's runs. */
   listRuns(taskId: string, limit = 1): TaskRun[] {
-    return this.store.listRuns(taskId, limit, 0);
+    return this.store.listRuns(taskId, limit);
   }
 
   getRun(id: string): TaskRun {

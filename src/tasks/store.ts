@@ -63,11 +63,8 @@ export class TaskStore {
     );
   }
 
-  listRuns(taskId: string, limit = 50, offset = 0): TaskRun[] {
-    return this.#many(`
-      SELECT json FROM task_runs WHERE task_id = ?
-      ORDER BY queued_at DESC LIMIT ? OFFSET ?
-    `, taskId, limit, offset);
+  listRuns(taskId: string, limit = 50): TaskRun[] {
+    return this.#many("SELECT json FROM task_runs WHERE task_id = ? ORDER BY queued_at DESC LIMIT ?", taskId, limit);
   }
 
   getRun(id: string): TaskRun | undefined {
