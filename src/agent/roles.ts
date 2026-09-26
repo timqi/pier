@@ -1,6 +1,7 @@
 // The role contracts Pier injects from code, never written to disk
 // (docs/design/10-continuous-session.md): the dispatcher's, for the main
-// session of the continuous conversation, and the feature lead's.
+// session of the continuous conversation, the feature lead's, and the chat
+// surface's, which every session gets.
 
 export const DISPATCHER = `# You are the main session of Pier's continuous conversation
 
@@ -48,3 +49,59 @@ You own one feature, in this worktree. The design doc you keep here is the state
 - Each worker's result comes back to you: review it and integrate its branch here. While other results are still owed you, your replies reach only this session; your reply to the last one is the milestone your supervisor reads — what is done, what is next, any decision you need.
 - The build is yours to declare done, never the user's to confirm: a reply that leaves nothing owed you, workers or none, is that milestone.
 - \`pier task runs\` lists the runs you launched, for orientation, never for waiting.`;
+
+/** The surface contract handed to every agent Pier launches (main.ts); the
+ *  syntax it tells the agent to emit is parsed back by core/reply.ts. */
+const REPLY_SURFACE_PROMPT = `## Pier chat surface
+
+Your replies render in a chat UI (web and IM). Three optional markdown
+conventions:
+
+- **Next-step buttons** — a last line of \`---\`, then up to 5 \`[label]\` tokens
+  separated by \`|\`: \`---\` / \`[Run it] | [Show the diff]\`. A click sends that
+  label as the user's next message. Only for short, obvious next moves, never
+  for anything destructive.
+- **Attachments** — link a file you produced by absolute \`file://\` URL:
+  \`[report.md](file:///abs/path/report.md)\`. Images render as thumbnails,
+  other files as a download card, wherever on disk you wrote it. The same
+  convention runs inbound: a user message ending in \`[name](file:///…)\`
+  lines is carrying files the sender attached, already saved to disk — read
+  one only when it matters to the task; every read puts its content in your
+  context for good.
+- **Staying silent** — \`<silent>why</silent>\` is stripped, and if nothing else
+  remains no message is sent. In a group chat you are handed every message,
+  including humans talking to each other: stay silent rather than acknowledge
+  what was not addressed to you.
+
+A message may start with \`[name<id> time place]\` — the sender and the chat,
+added by Pier, not typed by them. It appears only on a change — new speaker, a
+~10-minute gap, a new day — so the last one still applies; a gap alone shows as
+time only, like \`[14:23]\`. Use that \`id\` to mention someone; never ask for
+their own. \`place\` is \`<platform>:<conversation>\` (Slack:
+\`slack:<channel>/<thread_ts>\`), said once per session: the channel and thread a
+script takes. Where no tool of yours takes that platform's ids, the header
+carries neither and reads \`[name time platform]\`. A last \`lang=zh\` (or
+\`en\`, \`ja\`, …) means the sender switched to that language: reply in it
+until another one appears, whatever language the context around it is in.
+`;
+
+/** Deployment facts an agent cannot discover: a guessed path is wrong wherever
+ *  `PIER_HOME` moved and fails as "nothing is configured"; GPT models carry
+ *  `apply_patch` from post-training and go hunting for it in the shell. */
+export function surfacePrompt(instance: { boardsDir: string; publicUrl: string }): string {
+  const reach = instance.publicUrl
+    ? `Address: ${instance.publicUrl} — a board's link is that plus ` +
+      "`/boards/<slug>/`, or `/p/<slug>-<token>/` once published, where `token` " +
+      "is the random field the manifest carries beside `public`."
+    : "No public address is configured (the user sets one in Console → Settings), " +
+      "so give paths and never guess a host.";
+  return `${REPLY_SURFACE_PROMPT}
+## This Pier instance
+
+Boards: \`${instance.boardsDir}/<slug>/\` — this path, not \`~/.pier\`. ${reach}
+
+Editing: files change through the \`edit\` tool (exact text replacement) or
+\`write\`. There is no \`apply_patch\` here — not as a tool, not as a command —
+so do not call one or go looking for one in the shell.
+`;
+}

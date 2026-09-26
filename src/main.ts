@@ -24,7 +24,7 @@ import { EventHub } from "./core/hub.js";
 import { splitSpeaker } from "./core/identity.js";
 import { pierDb } from "./db.js";
 import { deliverLedger, drainForRestart, RestartLedger } from "./drain.js";
-import { surfacePrompt } from "./core/reply.js";
+import { surfacePrompt } from "./agent/roles.js";
 import { Router } from "./core/router.js";
 import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
