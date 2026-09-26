@@ -26,7 +26,7 @@ the web experience settling, and nothing below is shaped for it.
 | Rail · Conversation row | the head's dot: streaming or unread | none |
 | Rail · In progress | rows for work in flight, §In progress | needs-you rule below |
 | Rail · New session / Search | ⌘K stays; New session is Phase B's deletion | see §Phases |
-| ⋯ on the conversation | Session info · Model & reasoning · Browse files | Rename, Close, Continue in… hidden (the head is not a session the user manages) |
+| ⋯ on the conversation | Session info · Model & reasoning · Browse files | Rename hidden (the head is not a session the user manages) |
 | ⌘K palette | Running = In progress; Recent = everything else (finished leads, IM sessions); content search | none |
 | Console | Settings only | Automation and Boards deleted; the rail's Console section is one row |
 | Files | unchanged overlay | none |
@@ -48,7 +48,7 @@ state it carries.
   marks attention: a failed run's callback reaches main, so a failure is the
   Conversation row's unread dot, never a row of its own; a decision main is
   waiting on is a message in the conversation and a `/status` line.
-- Order: rail order (working set, then creation). A lead's phase tag stays.
+- Order: rail order (creation). A lead's phase tag stays.
 - Empty → the group is absent. `/status` remains the full list, the only
   place stages and waiting-on-user items are spelled out.
 - What this reverts: "a lead leaves In progress once its runs are finished"
@@ -195,7 +195,7 @@ when it comes, reads that table and the four browser-safe `core/` modules
 | What | Where | Why |
 | --- | --- | --- |
 | Automation: Tasks, editor, Runs, Activity, graph, their routes | `web/ui/tasks.ts` (270), `task-editor.ts` (196), `runs.ts` (174), `task-runs.ts` (251), `activity.ts` (355), `tasks/routes.ts` (what the CLI does not call), `views.ts`/`index.html` | §Scheduled tasks, §Console |
-| Rename / Close / Continue in… on the conversation | `session-header.ts` | not a managed session |
+| Rename on the conversation | `session-header.ts` | not a managed session |
 | "finished lead leaves In progress" special case | `sidebar.ts`, `palette.ts` | §In progress; one set again |
 | Boards page, `/api/boards*`, `sessions` on a board | `web/ui/boards.ts` (118), `boards/boards.ts` (the static routes stay), `skills/pier-boards/SKILL.md`, `05-boards.md` | §Boards |
 
@@ -205,8 +205,8 @@ Phase B (the switch goes, after [10 §Acceptance](10-continuous-session.md#accep
 | --- | --- |
 | the `continuous` switch, both branches of every rail/pane rule | `settings.ts`, `sidebar.ts`, `views.ts`, `main.ts`, `chat.ts`, `composer.ts` |
 | New session menu, Browse…, recent directories | `dir-picker.ts` (166), `index.html`, `sidebar.ts` |
-| working-set rank, Load more, "Sessions" label | `web/session-state.ts` (84), `sidebar.ts` |
-| `POST /api/sessions` (create), `/close`, `/rename` from the UI | `server.ts` — routes stay for `pier task`/tests until nothing calls them |
+| Load more, "Sessions" label | `sidebar.ts` |
+| `POST /api/sessions` (create), `/rename` from the UI | `server.ts` — routes stay for `pier task`/tests until nothing calls them |
 
 ## Phases
 

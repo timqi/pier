@@ -350,10 +350,10 @@ function setup(
   };
 }
 
-/** The session list, as a surface reads it: the listing joined with what the store
- *  owns, and the route is where that happens. */
-const sessionList = async (app: Hono): Promise<{ id: string; title?: string; rank?: number; modified?: number }[]> =>
-  (await (await app.request("/api/sessions")).json()) as { id: string; title?: string; rank?: number; modified?: number }[];
+/** The session list as a surface reads it: the listing joined with what the
+ *  store owns, and the route is where that happens. */
+const listed = async (app: Hono): Promise<{ id: string; title?: string; modified?: number; unread: boolean }[]> =>
+  (await (await app.request("/api/sessions")).json()) as { id: string; title?: string; modified?: number; unread: boolean }[];
 
 describe("workbench server", () => {
   // `modified` is forwarded for the row's tooltip; it orders nothing.
@@ -471,17 +471,17 @@ describe("workbench server", () => {
     expect(rows[0]?.channel).toBe("slack");
   });
 
-  // One source, one shape: the working-set rank is joined onto the listing's
-  // row, and the title comes off the transcript like everywhere else.
+  // One source, one shape: the unread mark is joined onto the listing's row,
+  // and the title comes off the transcript like everywhere else.
   it("joins what it owns onto the listing", async () => {
     const { app, factory, state } = setup();
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: 1, title: "Worked on", modified: 5 },
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6 },
     ]);
-    state.promote("s1");
-    expect(await sessionList(app)).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Worked on", modified: 5, rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+    state.setUnread("s1", true);
+    expect(await listed(app)).toEqual([
+      { id: "s1", cwd: "/tmp", createdAt: 1, title: "Worked on", modified: 5, state: "idle", unread: true, activeRuns: 0, channel: "web" },
       { id: "s2", cwd: "/other", createdAt: 2, modified: 6, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
@@ -540,8 +540,7 @@ describe("workbench server", () => {
       state: "succeeded", context: { definition: task, sessionId: "child" }, startedAt: 1, finishedAt: 2,
     }));
 
-    // Attached before the subscription: reaching a session promotes it, and
-    // that broadcast is not the one under test.
+    // Attached before the subscription: the attach is not the broadcast under test.
     const sessions = ["im", "child"].map((id) => {
       const own = fakeSession(id);
       router.attach({ channelId: "web", conversationId: id }, own);
@@ -613,18 +612,18 @@ describe("workbench server", () => {
     });
     await app.request("/api/sessions", { method: "POST", body: JSON.stringify({ cwd: "/tmp" }) });
 
-    // Not on disk yet — the nascent entry fills the gap, already at the front
-    // of the working set: the person who created it is about to type into it.
+    // Not on disk yet — the nascent entry fills the gap: the person who
+    // created it is about to type into it.
     let rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: expect.any(Number), state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
 
     // Pi persisted it — the real row wins, no duplicate.
     listed.push({ id: "s2", cwd: "/tmp", createdAt: 1, modified: 7 });
     rows = (await (await app.request("/api/sessions")).json()) as { id: string }[];
     expect(rows).toEqual([
-      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, rank: 0, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "s2", cwd: "/tmp", createdAt: 1, modified: 7, state: "idle", unread: false, activeRuns: 0, channel: "web" },
     ]);
   });
 
@@ -664,87 +663,8 @@ describe("workbench server", () => {
       .toBe(400);
   });
 
-  // Closed is out of the session list and nothing else: the by-id read still answers,
-  // and the next human message brings the row back.
-  it("closes a session out of the listing until it is spoken to", async () => {
-    const { app, factory, state, hub } = setup();
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: 1 },
-      { id: "s2", cwd: "/tmp", createdAt: 2 },
-    ]);
-    const changed = vi.fn();
-    hub.subscribeWorkspace(changed);
-    const close = (body: string) => app.request("/api/sessions/s1/close", { method: "POST", body });
-
-    expect((await close("{}")).status).toBe(400);
-    expect((await close(JSON.stringify({ closed: "yes" }))).status).toBe(400);
-    expect(changed).not.toHaveBeenCalled();
-
-    const res = await close(JSON.stringify({ closed: true }));
-    expect(await res.json()).toEqual({ ok: true });
-    expect(changed).toHaveBeenCalledWith({ type: "sessions-changed" });
-    expect((await sessionList(app)).map((s) => s.id)).toEqual(["s2"]);
-    expect((await app.request("/api/sessions/s1")).status).toBe(200);
-
-    state.promote("s1");
-    expect((await sessionList(app)).map((s) => s.id)).toEqual(["s1", "s2"]);
-  });
-
-  // A row that predates all of this holds a rank and a directory and nothing
-  // else. Everything the session list draws comes off the listing, so there is no
-  // backfill to run and no stale summary to repair. Nothing dates a rank
-  // either: a month-old session holds its slot until eight newer ones push it
-  // out.
-  it("renders a working-set row that carries no summary at all", async () => {
-    const month = Date.now() - 30 * 86_400_000;
-    const { app, factory } = setup(
-      "/tmp",
-      fakeSecrets(),
-      {},
-      (db) =>
-        db.prepare("INSERT INTO session_state(session_id, sort, cwd) VALUES ('s1', 0, '/tmp')")
-          .run(),
-    );
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "s1", cwd: "/tmp", createdAt: month, title: "from the transcript", modified: Date.now() },
-    ]);
-    expect(await sessionList(app)).toEqual([
-      expect.objectContaining({ id: "s1", title: "from the transcript", rank: 0 }),
-    ]);
-  });
-
-  // The session list's order is maintained by one rule and no gesture: whoever is
-  // spoken to and is not up there already takes the front slot. A member is
-  // left exactly where it is — that is the whole point, so switching between
-  // two sessions cannot make the list dance.
-  it("promotes a session a human speaks to, and moves nothing that is already up there", async () => {
-    const { app, router, factory, hub } = setup();
-    vi.mocked(factory.list).mockResolvedValue([
-      { id: "a", cwd: "/a", createdAt: 1, modified: 1 },
-      { id: "b", cwd: "/b", createdAt: 2, modified: 2 },
-    ]);
-    router.attach({ channelId: "web", conversationId: "a" }, fakeSession("a"));
-    router.attach({ channelId: "web", conversationId: "b" }, fakeSession("b"));
-    const changed = vi.fn();
-    hub.subscribeWorkspace(changed);
-    const speak = (id: string) =>
-      app.request(`/api/sessions/${id}/messages`, { method: "POST", body: JSON.stringify({ text: "hi" }) });
-
-    expect((await speak("a")).status).toBe(202);
-    expect((await sessionList(app)).map((r) => [r.id, r.rank])).toEqual([["a", 0], ["b", undefined]]);
-    expect((await speak("b")).status).toBe(202);
-    expect((await sessionList(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
-
-    // Back to the one already in the set: nothing moves, and no re-list is
-    // broadcast for an order that did not change.
-    changed.mockClear();
-    expect((await speak("a")).status).toBe(202);
-    expect((await sessionList(app)).map((r) => [r.id, r.rank])).toEqual([["a", 1], ["b", 0]]);
-    expect(changed).not.toHaveBeenCalledWith({ type: "sessions-changed" });
-  });
-
   it("creates a session in the given project directory, never pier's own", async () => {
-    const { app, factory, session, hub, state } = setup();
+    const { app, factory, session, hub } = setup();
     expect((await app.request("/api/sessions", { method: "POST", body: "{}" })).status).toBe(400);
     const res = await app.request("/api/sessions", {
       method: "POST",
@@ -753,9 +673,6 @@ describe("workbench server", () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: "s1" });
     expect(factory.create).toHaveBeenCalledExactlyOnceWith({ cwd: "/tmp" });
-    // Front of the working set from birth: the row must not move on the first
-    // message.
-    expect(state.flags().get("s1")?.rank).toBe(0);
     // attached: session events now reach the hub
     const seen = vi.fn();
     hub.subscribe("s1", seen);
@@ -1423,9 +1340,6 @@ describe("workbench server", () => {
       throw new Error("unknown session: ghost");
     });
     const state = new SessionStateStore(openDb(":memory:"));
-    // The create-time write: a rank and a cwd, exactly what an old POST
-    // /api/desk persisted before Pi had anything on disk.
-    state.promote("ghost");
     const events: string[] = [];
     hub.subscribeWorkspace((e) => events.push(e.type));
     const app = createServer({
@@ -1445,9 +1359,7 @@ describe("workbench server", () => {
     expect(res.status).toBe(404);
     const { error } = (await res.json()) as { error: string };
     expect(error).toContain("never got a first reply");
-    // The row is gone and every session list was told, so the Desk row (or a project
-    // group) stops pointing at a session nothing can resume.
-    expect(state.flags().get("ghost")).toBeUndefined();
+    // Every list was told, so no row keeps pointing at a session nothing can resume.
     expect(events).toContain("sessions-changed");
   });
 
@@ -2657,15 +2569,5 @@ describe("the continuous conversation's routes", () => {
     expect(edit.status).toBe(409);
     expect(await edit.json()).toEqual({ error: "an earlier session of the continuous conversation is read-only" });
     expect(factory.resume).not.toHaveBeenCalled();
-  });
-
-  it("refuses to close any of its sessions", async () => {
-    const { post, restarted } = chainRig();
-    restarted();
-    for (const id of ["old", "head"]) {
-      const res = await post(`/api/sessions/${id}/close`, { closed: true });
-      expect(res.status).toBe(409);
-      expect(await res.json()).toEqual({ error: "the continuous conversation cannot be closed" });
-    }
   });
 });

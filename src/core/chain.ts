@@ -33,7 +33,7 @@ export interface ChainDeps {
   sessionOf: (runId: string) => string | null;
   /** `TaskStore.roleOf`: a lead run's item line counts the lead's own workers. */
   roleOf: (sessionId: string) => AgentRole | undefined;
-  /** `TaskService.openDesigns`, less closed sessions: the designs waiting on the user. */
+  /** `TaskService.openDesigns`: the designs waiting on the user. */
   designs: () => LedgerRun[];
   /** The head's turn ends carry the open-item markers. */
   hub: EventHub;

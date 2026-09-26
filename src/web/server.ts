@@ -277,7 +277,6 @@ export function createServer(
     } catch (err) {
       if (String(err).includes("unknown session")) {
         nascent.delete(id);
-        state.forget(id);
         hub.emitWorkspace({ type: "sessions-changed" });
         throw new Error(`session ${id} no longer exists — it never got a first reply, so nothing was persisted; its session list entry was removed`);
       }
@@ -295,13 +294,9 @@ export function createServer(
   const allSessions = async (): Promise<SessionSummary[]> => {
     const sessions = await listSessions();
     for (const s of sessions) nascent.delete(s.id);
-    // A session created but never prompted would otherwise hold a working-set
-    // slot forever.
+    // A session created but never prompted would otherwise be listed forever.
     for (const [id, n] of nascent) {
-      if (Date.now() - n.createdAt > 86_400_000) {
-        nascent.delete(id);
-        state.forget(id);
-      }
+      if (Date.now() - n.createdAt > 86_400_000) nascent.delete(id);
     }
     const owned = taskSessions?.() ?? new Set<string>();
     return [
@@ -310,13 +305,11 @@ export function createServer(
     ];
   };
 
-  // `rank` is the place in the session list's working set; `modified` is for the
-  // row's tooltip and orders nothing.
+  // `modified` is for the row's tooltip and orders nothing.
   const leadOf = (lead: { phase: LeadPhase; runLive: boolean; designOpen: boolean } | undefined) =>
     (lead ? { phase: lead.phase, ...(lead.runLive ? { runLive: true } : {}), ...(lead.designOpen ? { designOpen: true } : {}) } : {});
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>, lead: ReturnType<NonNullable<WebDeps["leads"]>>) => ({
     ...s,
-    ...(own?.rank === undefined ? {} : { rank: own.rank }),
     state: router.stateOf(s.id) ?? "idle",
     unread: own?.unread ?? false,
     channel: channelOf?.(s.id) ?? "web",
@@ -324,21 +317,11 @@ export function createServer(
     ...leadOf(lead.get(s.id)),
   });
 
-  // The session list's top rows are maintained here and nowhere else: a session a
-  // human speaks to — or creates, below — and that is not in the working set
-  // already takes the front slot (web/session-state.ts). No route — there is no
-  // gesture to make, and an IM message has no browser to make it from.
-  router.onSpokenTo((id) => {
-    if (state.promote(id)) hub.emitWorkspace({ type: "sessions-changed" });
-  });
-
   app.get("/api/sessions", async (c) => {
     const flags = state.flags();
     const active = activeRuns();
     const lead = leads?.() ?? new Map();
-    // A closed session is out of the list only: its URL, the by-id read below
-    // and search still reach it.
-    return c.json((await allSessions()).filter((s) => !flags.get(s.id)?.closed).map((s) => present(s, flags.get(s.id), active, lead)));
+    return c.json((await allSessions()).map((s) => present(s, flags.get(s.id), active, lead)));
   });
 
   // One session by id, the listing's filters aside: a task run's own session is
@@ -371,9 +354,6 @@ export function createServer(
     const createdAt = Date.now();
     nascent.set(session.id, { cwd, createdAt });
     router.attach({ channelId: "web", conversationId: session.id }, session);
-    // Created is as good as spoken to: a row born below the working set would
-    // jump on the first message.
-    state.promote(session.id);
     hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ id: session.id }, 201);
   });
@@ -384,19 +364,6 @@ export function createServer(
       state.setUnread(id, false);
       hub.emitWorkspace({ type: "sessions-changed" });
     }
-    return c.json({ ok: true });
-  });
-
-  // Reversible and file-free: the transcript stays, and the next human message
-  // reopens it (session-state.ts `promote`).
-  app.post("/api/sessions/:id/close", async (c) => {
-    const body = await c.req.json().catch(() => null);
-    if (typeof body?.closed !== "boolean") return c.json({ error: "closed (boolean) required" }, 400);
-    const id = c.req.param("id");
-    // The conversation is drawn from its members; one closed would blank it.
-    if (continuous.chainOf(id)) return c.json({ error: "the continuous conversation cannot be closed" }, 409);
-    state.setClosed(id, body.closed);
-    hub.emitWorkspace({ type: "sessions-changed" });
     return c.json({ ok: true });
   });
 

@@ -5,29 +5,19 @@
 // that rides every button's value, so the card is the store and a restart
 // loses nothing.
 
-import { sessionLabel, splitSpeaker } from "../core/identity.js";
 import { splitInboundFiles } from "../core/inbound-file.js";
-import { compact, cut, relTime, splitReply, thinkingLabel } from "../core/reply.js";
+import { compact, cut, thinkingLabel } from "../core/reply.js";
 import {
   type ConversationKey,
   isThinkingLevel,
   type ModelRef,
-  type SessionSummary,
   type ThinkingLevel,
 } from "../core/types.js";
 import { type ChannelControl, type ConversationStatus, HAS_SESSION, NO_SESSION } from "./control.js";
-import { type Handoff, HandoffError } from "./handoff.js";
 
 export const PANEL_PREFIX = "cfg:";
 const PER_PAGE = 8;
-/** The picker's reach: five pages of the newest unbound sessions. */
-const SESSIONS_LISTED = 40;
-const TITLE_CHARS = 40;
 const QUESTION_CHARS = 80;
-/** Exchanges excerpted under the session, and the width of one line: four of
- *  these stay far inside Slack's 3000-character section. */
-const RECENT_EXCHANGES = 2;
-const EXCERPT_CHARS = 150;
 /** Characters of the serialized draft — what a button actually carries. Slack
  *  caps a value at 2000 and Lark a card at 30 KB; the rest of the 2000 is room
  *  for the cwd, model and reasoning a pick adds after the question. */
@@ -35,10 +25,7 @@ const DRAFT_CHARS = 1700;
 
 /** Pages whose every pick Pi's fixed-at-creation cwd or the row would refuse:
  *  reachable only by tapping a card that gained a session since it was drawn. */
-const DRAFT_ONLY = new Set(["cwd", "cwdtype", "sessions", "session"]);
-
-/** The pull half of the handoff; the push half never needs a panel. */
-export type PanelHandoff = Pick<Handoff, "unbound" | "continueHere">;
+const DRAFT_ONLY = new Set(["cwd", "cwdtype"]);
 
 export const CWD_DRAFT_TAIL = "Start creates the session there.";
 export const CWD_PLACEHOLDER = "/path/to/project";
@@ -80,31 +67,19 @@ export interface PanelDraft {
 
 export interface PanelDeps {
   control: ChannelControl;
-  handoff: PanelHandoff;
   log(message: string): void;
 }
 
 export interface PanelState {
   draft: PanelDraft;
-  /** The lists the payloads' indices point into. */
+  /** The list the payloads' indices point into. */
   dirs: string[];
-  sessions: SessionSummary[];
 }
 
 const btn = (label: string, action: string): PanelButton => ({ label, action });
 
 /** A button label is the last segment; the numbered line above has the whole path. */
 const shortDir = (path: string): string => path.split("/").filter(Boolean).at(-1) ?? path;
-
-/** One transcript line as a reader sees it: what was said, minus what was
- *  written for the model (the speaker header, attachment markers, the
- *  next-step block, a silent turn's reason). */
-const excerpt = (text: string, role: "user" | "assistant"): string => {
-  const said = role === "user" ? splitInboundFiles(splitSpeaker(text).text).text : splitReply(text).text;
-  return cut(said.replace(/\s+/g, " ").trim(), EXCERPT_CHARS);
-};
-
-const shortTitle = (s: SessionSummary): string => cut(sessionLabel(s), TITLE_CHARS);
 
 /** Page `page` of `items`, clamped: a stale Next past the end lands on the last page. */
 const paged = <T>(items: T[], page: number): { at: number; pages: number; slice: T[]; from: number } => {
@@ -120,10 +95,10 @@ const pager = (action: string, at: number, pages: number): PanelButton[] => [
   btn("‹ Back", "panel"),
 ];
 
-/** A refusal's sentence (a control refusal, a HandoffError) is the whole
- *  answer; any other failure names what was attempted. */
+/** A refusal's sentence (a control refusal) is the whole answer; any other
+ *  failure names what was attempted. */
 const failed = (what: string, err: unknown): string =>
-  err instanceof HandoffError || (err instanceof Error && (err.message === NO_SESSION || err.message === HAS_SESSION))
+  err instanceof Error && (err.message === NO_SESSION || err.message === HAS_SESSION)
     ? err.message
     : `${what}: ${String(err)}`;
 
@@ -192,8 +167,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
   protected async view(key: ConversationKey, state: S): Promise<PanelView> {
     const status = await this.deps.control.status(key);
     if (!status) return this.draftView(key, state.draft);
-    // The conversation is right above the card: no excerpt, and no way to a
-    // second session — that is a new thread.
+    // The conversation is right above the card; a second session is a new thread.
     return {
       groups: [{ title: "Session", lines: this.sessionLines(status) }],
       rows: [[
@@ -219,7 +193,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
         ],
       }],
       rows: [
-        [btn("Model & reasoning", "pins:0"), btn("Directory…", "cwd"), btn("Continue web session…", "sessions:0")],
+        [btn("Model & reasoning", "pins:0"), btn("Directory…", "cwd")],
         [btn("Start", "start"), btn("Close", "close")],
       ],
     };
@@ -262,24 +236,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
     }
   }
 
-  /** An excerpt, not a summary: the last exchanges are what makes a session
-   *  one has been away from recognisable on a phone. */
-  private async recentGroups(key: ConversationKey): Promise<PanelGroup[]> {
-    const { items: exchanges, unavailable } = await this.listed(
-      this.deps.control.recent(key, RECENT_EXCHANGES),
-      "Could not read the transcript",
-    );
-    if (unavailable) return [{ title: "Recent", lines: [unavailable] }];
-    const lines = exchanges.flatMap(({ user, assistant }) => {
-      const reply = assistant === undefined ? "" : excerpt(assistant, "assistant");
-      return [
-        `▸ ${this.esc(excerpt(user, "user"))}`,
-        ...(reply ? [`◂ ${this.esc(reply)}`] : []),
-      ];
-    });
-    return lines.length ? [{ title: "Recent", lines }] : [];
-  }
-
   protected async refresh(key: ConversationKey, note?: string): Promise<void> {
     const state = this.state(key);
     if (!state) return;
@@ -288,16 +244,11 @@ export abstract class ChatPanel<S extends PanelState, C> {
 
   /** The card's last draw, once an operation completed: the session as it now
    *  is, no button. The panel is released with it, so nothing can tap it again
-   *  and the card stays as a record; another @bot opens a fresh one. `recent`
-   *  excerpts the transcript — what tells a phone reader which conversation
-   *  was continued. */
-  private async settle(key: ConversationKey, state: S, note: string, recent: boolean): Promise<void> {
+   *  and the card stays as a record; another @bot opens a fresh one. */
+  private async settle(key: ConversationKey, state: S, note: string): Promise<void> {
     const status = await this.deps.control.status(key);
     if (!status) return this.refresh(key, note);
-    await this.draw(state, {
-      groups: [{ title: "Session", lines: this.sessionLines(status) }, ...recent ? await this.recentGroups(key) : []],
-      rows: [],
-    }, note);
+    await this.draw(state, { groups: [{ title: "Session", lines: this.sessionLines(status) }], rows: [] }, note);
     this.panels.delete(key.conversationId);
   }
 
@@ -340,12 +291,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
       case "pin":
         await this.pickPin(key, Number(arg));
         return true;
-      case "sessions":
-        await this.showSessions(key, Number(arg) || 0);
-        return true;
-      case "session":
-        await this.pickSession(key, Number(arg));
-        return true;
       case "cwd":
         if (arg) await this.pickDir(key, Number(arg));
         else await this.showDirs(key);
@@ -358,7 +303,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
         return true;
       case "stop":
         await this.deps.control.abort(key);
-        await this.settle(key, state, "Stop requested.", false);
+        await this.settle(key, state, "Stop requested.");
         return true;
       default:
         this.deps.log(`unknown panel action: ${action}`);
@@ -393,43 +338,6 @@ export abstract class ChatPanel<S extends PanelState, C> {
     });
   }
 
-  private async showSessions(key: ConversationKey, page: number): Promise<void> {
-    const state = this.state(key);
-    if (!state) return;
-    const { items, unavailable } = await this.listed(this.deps.handoff.unbound(SESSIONS_LISTED), "Could not list sessions");
-    state.sessions = items;
-    const { at, pages, slice, from } = paged(state.sessions, page);
-    const now = Date.now();
-    await this.draw(state, {
-      groups: [{
-        title: "Continue web session",
-        suffix: ` · page ${at + 1}/${pages}`,
-        lines: slice.length
-          ? slice.map((s, i) =>
-            `${String(from + i + 1)}. ${this.esc(shortTitle(s))} · ${
-              this.code(shortDir(s.cwd))
-            } · ${relTime(s.modified ?? s.createdAt, now)}`)
-          : [unavailable ?? "No unbound sessions."],
-      }],
-      picks: slice.map((s, i) => btn(`${String(from + i + 1)} ${shortTitle(s)}`, `session:${String(from + i)}`)),
-      rows: [pager("sessions", at, pages)],
-    });
-  }
-
-  private async pickSession(key: ConversationKey, index: number): Promise<void> {
-    const state = this.state(key);
-    const session = state?.sessions[index];
-    if (!state || !session) return this.refresh(key, "That session is no longer listed.");
-    try {
-      await this.deps.handoff.continueHere(key, session.id);
-      // The bound session has its own settings; the draft is spent.
-      state.draft = {};
-      await this.settle(key, state, `Continuing session ${session.id.slice(0, 8)} — reply in this thread.`, true);
-    } catch (err) {
-      await this.refresh(key, failed("Could not continue that session", err));
-    }
-  }
-
   private async pickPin(key: ConversationKey, index: number): Promise<void> {
     const state = this.state(key);
     const pin = this.deps.control.pins()[index];
@@ -442,7 +350,7 @@ export abstract class ChatPanel<S extends PanelState, C> {
     try {
       await this.deps.control.setModel(key, model);
       await this.deps.control.setThinking(key, pin.thinking);
-      await this.settle(key, state, `Model set to ${pin.id} · ${thinkingLabel(pin.thinking)}.`, false);
+      await this.settle(key, state, `Model set to ${pin.id} · ${thinkingLabel(pin.thinking)}.`);
     } catch (err) {
       await this.refresh(key, failed("Could not set that model", err));
     }
@@ -497,9 +405,9 @@ export abstract class ChatPanel<S extends PanelState, C> {
     state.draft = {};
     if (q) {
       await run(q);
-      return this.settle(key, state, `Started ${id.slice(0, 8)} — running your question.`, false);
+      return this.settle(key, state, `Started ${id.slice(0, 8)} — running your question.`);
     }
     const cwd = (await this.deps.control.status(key))?.cwd ?? launch.cwd ?? "?";
-    await this.settle(key, state, `Started ${id.slice(0, 8)} in ${cwd}.`, false);
+    await this.settle(key, state, `Started ${id.slice(0, 8)} in ${cwd}.`);
   }
 }

@@ -206,8 +206,8 @@ export interface OpenItems {
   items: { problem: string; stage: string; runs: OpenRun[]; live?: "running" | "idle" }[];
   /** Chain runs in flight in no item's session. */
   unlisted: OpenRun[];
-  /** Design leads that have not reported `Design final:` and are not closed,
-   *  by their creating run: the user decides when each is final. */
+  /** Design leads that have not reported `Design final:`, by their creating
+   *  run: the user decides when each is final. */
   designs: LedgerRun[];
 }
 

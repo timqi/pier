@@ -2,11 +2,10 @@
 // Hermetic — a recording control, a fake client.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import type { AgentLaunchOptions, ConversationKey, ModelRef, SessionSummary, ThinkingLevel } from "../core/types.js";
+import type { AgentLaunchOptions, ConversationKey, ModelRef, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
 import { type ChannelControl, type ConversationStatus, HAS_SESSION } from "./control.js";
-import { HandoffError } from "./handoff.js";
-import { type PanelHandoff, QUESTION_TOO_LONG } from "./panel.js";
+import { QUESTION_TOO_LONG } from "./panel.js";
 import { SlackPanel } from "./slack-panel.js";
 import type { SlackBlock, SlackClient, SlackInteraction } from "./slack-api.js";
 
@@ -73,52 +72,14 @@ class FakeControl implements ChannelControl {
   };
   recentDirs = (): Promise<string[]> =>
     this.dirs instanceof Error ? Promise.reject(this.dirs) : Promise.resolve(this.dirs);
-  exchanges: { user: string; assistant?: string }[] | Error = [];
-  recent = (_k: ConversationKey, count: number): Promise<{ user: string; assistant?: string }[]> =>
-    this.exchanges instanceof Error ? Promise.reject(this.exchanges) : Promise.resolve(this.exchanges.slice(-count));
-}
-
-/** Two exchanges as they are stored: a speaker header, an attachment marker,
- *  a next-step block, a silent turn's reason. */
-const EXCHANGES: { user: string; assistant?: string }[] = [
-  {
-    user: "[Qi<U42> 14:23 slack:C100/1717.0000]\nread the\nparser\n[notes.md](file:///srv/notes.md)",
-    assistant: "<silent>not for me</silent>Read it.\n\n---\n[Run it] | [Show the diff]",
-  },
-  { user: "[14:31]\nand fix it", assistant: `Fixed ${"y".repeat(200)}` },
-];
-
-const HOUR = 3_600_000;
-const SESSIONS: SessionSummary[] = Array.from({ length: 10 }, (_, i) => ({
-  id: `sess${String(i)}0000000000`,
-  cwd: `/srv/proj-${String(i)}`,
-  createdAt: Date.now() - (i + 1) * HOUR,
-  modified: Date.now() - (i + 1) * HOUR,
-  title: i === 0 ? "Fix the parser so that the benchmark suite passes again" : undefined,
-}));
-
-class FakeHandoff implements PanelHandoff {
-  sessions: SessionSummary[] | Error = SESSIONS;
-  refuse: Error | undefined;
-  readonly continued: [ConversationKey, string][] = [];
-  unbound = (limit: number): Promise<SessionSummary[]> =>
-    this.sessions instanceof Error ? Promise.reject(this.sessions) : Promise.resolve(this.sessions.slice(0, limit));
-  continueHere = (key: ConversationKey, sessionId: string): Promise<void> => {
-    if (this.refuse) return Promise.reject(this.refuse);
-    this.continued.push([key, sessionId]);
-    control.current = status({ sessionId, cwd: "/srv/proj-0" });
-    return Promise.resolve();
-  };
 }
 
 let control: FakeControl;
-let handoff: FakeHandoff;
 let logs: string[];
 let ran: string[];
 
 beforeEach(() => {
   control = new FakeControl();
-  handoff = new FakeHandoff();
   logs = [];
   ran = [];
 });
@@ -158,7 +119,6 @@ const slackPanel = (api: FakeSlack): SlackPanel =>
       "postMessage" | "updateMessage" | "deleteMessage" | "openView"
     >,
     control,
-    handoff,
     log: (m) => logs.push(m),
   });
 
@@ -188,79 +148,6 @@ const opened = async (question?: string): Promise<{ api: FakeSlack; panel: Slack
   await panel.open(SLACK_KEY, "C100", "1717.0000", question);
   return { api, panel };
 };
-
-describe("the Recent group", () => {
-  /** The Recent section of the card as last drawn. */
-  const recent = (blocks: SlackBlock[]): string => text(blocks[1]!);
-  /** Only one card carries it: the one Continue web session… settles on. */
-  const continued = async (): Promise<SlackBlock[]> => {
-    control.current = null;
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:sessions:0");
-    await tap(panel, "cfg:session:0");
-    return last(api);
-  };
-
-  it("excerpts the last two exchanges, oldest first, stripped, flattened and cut", async () => {
-    control.exchanges = EXCHANGES;
-    const blocks = await continued();
-    const lines = recent(blocks).split("\n");
-    expect(lines[0]).toBe("*Recent*");
-    expect(lines[1]).toBe("▸ read the parser");
-    expect(lines[2]).toBe("◂ Read it.");
-    expect(lines[3]).toBe("▸ and fix it");
-    expect(lines[4]).toBe(`◂ Fixed ${"y".repeat(143)}…`);
-    expect(lines[4]!.length).toBe(152);
-    expect(recent(blocks)).not.toContain("Run it");
-    expect(recent(blocks)).not.toContain("not for me");
-    expect(recent(blocks)).not.toContain("file://");
-    expect(recent(blocks)).not.toContain("U42");
-  });
-
-  it("asks for two and shows one when that is all there is", async () => {
-    control.exchanges = [EXCHANGES[1]!];
-    expect(recent(await continued()).split("\n")).toHaveLength(3);
-  });
-
-  it("an unanswered last turn is a ▸ without a ◂", async () => {
-    control.exchanges = [{ user: "still thinking?" }];
-    expect(recent(await continued())).toBe("*Recent*\n▸ still thinking?");
-  });
-
-  it("a session with no turn yet has no group at all", async () => {
-    const blocks = await continued();
-    expect(JSON.stringify(blocks)).not.toContain("Recent");
-    expect(blocks).toHaveLength(2);
-  });
-
-  it("a read that fails says so on the card and is logged", async () => {
-    control.exchanges = new Error("disk");
-    expect(recent(await continued()))
-      .toBe("*Recent*\nCould not read the transcript: Error: disk");
-    expect(logs).toContain("Could not read the transcript: Error: disk");
-  });
-
-  it("the draft view has none: there is no transcript to excerpt", async () => {
-    control.current = null;
-    control.exchanges = EXCHANGES;
-    const { api } = await opened();
-    expect(JSON.stringify(api.posted[0]!.blocks)).not.toContain("Recent");
-  });
-
-  it("the panel of a thread with a session has none: the conversation is right above it", async () => {
-    control.exchanges = EXCHANGES;
-    const { api } = await opened();
-    expect(JSON.stringify(api.posted[0]!.blocks)).not.toContain("Recent");
-  });
-
-  it("Start settles without it: the session it created has no conversation yet", async () => {
-    control.current = null;
-    control.exchanges = EXCHANGES;
-    const { api, panel } = await opened();
-    await tap(panel, "cfg:start");
-    expect(JSON.stringify(last(api))).not.toContain("Recent");
-  });
-});
 
 describe("slack panel with a session", () => {
   it("says in the thread when the card itself cannot be posted", async () => {
@@ -398,7 +285,7 @@ describe("draft panel (no session in the thread)", () => {
     const { api } = await openDraft();
     const blocks = api.posted[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toBe("*Session* · chat defaults\nStarts in `/srv/ops` · model-1 · reasoning medium");
-    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "Directory…", "Continue web session…"]);
+    expect(labels(blocks[1]!)).toEqual(["Model & reasoning", "Directory…"]);
     expect(labels(blocks[2]!)).toEqual(["Start", "Close"]);
     expect(JSON.stringify(blocks)).not.toContain("New session");
     // Nothing chosen: nothing to carry.
@@ -418,7 +305,7 @@ describe("draft panel (no session in the thread)", () => {
     const line = text(blocks[0]!).split("\n")[2]!;
     expect(line.startsWith("▸ Please review the parser xxx")).toBe(true);
     expect(line.length).toBe(82);
-    expect(values(blocks)).toEqual(Array<unknown>(5).fill({ q }));
+    expect(values(blocks)).toEqual(Array<unknown>(4).fill({ q }));
   });
 
   it("a Model & reasoning pick sets the draft, ticks it, and rides every button", async () => {
@@ -431,7 +318,7 @@ describe("draft panel (no session in the thread)", () => {
     const blocks = last(api);
     expect(text(blocks[0]!)).toBe("*Session*\nStarts in `/srv/ops` · model-1 · reasoning high\n▸ go");
     const draft = { model: { provider: "anthropic", id: "model-1" }, thinking: "high", q: "go" };
-    expect(values(blocks)).toEqual(Array<unknown>(5).fill(draft));
+    expect(values(blocks)).toEqual(Array<unknown>(4).fill(draft));
     await tap(panel, "cfg:pins:0");
     expect(text(last(api)[0]!)).toContain("2. ✓ model-1 · High");
   });
@@ -484,7 +371,7 @@ describe("draft panel (no session in the thread)", () => {
     await tap(panel, "cfg:cwd");
     await tap(panel, "cfg:cwd:0");
     expect(text(last(api)[0]!)).toBe("*Session*\nStarts in `/home/qiqi/code/dev/pier` · model-1 · reasoning medium");
-    expect(values(last(api))).toEqual(Array<unknown>(5).fill({ cwd: "/home/qiqi/code/dev/pier" }));
+    expect(values(last(api))).toEqual(Array<unknown>(4).fill({ cwd: "/home/qiqi/code/dev/pier" }));
   });
 
   it("a typed path sets the draft too, and the modal says so", async () => {
@@ -534,14 +421,13 @@ describe("draft panel (no session in the thread)", () => {
   it("a draft-only page is refused on a card whose thread has since gained a session", async () => {
     const { api, panel } = await openDraft();
     control.current = status();
-    for (const action of ["cfg:cwd", "cfg:cwdtype", "cfg:sessions:0", "cfg:session:0"]) {
+    for (const action of ["cfg:cwd", "cfg:cwdtype"]) {
       await tap(panel, action);
       expect(footnote(last(api).at(-1)!)).toBe(HAS_SESSION);
       // The with-session card is what is drawn, never a list of refused picks.
       expect(labels(last(api)[1]!)).toEqual(["Model & reasoning"]);
     }
     expect(api.views).toEqual([]);
-    expect(handoff.continued).toEqual([]);
   });
 
   it("Start with a question creates, then runs the question once", async () => {
@@ -586,7 +472,7 @@ describe("draft panel (no session in the thread)", () => {
     const { api, panel } = await openDraft('"'.repeat(900));
     const blocks = api.posted[0]!.blocks as SlackBlock[];
     expect(text(blocks[0]!)).toContain(QUESTION_TOO_LONG);
-    expect(values(blocks)).toEqual(Array<unknown>(5).fill({ dropped: true }));
+    expect(values(blocks)).toEqual(Array<unknown>(4).fill({ dropped: true }));
     await tap(panel, "cfg:start");
     expect(control.newSessions).toEqual([{}]);
     expect(ran).toEqual([]);
@@ -617,17 +503,6 @@ describe("draft panel (no session in the thread)", () => {
     expect(picks[0]!.endsWith("\u2026")).toBe(true);
   });
 
-  it("Continue web session… discards the draft", async () => {
-    const { api, panel } = await openDraft("go");
-    await tap(panel, "cfg:pin:2");
-    await tap(panel, "cfg:sessions:0");
-    await tap(panel, "cfg:session:0");
-    expect(handoff.continued).toEqual([[SLACK_KEY, "sess00000000000"]]);
-    expect(control.newSessions).toEqual([]);
-    expect(ran).toEqual([]);
-    expect(values(last(api)).every((v) => v === undefined)).toBe(true);
-  });
-
   describe("after a restart", () => {
     const draft = { cwd: "/srv/kept", model: ref(3), thinking: "low", q: "still here" };
     const click = (action: string, value: unknown = draft): Partial<SlackInteraction> => ({
@@ -645,7 +520,7 @@ describe("draft panel (no session in the thread)", () => {
       expect(api.updated).toHaveLength(1);
       expect(api.updated[0]).toMatchObject({ channel: "C100", ts: "900.0001" });
       expect(text(last(api)[0]!)).toBe("*Session*\nStarts in `/srv/kept` · model-3 · reasoning low\n▸ still here");
-      expect(values(last(api))).toEqual(Array<unknown>(5).fill(draft));
+      expect(values(last(api))).toEqual(Array<unknown>(4).fill(draft));
     });
 
     it("honours the tap itself: Start creates with the recovered draft and runs the question", async () => {
@@ -682,7 +557,7 @@ describe("draft panel (no session in the thread)", () => {
       control.current = null;
       const api = new FakeSlack();
       await tap(slackPanel(api), "cfg:panel", click("cfg:panel", { cwd: 7, model: { id: "x" }, thinking: "bogus", q: "ok", extra: 1 }));
-      expect(values(last(api))).toEqual(Array<unknown>(5).fill({ q: "ok" }));
+      expect(values(last(api))).toEqual(Array<unknown>(4).fill({ q: "ok" }));
     });
 
     it("a stale index pick is refused, and the panel still lands on the card", async () => {
@@ -705,90 +580,7 @@ describe("draft panel (no session in the thread)", () => {
         },
       } as unknown as SlackInteraction);
       expect(api.updated[0]).toMatchObject({ channel: "C100", ts: "900.0001" });
-      expect(values(last(api))).toEqual(Array<unknown>(5).fill({ ...draft, cwd: "/srv/typed" }));
+      expect(values(last(api))).toEqual(Array<unknown>(4).fill({ ...draft, cwd: "/srv/typed" }));
     });
-  });
-});
-
-describe("continue web session picker", () => {
-  const openPicker = async (page = "0"): Promise<{ api: FakeSlack; panel: SlackPanel }> => {
-    control.current = null;
-    const { api, panel } = await opened();
-    await tap(panel, `cfg:sessions:${page}`);
-    return { api, panel };
-  };
-
-  it("lists eight per page: title or directory, basename, age; picks by index", async () => {
-    const { api } = await openPicker();
-    const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("*Continue web session* · page 1/2");
-    expect(text(blocks[0]!)).toContain("1. Fix the parser so that the benchmark su… · `proj-0` · 1h");
-    expect(text(blocks[0]!)).toContain("2. proj-1 · `proj-1` · 2h");
-    expect(text(blocks[0]!)).toContain("8. proj-7 · `proj-7` · 8h");
-    expect(text(blocks[0]!)).not.toContain("9. ");
-    const picks = labels(blocks[1]!);
-    expect(picks).toHaveLength(8);
-    expect(picks[0]).toBe("1 Fix the parser so that the benchmark su…");
-    expect(picks[7]).toBe("8 proj-7");
-    expect(labels(blocks[2]!)).toEqual(["Next ›", "‹ Back"]);
-  });
-
-  it("pages: the second page continues the numbering and offers Prev", async () => {
-    const { api } = await openPicker("1");
-    const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("page 2/2");
-    expect(text(blocks[0]!)).toContain("9. proj-8");
-    expect(labels(blocks[1]!)).toEqual(["9 proj-8", "10 proj-9"]);
-    expect(labels(blocks[2]!)).toEqual(["‹ Prev", "‹ Back"]);
-  });
-
-  it("a pick binds this thread through the handoff and the panel shows the session", async () => {
-    const { api, panel } = await openPicker("1");
-    await tap(panel, "cfg:session:9");
-    expect(handoff.continued).toEqual([[SLACK_KEY, "sess90000000000"]]);
-    expect(control.newSessions).toEqual([]);
-    const blocks = last(api);
-    expect(footnote(blocks.at(-1)!)).toBe("Continuing session sess9000 — reply in this thread.");
-    expect(text(blocks[0]!)).toContain("`sess9000` · idle");
-    expect(blocks.some((b) => b.type === "actions")).toBe(false);
-  });
-
-  it("an empty list says so and offers only Back", async () => {
-    handoff.sessions = [];
-    const { api } = await openPicker();
-    const blocks = api.updated[0]!.blocks as SlackBlock[];
-    expect(text(blocks[0]!)).toContain("No unbound sessions.");
-    expect(blocks).toHaveLength(2);
-    expect(labels(blocks[1]!)).toEqual(["‹ Back"]);
-  });
-
-  it("a listing that fails is not drawn as empty", async () => {
-    handoff.sessions = new Error("disk");
-    const { api } = await openPicker();
-    expect(text((api.updated[0]!.blocks as SlackBlock[])[0]!)).toContain("Could not list sessions: Error: disk");
-    expect(logs).toContain("Could not list sessions: Error: disk");
-  });
-
-  it("a pick that lost the race prints the guard's refusal, never silence", async () => {
-    handoff.refuse = new HandoffError(409, "Already answers in lark · DM · Qi.");
-    const { api, panel } = await openPicker();
-    await tap(panel, "cfg:session:0");
-    const blocks = last(api);
-    expect(footnote(blocks.at(-1)!)).toBe("Already answers in lark · DM · Qi.");
-    expect(text(blocks[0]!)).toContain("Starts in");
-  });
-
-  it("a failure that is not a refusal names what was attempted", async () => {
-    handoff.refuse = new Error("SQLITE_BUSY");
-    const { api, panel } = await openPicker();
-    await tap(panel, "cfg:session:0");
-    expect(footnote(last(api).at(-1)!)).toBe("Could not continue that session: Error: SQLITE_BUSY");
-  });
-
-  it("a stale index is refused, not misfiled", async () => {
-    const { api, panel } = await openPicker();
-    await tap(panel, "cfg:session:42");
-    expect(handoff.continued).toEqual([]);
-    expect(footnote(last(api).at(-1)!)).toBe("That session is no longer listed.");
   });
 });

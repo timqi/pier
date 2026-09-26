@@ -91,7 +91,6 @@ export class Router {
   /** Set by a graceful restart (src/drain.ts); `endDrain` is for the caller
    *  that drains speculatively and may not get to exit. */
   private draining = false;
-  private spokenTo?: (sessionId: string) => void;
   private turnEnded?: (sessionId: string, text: string) => void;
 
   constructor(
@@ -109,13 +108,6 @@ export class Router {
 
   registerChannel(channel: Channel): void {
     this.channels.set(channel.id, channel);
-  }
-
-  /** Fires for humans only: chats and the workbench pass through `dispatch`,
-   *  tasks and subagents do not. Registered late because the listener
-   *  (web/session-state.ts) is built with the web surface. */
-  onSpokenTo(listener: (sessionId: string) => void): void {
-    this.spokenTo = listener;
   }
 
   /** Every attached session's answered turn, runs' and humans' alike; a failed
@@ -629,7 +621,6 @@ export class Router {
     if (this.draining) this.refuseDraining(msg.key);
     const session = await this.ensure(msg.key);
     if (this.draining) this.refuseDraining(msg.key);
-    this.spokenTo?.(session.id);
     const { action, text } = decide(msg, session.state);
     // A chat is named so the agent can hand it to a script (skills/pier-slack);
     // an alias names nothing a shell could reach.

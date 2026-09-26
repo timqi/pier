@@ -5,7 +5,6 @@ import type { AgentReply, NoteOrigin } from "../core/types.js";
 import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
 import type { LarkCard, LarkClient, LarkElement } from "./lark-api.js";
-import type { HandoffNote } from "./types.js";
 import {
   button,
   buttonRow,
@@ -28,7 +27,7 @@ export class LarkOutbound {
   private readonly sent = new Map<string, LarkCard>();
 
   constructor(
-    private readonly api: Pick<LarkClient, "replyCard" | "createCard" | "patchCard" | "uploadFile" | "deleteMessage">,
+    private readonly api: Pick<LarkClient, "replyCard" | "patchCard" | "uploadFile">,
     private readonly log: (message: string) => void,
   ) {}
 
@@ -60,25 +59,6 @@ export class LarkOutbound {
     }
     const lost = await sendAttachments(paths, (file) => this.api.uploadFile(root, file), this.log);
     if (lost) await this.api.replyCard(root, card([markdown(lost)]));
-  }
-
-  /** The root, then one card inside its topic: on the phone a topic has its
-   *  own composer only once it has a reply. Answers the root's id. The handoff
-   *  writes no row when this throws, so a root left behind would invite a reply
-   *  into a thread nobody answers: it is taken back down. */
-  async open(chatId: string, note: HandoffNote): Promise<string> {
-    const link = note.url ? `[Open on the web](${note.url})` : "(no public URL set — Settings → Instance)";
-    const { messageId: root } = await this.api.createCard(chatId, card([
-      markdown(`**Continued from web: ${note.title}**\n${link}\nReply in this thread to continue.`),
-    ]));
-    try {
-      await this.api.replyCard(root, card([markdown("Reply here to continue.")]));
-    } catch (err) {
-      await this.api.deleteMessage(root)
-        .catch((e: unknown) => this.log(`orphan handoff root ${root} not deleted: ${String(e)}`));
-      throw err;
-    }
-    return root;
   }
 
   /** Best-effort: a card sent before a restart keeps its row, logged. */

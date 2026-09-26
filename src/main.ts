@@ -16,7 +16,6 @@ import { defaultBoardsDir, registerBoardRoutes, rotateBoardViews } from "./board
 import { ChannelStore } from "./channels/config.js";
 import { createControl } from "./channels/control.js";
 import { ConversationStore, resolveConversation } from "./channels/conversations.js";
-import { createHandoff } from "./channels/handoff.js";
 import { registerChannelRoutes } from "./channels/routes.js";
 import { ChannelRuntime } from "./channels/runtime.js";
 import { MainChain } from "./core/chain.js";
@@ -133,10 +132,7 @@ const chain = new MainChain(db, {
   ledger: (ids, since) => tasks.ledger(ids, since),
   sessionOf: (id) => taskStore.getRun(id)?.targetSessionId ?? null,
   roleOf: (id) => taskStore.roleOf(id),
-  designs: () => {
-    const flags = sessionState.flags();
-    return tasks.openDesigns().filter((r) => r.targetSessionId && !flags.get(r.targetSessionId)?.closed);
-  },
+  designs: () => tasks.openDesigns(),
   hub,
 });
 const stopEviction = router.startIdleEviction();
@@ -164,24 +160,7 @@ const control = createControl({
   router, factory, conversations, store: channelStore,
   modelMenu: () => settings.get().modelMenu,
 });
-// The panel pulls through the handoff and the handoff posts through the
-// runtime: the runtime's half is reached lazily so both can be built.
-const handoff = createHandoff({
-  store: channelStore,
-  runtime: {
-    running: () => channels.running(),
-    openThread: (platform, chatId, note) => channels.openThread(platform, chatId, note),
-  },
-  conversations,
-  factory,
-  router,
-  hub,
-  publicUrl: () => settings.get().publicUrl,
-  taskSessions: () => tasks.taskSessions(),
-  workingSet: () => sessionState.flags(),
-  log: (m) => logger("channels").info(m),
-});
-const channels = new ChannelRuntime(channelStore, router, control, handoff);
+const channels = new ChannelRuntime(channelStore, router, control);
 resolveIm = resolveConversation(
   conversations,
   factory,
@@ -321,7 +300,7 @@ registerConfigSyncRoutes(app, {
   reconcile: configurationSync.reconcile,
   run: configurationSync.run,
 });
-registerChannelRoutes(app, channelStore, channels, handoff, conversations);
+registerChannelRoutes(app, channelStore, channels, conversations);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);
 registerPushRoutes(app, {

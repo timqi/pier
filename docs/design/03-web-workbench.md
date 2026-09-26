@@ -10,12 +10,11 @@ surface owns its routes and is mounted beside it.
 
 | Route | Behavior |
 | ----- | -------- |
-| `GET /api/sessions` | `AgentFactory.list()` joined with live router state, unread flags and working-set `rank`; `modified` is metadata, not the drawer's ordering key |
+| `GET /api/sessions` | `AgentFactory.list()` joined with live router state and unread flags; `modified` is metadata, not the drawer's ordering key |
 | `GET /api/sessions/:id` | one session's row, the list's filters aside — a task run's own session is never in the listing (a feature lead's is, [10](10-continuous-session.md#roles)), and the header that opened it from its run card names it and fills its info panel from here; 404 if unknown |
 | `POST /api/sessions` | body `{cwd?}` → create session, returns `{id}` |
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
-| `POST /api/sessions/:id/close` | body `{closed}` → keep the session out of `GET /api/sessions` (and out of the working set), or back in; returns `{ok}` and broadcasts `sessions-changed`; 409 on a continuous-conversation member. Nothing is deleted: the by-id route, the URL and search still reach it, and a human message to it clears the flag |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns, skills}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, skills: [], readonly: true}`; `skills` is `AgentSession.skills()`, the `{name, description}` Pi loaded for the session — what `/skill:<name>` expands and the composer lists |
 | `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md))* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"\|"new"}]}`, newest first |
@@ -56,14 +55,6 @@ surface owns its routes and is mounted beside it.
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
   session for itself. One flag, read by the dot, the badges and Web Push.
-- **Continue in a chat** (`GET /api/handoff/targets`, `POST /api/handoff`;
-  owned by `channels/routes.ts`, contract in
-  [04-im-channels.md](04-im-channels.md#continue-from-web-and-from-a-thread-handoffts)):
-  the ⋯ menu's *Continue in Lark/Slack…* lists the DMs the bot has seen (a
-  group's thread belongs to the group, so it is never a target); a pick posts the
-  handoff and the status chip follows from `sessions-changed`. A session
-  already answering a chat has the row disabled with `answers in <platform>`;
-  a refusal stays under the picked row in the server's words.
 
 Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` link,
 [08-cli-socket.md](08-cli-socket.md) — `/logout`, `/api/password`,
@@ -145,7 +136,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 `.select`, `.md`, …). `npm run dev:web` gives HMR with an `/api` proxy to
 :3141; `tsconfig.web.json` is the typecheck gate.
 
-`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `palette.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Working-set rank and unread state live in `web/session-state.ts`.
+`main.ts` orchestrates session state, SSE streams, routing and the header; `session-header.ts`, `drawer.ts`, `palette.ts`, `chat.ts`, `composer.ts` and the Console views receive explicit deps and never import main back. No state, router or component library. Unread state lives in `web/session-state.ts`.
 
 ### Data flow
 

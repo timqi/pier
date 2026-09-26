@@ -11,7 +11,6 @@ import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, Thi
 import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
 import type { ChannelControl } from "./control.js";
-import type { PanelHandoff } from "./panel.js";
 import { ReceiptLedger } from "./receipts.js";
 import { SlackChannel } from "./slack.js";
 import type {
@@ -168,9 +167,6 @@ let control: ChannelControl & {
   model?: ModelRef;
 };
 
-/** The panel's pull half is exercised in panel.test.ts; here it only has to exist. */
-const handoff: PanelHandoff = { unbound: () => Promise.resolve([]), continueHere: () => Promise.resolve() };
-
 let eventSeq = 0;
 
 /** One `message` event, wrapped as the envelope the transport hands over. */
@@ -283,7 +279,7 @@ beforeEach(async () => {
   known = new Set();
   working = new Set();
   control = fakeControl();
-  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
+  channel = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
   await channel.start((msg) => inbound.push(msg));
 });
 
@@ -376,32 +372,6 @@ describe("gating", () => {
     await feed(message({ text: "carry on", ts: "1800.000200", thread_ts: "1700.000100" }));
     expect(inbound).toHaveLength(1);
     expect(inbound[0]!.text).toBe("carry on");
-  });
-
-  it("openThread posts a root without thread_ts and returns <channel>/<ts>", async () => {
-    const id = await channel.openThread("C100", { title: "Fix the parser", url: "https://pier.example/#/session/s1" });
-    expect(client.sent).toHaveLength(1);
-    const root = client.sent[0]!;
-    expect(root.channel).toBe("C100");
-    expect(root.thread_ts).toBeUndefined();
-    expect(root.text).toBe("Continued from web: *Fix the parser*\nhttps://pier.example/#/session/s1\n_Reply in this thread to continue._");
-    expect(id).toBe("C100/900.000100");
-  });
-
-  it("openThread without a public URL says so instead of linking nowhere", async () => {
-    await channel.openThread("C100", { title: "Fix <the> parser", url: "" });
-    expect(client.sent[0]!.text).toContain("_(no public URL set — Settings → Instance)_");
-    // mrkdwn-escaped: a session title cannot smuggle a mention or a link.
-    expect(client.sent[0]!.text).toContain("Continued from web: *Fix &lt;the&gt; parser*");
-  });
-
-  it("a reply in a handoff thread without a mention is admitted in a mention-required channel", async () => {
-    bind();
-    const id = await channel.openThread("C100", { title: "t", url: "" });
-    known.add(id); // the row handoff.ts writes
-    await feed(message({ text: "carry on", ts: "1800.000200", thread_ts: "900.000100" }));
-    expect(inbound).toHaveLength(1);
-    expect(inbound[0]!.key.conversationId).toBe(id);
   });
 
   it("still requires a mention in a thread Pier does not own", async () => {
@@ -1256,7 +1226,7 @@ describe("receipts", () => {
 
   it("clears receipts a dead process left behind, at startup", async () => {
     receipts.add({ conversationId: "C100/1.1", chatId: "C100", messageId: "5.5" });
-    const reborn = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control, handoff });
+    const reborn = new SlackChannel({ store, client, receipts, log: (m) => dropped.push(m), control });
     await reborn.start(() => {});
     // The startup sweep is a detached promise: wait for what it does, not for
     // however long a loaded machine needs to get around to it.
