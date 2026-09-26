@@ -178,8 +178,9 @@
       <div class="glass rounded-[1.75rem] border border-neutral-200 px-3 py-2.5 transition-shadow focus-within:border-indigo-400">
         <div id="image-strip" data-gallery class="hidden flex-wrap gap-2 px-1 pb-1.5 pt-1"></div>
         <!-- The chat commands, offered while the draft is a `/` prefix of one
-             (composer.ts): the input keeps the caret, ↑/↓ walk, Enter or Tab picks. -->
-        <ul id="command-menu" role="listbox" aria-label="Chat commands" class="hidden flex-col pb-1.5 pt-0.5"></ul>
+             (composer.ts): the input keeps the caret, ↑/↓ walk, Enter or Tab picks.
+             Rows are subgrids of its two columns, so the descriptions line up. -->
+        <ul id="command-menu" role="listbox" aria-label="Chat commands" class="hidden grid-cols-[auto_minmax(0,1fr)] pb-1.5 pt-0.5"></ul>
         <!-- items-end keeps the icons on the bottom row while the textarea grows upward -->
         <div class="flex items-end gap-1.5">
           <button type="button" id="attach" title="Attach file (or paste / drop)"

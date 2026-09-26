@@ -349,8 +349,8 @@ function pickCommand(command: ChatCommand): void {
 function renderCommandMenu(): void {
   const matches = commandMatches();
   commandRows = matches.map((command) => {
-    const li = h("li", "palette-row flex min-h-9 cursor-pointer items-baseline gap-2 rounded-[10px] px-2 text-[14px] leading-5",
-      h("span", "flex-none font-mono text-neutral-800", `/${command}`),
+    const li = h("li", "palette-row col-span-2 grid min-h-9 cursor-pointer grid-cols-subgrid items-center gap-x-3 rounded-[10px] px-2.5 py-1.5 text-[14px] leading-5 text-neutral-800",
+      h("span", "font-mono", `/${command}`),
       h("span", "min-w-0 truncate text-[13px] text-neutral-500", CHAT_COMMANDS[command]));
     li.setAttribute("role", "option");
     // pointerdown, not click: a click first blurs the textarea, which on a phone drops the keyboard.
@@ -362,6 +362,7 @@ function renderCommandMenu(): void {
   });
   commandMenu.replaceChildren(...commandRows);
   commandMenu.classList.toggle("hidden", !commandRows.length);
+  commandMenu.classList.toggle("grid", commandRows.length > 0);
   setCommandActive(0);
 }
 

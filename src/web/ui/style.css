@@ -752,7 +752,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 .palette-row:not(.bg-indigo-50):hover { background-color: var(--color-neutral-100); }
 /* The tile takes the selection's ink and a deeper tint, so the selected row is
    one object rather than a grey square on a blue pill. */
-.palette-row.bg-indigo-50 > span:first-child {
+#palette .palette-row.bg-indigo-50 > span:first-child {
   background-color: color-mix(in oklab, var(--color-indigo-500) 18%, transparent);
   color: inherit;
 }
