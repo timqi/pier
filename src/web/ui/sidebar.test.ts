@@ -62,6 +62,7 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   // so the flag alone is the dot — a turn that answered Slack never carries it.
   expect(dot({ unread: true })?.cls).toContain("bg-amber-500");
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
+  expect(dot({ role: "lead" })).toMatchObject({ title: "lead — waiting for you" });
 });
 
 // ⌘⇧[ / ⌘⇧] step through the rail as it is drawn — working set, then the

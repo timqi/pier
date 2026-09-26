@@ -308,6 +308,7 @@ function setup(
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
     taskSessions: () => tasks.taskSessions(),
+    roleOf: (id) => tasks.store.roleOf(id),
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -433,6 +434,35 @@ describe("workbench server", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ id: "child", cwd: "/tmp", createdAt: 2, state: "idle" });
     expect((await app.request("/api/sessions/gone")).status).toBe(404);
+  });
+
+  // The rail keeps a lead in progress for its life (ui/sidebar.ts); the role
+  // is the task store's, and only a lead's row says one.
+  it("marks a lead's session with its role", async () => {
+    const { app, db, factory, tasks } = setup();
+    vi.mocked(factory.list).mockResolvedValue([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1 },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2 },
+    ]);
+    const task = await tasks.create({
+      name: "feature",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "design", launch: { role: "lead" } },
+    });
+    new TaskStore(db).saveRun({
+      id: "lead-run", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      resumedFromRunId: null, triggerSource: "agent",
+      invokedBySessionId: "s1", sourceSessionId: "s1", targetSessionId: "lead",
+      sessionMode: "fresh", callbackSessionId: "s1", background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+      state: "succeeded", input: null, context: { definition: task, sessionId: "lead" }, probe: null,
+      matched: null, result: null, error: null, skipReason: null,
+      queuedAt: 1, startedAt: 1, finishedAt: 2,
+    });
+    expect(await (await app.request("/api/sessions")).json()).toEqual([
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead" },
+    ]);
   });
 
   // The badge counts "web" rows only (ui/sidebar.ts): an IM turn is delivered

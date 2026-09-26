@@ -19,6 +19,23 @@ export const runSource = (run: TaskRun): SystemInputSource => ({
   ...(run.context.thinking ? { thinking: run.context.thinking } : {}),
 });
 
+/** Heads a milestone resume's prompt: the lead's reply is what its supervisor reads. */
+export const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
+
+/** On the record of a lead run that owed its supervisor nothing, so the Console says why. */
+export const LEAD_TURN = "a lead's turn, not a milestone";
+
+/** Decided once, as the run finishes. A lead reports milestones only: any
+ *  other turn of its the user reads in its session, and settles as `--callback none`. */
+export function settleCallback(run: TaskRun): void {
+  if (!run.callbackSessionId) return;
+  const action = run.context.definition.action;
+  const milestone = run.context.resumePrompt?.startsWith(MILESTONE) === true ||
+    (run.result?.type === "agent" && /^Design final:/m.test(run.result.text));
+  if (action.type === "agent" && action.launch?.role === "lead" && !milestone) run.callbackError = LEAD_TURN;
+  else run.callbackState = "pending";
+}
+
 export function runResultText(run: TaskRun): string {
   let result = run.error ?? "No result";
   if (run.result?.type === "agent" || run.result?.type === "system") result = run.result.text;

@@ -207,6 +207,8 @@ browser keeps no second session order.
   disappears when empty; the "Sessions" label and Load more go, everything
   else is ⌘K's. The phone drawer is the same list; picking a row closes it.
   The chords walk these rows.
+- A lead's session (`role: "lead"`) is in that set for its life, idle and read
+  included, its dot "lead — waiting for you"; it leaves when deleted.
 - Focus: refreshes retain the focused control; Load more focuses the first
   added row; an open menu reuses its trigger across refreshes. The mobile
   drawer removes hidden controls from the tab order, contains focus, restores
