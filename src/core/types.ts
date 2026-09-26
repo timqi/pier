@@ -320,10 +320,6 @@ export interface AgentSession {
    * requests arrive seconds apart, the 1h write premium never pays off).
    * Read per request, so it may change after open; other providers ignore it. */
   setCacheRetention(retention: "short" | "long"): void;
-  /** Auto-compaction triggers once the context passes `tokens`, for this
-   * session only and in memory; never later than the instance's own setting,
-   * and kept across a model switch. */
-  setCompactionCap(tokens: number): void;
   /** Pending queue as-is, for snapshotting a session into a fresh client. */
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** System inputs handed over while the session was streaming and not in the

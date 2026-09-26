@@ -16,7 +16,7 @@ type Runtime = { providers: Set<string>; registerProvider(name: string): void; s
 const runtimes: Runtime[] = [];
 const streamed: unknown[] = [];
 /** The Pi sessions the factory opened, for the settings it applies to them. */
-const opened: { agent: { followUpMode: string } }[] = [];
+const opened: { agent: { followUpMode: string }; overrides: unknown[] }[] = [];
 type Skill = { name: string; filePath: string };
 type Files = { agentsFiles: { path: string; content: string }[] };
 type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files };
@@ -56,6 +56,12 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
       messages: [],
       // Pi's default: one queued follow-up per turn boundary.
       agent: { followUpMode: "one-at-a-time" },
+      model: { provider: "p", id: "m", contextWindow: 400_000 },
+      overrides: [] as unknown[],
+      settingsManager: {
+        getCompactionSettings: () => ({ enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000 }),
+        applyOverrides: (o: unknown) => session.overrides.push(o),
+      },
       dispose() {},
     };
     opened.push(session);
@@ -618,9 +624,37 @@ describe("the continuous conversation's seam", () => {
     expect(await injected("/tmp/elsewhere", true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
   });
 
+  it("compacts a main session at 100K and a run's child at 150K while the switch is on, and no other session", async () => {
+    const home = join(process.env.PIER_HOME!, "home");
+    const path = () => join(mkdtempSync(join(tmpdir(), "pier-cap-")), "f.jsonl");
+    const factory = (continuous: boolean) => new PiAgentFactory(() => "", [], undefined, undefined, undefined,
+      () => ({ skillsOff: [], continuous }), undefined, {
+        scan: async () => [["member", home], ["worker-1", "/tmp/wt"], ["user-1", "/tmp/wt"]]
+          .map(([id, cwd]) => ({ id: id!, path: path(), cwd: cwd!, created: 1, modified: 2 })),
+      }, (id) => (id === "worker-1" ? "worker" : undefined));
+    const reserves = async (open: Promise<{ dispose(): Promise<void> }>) => {
+      await (await open).dispose();
+      return opened.at(-1)!.overrides;
+    };
+    const main = [{ compaction: { reserveTokens: 300_000 } }];
+    const child = [{ compaction: { reserveTokens: 250_000 } }];
+    const on = factory(true);
+    expect(await reserves(on.create({ cwd: home }))).toEqual(main);
+    expect(await reserves(on.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(child);
+    expect(await reserves(on.resume("worker-1"))).toEqual(child);
+    // Decided by what the session is, not by who opens it: a run reusing a
+    // chain member leaves it at main's cap, and a user's session uncapped.
+    expect(await reserves(on.resume("member"))).toEqual(main);
+    expect(await reserves(on.resume("user-1"))).toEqual([]);
+    expect(await reserves(on.create({ cwd: "/tmp/wt" }))).toEqual([]);
+    const off = factory(false);
+    expect(await reserves(off.create({ cwd: home }))).toEqual([]);
+    expect(await reserves(off.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual([]);
+  });
+
   /** A session whose model and settings manager are what the cap reads and writes. */
-  function capped(window: number, instanceReserve = 16_384) {
-    const { fake, session: s } = session();
+  function capped(window: number, cap?: number, instanceReserve = 16_384) {
+    const fake = fakePi();
     const overrides: unknown[] = [];
     const models: Record<string, { provider: string; id: string; contextWindow: number }> = {
       big: { provider: "p", id: "big", contextWindow: 1_000_000 },
@@ -635,12 +669,11 @@ describe("the continuous conversation's seam", () => {
       modelRuntime: { getModel: (_p: string, id: string) => models[id] },
       setModel(m: { contextWindow: number }) { (fake.pi as unknown as { model: unknown }).model = m; },
     });
-    return { s, overrides };
+    return { s: new PiSession(fake.pi as never, () => [], () => {}, { value: "long" }, () => undefined, cap), overrides };
   }
 
   it("turns a cap into a reserve for the model's window, and recomputes it on a model switch", async () => {
-    const { s, overrides } = capped(400_000);
-    s.setCompactionCap(100_000);
+    const { s, overrides } = capped(400_000, 100_000);
     expect(overrides).toEqual([{ compaction: { reserveTokens: 300_000 } }]);
     await s.setModel({ provider: "p", id: "big" });
     // A window no larger than the cap keeps the instance's reserve, never compacting later than it would.

@@ -34,10 +34,6 @@ const preamble = (run: TaskRun, supervised: boolean, role: AgentRole | undefined
     "\n\n";
 };
 
-/** A child never rotates, so its context is bounded here; above 200K input,
- *  1M-context models price higher. */
-export const CHILD_COMPACTION_CAP = 150_000;
-
 export class AgentTaskRunner {
   private readonly active = new Set<string>();
   private readonly slotWaiters = new Set<() => void>();
@@ -49,8 +45,6 @@ export class AgentTaskRunner {
     private readonly store: TaskStore,
     private readonly messages: TaskMessenger,
     private readonly changed: (run: TaskRun) => void,
-    /** The continuous-session switch: while on, children compact at their own cap. */
-    private readonly capped: () => boolean = () => false,
   ) {}
 
   async execute(
@@ -73,7 +67,6 @@ export class AgentTaskRunner {
         // Task requests come seconds apart, so the 1h cache-write premium never
         // earns back; after idle, so a reused session's in-flight turn keeps its 1h.
         session.setCacheRetention("short");
-        if (this.capped()) session.setCompactionCap(CHILD_COMPACTION_CAP);
         start();
         // No input is no block. `<\/` is the same JSON, so a value cannot close
         // the fence early.

@@ -13,8 +13,6 @@ import type { AgentFactory, AgentSession, ChainMember, ChainReason, ChatTurn, Co
 
 const log = logger("core");
 
-/** Where a main session compacts; above 200K input, 1M-context models price higher. */
-export const MAIN_COMPACTION_CAP = 100_000;
 const EXCHANGES = 3;
 
 /** One run of the ledger, as `pier task runs` prints it. */
@@ -82,12 +80,6 @@ export class MainChain {
     return ids.includes(sessionId) ? ids : undefined;
   }
 
-  /** For every open of a session: a member runs at the main cap however it was opened. */
-  readonly opened = (session: AgentSession): AgentSession => {
-    if (this.enabled() && this.chainOf(session.id)) session.setCompactionCap(MAIN_COMPACTION_CAP);
-    return session;
-  };
-
   /** The alias send: resolve the head, rotating it first when due, then dispatch to its own key. */
   send(message: Omit<InboundMessage, "key">): Promise<{ sessionId: string; rotated?: ChainReason }> {
     return this.serial(async (session) => {
@@ -140,7 +132,6 @@ export class MainChain {
     const seed = await this.seed(reason, previous, open);
     this.db.prepare("INSERT INTO main_chain(session_id, started_at, reason) VALUES (?, ?, ?)").run(session.id, this.now(), reason);
     this.deps.router.attach(webKey(session.id), session);
-    session.setCompactionCap(MAIN_COMPACTION_CAP);
     await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
     log.info(`main session ${session.id} started (${reason})`);
     return session;

@@ -2,12 +2,12 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, AgentSession, BackgroundRun } from "../core/types.js";
+import type { AgentFactory, BackgroundRun } from "../core/types.js";
 import type { LedgerRun, MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { AgentTaskRunner, CHILD_COMPACTION_CAP } from "./agent.js";
+import { AgentTaskRunner } from "./agent.js";
 import { TaskCallbacks } from "./callbacks.js";
 import type { Milestone } from "./outbox.js";
 import { TaskDefinitions, requiredString } from "./definitions.js";
@@ -81,8 +81,7 @@ export class TaskService {
       }),
       startMember: (run) => this.runs.start(run),
     }, (group) => this.hub.emitWorkspace({ type: "task-group-changed", groupId: group.id }), unreachable, headOf, this.milestone);
-    const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run),
-      () => instance?.continuous?.enabled() ?? false);
+    const agent = new AgentTaskRunner(factory, router, store, this.messages, (run) => this.changed(run));
     this.execution = new TaskExecution(store, this.definitions, this.callbacks, agent, {
       runChild: (taskId, parent) => this.run(taskId, parent.input, "task", parent.id, {
         invokedBySessionId: parent.invokedBySessionId,
@@ -250,13 +249,6 @@ export class TaskService {
   activeBackgroundRunCounts(): Map<string, number> {
     return this.store.countActiveBackgroundRunsBySession();
   }
-
-  /** For every open of a session: a child runs at the children's cap however it
-   *  was opened — a run, or someone typing into it on the web. */
-  readonly opened = (session: AgentSession): AgentSession => {
-    if (this.instance?.continuous?.enabled() && this.store.creatorOf(session.id)) session.setCompactionCap(CHILD_COMPACTION_CAP);
-    return session;
-  };
 
   /** The sessions runs made for themselves, for a list of the operator's own. */
   taskSessions(): Set<string> {

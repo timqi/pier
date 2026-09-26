@@ -1,6 +1,6 @@
 // Tasks under the continuous conversation: a result owed to any of its
 // sessions reaches the current head, every member controls what any member
-// launched, `pier task runs` is the ledger, and children compact at their cap.
+// launched, and `pier task runs` is the ledger.
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,7 +11,6 @@ import { EventHub } from "../core/hub.js";
 import { Router } from "../core/router.js";
 import { fakeSession, type FakeSession } from "../core/session.testkit.js";
 import type { AgentFactory } from "../core/types.js";
-import { CHILD_COMPACTION_CAP } from "./agent.js";
 import { TaskService, type TaskChain } from "./service.js";
 import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
@@ -100,32 +99,4 @@ describe("tasks under the continuous conversation", () => {
     const { service } = rig(false);
     await expect(service.handle({ operation: "runs" }, "h1")).rejects.toThrow(/not one of its sessions/);
   });
-
-  it("caps a child reopened outside any run, and no other session", async () => {
-    const { child, service, cwd } = rig();
-    const task = await service.create({ name: "worker", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } });
-    await service.waitForRun(service.run(task.id, null, "agent", null, { invokedBySessionId: "h1", callbackSessionId: null }).id);
-    const reopened = fakeSession(child.id);
-    service.opened(reopened);
-    expect(reopened.calls).toEqual([`compactionCap:${String(CHILD_COMPACTION_CAP)}`]);
-    const own = fakeSession("stranger");
-    service.opened(own);
-    expect(own.calls).toEqual([]);
-
-    const off = rig(false);
-    const offTask = await off.service.create({ name: "worker", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } });
-    await off.service.waitForRun(off.service.run(offTask.id, null, "agent", null, { invokedBySessionId: "h1", callbackSessionId: null }).id);
-    const offReopened = fakeSession(off.child.id);
-    off.service.opened(offReopened);
-    expect(offReopened.calls).toEqual([]);
-  });
-
-  it.each([[true, [`compactionCap:${String(CHILD_COMPACTION_CAP)}`]], [false, []]])(
-    "caps a child's context only while the switch is on (%s)", async (on, calls) => {
-      const { child, service, cwd } = rig(on);
-      const task = await service.create({ name: "worker", trigger: { type: "manual" }, action: { type: "agent", session: { mode: "fresh", cwd }, prompt: "go" } });
-      await service.waitForRun(service.run(task.id, null, "agent", null, { invokedBySessionId: "h1", callbackSessionId: null }).id);
-      expect(child.calls.filter((c) => c.startsWith("compactionCap"))).toEqual(calls);
-    },
-  );
 });

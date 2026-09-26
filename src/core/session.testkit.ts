@@ -157,7 +157,6 @@ export function fakeSession(id = "s1", opts: FakeSessionOptions = {}): FakeSessi
       session.calls.push(`setThinkingLevel:${level}`);
     },
     setCacheRetention: () => {},
-    setCompactionCap: (tokens) => void session.calls.push(`compactionCap:${tokens}`),
     pendingQueue: async () => structuredClone(queue),
     // Like PiSession: anything still queued on an idle session was aborted.
     pendingSystemInputs: async () => (state === "idle" ? [] : queuedInputs.map((q) => q.origin)),

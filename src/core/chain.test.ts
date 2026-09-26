@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { MAIN_COMPACTION_CAP, MainChain, type LedgerRun } from "./chain.js";
+import { MainChain, type LedgerRun } from "./chain.js";
 import { CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
@@ -44,7 +44,7 @@ function rig({ runs = [] as LedgerRun[], on = true } = {}) {
     readHistory: async () => undefined,
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
-  const router = new Router(new EventHub(), (key) => factory.resume(key.conversationId).then(chain.opened));
+  const router = new Router(new EventHub(), (key) => factory.resume(key.conversationId));
   const chain = new MainChain(db, {
     factory, router, home,
     enabled: () => on,
@@ -86,9 +86,9 @@ describe("the continuous conversation's chain", () => {
     expect(seed?.text.indexOf("wrote the contract")).toBeLessThan(seed!.text.indexOf("shipped the doc"));
     expect(seed?.text).toContain("## Runs — in flight, and finished since the previous session started\n\nnone");
     expect(seed?.text).not.toContain("last exchanges");
-    // The cap before the seed, the seed before the message.
+    // The seed before the message.
     expect(m1.calls.map((c) => c.split(":").slice(0, 2).join(":"))).toEqual([
-      `compactionCap:${String(MAIN_COMPACTION_CAP)}`, "systemInput:session-seed", expect.stringMatching(/^prompt:/),
+      "systemInput:session-seed", expect.stringMatching(/^prompt:/),
     ]);
     expect(m1.prompts[0]).toContain("hello");
   });
@@ -166,18 +166,12 @@ describe("the continuous conversation's chain", () => {
     expect(r.created).toHaveLength(1);
   });
 
-  it("answers for every member: one launcher, one head, the main cap wherever a member opens", async () => {
+  it("answers for every member with the whole chain, newest first", () => {
     const r = rig();
     r.existing("h0", r.clock.now - 10);
     r.existing("h1", r.clock.now);
     expect(r.chain.chainOf("h0")).toEqual(["h1", "h0"]);
     expect(r.chain.chainOf("child")).toBeUndefined();
-    const opened = await r.router.ensure({ channelId: "web", conversationId: "h0" }) as FakeSession;
-    expect(opened.calls).toEqual([`compactionCap:${String(MAIN_COMPACTION_CAP)}`]);
-
-    const off = rig({ on: false });
-    off.existing("h1", off.clock.now);
-    expect((await off.router.ensure({ channelId: "web", conversationId: "h1" }) as FakeSession).calls).toEqual([]);
   });
 
   it("says in the seed when a memory file cannot be read", async () => {

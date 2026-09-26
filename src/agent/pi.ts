@@ -177,6 +177,12 @@ const bashTimeoutDefault = (pi: ExtensionAPI) => {
 const branchMessages = (sessionManager: SessionManager): PiMessage[] =>
   sessionManager.getBranch().flatMap((entry) => sessionEntryToContextMessages(entry)) as PiMessage[];
 
+/** Where a session compacts while the continuous switch is on — a main session
+ *  and a session a run launched from a session made (a lead or a worker, which
+ *  never rotate); above 200K input, 1M-context models price higher. */
+const MAIN_COMPACTION_CAP = 100_000;
+const CHILD_COMPACTION_CAP = 150_000;
+
 /** Read per request by the runtime wrapper in `open()`, so a task can
  *  downgrade the cache TTL after the session is open. */
 type CacheRetentionBox = { value: "short" | "long" };
@@ -192,7 +198,11 @@ export class PiSession implements AgentSession {
     private readonly retention: CacheRetentionBox = { value: "long" },
     /** Read per turn: switching auto-titling on takes effect without a restart. */
     private readonly suggestTitle: () => ((first: string, reply: string) => Promise<string>) | undefined = () => undefined,
-  ) {}
+    /** Auto-compaction triggers once the context passes this many tokens. */
+    private readonly cap?: number,
+  ) {
+    this.applyCap();
+  }
 
   /** A turn started after Pi's dispose runs for real and lands nowhere — no
    *  transcript, no event, a promise that resolves. Refusing makes it a failure (§5). */
@@ -264,16 +274,11 @@ export class PiSession implements AgentSession {
     this.retention.value = retention;
   }
 
-  private cap?: number;
   private instanceReserve?: number;
 
-  setCompactionCap(tokens: number): void {
-    this.cap = tokens;
-    this.applyCap();
-  }
-
   /** Pi compacts past `contextWindow − reserveTokens`; this session's settings
-   *  manager is its own, so the override reaches no other session. */
+   *  manager is its own, so the override reaches no other session. Never later
+   *  than the instance's own reserve. */
   private applyCap(): void {
     const window = this.pi.model?.contextWindow;
     if (this.cap === undefined || !window) return;
@@ -712,7 +717,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     return { modelRegistry, model: active && modelRegistry.find(active.provider, active.id) };
   }
 
-  private async resourceLoader(cwd: string, role?: AgentRole): Promise<DefaultResourceLoader> {
+  private async resourceLoader(cwd: string, role: AgentRole | undefined, dispatcher: boolean): Promise<DefaultResourceLoader> {
     // A worker never delegates (tasks/operations.ts refuses it), so it is not taught how.
     const skillsOff = role === "worker" ? [...this.pier().skillsOff, "pier-tasks"] : this.pier().skillsOff;
     const loader = new DefaultResourceLoader({
@@ -731,8 +736,6 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       extensionFactories: [{ name: "pier-bash-timeout", factory: bashTimeoutDefault, hidden: true }],
       agentsFilesOverride: (current) => {
         const content = this.instructions();
-        // The home is where the continuous conversation's sessions run, and only they dispatch.
-        const dispatcher = this.pier().continuous === true && realPath(cwd) === realPath(pierPath("home"));
         return {
           agentsFiles: [
             ...current.agentsFiles,
@@ -752,7 +755,12 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
   }
 
   private async openSnapshot(sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
-    const { cwd } = opts;
+    const { cwd, role } = opts;
+    // While the switch is on, the home is where the continuous conversation's
+    // sessions run: only they dispatch, and they compact at main's cap.
+    const continuous = this.pier().continuous === true;
+    const main = continuous && realPath(cwd) === realPath(pierPath("home"));
+    const cap = main ? MAIN_COMPACTION_CAP : continuous && role ? CHILD_COMPACTION_CAP : undefined;
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.
     await this.credentials?.assertUnlocked();
@@ -769,7 +777,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       cwd,
       sessionManager,
       modelRuntime: runtime,
-      resourceLoader: await this.resourceLoader(cwd, opts.role),
+      resourceLoader: await this.resourceLoader(cwd, role, main),
     });
     const live = created.session;
     // Pi defaults to one follow-up per turn boundary, so N queued messages cost
@@ -781,7 +789,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     }, retention, () => {
       const model = this.titleModel();
       return model && ((first, reply) => this.suggestTitle(model, first, reply));
-    });
+    }, cap);
     if (opts.model) await session.setModel(opts.model);
     if (opts.thinking) session.setThinkingLevel(opts.thinking);
     log.info(`session ${session.id} open in ${cwd}${opts.name ? ` (${opts.name})` : ""}`);

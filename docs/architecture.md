@@ -160,9 +160,9 @@ seams:
   only — an inbound file is saved to `$PIER_HOME/inbox/` by the receiving
   surface and rides the prompt as a `[name](file:///…)` line; bytes in
   `core/inbox.ts`, grammar in `core/inbound-file.ts`), persisted system input,
-  abort, history, rename, model get/set/list, clearQueue, compaction cap,
-  create/resume, `list`/`find`/`readHistory`, and a payload-only `subscribe`.
-  Must stay implementable over RPC.
+  abort, history, rename, model get/set/list, clearQueue, create/resume,
+  `list`/`find`/`readHistory`, and a payload-only `subscribe`. Must stay
+  implementable over RPC.
 - `SessionEventPayload` — the only observability currency: turn/text/thinking/
   tool events, persisted `system-input`, linked `task-status`, state and queue
   snapshots, and errors. Delegation, callback, steer and supervisor-message

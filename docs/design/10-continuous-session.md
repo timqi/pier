@@ -68,12 +68,10 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 
 - Rotation is lazy, on the next user message; no timer. `MainChain.send` runs
   one at a time, so a race rotates once.
-- Compaction: Pi compacts past `contextWindow − reserveTokens`, so
-  `setCompactionCap` sets `reserveTokens = window − cap`, never later than the
-  instance's reserve, recomputed on `setModel`. While the switch is on a chain
-  member opens at 100K (`MAIN_COMPACTION_CAP`) and a session a fresh run made
-  at 150K (`CHILD_COMPACTION_CAP`): at a run's start and on every reopen
-  (`MainChain.opened`, `TaskService.opened`). Children never rotate.
+- Compaction, decided at open (`agent/pi.ts`) while the switch is on: a
+  session in the home at 100K, a lead's or worker's at 150K, any other at the
+  instance's setting; `reserveTokens = window − cap`, never later than the
+  instance's reserve, recomputed on `setModel`. Children never rotate.
 
 ## Run ledger
 
