@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, BackgroundRun, ParkedMessage } from "../core/types.js";
+import type { AgentFactory, BackgroundRun, ModelTier, ParkedMessage } from "../core/types.js";
 import type { LedgerRun, MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -55,7 +55,7 @@ export class TaskService {
     private readonly hub: EventHub,
     /** Structural: tasks/ must not import settings.ts. Absent in bare test rigs. */
     private readonly instance?: {
-      modelMenu(): { provider: string; id: string; thinking?: string; note?: string; tier?: string }[];
+      modelMenu(): { provider: string; id: string; thinking?: string; note?: string; tier?: ModelTier }[];
       systemActions?: SystemActions;
       continuous?: TaskChain;
     },
@@ -417,7 +417,7 @@ export class TaskService {
   /** An agent picks from names that exist right now, never from memory. */
   async models(): Promise<{
     source: "menu" | "catalog";
-    models: { provider: string; id: string; thinking?: string; note?: string; tier?: string }[];
+    models: { provider: string; id: string; thinking?: string; note?: string; tier?: ModelTier }[];
   }> {
     const menu = this.instance?.modelMenu() ?? [];
     if (menu.length) return { source: "menu", models: menu };
