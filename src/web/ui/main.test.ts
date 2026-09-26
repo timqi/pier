@@ -94,7 +94,8 @@ beforeEach(async () => {
   vi.stubGlobal("EventSource", Stream);
   vi.stubGlobal("__PIER_VERSION__", "test");
   Object.assign(installPage(), { hidden: true });
-  const rows = ["a", "b"].map((id) => ({ id, cwd: "/test", createdAt: 1, state: "idle" }));
+  // Listed oldest first, with `modified` the other way round: the client orders by birth.
+  const rows = ["a", "b"].map((id, i) => ({ id, cwd: "/test", createdAt: 1 + i, modified: 9 - i, state: "idle" }));
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
     if (url === "/api/continuous") return Promise.resolve(Response.json({ chain: [] }));
@@ -115,6 +116,11 @@ beforeEach(async () => {
   await settled();
 });
 afterEach(() => vi.unstubAllGlobals());
+
+// `modified` is deliberately ignored: ordering by it makes rows jump under the pointer.
+it("orders the sessions by birth, newest first, once for every surface", () => {
+  expect(h.drawer.sessions().map((s) => s.id)).toEqual(["b", "a"]);
+});
 
 describe("session loads", () => {
   it("restores queue recovery from the snapshot and reconciles it from the same event stream", async () => {

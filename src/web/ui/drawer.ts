@@ -35,6 +35,7 @@ export interface SessionInfo {
 
 /** Everything the drawer needs from the orchestrator (main.ts). */
 export interface DrawerDeps {
+  /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   currentId: () => string | null;
   select: (id: string) => void;
@@ -49,22 +50,15 @@ let deps: DrawerDeps;
 
 const chip = $("#status-chip");
 
-// --- order and marks ------------------------------------------------------------------
-// By birth only. Nothing reads `modified`: ordering by it makes rows jump under the pointer.
+// --- marks -------------------------------------------------------------------------------
 
 /** A session Pi has not persisted yet has no transcript to date; its creation
  *  is the last thing that happened to it. Tooltip only. */
 const lastActive = (s: SessionInfo): number => s.modified ?? s.createdAt;
 
-/** Newest first. */
-export const orderSessions = (list: SessionInfo[]): SessionInfo[] => [...list].sort((a, b) => b.createdAt - a.createdAt);
-
 /** The server marks only the sessions this workbench is the reader of
  *  (web/server.ts), so the flag is the whole rule here. */
 const waitingForYou = (s: SessionInfo): boolean => s.unread;
-
-/** One wording for the dot's title and the chat header's running chip. */
-export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
 
 /** A session with something going on in it: running, waiting for a look,
  *  subagents in flight, a lead's run queued, or a design waiting on the user
@@ -97,7 +91,7 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
       : mark === "unread"
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : mark === "runs"
-          ? ["bg-sky-500", runsLabel(s.activeRuns)]
+          ? ["bg-sky-500", `${s.activeRuns} subagent${s.activeRuns > 1 ? "s" : ""} running`]
           : ["bg-neutral-400", mark === "queued" ? "lead — run queued" : "design — waiting for you to finalize"],
   );
 }
@@ -130,7 +124,7 @@ const tag = (text: string, title: string): HTMLElement[] => {
  *  bar stands for; a finished lead stays while unread and leaves once viewed. */
 export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
   const members = new Set(chain.map((m) => m.sessionId));
-  return orderSessions(list.filter((s) => isLive(s) && !members.has(s.id)));
+  return list.filter((s) => isLive(s) && !members.has(s.id));
 }
 
 /** The drawer's session rows, for the palette's Running group. */

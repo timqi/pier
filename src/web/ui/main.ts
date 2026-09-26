@@ -248,10 +248,11 @@ function commitSessions(rows: SessionInfo[]): void {
   // A title read off an IM prompt still carries its speaker header: every
   // surface downstream reads `title`, so it is made readable once, here.
   sessions = rows.map((s) => ({ ...s, title: readableTitle(s.title) }));
+  // By birth only: ordering by `modified` makes rows jump under the pointer.
   sessions.sort((a, b) => b.createdAt - a.createdAt);
   renderDrawer();
-  // The header reads the selected session's row too — its running-runs chip is
-  // this list's `activeRuns`, so a re-list is also a repaint.
+  // The header reads the selected session's row too (title, phase), so a
+  // re-list is also a repaint.
   renderHeader();
   maybeAckRead();
 }

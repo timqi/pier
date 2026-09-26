@@ -15,7 +15,6 @@ vi.mock("./shortcut.js", () => ({ chord: vi.fn() }));
 vi.mock("./drawer.js", () => ({
   headSession: () => state.head,
   isLive: (s: Row) => s.state === "streaming",
-  orderSessions: (list: Row[]) => [...list].sort((a, b) => b.createdAt - a.createdAt),
   phaseTag: () => [],
   running: () => state.running,
   stateDot: () => [],
@@ -46,7 +45,7 @@ it("leads with the Conversation row, then the drawer's rows, the rest newest fir
   const head = row("h1", { createdAt: 9 });
   state.head = head;
   state.running = [row("lead", { state: "streaming", createdAt: 5 })];
-  state.sessions = [head, ...state.running, row("old", { createdAt: 1 }), row("member", { createdAt: 3 })];
+  state.sessions = [head, ...state.running, row("member", { createdAt: 3 }), row("old", { createdAt: 1 })];
   palette.togglePalette();
   const got = lines();
   expect(got[0]).toMatch(/^Conversation/);

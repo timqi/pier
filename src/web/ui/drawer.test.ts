@@ -51,16 +51,6 @@ beforeEach(async () => {
 const chip = () => doc.querySelector("#status-chip")!;
 const panelRows = () => doc.querySelectorAll(".session-open");
 
-// `modified` is deliberately ignored: ordering by it makes rows jump under the pointer.
-it("orders by birth, newest first", () => {
-  const ids = drawer.orderSessions([
-    row("older", { createdAt: 10, modified: 90 }),
-    row("newest", { createdAt: 30, modified: 1 }),
-    row("newer", { createdAt: 20, modified: 50 }),
-  ]).map((s) => s.id);
-  expect(ids).toEqual(["newest", "newer", "older"]);
-});
-
 it("draws no dot on an idle row and paints one only for something to look at", () => {
   const dot = (over: Partial<Row>) => fake(drawer.stateDot(row("x", over))[0] ?? null as never);
   expect(drawer.stateDot(row("x"))).toEqual([]);
@@ -112,7 +102,7 @@ it("leaves the conversation's sessions off the chip and badges the head's unread
 
 it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a click", () => {
   current = "b";
-  sessions = [row("a", { state: "streaming", createdAt: 1 }), row("b", { unread: true, createdAt: 2 })];
+  sessions = [row("b", { unread: true, createdAt: 2 }), row("a", { state: "streaming", createdAt: 1 })];
   drawer.renderDrawer();
   chip().onclick?.();
   expect(menu.openPanel).toHaveBeenCalledOnce();
@@ -130,7 +120,7 @@ it("opens from the chip or ⌘⇧P, lists the rows, and selects and closes on a 
   expect(select).toHaveBeenCalledWith("a");
 
   // A render under the open panel refills it in place.
-  sessions = [...sessions, row("c", { activeRuns: 1, createdAt: 3 })];
+  sessions = [row("c", { activeRuns: 1, createdAt: 3 }), ...sessions];
   drawer.renderDrawer();
   expect(list.querySelectorAll(".session-open").map((b) => b.textContent.trim())).toEqual(["c", "b", "a"]);
 });

@@ -216,7 +216,7 @@ describe("queue recall drafts", () => {
     expect(state.fetch.mock.calls[1]?.[0]).toBe("/api/sessions/a/messages");
   });
 
-  it("checkpoints A before createSession removes its selection", async () => {
+  it("checkpoints A before its selection clears", async () => {
     node("#input").value = "A unsaved input";
     const finish = await recallPending("fetch");
     state.id = null;

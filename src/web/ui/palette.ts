@@ -7,13 +7,14 @@ import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
 import { listStep, menuOpen } from "./menu.js";
-import { headSession, isLive, orderSessions, phaseTag, running, stateDot, type SessionInfo } from "./drawer.js";
+import { headSession, isLive, phaseTag, running, stateDot, type SessionInfo } from "./drawer.js";
 import { chord } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
 import type { SearchHit } from "../../core/types.js";
 
 /** Everything the palette needs from the orchestrator (main.ts). */
 export interface PaletteDeps {
+  /** Newest first, by birth (main.ts `commitSessions`). */
   sessions: () => SessionInfo[];
   loadSessions: () => Promise<void>;
   /** Resolves once the session's transcript is on screen, so a hit can scroll
@@ -199,7 +200,6 @@ function render(): void {
   };
   const sessions = deps.sessions();
   const byId = new Map(sessions.map((s) => [s.id, s]));
-  const ordered = orderSessions(sessions);
   const sessionRow = (s: SessionInfo): Target => ({
     icon: MessageSquare,
     label: s.title ?? untitled(s.cwd),
@@ -220,13 +220,13 @@ function render(): void {
   if (!q) {
     sections.push(
       ["Running", running().map(sessionRow)],
-      ["Recent", ordered.filter((s) => !isLive(s) && s.id !== head?.id).slice(0, RECENT).map(sessionRow)],
+      ["Recent", sessions.filter((s) => !isLive(s) && s.id !== head?.id).slice(0, RECENT).map(sessionRow)],
       ["Actions", consoleRows],
     );
   } else {
     // Named sessions first, newest first, then the server's hits as they
     // arrive; until then, or when it cannot, the list says so in its place.
-    const named = ordered.filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`)).slice(0, SESSIONS);
+    const named = sessions.filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`)).slice(0, SESSIONS);
     const shown = new Set(named.map((s) => s.id));
     const found: (Target | HTMLElement)[] = named.map(sessionRow);
     if (asked !== q || !answer) found.push(note("Searching messages…"));

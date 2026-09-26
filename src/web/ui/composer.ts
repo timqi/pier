@@ -555,7 +555,7 @@ async function recallQueue(): Promise<void> {
   const draftAtStart = draftVersion;
   const focusAtStart = document.activeElement;
   try {
-    // Creating a session clears the selection without saving the outgoing input.
+    // Checkpointed: the selection may move before the answer lands.
     saveDraft();
     const res = await fetch(`/api/sessions/${id}/queue/recall`, { method: "POST" });
     if (!res.ok) {
