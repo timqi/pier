@@ -37,7 +37,7 @@ type ResumeProvenance = Pick<RunProvenance, "invokedBySessionId" | "callbackSess
 const MILESTONE = "[Pier: the last result you were waiting on follows; nothing owed to you is still running. Your reply is the milestone your supervisor reads: what is done, what is next, any decision you need.]";
 
 /** The continuous conversation as tasks see it: its members launch and receive as one. */
-export type TaskChain = Pick<MainChain, "enabled" | "chainOf">;
+export type TaskChain = Pick<MainChain, "chainOf">;
 type Waiter = (run: TaskRun) => void;
 
 export class TaskService {

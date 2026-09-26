@@ -180,9 +180,9 @@ export async function handleTask(
 ): Promise<unknown> {
   // The launching session controls a run, and so does the run's own; every
   // member of the continuous conversation counts as the one that launched it.
+  const launchers = (): string[] => chain?.chainOf(callerSessionId) ?? [callerSessionId];
   const assertOwns = (target: TaskRun): void => {
-    const launchers = chain?.chainOf(callerSessionId) ?? [callerSessionId];
-    if (!launchers.includes(target.invokedBySessionId ?? "") && target.targetSessionId !== callerSessionId) {
+    if (!launchers().includes(target.invokedBySessionId ?? "") && target.targetSessionId !== callerSessionId) {
       throw new Error("session does not own this run");
     }
   };
@@ -203,12 +203,7 @@ export async function handleTask(
   };
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
-  if (input.operation === "runs") {
-    if (lead) return host.ledger([callerSessionId], Date.now() - RUNS_WINDOW_MS);
-    const members = chain?.enabled() ? chain.chainOf(callerSessionId) : undefined;
-    if (!members) throw new Error("runs lists the continuous conversation's runs; this session is not one of its sessions");
-    return host.ledger(members, Date.now() - RUNS_WINDOW_MS);
-  }
+  if (input.operation === "runs") return host.ledger(launchers(), Date.now() - RUNS_WINDOW_MS);
   if (input.operation === "save") {
     const draft = await expandDraft(definitions, menu, input.task, callerSessionId);
     if (input.task_id === undefined) return definitions.create(draft, `session:${callerSessionId}`);

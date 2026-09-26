@@ -16,7 +16,7 @@ import { TaskStore } from "./store.js";
 import type { TaskDefinition, TaskRun } from "./types.js";
 
 /** h0 is yesterday's head, h1 today's; "child" is nobody's member. */
-function rig(on = true) {
+function rig() {
   const cwd = mkdtempSync(join(tmpdir(), "pier-chain-tasks-"));
   const sessions = new Map<string, FakeSession>(["h0", "h1", "stranger"].map((id) => [id, fakeSession(id)]));
   const child = fakeSession("child");
@@ -30,7 +30,7 @@ function rig(on = true) {
     readHistory: async () => undefined,
   };
   const members = ["h1", "h0"];
-  const chain: TaskChain = { enabled: () => on, chainOf: (id) => (members.includes(id) ? members : undefined) };
+  const chain: TaskChain = { chainOf: (id) => (members.includes(id) ? members : undefined) };
   const hub = new EventHub();
   const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const store = new TaskStore(openDb(":memory:"));
@@ -76,7 +76,7 @@ describe("tasks under the continuous conversation", () => {
     await expect(service.handle({ operation: "cancel", run_id: "r0" }, "stranger")).rejects.toThrow(/does not own/);
   });
 
-  it("lists the chain's runs — in flight, and finished in the last day — for a member only", async () => {
+  it("lists the runs the caller launched — the whole chain's, for a member — in flight and finished in the last day", async () => {
     const { service, store, bash, cwd } = rig();
     const task = await bash();
     const day = 24 * 60 * 60_000;
@@ -92,11 +92,8 @@ describe("tasks under the continuous conversation", () => {
       runId: "live", name: "command", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: expect.any(Number), finishedAt: null,
     });
     expect(runs.find((r) => r.runId === "done")).toMatchObject({ cwd, targetSessionId: null });
-    await expect(service.handle({ operation: "runs" }, "child")).rejects.toThrow(/not one of its sessions/);
-  });
-
-  it("refuses runs while the switch is off", async () => {
-    const { service } = rig(false);
-    await expect(service.handle({ operation: "runs" }, "h1")).rejects.toThrow(/not one of its sessions/);
+    // Any session: its own runs, none refused.
+    expect((await service.handle({ operation: "runs" }, "stranger") as { runId: string }[]).map((r) => r.runId)).toEqual(["theirs"]);
+    await expect(service.handle({ operation: "runs" }, "child")).resolves.toEqual([]);
   });
 });

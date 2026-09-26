@@ -80,11 +80,9 @@ the Console's.
 pier task runs
 ```
 
-No flags. Receipt: a JSON array of `LedgerRun` (`core/chain.ts`), in flight
-plus finished in the last 24h, at most 200: a feature lead's own runs, or, in
-a continuous-conversation session while the switch is on, every chain
-member's. Anywhere else `task: runs lists the continuous conversation's runs;
-…`, exit 1.
+No flags, any session. Receipt: a JSON array of `LedgerRun` (`core/chain.ts`),
+the runs the caller launched — every chain member's, for a member of the
+continuous conversation — in flight plus finished in the last 24h, at most 200.
 
 ## Models
 
