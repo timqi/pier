@@ -87,10 +87,12 @@ export function createSettingsView(
   closeBtn.onclick = close;
   escapeKey(closeBtn, "Close Settings", close, () => !root.classList.contains("hidden"));
 
+  // Below md the pills take the head's second line and scroll rather than
+  // wrap: the title and the ✕ stay on the first, where the thumb expects them.
   function renderTabs(): void {
     head.replaceChildren(
       pageTitle("Settings"),
-      ...TOPICS.map(([id, label]) => pill(label, id === topic, () => onTopic(id))),
+      h("div", "flex min-w-0 items-center gap-2 overflow-x-auto max-md:order-1 max-md:w-full", ...TOPICS.map(([id, label]) => pill(label, id === topic, () => onTopic(id)))),
       version,
       theme,
       closeBtn,

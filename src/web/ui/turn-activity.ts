@@ -114,10 +114,10 @@ export function runHead(o: RunHead): HTMLElement {
     lead.append(failure);
   }
   if (lead !== head) head.append(lead);
-  const meta = h("div", "ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
+  const meta = h("div", "run-meta ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "flex-none", o.note));
   if (o.model) {
-    const model = h("span", "flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200", o.model.id);
+    const model = h("span", "run-model flex-none rounded bg-black/[0.05] px-1.5 py-px font-medium text-neutral-700 dark:bg-neutral-200", o.model.id);
     model.title = `${o.model.provider} / ${o.model.id}`;
     meta.append(model);
   }
