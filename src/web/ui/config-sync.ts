@@ -89,11 +89,6 @@ export function configSyncPane(): { el: HTMLElement; dispose(): void } {
     subscribing.append(status);
     if (state.error) subscribing.append(h("p", "text-[12px] break-words text-red-600", state.error));
     if (state.needsReload) subscribing.append(h("p", "text-[12px] text-amber-700", "Reload pending; retry synchronization."));
-    if (state.taskId) {
-      const runs = h("a", "text-[12px] text-indigo-600 hover:underline", "Sync task history") as HTMLAnchorElement;
-      runs.href = `#/tasks/${encodeURIComponent(state.taskId)}`;
-      subscribing.append(runs);
-    }
   }
 
   void load();

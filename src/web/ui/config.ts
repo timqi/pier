@@ -518,15 +518,6 @@ export function createConfigView(
     await showRead();
   }
 
-  /** Where every install and every failure already is: the update task's
-   *  runs. Null until this Pier has managed to create that task. */
-  function taskLink(text: string): HTMLElement | null {
-    if (!toolsTaskId) return null;
-    const link = h("a", "text-indigo-600 hover:underline", text) as HTMLAnchorElement;
-    link.href = `#/tasks/${encodeURIComponent(toolsTaskId)}`;
-    return link;
-  }
-
   /** A body ubix rejects is only debuggable against ubix's own documentation. */
   const ubixLink = (): HTMLElement => {
     const link = h("a", "text-indigo-600 hover:underline", "ubix") as HTMLAnchorElement;
@@ -550,7 +541,6 @@ export function createConfigView(
     paneRequest++;
     const status = h("span", "text-[11.5px] text-neutral-400", "");
     if (note) setStatus(status, note.state, note.text);
-    const runs = taskLink("the update task");
 
     const row = (tool: CatalogEntry): HTMLElement => {
       const line = h(
@@ -655,7 +645,8 @@ export function createConfigView(
         h(
           "p",
           "max-w-2xl text-[12px] leading-snug text-neutral-400",
-          ...(runs ? ["Installs and daily updates run as ", runs, " — output, failures and all."] : ["Switching one on creates the daily task that installs it and keeps it current."]),
+          // toolsTaskId is null until this Pier has managed to create the update task.
+          toolsTaskId ? "Installs and daily updates run as the update task; a failure shows on the tool's row." : "Switching one on creates the daily task that installs it and keeps it current.",
         ),
         status,
       ),
