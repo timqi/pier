@@ -177,10 +177,7 @@ function openContinuous(): void {
   currentState = "idle";
   unstarted = true;
   earlier = [];
-  resetChat();
-  renderQueue([], []);
-  renderRecovery([]);
-  resetHeaderState();
+  resetPane();
   appendTurn("system", "The continuous conversation — your first message starts it.");
   history.replaceState(null, "", "#/");
   renderSessions();
@@ -240,7 +237,6 @@ async function page(): Promise<void> {
 /** Earlier sessions above the head, read-only, each closed by the divider naming the rotation after it. */
 function renderEarlier(): void {
   if (!chain) return;
-  pageOnScroll();
   if (earlier.length < chain.length - 1) appendPager(() => void page());
   for (const [i, e] of earlier.entries()) {
     if (e.error) appendTurn("error", e.error);
@@ -250,15 +246,10 @@ function renderEarlier(): void {
   }
 }
 
-let scrollPages = false;
 /** Scrolling to the top pages; not right after a page, whose restore may itself land there. */
-function pageOnScroll(): void {
-  if (scrollPages) return;
-  scrollPages = true;
-  turnsPane.addEventListener("scroll", () => {
-    if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && Date.now() - pagedAt > 500) void page();
-  }, { passive: true });
-}
+turnsPane.addEventListener("scroll", () => {
+  if (turnsPane.scrollTop < 40 && continuousOpen() && !loading && Date.now() - pagedAt > 500) void page();
+}, { passive: true });
 
 // --- sessions --------------------------------------------------------------------
 
@@ -545,6 +536,16 @@ async function select(id: string): Promise<void> {
   await loadSession(id);
 }
 
+function resetPane(): void {
+  resetChat();
+  renderQueue([], []);
+  renderRecovery([]);
+  resetHeaderState();
+  turnOpen = false;
+  clearOptimistic();
+  lastSeq = 0;
+}
+
 /** (Re)load the current session's snapshot and reconnect its event stream. */
 async function loadSession(id: string, keep = false): Promise<void> {
   if (currentId !== id) return;
@@ -552,26 +553,17 @@ async function loadSession(id: string, keep = false): Promise<void> {
   source?.close();
   source = null;
   loading = true;
-  const reset = (): void => {
-    resetChat();
-    renderQueue([], []);
-    renderRecovery([]);
-    resetHeaderState();
-    turnOpen = false;
-    clearOptimistic();
-    lastSeq = 0;
-  };
   // Painted before the fetch: a long transcript takes a moment to arrive and
   // render, and until then the pane would look like an empty session. A page
   // (`keep`) leaves the pane as it is until the snapshot is in hand.
   if (!keep) {
-    reset();
+    resetPane();
     chatLoading(true);
   }
   const got = await getJson<SessionSnapshot>(`/api/sessions/${id}/history`, "failed to load session");
   if (currentId !== id || generation !== loadSeq) return;
   loading = false;
-  if (keep) reset();
+  if (keep) resetPane();
   if (!got.ok) {
     chatLoading(false);
     appendTurn("error", got.error);
@@ -635,11 +627,8 @@ initComposer({
   reload: reloadIfCurrent,
   continuous: continuousOpen,
   prepareHead,
-  headMoved: (id) => void (async () => {
-    const was = continuousOpen();
-    await refreshSessions();
-    if (was && currentId !== id) await followHead(id);
-  })(),
+  // The re-list sees the rotation and moves the pane to the new head.
+  headMoved: () => void refreshSessions(),
 });
 initShell({
   sessionMenu: (anchor) => {

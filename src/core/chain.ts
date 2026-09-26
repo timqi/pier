@@ -147,7 +147,7 @@ export class MainChain {
   }
 
   /** Read fresh at every rotation; a part that cannot be read says so in the seed. */
-  async seed(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<string> {
+  private async seed(reason: ChainReason, previous?: ChainMember, open?: AgentSession): Promise<string> {
     const today = new Date(this.now());
     const days = [new Date(today.getTime() - 86_400_000), today].map(localDate);
     const runs = this.deps.ledger(this.members().map((m) => m.sessionId), previous?.startedAt ?? this.now());

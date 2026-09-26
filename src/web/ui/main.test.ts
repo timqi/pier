@@ -391,7 +391,7 @@ describe("the continuous conversation", () => {
   it("follows a send that landed on a new head, keeping the session just left in view", async () => {
     await boot([member("h1"), member("h0", "first")]);
     chain = [member("h2"), member("h1"), member("h0", "first")];
-    h.composer.headMoved?.("h2");
+    h.composer.headMoved?.();
     await settled();
     await settled();
     expect(historyCalls().slice(1)).toEqual(["/api/sessions/h2/history", "/api/sessions/h1/history", "/api/sessions/h2/history"]);

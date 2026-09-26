@@ -748,11 +748,12 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     return loader;
   }
 
-  private open(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions = { cwd }): Promise<AgentSession> {
-    return this.providerConfig.withWrite(() => this.openSnapshot(cwd, sessionManager, opts));
+  private open(sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
+    return this.providerConfig.withWrite(() => this.openSnapshot(sessionManager, opts));
   }
 
-  private async openSnapshot(cwd: string, sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
+  private async openSnapshot(sessionManager: SessionManager, opts: AgentLaunchOptions): Promise<AgentSession> {
+    const { cwd } = opts;
     // A locked store is a refusal with a reason here, not "provider not
     // configured" later. Before appendSessionInfo, so nothing is written.
     await this.credentials?.assertUnlocked();
@@ -792,14 +793,15 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     this.listing = undefined;
     // Resolved before Pi records it, so every later listing names it the same way.
     const cwd = realPath(opts.cwd);
-    return this.open(cwd, SessionManager.create(cwd), { ...opts, cwd });
+    return this.open(SessionManager.create(cwd), { ...opts, cwd });
   }
 
   async resume(sessionId: string): Promise<AgentSession> {
+    const role = this.roleOf(sessionId);
     const known = this.located.get(sessionId);
     if (known) {
       try {
-        return await this.open(known.cwd, SessionManager.open(known.path), this.reopening(known.cwd, sessionId));
+        return await this.open(SessionManager.open(known.path), { cwd: known.cwd, role });
       } catch (err) {
         log.warn(`cached path for session ${sessionId} did not open; re-listing`, err);
         this.located.delete(sessionId);
@@ -807,12 +809,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     }
     const info = await this.locate(sessionId);
     if (!info) throw new Error(`unknown session: ${sessionId}`);
-    const cwd = info.cwd || process.cwd();
-    return this.open(cwd, SessionManager.open(info.path), this.reopening(cwd, sessionId));
-  }
-
-  private reopening(cwd: string, sessionId: string): AgentLaunchOptions {
-    return { cwd, role: this.roleOf(sessionId) };
+    return this.open(SessionManager.open(info.path), { cwd: info.cwd || process.cwd(), role });
   }
 
   /** The one place "no such session" is decided. A retained listing is not

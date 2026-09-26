@@ -188,11 +188,8 @@ export async function handleTask(
   };
   const input = record(raw);
   if (!input) throw new Error("task parameters required");
-  // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
-  // what a supervised run launched would report to a session no run owns. A
-  // queued run has not taken the session's turn, so it gates nothing yet.
-  // The role is the session's, for its life: a worker never delegates, and a
-  // feature lead delegates to workers only, so depth stays 2.
+  // Depth stays 2 (docs/design/09-tasks-cli.md §Two levels, no tree); a queued
+  // run has not taken the session's turn, so it gates nothing yet.
   const role = store.roleOf(callerSessionId);
   const lead = role === "lead";
   const active = store.findActiveRunForTarget(callerSessionId);

@@ -516,29 +516,29 @@ export function createServer(
     return c.json({ sessionId }, 202);
   });
 
+  const chainOff = (c: Context) => c.json({ error: "the continuous session is off" }, 404);
+  /** A rotation re-lists every surface. */
+  const reached = <T extends { rotated?: unknown }>(head: T): T => {
+    if (head.rotated) hub.emitWorkspace({ type: "sessions-changed" });
+    return head;
+  };
+
   // The chain, newest first; the client pages back through it with /history.
-  app.get("/api/continuous", (c) =>
-    continuous?.enabled() ? c.json({ chain: continuous.members() }) : c.json({ error: "the continuous session is off" }, 404));
+  app.get("/api/continuous", (c) => (continuous?.enabled() ? c.json({ chain: continuous.members() }) : chainOff(c)));
 
   // Resolved ahead of a send the client expects to rotate, so it watches the
   // new head before the message lands there.
-  guarded(app, "POST", "/api/continuous", 400, async (c) => {
-    if (!continuous?.enabled()) return c.json({ error: "the continuous session is off" }, 404);
-    const { sessionId, rotated } = await continuous.resolve();
-    if (rotated) hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ sessionId, ...(rotated ? { rotated } : {}) });
-  });
+  guarded(app, "POST", "/api/continuous", 400, async (c) =>
+    (continuous?.enabled() ? c.json(reached(await continuous.resolve())) : chainOff(c)));
 
   // The alias send: the head is resolved (and rotated) here, so a rotation
   // between the client's snapshot and its send cannot land on an old head.
   guarded(app, "POST", "/api/continuous/messages", 400, async (c) => {
-    if (!continuous?.enabled()) return c.json({ error: "the continuous session is off" }, 404);
+    if (!continuous?.enabled()) return chainOff(c);
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
     const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
-    const { sessionId, rotated } = await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode });
-    if (rotated) hub.emitWorkspace({ type: "sessions-changed" });
-    return c.json({ sessionId, ...(rotated ? { rotated } : {}) }, 202);
+    return c.json(reached(await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode })), 202);
   });
 
   // Edit a user turn: rewind to just before it — dropping every turn after it —

@@ -36,7 +36,7 @@ export interface ComposerDeps {
   /** Before a continuous send: may move the pane to the head the send will reach. */
   prepareHead?: () => Promise<void>;
   /** The head a continuous send landed on is not the one on screen. */
-  headMoved?: (sessionId: string) => void;
+  headMoved?: () => void;
 }
 
 let deps: ComposerDeps;
@@ -414,7 +414,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
       appendTurn("error", why);
     } else if (continuous) {
       const { sessionId } = (await res.json()) as { sessionId: string };
-      if (sessionId !== id) deps.headMoved?.(sessionId);
+      if (sessionId !== id) deps.headMoved?.();
     }
   } finally {
     if (label === undefined) sending = false;
