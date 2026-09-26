@@ -61,16 +61,14 @@ chars per run, a group's members included) or lost to compaction. `--group`
 caps each member at 2 000, so a long member is recovered with `--run`.
 **Never to check progress**: the refusal reveals no state.
 
-`pier task runs` — only in a session of the continuous conversation or a
-feature lead's: the runs it launched, in flight and finished in the last 24h,
-as JSON. For orientation, never to wait on a result.
-
-## Feature leads
+`pier task runs` — in a continuous-conversation or feature-lead session: the
+runs it launched, in flight and finished in the last 24h. For orientation,
+never to wait on a result.
 
 `--role lead` on a fresh `--prompt` run launches a feature lead: a long-lived
-child in the feature's own worktree that designs with the user, then builds with workers. It is the one
-delegated run that may delegate, never to a lead; only its reply to the last
-result owed it reaches its supervisor.
+child in the feature's worktree that designs with the user, then builds with
+workers. It is the one delegated run that may delegate, never to a lead; only
+its reply to the last result owed it reaches its supervisor.
 
 ## Saved definitions
 

@@ -278,19 +278,16 @@ browser keeps no second session order.
   editor says how many messages that drops. Esc cancels, Enter submits,
   Shift+Enter newline; new input cancels a stale editor; the API rejects a busy
   session and an index the transcript no longer holds.
-- **Continuous conversation**: the head's snapshot, with earlier sessions
-  paged in above it read-only (no pencil, no next-step buttons), each closed
-  by a divider naming the rotation after it. **Earlier session** at the top —
-  or scrolling there — pages one more in and keeps the reader's position, the
-  pane left as it is until the head's snapshot is back; a
-  keyboard page keeps focus on the pager. The trim cap stands down while
-  earlier sessions are on screen. Before its first session exists the pane
-  says the first message starts it. Sends go through the alias route; one
-  expected to rotate resolves the head first (`POST /api/continuous`) so the
-  pane is on the new head's stream before the message lands, and a rotation
-  seen on `sessions-changed` moves the pane to the new head with the session
-  just left paged in above. A session's seed is a system input card
-  (`session seed · new session — <reason>`) linking the previous session.
+- **Continuous conversation**: the head's snapshot under earlier sessions
+  paged in read-only (no pencil, no next-step buttons), each closed by a
+  divider naming the rotation. **Earlier session**, or scrolling to the top,
+  pages one more in, keeping the reader's position, the pane as it is until
+  the head's snapshot is back, and keyboard focus on the pager; the trim cap
+  stands down meanwhile. Sends take the alias route; one expected to rotate
+  resolves the head first (`POST /api/continuous`), and a rotation seen on
+  `sessions-changed` moves the pane to the new head, the session just left
+  paged in above. A seed is a system input card linking the previous session;
+  an empty chain's pane says the first message starts it.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during
   IME composition (`isComposing`/229).

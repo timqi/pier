@@ -80,12 +80,11 @@ the Console's.
 pier task runs
 ```
 
-No flags. Receipt: a JSON array, in-flight runs plus runs finished in the last
-24h, each `{runId, name, state, targetSessionId, cwd, queuedAt, finishedAt}`
-(`TaskService.ledger`). In a feature lead's session: the runs it launched. In a
-session of the continuous conversation while the switch is on: the runs any of
-its sessions launched. Anywhere else: `task: runs lists the continuous
-conversation's runs; this session is not one of its sessions`, exit 1.
+No flags. Receipt: a JSON array of `LedgerRun` (`core/chain.ts`), in flight
+plus finished in the last 24h, at most 200: a feature lead's own runs, or, in
+a continuous-conversation session while the switch is on, every chain
+member's. Anywhere else `task: runs lists the continuous conversation's runs;
+…`, exit 1.
 
 ## Models
 
@@ -151,7 +150,6 @@ commit that changes it.
 running run (server answer), `--prompt -` once, usage exit 2 without the
 socket. `tasks/operations.test.ts`: the supervised-run gate, ownership,
 `message`'s three branches, `recover`'s refusals, model matching (one, none,
-many, full id, `?`). `tasks/continuous.test.ts`: callbacks and ownership
-following the chain, `runs`, the children's compaction cap.
-`tasks/lead.test.ts`: the lead's role, delegation and depth, its ledger, the
-milestone flow and its waits, the resume committed with the marks.
+many, full id, `?`). `tasks/continuous.test.ts`: the chain's callbacks,
+ownership, `runs`, the children's cap. `tasks/lead.test.ts`: roles, depth,
+the milestone flow.
