@@ -322,6 +322,24 @@ export class TaskStore {
     return this.#many("SELECT json FROM task_messages WHERE run_id = ? ORDER BY created_at", runId);
   }
 
+  /** Follow-ups parked for the session until it idles: its queue shows them. */
+  pendingFollowUpsTo(sessionId: string): TaskMessage[] {
+    return this.#many(`
+      SELECT json FROM task_messages
+      WHERE state = 'pending' AND json_extract(json, '$.kind') = 'follow_up'
+        AND json_extract(json, '$.toSessionId') = ?
+      ORDER BY created_at
+    `, sessionId);
+  }
+
+  countPendingFollowUps(runId: string): number {
+    const row = this.sql(`
+      SELECT COUNT(*) AS n FROM task_messages
+      WHERE run_id = ? AND state = 'pending' AND json_extract(json, '$.kind') = 'follow_up'
+    `).get(runId) as { n: number };
+    return row.n;
+  }
+
   listRecentMessages(since: number): TaskMessage[] {
     return this.#many(
       "SELECT json FROM task_messages WHERE created_at >= ? ORDER BY created_at DESC LIMIT 200",

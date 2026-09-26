@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, BackgroundRun } from "../core/types.js";
+import type { AgentFactory, BackgroundRun, ParkedMessage } from "../core/types.js";
 import type { LedgerRun, MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -63,7 +63,10 @@ export class TaskService {
     const headOf = (id: string): string => instance?.continuous?.chainOf(id)?.[0] ?? id;
     const unreachable = (sessionId: string, what: string, why: string): void =>
       this.unreachable(sessionId, what, why);
-    this.messages = new TaskMessenger(store, router, hub, unreachable);
+    this.messages = new TaskMessenger(store, router, hub, unreachable, (runId) => {
+      const run = store.getRun(runId);
+      if (run) this.status(run);
+    });
     this.definitions = new TaskDefinitions(store, factory, router, hub, instance?.systemActions);
     this.callbacks = new TaskCallbacks(store, router, (run) => this.changed(run), unreachable, headOf, this.milestone);
     this.groups = new TaskGroups(store, router, {
@@ -232,6 +235,15 @@ export class TaskService {
       .filter((run) => run.background)
       .reverse()
       .map((run) => this.backgroundRun(run));
+  }
+
+  /** What the session's queue shows beside Pi's own: follow-ups waiting for it to idle. */
+  parkedMessages(sessionId: string): ParkedMessage[] {
+    return this.store.pendingFollowUpsTo(sessionId).map((message) => ({
+      messageId: message.id,
+      runName: this.store.getRun(message.runId)?.context.definition.name ?? message.runId,
+      text: message.content,
+    }));
   }
 
   /** The run ledger: runs any of `sessionIds` launched, in flight or finished since `since`, at most 200. */
@@ -474,11 +486,17 @@ export class TaskService {
       queuedAt: run.queuedAt,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
+      // A finished run's pending messages only wait for the sweep to expire them.
+      queuedMessages: isTerminal(run.state) ? 0 : this.store.countPendingFollowUps(run.id),
     };
   }
 
   private changed(run: TaskRun): void {
     this.hub.emitWorkspace({ type: "task-run-changed", taskId: run.taskId, runId: run.id });
+    this.status(run);
+  }
+
+  private status(run: TaskRun): void {
     if (run.background && run.invokedBySessionId) {
       this.hub.emit(run.invokedBySessionId, { type: "task-status", run: this.backgroundRun(run) });
     }

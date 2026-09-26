@@ -48,9 +48,10 @@ pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--ta
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
-  turn; terminal → resumed as a new run on the same session, taking
-  `--callback*` like any new run (`--after` has no turn to wait for and
-  changes nothing). Receipt: `{delivery: "steer" | "follow_up",
+  turn, shown in the target's queue panel under the run's name and as `1 queued`
+  on the sender's Background Run row while pending; terminal → resumed as a new
+  run on the same session, taking `--callback*` like any new run (`--after`
+  has no turn to wait for and changes nothing). Receipt: `{delivery: "steer" | "follow_up",
   message}` or `{delivery: "resume", run}`. `--callback*` on a run that is not
   terminal is refused (`task: run <id> is <state>: callback options apply to a
   resumed run only; drop them to steer or follow up`). `--run` takes nothing

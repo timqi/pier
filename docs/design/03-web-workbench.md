@@ -16,7 +16,7 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/rename` | body `{name}` → append the name to the session's transcript (empty clears it), returns `{ok}`; the new title reaches every surface as a `sessions-changed` re-read |
 | `POST /api/sessions/:id/read` | mark the session's last finished turn seen; clears the unread dot on every client |
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
-| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, readonly: true}` |
+| `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, readonly: true}` |
 | `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md); every `/api/continuous*` route is 404 while the switch is off)* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"}]}`, newest first |
 | `POST /api/continuous` | resolve the head a send now would reach, rotating first when due: `{sessionId, rotated?}` |
 | `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?}`, 400 without text. A rotation re-lists every surface (`sessions-changed`) |
@@ -273,7 +273,9 @@ browser keeps no second session order.
   type/status chips, expandable.
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events; the header's running chip (`activeRuns`
-  from the session list) reveals the newest one still in flight. Delegation and
+  from the session list) reveals the newest one still in flight. A row whose run
+  holds pending `--after` messages says `N queued` (`queuedMessages`), and the
+  message's creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs render as System input rows with Session and Run links, never
   as user messages.
 - **Edit**: any user message; sending rewinds the transcript to it and the
