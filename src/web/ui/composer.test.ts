@@ -484,9 +484,15 @@ describe("the chat-command completion", () => {
     type("/n");
     key({ key: "Tab" });
     expect(node("#input").value).toBe("/new");
-    // A pointer picks too, without blurring the textarea.
+    // A tap picks too, without blurring the textarea; a finger that scrolled does not.
     type("/");
-    onScreen("#command-menu")[0]!.onpointerdown!({ preventDefault: vi.fn() });
+    const tap = (row: number, from: number, to: number): void => {
+      onScreen("#command-menu")[row]!.onpointerdown!({ preventDefault: vi.fn(), clientY: from });
+      onScreen("#command-menu")[row]!.onpointerup!({ clientY: to });
+    };
+    tap(1, 100, 140);
+    expect(node("#input").value).toBe("/");
+    tap(0, 100, 103);
     expect(node("#input").value).toBe("/status");
   });
 
@@ -545,7 +551,8 @@ describe("the chat-command completion", () => {
     expect(menu().classList.contains("hidden")).toBe(true);
     expect(state.fetch).not.toHaveBeenCalled();
     type("/pier");
-    onScreen("#command-menu")[0]!.onpointerdown!({ preventDefault: vi.fn() });
+    onScreen("#command-menu")[0]!.onpointerdown!({ preventDefault: vi.fn(), clientY: 0 });
+    onScreen("#command-menu")[0]!.onpointerup!({ clientY: 0 });
     expect(node("#input").value).toBe("/skill:pier-tasks ");
   });
 

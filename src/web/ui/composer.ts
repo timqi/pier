@@ -371,10 +371,17 @@ function renderCommandMenu(): void {
       h("span", "font-mono", row.word),
       h("span", "min-w-0 truncate text-[13px] text-neutral-500", row.line));
     li.setAttribute("role", "option");
-    // pointerdown, not click: a click first blurs the textarea, which on a phone drops the keyboard.
+    // pointerdown's preventDefault keeps the textarea focused (a click would blur
+    // it and drop the phone's keyboard); the pick waits for pointerup so a finger
+    // scrolling the list past eight rows does not fill whatever it touched first.
+    let downY: number | undefined;
     li.onpointerdown = (ev) => {
       ev.preventDefault();
-      pickCommand(row);
+      downY = ev.clientY;
+    };
+    li.onpointerup = (ev) => {
+      if (downY !== undefined && Math.abs(ev.clientY - downY) < 8) pickCommand(row);
+      downY = undefined;
     };
     return li;
   });

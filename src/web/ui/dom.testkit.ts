@@ -138,6 +138,7 @@ export class FakeElement extends EventTarget {
   onkeydown: Handler = null;
   onpaste: Handler = null;
   onpointerdown: Handler = null;
+  onpointerup: Handler = null;
   onsubmit: Handler = null;
   onscroll: Handler = null;
   ontoggle: Handler = null;

@@ -318,7 +318,8 @@ browser keeps no second session order.
   chain row fills `/word`; a skill row fills `/skill:<name> `, whose trailing
   space closes the list for the ask. No skills and no chain commands, no list.
   The textarea keeps the caret: ↑/↓ (and ⌃N/⌃P) walk, Enter or Tab fills, a
-  pointer on a row does the same without blurring the textarea, Esc closes the
+  tap on a row does the same without blurring the textarea (a finger that
+  moved is a scroll, not a pick), Esc closes the
   list until the draft changes. Rows are the palette's (`.palette-row`, the
   `bg-indigo-50` selection), word in mono, line truncated, `role=listbox`/
   `option` with `aria-selected`, 44px on touch; past eight rows the list
