@@ -307,6 +307,7 @@ function setup(
     reload,
     backgroundRuns: (id) => tasks.backgroundRuns(id),
     activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
+    parkedMessages: (id) => tasks.parkedMessages(id),
     taskSessions: () => tasks.taskSessions(),
     roleOf: (id) => tasks.store.roleOf(id),
     channelOf: (id) => imOwners.get(id),
@@ -838,7 +839,7 @@ describe("workbench server", () => {
       state: "streaming",
       context: { tokens: 1200, contextWindow: 200_000, compactAt: 183_616 },
       thinkingLevel: "medium",
-      queue: { steering: ["s-msg"], followUp: ["f-msg"] },
+      queue: { steering: ["s-msg"], followUp: ["f-msg"], parked: [] },
       queueRecovery: [],
       queueUncertain: false,
       backgroundRuns: [],
@@ -849,6 +850,39 @@ describe("workbench server", () => {
     hub.subscribe("s1", seen);
     session.emit({ type: "turn-start" });
     expect(seen).toHaveBeenCalledOnce();
+  });
+
+  // A `--after` follow-up waits in the outbox, not in Pi's queue: the snapshot
+  // is the only place its target can see it.
+  it("snapshots a parked task message beside Pi's queue, named by its run", async () => {
+    const { app, db, tasks } = setup();
+    const task = await tasks.create({
+      name: "review worker",
+      trigger: { type: "manual" },
+      action: { type: "agent", session: { mode: "reuse", sessionId: "s1" }, prompt: "review" },
+    });
+    const store = new TaskStore(db);
+    store.saveRun({
+      id: "worker-run", taskId: task.id, taskRevision: 1, parentRunId: null, groupId: null,
+      resumedFromRunId: null, triggerSource: "agent",
+      invokedBySessionId: "lead", sourceSessionId: "lead", targetSessionId: "s1",
+      sessionMode: "reuse", callbackSessionId: null, background: true, callbackState: null,
+      callbackAttempts: 0, callbackError: null, callbackNextAttemptAt: null,
+      state: "running", input: null, context: { definition: task, sessionId: "s1" }, probe: null,
+      matched: null, result: null, error: null, skipReason: null,
+      queuedAt: 1, startedAt: 1, finishedAt: null,
+    });
+    store.saveMessage({
+      id: "m1", runId: "worker-run", kind: "follow_up", fromSessionId: "lead", toSessionId: "s1",
+      state: "pending", content: "then run the tests", createdAt: 2, deliveredAt: null,
+      error: null, attempts: 1, nextAttemptAt: null,
+    });
+    const snapshot = await (await app.request("/api/sessions/s1/history")).json() as { queue: unknown };
+    expect(snapshot.queue).toEqual({
+      steering: ["s-msg"],
+      followUp: ["f-msg"],
+      parked: [{ messageId: "m1", runName: "review worker", text: "then run the tests" }],
+    });
   });
 
   it("leaves a step's args and output off the snapshot, and serves them per turn", async () => {

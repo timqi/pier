@@ -166,6 +166,16 @@ export interface BackgroundRun {
   queuedAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  /** `pier task run --run <id> --after` messages parked on this run, not yet delivered. */
+  queuedMessages: number;
+}
+
+/** A `--after` follow-up waiting for its target session to idle, as that
+ *  session's queue shows it; `runName` is the run it was parked on. */
+export interface ParkedMessage {
+  messageId: string;
+  runName: string;
+  text: string;
 }
 
 /** Pier's normalized event. The ONLY observability currency in the system. */

@@ -28,6 +28,7 @@ import {
 } from "./chat.js";
 import {
   clearOptimistic,
+  dropParked,
   focusInput,
   initComposer,
   markOptimisticUser,
@@ -88,6 +89,7 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
+  ParkedMessage,
   QueueRecovery,
   SessionEvent,
   SessionState,
@@ -104,7 +106,7 @@ interface SessionSnapshot {
   state: SessionState;
   context: ContextUsage | null;
   thinkingLevel: ThinkingLevel;
-  queue: { steering: string[]; followUp: string[] };
+  queue: { steering: string[]; followUp: string[]; parked: ParkedMessage[] };
   queueRecovery: QueueRecovery[];
   queueUncertain: boolean;
   backgroundRuns: BackgroundRun[];
@@ -386,6 +388,7 @@ function handleEvent(e: SessionEvent): void {
     case "system-input":
       finalizeStreaming();
       appendSystemInput(e.text, e.origin);
+      if (e.origin.kind === "task-message") dropParked(e.origin.messageId);
       break;
     case "task-status":
       renderBackgroundRun(e.run);
@@ -539,7 +542,7 @@ async function select(id: string): Promise<void> {
 
 function resetPane(): void {
   resetChat();
-  renderQueue([], []);
+  renderQueue([], [], []);
   renderRecovery([]);
   resetHeaderState();
   turnOpen = false;
@@ -581,7 +584,7 @@ async function loadSession(id: string, keep = false): Promise<void> {
   // run state (composer buttons) and the pending queue panel.
   turnOpen = snap.state === "streaming";
   setState(snap.state);
-  renderQueue(snap.queue.steering, snap.queue.followUp);
+  renderQueue(snap.queue.steering, snap.queue.followUp, snap.queue.parked);
   renderRecovery(snap.queueRecovery, snap.queueUncertain);
   // meta is assistant-only (core/types.ts), so the last one that carries it is
   // the last reply — no role test, and none of Array#findLast (web target).

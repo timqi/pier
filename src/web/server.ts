@@ -29,6 +29,7 @@ import type {
   ConfigStore,
   InboundMessage,
   PackageStore,
+  ParkedMessage,
   ProviderManager,
   SessionEvent,
   SessionSummary,
@@ -144,6 +145,8 @@ export interface WebDeps {
   /** Injected by main.ts; web stays blind to the task service. */
   backgroundRuns?: (sessionId: string) => BackgroundRun[];
   activeBackgroundRunCounts?: () => Map<string, number>;
+  /** `pier task run --run <id> --after` messages waiting for the session to idle. */
+  parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
   /** `TaskStore.roleOf`: a lead's session stays in the rail for its life. */
@@ -204,6 +207,7 @@ export function createServer(
     updater,
     backgroundRuns,
     activeBackgroundRunCounts,
+    parkedMessages,
     taskSessions,
     roleOf,
     channelOf,
@@ -400,7 +404,7 @@ export function createServer(
         state: session.state,
         context: session.contextUsage ?? null,
         thinkingLevel: session.thinkingLevel,
-        queue,
+        queue: { ...queue, parked: parkedMessages?.(id) ?? [] },
         queueRecovery: router.recoveryOf(id),
         queueUncertain: router.queueUncertain(id),
         backgroundRuns: backgroundRuns?.(id) ?? [],

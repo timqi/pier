@@ -175,7 +175,7 @@ export function renderBackgroundRun(run: BackgroundRun): void {
     label: `run · ${run.state}`,
     labelCls: STATE_STYLE[run.state].label,
     taskName: run.taskName,
-    note: `${run.sessionMode ?? "task"} · ${String(seconds)}s`,
+    note: `${run.sessionMode ?? "task"} · ${String(seconds)}s${run.queuedMessages > 0 ? ` · ${String(run.queuedMessages)} queued` : ""}`,
     runId: run.runId,
     sessionId: run.targetSessionId,
   });
