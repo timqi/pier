@@ -18,7 +18,8 @@ const streamed: unknown[] = [];
 /** The Pi sessions the factory opened, for the settings it applies to them. */
 const opened: { agent: { followUpMode: string } }[] = [];
 type Skill = { name: string; filePath: string };
-type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] } };
+type Files = { agentsFiles: { path: string; content: string }[] };
+type LoaderOptions = { skillsOverride: (base: { skills: Skill[] }) => { skills: Skill[] }; agentsFilesOverride: (f: Files) => Files };
 /** What each open handed Pi's resource loader. */
 const loaders: LoaderOptions[] = [];
 
@@ -189,23 +190,24 @@ describe("the pier package's skills off-list", () => {
     ]);
   });
 
-  it("leaves pier-tasks out of a worker, created or reopened, and in a lead and an ordinary session", async () => {
-    const factory = new PiAgentFactory(undefined, ["/pier/skills"], undefined, undefined, undefined, undefined, undefined, {
+  it("opens a worker without pier-tasks and a lead with its contract, created or reopened", async () => {
+    const factory = new PiAgentFactory(() => "", ["/pier/skills"], undefined, undefined, undefined, undefined, undefined, {
       scan: async () => ["worker-1", "lead-1"].map((id) => ({ id, path: join(mkdtempSync(join(tmpdir(), "pier-role-")), "f.jsonl"), cwd: "/tmp/wt", created: 1, modified: 2 })),
     }, (id) => (id === "worker-1" ? "worker" : id === "lead-1" ? "lead" : undefined));
     const skills = [
       { name: "pier-tasks", filePath: "/pier/skills/pier-tasks/SKILL.md" },
       { name: "pier-help", filePath: "/pier/skills/pier-help/SKILL.md" },
     ];
-    const names = () => loaders.at(-1)!.skillsOverride({ skills }).skills.map((s) => s.name);
-    await (await factory.create({ cwd: "/tmp/wt", role: "worker" })).dispose();
-    expect(names()).toEqual(["pier-help"]);
-    await (await factory.resume("worker-1")).dispose();
-    expect(names()).toEqual(["pier-help"]);
-    await (await factory.resume("lead-1")).dispose();
-    expect(names()).toEqual(["pier-tasks", "pier-help"]);
-    await (await factory.create({ cwd: "/tmp/wt" })).dispose();
-    expect(names()).toEqual(["pier-tasks", "pier-help"]);
+    const opened = async (session: Promise<{ dispose(): Promise<void> }>) => {
+      await (await session).dispose();
+      const loader = loaders.at(-1)!;
+      return [...loader.skillsOverride({ skills }).skills.map((s) => s.name), ...loader.agentsFilesOverride({ agentsFiles: [] }).agentsFiles.map((f) => f.path)];
+    };
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "worker" }))).toEqual(["pier-help"]);
+    expect(await opened(factory.resume("worker-1"))).toEqual(["pier-help"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt", role: "lead" }))).toEqual(["pier-tasks", "pier-help", "<pier>/lead.md"]);
+    expect(await opened(factory.resume("lead-1"))).toEqual(["pier-tasks", "pier-help", "<pier>/lead.md"]);
+    expect(await opened(factory.create({ cwd: "/tmp/wt" }))).toEqual(["pier-tasks", "pier-help"]);
   });
 });
 
@@ -602,13 +604,11 @@ describe("titleFromAnswer", () => {
 });
 
 describe("the continuous conversation's seam", () => {
-  type Files = { agentsFiles: { path: string; content: string }[] };
   const injected = async (cwd: string, continuous: boolean): Promise<string[]> => {
     const factory = new PiAgentFactory(() => "pier notes", [], undefined, undefined, undefined,
       () => ({ skillsOff: [], continuous }));
     await (await factory.create({ cwd })).dispose();
-    const override = (loaders.at(-1) as unknown as { agentsFilesOverride: (f: Files) => Files }).agentsFilesOverride;
-    return override({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path);
+    return loaders.at(-1)!.agentsFilesOverride({ agentsFiles: [{ path: "/repo/AGENTS.md", content: "repo" }] }).agentsFiles.map((f) => f.path);
   };
 
   it("injects the dispatcher contract only into a session in the home, and only while the switch is on", async () => {
@@ -616,20 +616,6 @@ describe("the continuous conversation's seam", () => {
     expect(await injected(home, true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
     expect(await injected(home, false)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
     expect(await injected("/tmp/elsewhere", true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
-  });
-
-  it("injects the lead contract into a lead, at creation and when a lead is reopened", async () => {
-    const paths = () => (loaders.at(-1) as unknown as { agentsFilesOverride: (f: Files) => Files })
-      .agentsFilesOverride({ agentsFiles: [] }).agentsFiles.map((f) => f.path);
-    const factory = new PiAgentFactory(() => "", [], undefined, undefined, undefined, undefined, undefined, {
-      scan: async () => [{ id: "lead-1", path: join(mkdtempSync(join(tmpdir(), "pier-lead-")), "f.jsonl"), cwd: "/tmp/wt", created: 1, modified: 2 }],
-    }, (id) => (id === "lead-1" ? "lead" : undefined));
-    await (await factory.create({ cwd: "/tmp/wt", role: "lead" })).dispose();
-    expect(paths()).toEqual(["<pier>/lead.md"]);
-    await (await factory.create({ cwd: "/tmp/wt" })).dispose();
-    expect(paths()).toEqual([]);
-    await (await factory.resume("lead-1")).dispose();
-    expect(paths()).toEqual(["<pier>/lead.md"]);
   });
 
   /** A session whose model and settings manager are what the cap reads and writes. */

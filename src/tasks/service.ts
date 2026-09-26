@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, AgentRole, AgentSession, BackgroundRun } from "../core/types.js";
+import type { AgentFactory, AgentSession, BackgroundRun } from "../core/types.js";
 import type { LedgerRun, MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -377,10 +377,6 @@ export class TaskService {
       resumedFromRunId: prior.id,
       resumePrompt: prompt,
     });
-  }
-
-  roleOf(sessionId: string): AgentRole | undefined {
-    return this.store.roleOf(sessionId);
   }
 
   /** A lead reports once per wave (docs/design/10-continuous-session.md

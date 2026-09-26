@@ -104,6 +104,7 @@ const configSync = new ConfigSync({
   reload: () => readyForConfigReload ? reloadInstance() : Promise.resolve(),
 });
 const skillsDir = fileURLToPath(new URL("../skills", import.meta.url));
+const taskStore = new TaskStore(db);
 const factory = new PiAgentFactory(
   // Getters, read per session open: a Console change reaches the next session
   // without a restart.
@@ -117,7 +118,7 @@ const factory = new PiAgentFactory(
   () => settings.get().titleModel,
   // Transcripts carry the speaker header core wrote for the model.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),
-  (id) => tasks.roleOf(id),
+  (id) => taskStore.roleOf(id),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {
@@ -134,7 +135,7 @@ const chain = new MainChain(db, {
   ledger: (ids, since) => tasks.ledger(ids, since),
 });
 const stopEviction = router.startIdleEviction();
-tasks = new TaskService(new TaskStore(db), factory, router, hub, {
+tasks = new TaskService(taskStore, factory, router, hub, {
   modelMenu: () => settings.get().modelMenu,
   systemActions: { "config-sync": (signal) => configSync.sync(signal) },
   continuous: chain,
