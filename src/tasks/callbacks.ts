@@ -5,7 +5,7 @@ import type { SystemInputSource } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
-import type { TaskCallback, TaskRun } from "./types.js";
+import { createdRole, type TaskCallback, type TaskRun } from "./types.js";
 
 /** The run id and the session that did the work: a relayer's next move is a
  *  deep link to it, and without this that costs a second call. */
@@ -29,10 +29,9 @@ export const LEAD_TURN = "a lead's turn, not a milestone";
  *  other turn of its the user reads in its session, and settles as `--callback none`. */
 export function settleCallback(run: TaskRun): void {
   if (!run.callbackSessionId) return;
-  const action = run.context.definition.action;
   const milestone = run.context.resumePrompt?.startsWith(MILESTONE) === true ||
     (run.result?.type === "agent" && /^Design final:/m.test(run.result.text));
-  if (action.type === "agent" && action.launch?.role === "lead" && !milestone) run.callbackError = LEAD_TURN;
+  if (createdRole(run) === "lead" && !milestone) run.callbackError = LEAD_TURN;
   else run.callbackState = "pending";
 }
 
