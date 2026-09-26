@@ -60,7 +60,7 @@ const chip = $("#status-chip");
  *  is the last thing that happened to it. Tooltip only. */
 const lastActive = (s: SessionInfo): number => s.modified ?? s.createdAt;
 
-/** The server marks only the sessions this workbench is the reader of
+/** The server marks only a turn the operator sent into, or the conversation's
  *  (web/server.ts), so the flag is the whole rule here. */
 const waitingForYou = (s: SessionInfo): boolean => s.unread;
 

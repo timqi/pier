@@ -241,6 +241,10 @@ export function createServer(
   // on screen).
   const workbenchOwn = (id: string): boolean =>
     (channelOf?.(id) ?? "web") === "web" && !(taskSessions?.().has(id) ?? false);
+  // Outside the continuous conversation only a turn the operator sent into is
+  // theirs to read: a lead's dispatch or callback turn reports through main.
+  const operatorSent = new Set<string>();
+  const sentByOperator = (id: string): void => void operatorSent.add(id);
   const runningNow = new Set<string>();
   hub.subscribeWorkspace((e) => {
     if (e.type !== "session-state") return;
@@ -249,7 +253,8 @@ export function createServer(
       return;
     }
     if (!runningNow.delete(e.sessionId)) return;
-    if (!workbenchOwn(e.sessionId)) return;
+    const theirs = operatorSent.delete(e.sessionId) || continuous.chainOf(e.sessionId) !== undefined;
+    if (!theirs || !workbenchOwn(e.sessionId)) return;
     state.setUnread(e.sessionId, true);
     hub.emitWorkspace({ type: "sessions-changed" });
   });
@@ -502,6 +507,7 @@ export function createServer(
     }
     const mode: InboundMessage["mode"] =
       body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
+    sentByOperator(id);
     const { sessionId } = await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
@@ -560,6 +566,7 @@ export function createServer(
     await session.rewindToUserTurn(index);
     // The rewind took the speaker headers out of the context too.
     router.forgetSender(id);
+    sentByOperator(id);
     await router.dispatch({
       key: { channelId: "web", conversationId: id },
       senderId: "web",
@@ -578,6 +585,7 @@ export function createServer(
     if (mode !== "steer" && mode !== "restart") {
       return c.json({ error: "mode must be steer or restart" }, 400);
     }
+    sentByOperator(id);
     return queueResponse(async () => ({ submitted: await router.deliverQueue(id, mode) }), 202);
   });
 

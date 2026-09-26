@@ -39,7 +39,7 @@ updates this document.
 ## Layout
 
 - **One column**: the conversation fills the width without a permanent rail.
-- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens In progress; model, reasoning and context are metadata chips. ⋯ opens the bar menu.
+- **Bar**: one glass strip at every width; child sessions show ‹, title and phase. The status chip opens In progress, its amber `needs you` only for a design awaiting Finalize or a turn the operator sent that finished unseen; model, reasoning and context are metadata chips. ⋯ opens the bar menu.
 - **In progress**: a popover under the status chip at widths ≥640px and a bottom sheet below 640px; both use the menu primitive.
 - **Settings and Files**: overlays that return to their origin with ✕ or Esc. Settings' head contains the version link and theme toggle.
 - **Composer and transcript**: the transcript fills the pane beneath the bar; the composer accounts for the safe-area inset.

@@ -332,6 +332,7 @@ function setup(
   return {
     app,
     db,
+    continuous,
     imOwners,
     session,
     factory,
@@ -497,7 +498,7 @@ describe("workbench server", () => {
     expect((await Promise.all(requests)).map((res) => res.status)).toEqual([200, 200]);
   });
 
-  it("marks a session unread when a witnessed run settles, until a client acks", async () => {
+  it("marks a session unread when an operator's turn settles, until a client acks", async () => {
     const { app, session, hub, router, state } = setup();
     router.attach({ channelId: "web", conversationId: "s1" }, session);
 
@@ -507,6 +508,7 @@ describe("workbench server", () => {
 
     const changed = vi.fn();
     hub.subscribeWorkspace(changed);
+    await app.request("/api/sessions/s1/messages", { method: "POST", body: JSON.stringify({ text: "go" }) });
     session.emit({ type: "state", state: "streaming" });
     session.emit({ type: "state", state: "idle" });
     expect(state.unread("s1")).toBe(true);
@@ -555,6 +557,36 @@ describe("workbench server", () => {
       expect(state.unread(own.id)).toBe(false);
     }
     expect(changed).not.toHaveBeenCalledWith({ type: "sessions-changed" });
+  });
+
+  // A lead's dispatch or callback turn reports through main; only a turn the
+  // operator sent into, or the conversation's own, is theirs to read.
+  it("marks only the turns the operator sent into, and every turn of the conversation", async () => {
+    const { app, session, router, state, continuous } = setup();
+    router.attach({ channelId: "web", conversationId: "s1" }, session);
+    const settle = () => {
+      session.emit({ type: "state", state: "streaming" });
+      session.emit({ type: "state", state: "idle" });
+    };
+
+    settle();
+    expect(state.unread("s1")).toBe(false);
+
+    await app.request("/api/sessions/s1/messages", { method: "POST", body: JSON.stringify({ text: "look", mode: "steer" }) });
+    settle();
+    expect(state.unread("s1")).toBe(true);
+
+    // Consumed by the turn it marked: the next unprompted one is not the operator's.
+    await app.request("/api/sessions/s1/read", { method: "POST" });
+    settle();
+    expect(state.unread("s1")).toBe(false);
+
+    const head = fakeSession("head");
+    router.attach({ channelId: "web", conversationId: "head" }, head);
+    vi.spyOn(continuous, "chainOf").mockImplementation((id) => (id === "head" ? ["head"] : undefined));
+    head.emit({ type: "state", state: "streaming" });
+    head.emit({ type: "state", state: "idle" });
+    expect(state.unread("head")).toBe(true);
   });
 
   it("reloads channels, recycles idle sessions and counts the ones mid-turn", async () => {

@@ -59,7 +59,10 @@ surface owns its routes and is mounted beside it.
 
 - **Unread**: `streaming → idle` marks the session unread when no durable
   conversation row exists (`conversations.keyOf`) and no task run made the
-  session for itself. One flag, read by the dot, the badges and Web Push.
+  session for itself, and only for a turn of the continuous conversation or
+  one the operator sent into (a message, an edit, a queue delivery); a lead's
+  dispatch or callback turn finishing reports through main and marks nothing.
+  One flag, read by the dot, the badges and Web Push.
 
 Other route owners: `auth.ts` (`/login`, `/login/:token` — the `pier login` link,
 [08-cli-socket.md](08-cli-socket.md) — `/logout`, `/api/password`,
@@ -164,7 +167,7 @@ Screen. Composed in `main.ts` as a second consumer of the event stream.
 
 ### Bar and In progress drawer (`session-header.ts`, `drawer.ts`)
 
-- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; it is absent at zero. Conversation shows only its context, `used/rotateAt` ([12](12-ui-shape.md)); a child session's model, reasoning and context chips open model selection.
+- The single column has one bar: a child session shows ‹, title and phase; Conversation shows its title. The status chip reads `N running · M needs you` and opens In progress; needs you counts a design not yet reported final and an unread turn (**Unread** above), nothing else; it is absent at zero. Conversation shows only its context, `used/rotateAt` ([12](12-ui-shape.md)); a child session's model, reasoning and context chips open model selection.
 - The ⋯ menu contains Search ⌘K, Status, Session info, Browse files, Model & reasoning…, and Settings. Status opens the open items as one card ([12 §Status](12-ui-shape.md#status)). Session info and model actions are disabled before the first reply; Search is shown on Conversation.
 - In progress lists live sessions outside the continuous conversation and live runs not represented by a session row. Rows open in the column; a child session's ‹ returns to Conversation. ⌘⇧P opens the drawer.
 - The drawer is a popover under the status chip at widths of 640px and above, and a bottom sheet below 640px. The sheet uses `menu.ts` focus, inertness and backdrop behavior.
