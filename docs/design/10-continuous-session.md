@@ -78,7 +78,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 | --- | --- |
 | User message, head ≥ 1h (`CHAIN_IDLE_MS`) since its last user message, or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
-| Head gone from Pi (not live, not on disk) | a new head, reason `lost` |
+| Head gone from Pi (not live, not on disk) | a new head, reason `lost`; the gone head leaves `main_chain` |
 | Rotation | the new head keeps the previous head's model and thinking (`first`/`lost`: default at `low`) and gets one `session-seed` system input, mode `append` (no turn) |
 | Seed | `MEMORY.md`, `## Open` (§Open items' text, `Nothing open.` included), the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
 

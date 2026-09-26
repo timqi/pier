@@ -155,12 +155,16 @@ describe("the continuous conversation's chain", () => {
     expect(r.sessions.get("h1")!.prompts).toEqual([]);
   });
 
-  it("starts a new head, named lost, when the head is gone from Pi", async () => {
+  it("starts a new head, named lost, when the head is gone from Pi, and drops the gone one from the chain", async () => {
     const r = rig();
-    r.db.prepare("INSERT INTO main_chain VALUES ('gone', ?, 'first')").run(r.clock.now);
+    r.existing("h0", r.clock.now - 2);
+    r.db.prepare("INSERT INTO main_chain VALUES ('gone', ?, 'first')").run(r.clock.now - 1);
     expect(await r.say("hi")).toEqual({ sessionId: "m1", rotated: "lost" });
     expect(r.created).toEqual([{ cwd: r.home, thinking: "low" }]);
     expect(r.sessions.get("m1")!.systemInputs[0]!.origin).toEqual({ kind: "session-seed", reason: "lost", previousSessionId: "gone" });
+    // Nothing on disk to page back to: a member left behind would be an unknown session forever.
+    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "lost"], ["h0", "first"]]);
+    expect(r.chain.chainOf("gone")).toBeUndefined();
   });
 
   it("never rotates a head mid-turn", async () => {

@@ -264,7 +264,11 @@ export class MainChain {
       ...(open?.model ? { model: open.model } : {}),
       thinking: open?.thinkingLevel ?? "low",
     });
-    this.db.prepare("INSERT INTO main_chain(session_id, started_at, reason) VALUES (?, ?, ?)").run(session.id, this.now(), reason);
+    transact(this.db, () => {
+      this.db.prepare("INSERT INTO main_chain(session_id, started_at, reason) VALUES (?, ?, ?)").run(session.id, this.now(), reason);
+      // A lost head has no transcript to page back to; the new head's reason says it went.
+      if (reason === "lost" && previous) this.db.prepare("DELETE FROM main_chain WHERE session_id = ?").run(previous.sessionId);
+    });
     this.deps.router.attach(webKey(session.id), session);
     this.watch(session.id);
     await session.systemInput(seed, { kind: "session-seed", reason, previousSessionId: previous?.sessionId ?? null }, "append");
