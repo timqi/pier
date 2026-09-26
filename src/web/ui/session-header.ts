@@ -134,8 +134,13 @@ const CONTEXT_WARN = 70;
 const contextUsed = (tokens: number, limit: number): number =>
   Math.min(100, Math.round((tokens / limit) * 100));
 
-/** Full context reading: used against `limit`, where it compacts unless said otherwise. */
-const contextLabel = (u: ContextUsage, limit = u.compactAt): string =>
+/** The room the open session's context has: the conversation's head never
+ *  reaches compaction — it is replaced past the rotation threshold. */
+const contextLimit = (u: ContextUsage): number | null =>
+  deps.continuousOpen() ? deps.rotateAt() : u.compactAt;
+
+/** Full context reading: used against `limit`. */
+const contextLabel = (u: ContextUsage, limit: number): string =>
   u.tokens === null
     ? `?/${compact(limit)}`
     : `${compact(u.tokens)}/${compact(limit)} · ${100 - contextUsed(u.tokens, limit)}% left`;
@@ -171,16 +176,14 @@ function renderSessionMeta(): void {
   }
   // Context pressure decides two things: the chip's tone, and — below md —
   // whether this row is worth a line of the bar at all.
-  // The conversation's head never reaches compaction: it is replaced past the
-  // rotation threshold, so that is the room it has.
-  const limit = conversation ? deps.rotateAt() : u?.compactAt;
+  const limit = u ? contextLimit(u) : null;
   let pressure = 0;
   if (u && tokens !== null && limit) {
     pressure = contextUsed(tokens, limit);
     const tone = pressure >= 90 ? "text-red-700" : pressure >= CONTEXT_WARN ? "text-amber-700" : "text-neutral-500";
     if (conversation) {
       const chip = h("span", `flex-none rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[12px] ${tone}`,
-        `${compact(tokens)}/${compact(limit)}`.toLowerCase());
+        compact(tokens).toLowerCase());
       chip.title = `Context: ${contextLabel(u, limit)} before the next message starts a new session`;
       items.push(chip);
     } else items.push(h("span", `flex-none font-mono ${tone}`, compact(tokens).toLowerCase()));
@@ -212,7 +215,8 @@ function sessionInfo(anchor: HTMLElement, s: Pick<SessionInfo, "id" | "cwd" | "c
     // Same three readings the title row's chips carry, and in their order — the
     // panel is where they are read in full rather than glanced at.
     rows.push(["Reasoning", currentThinking ?? "—"]);
-    rows.push(["Context", currentContext ? contextLabel(currentContext) : "—"]);
+    const limit = currentContext ? contextLimit(currentContext) : null;
+    rows.push(["Context", currentContext && limit ? contextLabel(currentContext, limit) : "—"]);
   }
   // Last, and beside the reply: only the two together say how long this session
   // has been running. Free either way — the listed summary already carries it.

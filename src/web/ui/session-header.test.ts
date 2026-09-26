@@ -114,6 +114,10 @@ it("reads the context against where the session compacts", async () => {
   expect(await context()).toBe("50K/100K · 50% left");
   header.setHeaderState(model, { contextWindow: 1_000_000, tokens: null, compactAt: 100_000 }, "high", null);
   expect(await context()).toBe("?/100K");
+  // The conversation's head is replaced before it compacts: its room is rotateAt.
+  conversation = true;
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 36_000, compactAt: 100_000 }, "high", null);
+  expect(await context()).toBe("36K/60K · 40% left");
 });
 
 // The conversation rotates sessions and spans topics: the header names it as
@@ -205,14 +209,14 @@ it("keeps the meta row to model, reasoning and context, urgent only under contex
   expect(meta().hasAttribute("data-urgent")).toBe(true);
 });
 
-// The conversation's model is the default and never moves: its bar reads the
-// context in full, inline at every width, and ⋯ keeps the model picker.
-it("shows only the context, used/rotateAt, on the conversation's bar", () => {
+// The conversation's model is the default and never moves: its bar reads only
+// the used context, inline at every width; the room is in Session info.
+it("shows only the used context on the conversation's bar", () => {
   conversation = true;
   current = session(0);
   header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 16_000, compactAt: 984_000 }, "high", null);
   expect(chips()).toHaveLength(0);
-  expect(meta().textContent).toBe("16k/60k");
+  expect(meta().textContent).toBe("16k");
   expect(meta().firstElementChild!.className).toContain("text-neutral-500");
   expect(meta().hasAttribute("data-inline")).toBe(true);
   conversation = false;

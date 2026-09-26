@@ -91,7 +91,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   setting; `reserveTokens = window − cap`, never later than the instance's
   reserve, recomputed on `setModel`. Children never rotate.
 - `ContextUsage.compactAt` is that point, and a child's header reads against
-  it; the conversation's bar shows `used/rotateAt` (`CHAIN_FULL_TOKENS`).
+  it; the conversation's bar shows the used tokens, Session info `used/rotateAt` (`CHAIN_FULL_TOKENS`).
 
 ### Cache
 
