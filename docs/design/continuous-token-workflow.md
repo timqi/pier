@@ -118,6 +118,44 @@ long before it compacts, because every call re-reads its whole context.
 Room to move without crossing the price tier: 150K → 180K for children, if
 compaction proves too frequent in a week of use; measured, not assumed.
 
+### 7. A lead stays in the rail for its life — `web/`
+
+A lead whose turn ended is waiting on the user, not idle: today it is listed
+only while `unread` (an attention flag, cleared by looking) or running, so the
+design conversation vanishes from "In progress" the moment the user has seen
+it — and the user falls back to relaying through main, the path 10 §Roles says
+main is not in.
+
+- `SessionInfo` gains `role?: "lead"` (`web/server.ts`, from
+  `TaskStore.roleOf`); `inProgress` (`web/ui/sidebar.ts`) keeps every lead,
+  live or not; its idle dot reads "lead — waiting for you".
+- A lead leaves the rail when its session is deleted: a feature has no
+  machine-readable end, so the operator closes it.
+
+### 8. A lead reports milestones only — `tasks/`
+
+A `--role lead` run's every turn end is a callback to main today, its first
+proposal to the user included: a main turn spent on what the user reads in the
+lead's session. Decided when the run finishes:
+
+- the callback fires when the run was a milestone resume (`resumePrompt`
+  headed by `MILESTONE`) or its result carries a `Design final:` line;
+- otherwise the run settles with no callback owed, as `--callback none`
+  does, the reason on the run's record ("a lead's turn, not a milestone") so
+  the Console says why nothing reached main.
+
+### 9. A cross-session follow-up is visible where it waits — `web/`, `tasks/`
+
+`pier task run --run <id> --after` parks a `follow_up` task message in the
+outbox until the target idles; nothing shows in the target's UI meanwhile.
+
+- The session snapshot's `queue` (`web/server.ts`) merges the pending task
+  messages for that session (`TaskStore`, state `pending`, kind `follow_up`),
+  rendered as the composer's queued rows with the sender's run name; shown,
+  not recalled from there (`pier task cancel` is the sender's).
+- The sender's Background Run row shows `1 queued` while its message is
+  pending.
+
 ### Cache — invariants, not changes
 
 - The head's system prompt is the same bytes every turn: nothing per-turn goes
@@ -140,7 +178,7 @@ From the heads' transcript usage, over a week of daily use:
 
 ## Build
 
-Two workers, then the fold into 10 and the skill at integration:
+Three workers, then the fold into 10 and the skill at integration:
 
 - rotation on size + the seed line: `core/types.ts`, `core/chain.ts`,
   `agent/events.ts`, `web/ui/main.ts`; `chain.test.ts` — rotates past the
@@ -149,7 +187,12 @@ Two workers, then the fold into 10 and the skill at integration:
   `skills/pier-tasks/SKILL.md` (§4); preamble golden test;
 - `compactAt` on the seam and in the header (§6): `agent/pi.ts`,
   `core/types.ts`, `core/session.testkit.ts`, `web/ui/session-header.ts`;
-  header test — the small worker, or folded into the first.
+  header test — the small worker, or folded into the first;
+- the lead's presence (§7, §8): `web/server.ts`, `web/ui/sidebar.ts`,
+  `tasks/service.ts` or `tasks/callbacks.ts`; `lead.test.ts` — a plain turn
+  end reaches nobody, a milestone resume and a `Design final:` do;
+- the visible follow-up (§9): `web/server.ts`, `web/ui/composer.ts`, the run
+  row; snapshot test with one pending task message.
 
 ## Parked
 
