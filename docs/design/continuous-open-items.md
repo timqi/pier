@@ -1,10 +1,9 @@
-# Continuous conversation — open items, unbuilt
+# Continuous conversation — open items: the chat commands and the IM surface
 
-The contract for what is left of the open-items view over the continuous
-conversation: chat commands `/new` and `/stop`, and the IM surface. The built
-part — markers, table, `openItems()`, the text, `/status`, the rail's Open
-block — is [10 §Open items](10-continuous-session.md#open-items); folded into
-10 when built.
+The contract for the chat commands over the continuous conversation — `/new`,
+`/stop`, the composer's completion of them — and for the IM surface, unbuilt.
+Markers, table, `openItems()`, the text, `/status`, the rail's In progress rows are
+[10 §Open items](10-continuous-session.md#open-items).
 
 ## Chat commands
 
@@ -14,11 +13,25 @@ error: the composer is not a shell.
 
 | Command | Does | Card |
 | --- | --- | --- |
-| `/new` | rotates now, reason `new` (the idle seed; `ChainReason` gains it, the divider names it) | the new head's seed card is the answer; a streaming head refuses: `the conversation is replying — /stop first` |
+| `/new` | rotates now, reason `new` (the idle seed; `ChainReason` gains it, the divider names it); a head the send already rotated for its own reason is not rotated twice | the new head's seed card is the answer; a streaming head refuses with the send's 409, `the conversation is replying — /stop first`, shown as the composer's error row — a card would sit in the head's queue until the turn it refuses for ends |
 | `/stop` | aborts the head's running turn (`AgentSession.abort`), children untouched | `stopped` · `nothing running` |
 
-- `SystemInputOrigin`'s `command` gains `"new" | "stop"`.
-- Built after `/status` has been in use: one row of the table each.
+- The table is `CHAT_COMMANDS` in `core/types.ts` — word → the one line the
+  composer's completion shows; `chatCommand` (`core/chain.ts`), the transcript
+  rebuild (`agent/events.ts`) and the completion all read it, so none can
+  drift. `ChatCommand` is its keys.
+
+## Composer completion
+
+- A draft that is `/` followed by a prefix of a command, the continuous
+  conversation on screen, lists the matching commands above the input: the
+  word and its line from the table. The exact word hides the list; Enter then
+  sends it. Anywhere else the list never opens: `/status` is a message there.
+- The textarea keeps the caret. ↑/↓ (and the menus' ⌃N/⌃P) walk, Enter or Tab
+  fills the draft with the row's word, a pointer on a row does the same without
+  blurring the textarea, Esc closes it until the draft changes.
+- The rows are the palette's (`.palette-row`, the `bg-indigo-50` selection);
+  `role=listbox`/`option` with `aria-selected`; 44px rows on touch.
 
 ## IM
 
@@ -48,4 +61,6 @@ error: the composer is not a shell.
 ## Tests
 
 - `core/chain.test.ts`: `/new` rotating and refusing a streaming head, `/stop`
-  on a running and an idle head.
+  on a running and an idle head; `web/server.test.ts`: the 409.
+- `web/ui/composer.test.ts`: the list at `/`, the prefix, the exact word, the
+  keys, Esc, and never outside the conversation.

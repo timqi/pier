@@ -474,6 +474,7 @@ describe("toChatTurns", () => {
     expect(toChatTurns([
       { role: "custom", customType: "pier.system-input", content: "Nothing open.", details: origin, timestamp: 1 },
       { role: "custom", customType: "pier.system-input", content: "odd", details: { ...origin, command: "ls" }, timestamp: 2 },
+      { role: "custom", customType: "pier.system-input", content: "odd", details: { ...origin, command: "toString" }, timestamp: 2 },
       // A malformed link map costs the card its links, not the card.
       { role: "custom", customType: "pier.system-input", content: "Open", details: { ...origin, sessions: { r1: 7 } }, timestamp: 3 },
     ])).toEqual([{ role: "system", text: "Nothing open.", origin, at: 1 }, { role: "system", text: "Open", origin: bare, at: 3 }]);

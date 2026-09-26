@@ -11,7 +11,7 @@ import { logger } from "../log.js";
 import type { EventHub } from "./hub.js";
 import { openItemMarkers } from "./reply.js";
 import type { Router } from "./router.js";
-import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, NOT_IN_LEDGER } from "./types.js";
+import { CHAIN_FULL_TOKENS, CHAIN_IDLE_MS, isChatCommand, NOT_IN_LEDGER } from "./types.js";
 import type {
   AgentFactory, AgentRole, AgentSession, ChainMember, ChainReason, ChatCommand, ChatTurn, ConversationKey, InboundMessage, LedgerRun, OpenItems,
   OpenRun, TaskRunState,
@@ -42,7 +42,14 @@ const WHY: Record<ChainReason, string> = {
   idle: "the previous one was idle for an hour",
   lost: "the previous one is gone from Pi",
   full: `the previous one reached ${String(CHAIN_FULL_TOKENS / 1000)}K tokens`,
+  new: "you asked for one with /new",
 };
+
+/** A `/new` sent to a head mid-reply: a 409 to the composer, never a card the
+ *  head's queue would only deliver after the turn it refuses for. */
+export class ChatCommandRefused extends Error {}
+
+type Head = { session: AgentSession; rotated?: ChainReason };
 
 const webKey = (sessionId: string): ConversationKey => ({ channelId: "web", conversationId: sessionId });
 
@@ -62,7 +69,11 @@ const ledgerLine = (r: LedgerRun): string =>
   `${r.runId} · ${r.name} · ${r.state} · session ${r.targetSessionId ?? "—"} · ${r.cwd ?? "—"}`;
 
 /** Only the exact word is a command: the composer is not a shell. */
-const chatCommand = (text: string): ChatCommand | undefined => (text.trim().toLowerCase() === "/status" ? "status" : undefined);
+function chatCommand(text: string): ChatCommand | undefined {
+  const draft = text.trim().toLowerCase();
+  const word = draft.slice(1);
+  return draft.startsWith("/") && isChatCommand(word) ? word : undefined;
+}
 
 const STATES: TaskRunState[] = ["queued", "running", "succeeded", "failed", "cancelled", "interrupted", "skipped"];
 
@@ -127,17 +138,32 @@ export class MainChain {
    *  to its own key; `command` names a chat command, answered without a turn. */
   send(message: Omit<InboundMessage, "key">): Promise<{ sessionId: string; rotated?: ChainReason; command?: ChatCommand }> {
     const command = chatCommand(message.text);
-    if (command) {
-      return this.serial(async (session) => {
-        const open = this.openItems();
-        const sessions = Object.fromEntries(open.items.flatMap((i) => i.runs)
-          .flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
-        await session.systemInput(renderOpenItems(open, this.now()), { kind: "chat-command", command, sessions }, "append");
-      }).then((head) => ({ ...head, command }));
-    }
+    if (command) return this.serial((session, rotated) => this.command(command, session, rotated)).then((head) => ({ ...head, command }));
     return this.serial(async (session) => {
       await this.deps.router.dispatch({ ...message, key: webKey(session.id) });
     });
+  }
+
+  /** `status` and `stop` answer with a card on the head; `new` answers with the
+   *  next head's seed card — a head just rotated for its own reason is that answer. */
+  private async command(command: ChatCommand, session: AgentSession, rotated?: ChainReason): Promise<Head | undefined> {
+    const origin = { kind: "chat-command" as const, command };
+    if (command === "new") {
+      if (session.state === "streaming") throw new ChatCommandRefused("the conversation is replying — /stop first");
+      if (rotated) return undefined;
+      return { session: await this.rotate("new", this.members()[0], session), rotated: "new" };
+    }
+    if (command === "stop") {
+      const running = session.state === "streaming";
+      if (running) await session.abort();
+      await session.systemInput(running ? "stopped" : "nothing running", origin, "append");
+      return undefined;
+    }
+    const open = this.openItems();
+    const sessions = Object.fromEntries(open.items.flatMap((i) => i.runs)
+      .flatMap((r) => (r.targetSessionId ? [[r.runId, r.targetSessionId]] : [])));
+    await session.systemInput(renderOpenItems(open, this.now()), { ...origin, sessions }, "append");
+    return undefined;
   }
 
   openItems(): OpenItems {
@@ -203,10 +229,11 @@ export class MainChain {
     return this.serial(async () => {});
   }
 
-  private serial(then: (head: AgentSession) => Promise<void>): Promise<{ sessionId: string; rotated?: ChainReason }> {
+  /** `then` may rotate again and return the head it made; the caller's answer is that one. */
+  private serial(then: (head: AgentSession, rotated?: ChainReason) => Promise<Head | undefined | void>): Promise<{ sessionId: string; rotated?: ChainReason }> {
     const done = this.queue.then(async () => {
-      const { session, rotated } = await this.current();
-      await then(session);
+      const found = await this.current();
+      const { session, rotated } = (await then(found.session, found.rotated)) ?? found;
       return { sessionId: session.id, ...(rotated ? { rotated } : {}) };
     });
     this.queue = done.catch(() => undefined);
@@ -217,7 +244,7 @@ export class MainChain {
     return this.deps.now?.() ?? Date.now();
   }
 
-  private async current(): Promise<{ session: AgentSession; rotated?: ChainReason }> {
+  private async current(): Promise<Head> {
     const head = this.members()[0];
     if (!head) return { session: await this.rotate("first"), rotated: "first" };
     const live = this.deps.router.stateOf(head.sessionId) !== undefined;

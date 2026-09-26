@@ -2,7 +2,7 @@
 // imports, so it is unit-testable without Pi and Pi types never leak past the
 // seam. The golden table in events.test.ts is the mapping's spec.
 
-import { isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
+import { isChatCommand, isThinkingLevel, MAX_STEP_OUTPUT } from "../core/types.js";
 import type {
   ActivityStep,
   ChatTurn,
@@ -76,14 +76,14 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
   const { source: raw, ...origin } = value as Record<string, unknown>;
   if (origin.kind === "session-seed") {
     const { reason, previousSessionId } = origin;
-    return (reason === "first" || reason === "idle" || reason === "lost" || reason === "full") &&
+    return (reason === "first" || reason === "idle" || reason === "lost" || reason === "full" || reason === "new") &&
       (previousSessionId === null || typeof previousSessionId === "string")
       ? { kind: "session-seed", reason, previousSessionId }
       : null;
   }
   if (origin.kind === "chat-command") {
     const { command, sessions } = origin;
-    if (command !== "status") return null;
+    if (!isChatCommand(command)) return null;
     // A malformed map costs the card its links, not the card.
     const links = sessions && typeof sessions === "object" && !Array.isArray(sessions) && Object.values(sessions).every((v) => typeof v === "string")
       ? { sessions: sessions as Record<string, string> }

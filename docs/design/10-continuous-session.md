@@ -7,9 +7,9 @@ Behaviour not named here is [03](03-web-workbench.md)'s,
 [04](04-im-channels.md)'s and [09](09-tasks-cli.md)'s.
 
 - Built: Phase 1 (the web conversation), Phase 2 (the feature lead), §Open
-  items with `/status` and the rail's Open block.
-- Not built: Phase 3 (§IM), §Not built, the rest of [open
-  items](continuous-open-items.md) (`/new`, `/stop`, IM).
+  items with `/status` and its In progress rows, the chat commands of [open
+  items](continuous-open-items.md).
+- Not built: Phase 3 (§IM), §Not built, [open items §IM](continuous-open-items.md#im).
 
 ## Roles
 
@@ -143,7 +143,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the web card and the rail's Open block ([03](03-web-workbench.md),
+- Surfaces: the web card and the rail's In progress rows — a live run with no session row, an item with no live run ([03](03-web-workbench.md),
   `GET /api/continuous/open`).
 
 ## Run ledger
@@ -174,7 +174,9 @@ and never opened (`AgentFactory.readHistory`); no paging within a session; the
 divider between members names the rotation's reason (`DIVIDER`,
 `web/ui/main.ts`). Children show as Background Run rows opening their sessions.
 `/status` in the composer answers with §Open items' text as a card, no model
-call; the rail shows the same items live.
+call; the rail's In progress shows what of them is live or waiting on you. `/new` and `/stop`, and the
+composer's completion of the three, are
+[open items §Chat commands](continuous-open-items.md#chat-commands).
 
 ## IM
 
@@ -198,7 +200,6 @@ instance switch is on; group chats never change.
 - A callback to a cold head (>1h) deferred to the next seed.
 - A rotation on a callback to a full head.
 - A lead keeping the 1h cache TTL while its workers run.
-- Chat commands `/new`, `/stop` ([open items](continuous-open-items.md)).
 - The seed capped near 8K.
 - `pier search <q>` over the CLI socket (the index is `GET /api/search` only).
 

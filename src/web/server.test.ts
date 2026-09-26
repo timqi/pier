@@ -2664,6 +2664,19 @@ describe("the continuous conversation's routes", () => {
     expect(factory.create).not.toHaveBeenCalled();
   });
 
+  it("answers `/new` with the rotation and a replying head's refusal as a 409", async () => {
+    const { sessions, workspace, post } = chainRig();
+    await post("/api/continuous/messages", { text: "one" });
+    const fresh = await post("/api/continuous/messages", { text: "/new" });
+    expect(fresh.status).toBe(202);
+    expect(await fresh.json()).toEqual({ sessionId: "m2", rotated: "new", command: "new" });
+    expect(workspace).toContain("sessions-changed");
+    sessions.get("m2")!.setState("streaming");
+    const refused = await post("/api/continuous/messages", { text: "/new" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "the conversation is replying \u2014 /stop first" });
+  });
+
   it("resolves the head ahead of a send, so the send that follows lands there without rotating", async () => {
     const { sessions, post } = chainRig();
     const resolved = await post("/api/continuous", {});

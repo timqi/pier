@@ -106,7 +106,7 @@ const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
   ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: 0, finishedAt: null, ...over });
 const labels = () => list().querySelectorAll("div").map((d) => d.textContent.trim()).filter((t) => ["Open", "Not on the list", "In progress"].includes(t));
 
-it("draws what the conversation is solving under its row: items, run chips opening their sessions, and the runs no item names", () => {
+it("lists the open items in progress: a worker's live run as a row, an item with no live run as yours, never a lead twice", () => {
   state.chain = [member("h1")];
   sessions = [row("h1"), row("s-lead1abcdef", { role: "lead" })];
   state.items = {
@@ -114,33 +114,34 @@ it("draws what the conversation is solving under its row: items, run chips openi
       { problem: "open items 视图", stage: "lead designing", runs: [
         ledgerRun("lead1abcdef", { workers: { queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 } }),
       ] },
-      { problem: "model menu", stage: "merged, restart pending", runs: [ledgerRun("gone1", { state: NOT_IN_LEDGER, targetSessionId: null })] },
+      { problem: "model menu", stage: "waiting on you: merge?", runs: [ledgerRun("gone1", { state: NOT_IN_LEDGER, targetSessionId: null })] },
+      { problem: "auth review", stage: "worker running", runs: [ledgerRun("w1", { name: "Review src/auth" })] },
     ],
-    unlisted: [ledgerRun("r-failed", { name: "Review src/auth", state: "failed", finishedAt: 1 })],
+    unlisted: [ledgerRun("r-failed", { name: "Old review", state: "failed", finishedAt: 1 }), ledgerRun("q1", { name: "Queued one", state: "queued", targetSessionId: null })],
   };
   sidebar.renderSessions();
-  expect(labels()).toEqual(["Open", "Not on the list", "In progress"]);
-  expect(list().textContent).toContain("open items 视图 — lead designing");
-  expect(list().textContent).toContain("workers: 1 running, 1 succeeded");
-  const chips = list().querySelectorAll("[data-session-id]").filter((el) => el.dataset.sessionId?.startsWith("run:"));
-  expect(chips.map((c) => c.textContent.trim())).toEqual([
-    "run lead1abc · running",
-    `run gone1 — ${NOT_IN_LEDGER}`,
-    "run r-failed · failed",
+  expect(labels()).toEqual(["In progress"]);
+  const rows = list().querySelectorAll("[data-session-id]").map((el) => [el.dataset.sessionId, el.textContent.trim()]);
+  expect(rows).toEqual([
+    ["continuous", "Conversation"],
+    ["s-lead1abcdef", "s-lead1abcdef"],
+    ["run:w1", "Review src/authrun"],
+    ["run:q1", "Queued onerun"],
+    ["item:model menu", "model menuyou"],
   ]);
-  // The lead's session is a rail row, so its chip wears that row's dot.
-  expect(chips[0]!.querySelector("span")!.title).toBe("lead — waiting for you");
-  expect(chips[2]!.querySelector("span")!.title).toBe("failed — look at it");
-  // A run the ledger no longer holds has no session to open.
-  expect(chips[1]!.querySelector("button")).toBeNull();
-  chips[0]!.querySelector("button")!.onclick?.();
-  expect(select).toHaveBeenLastCalledWith("s-lead1abcdef");
-  chips[2]!.querySelector("button")!.onclick?.();
-  expect(select).toHaveBeenLastCalledWith("s-r-failed");
-  expect(list().textContent).toContain("Review src/auth");
+  expect(list().textContent).not.toContain("workers");
+  expect(list().textContent).not.toContain("Old review");
+  const byId = (id: string) => list().querySelectorAll("[data-session-id]").find((el) => el.dataset.sessionId === id)!;
+  expect(byId("run:w1").querySelectorAll("span").map((el) => el.title)).toEqual(["", "run w1 · running", "working…"]);
+  byId("run:w1").querySelector("button")!.onclick?.();
+  expect(select).toHaveBeenLastCalledWith("s-w1");
+  openContinuous.mockClear();
+  byId("run:q1").querySelector("button")!.onclick?.();
+  byId("item:model menu").querySelector("button")!.onclick?.();
+  expect(openContinuous).toHaveBeenCalledTimes(2);
 });
 
-it("hides the open block when both lists are empty, and while the switch is off", () => {
+it("adds no row when nothing is open, and none while the switch is off", () => {
   state.chain = [member("h1")];
   sessions = [row("h1")];
   state.items = { items: [], unlisted: [] };

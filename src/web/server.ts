@@ -10,7 +10,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { type Context, Hono, type Next } from "hono";
 import { compress } from "hono/compress";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
-import type { MainChain } from "../core/chain.js";
+import { ChatCommandRefused, type MainChain } from "../core/chain.js";
 import { EventHub } from "../core/hub.js";
 import { logger } from "../log.js";
 import { QueueOperationError, Router } from "../core/router.js";
@@ -568,7 +568,12 @@ export function createServer(
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400);
     const mode: InboundMessage["mode"] = body.mode === "steer" || body.mode === "followUp" ? body.mode : "auto";
-    return c.json(reached(await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode })), 202);
+    try {
+      return c.json(reached(await continuous.send({ senderId: "web", sender: { id: "web", name: "operator" }, text: body.text, mode })), 202);
+    } catch (err) {
+      if (err instanceof ChatCommandRefused) return c.json({ error: err.message }, 409);
+      throw err;
+    }
   });
 
   // Edit a user turn: rewind to just before it — dropping every turn after it —

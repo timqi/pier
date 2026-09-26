@@ -431,3 +431,75 @@ it("ends the optimistic turn a continuous command never starts", async () => {
   await composer.send("auto");
   expect(setState.mock.calls).toEqual([["streaming"], ["idle"], ["streaming"]]);
 });
+
+describe("the chat-command completion", () => {
+  const menu = () => node("#command-menu");
+  const rows = () => onScreen("#command-menu").map((li) => li.textContent);
+  const key = (init: Partial<KeyboardEvent>) => {
+    const ev = { preventDefault: vi.fn(), ...init } as unknown as KeyboardEvent;
+    node("#input").onkeydown!(ev);
+    return ev;
+  };
+  const continuous = (on: boolean) => composer.initComposer({
+    sessionId: () => "m1", starting: () => false, sessionState: () => "idle",
+    chatVisible: () => true, setState: vi.fn(), reload: state.reload, continuous: () => on,
+  });
+
+  it("lists every command with its line at a bare `/`, narrows on the prefix, hides on the exact word", () => {
+    continuous(true);
+    expect(menu().classList.contains("hidden")).toBe(true);
+    type("/");
+    expect(menu().classList.contains("hidden")).toBe(false);
+    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress"]);
+    expect(onScreen("#command-menu")[0]!.getAttribute("aria-selected")).toBe("true");
+    type("/st");
+    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress"]);
+    type("/stop");
+    expect(rows()).toEqual([]);
+    expect(menu().classList.contains("hidden")).toBe(true);
+    type("/stop now");
+    expect(rows()).toEqual([]);
+    type("status");
+    expect(rows()).toEqual([]);
+  });
+
+  it("walks with the arrows, picks with Enter or Tab into the draft, and Enter then sends", async () => {
+    continuous(true);
+    type("/");
+    const down = key({ key: "ArrowDown" });
+    expect(down.preventDefault).toHaveBeenCalled();
+    expect(onScreen("#command-menu").map((li) => li.getAttribute("aria-selected"))).toEqual(["false", "true", "false"]);
+    key({ key: "ArrowUp" });
+    key({ key: "ArrowUp" });
+    expect(onScreen("#command-menu")[2]!.getAttribute("aria-selected")).toBe("true");
+    const enter = key({ key: "Enter" });
+    expect(enter.preventDefault).toHaveBeenCalled();
+    expect(node("#input").value).toBe("/stop");
+    expect(menu().classList.contains("hidden")).toBe(true);
+    expect(state.fetch).not.toHaveBeenCalled();
+    state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", command: "stop" }, { status: 202 }));
+    key({ key: "Enter" });
+    await settled();
+    expect(state.fetch.mock.calls[0]?.[0]).toBe("/api/continuous/messages");
+    type("/n");
+    key({ key: "Tab" });
+    expect(node("#input").value).toBe("/new");
+    // A pointer picks too, without blurring the textarea.
+    type("/");
+    onScreen("#command-menu")[0]!.onpointerdown!({ preventDefault: vi.fn() });
+    expect(node("#input").value).toBe("/status");
+  });
+
+  it("closes on Esc until the draft changes, and never opens outside the continuous conversation", () => {
+    continuous(true);
+    type("/");
+    key({ key: "Escape" });
+    expect(menu().classList.contains("hidden")).toBe(true);
+    expect(key({ key: "ArrowDown" }).preventDefault).not.toHaveBeenCalled(); // the textarea's key again
+    type("/s");
+    expect(rows()).toHaveLength(2);
+    continuous(false);
+    type("/");
+    expect(rows()).toEqual([]);
+  });
+});

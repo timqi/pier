@@ -334,6 +334,42 @@ describe("the open items", () => {
     expect(r.sessions.get("m1")!.systemInputs.at(-1)!.origin).toEqual({ kind: "chat-command", command: "status", sessions: { "r-sess": "s-r" } });
   });
 
+  it("rotates on `/new` with the seed as the answer, once when the head was due anyway, and refuses a replying head", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now, { history: [{ role: "user", text: "earlier", at: r.clock.now }] });
+    expect(await r.say("/new")).toEqual({ sessionId: "m1", rotated: "new", command: "new" });
+    expect(r.chain.members().map((m) => [m.sessionId, m.reason])).toEqual([["m1", "new"], ["h1", "first"]]);
+    const m1 = r.sessions.get("m1")!;
+    expect(m1.systemInputs).toHaveLength(1);
+    expect(m1.systemInputs[0]).toMatchObject({ origin: { kind: "session-seed", reason: "new", previousSessionId: "h1" } });
+    expect(m1.systemInputs[0]!.text).toContain("you asked for one with /new");
+    expect(m1.prompts).toEqual([]);
+
+    // Due for its own reason: one rotation, not two.
+    r.clock.now += 2 * IDLE_MS;
+    expect(await r.say("/NEW")).toEqual({ sessionId: "m2", rotated: "idle", command: "new" });
+    expect(r.chain.members()).toHaveLength(3);
+
+    r.sessions.get("m2")!.setState("streaming");
+    await expect(r.say("/new")).rejects.toThrow("the conversation is replying — /stop first");
+    expect(r.chain.members()).toHaveLength(3);
+    expect(r.sessions.get("m2")!.systemInputs.filter((i) => i.origin.kind === "chat-command")).toEqual([]);
+  });
+
+  it("aborts the head's turn on `/stop` and says so, or says nothing was running", async () => {
+    const r = rig({ head: "h1" });
+    const h1 = r.existing("h1", r.clock.now, { hold: true });
+    await r.say("go");
+    expect(h1.state).toBe("streaming");
+    expect(await r.say("/stop")).toEqual({ sessionId: "h1", command: "stop" });
+    expect(h1.state).toBe("idle");
+    expect(h1.calls.slice(-2)).toEqual(["abort", "systemInput:chat-command:append:stopped"]);
+    expect(h1.systemInputs.at(-1)).toEqual({ text: "stopped", origin: { kind: "chat-command", command: "stop" }, mode: "append" });
+    await r.say("/stop");
+    expect(h1.calls.at(-1)).toBe("systemInput:chat-command:append:nothing running");
+    expect(h1.calls.filter((c) => c === "abort")).toHaveLength(1);
+  });
+
   it("writes the head's markers on its turn end and says so once, a restart's head and a new head alike", async () => {
     const r = rig({ head: "h0" });
     r.existing("h0", r.clock.now);

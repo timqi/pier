@@ -159,6 +159,7 @@ const DIVIDER: Record<ChainReason, string> = {
   idle: "new session — idle 1h",
   lost: "new session — the previous one was lost",
   full: "new session — the previous one was full",
+  new: "new session — /new",
 };
 
 /** A 404 is the switch being off; anything else is a failure, not "off". */

@@ -137,14 +137,24 @@ export type SystemInputOrigin = {
   sessions?: Record<string, string>;
 };
 
-/** A message to the continuous conversation that is exactly this word is a
- *  command, never a message; `/new` and `/stop` are docs/design/continuous-open-items.md. */
-export type ChatCommand = "status";
+/** The chat commands, each with the one line the composer's completion shows:
+ *  a message to the continuous conversation that is exactly `/<word>` is a
+ *  command, never a message (core/chain.ts). Browser-safe: the composer
+ *  lists this table. */
+export const CHAT_COMMANDS = {
+  status: "what is open — in flight, or waiting on you",
+  new: "start a new session now",
+  stop: "stop the reply in progress",
+} as const;
+
+export type ChatCommand = keyof typeof CHAT_COMMANDS;
+
+export const isChatCommand = (v: unknown): v is ChatCommand => typeof v === "string" && Object.hasOwn(CHAT_COMMANDS, v);
 
 /** Why a session joined the continuous conversation's chain: the first one,
- *  the previous one idle past the rotation boundary, the previous one gone, or
- *  the previous one's context past the size ceiling. */
-export type ChainReason = "first" | "idle" | "lost" | "full";
+ *  the previous one idle past the rotation boundary, the previous one gone,
+ *  the previous one's context past the size ceiling, or `/new`. */
+export type ChainReason = "first" | "idle" | "lost" | "full" | "new";
 
 /** How long the continuous conversation's head may go without a user message
  *  before the next one starts a new session: the "long" prompt-cache TTL

@@ -10,7 +10,8 @@ import { appendTurn, followTail, scrollBottom, turnsPane } from "./chat.js";
 import { imageThumb } from "./attachments.js";
 import { fileMarker, MAX_INBOUND_BYTES } from "../../core/inbound-file.js";
 import { escapeKey, letterKey } from "./shortcut.js";
-import type { ParkedMessage, QueueRecovery, SessionState } from "../../core/types.js";
+import { listStep } from "./menu.js";
+import { CHAT_COMMANDS, type ChatCommand, type ParkedMessage, type QueueRecovery, type SessionState } from "../../core/types.js";
 
 /** A file picked but not yet sent. The upload starts on attach, so Enter
  *  usually finds its marker already there and the send paints at once. */
@@ -55,6 +56,7 @@ const recoveryPanel = h("div", "hidden max-h-48 overflow-y-auto border-t border-
 recoveryPanel.id = "recovery-panel";
 queuePanel.after(recoveryPanel);
 const imageStrip = $("#image-strip");
+const commandMenu = $("#command-menu");
 const attachInput = $<HTMLInputElement>("#attach-input");
 
 let queueHasRows = false;
@@ -310,6 +312,73 @@ async function uploadFiles(files: PendingFile[]): Promise<string[] | null> {
   return markers.every((m): m is string => m !== null) ? markers : null;
 }
 
+// --- chat commands ---------------------------------------------------------------------
+// Offered while the draft is a `/` prefix of one and the continuous conversation
+// is on screen — anywhere else `/status` is a message (core/chain.ts). The
+// exact word hides the list: Enter then sends it.
+
+let commandRows: HTMLElement[] = [];
+let commandActive = 0;
+let commandDismissed = false; // Esc, until the draft changes
+
+function commandMatches(): ChatCommand[] {
+  const draft = input.value;
+  if (deps.continuous?.() !== true || !draft.startsWith("/") || /\s/.test(draft) || commandDismissed) return [];
+  return (Object.keys(CHAT_COMMANDS) as ChatCommand[]).filter((c) => `/${c}`.startsWith(draft) && `/${c}` !== draft);
+}
+
+const commandMenuOpen = (): boolean => commandRows.length > 0;
+
+function setCommandActive(index: number): void {
+  if (!commandRows.length) return;
+  commandActive = (index + commandRows.length) % commandRows.length;
+  for (const [i, el] of commandRows.entries()) {
+    el.classList.toggle("bg-indigo-50", i === commandActive); // the palette's selection vocabulary (style.css)
+    el.setAttribute("aria-selected", String(i === commandActive));
+  }
+}
+
+function pickCommand(command: ChatCommand): void {
+  input.value = `/${command}`; // assignment parks the caret at the end
+  input.focus();
+  autosize();
+  saveDraft();
+  renderCommandMenu();
+}
+
+function renderCommandMenu(): void {
+  const matches = commandMatches();
+  commandRows = matches.map((command) => {
+    const li = h("li", "palette-row flex min-h-9 cursor-pointer items-baseline gap-2 rounded-[10px] px-2 text-[14px] leading-5",
+      h("span", "flex-none font-mono text-neutral-800", `/${command}`),
+      h("span", "min-w-0 truncate text-[13px] text-neutral-500", CHAT_COMMANDS[command]));
+    li.setAttribute("role", "option");
+    // pointerdown, not click: a click first blurs the textarea, which on a phone drops the keyboard.
+    li.onpointerdown = (ev) => {
+      ev.preventDefault();
+      pickCommand(command);
+    };
+    return li;
+  });
+  commandMenu.replaceChildren(...commandRows);
+  commandMenu.classList.toggle("hidden", !commandRows.length);
+  setCommandActive(0);
+}
+
+/** The keys the open list takes from the textarea; false leaves the key to it. */
+function commandMenuKey(ev: KeyboardEvent): boolean {
+  if (!commandMenuOpen()) return false;
+  const step = listStep(ev);
+  if (step !== undefined) setCommandActive(commandActive + step);
+  else if (ev.key === "Enter" || ev.key === "Tab") pickCommand(commandMatches()[commandActive]!);
+  else if (ev.key === "Escape") {
+    commandDismissed = true;
+    renderCommandMenu();
+  } else return false;
+  ev.preventDefault();
+  return true;
+}
+
 // --- composer drafts -------------------------------------------------------------------
 // Per session, in sessionStorage only: an unsent draft is never the agent's
 // business, and a board's own script runs on this origin (boards/boards.ts) —
@@ -356,6 +425,8 @@ export function restoreDraft(id: string): void {
   ++draftVersion;
   input.value = sessionStorage.getItem(draftKey(id)) ?? "";
   autosize();
+  commandDismissed = false;
+  renderCommandMenu();
   pendingFiles = pendingBySession.get(id) ?? [];
   renderFileStrip();
 }
@@ -391,6 +462,7 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
     input.value = "";
     autosize();
     saveDraft();
+    renderCommandMenu();
     pendingFiles = [];
     renderFileStrip();
   }
@@ -528,6 +600,8 @@ export function initComposer(d: ComposerDeps): void {
   input.oninput = () => {
     autosize();
     saveDraft();
+    commandDismissed = false;
+    renderCommandMenu();
   };
   // A touch keyboard's Enter is the only way to get a newline (there is no
   // Shift), so there it types one and the send button is the only send.
@@ -536,6 +610,7 @@ export function initComposer(d: ComposerDeps): void {
     // IME guard: Enter that confirms a composition candidate must not send
     // (isComposing covers modern browsers; 229 covers stragglers).
     if (ev.isComposing || ev.keyCode === 229) return;
+    if (commandMenuKey(ev)) return;
     if (enterSends && ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
       void send("auto");

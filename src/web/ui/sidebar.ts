@@ -12,7 +12,7 @@ import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { setAttention } from "./shell.js";
 import { chord, modalOpen, shortcut } from "./shortcut.js";
-import { NOT_IN_LEDGER, type ChainMember, type LeadPhase, type OpenItems, type OpenRun, type SessionState } from "../../core/types.js";
+import { type ChainMember, type LeadPhase, type OpenItems, type OpenRun, type SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -153,14 +153,8 @@ export const phaseTag = (s: SessionInfo): HTMLElement[] => {
   return [tag];
 };
 
-/** A run's session row, when the rail lists it (a lead), marks it as any row
- *  would; a worker's session is never a row, so its run's state picks the mark. */
-function runDot(r: OpenRun): HTMLElement[] {
-  const session = deps.sessions().find((s) => s.id === r.targetSessionId);
-  if (session) return stateDot(session);
-  if (r.state === "running") return markDot(WORKING);
-  return r.state === "failed" || r.state === "interrupted" ? markDot(["bg-amber-500", `${r.state} — look at it`]) : [];
-}
+/** A worker's session is never a row, so its run's state picks the mark. */
+const runDot = (r: OpenRun): HTMLElement[] => (r.state === "running" ? markDot(WORKING) : []);
 
 // --- row actions ---------------------------------------------------------------------
 
@@ -257,54 +251,47 @@ function continuousRail(chain: ChainMember[]): { entry: HTMLElement; live: Sessi
   return { entry, live: inProgress(deps.sessions(), chain) };
 }
 
-// --- open items (docs/design/10-continuous-session.md) --------------------------------
+// --- open items in progress (docs/design/10-continuous-session.md) ------------------
 
-const workers = (r: OpenRun): HTMLElement[] =>
-  r.workers
-    ? [h("span", "px-1 text-xs leading-5 text-neutral-500",
-      `workers: ${Object.entries(r.workers).filter(([, n]) => n > 0).map(([state, n]) => `${n} ${state}`).join(", ") || "none"}`)]
-    : [];
+const live = (r: OpenRun): boolean => r.state === "running" || r.state === "queued";
 
-/** The run's session opens from it; a run with no session yet (queued) or gone
- *  from the ledger is text. Wrapped so a re-render finds focus by `data-session-id`;
- *  a lead's worker counts follow it, outside the target. */
-function runChip(r: OpenRun): HTMLElement[] {
-  const wrap = h("span", "inline-flex max-w-full");
-  wrap.dataset.sessionId = `run:${r.runId}`;
-  if (r.state === NOT_IN_LEDGER) {
-    wrap.append(h("span", "px-1 text-xs leading-5 text-neutral-500", `run ${r.runId} — ${NOT_IN_LEDGER}`));
-    return [wrap];
-  }
-  const label = `run ${r.runId.slice(0, 8)} · ${r.state}`;
-  const target = r.targetSessionId;
-  if (!target) {
-    wrap.append(h("span", "flex items-center gap-1.5 px-1 text-xs leading-5 text-neutral-500", ...runDot(r), label));
-    return [wrap, ...workers(r)];
-  }
-  const chip = h("button", "session-open flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-1 text-left text-xs text-neutral-500 hover:bg-neutral-200 hover:text-neutral-700",
-    ...runDot(r), h("span", "min-w-0 truncate", label));
-  chip.setAttribute("type", "button");
-  chip.setAttribute("aria-label", `Open run ${r.runId}'s session`);
-  chip.title = r.name;
-  chip.onclick = () => deps.select(target);
-  wrap.append(chip);
-  return [wrap, ...workers(r)];
+/** A row shaped like a session's, for a thing that has no session row: the
+ *  problem, a tag, the dot, one target. */
+function plainRow(label: string, tag: HTMLElement[], dot: HTMLElement[], id: string, title: string, open: () => void): HTMLElement {
+  const li = h("li", "flex items-center gap-1 hover:bg-neutral-100");
+  const button = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
+    h("span", "min-w-0 flex-1 truncate", label), ...tag, ...dot);
+  button.setAttribute("type", "button");
+  button.onclick = open;
+  li.dataset.sessionId = id;
+  li.title = title;
+  li.append(button);
+  return li;
 }
 
-/** What the conversation is solving and the runs behind it; nothing when there is nothing. */
-function openBlock(label: (text: string) => HTMLElement): HTMLElement[] {
+const tag = (text: string, title: string): HTMLElement[] => {
+  const el = h("span", "flex-none rounded bg-neutral-100 px-1 text-[0.6875rem] font-medium leading-4 text-neutral-500", text);
+  el.title = title;
+  return [el];
+};
+
+/** The open items as In progress rows, after the session rows: a live run
+ *  no session row stands for (a worker's), and an item with no live run — it
+ *  waits on the user, and opens the conversation. `/status` keeps the rest. */
+function openRows(listed: Set<string>): HTMLElement[] {
   const open = deps.open();
-  if (!open || (!open.items.length && !open.unlisted.length)) return [];
-  const item = (i: OpenItems["items"][number]): HTMLElement => {
-    const line = `${i.problem}${i.stage ? ` — ${i.stage}` : ""}`;
-    const text = h("div", "truncate px-1 pt-1.5 text-neutral-700", line);
-    text.title = line;
-    return h("li", "", text, ...(i.runs.length ? [h("div", "flex flex-wrap items-center gap-x-1 pb-1", ...i.runs.flatMap(runChip))] : []));
-  };
-  return [
-    ...(open.items.length ? [label("Open"), h("ul", "pb-1", ...open.items.map(item))] : []),
-    ...(open.unlisted.length ? [label("Not on the list"), h("ul", "pb-1", ...open.unlisted.map((r) => item({ problem: r.name, stage: "", runs: [r] })))] : []),
-  ];
+  if (!open) return [];
+  const runs = [...open.items.flatMap((i) => i.runs), ...open.unlisted]
+    .filter((r) => live(r) && !(r.targetSessionId && listed.has(r.targetSessionId)));
+  const rows = runs.map((r) => {
+    const target = r.targetSessionId;
+    return plainRow(r.name, tag("run", `run ${r.runId} · ${r.state}`), runDot(r), `run:${r.runId}`, `run ${r.runId} · ${r.state}${r.cwd ? `\n${r.cwd}` : ""}`,
+      () => (target ? deps.select(target) : deps.openContinuous()));
+  });
+  const yours = open.items.filter((i) => !i.runs.some(live)).map((i) =>
+    plainRow(i.problem, tag("you", "waiting on you — open the conversation"), markDot(["bg-amber-500", "waiting on you"]), `item:${i.problem}`,
+      `${i.problem}${i.stage ? ` — ${i.stage}` : ""}`, deps.openContinuous));
+  return [...rows, ...yours];
 }
 
 let drawn = "";
@@ -329,6 +316,7 @@ export function renderSessions(): void {
   const expanded = sessionList.querySelector<HTMLElement>(".session-more[aria-expanded='true']");
   const expandedId = expanded?.closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
   const nodes: HTMLElement[] = rows.map((s) => sessionRow(s, s.id === expandedId ? expanded! : undefined));
+  if (rail) nodes.push(...openRows(new Set(sessions.map((s) => s.id))));
   if (hidden > 0) {
     const more = h("button", "session-open w-full cursor-pointer rounded-lg text-left text-sm text-neutral-500", `Load more (${hidden})`);
     more.id = "session-load-more";
@@ -347,7 +335,7 @@ export function renderSessions(): void {
   sessionList.replaceChildren(
     ...(rail
       // The group collapses when nothing is in progress.
-      ? [h("ul", "pb-1 pt-1", rail.entry), ...openBlock(label), ...(nodes.length ? [label("In progress"), h("ul", "pb-1", ...nodes)] : [])]
+      ? [h("ul", "pb-1 pt-1", rail.entry), ...(nodes.length ? [label("In progress"), h("ul", "pb-1", ...nodes)] : [])]
       : nodes.length
       ? [h("ul", "pb-1", ...nodes)]
       : [h("p", "px-3 py-2 text-sm leading-normal text-neutral-500", "No sessions yet — create one.")]),
