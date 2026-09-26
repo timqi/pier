@@ -235,9 +235,6 @@ export const retryDelay = (attempts: number): number =>
  *  recipient, short enough that whoever is waiting still cares. */
 export const MAX_DELIVERY_ATTEMPTS = 8;
 
-/** The marks a delivered callback carries: nothing left to retry. */
-export const DELIVERED = { callbackState: "delivered", callbackError: null, callbackNextAttemptAt: null } as const;
-
 /** What a delivery says when it stops trying. */
 export const undeliverable = (attempts: number, error: string | null): string =>
   `undeliverable after ${String(attempts)} attempts${error ? `: ${error}` : ""}`;

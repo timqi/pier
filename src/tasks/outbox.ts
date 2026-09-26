@@ -4,9 +4,12 @@
 import type { AgentSession, SystemInputOrigin } from "../core/types.js";
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { DELIVERED, MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields } from "./types.js";
+import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields } from "./types.js";
 
 const log = logger("tasks");
+
+/** The marks a delivered record carries: nothing left to retry. */
+const DELIVERED = { callbackState: "delivered", callbackError: null, callbackNextAttemptAt: null } as const;
 
 /** The records a delivery names, from either side of the seam: a batch names
  *  every one of them, a group names itself, a message names its id. */
@@ -30,7 +33,14 @@ export interface Deliverable<T extends CallbackFields> {
   /** A follow-up to a busy recipient waits for idle so a batch stays one turn;
    *  a kind that never batches joins Pi's queue at once instead. */
   queues?: true;
+  /** A result owed to a feature lead may be its milestone instead (service.ts). */
+  milestone?: Milestone;
 }
+
+/** How a result owed to a session goes: `resumed` took it as a feature lead's
+ *  milestone, `settle` (the delivered marks) committed with the resume; `wait`
+ *  leaves it pending for the next sweep; `plain` is an ordinary callback. */
+export type Milestone = (sessionId: string, text: () => string, settle: () => void) => "resumed" | "wait" | "plain";
 
 export class Outbox<T extends CallbackFields> {
   private readonly delivering = new Set<string>();
@@ -41,6 +51,10 @@ export class Outbox<T extends CallbackFields> {
    *  written only against the input visible in the recipient's transcript: Pi's
    *  queues are memory, so a resolved `systemInput` proves nothing. */
   async deliver(sessionId: string, batch: T[]): Promise<void> {
+    const marked = batch.map((record) => ({ ...record, ...DELIVERED }));
+    const taken = this.kind.milestone?.(sessionId, () => this.kind.input(batch).text, () => { for (const record of marked) this.kind.save(record); });
+    if (taken === "resumed") for (const record of marked) this.kind.changed(record);
+    if (taken === "resumed" || taken === "wait") return;
     const mine = batch.filter((record) => !this.delivering.has(this.kind.id(record)));
     if (mine.length === 0) return;
     for (const record of mine) this.delivering.add(this.kind.id(record));

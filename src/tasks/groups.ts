@@ -3,12 +3,12 @@
 
 import type { Router } from "../core/router.js";
 import { logger } from "../log.js";
-import { runRef, runResultText, type Milestone } from "./callbacks.js";
+import { runRef, runResultText } from "./callbacks.js";
 import { newId } from "./definitions.js";
-import { Outbox } from "./outbox.js";
+import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
 import type { CallbackMode, GroupJoinMode, TaskDefinition, TaskGroup, TaskRun } from "./types.js";
-import { DELIVERED, isTerminal } from "./types.js";
+import { isTerminal } from "./types.js";
 
 const log = logger("tasks");
 
@@ -31,7 +31,7 @@ export class TaskGroups {
     private readonly changed: (group: TaskGroup) => void,
     private readonly unreachable: (sessionId: string, what: string, why: string) => void,
     private readonly headOf: (sessionId: string) => string = (id) => id,
-    private readonly milestone: Milestone = () => "plain",
+    milestone?: Milestone,
   ) {
     this.outbox = new Outbox<TaskGroup>(router, {
       id: (group) => group.id,
@@ -46,6 +46,7 @@ export class TaskGroups {
       }),
       abandoned: (group, sessionId, why) =>
         unreachable(sessionId, `the result of a ${String(group.memberRunIds.length)}-run group`, why),
+      milestone,
     });
   }
 
@@ -161,15 +162,7 @@ export class TaskGroups {
   async deliver(candidate: TaskGroup): Promise<void> {
     const group = this.store.getGroup(candidate.id);
     if (!group?.callbackSessionId || (group.callbackState !== "pending" && group.callbackState !== "failed")) return;
-    const sessionId = this.headOf(group.callbackSessionId);
-    const marked = { ...group, ...DELIVERED };
-    const taken = this.milestone(sessionId, () => this.text(group), () => { this.store.saveGroup(marked); });
-    if (taken === "wait") return;
-    if (taken === "resumed") {
-      this.changed(marked);
-      return;
-    }
-    await this.outbox.deliver(sessionId, [group]);
+    await this.outbox.deliver(this.headOf(group.callbackSessionId), [group]);
   }
 
   private text(group: TaskGroup): string {

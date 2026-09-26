@@ -3,14 +3,9 @@
 
 import type { SystemInputSource } from "../core/types.js";
 import type { Router } from "../core/router.js";
-import { Outbox } from "./outbox.js";
+import { Outbox, type Milestone } from "./outbox.js";
 import type { TaskStore } from "./store.js";
-import { DELIVERED, type TaskCallback, type TaskRun } from "./types.js";
-
-/** How a result owed to a session goes: `resumed` took it as a feature lead's
- *  milestone, `settle` (the delivered marks) committed with the resume; `wait`
- *  leaves it pending for the next sweep; `plain` is an ordinary callback. */
-export type Milestone = (sessionId: string, text: () => string, settle: () => void) => "resumed" | "wait" | "plain";
+import type { TaskCallback, TaskRun } from "./types.js";
 
 /** The run id and the session that did the work: a relayer's next move is a
  *  deep link to it, and without this that costs a second call. */
@@ -40,11 +35,11 @@ export class TaskCallbacks {
   constructor(
     private readonly store: TaskStore,
     router: Router,
-    private readonly changed: (run: TaskRun) => void,
+    changed: (run: TaskRun) => void,
     unreachable: (sessionId: string, what: string, why: string) => void,
     /** Where a result owed to a session goes now: the continuous conversation's head, for a member. */
     private readonly headOf: (sessionId: string) => string = (id) => id,
-    private readonly milestone: Milestone = () => "plain",
+    milestone?: Milestone,
   ) {
     this.outbox = new Outbox<TaskRun>(router, {
       id: (run) => run.id,
@@ -65,6 +60,7 @@ export class TaskCallbacks {
         },
       }),
       abandoned: (run, sessionId, why) => unreachable(sessionId, `the result of "${run.context.definition.name}"`, why),
+      milestone,
     });
   }
 
@@ -88,13 +84,6 @@ export class TaskCallbacks {
     const batch = this.store.listPendingCallbacks(Number.MAX_SAFE_INTEGER)
       .filter((run) => run.callbackSessionId !== null && this.headOf(run.callbackSessionId) === sessionId);
     if (!batch.some((run) => run.id === first.id)) return;
-    const marked = batch.map((run) => ({ ...run, ...DELIVERED }));
-    const taken = this.milestone(sessionId, () => this.text(batch), () => { for (const run of marked) this.store.saveRun(run); });
-    if (taken === "wait") return;
-    if (taken === "resumed") {
-      for (const run of marked) this.changed(run);
-      return;
-    }
     await this.outbox.deliver(sessionId, batch);
   }
 
