@@ -132,7 +132,8 @@ its result carries a `Design final:` line, or it did not succeed; otherwise it s
   names that are in flight or did not succeed; `renderOpenItems` is the one text.
 - An item is `<problem> — <stage>`: `problem` in the user's words, `stage` in
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
-  60K or 80K?`); a `(proposed)` decision is an item, stage `proposed, not applied`.
+  60K or 80K?`); only work in flight or waiting on the user's decision now, the
+  backlog in MEMORY.md.
 - The text: `Open`, one line per item, each run token rendered
   ` · run <id8>… <state> <age>` and a lead's ` · workers: <counts>`, then `Not
   on the list`; `Nothing open.` when both are empty.

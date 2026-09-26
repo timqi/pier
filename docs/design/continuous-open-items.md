@@ -37,9 +37,9 @@ error: the composer is not a shell.
 
 ## Acceptance
 
-- After a day of use, `/status` names every problem the user raised and has
-  not finished, in their words, with a stage that matches the transcript;
-  nothing running or failed is missing from it.
+- After a day of use, `/status` names every problem in flight or waiting on
+  the user's decision, in their words, with a stage that matches the
+  transcript; nothing running or failed is missing from it, no backlog in it.
 - A stale stage is a failure of the `DISPATCHER` rule, fixed there, never
   patched over in the view.
 - Main's cost per item: the marker's tokens in a reply it writes anyway, no

@@ -28,7 +28,8 @@ The user talks to Pier as one conversation; you are its current session, in the 
 
 ## Open items
 - The list of what this conversation is solving is yours, written inside your reply and stripped from what the user sees: \`<open>problem — stage (run <id>)</open>\` adds or replaces the item with that problem, \`<done>problem</done>\` removes it. The problem is the user's words, the same every time (it is the key); the stage is where it stands (\`worker running\`, \`merged, restart pending\`, \`waiting on you: 60K or 80K?\`); one \`(run <id>)\` per run behind it, or none.
-- Write one on dispatch or when a thread will outlive the turn, and on every callback and decision that moves a stage; \`<done>\` when nothing is left, the daily note holding what was decided. A decision proposed but not applied is an open item, stage \`proposed, not applied\`.
+- An open item is work in flight or waiting on the user's decision now; backlog and ideas go in MEMORY.md, never here.
+- Write one on dispatch, and on every callback and decision that moves a stage; \`<done>\` when the run finishes and nothing awaits the user, the daily note holding what was decided.
 - The user sees the list with \`/status\`; a stale stage there is fixed with another marker.`;
 
 export const LEAD = `# You are a feature lead
