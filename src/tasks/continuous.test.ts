@@ -89,9 +89,11 @@ describe("tasks under the continuous conversation", () => {
     store.saveRun(stored("live", task, { invokedBySessionId: "h0", state: "running", finishedAt: null, targetSessionId: "c1", context: { definition: task, cwd: "/wt" } }));
     store.saveRun(stored("done", task, { invokedBySessionId: "h1" }));
     store.saveRun(stored("stale", task, { invokedBySessionId: "h1", queuedAt: Date.now() - 2 * day, finishedAt: Date.now() - 2 * day }));
+    // Queued before the window, finished inside it.
+    store.saveRun(stored("long", task, { invokedBySessionId: "h0", queuedAt: Date.now() - 2 * day, finishedAt: Date.now() - 60_000 }));
     store.saveRun(stored("theirs", task, { invokedBySessionId: "stranger" }));
     const runs = await service.handle({ operation: "runs" }, "h1") as { runId: string }[];
-    expect(runs.map((r) => r.runId).sort()).toEqual(["done", "live"]);
+    expect(runs.map((r) => r.runId).sort()).toEqual(["done", "live", "long"]);
     expect(runs.find((r) => r.runId === "live")).toEqual({
       runId: "live", name: "command", state: "running", targetSessionId: "c1", cwd: "/wt", queuedAt: expect.any(Number), finishedAt: null,
     });

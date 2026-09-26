@@ -332,6 +332,11 @@ const MIGRATIONS: readonly string[] = [
     reason TEXT NOT NULL
   );
   `,
+  // 29 — runs by the session they run in: a session's role, asked on every open,
+  // every `pier task` call and every callback.
+  `
+  CREATE INDEX task_runs_target ON task_runs(json_extract(json, '$.targetSessionId'), queued_at);
+  `,
 ];
 
 /** `BEGIN IMMEDIATE`: taking the write lock up front turns a race with another

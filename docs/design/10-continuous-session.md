@@ -151,13 +151,13 @@ Mechanics:
 
 ## Run ledger
 
-- Source: `task_runs` via `TaskStore.activityRuns` (in flight, plus at most
-  200 finished runs queued in the window), filtered to `invokedBySessionId`
-  in the chain (`TaskService.ledger`).
+- Source: `task_runs` via `TaskStore.ledgerRuns`: runs whose
+  `invokedBySessionId` is in the chain, in flight or finished in the window,
+  at most 200 (`TaskService.ledger`).
 - Surface: `pier task runs`, the last 24h ([09 §`runs`](09-tasks-cli.md#runs));
   in a lead session, the lead's own runs.
 - The same read feeds the rotation seed (and IM `/status`, Phase 3).
-- Callbacks and ownership follow the chain: a run or group launched by an
+- Callbacks and ownership follow the chain, switch on or off: a run or group launched by an
   earlier head calls back to the current head (`MainChain.headOf` in
   `tasks/callbacks.ts`, `tasks/groups.ts`), and every chain member counts as
   its launcher for `--run` and `cancel` (`tasks/operations.ts`; `recover`

@@ -237,18 +237,13 @@ export class TaskService {
       .map((run) => this.backgroundRun(run));
   }
 
-  /** The run ledger: runs any of `sessionIds` launched, in flight or finished
-   *  since `since`. Read off the activity window, which caps finished runs at 200. */
+  /** The run ledger: runs any of `sessionIds` launched, in flight or finished since `since`, at most 200. */
   ledger(sessionIds: string[], since: number): LedgerRun[] {
-    const launchers = new Set(sessionIds);
-    return this.store.activityRuns(since)
-      .filter((run) => run.invokedBySessionId !== null && launchers.has(run.invokedBySessionId))
-      .filter((run) => !isTerminal(run.state) || (run.finishedAt ?? 0) >= since)
-      .map((run) => {
-        const action = run.context.definition.action;
-        const cwd = run.context.cwd ?? (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
-        return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd, queuedAt: run.queuedAt, finishedAt: run.finishedAt };
-      });
+    return this.store.ledgerRuns(sessionIds, since).map((run) => {
+      const action = run.context.definition.action;
+      const cwd = run.context.cwd ?? (action.type === "bash" ? action.cwd : action.type === "agent" && action.session.mode === "fresh" ? action.session.cwd : null);
+      return { runId: run.id, name: run.context.definition.name, state: run.state, targetSessionId: run.targetSessionId, cwd, queuedAt: run.queuedAt, finishedAt: run.finishedAt };
+    });
   }
 
   activeBackgroundRunCounts(): Map<string, number> {

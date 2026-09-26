@@ -162,6 +162,17 @@ export class TaskStore {
     return [...active, ...recent].sort((a, b) => b.queuedAt - a.queuedAt || b.id.localeCompare(a.id));
   }
 
+  /** Runs launched by any of `sessionIds`: in flight, or finished at or after `since`. */
+  ledgerRuns(sessionIds: string[], since: number): TaskRun[] {
+    return this.#many(`
+      SELECT json FROM task_runs
+      WHERE json_extract(json, '$.invokedBySessionId') IN (SELECT value FROM json_each(?))
+        AND (state IN ('queued', 'running') OR json_extract(json, '$.finishedAt') >= ?)
+        AND NOT (state = 'succeeded' AND json_extract(json, '$.matched') IS 0)
+      ORDER BY queued_at DESC, id DESC LIMIT 200
+    `, JSON.stringify(sessionIds), since);
+  }
+
   /** A `task` action's child runs; a cancel walks them. */
   listChildRuns(parentRunId: string): TaskRun[] {
     return this.#many(`
@@ -232,7 +243,7 @@ export class TaskStore {
   roleOf(sessionId: string): AgentRole | undefined {
     const run = this.#one<TaskRun>(`
       SELECT json FROM task_runs
-      WHERE json_extract(json, '$.context.sessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh'
+      WHERE json_extract(json, '$.targetSessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh'
       ORDER BY queued_at LIMIT 1
     `, sessionId);
     return run && createdRole(run);
@@ -262,7 +273,7 @@ export class TaskStore {
   isTaskSession(sessionId: string): boolean {
     return this.sql(`
       SELECT 1 FROM task_runs
-      WHERE json_extract(json, '$.context.sessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh' LIMIT 1
+      WHERE json_extract(json, '$.targetSessionId') = ? AND json_extract(json, '$.sessionMode') = 'fresh' LIMIT 1
     `).get(sessionId) !== undefined;
   }
 

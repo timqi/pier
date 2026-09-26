@@ -194,7 +194,7 @@ describe("task operations", () => {
   // The caller is the run's own session (`targetSessionId: "s1"`), still running.
   const REFUSAL = "a delegated run cannot delegate; ask in your result and let your supervisor run it";
   const live = (id: string, over: Partial<TaskRun> = {}) =>
-    run(id, { state: "running", targetSessionId: "s1", callbackState: null, finishedAt: null, result: null, ...over });
+    run(id, { state: "running", targetSessionId: "s1", sessionMode: "reuse", callbackState: null, finishedAt: null, result: null, ...over });
 
   it("a supervised run is refused every operation, save and list included", async () => {
     const own = rig([live("child", { callbackSessionId: "parent" }), run("sibling")]);
@@ -222,7 +222,7 @@ describe("task operations", () => {
     const detached = rig([live("m", { groupId: "g", callbackSessionId: null })], [group("g", ["m"], { callbackSessionId: null, callbackState: null })]);
     expect(await detached({ operation: "list" })).toEqual([]);
     // A finished run's session is nobody's turn any more; a queued one has not taken it yet.
-    const after = rig([run("done", { targetSessionId: "s1" })]);
+    const after = rig([run("done", { targetSessionId: "s1", sessionMode: "reuse" })]);
     expect(await after({ operation: "list" })).toEqual([]);
     const queued = rig([live("waiting", { state: "queued", startedAt: null, callbackSessionId: "parent" })]);
     expect(await queued({ operation: "list" })).toEqual([]);
