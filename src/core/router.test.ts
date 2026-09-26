@@ -89,30 +89,14 @@ describe("channel fan-out", () => {
     expect(im.sent).toHaveLength(1);
   });
 
-  it("gives the chat a digest of a long system input, and the hub all of it", async () => {
+  it("hands the chat and the hub the whole of a long system input", async () => {
     const seen: string[] = [];
     hub.subscribe("s1", (e) => { if (e.type === "system-input") seen.push(e.text); });
     await router.ensure(KEY);
-    // What a task callback looks like: a header the reader wants and 8000
-    // characters of result text they do not (tasks/callbacks.ts).
     const long = `Task "review" finished with state: succeeded\n${"result line\n".repeat(200)}`;
     fake.emit({ type: "system-input", text: long, origin: ORIGIN });
-    expect(im.notes[0]![1].text).toBe(
-      `Task "review" finished with state: succeeded\nresult line\nresult line\nresult line\n\u2026 +197 more lines`,
-    );
-    // One paragraph, no line to cut on: the head stops on a word instead.
-    fake.emit({ type: "system-input", text: "word ".repeat(200), origin: ORIGIN });
-    const oneLine = im.notes[1]![1].text;
-    expect(oneLine).toBe(`${"word ".repeat(39)}word\n\u2026 +1 more line`);
-    // The event stream is unclamped — the web timeline and the transcript are
-    // where the whole thing still is.
-    expect(seen).toEqual([long, "word ".repeat(200)]);
-  });
-
-  it("leaves a system input that already fits exactly as it is", async () => {
-    await router.ensure(KEY);
-    fake.emit({ type: "system-input", text: "line one\nline two", origin: ORIGIN });
-    expect(im.notes).toEqual([["C100/1717.7", { text: "line one\nline two", origin: ORIGIN }]]);
+    expect(im.notes[0]![1].text).toBe(long);
+    expect(seen).toEqual([long]);
   });
 
   it("delivers one reply at a time per conversation", async () => {

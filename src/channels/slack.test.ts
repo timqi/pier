@@ -10,6 +10,7 @@ import { openDb } from "../db.js";
 import type { AgentLaunchOptions, ConversationKey, InboundMessage, ModelRef, ThinkingLevel } from "../core/types.js";
 import type { ModelMenuEntry } from "../settings.js";
 import { ChannelStore } from "./config.js";
+import { noteBody } from "./lines.js";
 import type { ChannelControl } from "./control.js";
 import type { PanelHandoff } from "./panel.js";
 import { ReceiptLedger } from "./receipts.js";
@@ -948,6 +949,34 @@ describe("outbound", () => {
     await channel.notify("C100/1706.000100", { text: "it broke", origin: { kind: "error" } });
     expect(client.sent.at(-1)!.text).toContain("> it broke");
     expect(client.reactions).toEqual([]);
+  });
+});
+
+describe("noteBody — the note both platforms post", () => {
+  const origin = { kind: "task-callback", taskId: "t", runId: "r", sourceSessionId: null } as const;
+  const quoted = (text: string): string => noteBody({ text, origin }, "_").split("\n").slice(1)
+    .map((line) => line.slice(2)).join("\n");
+
+  it("labels in the platform's emphasis over a quote", () => {
+    expect(noteBody({ text: "line one\nline two", origin }, "*"))
+      .toBe("*\u21a9 task callback*\n> line one\n> line two");
+  });
+
+  it("gives the chat a digest of a long system input", () => {
+    // What a task callback looks like: a header the reader wants and 8000
+    // characters of result text they do not (tasks/callbacks.ts).
+    const long = `Task "review" finished with state: succeeded\n${"result line\n".repeat(200)}`;
+    expect(quoted(long)).toBe(
+      `Task "review" finished with state: succeeded\nresult line\nresult line\nresult line\n\u2026 +197 more lines`,
+    );
+    // One paragraph, no line to cut on: the head stops on a word instead.
+    expect(quoted("word ".repeat(200))).toBe(`${"word ".repeat(39)}word\n\u2026 +1 more line`);
+  });
+
+  it("leaves a system input that already fits exactly as it is, and an error whole", () => {
+    expect(quoted("line one\nline two")).toBe("line one\nline two");
+    const trace = Array.from({ length: 8 }, (_, i) => `at frame ${String(i)}`).join("\n");
+    expect(noteBody({ text: trace, origin: { kind: "error" } }, "_").split("\n")).toHaveLength(9);
   });
 });
 

@@ -1,6 +1,9 @@
 // What the shared control moments say — one spelling for both platforms. The
-// only legitimate variation is the spelling of the bind command, so it is the parameter.
+// only legitimate variations are platform spellings (the bind command, a label's
+// emphasis), so they are the parameters.
 
+import { originLabel } from "../core/reply.js";
+import type { NoteOrigin } from "../core/types.js";
 import type { BindOutcome } from "./types.js";
 
 export const bindHint = (command: string): string =>
@@ -23,3 +26,33 @@ export const picked = (label: string): string => `\u25b8 ${label}`;
 /** Said in the chat: the person clicked and would otherwise see nothing happen (§5). */
 export const STALE_OPTION =
   "⚠ That option is no longer available — please type the choice instead.";
+
+/** What a chat window gets of a system input; a task callback carries up to
+ *  8000 characters of result text (tasks/callbacks.ts). */
+const NOTE_CHARS = 200;
+const NOTE_LINES = 4;
+
+function digest(text: string): string {
+  const body = text.trimEnd();
+  let head = body.split("\n").slice(0, NOTE_LINES).join("\n");
+  if (head.length > NOTE_CHARS) {
+    const capped = head.slice(0, NOTE_CHARS);
+    // A boundary before the midpoint loses more than the ragged edge costs.
+    const boundary = Math.max(capped.lastIndexOf("\n"), capped.lastIndexOf(" "));
+    head = capped.slice(0, boundary > NOTE_CHARS / 2 ? boundary : NOTE_CHARS);
+  }
+  const rest = body.slice(head.length).trim();
+  if (!rest) return body;
+  const dropped = rest.split("\n").length;
+  return `${head.trimEnd()}\n… +${String(dropped)} more line${dropped === 1 ? "" : "s"}`;
+}
+
+/** The origin label in the platform's `emphasis` over the quoted body. A system
+ *  input is context for the turn it precedes: pasted whole, a run result buries
+ *  a chat that cannot collapse it, so it is digested (the hub keeps it all). An
+ *  error is quoted whole; core already capped it. */
+export function noteBody(note: { text: string; origin: NoteOrigin }, emphasis: string): string {
+  const text = note.origin.kind === "error" ? note.text : digest(note.text);
+  const body = text.split("\n").map((line) => `> ${line}`).join("\n");
+  return `${emphasis}${originLabel(note.origin)}${emphasis}\n${body}`;
+}

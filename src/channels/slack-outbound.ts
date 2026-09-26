@@ -3,8 +3,9 @@
 
 import type { AgentReply, NoteOrigin, TurnMeta } from "../core/types.js";
 import type { HandoffNote } from "./types.js";
-import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
+import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
+import { noteBody } from "./lines.js";
 import { isBlockRejection, type SlackBlock, type SlackClient } from "./slack-api.js";
 import {
   actions,
@@ -65,9 +66,8 @@ export class SlackOutbound {
     threadTs: string,
     note: { text: string; origin: NoteOrigin },
   ): Promise<string | undefined> {
-    const body = note.text.split("\n").map((line) => `> ${line}`).join("\n");
     let ts: string | undefined;
-    for (const part of chunk(`_${originLabel(note.origin)}_\n${body}`, this.budget())) {
+    for (const part of chunk(noteBody(note, "_"), this.budget())) {
       ts = await this.post(channel, threadTs, part, []);
     }
     return ts;

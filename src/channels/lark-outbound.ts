@@ -2,9 +2,10 @@
 // buttons on the last, and what an empty turn still has to say.
 
 import type { AgentReply, NoteOrigin } from "../core/types.js";
-import { formatTurnMeta, isSilentReply, originLabel, quietLabel } from "../core/reply.js";
+import { formatTurnMeta, isSilentReply, quietLabel } from "../core/reply.js";
 import { sendAttachments, splitAttachments } from "./attach.js";
 import type { LarkCard, LarkClient, LarkElement } from "./lark-api.js";
+import { noteBody } from "./lines.js";
 import type { HandoffNote } from "./types.js";
 import {
   button,
@@ -108,9 +109,8 @@ export class LarkOutbound {
   /** No footer: the turn this input triggers has not ended. Answers with the
    *  id of the last card posted, where the caller puts the 👀. */
   async note(root: string, note: { text: string; origin: NoteOrigin }): Promise<string | undefined> {
-    const body = note.text.split("\n").map((line) => `> ${line}`).join("\n");
     let messageId: string | undefined;
-    for (const part of chunk(`*${originLabel(note.origin)}*\n${body}`, LARK_MAX)) {
+    for (const part of chunk(noteBody(note, "*"), LARK_MAX)) {
       messageId = (await this.api.replyCard(root, card([markdown(part)]))).messageId;
     }
     return messageId;

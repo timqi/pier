@@ -69,7 +69,8 @@ export interface Channel {
    * Context that entered the session without a human typing it: a task
    * delegation, a callback, a supervisor message. Rendered as a system note,
    * never as an assistant turn — the people in the chat otherwise see the
-   * agent answer a question nobody asked.
+   * agent answer a question nobody asked. `text` is the whole text; the
+   * adapter decides how much a chat shows.
    */
   notify(
     conversationId: string,

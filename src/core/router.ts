@@ -24,29 +24,6 @@ const log = logger("core");
 const IDLE_TTL_MS = 30 * 60_000;
 const SWEEP_MS = 5 * 60_000;
 
-/** What a chat window gets of a system input; a task callback carries up to
- *  8000 characters of result text (tasks/callbacks.ts). */
-const NOTE_CHARS = 200;
-const NOTE_LINES = 4;
-
-/** A note is context for the turn it precedes, not the message: pasted whole,
- *  a run result buries the chat on IM, which cannot collapse it. The hub and
- *  the transcript keep every character. */
-function digest(text: string): string {
-  const body = text.trimEnd();
-  let head = body.split("\n").slice(0, NOTE_LINES).join("\n");
-  if (head.length > NOTE_CHARS) {
-    const capped = head.slice(0, NOTE_CHARS);
-    // A boundary before the midpoint loses more than the ragged edge costs.
-    const boundary = Math.max(capped.lastIndexOf("\n"), capped.lastIndexOf(" "));
-    head = capped.slice(0, boundary > NOTE_CHARS / 2 ? boundary : NOTE_CHARS);
-  }
-  const rest = body.slice(head.length).trim();
-  if (!rest) return body;
-  const dropped = rest.split("\n").length;
-  return `${head.trimEnd()}\n… +${String(dropped)} more line${dropped === 1 ? "" : "s"}`;
-}
-
 function keyOf(key: ConversationKey): string {
   return `${key.channelId}:${key.conversationId}`;
 }
@@ -271,7 +248,7 @@ export class Router {
         if (payload.type === "system-input") {
           const channel = this.channels.get(key.channelId);
           channel?.notify(key.conversationId, {
-            text: digest(payload.text),
+            text: payload.text,
             origin: payload.origin,
             at: payload.at,
           })
