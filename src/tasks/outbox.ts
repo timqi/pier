@@ -8,6 +8,10 @@ import { MAX_DELIVERY_ATTEMPTS, retryDelay, undeliverable, type CallbackFields }
 
 const log = logger("tasks");
 
+/** A result waiting on a lead's own running turn is asked again this often, not
+ *  every tick: a wait spends no attempt, so the attempt backoff does not apply. */
+const MILESTONE_WAIT_MS = 10_000;
+
 /** The marks a delivered record carries: nothing left to retry. */
 const DELIVERED = { callbackState: "delivered", callbackError: null, callbackNextAttemptAt: null } as const;
 
@@ -54,6 +58,7 @@ export class Outbox<T extends CallbackFields> {
     const marked = batch.map((record) => ({ ...record, ...DELIVERED }));
     const taken = this.kind.milestone?.(sessionId, () => this.kind.input(batch).text, () => { for (const record of marked) this.kind.save(record); });
     if (taken === "resumed") for (const record of marked) this.kind.changed(record);
+    if (taken === "wait") for (const record of batch) this.defer(record, MILESTONE_WAIT_MS);
     if (taken === "resumed" || taken === "wait") return;
     const mine = batch.filter((record) => !this.delivering.has(this.kind.id(record)));
     if (mine.length === 0) return;
@@ -148,8 +153,8 @@ export class Outbox<T extends CallbackFields> {
   }
 
   /** Busy target: try again shortly, and do not count it. */
-  private defer(record: T): void {
-    record.callbackNextAttemptAt = Date.now() + 1000;
+  private defer(record: T, ms = 1000): void {
+    record.callbackNextAttemptAt = Date.now() + ms;
     this.kind.save(record);
   }
 

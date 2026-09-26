@@ -64,6 +64,18 @@ function rig() {
   return { cwd, sessions, created, service, store, leadRan, bash, agent };
 }
 
+/** The wall clock `ms` ahead, past a waiting result's backoff; timers stay real. */
+async function laterBy(ms: number, then: () => Promise<unknown>): Promise<void> {
+  const at = Date.now() + ms;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(at);
+  try {
+    await then();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe("a feature lead", () => {
   it("is launched with --role lead, opened with its role, and told it may delegate", async () => {
     const { service, created, store } = rig();
@@ -153,19 +165,25 @@ describe("a feature lead", () => {
     service.stop();
   });
 
-  it("waits for its own running turn to end before the wave's last result resumes it", async () => {
+  it("waits for its own running turn to end before the wave's last result resumes it, asking again on a backoff", async () => {
     const { service, sessions, store, bash, leadRan } = rig();
     service.start(20);
     await leadRan("running");
     const task = await bash("echo late");
     const worker = service.run(task.id, null, "agent", null, { invokedBySessionId: "lead", callbackSessionId: "lead", background: true });
+    const asked = vi.spyOn(store, "latestRunForTarget");
     await service.waitForRun(worker.id);
+    // Five ticks go by: the waiting result is asked once, not once a tick.
     await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(asked).toHaveBeenCalledTimes(1);
     expect(sessions.get("lead")!.systemInputs).toEqual([]);
-    expect(store.getRun(worker.id)!.callbackState).toBe("pending");
+    expect(store.getRun(worker.id)).toMatchObject({ callbackState: "pending", callbackAttempts: 0 });
+    expect(store.getRun(worker.id)!.callbackNextAttemptAt).toBeGreaterThan(Date.now() + 9_000);
     store.saveRun({ ...store.getRun("lead-run")!, state: "succeeded", finishedAt: 3 });
-    await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1));
-    expect(sessions.get("lead")!.systemInputs.map((i) => i.origin.kind)).toEqual(["task-delegation"]);
+    await laterBy(11_000, async () => {
+      await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1));
+      expect(sessions.get("lead")!.systemInputs.map((i) => i.origin.kind)).toEqual(["task-delegation"]);
+    });
     service.stop();
   });
 
@@ -180,7 +198,7 @@ describe("a feature lead", () => {
     expect(sessions.get("lead")!.systemInputs).toEqual([]);
     expect(store.getRun(worker.id)!.callbackState).toBe("pending");
     service.unpause(20);
-    await vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1));
+    await laterBy(11_000, () => vi.waitFor(() => expect(sessions.get("main")!.systemInputs).toHaveLength(1)));
     service.stop();
   });
 
