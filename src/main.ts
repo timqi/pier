@@ -117,6 +117,7 @@ const factory = new PiAgentFactory(
   () => settings.get().titleModel,
   // Transcripts carry the speaker header core wrote for the model.
   new IndexedListing(undefined, undefined, (text) => splitSpeaker(text).text),
+  (id) => tasks.roleOf(id),
 );
 const hub = new EventHub();
 const router = new Router(hub, (key) => {

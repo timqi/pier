@@ -26,6 +26,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   SessionManager: {
     create: (cwd: string) => ({ path: `${cwd}/new`, getSessionDir: () => cwd }),
+    open: (path: string) => ({ path }),
   },
   ModelRuntime: {
     create: async () => {
@@ -596,6 +597,20 @@ describe("the continuous conversation's seam", () => {
     expect(await injected(home, true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md", "<pier>/dispatcher.md"]);
     expect(await injected(home, false)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
     expect(await injected("/tmp/elsewhere", true)).toEqual(["/repo/AGENTS.md", "<pier>/AGENTS.md"]);
+  });
+
+  it("injects the lead contract into a lead, at creation and when a lead is reopened", async () => {
+    const paths = () => (loaders.at(-1) as unknown as { agentsFilesOverride: (f: Files) => Files })
+      .agentsFilesOverride({ agentsFiles: [] }).agentsFiles.map((f) => f.path);
+    const factory = new PiAgentFactory(() => "", [], undefined, undefined, undefined, undefined, undefined, {
+      scan: async () => [{ id: "lead-1", path: join(mkdtempSync(join(tmpdir(), "pier-lead-")), "f.jsonl"), cwd: "/tmp/wt", created: 1, modified: 2 }],
+    }, (id) => (id === "lead-1" ? "lead" : undefined));
+    await (await factory.create({ cwd: "/tmp/wt", role: "lead" })).dispose();
+    expect(paths()).toEqual(["<pier>/lead.md"]);
+    await (await factory.create({ cwd: "/tmp/wt" })).dispose();
+    expect(paths()).toEqual([]);
+    await (await factory.resume("lead-1")).dispose();
+    expect(paths()).toEqual(["<pier>/lead.md"]);
   });
 
   /** A session whose model and settings manager are what the cap reads and writes. */

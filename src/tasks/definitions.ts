@@ -114,6 +114,10 @@ function parseLaunch(raw: unknown): AgentLaunchPolicy | undefined {
     }
     launch.thinking = value.thinking as ThinkingLevel;
   }
+  if (value.role !== undefined) {
+    if (value.role !== "lead") throw new Error("agent role must be lead");
+    launch.role = "lead";
+  }
   return Object.keys(launch).length ? launch : undefined;
 }
 

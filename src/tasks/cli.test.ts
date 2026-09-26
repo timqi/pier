@@ -31,6 +31,7 @@ describe("pier task", () => {
     const cases: [string[], Record<string, unknown>][] = [
       [["list"], { operation: "list" }],
       [["runs"], { operation: "runs" }],
+      [["run", "--prompt", "design it", "--role", "lead", "--model", "opus"], { operation: "run", prompt: "design it", launch: { model: "opus", role: "lead" } }],
       [["cancel", "--run", "r1"], { operation: "cancel", run_id: "r1" }],
       [["cancel", "--group", "g1"], { operation: "cancel", group_id: "g1" }],
       [["recover", "--run", "r1", "--reason", "truncated"], { operation: "recover", run_id: "r1", reason: "truncated" }],
@@ -159,7 +160,7 @@ describe("pier task", () => {
       [["run", "--prompt", "x", "--timeout", "soon"], "task: --timeout must be a whole number of seconds"],
       [["run"], "task: a new run needs --prompt, --bash or --task-id"],
       [["run", "--prompt", "x", "--bash", "y"], "task: a run takes exactly one of --prompt or --bash"],
-      [["run", "--bash", "x", "--model", "gpt"], "task: --model/--thinking apply to a prompt, not --bash"],
+      [["run", "--bash", "x", "--model", "gpt"], "task: --model/--thinking/--role apply to a prompt, not --bash"],
       [["run", "--session", "s1", "--bash", "x"], "task: --session continues an agent session; --bash is a command, not a turn"],
       [["run", "--task-id", "t1", "--bash", "x"], "task: --bash does not apply to a saved definition (--task-id)"],
       [["run", "--run", "r1", "--bash", "x"], "task: --bash does not apply to an existing run (--run)"],

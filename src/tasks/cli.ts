@@ -21,7 +21,7 @@ const OPTIONS = {
   timeout: { type: "string" }, callback: { type: "string" }, "callback-session": { type: "string" }, join: { type: "string" },
   bash: { type: "string" }, cron: { type: "string" }, tz: { type: "string" },
   watch: { type: "string" }, every: { type: "string" }, repeat: { type: "boolean" },
-  group: { type: "string" }, reason: { type: "string" },
+  group: { type: "string" }, reason: { type: "string" }, role: { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const;
 type Flag = keyof typeof OPTIONS;
@@ -33,7 +33,7 @@ type Params = Record<string, unknown>;
 const COMMANDS: Record<string, { usage: string; help: string }> = {
   run: {
     usage: "run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]\n" +
-      "        [--model <name|?>] [--thinking <level>] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
+      "        [--model <name|?>] [--thinking <level>] [--role lead] [--cwd <dir>] [--name <text>] [--timeout <seconds>]\n" +
       "        [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…",
     help: "a new run (--prompt | --bash | --task-id | --session … --prompt), a batch (--member), or a prompt on an existing one (--run)",
   },
@@ -44,7 +44,7 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
     help: "file a definition the operator sees, or update one by --task-id; no trigger means manual",
   },
   list: { usage: "list", help: "stored definitions, as JSON" },
-  runs: { usage: "runs", help: "the continuous conversation's runs, in flight and finished in the last 24h, as JSON; its sessions only" },
+  runs: { usage: "runs", help: "the continuous conversation's runs, or a feature lead's own, in flight and finished in the last 24h, as JSON" },
   cancel: { usage: "cancel (--run <id> | --group <id>)", help: "a run or a group, descendants included" },
   recover: { usage: "recover (--run <id> | --group <id>) --reason <text>", help: "a finished result after its callback settled; never a progress check" },
 };
@@ -82,7 +82,9 @@ const seconds = (flag: Flag, raw: string | boolean | undefined): number | undefi
 
 /** `launch` as the server takes it: `model` is a menu name it resolves. */
 const launchOf = (v: Values): Params | undefined =>
-  v.model === undefined && v.thinking === undefined ? undefined : compact({ model: v.model, thinking: v.thinking });
+  v.model === undefined && v.thinking === undefined && v.role === undefined
+    ? undefined
+    : compact({ model: v.model, thinking: v.thinking, role: v.role });
 
 /** Argv is split at each bare `--member`; a value equal to it is unreachable,
  *  since parseArgs (strict) refuses option-like values anyway. */
@@ -159,13 +161,13 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     const launch = launchOf(v);
     const timeoutSeconds = seconds("timeout", v.timeout);
     if (v["task-id"] !== undefined) {
-      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "name", "timeout"].includes(flag));
+      const extra = flagsOf(own).find((flag) => ["prompt", "bash", "session", "cwd", "model", "thinking", "role", "name", "timeout"].includes(flag));
       if (extra) refuse(`--${extra} does not apply to a saved definition (--task-id)`);
       return { task_id: v["task-id"] };
     }
     if (v.bash !== undefined) {
       if (v.prompt !== undefined) refuse("a run takes exactly one of --prompt or --bash");
-      if (launch) refuse("--model/--thinking apply to a prompt, not --bash");
+      if (launch) refuse("--model/--thinking/--role apply to a prompt, not --bash");
       if (v.session !== undefined) refuse("--session continues an agent session; --bash is a command, not a turn");
       return compact({ name: v.name, timeoutSeconds, action: compact({ type: "bash", script: v.bash, cwd: v.cwd }) });
     }

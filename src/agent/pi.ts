@@ -18,6 +18,7 @@ import {
 import type {
   AgentFactory,
   AgentLaunchOptions,
+  AgentRole,
   AgentSession,
   ChatTurn,
   ContextUsage,
@@ -42,7 +43,7 @@ import type {
 import { SESSION_TITLE_MAX } from "../core/types.js";
 import { logger } from "../log.js";
 import { pierPath } from "../paths.js";
-import { DISPATCHER } from "./roles.js";
+import { DISPATCHER, LEAD } from "./roles.js";
 import {
   textOf,
   toChatTurns,
@@ -492,6 +493,8 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     private readonly titleModel: () => ModelRef | undefined = () => undefined,
     /** Injected so a test needs no session directory or database. */
     private readonly listings: SessionListing = new IndexedListing(),
+    /** A reopened session's role, which only its runs record (tasks/). */
+    private readonly roleOf: (sessionId: string) => AgentRole | undefined = () => undefined,
   ) {}
 
   /** Catalogs are global, not per session. */
@@ -710,7 +713,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     return { modelRegistry, model: active && modelRegistry.find(active.provider, active.id) };
   }
 
-  private async resourceLoader(cwd: string): Promise<DefaultResourceLoader> {
+  private async resourceLoader(cwd: string, role?: AgentRole): Promise<DefaultResourceLoader> {
     const { skillsOff } = this.pier();
     const loader = new DefaultResourceLoader({
       cwd,
@@ -735,6 +738,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
             ...current.agentsFiles,
             ...(content ? [{ path: "<pier>/AGENTS.md", content }] : []),
             ...(dispatcher ? [{ path: "<pier>/dispatcher.md", content: DISPATCHER }] : []),
+            ...(role === "lead" ? [{ path: "<pier>/lead.md", content: LEAD }] : []),
           ],
         };
       },
@@ -764,7 +768,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
       cwd,
       sessionManager,
       modelRuntime: runtime,
-      resourceLoader: await this.resourceLoader(cwd),
+      resourceLoader: await this.resourceLoader(cwd, opts.role),
     });
     const live = created.session;
     // Pi defaults to one follow-up per turn boundary, so N queued messages cost
@@ -794,7 +798,7 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     const known = this.located.get(sessionId);
     if (known) {
       try {
-        return await this.open(known.cwd, SessionManager.open(known.path));
+        return await this.open(known.cwd, SessionManager.open(known.path), this.reopening(known.cwd, sessionId));
       } catch (err) {
         log.warn(`cached path for session ${sessionId} did not open; re-listing`, err);
         this.located.delete(sessionId);
@@ -802,7 +806,12 @@ export class PiAgentFactory implements AgentFactory, ProviderManager, WebAuth {
     }
     const info = await this.locate(sessionId);
     if (!info) throw new Error(`unknown session: ${sessionId}`);
-    return this.open(info.cwd || process.cwd(), SessionManager.open(info.path));
+    const cwd = info.cwd || process.cwd();
+    return this.open(cwd, SessionManager.open(info.path), this.reopening(cwd, sessionId));
+  }
+
+  private reopening(cwd: string, sessionId: string): AgentLaunchOptions {
+    return { cwd, role: this.roleOf(sessionId) };
   }
 
   /** The one place "no such session" is decided. A retained listing is not

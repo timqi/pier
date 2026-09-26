@@ -3,6 +3,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
+import type { AgentRole } from "../core/types.js";
 import type { RunPage, RunQuery, RunView, TaskDefinition, TaskGroup, TaskMessage, TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -214,14 +215,25 @@ export class TaskStore {
   }
 
   /** `fresh` is the one mode that makes a session rather than borrowing one;
-   *  these are the agent's conversations with itself, which the rail does not list. */
+   *  these are the agent's conversations with itself, which the rail does not
+   *  list. A feature lead's is the user's too, so it is not one of them. */
   taskOwnedSessionIds(): Set<string> {
     const rows = this.sql(`
       SELECT DISTINCT json_extract(json, '$.context.sessionId') AS id
       FROM task_runs
       WHERE json_extract(json, '$.sessionMode') = 'fresh' AND id IS NOT NULL
+        AND json_extract(json, '$.context.definition.action.launch.role') IS NOT 'lead'
     `).all() as unknown as { id: string }[];
     return new Set(rows.map((row) => row.id));
+  }
+
+  /** A lead's session is one a lead run made; a resume keeps the definition,
+   *  and a `--session` continuation cannot carry a launch policy. */
+  roleOf(sessionId: string): AgentRole | undefined {
+    return this.sql(`
+      SELECT 1 FROM task_runs
+      WHERE json_extract(json, '$.targetSessionId') = ? AND json_extract(json, '$.context.definition.action.launch.role') = 'lead' LIMIT 1
+    `).get(sessionId) === undefined ? undefined : "lead";
   }
 
   /** One session of `taskOwnedSessionIds`, without reading them all. */

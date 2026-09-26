@@ -9,7 +9,7 @@ import { logger } from "../log.js";
 import { runSource } from "./callbacks.js";
 import type { TaskMessenger } from "./messages.js";
 import type { TaskStore } from "./store.js";
-import type { AgentTaskAction, TaskResult, TaskRun } from "./types.js";
+import { isLead, type AgentTaskAction, type TaskResult, type TaskRun } from "./types.js";
 
 // Agent runs are I/O-bound: the cap is there for API pressure and runaway
 // fan-out, not for this machine's CPU.
@@ -28,7 +28,9 @@ const preamble = (run: TaskRun, supervised: boolean): string => {
   return `[Pier task run ${run.id} — "${run.context.definition.name}"] ` +
     `Your final reply is recorded verbatim as the run result, ${audience}; ` +
     `next-step buttons and file:// attachments do not render there. A question only that reader can answer is your result: state it and end your turn; the answer resumes this session.` +
-    (supervised ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +
+    (isLead(run.context.definition)
+      ? " You are a feature lead: you may delegate to workers with `pier task run` (never `--role lead`), and their results come back to you."
+      : supervised ? " You cannot delegate from here — `pier task` is refused; if the work needs another agent, say so in your result and your supervisor will run it." : "") +
     "\n\n";
 };
 
@@ -169,6 +171,7 @@ export class AgentTaskRunner {
       model: action.launch?.model ??
         (run.sourceSessionId ? this.router.modelOf(run.sourceSessionId) : undefined),
       thinking: action.launch?.thinking,
+      role: action.launch?.role,
     };
     const opening = this.factory.create(opts).then(async (session) => {
       // SDK creation cannot be cancelled; a late session still belongs to this

@@ -191,11 +191,20 @@ export async function handleTask(
   // Delegation is one level (docs/design/09-tasks-cli.md §Two levels, no tree):
   // what a supervised run launched would report to a session no run owns. A
   // queued run has not taken the session's turn, so it gates nothing yet.
+  // A feature lead is the one delegated run that may, and never to a lead, so depth stays 2.
+  const lead = store.roleOf(callerSessionId) === "lead";
   const active = store.findActiveRunForTarget(callerSessionId);
-  if (active?.state === "running" && store.supervised(active)) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
+  if (active?.state === "running" && store.supervised(active) && !lead) throw new Error("a delegated run cannot delegate; ask in your result and let your supervisor run it");
+  // Read off a draft before it is filed; a saved definition has the same shape under `action`.
+  const notLead = <T>(draft: T): T => {
+    const role = record(record(draft)?.launch)?.role ?? record(record(record(draft)?.action)?.launch)?.role;
+    if (lead && role === "lead") throw new Error("a feature lead cannot launch a lead; a build lead is your supervisor's to launch, from your milestone");
+    return draft;
+  };
   const menu: Menu = () => host.models().then((listed) => listed.models);
   if (input.operation === "list") return definitions.list().filter((task) => task.kind !== "subagent");
   if (input.operation === "runs") {
+    if (lead) return host.ledger([callerSessionId], Date.now() - RUNS_WINDOW_MS);
     if (!chain?.enabled() || !chain.isMember(callerSessionId)) throw new Error("runs lists the continuous conversation's runs; this session is not one of its sessions");
     return host.ledger(chain.launchers(callerSessionId), Date.now() - RUNS_WINDOW_MS);
   }
@@ -225,8 +234,8 @@ export async function handleTask(
         const entry = typeof rawEntry === "string" ? { prompt: rawEntry } : record(rawEntry);
         if (!entry) throw new Error("invalid tasks[] entry");
         resolved.push(entry.task_id === undefined
-          ? await resolveDraft(definitions, menu, entry, callerSessionId)
-          : definitions.get(requiredString(entry.task_id, "task_id")));
+          ? await resolveDraft(definitions, menu, notLead(entry), callerSessionId)
+          : notLead(definitions.get(requiredString(entry.task_id, "task_id"))));
       }
       const groupCallbackSessionId = input.callback === "none" ? null : callerSessionId;
       const { group, runs } = host.runGroup(
@@ -240,8 +249,8 @@ export async function handleTask(
     }
     const draft = input.task_id === undefined ? inlineDraft(input) : undefined;
     const task = draft
-      ? await resolveDraft(definitions, menu, draft, callerSessionId)
-      : definitions.get(requiredString(input.task_id, "task_id"));
+      ? await resolveDraft(definitions, menu, notLead(draft), callerSessionId)
+      : notLead(definitions.get(requiredString(input.task_id, "task_id")));
     const callbackSessionId = await callbackTarget(input, definitions, callerSessionId);
     const run = host.run(task.id, null, "agent", null, {
       invokedBySessionId: callerSessionId,

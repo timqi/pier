@@ -527,11 +527,16 @@ export interface PackageStore {
   checkUpdates(): Promise<PackageRegistry>;
 }
 
+/** A session's role beyond an ordinary one: a feature lead may delegate to
+ *  workers, and opens with the lead contract (docs/design/10-continuous-session.md). */
+export type AgentRole = "lead";
+
 export interface AgentLaunchOptions {
   cwd: string;
   name?: string;
   model?: ModelRef;
   thinking?: ThinkingLevel;
+  role?: AgentRole;
 }
 
 export interface SessionSummary {

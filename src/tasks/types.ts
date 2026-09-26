@@ -3,7 +3,7 @@
 // messenger must agree on. Owner-defined and browser-importable type-only
 // (architecture.md), so nothing here may reach for a runtime or a node builtin.
 
-import type { ModelRef, ThinkingLevel } from "../core/types.js";
+import type { AgentRole, ModelRef, ThinkingLevel } from "../core/types.js";
 
 export type TaskTrigger =
   | { type: "manual" }
@@ -17,6 +17,8 @@ export type AgentSessionPolicy =
 export interface AgentLaunchPolicy {
   model?: ModelRef;
   thinking?: ThinkingLevel;
+  /** A feature lead: may delegate to workers, opens with the lead contract. */
+  role?: AgentRole;
 }
 
 export type AgentTaskAction = {
@@ -241,3 +243,7 @@ export const isTerminal = (state: TaskRunState): boolean =>
   state === "cancelled" ||
   state === "interrupted" ||
   state === "skipped";
+
+/** A definition whose runs are a feature lead's. */
+export const isLead = (task: TaskDefinition): boolean =>
+  task.action.type === "agent" && task.action.launch?.role === "lead";

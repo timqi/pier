@@ -2,7 +2,7 @@
 // the tick, the boot recovery that writes off interrupted runs, and the pause a
 // drain needs. Decisions belong to the files beside it.
 
-import type { AgentFactory, AgentSession, BackgroundRun } from "../core/types.js";
+import type { AgentFactory, AgentRole, AgentSession, BackgroundRun } from "../core/types.js";
 import type { LedgerRun, MainChain } from "../core/chain.js";
 import type { EventHub } from "../core/hub.js";
 import type { Router } from "../core/router.js";
@@ -369,6 +369,10 @@ export class TaskService {
     });
     this.runs.start(run);
     return run;
+  }
+
+  roleOf(sessionId: string): AgentRole | undefined {
+    return this.store.roleOf(sessionId);
   }
 
   /** What `pier task` asks, under the calling session's identity. */
