@@ -412,6 +412,8 @@ export interface AgentSession {
    * requests arrive seconds apart, the 1h write premium never pays off).
    * Read per request, so it may change after open; other providers ignore it. */
   setCacheRetention(retention: "short" | "long"): void;
+  /** The skills Pi loaded for this session: exactly what `/skill:<name>` expands. */
+  skills(): { name: string; description: string }[];
   /** Pending queue as-is, for snapshotting a session into a fresh client. */
   pendingQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   /** System inputs handed over while the session was streaming and not in the

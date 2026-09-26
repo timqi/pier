@@ -409,7 +409,7 @@ export function createServer(
   guarded(app, "GET", "/api/sessions/:id/history", 404, async (c) => {
     const id = c.req.param("id");
     // Nothing live to snapshot: no cursor, no state, the transcript and its run cards.
-    if (older(id)) return c.json({ turns: (await turnsOf(id)).map(slim), backgroundRuns: backgroundRuns?.(id) ?? [], readonly: true });
+    if (older(id)) return c.json({ turns: (await turnsOf(id)).map(slim), backgroundRuns: backgroundRuns?.(id) ?? [], skills: [], readonly: true });
     const session = await ensureLoadable(id);
     // Async seam reads can straddle an event. Never label older content with a
     // newer cursor, and never spin indefinitely if the session stays busy.
@@ -428,6 +428,7 @@ export function createServer(
         queueRecovery: router.recoveryOf(id),
         queueUncertain: router.queueUncertain(id),
         backgroundRuns: backgroundRuns?.(id) ?? [],
+        skills: session.skills(),
       });
     }
     log.warn(`snapshot for ${id} changed during all 3 reads`);

@@ -502,4 +502,63 @@ describe("the chat-command completion", () => {
     type("/");
     expect(rows()).toEqual([]);
   });
+
+  const skills = [
+    { name: "pier-tasks", description: "Delegate work to a run." },
+    { name: "pier-boards", description: "Publish a Board." },
+  ];
+
+  it("lists the chain commands, then every skill with its description, as one list", () => {
+    continuous(true);
+    composer.setSkills(skills);
+    type("/");
+    expect(rows()).toEqual([
+      "/statuswhat is open — in flight, or waiting on you", "/newstart a new session now", "/stopstop the reply in progress",
+      "/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board.",
+    ]);
+    type("/s");
+    expect(rows()).toEqual(["/statuswhat is open — in flight, or waiting on you", "/stopstop the reply in progress",
+      "/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board."]);
+    // The exact chain word hides the list, skills that would match included.
+    composer.setSkills([{ name: "stop-all", description: "x" }]);
+    type("/stop");
+    expect(rows()).toEqual([]);
+  });
+
+  it("matches a skill by its name alone, and never takes its full word as exact", () => {
+    continuous(true);
+    composer.setSkills(skills);
+    type("/pier-t");
+    expect(rows()).toEqual(["/skill:pier-tasksDelegate work to a run."]);
+    type("/skill:pier-b");
+    expect(rows()).toEqual(["/skill:pier-boardsPublish a Board."]);
+    type("/skill:pier-boards");
+    expect(rows()).toEqual(["/skill:pier-boardsPublish a Board."]);
+  });
+
+  it("fills a skill with a trailing space that closes the list for the ask", () => {
+    continuous(true);
+    composer.setSkills(skills);
+    type("/pier-b");
+    key({ key: "Enter" });
+    expect(node("#input").value).toBe("/skill:pier-boards ");
+    expect(menu().classList.contains("hidden")).toBe(true);
+    expect(state.fetch).not.toHaveBeenCalled();
+    type("/pier");
+    onScreen("#command-menu")[0]!.onpointerdown!({ preventDefault: vi.fn() });
+    expect(node("#input").value).toBe("/skill:pier-tasks ");
+  });
+
+  it("offers skills outside the continuous conversation, and nothing when there are none", () => {
+    continuous(false);
+    composer.setSkills(skills);
+    type("/");
+    expect(rows()).toEqual(["/skill:pier-tasksDelegate work to a run.", "/skill:pier-boardsPublish a Board."]);
+    type("/status");
+    expect(rows()).toEqual([]);
+    composer.setSkills([]);
+    type("/");
+    expect(rows()).toEqual([]);
+    expect(menu().classList.contains("hidden")).toBe(true);
+  });
 });

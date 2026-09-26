@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
   renderRecovery: vi.fn(),
+  setSkills: vi.fn(),
   appendDivider: vi.fn(),
   appendPager: vi.fn(),
   content: [] as string[],
@@ -33,7 +34,7 @@ vi.mock("./composer.js", () => ({
   clearOptimistic: vi.fn(), dropParked: vi.fn(), focusInput: vi.fn(),
   initComposer: (deps: typeof h.composer) => { h.composer = deps; },
   markOptimisticUser: vi.fn(), reconcileOptimisticUser: vi.fn(() => false),
-  renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), updateComposer: vi.fn(),
+  renderQueue: vi.fn(), renderRecovery: h.renderRecovery, restoreDraft: vi.fn(), saveDraft: vi.fn(), send: vi.fn(), setSkills: h.setSkills, updateComposer: vi.fn(),
 }));
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
 vi.mock("./session-header.js", () => ({
@@ -80,7 +81,7 @@ function deferred<T = Response>() {
 }
 const snapshot = (text: string, lastSeq = 0, epoch = "new") => Response.json({
   turns: [{ role: "user", text }], lastSeq, epoch, model: null, state: "idle",
-  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [], parked: [] }, queueRecovery: [], queueUncertain: false, backgroundRuns: [],
+  context: null, thinkingLevel: "medium", queue: { steering: [], followUp: [], parked: [] }, queueRecovery: [], queueUncertain: false, backgroundRuns: [], skills: [],
 });
 const latest = () => Stream.all.at(-1)!;
 const settled = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -128,6 +129,15 @@ describe("session loads", () => {
     expect(h.renderRecovery).toHaveBeenLastCalledWith([], true);
     latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 2, ts: 1, type: "queue-recovery", batches: [], uncertain: false }) });
     expect(h.renderRecovery).toHaveBeenLastCalledWith([], false);
+  });
+
+  it("hands the snapshot's skills to the composer, and clears them with the pane", async () => {
+    const skills = [{ name: "pier-tasks", description: "Delegate." }];
+    h.history.mockResolvedValueOnce(Response.json({ ...await snapshot("loaded").json(), skills }));
+    h.sidebar.select("a");
+    expect(h.setSkills).toHaveBeenLastCalledWith([]);
+    await settled();
+    expect(h.setSkills).toHaveBeenLastCalledWith(skills);
   });
 
   // Opened from Runs or Activity: a task run's own session is never a row, and

@@ -280,6 +280,13 @@ describe("a prompt that races a turn", () => {
   });
 });
 
+it("lists the skills its loader holds — the set /skill: expands — as name and description only", () => {
+  const fake = fakePi();
+  const skill = { name: "pier-tasks", description: "Delegate.", filePath: "/s/SKILL.md", baseDir: "/s", disableModelInvocation: true };
+  const pi = { ...fake.pi, resourceLoader: { getSkills: () => ({ skills: [skill], diagnostics: [] }) } };
+  expect(new PiSession(pi as never).skills()).toEqual([{ name: "pier-tasks", description: "Delegate." }]);
+});
+
 describe("a system input handed to a streaming session", () => {
   const origin = {
     kind: "task-message", taskId: "t", runId: "r", sourceSessionId: "parent",

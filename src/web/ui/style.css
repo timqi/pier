@@ -758,6 +758,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 @media (pointer: coarse) {
   .palette-row { min-height: 44px; }
+  #command-menu { max-height: calc(8 * 44px + 0.5rem); }
   /* A thumb has no arrows and no Esc key, and the backdrop is how it closes the
      palette. The count stays: that is an answer, not an instruction. */
   #palette kbd, #palette-keys { display: none; }
