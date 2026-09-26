@@ -360,7 +360,7 @@ app.route("/", createServer({
   activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
   parkedMessages: (id) => tasks.parkedMessages(id),
   taskSessions: () => tasks.taskSessions(),
-  roleOf: (id) => taskStore.roleOf(id),
+  leadPhaseOf: (id) => taskStore.leadPhaseOf(id),
   channelOf: (id) => conversations.keyOf(id)?.channelId,
   continuous: chain,
 }));

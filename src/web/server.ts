@@ -21,13 +21,13 @@ import { fileHeaders, MAX_FILE_BYTES, registerFsRoutes } from "./fs.js";
 import { guarded } from "./route.js";
 import type {
   AgentFactory,
-  AgentRole,
   AgentSession,
   BackgroundRun,
   CatalogEntry,
   ChatTurn,
   ConfigStore,
   InboundMessage,
+  LeadPhase,
   PackageStore,
   ParkedMessage,
   ProviderManager,
@@ -149,8 +149,8 @@ export interface WebDeps {
   parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
-  /** `TaskStore.roleOf`: a lead's session stays in the rail for its life. */
-  roleOf?: (sessionId: string) => AgentRole | undefined;
+  /** `TaskStore.leadPhaseOf`: a lead's session stays in the rail for its life, tagged by phase. */
+  leadPhaseOf?: (sessionId: string) => LeadPhase | undefined;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -209,7 +209,7 @@ export function createServer(
     activeBackgroundRunCounts,
     parkedMessages,
     taskSessions,
-    roleOf,
+    leadPhaseOf,
     channelOf,
     continuous,
   }: WebDeps,
@@ -311,6 +311,10 @@ export function createServer(
 
   // `rank` is the place in the rail's working set; `modified` is for the
   // row's tooltip and orders nothing.
+  const leadOf = (id: string) => {
+    const phase = leadPhaseOf?.(id);
+    return phase ? { role: "lead" as const, phase } : {};
+  };
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>) => ({
     ...s,
     ...(own?.rank === undefined ? {} : { rank: own.rank }),
@@ -318,7 +322,7 @@ export function createServer(
     unread: own?.unread ?? false,
     channel: channelOf?.(s.id) ?? "web",
     activeRuns: active.get(s.id) ?? 0,
-    ...(roleOf?.(s.id) === "lead" ? { role: "lead" as const } : {}),
+    ...leadOf(s.id),
   });
 
   // The rail's top rows are maintained here and nowhere else: a session a

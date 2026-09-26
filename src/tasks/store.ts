@@ -3,7 +3,7 @@
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { pierDb, statements, transact } from "../db.js";
-import type { AgentRole } from "../core/types.js";
+import { BUILD_PROMPT, type AgentRole, type LeadPhase } from "../core/types.js";
 import { createdRole, type RunPage, type RunQuery, type RunView, type TaskDefinition, type TaskGroup, type TaskMessage, type TaskRun } from "./types.js";
 
 interface JsonRow {
@@ -251,6 +251,12 @@ export class TaskStore {
   roleOf(sessionId: string): AgentRole | undefined {
     const run = this.creatorOf(sessionId);
     return run && createdRole(run);
+  }
+
+  leadPhaseOf(sessionId: string): LeadPhase | undefined {
+    const run = this.creatorOf(sessionId);
+    if (!run || createdRole(run) !== "lead" || run.context.definition.action.type !== "agent") return undefined;
+    return run.context.definition.action.prompt.startsWith(BUILD_PROMPT) ? "build" : "design";
   }
 
   /** What a milestone resumes, and whose supervisor it reports to. */

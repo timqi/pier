@@ -212,7 +212,9 @@ browser keeps no second session order.
 - One row is lit, the route's: a session row or Conversation only while the
   chat is on screen, a Console row while its view is.
 - A lead's session (`role: "lead"`) is in that set for its life, idle and read
-  included, its dot "lead — waiting for you"; it leaves when closed.
+  included, its dot "lead — waiting for you"; it leaves when closed. Its
+  `phase` (`design` | `build`) is a trailing tag before the dot, in the rail
+  and the palette.
 - Focus: refreshes retain the focused control; Load more focuses the first
   added row; an open menu reuses its trigger across refreshes. The mobile
   drawer removes hidden controls from the tab order, contains focus, restores

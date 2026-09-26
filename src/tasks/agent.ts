@@ -161,7 +161,8 @@ export class AgentTaskRunner {
     signal.throwIfAborted();
     const opts = {
       cwd,
-      name: `${run.context.definition.name} [${run.id.slice(0, 8)}]`,
+      // The rail's title: the caller's `--name`, else the prompt's first line.
+      name: run.context.definition.name,
       // Unspecified model inherits the caller's live model, not the global
       // default; falls back to the default when the caller isn't attached.
       model: launch.model ??

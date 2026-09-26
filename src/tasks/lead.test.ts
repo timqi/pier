@@ -86,6 +86,10 @@ describe("a feature lead", () => {
     expect(run.context.renderedPrompt).toContain("You are a feature lead: you may delegate to workers");
     expect(store.roleOf(run.targetSessionId!)).toBe("lead");
     expect(store.roleOf("main")).toBeUndefined();
+    expect(store.leadPhaseOf(run.targetSessionId!)).toBe("design");
+    const build = await service.waitForRun((await service.handle({ operation: "run", prompt: "Build per /repo/design.md: go", launch: { role: "lead" } }, "main") as { runId: string }).runId);
+    expect(store.leadPhaseOf(build.targetSessionId!)).toBe("build");
+    expect(store.leadPhaseOf("main")).toBeUndefined();
     await expect(service.handle({ operation: "run", prompt: "x", launch: { role: "boss" } }, "main")).rejects.toThrow(/role must be lead/);
   });
 

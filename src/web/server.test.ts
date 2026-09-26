@@ -322,7 +322,7 @@ function setup(
     activeBackgroundRunCounts: () => tasks.activeBackgroundRunCounts(),
     parkedMessages: (id) => tasks.parkedMessages(id),
     taskSessions: () => tasks.taskSessions(),
-    roleOf: (id) => tasks.store.roleOf(id),
+    leadPhaseOf: (id) => tasks.store.leadPhaseOf(id),
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -430,25 +430,31 @@ describe("workbench server", () => {
   });
 
   // The rail keeps a lead in progress for its life (ui/sidebar.ts); the role
-  // is the task store's, and only a lead's row says one.
-  it("marks a lead's session with its role", async () => {
+  // is the task store's, only a lead's row says one, tagged by its phase.
+  it("marks a lead's session with its role and phase", async () => {
     const { app, db, factory, tasks } = setup();
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1 },
       { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2 },
+      { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3 },
     ]);
-    const task = await tasks.create({
-      name: "feature",
-      trigger: { type: "manual" },
-      action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "design", launch: { role: "lead" } },
-    });
-    new TaskStore(db).saveRun(storedRun(task, "lead-run", {
-      sourceSessionId: "s1", targetSessionId: "lead", sessionMode: "fresh", callbackSessionId: "s1",
-      state: "succeeded", context: { definition: task, sessionId: "lead" }, startedAt: 1, finishedAt: 2,
-    }));
+    const lead = async (runId: string, sessionId: string, prompt: string) => {
+      const task = await tasks.create({
+        name: "feature",
+        trigger: { type: "manual" },
+        action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt, launch: { role: "lead" } },
+      });
+      new TaskStore(db).saveRun(storedRun(task, runId, {
+        sourceSessionId: "s1", targetSessionId: sessionId, sessionMode: "fresh", callbackSessionId: "s1",
+        state: "succeeded", context: { definition: task, sessionId }, startedAt: 1, finishedAt: 2,
+      }));
+    };
+    await lead("lead-run", "lead", "design");
+    await lead("build-run", "builder", "Build per /tmp/design.md: go");
     expect(await (await app.request("/api/sessions")).json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 0, channel: "web" },
-      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead" },
+      { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "design" },
+      { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "build" },
     ]);
   });
 

@@ -65,6 +65,14 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   expect(dot({ role: "lead" })).toMatchObject({ title: "lead — waiting for you" });
 });
 
+// The phase is English whatever the title's language; no phase, no tag.
+it("tags a lead's row with its phase, and nothing else", () => {
+  const tag = (over: Partial<Row>) => sidebar.phaseTag(row("x", over))[0] as unknown as { cls: string; title: string } | undefined;
+  expect(tag({})).toBeUndefined();
+  expect(tag({ role: "lead", phase: "design" })).toMatchObject({ title: "lead — designing with you" });
+  expect(tag({ role: "lead", phase: "build" })).toMatchObject({ title: "lead — building per the design" });
+});
+
 // ⌘⇧[ / ⌘⇧] step through the rail as it is drawn — working set, then the
 // rest — past the "Load more" fold and around either end.
 it("steps to the neighbouring session in rail order, wrapping", () => {

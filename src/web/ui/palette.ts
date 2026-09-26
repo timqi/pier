@@ -8,7 +8,7 @@ import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
 import { listStep, menuOpen } from "./menu.js";
 import { projectCwds } from "../../core/identity.js";
-import { isLive, openNewSession, orderSessions, stateDot, type SessionInfo } from "./sidebar.js";
+import { isLive, openNewSession, orderSessions, phaseTag, stateDot, type SessionInfo } from "./sidebar.js";
 import { shortcut } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
 import type { SearchHit } from "../../core/types.js";
@@ -157,6 +157,7 @@ function paletteRow(t: Target): HTMLElement {
   if (t.detail) phrase.append(h("span", DETAIL, t.detail));
   head.append(phrase);
   const age = ageOf(t);
+  if (t.session) head.append(...phaseTag(t.session));
   if (age !== undefined) head.append(h("span", MARK, relTime(age)));
   body.append(head);
   if (t.hit) {

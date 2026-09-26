@@ -29,9 +29,14 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
   (`LEAD`), never on disk; its session stays in the rail for its life (idle
   dot "lead — waiting for you") and leaves it when the operator closes it
   (Session menu → Close; a message reopens it).
-- The user designs with the lead in its session, main not in that path; the
-  lead's `Design final: <absolute path>` has main launch a new build lead on
-  that doc, which launches and integrates workers; main gets milestones only.
+- The user designs with the lead in its session, main not in that path; only
+  the user finalizes: the lead asks (a `[Finalize design]` button) and writes
+  `Design final: <absolute path>` once they confirm, which has main launch a
+  new build lead on that doc, its prompt opening `Build per ` (`BUILD_PROMPT`),
+  which launches and integrates workers; main gets milestones only.
+- Every run main or a lead launches is `--name`d with a few words that hit its
+  intent; the name is the session's title. A lead's rail row carries its phase,
+  `design` or `build` (`TaskStore.leadPhaseOf`), in English whatever the title's language.
 - Before the first tool call on a message main decides: answer from context,
   or dispatch; one command may answer, a second means a worker.
 - A callback writes no note; a note records a decision or a fact the ledger

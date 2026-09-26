@@ -12,7 +12,7 @@ import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { setAttention } from "./shell.js";
 import { chord, modalOpen, shortcut } from "./shortcut.js";
-import type { ChainMember, SessionState } from "../../core/types.js";
+import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -33,6 +33,8 @@ export interface SessionInfo {
   activeRuns: number;
   /** A feature lead's session (`pier task run --role lead`): in progress for its life. */
   role?: "lead";
+  /** That lead's phase: designing with the user, or building per a doc. */
+  phase?: LeadPhase;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -134,6 +136,15 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
   return [dot];
 }
 
+/** A lead's phase in English whatever language its title is in; trailing, so a
+ *  truncated title never hides it. */
+export const phaseTag = (s: SessionInfo): HTMLElement[] => {
+  if (!s.phase) return [];
+  const tag = h("span", "flex-none rounded bg-neutral-100 px-1 text-[0.6875rem] font-medium leading-4 text-neutral-500", s.phase);
+  tag.title = s.phase === "design" ? "lead — designing with you" : "lead — building per the design";
+  return [tag];
+};
+
 // --- row actions ---------------------------------------------------------------------
 
 /** Drawn before the write and taken back if it fails; what a successful write
@@ -178,6 +189,7 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
   };
   const open = h("button", "session-open flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-lg text-left",
     h("span", "min-w-0 flex-1 truncate", s.title ?? "untitled"),
+    ...phaseTag(s),
     ...stateDot(s),
   );
   open.setAttribute("type", "button");
