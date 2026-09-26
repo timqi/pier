@@ -42,7 +42,8 @@ const views = new Map<ConsoleName, ConsoleView>();
 /** In-flight builds, so leaving and reopening a loading view cannot construct
  *  it twice and duplicate its document listeners. */
 const building = new Map<ConsoleName, Promise<ConsoleView>>();
-const consoleBtns = new Map<ConsoleName, HTMLElement>();
+/** The rail's one Console row; Files is an overlay with no row of its own. */
+const settingsBtn = $("#open-settings");
 /** Which view the route says is open, set before its chunk lands: the top bar
  *  and the overlay toggles may not wait on a fetch to know where they are. */
 let openName: ConsoleName | null = null;
@@ -79,7 +80,7 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
-  for (const [btnName, btn] of consoleBtns) btn.classList.toggle("bg-indigo-50", btnName === name);
+  settingsBtn.classList.toggle("bg-indigo-50", name === "settings");
   renderSessions(); // the open session's row goes dark while a view covers it
   syncBar();
   void openView(name, arg, query, ++openRequest);
@@ -148,7 +149,7 @@ export function showChat(): void {
   if (!openName) return;
   openName = null;
   for (const view of views.values()) view.hide();
-  for (const btn of consoleBtns.values()) btn.classList.remove("bg-indigo-50");
+  settingsBtn.classList.remove("bg-indigo-50");
   renderSessions();
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
@@ -270,8 +271,6 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
 
 export function initViews(d: ViewsDeps): void {
   deps = d;
-  const settingsBtn = $("#open-settings");
-  consoleBtns.set("settings", settingsBtn);
   settingsBtn.onclick = () => showConsole("settings");
   const consoleSection = $<HTMLDetailsElement>("#console-section");
   consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";

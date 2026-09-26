@@ -335,7 +335,7 @@ function commandMatches(): CommandRow[] {
   if (!draft.startsWith("/") || /\s/.test(draft) || commandDismissed) return [];
   const prefix = draft.slice(1);
   const chain = deps.continuous?.() === true ? (Object.keys(CHAT_COMMANDS) as ChatCommand[]) : [];
-  if ((chain as string[]).includes(prefix)) return [];
+  if (chain.some((c) => c === prefix)) return [];
   return [
     ...chain.filter((c) => c.startsWith(prefix)).map((c) => ({ word: `/${c}`, line: CHAT_COMMANDS[c], fill: `/${c}` })),
     ...skills.filter((s) => `skill:${s.name}`.startsWith(prefix) || s.name.startsWith(prefix))
