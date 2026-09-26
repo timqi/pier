@@ -31,10 +31,12 @@ export interface SessionInfo {
   channel: string;
   /** Background runs this session launched that are still in flight. */
   activeRuns: number;
-  /** A feature lead's session (`pier task run --role lead`): in progress for its life. */
+  /** A feature lead's session (`pier task run --role lead`). */
   role?: "lead";
   /** That lead's phase: designing with the user, or building per a doc. */
   phase?: LeadPhase;
+  /** That lead's: a run targeting its session is queued or running. */
+  runLive?: true;
 }
 
 /** Everything the sidebar needs from the orchestrator (main.ts). */
@@ -116,13 +118,13 @@ const waitingForYou = (s: SessionInfo): boolean => s.unread;
 export const runsLabel = (runs: number): string => `${runs} subagent${runs > 1 ? "s" : ""} running`;
 
 /** A session with something going on in it: running, waiting for a look,
- *  subagents in flight, or a lead, live or not, until it is deleted — what the
- *  dot marks, and what the palette lists first. */
+ *  subagents in flight, or a lead's run queued — what the dot marks, and what
+ *  the palette lists first. */
 export const isLive = (s: SessionInfo): boolean =>
-  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.role === "lead";
+  s.state === "streaming" || waitingForYou(s) || s.activeRuns > 0 || s.runLive === true;
 
 /** Green = running, amber = waiting for a look, sky = subagents in flight,
- *  grey = an idle lead, whose turn ended on the user. Idle has no mark or slot. */
+ *  grey = a lead's run queued. Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   if (!isLive(s)) return [];
   return markDot(
@@ -132,7 +134,7 @@ export function stateDot(s: SessionInfo): HTMLElement[] {
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
           ? ["bg-sky-500", runsLabel(s.activeRuns)]
-          : ["bg-neutral-400", "lead — waiting for you"],
+          : ["bg-neutral-400", "lead — run queued"],
   );
 }
 
@@ -223,18 +225,17 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 const renderKey = (): string =>
   `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
-const live = (r: OpenRun): boolean => r.state === "running" || r.state === "queued";
+/** No run of its queued or running, no subagent, no turn streaming: what is
+ *  left waits on the user, and `/status` and search reach it. */
+const leadFinished = (s: SessionInfo): boolean =>
+  s.role === "lead" && s.state !== "streaming" && s.runLive !== true && s.activeRuns === 0;
 
 /** Switch on, the rail below the conversation: the palette's Running set in
  *  rail order, less the conversation's own sessions, which its row stands for,
- *  and the sessions of an open item's finished runs, which wait on the user in
- *  `/status`. */
-export function inProgress(list: SessionInfo[], chain: ChainMember[], open: OpenItems | null = null): SessionInfo[] {
+ *  and finished leads. */
+export function inProgress(list: SessionInfo[], chain: ChainMember[]): SessionInfo[] {
   const members = new Set(chain.map((m) => m.sessionId));
-  const runs = open?.items.flatMap((i) => i.runs) ?? [];
-  const running = new Set(runs.filter(live).map((r) => r.targetSessionId));
-  const folded = new Set(runs.filter((r) => !live(r) && !running.has(r.targetSessionId)).map((r) => r.targetSessionId));
-  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id) && !folded.has(s.id)));
+  const { top, rest } = orderSessions(list.filter((s) => isLive(s) && !members.has(s.id) && !leadFinished(s)));
   return [...top, ...rest];
 }
 
@@ -255,10 +256,12 @@ function continuousRail(chain: ChainMember[]): { entry: HTMLElement; live: Sessi
   entry.dataset.sessionId = "continuous";
   entry.title = "The continuous conversation — one per instance";
   entry.append(button);
-  return { entry, live: inProgress(deps.sessions(), chain, deps.open()) };
+  return { entry, live: inProgress(deps.sessions(), chain) };
 }
 
 // --- open items in progress (docs/design/10-continuous-session.md) ------------------
+
+const live = (r: OpenRun): boolean => r.state === "running" || r.state === "queued";
 
 /** A row shaped like a session's, for a run that has no session row: the
  *  name, a tag, the dot, one target. */
@@ -383,7 +386,7 @@ export function initSidebar(d: SidebarDeps): void {
       return;
     }
     // Switch on, the rail's rows are the conversation and what is in progress.
-    const ids = ["continuous", ...inProgress(deps.sessions(), chain, deps.open()).map((s) => s.id)];
+    const ids = ["continuous", ...inProgress(deps.sessions(), chain).map((s) => s.id)];
     const at = deps.continuousOpen() ? 0 : ids.indexOf(deps.currentId() ?? "");
     const next = ids[(Math.max(at, 0) + by + ids.length) % ids.length];
     if (next === "continuous") deps.openContinuous();

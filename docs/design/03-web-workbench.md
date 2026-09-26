@@ -205,8 +205,8 @@ browser keeps no second session order.
   palette. All stand down under a modal.
 - **Continuous session on** (Settings → Instance): the list is the
   **Conversation** row (the head's dot), then **In progress** — the palette's
-  Running set in rail order, less the conversation's own sessions and the
-  sessions of an open item's finished runs, then the open items'
+  Running set in rail order, less the conversation's own sessions and
+  finished leads, then the open items'
   ([10 §Open items](10-continuous-session.md#open-items)) live (running,
   queued) runs no session row stands for, as rows of the same shape:
   `<name>` + `run` tag + the run state's dot, opening the run's session (the
@@ -224,10 +224,12 @@ browser keeps no second session order.
   and `open-items-changed`.
 - One row is lit, the route's: a session row or Conversation only while the
   chat is on screen, a Console row while its view is.
-- A lead's session (`role: "lead"`) is in that set for its life, idle and read
-  included, its dot "lead — waiting for you"; it leaves when closed. Its
-  `phase` (`design` | `build`) is a trailing tag before the dot, in the rail
-  and the palette.
+- A lead's session (`role: "lead"`) is live while `runLive` (a run targeting
+  it queued or running; grey dot "lead — run queued" when nothing else marks
+  it). It is in In progress only while `runLive`, its subagents or a streaming
+  turn hold it — unread alone does not; finished, it is the palette's and
+  `/status`'s. Its `phase` (`design` | `build`) is a trailing tag before the
+  dot, in the rail and the palette.
 - Focus: refreshes retain the focused control; Load more focuses the first
   added row; an open menu reuses its trigger across refreshes. The mobile
   drawer removes hidden controls from the tab order, contains focus, restores

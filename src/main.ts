@@ -363,6 +363,7 @@ app.route("/", createServer({
   parkedMessages: (id) => tasks.parkedMessages(id),
   taskSessions: () => tasks.taskSessions(),
   leadPhaseOf: (id) => taskStore.leadPhaseOf(id),
+  runLiveFor: (id) => taskStore.findActiveRunForTarget(id) !== undefined,
   channelOf: (id) => conversations.keyOf(id)?.channelId,
   continuous: chain,
 }));

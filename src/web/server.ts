@@ -149,8 +149,10 @@ export interface WebDeps {
   parkedMessages?: (sessionId: string) => ParkedMessage[];
   /** Sessions a task run created for itself; not the operator's conversations. */
   taskSessions?: () => Set<string>;
-  /** `TaskStore.leadPhaseOf`: a lead's session stays in the rail for its life, tagged by phase. */
+  /** `TaskStore.leadPhaseOf`: a lead's session is tagged by its phase in the rail and the palette. */
   leadPhaseOf?: (sessionId: string) => LeadPhase | undefined;
+  /** A run targeting the session is queued or running (`TaskStore.findActiveRunForTarget`). */
+  runLiveFor?: (sessionId: string) => boolean;
   /** The IM channel that durably owns a session. Not push.ts's question, which
    *  is answered from the live router: a chat session prompted from the
    *  workbench answers "web" there and its owning channel here. */
@@ -210,6 +212,7 @@ export function createServer(
     parkedMessages,
     taskSessions,
     leadPhaseOf,
+    runLiveFor,
     channelOf,
     continuous,
   }: WebDeps,
@@ -313,7 +316,8 @@ export function createServer(
   // row's tooltip and orders nothing.
   const leadOf = (id: string) => {
     const phase = leadPhaseOf?.(id);
-    return phase ? { role: "lead" as const, phase } : {};
+    if (!phase) return {};
+    return { role: "lead" as const, phase, ...(runLiveFor?.(id) ? { runLive: true } : {}) };
   };
   const present = (s: SessionSummary, own: SessionFlags | undefined, active: Map<string, number>) => ({
     ...s,

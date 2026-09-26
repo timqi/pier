@@ -62,7 +62,8 @@ it("draws no dot on an idle row and paints one only for something to look at", (
   // so the flag alone is the dot — a turn that answered Slack never carries it.
   expect(dot({ unread: true })?.cls).toContain("bg-amber-500");
   expect(dot({ activeRuns: 2 })).toMatchObject({ cls: expect.stringContaining("bg-sky-500"), title: "2 subagents running" });
-  expect(dot({ role: "lead" })).toMatchObject({ title: "lead — waiting for you" });
+  expect(dot({ role: "lead" })).toBeUndefined();
+  expect(dot({ role: "lead", runLive: true })).toMatchObject({ title: "lead — run queued" });
 });
 
 // The phase is English whatever the title's language; no phase, no tag.

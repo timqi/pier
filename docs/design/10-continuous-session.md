@@ -28,9 +28,9 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
   on or off (`createdRole`, `TaskStore.roleOf`); the gate is
   [09 §Two levels](09-tasks-cli.md#two-levels-no-tree).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
-  (`LEAD`), never on disk; its session stays in the rail for its life (idle
-  dot "lead — waiting for you") and leaves it when the operator closes it
-  (Session menu → Close; a message reopens it).
+  (`LEAD`), never on disk; its session is in the rail's In progress while a
+  run targeting it is queued or running, its subagents are in flight or a turn
+  streams; once all are finished it leaves, `/status` and search still reach it.
 - The user designs with the lead in its session, main not in that path; only
   the user finalizes: the lead asks (a `[Finalize design]` button) and writes
   `Design final: <absolute path>` once they confirm, which has main launch a
@@ -143,7 +143,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
   text as a `chat-command` system input, mode `append`, no turn, its origin
   carrying `sessions`, run id → session id for every named run that has one; any
   other text, `/tmp is full` included, is a message.
-- Surfaces: the web card and the rail's In progress rows — only running work: a live run with no session row; an item waiting on the user, and its finished runs' sessions, are `/status`'s alone ([03](03-web-workbench.md),
+- Surfaces: the web card and the rail's In progress rows — only running work: a live run with no session row; an item waiting on the user, and a finished lead's session, are `/status`'s alone ([03](03-web-workbench.md),
   `GET /api/continuous/open`).
 
 ## Run ledger

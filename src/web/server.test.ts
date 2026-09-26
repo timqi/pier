@@ -324,6 +324,7 @@ function setup(
     parkedMessages: (id) => tasks.parkedMessages(id),
     taskSessions: () => tasks.taskSessions(),
     leadPhaseOf: (id) => tasks.store.leadPhaseOf(id),
+    runLiveFor: (id) => tasks.store.findActiveRunForTarget(id) !== undefined,
     channelOf: (id) => imOwners.get(id),
   }));
   return {
@@ -430,16 +431,16 @@ describe("workbench server", () => {
     expect((await app.request("/api/sessions/gone")).status).toBe(404);
   });
 
-  // The rail keeps a lead in progress for its life (ui/sidebar.ts); the role
-  // is the task store's, only a lead's row says one, tagged by its phase.
-  it("marks a lead's session with its role and phase", async () => {
+  // The rail keeps a lead in progress while a run of its is live (ui/sidebar.ts);
+  // the role is the task store's, only a lead's row says one, tagged by its phase.
+  it("marks a lead's session with its role, phase and live run", async () => {
     const { app, db, factory, tasks } = setup();
     vi.mocked(factory.list).mockResolvedValue([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1 },
       { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2 },
       { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3 },
     ]);
-    const lead = async (runId: string, sessionId: string, prompt: string) => {
+    const lead = async (runId: string, sessionId: string, prompt: string, live = false) => {
       const task = await tasks.create({
         name: "feature",
         trigger: { type: "manual" },
@@ -447,15 +448,16 @@ describe("workbench server", () => {
       });
       new TaskStore(db).saveRun(storedRun(task, runId, {
         sourceSessionId: "s1", targetSessionId: sessionId, sessionMode: "fresh", callbackSessionId: "s1",
-        state: "succeeded", context: { definition: task, sessionId }, startedAt: 1, finishedAt: 2,
+        context: { definition: task, sessionId }, startedAt: 1,
+        ...(live ? { state: "running" } : { state: "succeeded", finishedAt: 2 }),
       }));
     };
     await lead("lead-run", "lead", "design");
-    await lead("build-run", "builder", "Build per /tmp/design.md: go");
+    await lead("build-run", "builder", "Build per /tmp/design.md: go", true);
     expect(await (await app.request("/api/sessions")).json()).toEqual([
-      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 0, channel: "web" },
+      { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 1, channel: "web" },
       { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "design" },
-      { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "build" },
+      { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3, state: "idle", unread: false, activeRuns: 0, channel: "web", role: "lead", phase: "build", runLive: true },
     ]);
   });
 

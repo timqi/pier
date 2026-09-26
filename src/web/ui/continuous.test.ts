@@ -97,9 +97,14 @@ it("leaves the conversation's own sessions out of In progress", () => {
     .toEqual(["c"]);
 });
 
-// A lead's ended turn waits on the user: seen or not, it stays until deleted.
-it("keeps an idle, read lead in progress", () => {
-  expect(sidebar.inProgress([row("lead", { role: "lead" }), row("i")], []).map((s) => s.id)).toEqual(["lead"]);
+// A lead is in progress while something of it runs; after that, seen or not, it is `/status`'s and search's.
+it("keeps a lead in progress only while a run, a subagent or a turn of it is live", () => {
+  const lead = (id: string, over: Partial<Row> = {}) => row(id, { role: "lead", ...over });
+  const rows = [
+    lead("done"), lead("unread", { unread: true }), lead("queued", { runLive: true }),
+    lead("workers", { activeRuns: 1 }), lead("talking", { state: "streaming", unread: true }),
+  ];
+  expect(sidebar.inProgress(rows, []).map((s) => s.id).sort()).toEqual(["queued", "talking", "workers"]);
 });
 
 const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
@@ -108,7 +113,7 @@ const labels = () => list().querySelectorAll("div").map((d) => d.textContent.tri
 
 it("lists the open items in progress: a worker's live run as a row, nothing that waits on you, never a lead twice", () => {
   state.chain = [member("h1")];
-  sessions = [row("h1"), row("s-lead1abcdef", { role: "lead" })];
+  sessions = [row("h1"), row("s-lead1abcdef", { role: "lead", runLive: true })];
   state.items = {
     items: [
       { problem: "open items 视图", stage: "lead designing", runs: [
@@ -138,23 +143,6 @@ it("lists the open items in progress: a worker's live run as a row, nothing that
   openContinuous.mockClear();
   byId("run:q1").querySelector("button")!.onclick?.();
   expect(openContinuous).toHaveBeenCalledOnce();
-});
-
-// A finished lead stays in the rail unless an open item names its run: then it waits in `/status`.
-it("leaves an open item's finished run's session out, unless a live run still targets it", () => {
-  state.chain = [member("h1")];
-  sessions = [row("h1"), row("s-lead2", { role: "lead" }), row("s-lead3", { role: "lead" })];
-  state.items = {
-    items: [
-      { problem: "/new /stop", stage: "waiting on you: merge?", runs: [ledgerRun("lead2", { state: "succeeded", finishedAt: 1 })] },
-      { problem: "rerun", stage: "lead running", runs: [ledgerRun("lead3", { state: "succeeded", finishedAt: 1 }), ledgerRun("lead3b", { targetSessionId: "s-lead3" })] },
-    ],
-    unlisted: [],
-  };
-  sidebar.renderSessions();
-  const rows = list().querySelectorAll("[data-session-id]").map((el) => el.dataset.sessionId);
-  expect(rows).toEqual(["continuous", "s-lead3"]);
-  expect(sidebar.inProgress(sessions, state.chain, state.items).map((s) => s.id)).toEqual(["s-lead3"]);
 });
 
 it("adds no row when nothing is open, and none while the switch is off", () => {
