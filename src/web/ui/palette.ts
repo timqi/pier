@@ -1,15 +1,14 @@
 // The ⌘K launcher. The answer is always a session (or a place to go); a
 // matched message is the reason a session is listed, not a result of its own.
 
-import { FolderPlus, MessageSquare, Settings, type IconNode } from "lucide";
+import { MessageSquare, MessagesSquare, Settings, type IconNode } from "lucide";
 import { getJson } from "./api.js";
 import { revealTurn } from "./chat.js";
 import { $, basename, h, relTime, untitled } from "./dom.js";
 import { icon } from "./icons.js";
 import { listStep, menuOpen } from "./menu.js";
-import { projectCwds } from "../../core/identity.js";
-import { isLive, openNewSession, orderSessions, phaseTag, stateDot, type SessionInfo } from "./sidebar.js";
-import { shortcut } from "./shortcut.js";
+import { headSession, isLive, orderSessions, phaseTag, running, stateDot, type SessionInfo } from "./drawer.js";
+import { chord } from "./shortcut.js";
 import type { ConsoleName } from "./views.js";
 import type { SearchHit } from "../../core/types.js";
 
@@ -17,11 +16,10 @@ import type { SearchHit } from "../../core/types.js";
 export interface PaletteDeps {
   sessions: () => SessionInfo[];
   loadSessions: () => Promise<void>;
-  currentId: () => string | null;
   /** Resolves once the session's transcript is on screen, so a hit can scroll
    *  to its turn afterwards. */
   select: (id: string) => Promise<void>;
-  createSession: (cwd: string) => Promise<void>;
+  openContinuous: () => void;
   openConsole: (name: ConsoleName) => void;
 }
 
@@ -52,12 +50,9 @@ const CONSOLE_TARGETS: { name: ConsoleName; icon: IconNode; label: string; detai
   { name: "settings", icon: Settings, label: "Settings", detail: "Console — models and providers, agent files and extensions, channels, password, sign out, security" },
 ];
 
-/** Rows under Recent with nothing typed: the top of the rail, which is what
- *  "the thing I was just in" almost always is. */
+/** Rows under Recent with nothing typed: the newest, which is what "the thing
+ *  I was just in" almost always is. */
 const RECENT = 7;
-/** Directories a query may offer a new session in; the rail's own menu has the
- *  full list. */
-const NEW_IN = 3;
 /** Sessions a query lists: those matched by name first, then those matched
  *  by what was said in them, up to this many in all. */
 const SESSIONS = 8;
@@ -109,7 +104,7 @@ function setActive(index: number): void {
   if (!rows.length) return;
   active = (index + rows.length) % rows.length;
   for (const [i, { el }] of rows.entries()) {
-    el.classList.toggle("bg-indigo-50", i === active); // ink and weight follow in style.css, as on the rail
+    el.classList.toggle("bg-indigo-50", i === active); // ink and weight follow in style.css
     el.setAttribute("aria-selected", String(i === active));
   }
   rows[active]?.el.scrollIntoView({ block: "nearest" });
@@ -204,8 +199,7 @@ function render(): void {
   };
   const sessions = deps.sessions();
   const byId = new Map(sessions.map((s) => [s.id, s]));
-  const { top, rest } = orderSessions(sessions);
-  const ordered = [...top, ...rest];
+  const ordered = orderSessions(sessions);
   const sessionRow = (s: SessionInfo): Target => ({
     icon: MessageSquare,
     label: s.title ?? untitled(s.cwd),
@@ -213,30 +207,24 @@ function render(): void {
     open: open(() => void deps.select(s.id)),
     session: s,
   });
-  const newIn = (cwd: string): Target => ({
-    icon: FolderPlus,
-    label: untitled(cwd),
-    detail: cwd,
-    open: open(() => void deps.createSession(cwd)),
-  });
+  // The one way back from anywhere, so it is first whatever else is listed.
+  const head = headSession();
+  const conversation: Target[] = !q || hit("conversation")
+    ? [{ icon: MessagesSquare, label: "Conversation", detail: "", open: open(deps.openContinuous), ...(head ? { session: head } : {}) }]
+    : [];
   const consoleRows = CONSOLE_TARGETS.filter((t) => !q || hit(`${t.label} ${t.detail}`))
     .map(({ name, icon, label, detail }) => ({ icon, label, detail, open: open(() => deps.openConsole(name)) }));
-  // The rail's own menu, from here: the dialog goes first, so the menu has a
-  // page to anchor on rather than a top layer to hide under.
-  const newAnywhere: Target = { icon: FolderPlus, label: "New session in…", detail: "Pick a directory", open: open(openNewSession) };
 
-  const sections: [string, (Target | HTMLElement)[]][] = [];
+  // An untitled first section is the Conversation row alone.
+  const sections: [string, (Target | HTMLElement)[]][] = [["", conversation]];
   if (!q) {
-    const current = byId.get(deps.currentId() ?? "");
     sections.push(
-      ["Running", ordered.filter(isLive).map(sessionRow)],
-      ["Recent", ordered.filter((s) => !isLive(s)).slice(0, RECENT).map(sessionRow)],
-      ["Actions", [...(current ? [newIn(current.cwd)] : []), newAnywhere]],
-      ["Console", consoleRows],
+      ["Running", running().map(sessionRow)],
+      ["Recent", ordered.filter((s) => !isLive(s) && s.id !== head?.id).slice(0, RECENT).map(sessionRow)],
+      ["Actions", consoleRows],
     );
   } else {
-    const dirs = projectCwds(sessions).filter((cwd) => hit(basename(cwd))).slice(0, NEW_IN);
-    // Named sessions first in the rail's order, then the server's hits as they
+    // Named sessions first, newest first, then the server's hits as they
     // arrive; until then, or when it cannot, the list says so in its place.
     const named = ordered.filter((s) => hit(`${s.title ?? ""} ${s.cwd} ${chatOf(s)}`)).slice(0, SESSIONS);
     const shown = new Set(named.map((s) => s.id));
@@ -258,17 +246,14 @@ function render(): void {
       }
       if (!found.length) found.push(note("No sessions match"));
     }
-    sections.push(
-      ["Actions", [...dirs.map(newIn), ...(hit(newAnywhere.label) ? [newAnywhere] : []), ...consoleRows]],
-      ["Sessions", found],
-    );
+    sections.push(["Actions", consoleRows], ["Sessions", found]);
   }
 
   rows = [];
   const nodes: HTMLElement[] = [];
   for (const [title, items] of sections) {
     if (!items.length) continue;
-    nodes.push(sectionHead(title));
+    if (title) nodes.push(sectionHead(title));
     for (const item of items) {
       if (item instanceof HTMLElement) {
         nodes.push(item);
@@ -287,13 +272,13 @@ function render(): void {
   setActive(Math.min(active, Math.max(0, rows.length - 1)));
 }
 
-/** Re-drawn by the rail when the sessions change under an open palette. */
+/** Re-drawn by the drawer when the sessions change under an open palette. */
 export function refreshPalette(): void {
   if (dialog.open) render();
 }
 
-/** Same control from the button and from ⌘K, so the chord also dismisses it. */
-function toggle(): void {
+/** ⌘K and the bar's ⋯ → Search. */
+export function togglePalette(): void {
   if (dialog.open) return dialog.close();
   input.value = "";
   active = 0;
@@ -308,11 +293,9 @@ function toggle(): void {
 
 export function initPalette(d: PaletteDeps): void {
   deps = d;
-  const search = $("#open-palette");
-  search.onclick = toggle;
   // Open, the chord belongs to the list (⌃K walks up); an anchored menu's
   // rows walk on ⌃K too.
-  shortcut(search, "k", "Search sessions, messages and Console", toggle, () => dialog.open || menuOpen());
+  chord("k", togglePalette, () => dialog.open || menuOpen());
   // The dialog is its own backdrop's hit target: a click that lands on the
   // element itself, not on a descendant, landed outside the panel.
   dialog.onclick = (ev) => {

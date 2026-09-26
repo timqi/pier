@@ -1,17 +1,16 @@
 // Exercise the real orchestrator with deferred HTTP and EventSource delivery;
-// surface renderers are spies while the shell, palette, icons and error
+// surface renderers are spies while the palette, icons and error
 // reporting run on index.html's body, so no browser, Pi session or network is needed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatTurn } from "../../core/types.js";
 import { installPage } from "./dom.testkit.js";
 
 const h = vi.hoisted(() => ({
-  sidebar: null as unknown as Parameters<typeof import("./sidebar.js").initSidebar>[0],
+  drawer: null as unknown as Parameters<typeof import("./drawer.js").initDrawer>[0],
   header: null as unknown as Parameters<typeof import("./session-header.js").initHeader>[0],
   composer: null as unknown as Parameters<typeof import("./composer.js").initComposer>[0],
   views: null as unknown as Parameters<typeof import("./views.js").initViews>[0],
   history: vi.fn<(url: string) => Promise<Response>>(),
-  create: vi.fn<() => Promise<Response>>(),
   renderSnapshot: vi.fn(),
   appendTurn: vi.fn(),
   streamDied: vi.fn(),
@@ -39,12 +38,12 @@ vi.mock("./composer.js", () => ({
 vi.mock("./notifications.js", () => ({ initPush: vi.fn() }));
 vi.mock("./session-header.js", () => ({
   initHeader: (deps: typeof h.header) => { h.header = deps; }, noteTurnMeta: vi.fn(), renderHeader: vi.fn(), resetHeaderState: vi.fn(),
-  sessionInfo: vi.fn(), sessionMenu: vi.fn(), setHeaderPending: vi.fn(), setHeaderState: vi.fn(),
+  setHeaderState: vi.fn(),
 }));
 vi.mock("./theme.js", () => ({ initTheme: vi.fn() }));
 vi.mock("./version.js", () => ({ initVersion: vi.fn() }));
-vi.mock("./sidebar.js", () => ({
-  initSidebar: (deps: typeof h.sidebar) => { h.sidebar = deps; }, renderSessions: vi.fn(),
+vi.mock("./drawer.js", () => ({
+  initDrawer: (deps: typeof h.drawer) => { h.drawer = deps; }, renderDrawer: vi.fn(),
 }));
 vi.mock("./turn-activity.js", () => ({
   activityThinking: vi.fn(), activityToolEnd: vi.fn(), activityToolStart: vi.fn(),
@@ -52,11 +51,11 @@ vi.mock("./turn-activity.js", () => ({
 }));
 vi.mock("./views.js", () => ({
   // The router's one call main.ts relies on here: a bare address opens the conversation (views.test.ts covers the rest).
-  applyRoute: vi.fn(() => { if (h.views.continuousOn() && !location.hash) h.views.openContinuous(); }),
+  applyRoute: vi.fn(() => { if (typeof location !== "undefined" && !location.hash) h.views.openContinuous(); }),
   initViews: (deps: typeof h.views) => { h.views = deps; }, isChatVisible: vi.fn(() => true),
   setConversationHash: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
   showConsole: vi.fn(), showFiles: vi.fn(),
-  syncBar: vi.fn(), toggleFiles: vi.fn(),
+  toggleFiles: vi.fn(),
 }));
 
 class Stream extends EventTarget {
@@ -98,7 +97,8 @@ beforeEach(async () => {
   const rows = ["a", "b"].map((id) => ({ id, cwd: "/test", createdAt: 1, state: "idle" }));
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url.endsWith("/history")) return h.history(url);
-    if (url === "/api/sessions" && init?.method === "POST") return h.create();
+    if (url === "/api/continuous") return Promise.resolve(Response.json({ chain: [] }));
+    if (url === "/api/continuous/open") return Promise.resolve(Response.json({ items: [], unlisted: [], designs: [] }));
     const one = /^\/api\/sessions\/([^/]+)$/.exec(url);
     if (one && !init?.method) {
       const id = one[1] as string;
@@ -121,7 +121,7 @@ describe("session loads", () => {
     const batch = { id: "batch", steering: ["[Ada<U1>]\nfirst", "second"], followUp: [], status: "uncertain" };
     const response = await snapshot("loaded").json();
     h.history.mockResolvedValueOnce(Response.json({ ...response, queueRecovery: [batch], queueUncertain: true }));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     expect(h.renderRecovery).toHaveBeenLastCalledWith([batch], true);
     latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq: 1, ts: 1, type: "queue-recovery", batches: [], uncertain: true }) });
@@ -133,7 +133,7 @@ describe("session loads", () => {
   it("hands the snapshot's skills to the composer, and clears them with the pane", async () => {
     const skills = [{ name: "pier-tasks", description: "Delegate." }];
     h.history.mockResolvedValueOnce(Response.json({ ...await snapshot("loaded").json(), skills }));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     expect(h.setSkills).toHaveBeenLastCalledWith([]);
     await settled();
     expect(h.setSkills).toHaveBeenLastCalledWith(skills);
@@ -143,13 +143,13 @@ describe("session loads", () => {
   // the header would otherwise have nothing to name or to open its info panel on.
   it("fetches the summary of a selected session the listing does not carry", async () => {
     h.history.mockImplementation(() => Promise.resolve(snapshot("loaded")));
-    h.sidebar.select("run-1");
+    h.drawer.select("run-1");
     await settled();
     expect(h.header.currentSession()).toMatchObject({ id: "run-1", cwd: "/run" });
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     expect(h.header.currentSession()).toMatchObject({ id: "a", cwd: "/test" });
-    h.sidebar.select("gone");
+    h.drawer.select("gone");
     await settled();
     expect(h.header.currentSession()).toBeUndefined();
   });
@@ -157,13 +157,13 @@ describe("session loads", () => {
   it("reselecting during a load or on a healthy stream keeps the current generation", async () => {
     const history = deferred();
     h.history.mockReturnValueOnce(history.promise);
-    h.sidebar.select("a");
-    h.sidebar.select("a");
+    h.drawer.select("a");
+    h.drawer.select("a");
     expect(h.history).toHaveBeenCalledTimes(1);
     history.resolve(snapshot("loaded"));
     await settled();
     const stream = latest();
-    h.sidebar.select("a");
+    h.drawer.select("a");
     stream.message(1, "live");
     expect(h.history).toHaveBeenCalledTimes(1);
     expect(h.content).toEqual(["loaded", "live"]);
@@ -173,9 +173,9 @@ describe("session loads", () => {
   it.each(["success", "error"])("ignores stale A -> B -> A history %s after the newer stream starts", async (outcome) => {
     const first = deferred(), second = deferred(), third = deferred();
     h.history.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise);
-    h.sidebar.select("a");
-    h.sidebar.select("b");
-    h.sidebar.select("a");
+    h.drawer.select("a");
+    h.drawer.select("b");
+    h.drawer.select("a");
     third.resolve(snapshot("latest", 10));
     await settled();
     const stream = latest();
@@ -191,7 +191,7 @@ describe("session loads", () => {
 
   it.each(["success", "error"])("ignores an older same-session reload %s", async (outcome) => {
     h.history.mockResolvedValueOnce(snapshot("initial"));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     const older = deferred(), newer = deferred();
     h.history.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
@@ -210,7 +210,7 @@ describe("session loads", () => {
 
   it("repeated resets replace snapshots once and ignore obsolete stream callbacks", async () => {
     h.history.mockResolvedValueOnce(snapshot("old", 20, "old"));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     for (const epoch of ["new", "newer"]) {
       const previous = latest();
@@ -236,25 +236,25 @@ describe("session loads", () => {
 
   it("recovery cannot select its old session or display its failure after navigation", async () => {
     h.history.mockResolvedValueOnce(snapshot("initial"));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     const recovery = deferred();
     h.history.mockReturnValueOnce(recovery.promise).mockResolvedValueOnce(snapshot("b"));
     const old = latest();
     old.reset();
-    h.sidebar.select("b");
+    h.drawer.select("b");
     await settled();
     recovery.resolve(Response.json({ error: "obsolete recovery" }, { status: 503 }));
     await settled();
     old.reset();
-    expect(h.sidebar.currentId()).toBe("b");
+    expect(h.drawer.currentId()).toBe("b");
     expect(h.content).toEqual(["b"]);
     expect(h.history).toHaveBeenCalledTimes(3);
   });
 
   it("shows a recovery failure and allows reselecting the session to retry", async () => {
     h.history.mockResolvedValueOnce(snapshot("initial"));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     h.history.mockResolvedValueOnce(Response.json({ error: "busy snapshot" }, { status: 503 }));
     const old = latest();
@@ -264,7 +264,7 @@ describe("session loads", () => {
     expect(h.content).toEqual(["busy snapshot"]);
     expect(old.closed).toBe(true);
     h.history.mockResolvedValueOnce(snapshot("retried", 3));
-    h.sidebar.select("a");
+    h.drawer.select("a");
     await settled();
     latest().message(4, "live");
     expect(h.content).toEqual(["retried", "live"]);
@@ -272,48 +272,22 @@ describe("session loads", () => {
     expect(latest().closed).toBe(false);
   });
 
-  it.each(["success", "error"])("does not let a creation %s override navigation", async (outcome) => {
-    const creation = deferred();
-    h.create.mockReturnValueOnce(creation.promise);
-    const creating = h.sidebar.createSession("/new");
-    h.history.mockResolvedValueOnce(snapshot("selected"));
-    h.sidebar.select("b");
+  // Pi can refuse a prompt before its turn starts (no model, no auth): the
+  // error is the only event, and the optimistic streaming must not outlive it.
+  it("clears the optimistic streaming state on an error with no turn open", async () => {
+    h.history.mockResolvedValueOnce(snapshot("loaded"));
+    h.drawer.select("a");
     await settled();
-    creation.resolve(outcome === "success" ? Response.json({ id: "created" }) : Response.json({}, { status: 500 }));
-    await creating;
-    expect(h.sidebar.currentId()).toBe("b");
-    expect(h.composer.starting()).toBe(false);
-    expect(h.content).toEqual(["selected"]);
-  });
+    h.composer.setState("streaming");
+    const event = (seq: number, body: object) => latest().onmessage?.({ data: JSON.stringify({ sessionId: "a", seq, ts: 1, ...body }) });
+    event(1, { type: "error", message: "no model" });
+    expect(h.composer.sessionState()).toBe("idle");
 
-  it("creation invalidates an in-flight history read and loads its own session", async () => {
-    const history = deferred();
-    h.history.mockReturnValueOnce(history.promise).mockResolvedValueOnce(snapshot("created"));
-    h.sidebar.select("a");
-    h.create.mockResolvedValueOnce(Response.json({ id: "created" }));
-    await h.sidebar.createSession("/new");
-    history.resolve(snapshot("obsolete"));
-    await settled();
-    expect(h.sidebar.currentId()).toBe("created");
-    expect(h.content).toEqual(["created"]);
-    expect(latest().url).toContain("/created/events");
-  });
-
-  it("checks navigation again after the creation response body arrives", async () => {
-    const body = deferred<{ id: string }>();
-    const response = Response.json({});
-    vi.spyOn(response, "json").mockReturnValue(body.promise);
-    h.create.mockResolvedValueOnce(response);
-    const creating = h.sidebar.createSession("/new");
-    await settled();
-    h.history.mockResolvedValueOnce(snapshot("selected"));
-    h.sidebar.select("b");
-    await settled();
-    body.resolve({ id: "created" });
-    await creating;
-    expect(h.sidebar.currentId()).toBe("b");
-    expect(h.content).toEqual(["selected"]);
-    expect(h.sidebar.sessions().some((s) => s.id === "created")).toBe(false);
+    // Inside a turn the error is part of it; the turn's own state events settle it.
+    h.composer.setState("streaming");
+    event(2, { type: "turn-start" });
+    event(3, { type: "error", message: "tool failed" });
+    expect(h.composer.sessionState()).toBe("streaming");
   });
 });
 
@@ -329,39 +303,39 @@ it("re-lists the sessions when the workspace stream reconnects", async () => {
   expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
 });
 
-// The rail's Open block re-reads on a marker written, without re-listing every session.
+// The drawer's run rows re-read on a marker written, without re-listing every session.
 it("re-reads the open items when a turn end wrote a marker", async () => {
-  const sidebar = await import("./sidebar.js");
+  const drawer = await import("./drawer.js");
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
   const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
   const open = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [], designs: [] };
   fetcher.mockClear();
   fetcher.mockImplementationOnce(() => Promise.resolve(Response.json(open)));
-  vi.mocked(sidebar.renderSessions).mockClear();
+  vi.mocked(drawer.renderDrawer).mockClear();
 
   workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
   await settled();
 
   expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/continuous/open"]);
-  expect(h.sidebar.open()).toEqual(open);
-  expect(vi.mocked(sidebar.renderSessions)).toHaveBeenCalled();
+  expect(h.drawer.open()).toEqual(open);
+  expect(vi.mocked(drawer.renderDrawer)).toHaveBeenCalled();
 });
 
 // A lead's session is saved after its run-changed refetch, so its first state names an unlisted id.
 it("re-lists sessions on a state change for an unknown session, and updates a known one in place", async () => {
-  const sidebar = await import("./sidebar.js");
+  const drawer = await import("./drawer.js");
   const workspace = Stream.all.find((s) => s.url === "/api/events")!;
   const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
   const sessionsFetches = () => fetcher.mock.calls.filter(([url]) => url === "/api/sessions").length;
   const state = (sessionId: string) => workspace.onmessage?.({ data: JSON.stringify({ type: "session-state", sessionId, state: "running" }) });
   fetcher.mockClear();
-  vi.mocked(sidebar.renderSessions).mockClear();
+  vi.mocked(drawer.renderDrawer).mockClear();
 
   state("b");
   await settled();
   expect(sessionsFetches()).toBe(0);
-  expect(h.sidebar.sessions().find((s) => s.id === "b")?.state).toBe("running");
-  expect(vi.mocked(sidebar.renderSessions)).toHaveBeenCalled();
+  expect(h.drawer.sessions().find((s) => s.id === "b")?.state).toBe("running");
+  expect(vi.mocked(drawer.renderDrawer)).toHaveBeenCalled();
 
   state("lead");
   await settled();
@@ -398,11 +372,26 @@ describe("the continuous conversation", () => {
   it("opens at the head on a bare address, and any of its sessions opens the head", async () => {
     await boot([member("h1"), member("h0", "first")]);
     expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
-    expect(h.sidebar.continuousOpen()).toBe(true);
-    expect(h.composer.continuous?.()).toBe(true);
-    h.sidebar.select("h0");
+    expect(h.header.continuousOpen()).toBe(true);
+    expect(h.composer.continuous()).toBe(true);
+    h.drawer.select("h0");
     await settled();
     expect(historyCalls()).toEqual(["/api/sessions/h1/history"]);
+  });
+
+  // A child session (a lead's, a task run's) is a route of its own; ‹ goes back.
+  it("opens a child session outside the conversation and returns to the head", async () => {
+    await boot([member("h1"), member("h0", "first")]);
+    h.history.mockImplementation(() => Promise.resolve(snapshot("child")));
+    h.drawer.select("other");
+    await settled();
+    expect(h.header.continuousOpen()).toBe(false);
+    expect(h.composer.continuous()).toBe(false);
+    expect(historyCalls().at(-1)).toBe("/api/sessions/other/history");
+    h.header.openContinuous();
+    await settled();
+    expect(h.header.continuousOpen()).toBe(true);
+    expect(historyCalls().at(-1)).toBe("/api/sessions/h1/history");
   });
 
   it("pages an earlier session in read-only above the head, closed by the rotation's divider", async () => {
@@ -442,7 +431,7 @@ describe("the continuous conversation", () => {
   it("opens before its first session exists, and follows the head its first message made", async () => {
     await boot([]);
     expect(h.composer.sessionId()).toBeNull();
-    expect(h.composer.continuous?.()).toBe(true);
+    expect(h.composer.continuous()).toBe(true);
     expect(h.content).toContain("The continuous conversation — your first message starts it.");
     chain = [member("h1", "first")];
     h.composer.headMoved?.();

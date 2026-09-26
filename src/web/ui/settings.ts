@@ -2,15 +2,18 @@
 // (Instance, Security). Storage is not the split: a db row and a Pi file are
 // both "settings" to the person opening this page.
 
+import { X } from "lucide";
 import { failure, getJson, sendJson } from "./api.js";
 import { createChannelsView } from "./channels.js";
 import { createConfigView } from "./config.js";
-import { agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
+import { $, agoLabel, consoleView, h, type ConsoleView } from "./dom.js";
 import { badge, button, card, deviceRow, empty, field, input, pageTitle, PANEL, pill, setStatus, swatches } from "./form.js";
+import { icon } from "./icons.js";
 import { createModelMenuPane } from "./model-menu.js";
 import { createNotificationsCard } from "./notifications.js";
 import { createPasskeysCard } from "./passkeys.js";
 import { openProviders } from "./providers.js";
+import { escapeKey } from "./shortcut.js";
 import { createVaultPane } from "./vault.js";
 
 type Topic = "instance" | "models" | "channels" | "vault" | "files" | "security";
@@ -65,6 +68,8 @@ export function createSettingsView(
   onTopic: (topic: string) => void,
   /** Agent → Packages' Browse files: the Files overlay on a package directory. */
   openFiles: (dir: string, select?: string) => void,
+  /** ✕ and Esc: back to where Settings was opened from (views.ts). */
+  close: () => void,
 ): ConsoleView {
   const stored = localStorage.getItem(TOPIC_KEY) ?? undefined;
   let topic: Topic = isTopic(stored) ? stored : "models";
@@ -72,11 +77,23 @@ export function createSettingsView(
   // The head sits above the topic host, which scrolls (or lays out) on its
   // own — the strip stays visible however long a topic page gets.
   const head = h("header", "pagehead");
+  // Wired at boot by version.ts and theme.ts; this head is where they are shown.
+  const version = $("#version");
+  const theme = $("#theme-toggle");
+  version.classList.add("ml-auto");
+  const closeBtn = h("button", "icon-btn", icon(X)) as HTMLButtonElement;
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close Settings");
+  closeBtn.onclick = close;
+  escapeKey(closeBtn, "Close Settings", close, () => !root.classList.contains("hidden"));
 
   function renderTabs(): void {
     head.replaceChildren(
       pageTitle("Settings"),
       ...TOPICS.map(([id, label]) => pill(label, id === topic, () => onTopic(id))),
+      version,
+      theme,
+      closeBtn,
     );
   }
 

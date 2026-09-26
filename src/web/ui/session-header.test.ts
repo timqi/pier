@@ -3,7 +3,7 @@
 // that reconciles it.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ModelRef, ThinkingLevel } from "../../core/types.js";
-import type { SessionInfo } from "./sidebar.js";
+import type { SessionInfo } from "./drawer.js";
 import { fake, installPage, type FakeElement } from "./dom.testkit.js";
 
 const meta = (): FakeElement => fake(document.querySelector("#session-meta"));
@@ -16,18 +16,24 @@ vi.mock("./menu.js", () => ({
 vi.mock("./api.js", () => ({ mustGetJson: vi.fn(), sendJson: vi.fn() }));
 vi.mock("./chat.js", () => ({ appendTurn: vi.fn(), revealActiveRun: vi.fn(() => true) }));
 vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => document.createElement("div")) }));
-vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: () => "", modalOpen: vi.fn() }));
-vi.mock("./sidebar.js", () => ({
-  renameSession: vi.fn(),
-  // Marked so the chip's title proves it uses the rail's words, which
-  // sidebar.test.ts owns, rather than spelling its own second copy.
+vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn() }));
+const drawer = vi.hoisted(() => ({ head: undefined as unknown }));
+vi.mock("./drawer.js", () => ({
+  headSession: () => drawer.head,
+  phaseTag: (s: SessionInfo) => (s.phase ? [Object.assign(document.createElement("span"), { textContent: s.phase })] : []),
+  stateDot: () => [document.createElement("i")],
+  // Marked so the chip's title proves it uses the drawer's words, which
+  // drawer.test.ts owns, rather than spelling its own second copy.
   runsLabel: (runs: number) => `RUNS(${runs})`,
 }));
+const palette = vi.hoisted(() => ({ togglePalette: vi.fn() }));
+vi.mock("./palette.js", () => palette);
 
 const model: ModelRef = { provider: "test", id: "test-model" };
 const levels: ThinkingLevel[] = ["low", "high"];
 
-const closeSession = vi.fn();
+const openSettings = vi.fn();
+const openContinuous = vi.fn();
 
 /** What the orchestrator's list says about the selected session. */
 let current: SessionInfo | undefined;
@@ -61,19 +67,18 @@ beforeEach(async () => {
   installPage();
   current = undefined;
   conversation = false;
+  drawer.head = undefined;
   header = await import("./session-header.js");
   picker = await import("./model-picker.js");
   api = await import("./api.js");
   header.initHeader({
     currentId: () => "s1",
     currentSession: () => current,
-    createSession: vi.fn(),
-    syncBar: vi.fn(),
     openFiles: vi.fn(),
     toggleFiles: vi.fn(),
-    closeSession,
-    inConversation: (id) => id === "head",
+    openSettings,
     continuousOpen: () => conversation,
+    openContinuous,
   });
   vi.mocked(api.mustGetJson).mockImplementation((url: string) =>
     Promise.resolve(url.endsWith("/models") ? [model] : { level: "high", levels }) as never
@@ -97,7 +102,9 @@ it("marks the meta row urgent only once the context is near full", () => {
 // The distance that matters is to compaction, not to a window it never reaches.
 it("reads the context against where the session compacts", async () => {
   const context = async (): Promise<string> => {
-    header.sessionInfo(document.createElement("button"), { id: "s1", cwd: "/tmp", createdAt: 0 });
+    current = session(0);
+    header.renderHeader();
+    fake(document.querySelector("#chat-title")).onclick?.();
     const panel = fake(vi.mocked((await import("./menu.js")).openPanel).mock.lastCall?.[1]);
     const row = panel.querySelectorAll("div").find((d) => d.firstElementChild?.textContent === "Context");
     return fake(row?.querySelector("dd")).textContent;
@@ -109,7 +116,7 @@ it("reads the context against where the session compacts", async () => {
 });
 
 // The conversation rotates sessions and spans topics: the header names it as
-// the rail does, whatever the head was titled; every other session keeps its own.
+// its own name, whatever the head was titled; every other session keeps its own.
 it("titles the continuous conversation Conversation, other sessions by their own title", () => {
   const title = () => fake(document.querySelector("#chat-title")).textContent;
   current = { ...session(0), title: "Worker展示功能" };
@@ -124,24 +131,64 @@ it("titles the continuous conversation Conversation, other sessions by their own
   expect(title()).toBe("Conversation");
 });
 
-// Close sits after Rename and is handed to the orchestrator, which owns the
-// list it optimistically edits. The conversation's sessions are not managed:
-// no Rename, Close or Continue in… on them.
-it("offers Close after Rename, and neither nor Continue in… on the continuous conversation", async () => {
+const title = () => fake(document.querySelector("#chat-title"));
+const back = () => fake(document.querySelector("#bar-back"));
+
+async function menuItems() {
   const { openMenu } = await import("./menu.js");
-  const items = (s: SessionInfo) => {
-    header.sessionMenu(document.createElement("button"), s);
-    return vi.mocked(openMenu).mock.lastCall![1];
-  };
-  const own = items(session(0));
-  expect(own.map((i) => i.label).slice(0, 2)).toEqual(["Rename…", "Close"]);
-  expect(own[1]).toMatchObject({ hint: "leaves the rail; a message reopens it" });
-  expect(own[1]!.disabled).toBeUndefined();
-  own[1]!.onSelect();
-  expect(closeSession).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
-  expect(own.map((i) => i.label)).toContain("Continue in Lark/Slack…");
-  expect(items({ ...session(0), id: "head" }).map((i) => i.label))
-    .toEqual(["Session info", "Browse files", "Model & reasoning…"]);
+  fake(document.querySelector("#chat-menu")).onclick?.();
+  return vi.mocked(openMenu).mock.lastCall![1];
+}
+
+it("offers Search first on the conversation, and the rest without it on a child", async () => {
+  conversation = true;
+  current = session(0);
+  header.renderHeader();
+  const items = await menuItems();
+  expect(items.map((i) => i.label)).toEqual(["Search", "Session info", "Browse files", "Model & reasoning…", "Settings"]);
+  expect(items[0]!.hint).toBe("⌘K");
+  items[0]!.onSelect();
+  expect(palette.togglePalette).toHaveBeenCalledOnce();
+  items[4]!.onSelect();
+  expect(openSettings).toHaveBeenCalledOnce();
+
+  conversation = false;
+  header.renderHeader();
+  expect((await menuItems()).map((i) => i.label)).toEqual(["Session info", "Browse files", "Model & reasoning…", "Settings"]);
+});
+
+// Before the conversation's first reply there is no session to describe or
+// re-model, and ⋯ still opens: the two say why they are not available yet.
+it("keeps ⋯ on a conversation with no session yet, its session actions disabled", async () => {
+  conversation = true;
+  header.renderHeader();
+  expect(fake(document.querySelector("#chat-menu")).classList.contains("hidden")).toBe(false);
+  expect(title().disabled).toBe(true);
+  const items = await menuItems();
+  const byLabel = (label: string) => items.find((i) => i.label === label)!;
+  expect(byLabel("Session info")).toMatchObject({ disabled: true, hint: "after the first reply" });
+  expect(byLabel("Model & reasoning…")).toMatchObject({ disabled: true, hint: "after the first reply" });
+  expect(byLabel("Search").disabled).toBeUndefined();
+});
+
+// The ‹ is the way back from a child, wearing the head's dot while the
+// conversation is doing something; on the conversation it is not there.
+it("shows ‹ with the head's dot on a child, and the child's phase tag", () => {
+  current = { ...session(0), title: "lead", phase: "design" };
+  header.renderHeader();
+  expect(back().classList.contains("hidden")).toBe(false);
+  expect(back().querySelectorAll("i")).toHaveLength(0);
+  expect(fake(document.querySelector("#chat-phase")).textContent).toBe("design");
+  drawer.head = { ...session(0), id: "h", state: "streaming" };
+  header.renderHeader();
+  expect(back().querySelectorAll("i")).toHaveLength(1);
+  back().onclick?.();
+  expect(openContinuous).toHaveBeenCalledOnce();
+
+  conversation = true;
+  header.renderHeader();
+  expect(back().classList.contains("hidden")).toBe(true);
+  expect(fake(document.querySelector("#chat-phase")).textContent).toBe("");
 });
 
 // A background run is the other kind of "nothing happening": the card sits far

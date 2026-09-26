@@ -4,10 +4,8 @@
 import { turnsPane } from "./chat.js";
 import { syncQueuePanel } from "./composer.js";
 import { $, consoleView, h, type ConsoleView } from "./dom.js";
-import { renderHeader } from "./session-header.js";
-import { closeDrawer, setBarTitle } from "./shell.js";
 import { projectCwds } from "../../core/identity.js";
-import { orderSessions, renderSessions, type SessionInfo } from "./sidebar.js";
+import type { SessionInfo } from "./drawer.js";
 
 /** Everything the view switcher needs from the orchestrator (main.ts). */
 export interface ViewsDeps {
@@ -15,8 +13,6 @@ export interface ViewsDeps {
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
   select: (id: string) => void;
-  /** The continuous switch is on: `#/conversation` and a bare address open the conversation. */
-  continuousOn: () => boolean;
   /** One of the continuous conversation's sessions, which its route names instead. */
   inConversation: (id: string) => boolean;
   openContinuous: () => void;
@@ -26,12 +22,10 @@ export interface ViewsDeps {
 
 let deps: ViewsDeps;
 
-const chatHeader = $("#chat-header");
-const chatTitle = $("#chat-title");
 const composerForm = $<HTMLFormElement>("#composer");
 
 // Console views hide chat elements but leave session SSE wiring untouched.
-const chatEls = [chatHeader, turnsPane, composerForm];
+const chatEls = [$("#bar"), turnsPane, composerForm];
 
 export const isChatVisible = (): boolean => openName === null;
 
@@ -42,16 +36,14 @@ const views = new Map<ConsoleName, ConsoleView>();
 /** In-flight builds, so leaving and reopening a loading view cannot construct
  *  it twice and duplicate its document listeners. */
 const building = new Map<ConsoleName, Promise<ConsoleView>>();
-/** The rail's one Console row; Files is an overlay with no row of its own. */
-const settingsBtn = $("#open-settings");
-/** Which view the route says is open, set before its chunk lands: the top bar
- *  and the overlay toggles may not wait on a fetch to know where they are. */
+/** Which view the route says is open, set before its chunk lands: the overlay
+ *  toggles may not wait on a fetch to know where they are. */
 let openName: ConsoleName | null = null;
 let openRequest = 0;
 
-// Files drops over whatever was on screen and its ✕ returns there — it
+// Both drop over whatever was on screen and their ✕ returns there — each
 // remembers where it was opened from.
-const OVERLAYS: ConsoleName[] = ["files"];
+const OVERLAYS: ConsoleName[] = ["files", "settings"];
 const origins = new Map<ConsoleName, Route>();
 
 const CONSOLE_LABELS: Record<ConsoleName, string> = {
@@ -59,15 +51,8 @@ const CONSOLE_LABELS: Record<ConsoleName, string> = {
   files: "Files",
 };
 
-/** Mobile top bar mirrors the route: a Console view's name, or the chat title
- *  plus its ⋯ menu (the chat header itself is hidden below md). */
-export function syncBar(): void {
-  if (openName) setBarTitle(CONSOLE_LABELS[openName], false);
-  else setBarTitle(chatTitle.textContent ?? "", deps.currentSession() !== undefined);
-}
-
-/** Open a Console view by name — the sidebar's rows and the search palette
- *  both address them this way rather than clicking each other's buttons. */
+/** Open a Console view by name — the ⋯ menu and the search palette both
+ *  address them this way rather than clicking each other's buttons. */
 export function showConsole(name: ConsoleName, arg?: string, query?: string): void {
   // Switching folders inside an overlay re-enters the same view: not a new origin.
   if (OVERLAYS.includes(name)) {
@@ -75,14 +60,10 @@ export function showConsole(name: ConsoleName, arg?: string, query?: string): vo
     if (from && !(from.kind === "console" && from.name === name)) origins.set(name, from);
   }
   setHash({ kind: "console", name, arg, query });
-  closeDrawer();
   openName = name;
   for (const el of chatEls) el.classList.add("hidden");
   syncQueuePanel();
   for (const [built, view] of views) if (built !== name) view.hide();
-  settingsBtn.classList.toggle("bg-indigo-50", name === "settings");
-  renderSessions(); // the open session's row goes dark while a view covers it
-  syncBar();
   void openView(name, arg, query, ++openRequest);
 }
 
@@ -131,29 +112,22 @@ const toggleOverlay = (name: ConsoleName, dir?: string): void => {
 
 export const toggleFiles = (dir?: string): void => toggleOverlay("files", dir);
 
-/** An overlay's ✕. Back to the route it was opened from — a session's chat, or
- *  the Console view you came from — and the current session when that is
- *  unknown (a bookmarked or reloaded #/files, where there is no "from"). */
+/** An overlay's ✕ and Esc. Back to the route it was opened from — a chat, or
+ *  the other overlay — and the current chat when that is unknown (a bookmarked
+ *  or reloaded #/files, where there is no "from"). */
 function closeOverlay(name: ConsoleName): void {
   const id = deps.currentId();
-  const back: Route | null = origins.get(name) ?? (id ? { kind: "session", id } : null);
+  const back = origins.get(name) ?? (id ? chatRoute(id) : CONVERSATION);
   origins.delete(name);
-  if (back) setHash(back); // onhashchange → applyRoute() does the switching
-  else {
-    history.replaceState(null, "", "#/"); // no session to name; don't let the hash lie
-    showChat();
-  }
+  setHash(back); // onhashchange → applyRoute() does the switching
 }
 
 export function showChat(): void {
   if (!openName) return;
   openName = null;
   for (const view of views.values()) view.hide();
-  settingsBtn.classList.remove("bg-indigo-50");
-  renderSessions();
   for (const el of chatEls) el.classList.remove("hidden");
   syncQueuePanel();
-  syncBar();
   deps.maybeAckRead(); // the selected session's turns just came (back) on screen
 }
 
@@ -212,38 +186,27 @@ const chatRoute = (id: string): Route => (deps.inConversation(id) ? CONVERSATION
 export const setSessionHash = (id: string): void => setHash(chatRoute(id));
 export const setConversationHash = (): void => setHash(CONVERSATION);
 
-/** Hash → UI. Session routes may name sessions not listed yet; select verifies them. */
+/** Hash → UI. Session routes may name sessions not listed yet; select
+ *  verifies them. A bare or unknown hash is the conversation. */
 export function applyRoute(): void {
-  // With the switch on, an empty or unknown hash is the conversation, not the rail's first row.
-  const continuous = deps.continuousOn();
-  const route = parseHash() ?? (continuous ? CONVERSATION : null);
-  if (route?.kind === "conversation" && continuous) {
-    applyingRoute = true;
-    try {
-      deps.openContinuous();
-    } finally {
-      applyingRoute = false;
-    }
-    return setHash(CONVERSATION, true);
-  }
-  const sessions = deps.sessions();
-  const currentId = deps.currentId();
-  const wanted = route?.kind === "session" ? route.id : null;
-  // Nothing asked for: the rail's first row, which is the front of the working
-  // set when there is one.
-  const { top, rest } = orderSessions(sessions);
-  const id = wanted ?? currentId ?? (top[0] ?? rest[0])?.id ?? null;
+  const route = parseHash() ?? CONVERSATION;
   applyingRoute = true;
   try {
-    if (id && id !== currentId) deps.select(id);
-    if (route?.kind === "console") showConsole(route.name, route.arg, route.query);
-    else showChat();
-    if (!id) renderHeader();
+    if (route.kind === "conversation") deps.openContinuous();
+    else if (route.kind === "session") {
+      if (route.id !== deps.currentId()) deps.select(route.id);
+      else showChat();
+    } else {
+      // An overlay over nothing yet (a reloaded #/settings): the conversation is what it closes to.
+      if (!deps.currentId()) deps.openContinuous();
+      showConsole(route.name, route.arg, route.query);
+    }
   } finally {
     applyingRoute = false;
   }
-  // Boot with no hash: name where we landed without adding a history entry.
-  if (route?.kind !== "console" && id) setHash(chatRoute(id), true);
+  // Name where we landed without adding a history entry: a chain member's id is the conversation.
+  if (route.kind === "conversation") setHash(CONVERSATION, true);
+  else if (route.kind === "session") setHash(chatRoute(route.id), true);
 }
 
 /** One dynamic import per view, with the deps it is built from. `deps` is read
@@ -266,15 +229,11 @@ const BUILD: Record<ConsoleName, (root: HTMLElement) => Promise<ConsoleView>> = 
       // copy of "where am I", and Back should walk tabs too.
       (t) => showConsole("settings", t),
       showFiles,
+      () => closeOverlay("settings"),
     ),
 };
 
 export function initViews(d: ViewsDeps): void {
   deps = d;
-  settingsBtn.onclick = () => showConsole("settings");
-  const consoleSection = $<HTMLDetailsElement>("#console-section");
-  consoleSection.open = localStorage.getItem("pier.consoleCollapsed") !== "1";
-  consoleSection.ontoggle = () =>
-    localStorage.setItem("pier.consoleCollapsed", consoleSection.open ? "0" : "1");
   window.onhashchange = applyRoute; // Back/forward and hand-edited URLs
 }

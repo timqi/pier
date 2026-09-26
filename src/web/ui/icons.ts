@@ -1,7 +1,7 @@
 // Lucide rendering for the workbench's decorative control icons.
 import {
   ArrowUp, ChevronDown, ChevronLeft, ChevronRight, Clock, Ellipsis,
-  Menu, Plus, RotateCw, Search, Settings, Square,
+  Plus, RotateCw, Search, Square,
   Undo2, X, createElement, type IconNode,
 } from "lucide";
 
@@ -14,7 +14,7 @@ export const icon = (node: IconNode, cls = "h-3.5 w-3.5"): SVGElement =>
 export function initIcons(): void {
   const shell: Record<string, IconNode> = {
     ArrowUp, ChevronLeft, ChevronRight, Clock, Ellipsis,
-    Menu, Plus, RotateCw, Search, Settings, Square, Undo2, X,
+    Plus, RotateCw, Search, Square, Undo2, X,
   };
   for (const slot of document.querySelectorAll<HTMLElement>("[data-icon]")) {
     const node = shell[slot.dataset.icon!];

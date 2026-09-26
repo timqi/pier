@@ -1,5 +1,5 @@
 // Notifications for the workbench that is not on screen. The rule is the
-// sidebar's unread dot, read a few seconds late: a client with the session
+// drawer's unread dot, read a few seconds late: a client with the session
 // visible acks immediately, so "still unread" is precisely "nobody saw it".
 // The wire format is webpush.ts.
 

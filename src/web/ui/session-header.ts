@@ -1,50 +1,45 @@
-// The selected session's header: title row, meta chips and the ⋯ menu. Owns
-// the model/context state the snapshot reports.
+// The bar: the way back, the title, the meta chips and the ⋯ menu. Owns the
+// model/context state the snapshot reports.
 
-import { ArrowLeft, LoaderCircle, X } from "lucide";
+import { ArrowLeft, ChevronLeft, LoaderCircle, X } from "lucide";
 import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
-import { getJson, mustGetJson, sendJson } from "./api.js";
+import { mustGetJson, sendJson } from "./api.js";
 import { appendTurn, revealActiveRun } from "./chat.js";
-import { $, agoLabel, basename, copyBtn, h, stampTime, untitled } from "./dom.js";
-import { closeMenu, openMenu, openPanel } from "./menu.js";
+import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
+import { headSession, phaseTag, runsLabel, stateDot, type SessionInfo } from "./drawer.js";
+import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
+import { togglePalette } from "./palette.js";
 import { chord, chordLabel, modalOpen } from "./shortcut.js";
-import { renameSession, runsLabel, type SessionInfo } from "./sidebar.js";
 import { modelKey, type ContextUsage, type ModelRef, type ThinkingLevel, type TurnMeta } from "../../core/types.js";
-import type { HandoffTarget } from "../../channels/types.js";
 
 /** Everything the header needs from the orchestrator (main.ts). */
 export interface HeaderDeps {
   currentId: () => string | null;
-  /** The selected session's listed summary. `select` guarantees one exists
-   *  for any session that does — the header hides itself when it does not. */
+  /** The selected session's listed summary; undefined before the
+   *  conversation's first session exists, or while a detached one loads. */
   currentSession: () => SessionInfo | undefined;
-  /** Start another session in a cwd (main.ts) — the ⋯ menu offers it for the
-   *  session's own directory, which is where the next one usually belongs. */
-  createSession: (cwd: string) => void;
-  /** Mobile top bar mirror (views.ts). */
-  syncBar: () => void;
   /** Open the Files view on a cwd, or on nothing — which reopens the folder
    *  and diff the current session last browsed (views.ts, wired through main). */
   openFiles: (cwd?: string) => void;
   /** Same view, but a second press closes it — what the chord binds to. */
   toggleFiles: (cwd?: string) => void;
-  /** Take a session out of the rail, optimistically (main.ts). */
-  closeSession: (s: SessionInfo) => void;
-  /** One of the continuous conversation's sessions, which its row stands for. */
-  inConversation: (id: string) => boolean;
+  openSettings: () => void;
   /** The continuous conversation is what the pane shows. */
   continuousOpen: () => boolean;
+  /** The `‹`: back to `#/conversation`. */
+  openContinuous: () => void;
 }
 
 let deps: HeaderDeps;
 
 export function initHeader(d: HeaderDeps): void {
   deps = d;
-  // One of the ⋯ menu's actions is frequent enough to earn a chord. It acts on
-  // the *current* session — the menu also opens from a rail row, which is why
-  // the rows only advertise the chord when it would hit theirs.
+  back.onclick = () => deps.openContinuous();
+  chatMenu.onclick = () => barMenu(chatMenu);
+  // One of the ⋯ menu's actions is frequent enough to earn a chord; it acts on
+  // the current session.
   chord(FILES_KEY, () => {
     const s = deps.currentSession();
     if (!s) return;
@@ -55,7 +50,9 @@ export function initHeader(d: HeaderDeps): void {
 
 const FILES_KEY = "i"; // no mnemonic — the menu row teaches it; ⌘E/⌘F/⌘O are taken
 
-const chatTitle = $("#chat-title");
+const back = $("#bar-back");
+const chatTitle = $<HTMLButtonElement>("#chat-title");
+const phase = $("#chat-phase");
 const chatMenu = $("#chat-menu");
 const sessionMeta = $("#session-meta");
 
@@ -103,36 +100,27 @@ export function noteTurnMeta(meta: TurnMeta): void {
   renderSessionMeta();
 }
 
-/** The pane is the new session's before that session has an id, and it may not
- *  go on naming the one it replaced. Cleared by the first render that has a
- *  session — which is that session arriving. */
-let pending: string | null = null;
-
-export function setHeaderPending(cwd: string | null): void {
-  pending = cwd === null ? null : untitled(cwd);
-  renderHeader();
-}
-
 export function renderHeader(): void {
   const s = deps.currentSession();
-  if (s) pending = null;
-  // Selected but not a row — a task run's own session, opened from its run
-  // card — is named by its id: "no session" would be untrue of a pane
-  // with a transcript in it.
-  // The conversation rotates sessions and spans topics: its name is the rail's, not the head's title.
-  chatTitle.textContent = deps.continuousOpen()
+  const conversation = deps.continuousOpen();
+  // The conversation rotates sessions and spans topics: its name is its own,
+  // not the head's title. A detached session not listed yet — a task run's
+  // own, opened from its run card — is named by its id.
+  chatTitle.textContent = conversation
     ? "Conversation"
-    : s ? (s.title ?? untitled(s.cwd)) : (pending ?? deps.currentId() ?? "no session");
-  // The title is what the panel is *about*, so it is also the way in — a click,
-  // not a hover: the same gesture works on the mobile bar's title (shell.ts).
+    : s ? (s.title ?? untitled(s.cwd)) : (deps.currentId() ?? "no session");
+  // The title is what the panel is *about*, so it is also the way in.
+  chatTitle.disabled = !s;
   chatTitle.classList.toggle("cursor-pointer", !!s);
   chatTitle.title = s ? "Session info" : "";
   chatTitle.onclick = s ? () => sessionInfo(chatTitle, s) : null;
-  chatMenu.classList.toggle("hidden", !s);
-  // Everything per-session (info, rename, model) lives in the ⋯ menu.
-  if (s) chatMenu.onclick = () => sessionMenu(chatMenu, s);
+  back.classList.toggle("hidden", conversation);
+  back.classList.toggle("flex", !conversation);
+  // The head's dot only for what a child's reader would go back for.
+  const head = conversation ? undefined : headSession();
+  back.replaceChildren(icon(ChevronLeft, "h-4.5 w-4.5"), ...(head && (head.state === "streaming" || head.unread) ? stateDot(head) : []));
+  phase.replaceChildren(...(!conversation && s ? phaseTag(s) : []));
   renderSessionMeta();
-  deps.syncBar();
 }
 
 /** Where a context reading stops being information and becomes something to
@@ -155,7 +143,7 @@ function renderSessionMeta(): void {
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
-  // The rail's dot count (sidebar.ts) for the session on screen, plus the way
+  // The drawer's dot count (drawer.ts) for the session on screen, plus the way
   // to a card that has scrolled off.
   const runs = deps.currentSession()?.activeRuns ?? 0;
   const items: HTMLElement[] = [];
@@ -173,17 +161,6 @@ function renderSessionMeta(): void {
       if (!revealActiveRun()) appendTurn("error", "no run card left in this transcript — reload the session to see it");
     };
     items.push(chip);
-  }
-  // Opening a session in Pi is a round trip, and during it the meta row has no
-  // id and no chips to draw — which reads exactly like a session sitting idle.
-  // It says which one it is instead, and the chips replace it on arrival.
-  if (!id && pending) {
-    items.push(h(
-      "span",
-      "flex flex-none items-center gap-1.5 text-neutral-500",
-      icon(LoaderCircle, "spinner"),
-      "starting…",
-    ));
   }
   if (id) {
     const pickerButton = (text: string, cls: string): HTMLElement => {
@@ -219,16 +196,16 @@ function renderSessionMeta(): void {
   sessionMeta.replaceChildren(...children);
   sessionMeta.classList.toggle("hidden", items.length === 0);
   sessionMeta.classList.toggle("flex", items.length > 0);
-  // On a phone only three chips are worth a second line: a session still
-  // opening (§5), a subagent still running, and a context near full, which is
-  // acted on. style.css shows only this one below md.
-  sessionMeta.toggleAttribute("data-urgent", (!id && !!pending) || runs > 0 || pressure >= CONTEXT_WARN);
+  // On a phone only two chips are worth a second line: a subagent still
+  // running, and a context near full, which is acted on. style.css shows only
+  // this one below md.
+  sessionMeta.toggleAttribute("data-urgent", runs > 0 || pressure >= CONTEXT_WARN);
 }
 
 /** Read-only details panel: what this session is and how full its context is.
- *  Opened from the ⋯ menu, from either title bar, or from a project row.
- *  `back` puts a return arrow in the head; returns the floated panel. */
-export function sessionInfo(anchor: HTMLElement, s: Pick<SessionInfo, "id" | "cwd" | "createdAt" | "title">, back?: () => void): HTMLElement {
+ *  Opened from the ⋯ menu or the bar's title. `back` puts a return arrow in
+ *  the head; returns the floated panel. */
+function sessionInfo(anchor: HTMLElement, s: Pick<SessionInfo, "id" | "cwd" | "createdAt" | "title">, back?: () => void): HTMLElement {
   // The trailing relative time is supporting text, not part of the value.
   const rows: [string, string, string?][] = [
     ["Directory", s.cwd],
@@ -393,114 +370,61 @@ async function setThinkingLevel(id: string, level: ThinkingLevel): Promise<void>
 
 /** Head of a follow-up panel: back to the menu, the session's name, close. */
 function panelHead(anchor: HTMLElement, s: SessionInfo, closeLabel: string): HTMLElement {
-  const back = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
-  back.setAttribute("aria-label", "Back to session actions");
-  back.onclick = () => sessionMenu(anchor, s);
+  const arrow = h("button", "icon-btn h-11 w-11", icon(ArrowLeft));
+  arrow.setAttribute("aria-label", "Back to session actions");
+  arrow.onclick = () => barMenu(anchor);
   const close = h("button", "icon-btn h-11 w-11", icon(X));
   close.setAttribute("aria-label", closeLabel);
   close.onclick = closeMenu;
   const title = h("span", "min-w-0 flex-1 truncate text-sm font-medium", s.title ?? untitled(s.cwd));
   title.title = title.textContent ?? "";
-  return h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", back, title, close);
+  return h("div", "flex items-center gap-2 border-b border-neutral-200 pb-2 mb-2", arrow, title, close);
 }
 
-/** The chats a web session can be continued in; a pick posts the handoff and
- *  the rail's chip follows from `sessions-changed`. A refusal stays under the
- *  row it answers, as the directory picker's errors do. */
-async function handoffPicker(anchor: HTMLElement, s: SessionInfo): Promise<void> {
-  const status = h("p", "px-3 py-2 text-[15px] text-neutral-500", "Loading chats…");
-  const content = h("div", "w-[min(24rem,calc(100vw-2rem))] min-w-0 max-sm:w-full",
-    panelHead(anchor, s, "Close chat picker"),
-    h("div", "px-3 pb-1 text-sm font-medium text-neutral-500", "Continue in a direct message"),
-    h("p", "px-3 pb-2 text-[13px] text-neutral-500", "DMs the bot has seen. A DM appears here after its first message to the bot."),
-    status);
-  openPanel(anchor, content);
-  const got = await getJson<{ targets: HandoffTarget[] }>("/api/handoff/targets", "Could not list chats");
-  if (!content.isConnected) return;
-  if (!got.ok) {
-    status.textContent = got.error;
-    status.setAttribute("role", "alert");
-    return;
-  }
-  if (!got.value.targets.length) {
-    status.textContent = "No DMs yet — message the bot once in Lark or Slack, then come back.";
-    return;
-  }
-  const error = h("p", "hidden px-3 pt-1 text-[13px] text-red-600");
-  error.setAttribute("role", "alert");
-  const list = h("div", "");
-  list.dataset.list = "";
-  for (const t of got.value.targets) {
-    const row = h("button", "flex w-full min-h-10 cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-indigo-50 hover:text-indigo-700 active:bg-indigo-100",
-      h("span", "min-w-0 truncate", `${t.platform[0]!.toUpperCase()}${t.platform.slice(1)} · ${t.name || t.chatId}`));
-    row.onclick = async () => {
-      const res = await sendJson("/api/handoff", { sessionId: s.id, platform: t.platform, chatId: t.chatId });
-      if (res.ok) return closeMenu();
-      error.textContent = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `handoff failed: ${String(res.status)}`;
-      error.classList.remove("hidden");
-    };
-    list.append(row);
-  }
-  status.replaceWith(list, error);
-  list.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
-}
-
-/** Same menu from the chat header and from a rail row's ⋯ button. The
- *  conversation's sessions are not ones the user manages: no Rename, Close or
- *  Continue in… on them. */
-export function sessionMenu(anchor: HTMLElement, s: SessionInfo): void {
-  const current = s.id === deps.currentId();
-  const managed = !deps.inConversation(s.id);
-  openMenu(anchor, [
-    ...(managed ? [
-      {
-        label: "Rename…",
-        onSelect: () => {
-          closeMenu();
-          void renameSession(s);
-        },
+/** The bar's ⋯. Session info and the model need a session, so before the
+ *  conversation's first reply they are shown and say so rather than vanish. */
+export function barMenu(anchor: HTMLElement): void {
+  const s = deps.currentSession();
+  const conversation = deps.continuousOpen();
+  const later = s ? {} : { disabled: true, hint: "after the first reply" };
+  const items: MenuItem[] = [
+    ...(conversation ? [{
+      label: "Search",
+      hint: chordLabel("k"),
+      onSelect: () => {
+        closeMenu();
+        togglePalette();
       },
-      {
-        label: "Close",
-        hint: "leaves the rail; a message reopens it",
-        onSelect: () => {
-          closeMenu();
-          deps.closeSession(s);
-        },
-      },
-    ] : []),
+    }] : []),
     {
       label: "Session info",
-      onSelect: () => sessionInfo(anchor, s, () => sessionMenu(anchor, s)),
+      separatorBefore: conversation,
+      onSelect: () => s && sessionInfo(anchor, s, () => barMenu(anchor)),
+      ...later,
     },
-    ...(managed ? [{
-      label: "New session here",
-      separatorBefore: true,
-      hint: basename(s.cwd),
-      onSelect: () => {
-        closeMenu();
-        deps.createSession(s.cwd);
-      },
-    }] : []),
     {
       label: "Browse files",
-      separatorBefore: !managed,
-      hint: current ? chordLabel(FILES_KEY) : "",
+      hint: chordLabel(FILES_KEY),
       onSelect: () => {
         closeMenu();
-        deps.openFiles(current ? undefined : s.cwd);
+        deps.openFiles();
       },
     },
-    ...(managed ? [{
-      label: "Continue in Lark/Slack…",
-      ...(s.channel && s.channel !== "web" ? { hint: `answers in ${s.channel}`, disabled: true } : {}),
-      onSelect: () => void handoffPicker(anchor, s),
-    }] : []),
     {
       label: "Model & reasoning…",
       separatorBefore: true,
-      hint: current ? (currentModel?.id ?? "…") : "",
-      onSelect: () => void pickModel(anchor, s.id, s),
+      hint: currentModel?.id ?? "…",
+      onSelect: () => s && void pickModel(anchor, s.id, s),
+      ...later,
     },
-  ], s.title ?? untitled(s.cwd));
+    {
+      label: "Settings",
+      separatorBefore: true,
+      onSelect: () => {
+        closeMenu();
+        deps.openSettings();
+      },
+    },
+  ];
+  openMenu(anchor, items, conversation ? "Conversation" : s ? (s.title ?? untitled(s.cwd)) : "Session");
 }

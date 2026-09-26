@@ -18,10 +18,10 @@ export const btn = (label: string, cls = ""): HTMLButtonElement => {
   return el;
 };
 
-/** A Console page's title, first on its `.pagehead` (style.css owns the band).
- * Phones hide it: the mobile top bar already names every view. */
+/** A Console page's title, first on its `.pagehead` (style.css owns the band);
+ *  the bar hides under a Console page, so this is its only name at any width. */
 export const pageTitle = (label: string): HTMLElement =>
-  h("span", "mr-1 flex-none font-medium max-md:hidden", label);
+  h("span", "mr-1 flex-none font-medium", label);
 
 /** Smaller than a pill strip: it sits under one, and two rows of the same
  *  chrome would read as two levels of one navigation. An option with an icon

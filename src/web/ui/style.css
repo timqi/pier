@@ -26,11 +26,11 @@ html {
   --workbench-canvas: #f1f4f3;
   --workbench-mist: #e6f1f3;
   --workbench-mint: #e8f3ed;
-  /* Glass chrome (rail, chat heading, composer, menus): a neutral hairline the
+  /* Glass chrome (bar, composer, menus): a neutral hairline the
      canvas shows through, a top-edge highlight, and a shadow in two parts —
      wide ambient plus tight contact — which is what reads as lifted rather
      than drawn on. `-raised` is one step higher, for what sits over content
-     (composer, open drawer). Dark swaps the hairline for a light one, since a
+     (composer, an open panel). Dark swaps the hairline for a light one, since a
      shadow alone disappears against a dark canvas. */
   --glass-edge: rgb(16 24 40 / 0.08);
   --glass-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -8px rgb(16 24 40 / 0.14),
@@ -70,8 +70,8 @@ html[data-theme="dark"] {
     0 18px 44px -8px rgb(0 0 0 / 0.65), inset 0 1px 0 rgb(255 255 255 / 0.07);
   background-color: var(--workbench-canvas);
 
-  /* Surfaces, then text. `white` is the pane; 50 is what sits under it (the
-     rail), 100–300 the chrome over it; 400 and up is type. */
+  /* Surfaces, then text. `white` is the pane; 50 is what sits under it,
+     100–300 the chrome over it; 400 and up is type. */
   --color-white: oklch(22.5% 0 none);
   --color-neutral-50: oklch(19% 0 none);
   --color-neutral-100: oklch(27.5% 0 none);
@@ -316,9 +316,8 @@ html {
 }
 
 /* The transcript runs the full pane and the glass chrome floats over it, so a
-   message slides under the heading and the dock instead of being cut off at
-   their edges — the same on a phone as on a desktop, where only *which*
-   heading floats differs (#mobile-bar below md, #chat-header above it). One
+   message slides under the bar and the dock instead of being cut off at
+   their edges — the same on a phone as on a desktop. One
    column, four rows: the heading pins to the top of row 1, the dock (queue,
    recovery, composer) owns rows 2–4 by height, and the transcript spans all
    four, padding its ends by what covers them — the heading's fixed height,
@@ -337,11 +336,11 @@ main {
    item into an implicit second column rather than stack it. */
 main > * { grid-column: 1; }
 main > section, #turns { grid-row: 1 / -1; }
-:is(#mobile-bar, #chat-header) { grid-row: 1; align-self: start; }
+#bar { grid-row: 1; align-self: start; }
 #queue-panel { grid-row: 2; }
 #recovery-panel { grid-row: 3; }
 #composer { grid-row: 4; }
-:is(#mobile-bar, #chat-header, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
+:is(#bar, #queue-panel, #recovery-panel, #composer) { position: relative; z-index: 1; }
 /* The two panels are cards on the dock, not bars over the transcript: the
    composer's own width and inset, an edge all round, and the 0.5rem the
    composer's top padding already leaves between the stack and the input.
@@ -357,94 +356,24 @@ main > section, #turns { grid-row: 1 / -1; }
 }
 #queue-panel:not(.hidden) + #recovery-panel { margin-top: 0.5rem; }
 
-/* Desktop: the rail collapses away and its re-open handle floats in the title
-   band every view starts with — `#chat-header` or a `.pagehead`. The padding is
-   what keeps the handle out of their titles without each view knowing about
-   it. Unlayered, so it outranks the body's md: grid-template utility. */
+/* Desktop has the width to keep title, tabs and action on one line, so the
+   head is exactly the bar's strip: one row, and its floor is its height. */
 @media (width >= 48rem) {
-  body[data-rail="closed"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  body[data-rail="closed"] #sidebar {
-    display: none;
-  }
-  /* The rail floats above the canvas; the conversation keeps its full pane. */
-  #sidebar {
-    min-height: 0;
-    margin: 8px;
-    border: 1px solid var(--glass-edge);
-    border-radius: 20px;
-    box-shadow: var(--glass-shadow);
-  }
-  /* Keep the handle inside the inset panel's title band. */
-  #rail-toggle {
-    left: calc(12.375rem - 8px);
-  }
-  body:not([data-rail="closed"]) #rail-toggle {
-    top: calc(0.625rem + 8px);
-  }
-  /* Every title band is the same inset strip, so the handle clears it by the
-     same 8px whichever view is open. */
-  body[data-rail="closed"] #rail-toggle {
-    left: calc(0.375rem + 8px);
-    top: calc(0.625rem + 8px);
-  }
-  body[data-rail="closed"] #rail-toggle svg {
-    transform: rotate(180deg);
-  }
-  /* The badge stands in for the list's own dots; with the rail open they are
-     on screen, and saying it twice in one band is saying it once too often. */
-  body:not([data-rail="closed"]) #rail-toggle .attention {
-    display: none;
-  }
-  body[data-rail="closed"] :is(#chat-header, .pagehead) {
-    padding-left: 2.75rem;
-  }
-  /* Desktop has the width to keep title, tabs and action on one line, so the
-     head is exactly the heading's strip: one row, and its floor is its height. */
   .pagehead {
     flex-wrap: nowrap;
     padding-block: 0;
   }
 }
 
-/* Mobile: the sidebar leaves the grid and slides over the workbench. Plain CSS
-   behind one media query rather than a pile of `max-md:` utilities — the open
-   state is a single transform, and Tailwind's class ordering can't flip it. */
+/* Mobile: plain CSS behind one media query rather than a pile of `max-md:` utilities. */
 @media (width < 48rem) {
-  #sidebar {
-    position: fixed;
-    inset-block: 0;
-    left: 0;
-    z-index: 40;
-    width: 19rem;
-    border-radius: 0 20px 20px 0;
-    transform: translateX(-100%);
-    transition: transform 220ms var(--ease-surface);
-  }
-  #drawer-scrim {
-    opacity: 1;
-    visibility: visible;
-    transition: opacity 220ms var(--ease-surface), visibility 220ms;
-  }
-  #drawer-scrim.hidden {
-    display: block;
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-  }
-  #sidebar[data-open] {
-    transform: translateX(0);
-    box-shadow: var(--glass-shadow-raised);
-  }
   /* Pull-to-refresh would reload the workbench mid-turn; the transcript pane
      keeps its own scroll chaining. */
   body {
     overscroll-behavior: none;
   }
-  /* Home-indicator gutter for the two elements that sit on the bottom edge. */
-  #composer,
-  #session-list {
+  /* Home-indicator gutter for the element that sits on the bottom edge. */
+  #composer {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
   }
   /* Installed on iOS the top inset is paid twice: the web view is the whole
@@ -464,18 +393,10 @@ main > section, #turns { grid-row: 1 / -1; }
     padding-bottom: 0.5rem;
   }
   /* black-translucent (index.html) hands us the notch strip instead of the
-     system's grey band, so the two surfaces that touch the top edge pay the
-     inset back — and the strip carries their background, which was the point. */
-  main,
-  #sidebar {
+     system's grey band, so main pays the inset back — and the strip carries
+     its background, which was the point. */
+  main {
     padding-top: env(safe-area-inset-top);
-  }
-  /* Only the transcript scrolls under the floating bar. A Console view brings
-     its own head strip and its own scrollers, so it starts below the bar
-     instead — by the bar's footprint, without each view knowing about it; the
-     8px between the two strips is the head's own inset. */
-  main > section {
-    padding-top: var(--head-h);
   }
 }
 
@@ -498,39 +419,9 @@ main {
     radial-gradient(ellipse 80% 65% at 100% 100%, var(--workbench-mist), transparent 75%),
     radial-gradient(ellipse 70% 65% at 0% 100%, var(--workbench-mint), transparent 75%);
 }
-/* Desktop keeps a 36px navigation rhythm; the drawer retains touch targets. */
-#sidebar { font-size: 0.875rem; line-height: 1.4; }
-#sidebar :is(.session-open, #new-session, #open-palette), #console-section li button {
-  min-height: 2rem;
-  padding-block: 0.25rem;
-}
-@media (width < 48rem) {
-  #sidebar { font-size: 0.9375rem; line-height: 1.5; }
-}
-/* Navigation shares the same inset shape in the Console and session list. */
-#console-section ul, #session-list { padding-inline: 0.5rem; }
-#console-section li button, #session-list li {
-  border-radius: 0.625rem;
-  margin-block: 0.125rem;
-  transition: background-color 180ms, color 180ms;
-}
-#console-section li button { padding-left: 0.75rem; }
-#session-list li { padding-inline: 0.375rem; }
-#session-list .session-open { padding-left: 0.25rem; }
-#session-list :focus-visible { outline-offset: -2px; }
-#session-list li:focus-within .session-more,
-#session-list .session-more[aria-expanded="true"] { display: flex; }
-@media (hover: hover) and (pointer: fine) {
-  #session-list li:hover .session-more { display: flex; }
-}
-@media (hover: none), (pointer: coarse) {
-  #session-list li:has([aria-current="page"]) .session-more { display: flex; }
-}
 @media (pointer: coarse), (width < 48rem) {
-  #sidebar :is(.session-open, .session-more, .icon-btn, #new-session, #open-palette),
-  #console-section :is(summary, li button), .config-row { min-height: 44px; }
-  #sidebar :is(.session-more, .icon-btn, #open-palette) { min-width: 44px; }
-  /* Files' tree rows and controls are on the same thumb as the rail's. The
+  .config-row, .session-open { min-height: 44px; }
+  /* Files' tree rows and controls are on the same thumb. The
      heat-map marks are sized from the diff, so the floor may not reach them. */
   #files-view :is(summary, button:not(.map-mark), a.btn) { min-height: 44px; }
   #files-view .icon-btn { min-width: 44px; }
@@ -548,17 +439,15 @@ main {
   #turns [data-kind="activity"] details > summary { min-height: 28px; }
   #turns [data-kind="activity"] > summary + div { gap: 0; max-height: 20rem; }
 }
-/* One selection vocabulary: the rail's rows, the Console's, and the palette's. */
-#console-section button.bg-indigo-50, #session-list li.bg-indigo-50, .palette-row.bg-indigo-50,
-#files-view button.bg-indigo-50 {
+/* One selection vocabulary: the palette's rows and the Files view's. */
+.palette-row.bg-indigo-50, #files-view button.bg-indigo-50 {
   color: var(--color-indigo-700);
   font-weight: 500;
   background-color: var(--color-indigo-100);
   box-shadow: none;
 }
-#console-section button.bg-indigo-50 [data-icon] { color: inherit; }
 /* Glass is reserved for navigation and controls; messages use opaque surfaces. */
-:is(.glass, #sidebar, #mobile-bar, #chat-header, .pagehead) {
+:is(.glass, #bar, .pagehead) {
   background: var(--glass-surface);
   border-color: var(--glass-edge);
   backdrop-filter: blur(28px) saturate(1.4);
@@ -582,11 +471,9 @@ main {
   background: var(--color-white);
   box-shadow: var(--glass-shadow);
 }
-#rail-toggle { top: 0.625rem; border-radius: 50%; }
-/* One heading material at both breakpoints: the same slim inset strip in the
-   same glass, whichever of the two the width is showing — and a Console page's
-   head is that strip too, so a Console page and a chat read as one workbench. */
-#mobile-bar, #chat-header, .pagehead {
+/* One heading material: the bar is a slim inset strip in glass, and a Console
+   page's head is that strip too, so a Console page and a chat read as one workbench. */
+#bar, .pagehead {
   margin: 8px 8px 0;
   border: 1px solid var(--glass-edge);
   border-radius: 18px;
@@ -595,7 +482,7 @@ main {
 }
 /* A bar holds one line and is that tall; the head may wrap — a phone's tab row
    takes two lines — so its `min-h-12` is a floor instead. */
-#mobile-bar, #chat-header { height: 3rem; }
+#bar { height: 3rem; }
 /* A head that hugs its controls — Channels' platform switch, which is one
    switch and a status line, not a page's worth of band — centres over the
    column of cards below it instead of hanging off the left edge. The cap is
@@ -816,7 +703,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
 }
 :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: scale(0.95); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :is(.glass, .glass-menu, #sidebar, #mobile-bar, #chat-header, #queue-panel, #recovery-panel, .pagehead) {
+  :is(.glass, .glass-menu, #bar, #queue-panel, #recovery-panel, .pagehead) {
     background: var(--color-white);
     backdrop-filter: none;
     border-color: var(--color-neutral-400);
@@ -824,45 +711,24 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   }
 }
 
-/* Keep the drawer inside narrow phones, even with the enlarged UI scale. */
 @media (width < 48rem) {
-  #sidebar { max-width: calc(100vw - 2.5rem); }
   #composer { --composer-control-size: 2.25rem; padding-inline: 0.75rem; }
   /* The cards take the composer's inset, which is narrower here than the 1rem
      its px-4 leaves above md — two edges a few pixels apart in the same dock
      read as a misalignment, not as two elements. */
   #queue-panel, #recovery-panel { width: calc(100% - 1.5rem); }
-  /* The bar carries the chat heading's meta chips — the same element, moved
-     here by shell.ts, not a second copy. Three columns for the strip and a
-     second row for the chips, aligned under the title: at this width they do
-     not fit beside a session's name, and the row is there only when the chips
-     are the kind that has to be seen without opening anything (data-urgent,
-     session-header.ts) — the rest is a reading the title's info panel gives in
-     full. The strip's height has two values, so it is declared here rather
-     than as a utility on the element — and declared, not measured, so --head-h
-     can be too: the transcript pads by what covers it. */
+  /* At this width the meta chips do not fit beside a session's name, so they
+     wrap to a second line of the bar, and only when they are the kind that has
+     to be seen without opening anything (data-urgent, session-header.ts). The
+     strip's height is declared, not measured, so --head-h can be too: the
+     transcript pads by what covers it. */
   main { --bar-h: 3rem; --head-h: calc(var(--bar-h) + 8px); }
-  /* The chips' own line, and no more: the strip's controls (2.75rem) plus the
-     chip row — slack above the chips reads as the strip having lost its title. */
-  main:has(#chat-header:not(.hidden)):has(#session-meta[data-urgent]:not(.hidden)) { --bar-h: 4rem; }
-  #mobile-bar {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    /* The gap utility is the row's, not the rows': a row gap would come out of
-       the strip, which is the one thing here with a fixed height. */
-    grid-template-rows: minmax(0, 1fr) auto;
-    row-gap: 0;
-    height: var(--bar-h);
-  }
-  /* `min-width: 0`: a grid item's automatic minimum is its content, which here
-     is a row of chips wider than the strip — it would hang off the bar's edge
-     instead of making the model chip give up characters (session-header.ts). */
-  #mobile-bar #session-meta { grid-row: 2; grid-column: 2 / -1; height: 1.25rem; min-width: 0; }
-  /* A Console view hides the chat heading (views.ts), and the chips are the
-     chat's: they leave with it rather than sitting under the view's name. */
-  main:has(#chat-header.hidden) #session-meta { display: none; }
-  /* And the row itself is only there when it is the urgent kind (above). */
-  #mobile-bar #session-meta:not([data-urgent]) { display: none; }
+  main:has(#bar:not(.hidden)):has(#session-meta[data-urgent]:not(.hidden)) { --bar-h: 4rem; }
+  #bar { flex-wrap: wrap; align-content: center; row-gap: 0; height: var(--bar-h); }
+  /* `min-width: 0`: the model chip gives up characters instead of hanging off
+     the bar's edge (session-header.ts). */
+  #bar #session-meta { order: 1; flex-basis: 100%; height: 1.25rem; min-width: 0; padding-left: 0.5rem; }
+  #bar #session-meta:not([data-urgent]) { display: none; }
   #turns { padding-inline: 0.625rem; }
   #turns > :is([data-kind="user"], [data-kind="assistant"]) { max-width: 92%; }
   #turns > [data-kind="user"] { max-width: min(92%, calc(100% - 3rem)); }
@@ -879,8 +745,6 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   /* Still marked, not faded: chat.ts takes the attribute off after the same 1.2s. */
   #turns > [data-reveal] { animation: none; outline: 3px solid var(--color-indigo-400); outline-offset: 3px; }
   .glass-menu, .glass-menu[data-presentation="sheet"] { --menu-shift: none; transition-duration: 120ms; }
-  #sidebar { transition: none; }
-  #drawer-scrim { transition-duration: 120ms; }
   :is(#turns, #files-view) details::details-content { transition: opacity 120ms, content-visibility 120ms allow-discrete; }
   :is(.btn, .icon-btn, #composer button):active:not(:disabled) { transform: none; }
 }
@@ -931,8 +795,7 @@ dialog[open]:not(#image-dialog) { animation: surface-fade 160ms ease-out; }
   }
   /* A Console page's head: its title, the view's tab pills and the page's
      primary action on one band, in the heading strip's material (below). Below
-     md the title hides — the top bar already names the page — the right-hand
-     group takes `w-full` and this wraps to give it a line of its own within
+     md the right-hand group takes `w-full` and this wraps to give it a line of its own within
      thumb reach; the pills scroll rather than shrink when they outgrow a row. */
   .pagehead {
     @apply flex min-h-12 flex-none flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap px-4 py-2;

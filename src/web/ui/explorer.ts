@@ -222,7 +222,7 @@ export function createExplorerView(
     return el;
   }
 
-  /** The rail's, the palette's and Agent's nav all say "selected" this way. */
+  /** The palette's and Agent's nav both say "selected" this way. */
   function markSelected(row: HTMLElement): void {
     selectedRow?.classList.remove("bg-indigo-50", "font-medium", "text-indigo-700");
     selectedRow = row;
