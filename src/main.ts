@@ -133,6 +133,8 @@ const chain = new MainChain(db, {
   factory, router, home: pierPath("home"),
   enabled: () => settings.get().continuous,
   ledger: (ids, since) => tasks.ledger(ids, since),
+  roleOf: (id) => taskStore.roleOf(id),
+  hub,
 });
 const stopEviction = router.startIdleEviction();
 tasks = new TaskService(taskStore, factory, router, hub, {

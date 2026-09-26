@@ -325,6 +325,24 @@ it("re-lists every view the workspace stream feeds when it reconnects", async ()
   expect(globalThis.fetch).toHaveBeenCalledWith("/api/sessions", undefined);
 });
 
+// The rail's Open block re-reads on a marker written, without re-listing every session.
+it("re-reads the open items when a turn end wrote a marker", async () => {
+  const sidebar = await import("./sidebar.js");
+  const workspace = Stream.all.find((s) => s.url === "/api/events")!;
+  const fetcher = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  const open = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [] };
+  fetcher.mockClear();
+  fetcher.mockImplementationOnce(() => Promise.resolve(Response.json(open)));
+  vi.mocked(sidebar.renderSessions).mockClear();
+
+  workspace.onmessage?.({ data: JSON.stringify({ type: "open-items-changed" }) });
+  await settled();
+
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/continuous/open"]);
+  expect(h.sidebar.open()).toEqual(open);
+  expect(vi.mocked(sidebar.renderSessions)).toHaveBeenCalled();
+});
+
 describe("the continuous conversation", () => {
   const member = (sessionId: string, reason = "idle", startedAt = 1) => ({ sessionId, startedAt, reason });
   let chain: ReturnType<typeof member>[] = [];

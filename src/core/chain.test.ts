@@ -6,20 +6,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../db.js";
-import { MainChain, type LedgerRun } from "./chain.js";
-import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS } from "./types.js";
+import { MainChain, renderOpenItems } from "./chain.js";
+import { CHAIN_FULL_TOKENS as FULL, CHAIN_IDLE_MS as IDLE_MS, NOT_IN_LEDGER } from "./types.js";
 import { EventHub } from "./hub.js";
 import { Router } from "./router.js";
 import { fakeSession, type FakeSession, type FakeSessionOptions } from "./session.testkit.js";
-import type { AgentFactory, AgentLaunchOptions } from "./types.js";
+import type { AgentFactory, AgentLaunchOptions, AgentRole, LedgerRun } from "./types.js";
 
 const day = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-function rig({ runs = [] as LedgerRun[] | (() => LedgerRun[]), on = true } = {}) {
+function rig({
+  runs = [] as LedgerRun[] | ((ids: string[], since: number) => LedgerRun[]),
+  on = true,
+  roles = {} as Record<string, AgentRole>,
+  head = undefined as string | undefined,
+} = {}) {
   const home = join(mkdtempSync(join(tmpdir(), "pier-chain-")), "home");
   const db = openDb(":memory:");
   const clock = { now: Date.now() };
+  // A head already in the chain when the process starts.
+  if (head) db.prepare("INSERT INTO main_chain VALUES (?, ?, 'first')").run(head, clock.now);
   const sessions = new Map<string, FakeSession>();
   const created: AgentLaunchOptions[] = [];
   const onDisk = new Set<string>();
@@ -44,14 +51,20 @@ function rig({ runs = [] as LedgerRun[] | (() => LedgerRun[]), on = true } = {})
     readHistory: async () => undefined,
   } satisfies AgentFactory;
   const ledger: { ids: string[]; since: number }[] = [];
-  const router = new Router(new EventHub(), (key) => factory.resume(key.conversationId));
+  const hub = new EventHub();
+  const workspace: string[] = [];
+  hub.subscribeWorkspace((e) => {
+    if (e.type === "open-items-changed") workspace.push(e.type);
+  });
+  const router = new Router(hub, (key) => factory.resume(key.conversationId));
   const chain = new MainChain(db, {
-    factory, router, home,
+    factory, router, home, hub,
     enabled: () => on,
     ledger: (ids, since) => {
       ledger.push({ ids, since });
-      return typeof runs === "function" ? runs() : runs;
+      return typeof runs === "function" ? runs(ids, since) : runs;
     },
+    roleOf: (id) => roles[id],
     now: () => clock.now,
   });
   /** A head already in the chain, as a restart finds it: on disk, not live. */
@@ -59,11 +72,13 @@ function rig({ runs = [] as LedgerRun[] | (() => LedgerRun[]), on = true } = {})
     const s = fakeSession(id, opts);
     sessions.set(id, s);
     onDisk.add(id);
-    db.prepare("INSERT INTO main_chain VALUES (?, ?, 'first')").run(id, startedAt);
+    db.prepare("INSERT OR IGNORE INTO main_chain VALUES (?, ?, 'first')").run(id, startedAt);
     return s;
   };
   const say = (text: string) => chain.send({ senderId: "web", sender: { id: "web", name: "operator" }, text, mode: "auto" });
-  return { chain, db, home, clock, sessions, created, ledger, existing, say, router };
+  const item = (problem: string, stage: string, runIds: string[], updatedAt: number) =>
+    db.prepare("INSERT INTO open_items VALUES (?, ?, ?, ?)").run(problem, stage, JSON.stringify(runIds), updatedAt);
+  return { chain, db, home, clock, sessions, created, ledger, existing, say, router, hub, workspace, item };
 }
 
 describe("the continuous conversation's chain", () => {
@@ -85,6 +100,7 @@ describe("the continuous conversation's chain", () => {
     expect(seed?.text).toContain("pier lives in ~/code/pier");
     expect(seed?.text.indexOf("wrote the contract")).toBeLessThan(seed!.text.indexOf("shipped the doc"));
     expect(seed?.text).toContain("## Runs — in flight, and finished since the previous session started\n\nnone");
+    expect(seed?.text).toContain("pier lives in ~/code/pier\n\n## Open\n\nNothing open.\n\n## Runs");
     expect(seed?.text).not.toContain("last exchanges");
     // The seed before the message.
     expect(m1.calls.map((c) => c.split(":").slice(0, 2).join(":"))).toEqual([
@@ -121,10 +137,11 @@ describe("the continuous conversation's chain", () => {
 
     expect(await r.say("new day")).toEqual({ sessionId: "m1", rotated: "idle" });
     expect(r.created).toEqual([{ cwd: r.home, model: { provider: "p", id: "strong" }, thinking: "high" }]);
-    expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }]);
+    expect(r.ledger).toEqual([{ ids: ["h1"], since: startedAt }, { ids: ["h1"], since: r.clock.now - 86_400_000 }]);
     const seed = r.sessions.get("m1")!.systemInputs[0]!;
     expect(seed.origin).toEqual({ kind: "session-seed", reason: "idle", previousSessionId: "h1" });
     expect(seed.text).toContain("started\n\nr1 · fix · running · session c1 · /wt\nr2 · look · queued · session — · —\n\n");
+    expect(seed.text).toContain("## Open\n\nNot on the list\n- fix — running ");
     expect(seed.text).toContain("user: question 2\n\nassistant: answer 2");
     expect(seed.text).toContain("assistant: answer 4");
     expect(seed.text).not.toContain("question 1");
@@ -227,5 +244,115 @@ describe("the continuous conversation's chain", () => {
     mkdirSync(join(r.home, "MEMORY.md"), { recursive: true });
     await r.say("hi");
     expect(r.sessions.get("m1")!.systemInputs[0]!.text).toMatch(/## MEMORY\.md\n\n\(could not be read: .*EISDIR/);
+  });
+});
+
+const MIN = 60_000;
+const run = (runId: string, over: Partial<LedgerRun> = {}): LedgerRun =>
+  ({ runId, name: runId, state: "running", targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null, ...over });
+
+describe("the open items", () => {
+  it("joins each run token through the ledger: found, gone, and a lead with its workers", () => {
+    let now = 0;
+    const r = rig({
+      roles: { lead1: "lead" },
+      runs: (ids) => ids[0] === "lead1"
+        ? [run("w1"), run("w2", { state: "succeeded", finishedAt: now })]
+        : [run("1prwmabcdef", { name: "lead open items", targetSessionId: "lead1", queuedAt: now - 23 * MIN })],
+    });
+    now = r.clock.now;
+    r.existing("h1", now);
+    r.item("open items 视图", "lead designing", ["1prwmabcdef"], 2);
+    r.item("model menu 重选", "merged, restart pending", ["gone1"], 1);
+    const open = r.chain.openItems();
+    expect(open.items.map((i) => i.problem)).toEqual(["model menu 重选", "open items 视图"]);
+    expect(open.items[0]!.runs).toEqual([{ runId: "gone1", name: "gone1", state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null }]);
+    expect(open.items[1]!.runs[0]!.workers).toEqual({ queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 });
+    expect(open.unlisted).toEqual([]);
+    expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }, { ids: ["lead1"], since: now - 86_400_000 }]);
+    expect(renderOpenItems(open, now)).toBe([
+      "Open",
+      "- model menu 重选 — merged, restart pending · run gone1 — not in the ledger",
+      "- open items 视图 — lead designing · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
+    ].join("\n"));
+  });
+
+  it("lists the chain runs no item names that are in flight or did not succeed, never a success", () => {
+    let now = 0;
+    const r = rig({ runs: () => [
+      run("r-live", { name: "Build it", queuedAt: now - 5 * MIN }),
+      run("r-failed", { name: "Review src/auth", state: "failed", finishedAt: now - 2 * 60 * MIN }),
+      run("r-ok", { name: "Done thing", state: "succeeded", finishedAt: now - MIN }),
+      run("r-named", { name: "Named", state: "failed", finishedAt: now }),
+    ] });
+    now = r.clock.now;
+    r.existing("h1", now);
+    r.item("the problem", "", ["r-named"], 1);
+    const open = r.chain.openItems();
+    expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-failed"]);
+    // The window is the ledger's: `pier task runs`' last 24h.
+    expect(r.ledger[0]!.since).toBe(now - 86_400_000);
+    expect(renderOpenItems(open, now)).toBe([
+      "Open",
+      "- the problem · run r-named failed <1m ago",
+      "Not on the list",
+      "- Build it — running 5m",
+      "- Review src/auth — failed 2h ago",
+    ].join("\n"));
+  });
+
+  it("says nothing is open when nothing is, and asks no ledger before the first head", () => {
+    const r = rig();
+    expect(renderOpenItems(r.chain.openItems(), r.clock.now)).toBe("Nothing open.");
+    expect(r.ledger).toEqual([]);
+  });
+
+  it("puts the open items in a new head's seed, after MEMORY.md", async () => {
+    const r = rig();
+    r.existing("h1", r.clock.now - 3 * IDLE_MS);
+    r.item("60K rotation", "waiting on you: keep 60K or raise to 80K?", [], 1);
+    await r.say("morning");
+    expect(r.sessions.get("m1")!.systemInputs[0]!.text).toContain("## Open\n\nOpen\n- 60K rotation — waiting on you: keep 60K or raise to 80K?\n\n## Runs");
+  });
+
+  it("answers exactly `/status` with the list, appended to the head without a turn", async () => {
+    const r = rig();
+    r.item("model menu", "merged", [], 1);
+    expect(await r.say("  /STATUS \n")).toEqual({ sessionId: "m1", rotated: "first", command: "status" });
+    const m1 = r.sessions.get("m1")!;
+    expect(m1.systemInputs.at(-1)).toMatchObject({ text: "Open\n- model menu — merged", origin: { kind: "chat-command", command: "status" }, mode: "append" });
+    expect(m1.prompts).toEqual([]);
+    for (const text of ["/tmp is full", "/status please", "status", "/stat"]) await r.say(text);
+    expect(m1.prompts).toHaveLength(4);
+    expect(m1.systemInputs.filter((i) => i.origin.kind === "chat-command")).toHaveLength(1);
+  });
+
+  it("carries each named run's session with `/status`, for the card to link", async () => {
+    const r = rig({ runs: () => [run("r-sess", { targetSessionId: "s-r" }), run("r-none")] });
+    r.item("with a session", "running", ["r-sess", "r-none", "r-gone"], 1);
+    await r.say("/status");
+    expect(r.sessions.get("m1")!.systemInputs.at(-1)!.origin).toEqual({ kind: "chat-command", command: "status", sessions: { "r-sess": "s-r" } });
+  });
+
+  it("writes the head's markers on its turn end and says so once, a restart's head and a new head alike", async () => {
+    const r = rig({ head: "h0" });
+    r.existing("h0", r.clock.now);
+    r.hub.emit("h0", { type: "turn-end", text: "On it.\n<open>open items — worker running (run r1)</open>" });
+    expect(r.db.prepare("SELECT problem, stage, run_ids FROM open_items").all())
+      .toEqual([{ problem: "open items", stage: "worker running", run_ids: '["r1"]' }]);
+    expect(r.workspace).toEqual(["open-items-changed"]);
+
+    // Nothing written, nothing said: no marker, a done for no item, a marker with no problem.
+    r.hub.emit("h0", { type: "turn-end", text: "plain <done>never open</done><open> — x</open>" });
+    r.hub.emit("h0", { type: "turn-end", text: "" });
+    expect(r.workspace).toEqual(["open-items-changed"]);
+
+    r.clock.now += 2 * IDLE_MS;
+    await r.say("later");
+    r.hub.emit("h0", { type: "turn-end", text: "<done>open items</done>" });
+    expect(r.db.prepare("SELECT count(*) AS n FROM open_items").get()).toEqual({ n: 1 });
+    r.hub.emit("m1", { type: "turn-end", text: "Merged.\n<open>open items — merged, restart pending</open>\n<done>open items</done>" });
+    expect(r.db.prepare("SELECT count(*) AS n FROM open_items").get()).toEqual({ n: 0 });
+    expect(r.workspace).toEqual(["open-items-changed", "open-items-changed"]);
   });
 });

@@ -2,7 +2,7 @@
 // conversation's own row first, then only what is in progress; switch off,
 // the rail is exactly the session list it always was.
 import { beforeEach, expect, it, vi } from "vitest";
-import type { ChainMember } from "../../core/types.js";
+import { NOT_IN_LEDGER, type ChainMember, type OpenItems, type OpenRun } from "../../core/types.js";
 import { installPage, type FakeDocument } from "./dom.testkit.js";
 
 vi.mock("./dir-picker.js", () => ({ openBrowser: vi.fn(), openPathMenu: vi.fn() }));
@@ -19,7 +19,7 @@ const member = (sessionId: string): ChainMember => ({ sessionId, startedAt: 1, r
 
 let doc: FakeDocument;
 let sidebar: typeof import("./sidebar.js");
-const state = { chain: null as ChainMember[] | null, open: false, current: null as string | null, chat: true };
+const state = { chain: null as ChainMember[] | null, open: false, current: null as string | null, chat: true, items: null as OpenItems | null };
 const openContinuous = vi.fn();
 const select = vi.fn();
 let sessions: Row[] = [];
@@ -28,11 +28,11 @@ beforeEach(async () => {
   vi.resetModules();
   doc = installPage();
   sidebar = await import("./sidebar.js");
-  Object.assign(state, { chain: null, open: false, current: null, chat: true });
+  Object.assign(state, { chain: null, open: false, current: null, chat: true, items: null });
   sidebar.initSidebar({
     sessions: () => sessions, currentId: () => state.current, select, sessionMenu: vi.fn(), createSession: vi.fn(),
     onTitleChanged: vi.fn(), chain: () => state.chain, continuousOpen: () => state.open, openContinuous,
-    chatVisible: () => state.chat,
+    chatVisible: () => state.chat, open: () => state.items,
   });
 });
 
@@ -100,4 +100,56 @@ it("leaves the conversation's own sessions out of In progress", () => {
 // A lead's ended turn waits on the user: seen or not, it stays until deleted.
 it("keeps an idle, read lead in progress", () => {
   expect(sidebar.inProgress([row("lead", { role: "lead" }), row("i")], []).map((s) => s.id)).toEqual(["lead"]);
+});
+
+const ledgerRun = (runId: string, over: Partial<OpenRun> = {}): OpenRun =>
+  ({ runId, name: runId, state: "running", targetSessionId: `s-${runId}`, cwd: null, queuedAt: 0, finishedAt: null, ...over });
+const labels = () => list().querySelectorAll("div").map((d) => d.textContent.trim()).filter((t) => ["Open", "Not on the list", "In progress"].includes(t));
+
+it("draws what the conversation is solving under its row: items, run chips opening their sessions, and the runs no item names", () => {
+  state.chain = [member("h1")];
+  sessions = [row("h1"), row("s-lead1abcdef", { role: "lead" })];
+  state.items = {
+    items: [
+      { problem: "open items 视图", stage: "lead designing", runs: [
+        ledgerRun("lead1abcdef", { workers: { queued: 0, running: 1, succeeded: 1, failed: 0, cancelled: 0, interrupted: 0, skipped: 0 } }),
+      ] },
+      { problem: "model menu", stage: "merged, restart pending", runs: [ledgerRun("gone1", { state: NOT_IN_LEDGER, targetSessionId: null })] },
+    ],
+    unlisted: [ledgerRun("r-failed", { name: "Review src/auth", state: "failed", finishedAt: 1 })],
+  };
+  sidebar.renderSessions();
+  expect(labels()).toEqual(["Open", "Not on the list", "In progress"]);
+  expect(list().textContent).toContain("open items 视图 — lead designing");
+  expect(list().textContent).toContain("workers: 1 running, 1 succeeded");
+  const chips = list().querySelectorAll("[data-session-id]").filter((el) => el.dataset.sessionId?.startsWith("run:"));
+  expect(chips.map((c) => c.textContent.trim())).toEqual([
+    "run lead1abc · running",
+    `run gone1 — ${NOT_IN_LEDGER}`,
+    "run r-failed · failed",
+  ]);
+  // The lead's session is a rail row, so its chip wears that row's dot.
+  expect(chips[0]!.querySelector("span")!.title).toBe("lead — waiting for you");
+  expect(chips[2]!.querySelector("span")!.title).toBe("failed — look at it");
+  // A run the ledger no longer holds has no session to open.
+  expect(chips[1]!.querySelector("button")).toBeNull();
+  chips[0]!.querySelector("button")!.onclick?.();
+  expect(select).toHaveBeenLastCalledWith("s-lead1abcdef");
+  chips[2]!.querySelector("button")!.onclick?.();
+  expect(select).toHaveBeenLastCalledWith("s-r-failed");
+  expect(list().textContent).toContain("Review src/auth");
+});
+
+it("hides the open block when both lists are empty, and while the switch is off", () => {
+  state.chain = [member("h1")];
+  sessions = [row("h1")];
+  state.items = { items: [], unlisted: [] };
+  sidebar.renderSessions();
+  expect(texts()).toEqual(["Conversation"]);
+  expect(labels()).toEqual([]);
+
+  state.chain = null;
+  state.items = { items: [{ problem: "p", stage: "s", runs: [] }], unlisted: [] };
+  sidebar.renderSessions();
+  expect(list().textContent).not.toContain("Open");
 });

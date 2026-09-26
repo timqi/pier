@@ -90,6 +90,7 @@ import type {
   ChatTurn,
   ContextUsage,
   ModelRef,
+  OpenItems,
   ParkedMessage,
   QueueRecovery,
   SessionEvent,
@@ -144,6 +145,8 @@ let earlier: { member: ChainMember; turns: ChatTurn[]; runs: BackgroundRun[]; er
 let unstarted = false;
 let paging = false;
 let pagedAt = 0;
+/** What it is solving, for the rail's Open block; null while the switch is off. */
+let openItems: OpenItems | null = null;
 /** When the head last heard the user, as far as this tab knows: whether a send is likely to rotate. */
 let headSpokeAt: number | null = null;
 
@@ -166,6 +169,20 @@ async function loadChain(): Promise<ChainMember[] | null> {
   const { chain } = (await res.json()) as { chain?: unknown };
   return Array.isArray(chain) ? chain as ChainMember[] : null;
 }
+
+/** Same contract as the chain's read: a 404 is the switch being off. */
+async function loadOpenItems(): Promise<OpenItems | null> {
+  const res = await fetch("/api/continuous/open");
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await failure(res, "Could not load the open items"));
+  return (await res.json()) as OpenItems;
+}
+
+// Thrown like refreshSessions', for the same reason.
+const refreshOpenItems = coalesce(async () => {
+  openItems = await loadOpenItems();
+  renderSessions();
+});
 
 function openContinuous(): void {
   const head = headId();
@@ -322,12 +339,14 @@ function commitSessions(rows: SessionInfo[]): void {
 // handlers, and report.ts is listening for exactly that rejection — a rail
 // that quietly stopped updating is the shape of bug principle 5 is about.
 const refreshSessions = coalesce(async () => {
-  const [rows, next] = await Promise.all([
+  const [rows, next, open] = await Promise.all([
     mustGetJson<SessionInfo[]>("/api/sessions", "Could not load sessions"),
     loadChain(),
+    loadOpenItems(),
   ]);
   const was = continuousOpen() ? headId() : null;
   chain = next;
+  openItems = open;
   if (!chain) unstarted = false;
   commitSessions(rows);
   // A rotation — this tab's send or another's — moves the open conversation to the new head.
@@ -504,6 +523,10 @@ function connectWorkspace(): void {
       if (e.type === "task-run-changed") void refreshSessions();
       return;
     }
+    if (e.type === "open-items-changed") {
+      void refreshOpenItems();
+      return;
+    }
     refreshActivity();
     // The selected session's own stream already drives composer state.
     if (e.sessionId === currentId) return;
@@ -675,6 +698,7 @@ initSidebar({
   continuousOpen,
   openContinuous,
   chatVisible: isChatVisible,
+  open: () => openItems,
 });
 initPalette({
   sessions: () => sessions,

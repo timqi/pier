@@ -6,8 +6,10 @@ instance switch `continuous` (`settings.ts`, Settings → Instance), default off
 Behaviour not named here is [03](03-web-workbench.md)'s,
 [04](04-im-channels.md)'s and [09](09-tasks-cli.md)'s.
 
-- Built: Phase 1 (the web conversation), Phase 2 (the feature lead).
-- Not built: Phase 3 (§IM), §Not built.
+- Built: Phase 1 (the web conversation), Phase 2 (the feature lead), §Open
+  items with `/status` and the rail's Open block.
+- Not built: Phase 3 (§IM), §Not built, the rest of [open
+  items](continuous-open-items.md) (`/new`, `/stop`, IM).
 
 ## Roles
 
@@ -92,7 +94,7 @@ its result carries a `Design final:` line, or it did not succeed; otherwise it s
 | User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost` |
 | Rotation | the new head keeps the previous head's model and thinking (`first`/`lost`: default at `low`) and gets one `session-seed` system input, mode `append` (no turn) |
-| Seed | `MEMORY.md`, the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
+| Seed | `MEMORY.md`, `## Open` (§Open items' text, `Nothing open.` included), the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
 
 - Rotation is lazy, only on a user message, so a head fed by callbacks alone
   grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
@@ -115,6 +117,33 @@ its result carries a `Design final:` line, or it did not succeed; otherwise it s
 - Accepted one-time misses: a rotation, a settings change that edits the
   prompt (skills, the home's `AGENTS.md`), the user switching model.
 
+## Open items
+
+- Main keeps the list inside its replies: `<open>problem — stage (run <id>)</open>`
+  adds or replaces the item keyed by `problem`, `<done>problem</done>` removes it;
+  both are stripped beside `<silent>` and never read inside a fence
+  (`openItemMarkers`, `core/reply.ts`); when to write them is `DISPATCHER`'s.
+- The head's `turn-end` writes them (`MainChain`, subscribed to the head) and
+  broadcasts `open-items-changed` when a row changed; a marker with no problem
+  is logged and dropped.
+- `MainChain.openItems()` joins each run token through the ledger's last 24h (a
+  run it no longer holds reads `run <id> — not in the ledger`, `NOT_IN_LEDGER`), a
+  lead run's with its workers counted by state, and adds the chain's runs no item
+  names that are in flight or did not succeed; `renderOpenItems` is the one text.
+- An item is `<problem> — <stage>`: `problem` in the user's words, `stage` in
+  the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
+  60K or 80K?`); a `(proposed)` decision is an item, stage `proposed, not applied`.
+- The text: `Open`, one line per item, each run token rendered
+  ` · run <id8>… <state> <age>` and a lead's ` · workers: <counts>`, then `Not
+  on the list`; `Nothing open.` when both are empty.
+- `/status`, trimmed and case-insensitive with nothing else on the message, is
+  taken by `MainChain.send` before dispatch: the head (rotated when due) gets the
+  text as a `chat-command` system input, mode `append`, no turn, its origin
+  carrying `sessions`, run id → session id for every named run that has one; any
+  other text, `/tmp is full` included, is a message.
+- Surfaces: the web card and the rail's Open block ([03](03-web-workbench.md),
+  `GET /api/continuous/open`).
+
 ## Run ledger
 
 - `TaskService.ledger` over `TaskStore.ledgerRuns`: runs launched by the given
@@ -129,6 +158,8 @@ its result carries a `Design final:` line, or it did not succeed; otherwise it s
 
 - `main_chain` (`db.ts` migration 28): one row per session, `started_at`,
   `reason`; the head is the newest, the transcripts are the record.
+- `open_items` (migration 31): `problem` the key, `stage`, `run_ids` a JSON
+  array, `updated_at` the order; Pier's store, never MEMORY.md.
 - Surfaces reach the conversation through `MainChain`, which dispatches to the
   head's own `web:<id>` key; the router knows nothing of the chain.
 
@@ -140,6 +171,8 @@ or any chain member opens the conversation at its head; earlier members page in 
 and never opened (`AgentFactory.readHistory`); no paging within a session; the
 divider between members names the rotation's reason (`DIVIDER`,
 `web/ui/main.ts`). Children show as Background Run rows opening their sessions.
+`/status` in the composer answers with §Open items' text as a card, no model
+call; the rail shows the same items live.
 
 ## IM
 
@@ -163,7 +196,7 @@ instance switch is on; group chats never change.
 - A callback to a cold head (>1h) deferred to the next seed.
 - A rotation on a callback to a full head.
 - A lead keeping the 1h cache TTL while its workers run.
-- Chat commands `/new`, `/status`, `/stop`.
+- Chat commands `/new`, `/stop` ([open items](continuous-open-items.md)).
 - The seed capped near 8K.
 - `pier search <q>` over the CLI socket (the index is `GET /api/search` only).
 

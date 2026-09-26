@@ -435,7 +435,9 @@ export async function send(mode: "auto" | "steer", label?: string): Promise<void
       if (id) await deps.reload(id);
       appendTurn("error", why);
     } else if (continuous) {
-      const { sessionId } = (await res.json()) as { sessionId: string };
+      const { sessionId, command } = (await res.json()) as { sessionId: string; command?: string };
+      // A command is answered without a turn, so no state event ends the optimistic one.
+      if (command && startsTurn) deps.setState("idle");
       if (sessionId !== id) deps.headMoved?.();
     }
   } finally {

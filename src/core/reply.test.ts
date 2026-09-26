@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cjkFriendly, compact, formatTurnMeta, silentReason, splitReply, stableBlockEnd, streamBody, surfacePrompt } from "./reply.js";
+import { cjkFriendly, compact, formatTurnMeta, openItemMarkers, silentReason, splitReply, stableBlockEnd, streamBody, surfacePrompt } from "./reply.js";
 
 describe("next-step block", () => {
   it("splits a separated button row off the text", () => {
@@ -230,6 +230,16 @@ describe("the stable block boundary a streaming render keeps", () => {
     expect(stableBlockEnd(fenced)).toBe(fenced.indexOf("after"));
   });
 
+  it("does not cut inside an open-item marker, and ignores one inside a fence", () => {
+    const open = "before\n\n<open>a long\n\nproblem — stage\n";
+    expect(stableBlockEnd(open)).toBe(open.indexOf("<open>"));
+    expect(stableBlockEnd(`${open}</open>\n\nafter\n`)).toBe(`${open}</open>\n\n`.length);
+    // A `</silent>` does not close an `<open>`.
+    expect(stableBlockEnd("<done>x\n</silent>\n\nafter\n")).toBe(0);
+    const fenced = "```\n<open> is code\n```\n\nafter\n";
+    expect(stableBlockEnd(fenced)).toBe(fenced.indexOf("after"));
+  });
+
   it("claims nothing until a block is closed by a line that follows it", () => {
     expect(stableBlockEnd("a paragraph that is still growing")).toBe(0);
     expect(stableBlockEnd("a paragraph\n\n")).toBe(0); // the next block hasn't arrived
@@ -272,5 +282,49 @@ describe("the stable block boundary a streaming render keeps", () => {
     expect(streamBody("---\n[a] | [b]")).toBe("---\n[a] | [b]");
     expect(splitReply("---\n[a] | [b]").text).toBe("");
     expect(streamBody("said it\n<silent>nothing to add</silent>")).toBe("said it");
+  });
+});
+
+describe("open-item markers", () => {
+  it("strips both markers from what the user sees, zero-width characters included", () => {
+    const raw = "Launched.\n<open>model menu — worker running (run r1)</open>\n<d\u200bone>60K rotation</done>\nMore.";
+    expect(streamBody(raw)).toBe("Launched.\nMore.");
+    expect(splitReply(`${raw}\n\n---\n[Ok]`)).toMatchObject({ text: "Launched.\nMore.", suggestions: ["Ok"] });
+    expect(splitReply("<open>x — y</open>").text).toBe("");
+  });
+
+  it("parses an add with its runs, a replace, and a done, in reply order", () => {
+    expect(openItemMarkers(
+      "<open>open items 视图 — lead designing (run 1prwm) (RUN w2)</open>\n" +
+      "<done>60K rotation</done>\n<open>open items 视图 — worker running</open>",
+    )).toEqual({
+      markers: [
+        { op: "open", problem: "open items 视图", stage: "lead designing", runIds: ["1prwm", "w2"] },
+        { op: "done", problem: "60K rotation" },
+        { op: "open", problem: "open items 视图", stage: "worker running", runIds: [] },
+      ],
+      dropped: [],
+    });
+  });
+
+  it("keeps a parenthetical that is not a run token in the stage, and a stageless item", () => {
+    expect(openItemMarkers("<open>review\n src/auth — proposed (not applied)</open><open>just a problem</open>").markers).toEqual([
+      { op: "open", problem: "review src/auth", stage: "proposed (not applied)", runIds: [] },
+      { op: "open", problem: "just a problem", stage: "", runIds: [] },
+    ]);
+  });
+
+  it("drops a marker with no problem text and leaves the reply otherwise untouched", () => {
+    const raw = "Hi.\n<open> — stage (run r1)</open><done> </done>";
+    expect(openItemMarkers(raw)).toEqual({ markers: [], dropped: ["<open> — stage (run r1)</open>", "<done> </done>"] });
+    expect(streamBody(raw)).toBe("Hi.");
+  });
+
+  it("never reads or strips a marker inside a fence", () => {
+    const raw = "Syntax:\n\n```\n<open>problem — stage</open>\n```\n~~~\n<done>p</done>\n~~~\n<done>real</done>";
+    expect(openItemMarkers(raw).markers).toEqual([{ op: "done", problem: "real" }]);
+    expect(streamBody(raw)).toBe("Syntax:\n\n```\n<open>problem — stage</open>\n```\n~~~\n<done>p</done>\n~~~");
+    // A fence still streaming is code until it closes.
+    expect(streamBody("```\n<open>a — b</open>")).toBe("```\n<open>a — b</open>");
   });
 });

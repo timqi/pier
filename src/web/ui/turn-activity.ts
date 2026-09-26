@@ -56,7 +56,7 @@ export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
 
 /** Four rendered lines give the topic; the full text stays one click away.
  *  Hidden panes use a conservative guess until their content can be measured. */
-export function clampedBody(text: string): HTMLElement[] {
+export function clampedBody(text: string): [content: HTMLElement, toggle: HTMLElement] {
   const long = text.length > 240 || text.split("\n").length > 4;
   const collapsed = ["max-h-[4lh]", "overflow-hidden"];
   const content = h("div", `mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500 ${collapsed.join(" ")}`, text);

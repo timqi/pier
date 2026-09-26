@@ -553,6 +553,9 @@ export function createServer(
   // The chain, newest first; the client pages back through it with /history.
   app.get("/api/continuous", (c) => (continuous?.enabled() ? c.json({ chain: continuous.members() }) : chainOff(c)));
 
+  // The rail's Open block.
+  app.get("/api/continuous/open", (c) => (continuous?.enabled() ? c.json(continuous.openItems()) : chainOff(c)));
+
   // Resolved ahead of a send the client expects to rotate, so it watches the
   // new head before the message lands there.
   guarded(app, "POST", "/api/continuous", 400, async (c) =>

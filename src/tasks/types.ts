@@ -3,7 +3,7 @@
 // messenger must agree on. Owner-defined and browser-importable type-only
 // (architecture.md), so nothing here may reach for a runtime or a node builtin.
 
-import type { AgentRole, ModelRef, ThinkingLevel } from "../core/types.js";
+import type { AgentRole, ModelRef, TaskRunState, ThinkingLevel } from "../core/types.js";
 
 export type TaskTrigger =
   | { type: "manual" }
@@ -74,14 +74,7 @@ export interface TaskDraft {
   timeoutSeconds?: number;
 }
 
-export type TaskRunState =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "interrupted"
-  | "skipped";
+export type { TaskRunState };
 
 export interface CommandResult {
   exitCode: number | null;

@@ -1,6 +1,7 @@
 // Assistant-reply presentation, computed once for every surface: the next-step
-// block syntax, silence, completion stats and the emphasis repair. Web chat and
-// every IM adapter render these, so the wording and units live here.
+// block syntax, silence, the open-item markers, completion stats and the
+// emphasis repair. Web chat and every IM adapter render these, so the wording
+// and units live here.
 
 import type { AgentReply, NoteOrigin, ThinkingLevel, TurnMeta } from "./types.js";
 
@@ -153,7 +154,65 @@ const MAX_SUGGESTIONS = 5;
 const ZW = String.raw`[\u200B-\u200D\u2060\uFEFF]*`;
 const tag = (literal: string): string => literal.split("").join(ZW);
 const SILENT = new RegExp(`${tag("<silent>")}([\\s\\S]*?)${tag("</silent>")}`, "gi");
-const SILENT_TAG = new RegExp(`<(\\/?)${tag("silent>")}`, "gi");
+/** A tag that hides what it wraps: a streaming renderer never cuts inside one. */
+const HIDDEN_TAG = new RegExp(`<(\\/?)(${["silent", "open", "done"].map(tag).join("|")})${ZW}>`, "gi");
+const ZW_CHARS = new RegExp(ZW.slice(0, -1), "g");
+
+/** Main's open-item markers (docs/design/10-continuous-session.md): stripped like
+ *  `<silent>`, and read back by core/chain.ts on the head's turn end. Code is
+ *  content, so a marker inside a fence is neither. */
+const OPEN = new RegExp(`${tag("<open>")}([\\s\\S]*?)${tag("</open>")}[ \\t]*\\n?`, "gi");
+const DONE = new RegExp(`${tag("<done>")}([\\s\\S]*?)${tag("</done>")}[ \\t]*\\n?`, "gi");
+const FENCE = /(`{3,}|~{3,})[\s\S]*?(?:\1|$)/g;
+const RUN_TOKEN = /\s*\(run\s+([^\s()]+)\)\s*$/i;
+
+/** `open` adds or replaces the item keyed by `problem`; `done` removes it. */
+export type OpenItemMarker =
+  | { op: "open"; problem: string; stage: string; runIds: string[] }
+  | { op: "done"; problem: string };
+
+function unfenced(markdown: string, fn: (text: string) => string): string {
+  let out = "";
+  let at = 0;
+  for (const m of markdown.matchAll(FENCE)) {
+    out += fn(markdown.slice(at, m.index)) + m[0];
+    at = m.index + m[0].length;
+  }
+  return out + fn(markdown.slice(at));
+}
+
+const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+/** The markers in reply order; `dropped` holds the ones with no problem text,
+ *  for the caller to log. */
+export function openItemMarkers(markdown: string): { markers: OpenItemMarker[]; dropped: string[] } {
+  const found: { at: number; marker: OpenItemMarker }[] = [];
+  const dropped: string[] = [];
+  let offset = 0;
+  unfenced(markdown, (text) => {
+    for (const m of text.matchAll(OPEN)) {
+      let rest = oneLine(m[1] ?? "");
+      const runIds: string[] = [];
+      for (let run = RUN_TOKEN.exec(rest); run; run = RUN_TOKEN.exec(rest)) {
+        runIds.unshift(run[1]!);
+        rest = rest.slice(0, run.index);
+      }
+      const dash = rest.indexOf("\u2014");
+      const problem = (dash < 0 ? rest : rest.slice(0, dash)).trim();
+      const stage = dash < 0 ? "" : rest.slice(dash + 1).trim();
+      if (problem) found.push({ at: offset + m.index, marker: { op: "open", problem, stage, runIds } });
+      else dropped.push(m[0].trim());
+    }
+    for (const m of text.matchAll(DONE)) {
+      const problem = oneLine(m[1] ?? "");
+      if (problem) found.push({ at: offset + m.index, marker: { op: "done", problem } });
+      else dropped.push(m[0].trim());
+    }
+    offset += text.length;
+    return text;
+  });
+  return { markers: found.sort((a, b) => a.at - b.at).map((f) => f.marker), dropped };
+}
 
 /** Why the agent stayed quiet; hidden from the chat, shown on the workbench,
  *  where a silent turn must not look like a broken one. */
@@ -180,7 +239,8 @@ export function splitReply(rawMarkdown: string, meta?: TurnMeta): AgentReply {
 
 /** For rendering mid-turn: everything `splitReply` repairs, minus the
  *  next-step block, which is only one at the very end of a turn. */
-export const streamBody = (markdown: string): string => cjkFriendly(markdown.replace(SILENT, "").trim());
+export const streamBody = (markdown: string): string =>
+  cjkFriendly(unfenced(markdown.replace(SILENT, ""), (text) => text.replace(OPEN, "").replace(DONE, "")).trim());
 
 /** Lines a blank line does not necessarily separate (a loose list is still one
  *  list). Over-matching is fine: one boundary too few costs only a repaint. */
@@ -189,14 +249,15 @@ const CONTINUES = /^(?:\s|[-*+>]|\d+[.)])/;
 /** Offset past the last blank line after `from` that closes a block, so a
  *  streaming renderer can parse each closed prefix once (whole-reply reparse is
  *  O(N²) over a turn). A boundary is claimed only where the two sides render the
- *  same apart as together: never inside a fence, a `<silent>` block, or a loose
+ *  same apart as together: never inside a fence, a `<silent>`/`<open>`/`<done>` block, or a loose
  *  list/quote. A ```` fence is not closed by the ``` it quotes. */
 export function stableBlockEnd(markdown: string, from = 0): number {
   // The last line is still growing, so it decides nothing.
   const end = markdown.lastIndexOf("\n") + 1;
   /** Marker run of the fence currently open; empty = closed. */
   let open = "";
-  let silent = false;
+  /** The hiding tag currently open; empty = none. */
+  let hidden = "";
   let cut = from;
   /** Start of the block after a blank line, waiting for its first line. */
   let pending = -1;
@@ -206,16 +267,20 @@ export function stableBlockEnd(markdown: string, from = 0): number {
     const line = markdown.slice(at, nl);
     at = nl + 1;
     const fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
-    if (!open && !silent && !line.trim()) {
+    if (!open && !hidden && !line.trim()) {
       if (pending < 0 && prev) pending = at;
       continue;
     }
-    if (!open && !silent && pending >= 0 && !(CONTINUES.test(prev) && CONTINUES.test(line))) cut = pending;
+    if (!open && !hidden && pending >= 0 && !(CONTINUES.test(prev) && CONTINUES.test(line))) cut = pending;
     const run = fence?.[1] ?? "";
-    if (!open && run && !silent) open = run;
+    if (!open && run && !hidden) open = run;
     else if (open && run[0] === open[0] && run.length >= open.length && !fence?.[2]?.trim()) open = "";
-    if (!open && (!run || silent)) {
-      for (const t of line.matchAll(SILENT_TAG)) silent = !t[1];
+    if (!open && (!run || hidden)) {
+      for (const t of line.matchAll(HIDDEN_TAG)) {
+        const name = t[2]!.replace(ZW_CHARS, "").toLowerCase();
+        if (!t[1] && !hidden) hidden = name;
+        else if (t[1] && name === hidden) hidden = "";
+      }
     }
     pending = -1;
     prev = line;

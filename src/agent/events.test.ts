@@ -468,6 +468,17 @@ describe("toChatTurns", () => {
     ])).toEqual([{ role: "system", text: "seed", origin, at: 1 }]);
   });
 
+  it("rebuilds a chat command's answer, and drops a command it does not know", () => {
+    const origin = { kind: "chat-command" as const, command: "status" as const, sessions: { r1: "s1" } };
+    const bare = { kind: "chat-command" as const, command: "status" as const };
+    expect(toChatTurns([
+      { role: "custom", customType: "pier.system-input", content: "Nothing open.", details: origin, timestamp: 1 },
+      { role: "custom", customType: "pier.system-input", content: "odd", details: { ...origin, command: "ls" }, timestamp: 2 },
+      // A malformed link map costs the card its links, not the card.
+      { role: "custom", customType: "pier.system-input", content: "Open", details: { ...origin, sessions: { r1: 7 } }, timestamp: 3 },
+    ])).toEqual([{ role: "system", text: "Nothing open.", origin, at: 1 }, { role: "system", text: "Open", origin: bare, at: 3 }]);
+  });
+
   it("stamps user and system turns with when they arrived, and invents nothing", () => {
     // An assistant turn carries `meta.completedAt`; these two had no time at
     // all after a reload, so the hover chip had nothing to show.

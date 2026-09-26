@@ -19,8 +19,9 @@ surface owns its routes and is mounted beside it.
 | `POST /api/sessions/:id/turns/:index/edit` | body `{text}` → rewind to that user turn, dropping every turn after it, and re-dispatch the new text; 409 for an index the transcript no longer holds or while streaming, rechecked after history loads, and 409 on an earlier session of the continuous conversation |
 | `GET /api/sessions/:id/history` | session **snapshot**: resume/attach on demand via `router.ensure`, returns `{turns, epoch, lastSeq, model, state, context, queue, backgroundRuns}`; 404 if unknown, 503 if events race all three snapshot attempts. Compressed, like the steps route below — a long transcript is the one large answer here. `queue` is Pi's `{steering, followUp}` plus `parked`, the session's pending `--after` task messages as `{messageId, runName, text}`, which the queue panel shows by run name but never recalls or sends (a `task-message` system input drops its row); `turns` is the transcript's current branch, compacted turns included; an earlier continuous-conversation member is read off disk, never opened, as `{turns, backgroundRuns, readonly: true}` |
 | `GET /api/continuous` | *(the continuous conversation, [10](10-continuous-session.md); every `/api/continuous*` route is 404 while the switch is off)* `{chain: [{sessionId, startedAt, reason: "first"\|"idle"\|"lost"\|"full"}]}`, newest first |
+| `GET /api/continuous/open` | `MainChain.openItems()`: `{items: [{problem, stage, runs}], unlisted}`, each run a ledger row (`LedgerRun`, a lead's with `workers` counted by state) |
 | `POST /api/continuous` | resolve the head a send now would reach, rotating first when due: `{sessionId, rotated?}` |
-| `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?}`, 400 without text. A rotation re-lists every surface (`sessions-changed`) |
+| `POST /api/continuous/messages` | body `{text, mode}` like the session route → the alias send: the head is resolved (and rotated) server-side, then dispatched to; 202 `{sessionId, rotated?, command?}`, `command` naming a chat command answered without a turn (the composer drops its optimistic streaming state), 400 without text. A rotation re-lists every surface (`sessions-changed`) |
 | `GET /api/sessions/:id/turns/:index/steps` | one turn's thinking/progress/tool steps; tool args and output are fetched when its Activity group opens, while progress text and step identities remain in the snapshot |
 | `GET /api/sessions/:id/models` | available models (auth-configured) for the session |
 | `GET /api/models` | the same list without a session, for pickers |
@@ -205,12 +206,21 @@ browser keeps no second session order.
 - **Continuous session on** (Settings → Instance): the list is the
   **Conversation** row (the head's dot), then **In progress** — the palette's
   Running set in rail order, less the conversation's own sessions — which
-  disappears when empty; the "Sessions" label and Load more go, everything
+  disappears when empty; between them **Open**, a row per open item
+  (`problem — stage`, [10 §Open items](10-continuous-session.md#open-items))
+  over its run chips, and **Not on the list**, the chain's unlisted runs —
+  both gone when empty; the "Sessions" label and Load more go, everything
   else is ⌘K's. The phone drawer is the same list; picking a row closes it.
   The chords walk these rows. The chat header (and the phone bar) titles it
   **Conversation**, never the head's own title. Its route is
   `#/conversation`, whichever session is the head; a bare or unknown hash and
   `#/session/<member>` land there too, the address rewritten to it.
+- A run chip reads `run <id8> · <state>` with the rail's dot (the listed
+  session's own, else the run state's) and opens the run's session; a run with
+  no session yet is text, one gone from the ledger reads
+  `run <id> — not in the ledger`, a lead's is followed by `workers: <counts>`.
+  The block re-reads `GET /api/continuous/open` on `sessions-changed` and
+  `open-items-changed`.
 - One row is lit, the route's: a session row or Conversation only while the
   chat is on screen, a Console row while its view is.
 - A lead's session (`role: "lead"`) is in that set for its life, idle and read
@@ -301,6 +311,9 @@ browser keeps no second session order.
   resolves the head first (`POST /api/continuous`), and a rotation seen on
   `sessions-changed` moves the pane to the new head, the session just left
   paged in above. A seed is a system input card linking the previous session;
+  a `/status` answer is a card of the same material whose every `run <id8>…`
+  links that run's session, from the run → session map the answer carries in
+  its origin (`sessions`), so a reloaded transcript links the same;
   an empty chain's pane says the first message starts it.
 - **Composer**: **Send** = `mode:"auto"`, **Send now** = `mode:"steer"`
   (streaming only), **Stop** = abort (streaming only). Enter sends, never during

@@ -413,3 +413,21 @@ describe("pending attachments", () => {
     expect(staged()).toBe(2);
   });
 });
+
+it("ends the optimistic turn a continuous command never starts", async () => {
+  const setState = vi.fn();
+  composer.initComposer({
+    sessionId: () => "m1", starting: () => false, sessionState: () => "idle",
+    chatVisible: () => true, setState, reload: state.reload, continuous: () => true,
+  });
+  state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1", command: "status" }, { status: 202 }));
+  type("/status");
+  await composer.send("auto");
+  expect(state.fetch.mock.calls[0]?.[0]).toBe("/api/continuous/messages");
+  expect(setState.mock.calls).toEqual([["streaming"], ["idle"]]);
+  // A message is a turn: its own events end it.
+  state.fetch.mockResolvedValueOnce(Response.json({ sessionId: "m1" }, { status: 202 }));
+  type("hello");
+  await composer.send("auto");
+  expect(setState.mock.calls).toEqual([["streaming"], ["idle"], ["streaming"]]);
+});

@@ -81,6 +81,15 @@ function systemOrigin(message: PiMessage): SystemInputOrigin | null {
       ? { kind: "session-seed", reason, previousSessionId }
       : null;
   }
+  if (origin.kind === "chat-command") {
+    const { command, sessions } = origin;
+    if (command !== "status") return null;
+    // A malformed map costs the card its links, not the card.
+    const links = sessions && typeof sessions === "object" && !Array.isArray(sessions) && Object.values(sessions).every((v) => typeof v === "string")
+      ? { sessions: sessions as Record<string, string> }
+      : {};
+    return { kind: "chat-command", command, ...links };
+  }
   if (
     typeof origin.taskId !== "string" ||
     typeof origin.runId !== "string" ||

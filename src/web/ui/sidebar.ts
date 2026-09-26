@@ -12,7 +12,7 @@ import { setUnreadBadge } from "./notifications.js";
 import { refreshPalette } from "./palette.js";
 import { setAttention } from "./shell.js";
 import { chord, modalOpen, shortcut } from "./shortcut.js";
-import type { ChainMember, LeadPhase, SessionState } from "../../core/types.js";
+import { NOT_IN_LEDGER, type ChainMember, type LeadPhase, type OpenItems, type OpenRun, type SessionState } from "../../core/types.js";
 
 /** GET /api/sessions row: summary + live workspace state. */
 export interface SessionInfo {
@@ -53,6 +53,8 @@ export interface SidebarDeps {
   openContinuous: () => void;
   /** No Console view covers the chat: a row lights up only for the route on screen. */
   chatVisible: () => boolean;
+  /** `GET /api/continuous/open`; null while the switch is off or before it answers. */
+  open: () => OpenItems | null;
 }
 
 let deps: SidebarDeps;
@@ -123,16 +125,22 @@ export const isLive = (s: SessionInfo): boolean =>
  *  grey = an idle lead, whose turn ended on the user. Idle has no mark or slot. */
 export function stateDot(s: SessionInfo): HTMLElement[] {
   if (!isLive(s)) return [];
-  const mark: [string, string] =
+  return markDot(
     s.state === "streaming"
-      ? ["bg-green-500 animate-pulse", "working…"]
+      ? WORKING
       : waitingForYou(s)
         ? ["bg-amber-500", "turn finished — not viewed yet"]
         : s.activeRuns > 0
           ? ["bg-sky-500", runsLabel(s.activeRuns)]
-          : ["bg-neutral-400", "lead — waiting for you"];
-  const dot = h("span", `h-2 w-2 flex-none rounded-full ${mark[0]}`);
-  dot.title = mark[1];
+          : ["bg-neutral-400", "lead — waiting for you"],
+  );
+}
+
+const WORKING: [string, string] = ["bg-green-500 animate-pulse", "working…"];
+
+function markDot([cls, title]: [string, string]): HTMLElement[] {
+  const dot = h("span", `h-2 w-2 flex-none rounded-full ${cls}`);
+  dot.title = title;
   return [dot];
 }
 
@@ -144,6 +152,15 @@ export const phaseTag = (s: SessionInfo): HTMLElement[] => {
   tag.title = s.phase === "design" ? "lead — designing with you" : "lead — building per the design";
   return [tag];
 };
+
+/** A run's session row, when the rail lists it (a lead), marks it as any row
+ *  would; a worker's session is never a row, so its run's state picks the mark. */
+function runDot(r: OpenRun): HTMLElement[] {
+  const session = deps.sessions().find((s) => s.id === r.targetSessionId);
+  if (session) return stateDot(session);
+  if (r.state === "running") return markDot(WORKING);
+  return r.state === "failed" || r.state === "interrupted" ? markDot(["bg-amber-500", `${r.state} — look at it`]) : [];
+}
 
 // --- row actions ---------------------------------------------------------------------
 
@@ -210,7 +227,7 @@ function sessionRow(s: SessionInfo, more = h("button", HOVER_BTN, icon(Ellipsis)
 /** Short-circuit (as in ui/activity.ts): a rebuild replaces every node, and
  *  one landing between mousedown and mouseup swallows the click. */
 const renderKey = (): string =>
-  `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}`;
+  `${deps.currentId() ?? ""}\n${shown}\n${String(deps.continuousOpen())}\n${String(deps.chatVisible())}\n${JSON.stringify(deps.chain())}\n${JSON.stringify(deps.sessions())}\n${JSON.stringify(deps.open())}`;
 
 /** Switch on, the rail below the conversation: the palette's Running set in
  *  rail order, less the conversation's own sessions, which its row stands for. */
@@ -238,6 +255,56 @@ function continuousRail(chain: ChainMember[]): { entry: HTMLElement; live: Sessi
   entry.title = "The continuous conversation — one per instance";
   entry.append(button);
   return { entry, live: inProgress(deps.sessions(), chain) };
+}
+
+// --- open items (docs/design/10-continuous-session.md) --------------------------------
+
+const workers = (r: OpenRun): HTMLElement[] =>
+  r.workers
+    ? [h("span", "px-1 text-xs leading-5 text-neutral-500",
+      `workers: ${Object.entries(r.workers).filter(([, n]) => n > 0).map(([state, n]) => `${n} ${state}`).join(", ") || "none"}`)]
+    : [];
+
+/** The run's session opens from it; a run with no session yet (queued) or gone
+ *  from the ledger is text. Wrapped so a re-render finds focus by `data-session-id`;
+ *  a lead's worker counts follow it, outside the target. */
+function runChip(r: OpenRun): HTMLElement[] {
+  const wrap = h("span", "inline-flex max-w-full");
+  wrap.dataset.sessionId = `run:${r.runId}`;
+  if (r.state === NOT_IN_LEDGER) {
+    wrap.append(h("span", "px-1 text-xs leading-5 text-neutral-500", `run ${r.runId} — ${NOT_IN_LEDGER}`));
+    return [wrap];
+  }
+  const label = `run ${r.runId.slice(0, 8)} · ${r.state}`;
+  const target = r.targetSessionId;
+  if (!target) {
+    wrap.append(h("span", "flex items-center gap-1.5 px-1 text-xs leading-5 text-neutral-500", ...runDot(r), label));
+    return [wrap, ...workers(r)];
+  }
+  const chip = h("button", "session-open flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-1 text-left text-xs text-neutral-500 hover:bg-neutral-200 hover:text-neutral-700",
+    ...runDot(r), h("span", "min-w-0 truncate", label));
+  chip.setAttribute("type", "button");
+  chip.setAttribute("aria-label", `Open run ${r.runId}'s session`);
+  chip.title = r.name;
+  chip.onclick = () => deps.select(target);
+  wrap.append(chip);
+  return [wrap, ...workers(r)];
+}
+
+/** What the conversation is solving and the runs behind it; nothing when there is nothing. */
+function openBlock(label: (text: string) => HTMLElement): HTMLElement[] {
+  const open = deps.open();
+  if (!open || (!open.items.length && !open.unlisted.length)) return [];
+  const item = (i: OpenItems["items"][number]): HTMLElement => {
+    const line = `${i.problem}${i.stage ? ` — ${i.stage}` : ""}`;
+    const text = h("div", "truncate px-1 pt-1.5 text-neutral-700", line);
+    text.title = line;
+    return h("li", "", text, ...(i.runs.length ? [h("div", "flex flex-wrap items-center gap-x-1 pb-1", ...i.runs.flatMap(runChip))] : []));
+  };
+  return [
+    ...(open.items.length ? [label("Open"), h("ul", "pb-1", ...open.items.map(item))] : []),
+    ...(open.unlisted.length ? [label("Not on the list"), h("ul", "pb-1", ...open.unlisted.map((r) => item({ problem: r.name, stage: "", runs: [r] })))] : []),
+  ];
 }
 
 let drawn = "";
@@ -280,7 +347,7 @@ export function renderSessions(): void {
   sessionList.replaceChildren(
     ...(rail
       // The group collapses when nothing is in progress.
-      ? [h("ul", "pb-1 pt-1", rail.entry), ...(nodes.length ? [label("In progress"), h("ul", "pb-1", ...nodes)] : [])]
+      ? [h("ul", "pb-1 pt-1", rail.entry), ...openBlock(label), ...(nodes.length ? [label("In progress"), h("ul", "pb-1", ...nodes)] : [])]
       : nodes.length
       ? [h("ul", "pb-1", ...nodes)]
       : [h("p", "px-3 py-2 text-sm leading-normal text-neutral-500", "No sessions yet — create one.")]),

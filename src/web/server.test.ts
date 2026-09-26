@@ -23,6 +23,7 @@ import type {
   AgentFactory,
   AgentSession,
   ChatTurn,
+  LedgerRun,
   ConfigScope,
   ConfigStore,
   PackageStore,
@@ -2563,7 +2564,7 @@ describe("the app shell", () => {
 
 describe("the continuous conversation's routes", () => {
   /** Sessions opened only through the factory, so a test can tell "read off disk" from "opened". */
-  function chainRig(on = true, ledger: () => [] = () => []) {
+  function chainRig(on = true, ledger: () => LedgerRun[] = () => []) {
     const db = openDb(":memory:");
     const settings = new SettingsStore(db);
     settings.setContinuous(on);
@@ -2592,7 +2593,7 @@ describe("the continuous conversation's routes", () => {
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
-      enabled: () => settings.get().continuous, ledger, now: () => clock.now,
+      enabled: () => settings.get().continuous, ledger, roleOf: () => undefined, hub, now: () => clock.now,
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
@@ -2609,7 +2610,7 @@ describe("the continuous conversation's routes", () => {
         db.prepare("INSERT INTO main_chain VALUES (?, ?, 'idle')").run(id, at);
       }
     };
-    return { app, factory, sessions, clock, workspace, post, restarted };
+    return { app, db, factory, sessions, clock, workspace, post, restarted };
   }
 
   it("answers 404 while the switch is off, and the switch is an instance setting", async () => {
@@ -2617,10 +2618,22 @@ describe("the continuous conversation's routes", () => {
     expect((await app.request("/api/continuous")).status).toBe(404);
     expect((await post("/api/continuous/messages", { text: "hi" })).status).toBe(404);
     expect((await post("/api/continuous", {})).status).toBe(404);
+    expect((await app.request("/api/continuous/open")).status).toBe(404);
     const put = (body: unknown) => app.request("/api/settings", { method: "PUT", body: JSON.stringify(body) });
     expect((await put({ continuous: "yes" })).status).toBe(400);
     expect(await (await put({ continuous: true })).json()).toMatchObject({ continuous: true });
     expect(await (await app.request("/api/continuous")).json()).toEqual({ chain: [] });
+  });
+
+  it("answers the open items, runs joined through the ledger", async () => {
+    const live: LedgerRun = { runId: "r1", name: "Build it", state: "running", targetSessionId: "s-r1", cwd: "/w", queuedAt: 1, finishedAt: null };
+    const stray: LedgerRun = { ...live, runId: "r2", name: "Review", state: "failed", targetSessionId: null, finishedAt: 2 };
+    const { app, db, restarted } = chainRig(true, () => [live, stray]);
+    restarted();
+    db.prepare("INSERT INTO open_items VALUES ('open items', 'worker running', '[\"r1\"]', 1)").run();
+    const res = await app.request("/api/continuous/open");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items: [{ problem: "open items", stage: "worker running", runs: [live] }], unlisted: [stray] });
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

@@ -1,7 +1,7 @@
 // The turns pane: chat rows, markdown, streaming text, system-input rows and
 // inline user-message edit. Renders into #turns only.
 
-import { ArrowUpRight, CornerDownLeft, History, Pencil, type IconNode } from "lucide";
+import { ArrowUpRight, CornerDownLeft, History, Pencil, SquareSlash, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -301,7 +301,28 @@ const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> 
   "task-delegation": [ArrowUpRight, "delegated", "text-cyan-700"],
   "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
   "session-seed": [History, "session seed", "text-cyan-700"],
+  "chat-command": [SquareSlash, "command", "text-cyan-700"],
 };
+
+/** `/status`'s text names a run as `run <id8>…` (core/chain.ts renderOpenItems);
+ *  each one whose session the origin carries opens it. */
+function linkRuns(content: HTMLElement, sessions: Record<string, string>): void {
+  const text = content.textContent ?? "";
+  const parts: (Node | string)[] = [];
+  let at = 0;
+  for (const m of text.matchAll(/\brun ([\w-]+)(…?)/g)) {
+    const [token, id = "", cut] = m;
+    const runId = Object.keys(sessions).find((r) => (cut ? r.startsWith(id) : r === id));
+    if (!runId) continue;
+    const link = h("button", "text-indigo-600 hover:underline", token);
+    link.setAttribute("type", "button");
+    link.title = `Open run ${runId}'s session`;
+    link.onclick = () => deps.select(sessions[runId]!);
+    parts.push(text.slice(at, m.index), link);
+    at = m.index + token.length;
+  }
+  if (parts.length) content.replaceChildren(...parts, text.slice(at));
+}
 
 /** Every task text opens with `Key: value` lines naming the run, which the
  *  head row already says; only a card with no source of its own borrows the
@@ -324,6 +345,8 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const [meta, body] = splitMetaBlock(text);
   const head = origin.kind === "session-seed"
     ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label, labelCls: cls, taskName: `new session — ${origin.reason}`, sessionId: origin.previousSessionId })
+    : origin.kind === "chat-command"
+    ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label: `/${origin.command}`, labelCls: cls })
     : runHead({
       glyph: state ? stateGlyph(state) : icon(glyph, `h-3 w-3 ${cls}`),
       label: state ? `${label} \u00b7 ${state}` : label,
@@ -335,7 +358,9 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       sessionId: origin.sourceSessionId,
     });
   row.append(head);
-  row.append(...clampedBody(body));
+  const [content, toggle] = clampedBody(body);
+  if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions);
+  row.append(content, toggle);
   turnsPane.append(row);
   trimRows();
   scrollBottom();
@@ -774,7 +799,7 @@ export function renderSnapshot(
       if (!t.text) continue;
       if (t.role === "system" && t.origin) {
         // Launched elsewhere: the callback is the earliest place it can be shown.
-        if (t.origin.kind !== "session-seed") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
+        if (t.origin.kind !== "session-seed" && t.origin.kind !== "chat-command") placeRuns(t.origin.kind === "task-message" ? [t.origin.runId] : (t.origin.runIds ?? [t.origin.runId]));
         appendSystemInput(t.text, t.origin);
         continue;
       }

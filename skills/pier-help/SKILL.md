@@ -45,6 +45,9 @@ truth.
 - It dispatches: real work is a task run — a worker, or a feature lead that
   designs with the user, then builds with workers — each its own session,
   taking messages directly.
+- `/status` alone in the composer answers with the open items — each problem,
+  its stage and its runs — with no model call; the web rail shows the same list
+  under Conversation.
 
 ## Files and images the user sends
 

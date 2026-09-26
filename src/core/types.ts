@@ -127,7 +127,19 @@ export type SystemInputOrigin = {
   kind: "session-seed";
   reason: ChainReason;
   previousSessionId: string | null;
+} | {
+  /** The answer to a chat command the conversation took instead of the model
+   *  (core/chain.ts), appended without a turn so the model sees what the user saw. */
+  kind: "chat-command";
+  command: ChatCommand;
+  /** `/status`'s named runs that have a session, run id → session id: the
+   *  text carries only `run <id8>…`, and the card links each to its session. */
+  sessions?: Record<string, string>;
 };
+
+/** A message to the continuous conversation that is exactly this word is a
+ *  command, never a message; `/new` and `/stop` are docs/design/continuous-open-items.md. */
+export type ChatCommand = "status";
 
 /** Why a session joined the continuous conversation's chain: the first one,
  *  the previous one idle past the rotation boundary, the previous one gone, or
@@ -151,11 +163,42 @@ export interface ChainMember {
   reason: ChainReason;
 }
 
+/** Declared here, not in tasks/, because core counts runs by state too (a lead's workers, core/chain.ts). */
+export type TaskRunState = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "skipped";
+
+/** One run of the ledger, as `pier task runs` prints it. */
+export interface LedgerRun {
+  runId: string;
+  name: string;
+  state: string;
+  targetSessionId: string | null;
+  cwd: string | null;
+  queuedAt: number;
+  finishedAt: number | null;
+}
+
+/** A run behind an open item; a lead's carries its own launches, counted by state. */
+export interface OpenRun extends LedgerRun {
+  workers?: Record<TaskRunState, number>;
+}
+
+/** What the continuous conversation is solving, as main last said it
+ *  (docs/design/10-continuous-session.md#open-items). */
+export interface OpenItems {
+  /** By `updated_at`, oldest first. */
+  items: { problem: string; stage: string; runs: OpenRun[] }[];
+  /** Chain runs no item names: in flight, or not `succeeded` in the last 24h. */
+  unlisted: OpenRun[];
+}
+
+/** The `state` of a run an item names that the ledger no longer holds; its `name` is the id. */
+export const NOT_IN_LEDGER = "not in the ledger";
+
 export interface BackgroundRun {
   runId: string;
   taskId: string;
   taskName: string;
-  state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "skipped";
+  state: TaskRunState;
   targetSessionId: string | null;
   /** `"fork"` exists only in stored runs; the timeline prints what it reads. */
   sessionMode: "reuse" | "fresh" | "fork" | null;
@@ -245,7 +288,8 @@ export type WorkspaceEvent =
   | { type: "tasks-changed" }
   | { type: "task-run-changed"; taskId: string; runId: string }
   | { type: "task-message-changed"; runId: string; messageId: string }
-  | { type: "task-group-changed"; groupId: string };
+  | { type: "task-group-changed"; groupId: string }
+  | { type: "open-items-changed" }; // a head's turn end wrote an `<open>`/`<done>` marker
 
 /** How much of a tool result any surface ever shows. A transcript replay
  *  carries no more than that: a session's tool output is most of its history
