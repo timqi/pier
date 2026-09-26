@@ -45,6 +45,12 @@ surface owns its routes and is mounted beside it.
 | `GET /api/vault` | *(served by `web/vault.ts`, as are the two below; [07-vault.md](07-vault.md) owns the store)* `[{name, level: "auto"\|"approve", updatedAt}]` — names and levels, never values |
 | `PUT /api/vault/:name` | body `{level, value}` → `Vault.put`; answers the row. 400 for a name that is not `^[A-Z][A-Z0-9_]{0,63}$`, a level that is neither, or an empty value; 423 when `auto` cannot seal because the store is locked; 503 when `approve` could not create its `vt://` record, the error carrying `vt doctor`'s report; 504 when `vt create` is still waiting on an approval after 15s — the put keeps running and a late approval still files the row |
 | `DELETE /api/vault/:name` | remove; 204, or 404 `{error: "no secret named X"}` |
+| `GET /api/tasks` | *(served by `tasks/routes.ts`, as are the three below)* `TaskRow[]` (`tasks/types.ts`): every non-archived `kind: "task"` definition with `lastRun` |
+| `GET /api/tasks/:id/runs` | the task's newest 20 `TaskRun`s; 404 unknown task |
+| `POST /api/tasks/:id/pause`, `/resume` | `setEnabled`; answers the definition. 400 unknown, archived-on-resume, or a task Pier owns |
+| `GET /api/boards` | *(served by `boards/boards.ts`, as are the two below)* `[{slug, title, description, public, token, updatedAt}]`, freshest `site/` mtime first |
+| `PATCH /api/boards/:slug` | body `{public: boolean}`, minting the token on first publish; answers `{public, token}`. 400 bad body, 404 unknown slug |
+| `DELETE /api/boards/:slug` | renames the folder `<slug>.deleted-<ts>`; answers `{deleted}`, 404 unknown slug |
 | `GET /api/events` | SSE workspace stream: session/task/run change pointers. Pointers only, no content, no replay — a reconnect re-lists. A reader that lets 4MB queue up is dropped and reconnects. |
 | `GET /api/sessions/:id/events` | SSE. `id:` = `epoch:seq`; replay from hub ring buffer after `Last-Event-ID` header or `?after=` query (client passes `epoch:lastSeq` from history, including zero) in one write, then live. Missing, foreign or uncovered cursors receive a named `reset` event requiring a fresh snapshot. Text deltas are live-only, not replay gaps: a covered reconnect gets final text from `turn-end` and thinking from replay. A reader that lets 4MB queue up is dropped and reconnects. Heartbeat comment every 15s. |
 | `GET /` | 302 to `/app/` |
@@ -67,7 +73,7 @@ headers), `explorer.ts` (`/api/explorer/{git,diff}`, read-only), `instance.ts`
 (`/api/settings`, `/api/update`, `/api/secrets*`, `/api/client-log`),
 `providers.ts` + `provider-flows.ts` (`/api/providers*`, including the probe
 that sends one real request), `push.ts` (below),
-`channels/routes.ts`, `vault.ts` (`/api/vault*`), `boards/boards.ts` (`/boards/*`, `/b/*`, `/p/*`).
+`channels/routes.ts`, `vault.ts` (`/api/vault*`), `tasks/routes.ts` (`/api/tasks*`), `boards/boards.ts` (`/api/boards*`, `/boards/*`, `/b/*`, `/p/*`).
 
 ## Passkeys (`src/web/passkeys.ts`)
 
@@ -287,7 +293,14 @@ The Console views are overlays: Settings and Files open over their origin, and �
   name, `auto|approve` segmented with its one-line note, a password field;
   no reveal, filing an existing name replaces it. `?name=X` opens with the
   name filled and the value field focused: the link an agent's `no secret
-  named X` error carries. Agent: two panels (what a session is
+  named X` error carries. Tasks (`#/settings/tasks`): one row per task —
+  name, last run's state and age, trigger and next run — with the pause switch
+  (not on manual tasks) and Runs, which opens the newest 20 as rows (state,
+  time, source, duration) whose log (error, result, probe, a link to the run's
+  session) unfolds in place; defining a task stays `pier task`'s. Boards
+  (`#/settings/boards`): one row per board — title linking where it is
+  readable, slug, age — with a Public switch, Copy link and Delete (a rename,
+  no confirm). A refused switch redraws from the server and says why. Agent: two panels (what a session is
   made of / what the selected item affords), Scope in the Console's control
   skin. An agent file opens in `code.ts`'s viewer; **Edit**/**View** swap,
   rendering the editor's own text; Save keeps `expected` for the conflict check

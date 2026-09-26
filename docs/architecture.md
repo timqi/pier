@@ -48,7 +48,7 @@ src/
                -thread, -cli (`pier slack`) and -transcript (the one
                transcript renderer, for the CLI and the inlined thread); lark
                also -outbound)
-  boards/      boards.ts (manifest + static serving), pier.css
+  boards/      boards.ts (scan + manifest + static serving), pier.css
   web/         types.ts (wire shapes; the one file the browser may import),
                server.ts (sessions + events), instance.ts, vault.ts (the
                three /api/vault routes), providers.ts +
@@ -62,7 +62,8 @@ src/
                runs, groups, agent (child-run runner), execution, callbacks,
                messages, command, service, store, operations (the `/task`
                route: who may ask for what, by the session's role),
-               cli (`pier task`: argv → the params object over the socket)
+               cli (`pier task`: argv → the params object over the socket),
+               routes (Settings → Tasks: list, pause/resume, runs)
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME

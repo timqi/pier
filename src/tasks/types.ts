@@ -136,6 +136,11 @@ export interface TaskRun extends CallbackFields {
   finishedAt: number | null;
 }
 
+/** One row of `GET /api/tasks`: the definition and its newest run. */
+export interface TaskRow extends TaskDefinition {
+  lastRun: TaskRun | null;
+}
+
 export type GroupJoinMode = "all" | "first";
 
 /** A fan-out join owned by core: one aggregated callback when the join

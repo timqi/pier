@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -266,5 +266,57 @@ describe("manifest writes", () => {
     expect((await app.request("/boards/digest/")).status).toBe(404);
     expect((await app.request(`/p/${key("digest")}/`)).status).toBe(404);
     expect(readFileSync(join(dir, "digest.deleted-1700000000000", "site", "index.html"), "utf8")).toBe("<h1>hi</h1>");
+  });
+});
+
+describe("the Settings API", () => {
+  const patch = (slug: string, body: unknown) =>
+    app.request(`/api/boards/${slug}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+    });
+
+  it("lists boards freshest first, skipping non-boards and deleted ones", async () => {
+    const stale = makeBoard("stale", { description: "old" });
+    makeBoard("fresh");
+    makeBoard("gone.deleted-1");
+    mkdirSync(join(dir, "not-a-board"));
+    utimesSync(join(stale, "site"), new Date(1e9), new Date(1e9));
+    const boards = (await (await app.request("/api/boards")).json()) as { slug: string; description: string }[];
+    expect(boards.map((b) => b.slug)).toEqual(["fresh", "stale"]);
+    expect(boards[1]).toMatchObject({ description: "old", public: false });
+  });
+
+  it("answers an empty list when the boards dir does not exist", async () => {
+    const other = new Hono();
+    registerBoardRoutes(other, join(dir, "missing"));
+    expect(await (await other.request("/api/boards")).json()).toEqual([]);
+  });
+
+  it("publishes with a minted token, keeping agent fields, and unpublishes", async () => {
+    makeBoard("digest", { note: "agent data" });
+    const res = await patch("digest", { public: true });
+    const { token } = (await res.json()) as { token: string };
+    expect(token).toMatch(/^[a-f0-9]{8}$/);
+    expect((await app.request(`/p/digest-${token}/`)).status).toBe(200);
+    expect(JSON.parse(readFileSync(join(dir, "digest", "board.json"), "utf8"))).toMatchObject({ note: "agent data" });
+    await patch("digest", { public: false });
+    expect((await app.request(`/p/digest-${token}/`)).status).toBe(404);
+  });
+
+  it("refuses a non-boolean public, an unknown slug and a traversal", async () => {
+    makeBoard("digest");
+    expect((await patch("digest", { public: "yes" })).status).toBe(400);
+    expect((await patch("nope", { public: true })).status).toBe(404);
+    expect((await patch("..%2F", { public: true })).status).toBe(404);
+    expect((await app.request("/api/boards/..%2F", { method: "DELETE" })).status).toBe(404);
+  });
+
+  it("deletes by renaming the folder", async () => {
+    makeBoard("digest");
+    expect((await app.request("/api/boards/digest", { method: "DELETE" })).status).toBe(200);
+    expect((await app.request("/boards/digest/")).status).toBe(404);
+    expect(readdirSync(dir).some((name) => name.startsWith("digest.deleted-"))).toBe(true);
   });
 });

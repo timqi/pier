@@ -29,6 +29,7 @@ import type { AgentSession, ConversationKey } from "./core/types.js";
 import { acquireInstanceLock } from "./lock.js";
 import { parseWebParams, runWeb } from "./websearch/run.js";
 import { logger } from "./log.js";
+import { registerTaskRoutes } from "./tasks/routes.js";
 import { TaskService } from "./tasks/service.js";
 import { TaskStore } from "./tasks/store.js";
 import { PIER_HOME, pierPath, resolveAgentDir } from "./paths.js";
@@ -300,6 +301,7 @@ registerConfigSyncRoutes(app, {
   reconcile: configurationSync.reconcile,
   run: configurationSync.run,
 });
+registerTaskRoutes(app, tasks);
 registerChannelRoutes(app, channelStore, channels, conversations);
 registerVaultRoutes(app, { vault, doctor: () => secrets.doctor() });
 registerBoardRoutes(app);

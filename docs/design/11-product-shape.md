@@ -28,7 +28,7 @@ the web experience settling, and nothing below is shaped for it.
 | Rail · New session / Search | ⌘K stays; New session is Phase B's deletion | see §Phases |
 | ⋯ on the conversation | Session info · Model & reasoning · Browse files | Rename hidden (the head is not a session the user manages) |
 | ⌘K palette | Running = In progress; Recent = everything else (finished leads, IM sessions); content search | none |
-| Console | Settings only | Automation and Boards deleted; the rail's Console section is one row |
+| Console | Settings only | Automation deleted; Tasks and Boards are Settings tabs; the rail's Console section is one row |
 | Files | unchanged overlay | none |
 | Phone | the same list in the drawer; the same rules | none |
 
@@ -63,7 +63,7 @@ Cron is a thing the conversation does, not a Console the user edits.
   No editor form. Pause, resume, run now, archive: the user says it; main
   runs the CLI, which gains `pause`, `resume` and `archive` (`--task-id`, the
   Console's three routes behind one socket op each) beside `run --task-id`
-  for run now. The routes go with the page.
+  for run now. Settings → Tasks keeps pause/resume and the run log.
 - A saved task's callback defaults to the conversation while the switch is
   on (it follows the chain to the head, [10 §Run ledger](10-continuous-session.md#run-ledger)),
   so every cron result and failure is a card in the conversation with its
@@ -91,15 +91,15 @@ manifest, the skill, the list row and the API.
   Pier keeps no second copy.
 - The list: the user asks; main reads the folder (the skill says how) and
   answers public boards first with their `/p/<slug>-<token>/` URL, then
-  private with `/boards/<slug>/`; title, updated age. `GET /api/boards` goes
-  with the page: the folder is the API.
+  private with `/boards/<slug>/`; title, updated age. Settings → Boards reads
+  the same folder through `GET /api/boards`.
 - Publish, unpublish, delete: the user says it; main edits `board.json`
   (`public`, the token rule the skill states) or renames the directory
-  `<slug>.deleted-<ts>` as the route did, and answers with the URL. The
+  `<slug>.deleted-<ts>` as the route does, and answers with the URL. The
   skill's rule stands: `public: true` only when this request asks for it, and
   the skill gains the "anyone with the link" warning line main repeats when
   it publishes. The link is the row's URL, copied like any text.
-  `PATCH`/`DELETE /api/boards/:slug` go with the page.
+  `PATCH`/`DELETE /api/boards/:slug` serve the Settings tab.
 
 ## Chat commands
 
@@ -178,10 +178,12 @@ changes, 44px on touch).
   transcript is the picture Activity drew — every delegation and callback is a
   system-input card linking its session and run — and In progress + `/status`
   are the live view.
-- **Boards is deleted**: the folder and the skill are the surface.
-- The Console is Settings, with Files as its overlay. `/api/tasks*` and
-  `/api/task-runs*` stay only as far as the CLI socket and tests use them; a
-  route with no caller goes with the view.
+- **Boards is a Settings tab**, not a page: the folder and the skill stay the
+  agent's surface; the tab lists, publishes and deletes.
+- **Tasks is a Settings tab**: list, pause/resume, a task's runs and their
+  logs; no editor, no global Runs, no Activity.
+- The Console is Settings, with Files as its overlay; `/api/tasks*` and
+  `/api/boards*` serve those two tabs only.
 
 ## Wire contract
 
