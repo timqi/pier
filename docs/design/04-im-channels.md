@@ -269,7 +269,10 @@ speaker header.
 
 `InboundMessage.sender` carries `{id, name}`: the adapter resolves the display
 name; `core/identity.ts`'s `SenderPrefix` emits `[name<id> time place]` only on
-a different speaker, a 10-minute gap, a new day, or a different conversation.
+a different speaker, a 10-minute gap, a new day, a different conversation, or
+a different language — `lang=zh` last, from `detectLanguage` (CJK characters
+against Latin words, code and paths excluded), so the reply follows the
+sender instead of an English-heavy context.
 `place` is `<channelId>:<conversationId>` verbatim (`slack:C079TC7GUBG/1712.345600`),
 said once per session and again only after `forgetSender`;
 alias keys (`web:`, `task:`) name no place. A channel that declares

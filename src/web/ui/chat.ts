@@ -233,7 +233,7 @@ export function appendTurn(
   // The speaker header (core/identity.ts) is written for the model; as body
   // text it buries the message under a raw platform id.
   const speaker = kind === "user" ? splitSpeaker(body) : null;
-  const named = speaker?.id || speaker?.when || speaker?.where ? speaker : null;
+  const named = speaker?.id || speaker?.when || speaker?.where || speaker?.lang ? speaker : null;
   // Here the operator is the reader; their own name over every message is noise.
   // A platform with opaque ids names the speaker and nothing else, so the
   // caption cannot be gated on the id.

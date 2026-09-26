@@ -2,7 +2,7 @@
 // message is pure token waste in a conversation whose speaker never changes.
 
 import { describe, expect, it } from "vitest";
-import { distinctCwds, projectCwds, readableTitle, sanitizeIdentity, SenderPrefix, sessionLabel, splitSpeaker, withPrefix } from "./identity.js";
+import { detectLanguage, distinctCwds, projectCwds, readableTitle, sanitizeIdentity, SenderPrefix, sessionLabel, splitSpeaker, withPrefix } from "./identity.js";
 
 const ada = { id: "U1", name: "Ada" };
 const bob = { id: "U2", name: "Bob" };
@@ -107,6 +107,48 @@ describe("when a speaker line is worth its tokens", () => {
     expect(p.next("s1", ada, noon)).toBe("");
     p.forget("s1");
     expect(p.next("s1", ada, noon)).toContain("Ada<U1>");
+  });
+});
+
+describe("the language tag", () => {
+  it("tells Chinese from English, and says nothing on too little to tell", () => {
+    expect(detectLanguage("帮我看看这个报错")).toBe("zh");
+    expect(detectLanguage("用 rg 找一下 header 在哪里")).toBe("zh");
+    expect(detectLanguage("please fix the parser")).toBe("en");
+    expect(detectLanguage("これは何ですか")).toBe("ja");
+    expect(detectLanguage("이것은 무엇입니까")).toBe("ko");
+    for (const text of ["ok", "👍", "1", ""]) expect(detectLanguage(text)).toBeUndefined();
+  });
+
+  it("does not let pasted code, paths or links outvote the question", () => {
+    const log = "```\nError: cannot read properties of undefined reading the thing at line four\n```";
+    expect(detectLanguage(`${log}\n这个怎么修`)).toBe("zh");
+    expect(detectLanguage("看下 `npm run check && npm run lint && npm test` 为什么失败")).toBe("zh");
+    expect(detectLanguage("看下 src/core/router.ts https://example.com/a/b 的问题")).toBe("zh");
+    expect(detectLanguage("[需求文档.md](file:///tmp/需求文档.md)\nplease read this file")).toBe("en");
+  });
+
+  it("rides the header only when the language changes, the first message included", () => {
+    const p = new SenderPrefix();
+    expect(p.next("s1", ada, noon, undefined, false, "帮我看看")).toBe("[Ada<U1> 2024-06-01 12:00 lang=zh]");
+    expect(p.next("s1", ada, noon + 1000, undefined, false, "再看看这个")).toBe("");
+    // Too short to tell keeps the language, and says nothing.
+    expect(p.next("s1", ada, noon + 2000, undefined, false, "ok")).toBe("");
+    expect(p.next("s1", ada, noon + 3000, undefined, false, "now in English please")).toBe("[lang=en]");
+    expect(p.next("s1", bob, noon + 4000, undefined, false, "me too, in English")).toBe("[Bob<U2>]");
+    expect(p.next("s1", bob, noon + 5000, undefined, false, "好的")).toBe("[lang=zh]");
+    // The opaque-ids shape carries it after the platform.
+    expect(new SenderPrefix().next("s2", ada, noon, "lark:oc_1/om_2", true, "你好"))
+      .toBe("[Ada 2024-06-01 12:00 lark lang=zh]");
+  });
+
+  it("is read back off the header like the rest of it", () => {
+    expect(splitSpeaker("[lang=zh]\n好的")).toEqual({ lang: "zh", text: "好的" });
+    expect(splitSpeaker("[Ada<U1> 12:00 slack:C1/1712.5 lang=en]\nhi"))
+      .toEqual({ name: "Ada", id: "U1", when: "12:00", where: "slack:C1/1712.5", lang: "en", text: "hi" });
+    expect(splitSpeaker("[Ada 2024-06-01 12:00 lark lang=zh]\n你好"))
+      .toEqual({ name: "Ada", when: "2024-06-01 12:00", where: "lark", lang: "zh", text: "你好" });
+    expect(splitSpeaker("[lang=zh] not a header")).toEqual({ text: "[lang=zh] not a header" });
   });
 });
 

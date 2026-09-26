@@ -1991,13 +1991,13 @@ describe("workbench server", () => {
         body: JSON.stringify(body),
       });
 
-    let res = await post({ text: "hello" });
+    let res = await post({ text: "hello from the web" });
     expect(res.status).toBe(202);
     // The first web message carries the operator header (core/identity.ts);
-    // the follow-ups below are the same speaker in the same minute, so none.
+    // the follow-ups below are the same speaker, minute and language, so none.
     expect(session.calls).toHaveLength(1);
     expect(session.calls[0]).toMatch(
-      /^prompt:\[operator<web> \d{4}-\d{2}-\d{2} \d{1,2}:\d{2}\]\nhello$/,
+      /^prompt:\[operator<web> \d{4}-\d{2}-\d{2} \d{1,2}:\d{2} lang=en\]\nhello from the web$/,
     );
 
     session.setState("streaming");

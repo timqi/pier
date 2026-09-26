@@ -636,7 +636,7 @@ export class Router {
     const where = isAlias(msg.key) ? undefined : keyOf(msg.key);
     const opaque = this.channels.get(msg.key.channelId)?.opaqueIds;
     const prompt = withPrefix(
-      this.senders.next(session.id, msg.sender, Date.now(), where, opaque),
+      this.senders.next(session.id, msg.sender, Date.now(), where, opaque, text),
       text,
     );
     log.debug(

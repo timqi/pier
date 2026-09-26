@@ -32,10 +32,29 @@ const two = (n: number): string => String(n).padStart(2, "0");
 const hhmm = (d: Date): string => `${two(d.getHours())}:${two(d.getMinutes())}`;
 const day = (d: Date): string => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
 
+/** Pasted code, links and paths are English whatever the speaker writes in. */
+const NOT_PROSE = /```[\s\S]*?(?:```|$)|`[^`\n]*`|\[[^\]\n]*\]\([^)\n]*\)|[!-~]*[/\\][!-~]*/g;
+
+/** The language a message is written in, or `undefined` when it is too short
+ *  to tell (`ok`, `👍`) and the last one still applies. A CJK character counts
+ *  as two Latin words: a short question under a pasted English log is still
+ *  the speaker's language. */
+export function detectLanguage(text: string): string | undefined {
+  const prose = text.replace(NOT_PROSE, " ");
+  const han = prose.match(/\p{Script=Han}/gu)?.length ?? 0;
+  const kana = prose.match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu)?.length ?? 0;
+  const hangul = prose.match(/\p{Script=Hangul}/gu)?.length ?? 0;
+  const words = prose.match(/[A-Za-z]{2,}/g)?.length ?? 0;
+  const cjk = han + kana + hangul;
+  if (cjk > 0 && cjk * 2 >= words) return kana ? "ja" : hangul > han ? "ko" : "zh";
+  return words >= 3 ? "en" : undefined;
+}
+
 interface Seen {
   senderId: string;
   at: number;
   conversation?: string;
+  lang?: string;
 }
 
 /** What each session has already been told. In memory: after a restart one
@@ -46,24 +65,29 @@ export class SenderPrefix {
   /** The line to put above this message, or `""` when the session already
    *  knows. `conversation` is the chat's `<channelId>:<conversationId>`, told
    *  once: a session never moves, but the rule stays the same as the rest.
-   *  `opaqueIds` is the platform's (`core/types.ts`): its ids buy nothing. */
+   *  `opaqueIds` is the platform's (`core/types.ts`): its ids buy nothing.
+   *  `text` is the message, for its language: `lang=zh` tells the model which
+   *  language to answer in, since an English-heavy context drags replies there. */
   next(
     sessionId: string,
     sender: Sender | undefined,
     at = Date.now(),
     conversation?: string,
     opaqueIds = false,
+    text = "",
   ): string {
     if (!sender?.id) return "";
     const last = this.seen.get(sessionId);
-    this.seen.set(sessionId, { senderId: sender.id, at, conversation });
+    const lang = detectLanguage(text) ?? last?.lang;
+    this.seen.set(sessionId, { senderId: sender.id, at, conversation, lang });
 
     const now = new Date(at);
     const newSpeaker = last?.senderId !== sender.id;
     const gap = !last || at - last.at >= GAP_MS;
     const newDay = !last || day(new Date(last.at)) !== day(now);
     const newPlace = !!conversation && last?.conversation !== conversation;
-    if (!newSpeaker && !gap && !newDay && !newPlace) return "";
+    const newLang = !!lang && last?.lang !== lang;
+    if (!newSpeaker && !gap && !newDay && !newPlace && !newLang) return "";
 
     // The id is the only thing a mention can be built from; an unresolved name
     // is the id, and `U123<U123>` would read as a broken record.
@@ -77,7 +101,7 @@ export class SenderPrefix {
     const when = clock ? `${newDay ? `${day(now)} ` : ""}${hhmm(now)}` : "";
     const place = opaqueIds ? conversation?.split(":")[0] : conversation;
     const where = newPlace && place ? sanitizePlace(place) : "";
-    return `[${[who, when, where].filter(Boolean).join(" ")}]`;
+    return `[${[who, when, where, newLang ? `lang=${lang}` : ""].filter(Boolean).join(" ")}]`;
   }
 
   forget(sessionId: string): void {
@@ -98,6 +122,8 @@ export interface Speaker {
   /** `slack:C0123/1712.345600` — platform, then the adapter's conversation id,
    *  which is absent on a platform whose ids the agent cannot use. */
   where?: string;
+  /** `zh`, `en`: the language the message switched to. */
+  lang?: string;
   /** The message with its header line removed. */
   text: string;
 }
@@ -105,28 +131,30 @@ export interface Speaker {
 // Only the shapes `next()` emits, newline included: a human typing
 // `[14:23] on my way` is body text and must come back untouched.
 const TIME = String.raw`(?<when>(?:\d{4}-\d{2}-\d{2} )?\d{1,2}:\d{2})`;
+const LANG = String.raw`lang=(?<lang>[a-z]{2})`;
 const WITH_ID = new RegExp(
-  String.raw`^\[(?:(?<name>[^\n[\]<>]*)<(?<id>[^\n[\]<>]+)>)? ?${TIME}? ?(?<where>[a-z]+:[^\s[\]<>]+)?\]\n`,
+  String.raw`^\[(?:(?<name>[^\n[\]<>]*)<(?<id>[^\n[\]<>]+)>)? ?${TIME}? ?(?<where>[a-z]+:[^\s[\]<>]+)? ?(?:${LANG})?\]\n`,
 );
 
 /** The opaque-ids shape: a name with no `<>`, told apart from body text by the
  *  time that always follows it, and a platform with no conversation after it.
  *  A line of its own reading `[meeting 14:23]` is the price. */
-const NAMED = new RegExp(String.raw`^\[(?<name>[^\n[\]<>]*?) ${TIME}(?: (?<where>[a-z]+))?\]\n`);
+const NAMED = new RegExp(String.raw`^\[(?<name>[^\n[\]<>]*?) ${TIME}(?: (?<where>[a-z]+))?(?: ${LANG})?\]\n`);
 
 /** Read back a header this module wrote: the prefix is for the model, and a
  *  surface showing a stored message renders the speaker its own way. */
 export function splitSpeaker(text: string): Speaker {
   const head = WITH_ID.exec(text);
-  const { id, when, where } = head?.groups ?? {};
+  const { id, when, where, lang } = head?.groups ?? {};
   // A name on its own proves nothing: try the shape that requires a time.
-  const m = id || when || where ? head : NAMED.exec(text);
+  const m = id || when || where || lang ? head : NAMED.exec(text);
   if (!m?.groups) return { text };
   return {
     ...(m.groups.name ? { name: m.groups.name } : {}),
     ...(m.groups.id ? { id: m.groups.id } : {}),
     ...(m.groups.when ? { when: m.groups.when } : {}),
     ...(m.groups.where ? { where: m.groups.where } : {}),
+    ...(m.groups.lang ? { lang: m.groups.lang } : {}),
     text: text.slice(m[0].length),
   };
 }
