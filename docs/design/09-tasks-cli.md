@@ -12,7 +12,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
 | `list` | stored definitions, as JSON |
-| `runs` | the continuous conversation's run ledger, in flight and finished in the last 24h, as JSON; its sessions only ([10](10-continuous-session.md#run-ledger)) |
+| `runs` | the run ledger, in flight and finished in the last 24h, as JSON: the continuous conversation's, or in a lead session the lead's own ([10](10-continuous-session.md#run-ledger)) |
 | `cancel` | `--run <id>` or `--group <id>`, descendants included |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
@@ -29,9 +29,12 @@ the one validator of the params object.
 
 ```
 pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--task-id <id>] [--session <id>]
-        [--model <name|?>] [--thinking <level>] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
+        [--model <name|?>] [--thinking <level>] [--role lead] [--cwd <dir>] [--name <text>] [--timeout <seconds>]
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
+
+`--role lead` rides as `launch.role` and makes the run's session a feature
+lead: the one delegated run that may delegate.
 
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
   caller's), or `--bash` (a one-shot script action in the same `--cwd`, no
@@ -101,15 +104,16 @@ result; the supervisor answers with `pier task run --run <id> --prompt
 A run with a supervisor (a `callbackSessionId` — its own, or its group's) may
 not call `pier task` while it is `running` on the caller's session: `task: a
 delegated run cannot delegate; ask in your result and let your supervisor run
-it`, exit 1. A queued run gates nothing. A top-level session, and a run nobody
+it`, exit 1. A queued run gates nothing. A top-level session, a run nobody
 waits on (`--callback none`; a cron, watch or Console run whose definition
-names no `--callback-session`), may.
+names no `--callback-session`), and a feature lead may; a lead launching a lead
+is refused (`task: a feature lead cannot launch a lead; …`), so depth stays 2.
 
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session of the continuous conversation counts as the one
 that launched it. `parentRunId` links only a `task` action's child, which a cancel
 walks. The run preamble (`tasks/agent.ts`) tells a supervised run in one
-sentence that `pier task` is refused.
+sentence that `pier task` is refused, and a lead that it may delegate.
 
 ## Skill
 
@@ -127,3 +131,5 @@ socket. `tasks/operations.test.ts`: the supervised-run gate, ownership,
 `message`'s three branches, `recover`'s refusals, model matching (one, none,
 many, full id, `?`). `tasks/continuous.test.ts`: callbacks and ownership
 following the chain, `runs`, the children's compaction cap.
+`tasks/lead.test.ts`: the lead's role, delegation and depth, its ledger, the
+milestone flow and its waits, the resume committed with the marks.

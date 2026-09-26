@@ -44,48 +44,70 @@ Three roles, not three mandatory tiers: main (dispatcher) → feature lead
 | Role | Session | Model | Delegates |
 | --- | --- | --- | --- |
 | main | the chain head, cwd `$PIER_HOME/home` | instance default, `low` | leads and workers |
-| lead | an ordinary child, cwd = the feature's own worktree, long-lived | strong (`--model`), `high` | workers only |
+| lead | an ordinary child, cwd = the feature's own worktree, long-lived | strong (`--model`); `high` to design, `medium` to build | workers only |
 | worker | an ordinary child, one worktree each | as launched | never |
 
+- The role does not depend on the instance switch: `--role lead`, its
+  delegation, ledger and milestones work from any session with the switch on
+  or off; off, the lead is an ordinary rail session at the instance's
+  compaction.
 - A lead never rotates; auto-compaction stays on at the children's cap
   (§Main session lifecycle), since its state is the design doc on disk.
-- "I want X" → main launches a lead (`--role lead`) and its card is posted
-  like any child's.
-- Design phase: the user talks to the lead directly — its card thread on IM,
-  its session on web; the dispatcher is never in that path.
-- Build phase, once the design is final: the lead decomposes the work, launches
-  workers (one `wt` worktree each), reviews and integrates their results.
-- Main receives milestones only, never one wake per worker result: each lead
-  callback becomes one line in the main flow. Workers get no card of their
-  own; their callbacks are system notes in the lead's thread and Background
-  Run rows in the lead's session.
-- A lead's card follows its session's latest run (a resume is a new run on the
-  same session).
-- Build phase starts in a fresh lead session, seeded with the design doc's
-  path (the doc on disk is the state), thinking `high` → `medium`.
-- The lead contract is injected from code as `<pier>/lead.md`, for a session
-  whose run carries the role; it is never written to disk.
-- Both role contracts are string constants in `src/agent/roles.ts`, read by
+- "I want X" → main launches a lead (`pier task run --role lead`). On the web
+  the lead is its session in the rail's In progress group, whichever chain
+  member launched it, and the Background Run row in the launching session; IM
+  cards are Phase 3.
+- Design phase: the user talks to the lead directly in its session; the
+  dispatcher is never in that path.
+- Build phase: when the design is final the lead ends its reply with `Design
+  final: <absolute path>`; on that milestone, or the user's word, main launches
+  a new lead with plain `pier task run --role lead --thinking medium --cwd
+  <worktree> --model <the lead's model> --prompt "Build per <path> …"`, the doc
+  on disk being the whole state.
+- The build lead decomposes the work, launches workers (one `wt` worktree
+  each), reviews and integrates their results.
+- Main receives milestones only, never one wake per worker result. Workers get
+  no card of their own; their callbacks are system notes and Background Run
+  rows in the lead's session.
+- The lead contract is injected from code as `<pier>/lead.md` for a session
+  created or reopened with the role; it is never written to disk. Both role
+  contracts are string constants in `src/agent/roles.ts`, read by
   `agent/pi.ts`'s `agentsFilesOverride`.
 
-Gaps (required new work):
+Mechanics:
 
-- Role marking: `pier task run --role lead` rides as `launch.role: "lead"`
-  (`AgentLaunchPolicy`, `tasks/types.ts`), parsed in `tasks/cli.ts` and
-  `parseDraft`; `AgentLaunchOptions` (`core/types.ts`) carries it to the
-  factory, and a session reopened outside a run (a thread reply, a restart)
-  gets it from an injected `roleOf(sessionId)` answered from `task_runs`.
-- Delegation: `tasks/operations.ts:184` refuses `pier task` while a supervised
-  run is running on the caller's session; a run whose `launch.role` is `lead`
-  passes, and a lead launching `--role lead` is refused (`task: a feature lead
-  cannot launch a lead`), so depth stays 2.
-- The run preamble (`tasks/agent.ts:31`) says "you may delegate to workers" to a
-  lead instead of "`pier task` is refused".
-- Milestones: a user reply in the lead's thread, or a worker callback while
-  another run the lead launched is still in flight, starts a lead turn outside
-  any run, so nothing reaches main; the callback that settles the lead's last
-  in-flight run is delivered as a resume of the lead's last run
-  (`tasks/callbacks.ts`), whose own callback then reaches main once.
+- Role marking: `--role lead` rides as `launch.role: "lead"`
+  (`AgentLaunchPolicy`, `tasks/types.ts`; `parseLaunch` accepts `lead` only,
+  and a reused session takes no launch policy); `AgentLaunchOptions.role`
+  (`core/types.ts`) carries it to the factory, and a reopened session gets it
+  from `roleOf(sessionId)`, injected into the factory and answered from
+  `task_runs` (a run on that session whose definition has the role; a resume
+  keeps the definition).
+- A lead's session is not one of the runs' own (`taskOwnedSessionIds`,
+  `tasks/store.ts`): the web lists it and marks it unread like a workbench
+  session; it keeps the children's compaction cap.
+- Delegation: the refusal for a running supervised run (`tasks/operations.ts`)
+  passes a lead session; a lead launching a lead — `--role lead`, a saved lead
+  definition, or a lead member of a batch — is refused before its draft is
+  filed (`task: a feature lead cannot launch a lead; …`), so depth stays 2.
+- The run preamble (`tasks/agent.ts`) tells a lead it may delegate to workers
+  instead of "`pier task` is refused".
+- `pier task runs` in a lead session lists the runs that lead launched.
+- Milestones: every run and group callback to a lead session asks
+  `TaskService.milestone` (`tasks/callbacks.ts`, `tasks/groups.ts`):
+  - while another result is owed the lead (a run in flight whose own callback,
+    or whose unfinished group's, names it), the result is a plain callback: a
+    lead turn outside any run, so nothing reaches main; a user message in the
+    lead's session is the same;
+  - the result that leaves nothing owed resumes the lead's last run, prompted
+    `[Pier: the last result you were waiting on follows; …]` with the results,
+    and that run's own callback reaches main once; the resume and the
+    callbacks' `delivered` marks commit in one transaction, so a crash cannot
+    resume twice;
+  - the lead's last run not yet finished, or a drain under way: the result
+    stays pending and the tick's sweep asks again;
+  - nobody waiting on the lead's last run, or a resume that cannot be filed
+    (logged): a plain callback.
 
 ## Home and memory
 
@@ -156,8 +178,8 @@ checks; the dispatcher needs the runs it launched.
   in the chain (`TaskService.ledger`).
 - Surface: `pier task runs` → JSON, in-flight runs plus runs finished in the
   last 24h, each `{runId, name, state, targetSessionId, cwd, queuedAt,
-  finishedAt}`; refused outside a chain session and while the switch is off;
-  in a lead session it will list the runs that lead launched (Phase 2).
+  finishedAt}`; in a lead session the runs that lead launched, switch on or
+  off; elsewhere refused outside a chain session and while the switch is off.
 - The same read feeds the rotation seed and IM `/status`; `skills/pier-tasks`
   names it for the dispatcher.
 - Callbacks and ownership follow the chain: a run or group launched by an

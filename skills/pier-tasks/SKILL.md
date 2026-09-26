@@ -6,9 +6,8 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 # Pier tasks
 
 `pier task --help` lists the six commands and their flags. Each prints one
-JSON receipt (`--model ?` one pin per line), exit 0; a refusal is a `task:`
-line, exit 1 (`--model` with no or several hits lists the menu under it); a
-bad flag is `task:` plus the usage, exit 2. `--prompt -` reads stdin.
+JSON receipt, exit 0; a refusal is a `task:` line, exit 1; a bad flag is
+`task:` plus the usage, exit 2. `--prompt -` reads stdin.
 
 ## Delegate, then end your turn
 
@@ -62,9 +61,16 @@ chars per run, a group's members included) or lost to compaction. `--group`
 caps each member at 2 000, so a long member is recovered with `--run`.
 **Never to check progress**: the refusal reveals no state.
 
-`pier task runs` — only in a session of the continuous conversation: the runs
-it launched, in flight and finished in the last 24h, as JSON. For orientation,
-never to wait on a result.
+`pier task runs` — only in a session of the continuous conversation or a
+feature lead's: the runs it launched, in flight and finished in the last 24h,
+as JSON. For orientation, never to wait on a result.
+
+## Feature leads
+
+`--role lead` launches a feature lead: a long-lived child in the feature's own
+worktree that designs with the user, then builds with workers. It is the one
+delegated run that may delegate, never to a lead; only its reply to the last
+result owed it reaches its supervisor.
 
 ## Saved definitions
 
@@ -81,6 +87,6 @@ session; `pier task list` shows definitions, never runs.
 - A delegated run does not delegate: `pier task` is refused inside a run
   someone waits on — ask in your result; your supervisor runs it.
 - 6 agent runs execute at once instance-wide, `--bash` runs taking none of
-  those slots; the rest queue until cancelled
-  or a restart marks them `interrupted` (callbacks still fire).
+  those slots; the rest queue until cancelled or a restart marks them
+  `interrupted` (callbacks still fire).
 - During a restart drain new runs are refused: retry after.
