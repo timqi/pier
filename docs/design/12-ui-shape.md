@@ -54,7 +54,7 @@ desktop / phone                         viewing a child session
 
 ## In progress drawer
 
-The rail's In progress list ([03 §Sessions rail](03-web-workbench.md#sessions-rail-sidebarts))
+The rail's In progress list ([03 §Bar and In progress drawer](03-web-workbench.md#bar-and-in-progress-drawer-session-headerts-drawerts))
 as an overlay: a panel anchored under the chip at the right ≥ md (the
 sidebar's material, 20rem, over the transcript, not beside it), a bottom
 sheet below 640px (the menu primitive's sheet, `menu.ts`). Right because the
@@ -62,7 +62,7 @@ chip is right and the reading column keeps its left edge.
 
 - Rows unchanged: `<name>` · `phase` tag · dot (green live, amber unread,
   grey queued / design waiting), the run rows for runs with no session yet;
-  rail order; same source (`GET /api/sessions` ∩ Running, plus
+  newest first by birth; same source (`GET /api/sessions` ∩ Running, plus
   `GET /api/continuous/open`'s live runs), re-read on `sessions-changed` and
   `open-items-changed`. Empty → the chip is absent and the drawer cannot open;
   `/status` is the full list.
