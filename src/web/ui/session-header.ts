@@ -1,13 +1,13 @@
 // The bar: the way back, the title, the meta chips and the ⋯ menu. Owns the
 // model/context state the snapshot reports.
 
-import { ArrowLeft, ChevronLeft, LoaderCircle, X } from "lucide";
+import { ArrowLeft, ChevronLeft, X } from "lucide";
 import { icon } from "./icons.js";
 import { compact } from "../../core/reply.js";
 import { mustGetJson, sendJson } from "./api.js";
-import { appendTurn, revealActiveRun } from "./chat.js";
+import { appendTurn } from "./chat.js";
 import { $, agoLabel, copyBtn, h, stampTime, untitled } from "./dom.js";
-import { headSession, phaseTag, runsLabel, stateDot, type SessionInfo } from "./drawer.js";
+import { headSession, phaseTag, stateDot, type SessionInfo } from "./drawer.js";
 import { closeMenu, openMenu, openPanel, type MenuItem } from "./menu.js";
 import { modelPicker } from "./model-picker.js";
 import { togglePalette } from "./palette.js";
@@ -138,30 +138,12 @@ const contextLabel = (u: ContextUsage): string =>
     ? `?/${compact(u.compactAt)}`
     : `${compact(u.tokens)}/${compact(u.compactAt)} · ${100 - contextUsed(u.tokens, u)}% left`;
 
-/** Title-row meta: background runs · model · reasoning · current context size. */
+/** Title-row meta: model · reasoning · current context size. */
 function renderSessionMeta(): void {
   const u = currentContext;
   const tokens = u?.tokens ?? null;
   const id = deps.currentId();
-  // The drawer's dot count (drawer.ts) for the session on screen, plus the way
-  // to a card that has scrolled off.
-  const runs = deps.currentSession()?.activeRuns ?? 0;
   const items: HTMLElement[] = [];
-  if (runs > 0) {
-    const chip = h(
-      "button",
-      "flex flex-none cursor-pointer items-center gap-1 rounded bg-sky-50 px-1.5 py-px font-medium text-sky-700 hover:bg-sky-100",
-      icon(LoaderCircle, "spinner h-3 w-3"),
-      `${runs} running`,
-    );
-    chip.title = `${runsLabel(runs)} · show the newest`;
-    chip.onclick = () => {
-      // The count is the server's, the card is this pane's: if the transcript
-      // no longer holds one, say so rather than swallow the click.
-      if (!revealActiveRun()) appendTurn("error", "no run card left in this transcript — reload the session to see it");
-    };
-    items.push(chip);
-  }
   if (id) {
     const pickerButton = (text: string, cls: string): HTMLElement => {
       const button = h("button", `cursor-pointer font-mono ${cls}`, text);
@@ -196,10 +178,9 @@ function renderSessionMeta(): void {
   sessionMeta.replaceChildren(...children);
   sessionMeta.classList.toggle("hidden", items.length === 0);
   sessionMeta.classList.toggle("flex", items.length > 0);
-  // On a phone only two chips are worth a second line: a subagent still
-  // running, and a context near full, which is acted on. style.css shows only
-  // this one below md.
-  sessionMeta.toggleAttribute("data-urgent", runs > 0 || pressure >= CONTEXT_WARN);
+  // On a phone only one chip is worth a second line: a context near full,
+  // which is acted on. style.css shows only this one below md.
+  sessionMeta.toggleAttribute("data-urgent", pressure >= CONTEXT_WARN);
 }
 
 /** Read-only details panel: what this session is and how full its context is.

@@ -142,16 +142,6 @@ export function revealTurn(role: "user" | "assistant", at: number): boolean {
   return true;
 }
 
-/** Scroll the newest running-run card into view for the header's chip
- *  (session-header.ts). `false` when the trim dropped every card. */
-export function revealActiveRun(): boolean {
-  const cards = turnsPane.querySelectorAll<HTMLElement>('[data-kind="background-run"][data-active]');
-  const card = cards[cards.length - 1];
-  if (!card) return false;
-  reveal(card);
-  return true;
-}
-
 function reveal(row: HTMLElement): void {
   follow = false; // walking back into history is leaving the tail
   // Centred, unless the row is taller than the pane: a long reply centred

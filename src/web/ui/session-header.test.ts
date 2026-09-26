@@ -14,7 +14,7 @@ vi.mock("./menu.js", () => ({
   openPanel: vi.fn((_anchor: HTMLElement, panel: HTMLElement) => { if (!panel.isConnected) document.body.append(panel); }),
 }));
 vi.mock("./api.js", () => ({ mustGetJson: vi.fn(), sendJson: vi.fn() }));
-vi.mock("./chat.js", () => ({ appendTurn: vi.fn(), revealActiveRun: vi.fn(() => true) }));
+vi.mock("./chat.js", () => ({ appendTurn: vi.fn() }));
 vi.mock("./model-picker.js", () => ({ modelPicker: vi.fn(() => document.createElement("div")) }));
 vi.mock("./shortcut.js", () => ({ chord: vi.fn(), chordLabel: (key: string) => `⌘${key.toUpperCase()}`, modalOpen: vi.fn() }));
 const drawer = vi.hoisted(() => ({ head: undefined as unknown }));
@@ -24,7 +24,6 @@ vi.mock("./drawer.js", () => ({
   stateDot: () => [document.createElement("i")],
   // Marked so the chip's title proves it uses the drawer's words, which
   // drawer.test.ts owns, rather than spelling its own second copy.
-  runsLabel: (runs: number) => `RUNS(${runs})`,
 }));
 const palette = vi.hoisted(() => ({ togglePalette: vi.fn() }));
 vi.mock("./palette.js", () => palette);
@@ -191,31 +190,15 @@ it("shows ‹ with the head's dot on a child, and the child's phase tag", () => 
   expect(fake(document.querySelector("#chat-phase")).textContent).toBe("");
 });
 
-// A background run is the other kind of "nothing happening": the card sits far
-// up the transcript, so the chip is the count and the way back to it.
-it("shows a running chip that reveals the newest card, and keeps the row urgent", async () => {
-  expect(chips()).toHaveLength(2); // model + reasoning
+// Subagents are the status chip's count (drawer.ts): the meta row is model,
+// reasoning and context only, and a phone shows it just for a context near full.
+it("keeps the meta row to model, reasoning and context, urgent only under context pressure", () => {
   current = session(2);
   header.setHeaderState(model, null, "high", null);
-  const running = chips()[0]!;
-  expect(running.textContent).toBe("2 running");
-  expect(running.title).toBe("RUNS(2) · show the newest");
-  expect(meta().hasAttribute("data-urgent")).toBe(true);
-
-  const { appendTurn, revealActiveRun } = await import("./chat.js");
-  running.onclick!();
-  expect(revealActiveRun).toHaveBeenCalled();
-  expect(appendTurn).not.toHaveBeenCalled();
-
-  // Counted by the server, drawn from this pane: no card means say so.
-  vi.mocked(revealActiveRun).mockReturnValue(false);
-  chips()[0]!.onclick!();
-  expect(appendTurn).toHaveBeenCalledWith("error", expect.stringContaining("no run card"));
-
-  current = undefined;
-  header.setHeaderState(model, null, "high", null);
-  expect(chips()).toHaveLength(2);
+  expect(chips().map((c) => c.textContent)).toEqual([model.id, "high"]);
   expect(meta().hasAttribute("data-urgent")).toBe(false);
+  header.setHeaderState(model, { contextWindow: 1_000_000, tokens: 90_000, compactAt: 100_000 }, "high", null);
+  expect(meta().hasAttribute("data-urgent")).toBe(true);
 });
 
 it("draws the second open from cache, before the read answers", async () => {

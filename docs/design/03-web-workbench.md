@@ -281,8 +281,8 @@ browser keeps no second session order.
   leave no empty log; interrupted work stays visible. System inputs: one line
   with type/status chip, opening to the card ([12 §Transcript density](12-ui-shape.md#transcript-density)).
 - **Task communication**: runs launched by `pier task run` create Background
-  Run rows, updated from `task-status` events; the header's running chip (`activeRuns`
-  from the session list) reveals the newest one still in flight. A row whose run
+  Run rows, updated from `task-status` events; the In progress drawer lists the
+  runs still in flight ([12 §In progress drawer](12-ui-shape.md#in-progress-drawer)). A row whose run
   holds pending `--after` messages says `N queued` (`queuedMessages`), and the
   message's creation, delivery and expiry each emit `task-status`. Delegation and
   callback inputs render as System input rows with a Session link and the run
