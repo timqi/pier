@@ -23,6 +23,7 @@ function rig({
   roles = {} as Record<string, AgentRole>,
   head = undefined as string | undefined,
   designs = [] as LedgerRun[],
+  runSessions = {} as Record<string, string>,
 } = {}) {
   const home = join(mkdtempSync(join(tmpdir(), "pier-chain-")), "home");
   const db = openDb(":memory:");
@@ -66,6 +67,7 @@ function rig({
       ledger.push({ ids, since });
       return typeof runs === "function" ? runs(ids, since) : runs;
     },
+    sessionOf: (id) => runSessions[id] ?? null,
     roleOf: (id) => roles[id],
     designs: () => designs,
     now: () => clock.now,
@@ -267,16 +269,18 @@ describe("the open items", () => {
     expect(r.ledger).toEqual([{ ids: ["h1"], since: now - 86_400_000 }, { ids: ["lead1"], since: now - 86_400_000 }]);
     expect(renderOpenItems(open, now)).toBe([
       "Open",
-      "- model menu 重选 — merged, restart pending · run gone1 — not in the ledger",
-      "- open items 视图 — lead designing · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
+      "- model menu 重选 — merged, restart pending (idle) · run gone1 — not in the ledger",
+      "- open items 视图 — lead designing (running) · run 1prwmabc… running 23m · workers: 1 running, 1 succeeded",
     ].join("\n"));
   });
 
-  it("lists the chain runs no item names that are in flight or did not succeed, never a success", () => {
+  it("lists only the in-flight chain runs no item's session holds, never a finished one", () => {
     let now = 0;
     const r = rig({ runs: () => [
       run("r-live", { name: "Build it", queuedAt: now - 5 * MIN }),
+      run("r-queued", { name: "Next", state: "queued", queuedAt: now - MIN }),
       run("r-failed", { name: "Review src/auth", state: "failed", finishedAt: now - 2 * 60 * MIN }),
+      run("r-cancelled", { name: "Dropped", state: "cancelled", finishedAt: now - MIN }),
       run("r-ok", { name: "Done thing", state: "succeeded", finishedAt: now - MIN }),
       run("r-named", { name: "Named", state: "failed", finishedAt: now }),
     ] });
@@ -284,16 +288,45 @@ describe("the open items", () => {
     r.existing("h1", now);
     r.item("the problem", "", ["r-named"], 1);
     const open = r.chain.openItems();
-    expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-failed"]);
+    expect(open.unlisted.map((u) => u.runId)).toEqual(["r-live", "r-queued"]);
     // The window is the ledger's: `pier task runs`' last 24h.
     expect(r.ledger[0]!.since).toBe(now - 86_400_000);
     expect(renderOpenItems(open, now)).toBe([
       "Open",
-      "- the problem · run r-named failed just now",
+      "- the problem (idle) · run r-named failed just now",
       "Not on the list",
       "- Build it — running 5m",
-      "- Review src/auth — failed 2h ago",
+      "- Next — queued 1m",
     ].join("\n"));
+  });
+
+  // A lead woken again (a callback turn, a follow-up run) is the same item: the item follows its session.
+  it("follows an item's session to its newest run, even when the named run has left the ledger", () => {
+    let now = 0;
+    const r = rig({
+      runSessions: { vdmj112x: "lead1" },
+      runs: () => [run("k4k3jz55", { name: "lead again", targetSessionId: "lead1", queuedAt: now - 2 * MIN })],
+    });
+    now = r.clock.now;
+    r.existing("h1", now);
+    r.item("status 归并", "lead building", ["vdmj112x"], 1);
+    const open = r.chain.openItems();
+    expect(open.items[0]!.runs.map((x) => x.runId)).toEqual(["k4k3jz55"]);
+    expect(open.unlisted).toEqual([]);
+    expect(renderOpenItems(open, now)).toBe("Open\n- status 归并 — lead building (running) · run k4k3jz55 running 2m");
+  });
+
+  it("reads an item running while its session streams, though its run has finished", () => {
+    let now = 0;
+    const r = rig({ runs: () => [run("r1", { targetSessionId: "lead1", state: "succeeded", finishedAt: now - MIN })] });
+    now = r.clock.now;
+    r.existing("h1", now);
+    r.item("fix", "lead building", ["r1"], 1);
+    expect(r.chain.openItems().items[0]!.live).toBe("idle");
+    const lead = fakeSession("lead1");
+    r.router.attach({ channelId: "task", conversationId: "lead1" }, lead);
+    lead.setState("streaming");
+    expect(r.chain.openItems().items[0]!.live).toBe("running");
   });
 
   // A design lead's turn ends on the user; until it reports `Design final:` it is theirs to decide.

@@ -21,13 +21,17 @@ const log = logger("core");
 
 const EXCHANGES = 3;
 
+const IN_FLIGHT = new Set(["queued", "running"]);
+
 export interface ChainDeps {
   factory: AgentFactory;
   router: Router;
   home: string;
   enabled: () => boolean;
-  /** Runs launched by any of `sessionIds`: in flight, or finished at or after `since`. */
+  /** Runs launched by any of `sessionIds`, newest first: in flight, or finished at or after `since`. */
   ledger: (sessionIds: string[], since: number) => LedgerRun[];
+  /** The session a run ran in, the ledger's window or not: an item follows its lead across runs. */
+  sessionOf: (runId: string) => string | null;
   /** `TaskStore.roleOf`: a lead run's item line counts the lead's own workers. */
   roleOf: (sessionId: string) => AgentRole | undefined;
   /** `TaskService.openDesigns`, less closed sessions: the designs waiting on the user. */
@@ -92,7 +96,7 @@ const runText = (r: OpenRun, now: number): string =>
 /** The one string every surface shows for the open items: `/status`, the seed, the rail. */
 export function renderOpenItems({ items, unlisted, designs }: OpenItems, now: number): string {
   if (!items.length && !unlisted.length && !designs.length) return "Nothing open.";
-  const open = items.map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.runs.map((r) => ` · ${runText(r, now)}`).join("")}`);
+  const open = items.map((i) => `- ${i.problem}${i.stage ? ` — ${i.stage}` : ""}${i.live ? ` (${i.live})` : ""}${i.runs.map((r) => ` · ${runText(r, now)}`).join("")}`);
   const rest = unlisted.map((r) => `- ${r.name} — ${runStatus(r, now)}${workersText(r.workers)}`);
   const decide = designs.map((r) => `- ${r.name} · ${runText(r, now)}`);
   return [
@@ -166,8 +170,6 @@ export class MainChain {
     const since = this.now() - LEDGER_WINDOW_MS;
     const ids = this.members().map((m) => m.sessionId);
     const runs = ids.length ? this.deps.ledger(ids, since) : [];
-    const byId = new Map(runs.map((r) => [r.runId, r]));
-    const named = new Set<string>();
     const withWorkers = (r: LedgerRun): OpenRun => {
       if (!r.targetSessionId || this.deps.roleOf(r.targetSessionId) !== "lead") return r;
       const workers = Object.fromEntries(TASK_RUN_STATES.map((s) => [s, 0])) as Record<TaskRunState, number>;
@@ -178,18 +180,21 @@ export class MainChain {
     };
     const rows = this.db.prepare("SELECT problem, stage, run_ids FROM open_items ORDER BY updated_at, rowid")
       .all() as { problem: string; stage: string; run_ids: string }[];
-    const items = rows.map((row) => ({
-      problem: row.problem,
-      stage: row.stage,
-      runs: (JSON.parse(row.run_ids) as string[]).map((id): OpenRun => {
-        named.add(id);
-        const run = byId.get(id);
+    // An item names a session through any of its runs: the session's newest run stands for it.
+    const tracked = new Set<string>();
+    const items = rows.map((row) => {
+      const named = (JSON.parse(row.run_ids) as string[]).map((id): OpenRun => {
+        const session = runs.find((r) => r.runId === id)?.targetSessionId ?? this.deps.sessionOf(id);
+        tracked.add(session ?? id);
+        const run = runs.find((r) => (session ? r.targetSessionId === session : r.runId === id));
         return run
           ? withWorkers(run)
-          : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: null, cwd: null, queuedAt: 0, finishedAt: null };
-      }),
-    }));
-    const unlisted = runs.filter((r) => !named.has(r.runId) && r.state !== "succeeded").map(withWorkers);
+          : { runId: id, name: id, state: NOT_IN_LEDGER, targetSessionId: session, cwd: null, queuedAt: 0, finishedAt: null };
+      }).filter((r, i, all) => all.findIndex((o) => o.runId === r.runId) === i);
+      const busy = named.some((r) => IN_FLIGHT.has(r.state) || (r.targetSessionId && this.deps.router.stateOf(r.targetSessionId) === "streaming"));
+      return { problem: row.problem, stage: row.stage, runs: named, ...(named.length ? { live: busy ? "running" as const : "idle" as const } : {}) };
+    });
+    const unlisted = runs.filter((r) => IN_FLIGHT.has(r.state) && !tracked.has(r.targetSessionId ?? r.runId)).map(withWorkers);
     return { items, unlisted, designs: this.deps.designs() };
   }
 

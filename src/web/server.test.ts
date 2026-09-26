@@ -2565,7 +2565,7 @@ describe("the continuous conversation's routes", () => {
     const clock = { now: Date.now() };
     const chain = new MainChain(db, {
       factory, router, home: join(mkdtempSync(join(tmpdir(), "pier-home-")), "home"),
-      enabled: () => settings.get().continuous, ledger, roleOf: () => undefined, designs: () => [], hub, now: () => clock.now,
+      enabled: () => settings.get().continuous, ledger, sessionOf: () => null, roleOf: () => undefined, designs: () => [], hub, now: () => clock.now,
     });
     const app = createServer({
       factory, router, hub, sessions: new SessionStateStore(db), config: fakeConfig(), packages: fakePackages(),
@@ -2598,13 +2598,13 @@ describe("the continuous conversation's routes", () => {
 
   it("answers the open items, runs joined through the ledger", async () => {
     const live: LedgerRun = { runId: "r1", name: "Build it", state: "running", targetSessionId: "s-r1", cwd: "/w", queuedAt: 1, finishedAt: null };
-    const stray: LedgerRun = { ...live, runId: "r2", name: "Review", state: "failed", targetSessionId: null, finishedAt: 2 };
+    const stray: LedgerRun = { ...live, runId: "r2", name: "Review", state: "queued", targetSessionId: null };
     const { app, db, restarted } = chainRig(true, () => [live, stray]);
     restarted();
     db.prepare("INSERT INTO open_items VALUES ('open items', 'worker running', '[\"r1\"]', 1)").run();
     const res = await app.request("/api/continuous/open");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [{ problem: "open items", stage: "worker running", runs: [live] }], unlisted: [stray], designs: [] });
+    expect(await res.json()).toEqual({ items: [{ problem: "open items", stage: "worker running", runs: [live], live: "running" }], unlisted: [stray], designs: [] });
   });
 
   it("sends to the head through the alias, and to the next head across a rotation", async () => {

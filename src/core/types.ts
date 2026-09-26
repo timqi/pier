@@ -202,8 +202,9 @@ export interface OpenRun extends LedgerRun {
  *  (docs/design/10-continuous-session.md#open-items). */
 export interface OpenItems {
   /** By `updated_at`, oldest first. */
-  items: { problem: string; stage: string; runs: OpenRun[] }[];
-  /** Chain runs no item names: in flight, or not `succeeded` in the last 24h. */
+  /** `runs`: each named run's session, by its newest run; `live` whether any is working now. */
+  items: { problem: string; stage: string; runs: OpenRun[]; live?: "running" | "idle" }[];
+  /** Chain runs in flight in no item's session. */
   unlisted: OpenRun[];
   /** Design leads that have not reported `Design final:` and are not closed,
    *  by their creating run: the user decides when each is final. */

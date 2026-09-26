@@ -114,10 +114,13 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - The head's `turn-end` writes them (`MainChain`, subscribed to the head) and
   broadcasts `open-items-changed` when a row changed; a marker with no problem
   is logged and dropped.
-- `MainChain.openItems()` joins each run token through the ledger's last 24h (a
-  run it no longer holds reads `run <id> — not in the ledger`, `NOT_IN_LEDGER`), a
-  lead run's with its workers counted by state, and adds the chain's runs no item
-  names that are in flight or did not succeed; `renderOpenItems` is the one text.
+- `MainChain.openItems()` resolves each run token to its session (the ledger,
+  else `TaskStore.getRun`) and shows that session's newest run in the ledger's
+  last 24h, so a lead woken again stays the same item (none there reads `run <id>
+  — not in the ledger`, `NOT_IN_LEDGER`), a lead run's with its workers counted
+  by state; `live` is `running` while any of those runs is queued or running or
+  its session streams, else `idle`; `unlisted` is the chain's queued and running
+  runs in no item's session; `renderOpenItems` is the one text.
 - An item is `<problem> — <stage>`: `problem` in the user's words, `stage` in
   the workflow's (`lead designing`, `merged, restart pending`, `waiting on you:
   60K or 80K?`); only work in flight or waiting on the user's decision now, the
@@ -125,7 +128,7 @@ result coming to it (`TaskStore.awaitsResults`), or it did not succeed; otherwis
 - `designs`: every design lead not closed whose runs have not reported
   `Design final:` (`TaskService.openDesigns` over `TaskStore.leads`), by its
   creating run — the user's to finalize.
-- The text: `Open`, one line per item, each run token rendered
+- The text: `Open`, one line per item, `- <problem> — <stage> (<live>)`, each run rendered
   ` · run <id8>… <state> <age>` and a lead's ` · workers: <counts>`, then `Not
   on the list`, then `Designs for you to finalize`, `- <name> · run <id8>… …`;
   `Nothing open.` when all are empty.
