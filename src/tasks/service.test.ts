@@ -831,7 +831,7 @@ describe("task service", () => {
   it("shows a parked follow-up in its target's queue and on its sender's run card until it lands", async () => {
     const busy = fakeSession("busy-target");
     busy.setState("streaming");
-    const { cwd, service, store, hub } = setup(busy);
+    const { service, store, hub } = setup(busy);
     const advance = skewClock();
     const queued: number[] = [];
     hub.subscribe("owner", (event) => { if (event.type === "task-status") queued.push(event.run.queuedMessages); });

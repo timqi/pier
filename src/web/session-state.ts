@@ -3,8 +3,8 @@
 // (`sort`), and a session the operator closed out of the rail (`closed`), which
 // the next human message reopens. A session enters the set at the front when a
 // human speaks to it and it is not already in; members never move relative to
-// each other until one is pushed out. Remembered, not derived: any order recomputed from activity
-// jumps on every message. `cwd` and `project_sort` are columns nothing reads.
+// each other until one is pushed out. Remembered, not derived: any order
+// recomputed from activity jumps on every message. `cwd` and `project_sort` are columns nothing reads.
 
 import type { DatabaseSync } from "node:sqlite";
 import { pierDb, transact } from "../db.js";
