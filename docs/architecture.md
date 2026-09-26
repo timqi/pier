@@ -28,14 +28,14 @@ Slack / Lark                     Web workbench (browser)       Tasks
 src/
   core/        types.ts (the seams), router.ts, hub.ts, queue.ts, reply.ts,
                identity.ts, inbox.ts, inbound-file.ts, chain.ts (the
-               continuous conversation: its sessions, rotation, seed)
+               continuous conversation: the main_chain table, rotation, seed)
   agent/       pi.ts (sessions) and packages.ts (the package registry: Pi's
                DefaultPackageManager behind `PackageStore`) — the two files
                importing @earendil-works/pi-*; events.ts
                (Pi → Pier event translation), listing.ts (on-disk sessions,
                indexed in pier.db), config.ts, credentials.ts (sealed store +
-               auth.json import), models.ts, roles.ts (the role contracts
-               injected from code)
+               auth.json import), models.ts, roles.ts (the dispatcher's
+               and feature lead's contracts, injected from code)
   websearch/   `pier web search|fetch` behind `POST /web`: run.ts (the two
                operations and the validator), cli.ts (argv), provider.ts
                (backend + auth over core's `WebContext`), anthropic.ts /
@@ -61,8 +61,8 @@ src/
   tasks/       types, outbox (delivery: proof, backoff, ceiling), definitions,
                runs, groups, agent (child-run runner), execution, callbacks,
                messages, command, service, store, operations (the `/task`
-               route: who may ask for what), routes, cli (`pier task`: argv →
-               the params object over the socket)
+               route: who may ask for what, by the session's role), routes,
+               cli (`pier task`: argv → the params object over the socket)
   main.ts      wiring only
   paths.ts     where PIER_HOME resolves, once
   lock.ts      the claim on the instance directory: one Pier per PIER_HOME
@@ -77,7 +77,8 @@ src/
                reaches the running instance through — `/resolve`, `/task` —
                every request naming its session; the bits are the auth
   settings.ts  instance facts a human owns (public URL, model menu, auto-update
-               switch, which of the built-in `pier` package's resources are on)
+               and continuous-session switches, which of the built-in `pier`
+               package's resources are on)
   update.ts    whether a newer release exists and when this instance may become
                it; the install is handed to service.ts's unit
   drain.ts     graceful restart: finish running turns and outbound sends,
@@ -159,8 +160,8 @@ seams:
   only — an inbound file is saved to `$PIER_HOME/inbox/` by the receiving
   surface and rides the prompt as a `[name](file:///…)` line; bytes in
   `core/inbox.ts`, grammar in `core/inbound-file.ts`), persisted system input,
-  abort, history, rename, model get/set/list, clearQueue, create/resume,
-  `list`/`find`, and a payload-only `subscribe`. Must stay implementable over
+  abort, history, rename, model get/set/list, clearQueue, compaction cap,
+  create/resume, `list`/`find`/`readHistory`, and a payload-only `subscribe`. Must stay implementable over
   RPC.
 - `SessionEventPayload` — the only observability currency: turn/text/thinking/
   tool events, persisted `system-input`, linked `task-status`, state and queue

@@ -1,21 +1,12 @@
-# Continuous session (experimental design)
+# Continuous session
 
-The contract for the trial of one continuous conversation per instance, in
-front of a dispatcher session that routes work to task-run children.
-Behaviour not named here is today's, owned by [03](03-web-workbench.md),
-[04](04-im-channels.md) and [09](09-tasks-cli.md). "Gap" marks what does not
-exist yet.
+The contract for one continuous conversation per instance, in front of a
+dispatcher session that routes work to task-run children: a trial behind an
+instance switch, default off. Behaviour not named here is owned by
+[03](03-web-workbench.md), [04](04-im-channels.md) and [09](09-tasks-cli.md).
 
-## Phases
-
-- **Phase 1 (web)**: the instance switch; `$PIER_HOME/home` and the
-  dispatcher contract injection; `main_chain`, lazy 1h rotation and
-  `session-seed`; the per-session compaction override (both caps below); the
-  run ledger `pier task runs`; callbacks and ownership follow the chain; the
-  web routes and UI (entry row, In progress group, chain paging, read-only
-  non-head, branch-based history).
-- **Phase 2**: the feature lead.
-- **Phase 3 (IM)**: the DM switch, main-flow DM replies, cards, `/status`.
+- Built: Phase 1 (the web conversation) and Phase 2 (the feature lead).
+- Not built: Phase 3 (§IM), §Not built, and each "Gap".
 
 ## Model
 
@@ -30,9 +21,9 @@ exist yet.
 - A follow-up on an existing feature continues that child (`--run <id>`, or
   `--session <id>` once idle), never a new one; the user's words go through
   verbatim, the dispatcher's additions after them, never a re-summary.
-- Children are ordinary supervised runs: a worker does not delegate (09 §Two
-  levels), a feature lead does (below); both count against the 6-run instance
-  limit and never rotate.
+- Children are ordinary supervised runs: a worker does not delegate, a
+  feature lead does (below); both count against the 6-run instance limit and
+  never rotate.
 - Callbacks stay the only delivery (`skills/pier-tasks`); the ledger below is
   for orientation, never for waiting.
 
@@ -47,18 +38,15 @@ Three roles, not three mandatory tiers: main (dispatcher) → feature lead
 | lead | an ordinary child, cwd = the feature's own worktree, long-lived | strong (`--model`); `high` to design, `medium` to build | workers only |
 | worker | any session a run launched from a session (`invokedBySessionId`) created, unless a lead; one worktree each | as launched | never |
 
-- A role is the session's for its life, with the switch on or off: `pier
-  task` is refused in a worker's session at any time, reopened on the web
-  included, and it opens without the `pier-tasks` skill; a lead's delegation,
-  ledger and milestones work from any session (switch off, the lead is an
-  ordinary rail session at the instance's compaction); top-level sessions and
-  cron or watch run sessions have no role and keep 09's rules.
-- A lead never rotates; auto-compaction stays on at the children's cap
-  (§Main session lifecycle), since its state is the design doc on disk.
+- A role is the session's for its life, switch on or off; who may delegate is
+  [09 §Two levels](09-tasks-cli.md#two-levels-no-tree). A worker's session
+  opens without the `pier-tasks` skill; switch off, a lead is an ordinary rail
+  session at the instance's compaction.
+- A lead never rotates; while the switch is on it compacts at the children's
+  cap (§Main session lifecycle), its state being the design doc on disk.
 - "I want X" → main launches a lead (`pier task run --role lead`). On the web
-  the lead is its session in the rail's In progress group, whichever chain
-  member launched it, and the Background Run row in the launching session; IM
-  cards are Phase 3.
+  the lead is its own session, in the rail's In progress group while live,
+  and the Background Run row in the launching session; IM cards are Phase 3.
 - Design phase: the user talks to the lead directly in its session; the
   dispatcher is never in that path.
 - Build phase: when the design is final the lead ends its reply with `Design
@@ -78,27 +66,14 @@ Three roles, not three mandatory tiers: main (dispatcher) → feature lead
 
 Mechanics:
 
-- Role marking: `--role lead` rides as `launch.role: "lead"`
-  (`AgentLaunchPolicy`, `tasks/types.ts`; `parseLaunch` accepts `lead` only,
-  and a reused session takes no launch policy); `AgentLaunchOptions.role`
-  (`core/types.ts`) carries it, `lead` or `worker`, to the factory; a reopened
-  session gets it from `roleOf(sessionId)`, injected into the factory and
-  answered by the run that created the session (`createdRole`,
-  `tasks/types.ts`), which a resume or a `--session` continuation never
-  changes. `agent/pi.ts` drops `pier-tasks` from a worker's skills; the refusal
-  in `tasks/operations.ts` is the gate.
+- Role marking: `launch.role: "lead"` (`AgentLaunchPolicy`,
+  `tasks/types.ts`) becomes `AgentLaunchOptions.role` (`core/types.ts`,
+  `lead` | `worker`, `createdRole`) at creation; a reopen asks `roleOf`,
+  injected into the factory. `agent/pi.ts` drops `pier-tasks` from a worker;
+  `tasks/operations.ts` is the gate.
 - A lead's session is not one of the runs' own (`taskOwnedSessionIds`,
   `tasks/store.ts`): the web lists it and marks it unread like a workbench
-  session; it keeps the children's compaction cap.
-- Delegation: the refusal for a running supervised run (`tasks/operations.ts`)
-  passes a lead session, and a worker's session is refused outside a run too
-  (`task: a worker's session never delegates, …`); a lead launching a lead —
-  `--role lead`, a saved lead definition, or a lead member of a batch — is
-  refused before its draft is filed (`task: a feature lead cannot launch a
-  lead; …`), so depth stays 2.
-- The run preamble (`tasks/agent.ts`) tells a lead it may delegate to workers,
-  and a worker or a supervised run that "`pier task` is refused".
-- `pier task runs` in a lead session lists the runs that lead launched.
+  session.
 - Milestones: every run and group callback to a lead session asks
   `TaskService.milestone` (`tasks/callbacks.ts`, `tasks/groups.ts`):
   - while another result is owed the lead (a run in flight whose own callback,
@@ -122,7 +97,7 @@ Mechanics:
 - The dispatcher contract is injected from code, beside `<pier>/AGENTS.md`
   (`agent/pi.ts` `agentsFilesOverride`, text in `agent/roles.ts`), as
   `<pier>/dispatcher.md`, only while the switch is on and only for a session
-  whose cwd is the home (`resourceLoader(cwd)`); it is never written to disk.
+  whose real cwd is the home; it is never written to disk.
   Flipping the switch recycles idle sessions, as a Console save does.
 - The home holds memory only:
   - `MEMORY.md` — durable facts, decisions, the project index (repo → path,
@@ -135,7 +110,7 @@ Mechanics:
   never into the home.
 - Recall is files plus transcripts: `rg` over `memory/` and the Pi session
   directory. Gap: the `agent/listing.ts` index is reachable only as `GET
-  /api/search`; a `pier search <q>` over the CLI socket is optional work.
+  /api/search`; no `pier search <q>` over the CLI socket.
 - No vector store or memory service is a dependency.
 
 ## Main session lifecycle
@@ -145,8 +120,8 @@ Mechanics:
 | User message to the main session, head ≥ 1h since its last user message (its start, before it has one) | rotate before delivering: create the next session, append a chain row, deliver to it; a head mid-turn never rotates |
 | Callback to the main session | delivered to the head, whatever its idle time; never rotates |
 | Rotation | the new session opens with the previous head's model and thinking level (`lost` and `first`: the instance default at `low`), then gets one seed system input, appended without a turn so the user's message is the turn that reads it |
-| Seed (every chain session, the first included) | `MEMORY.md`, the run ledger (in flight, and finished since the previous rotation), today's and yesterday's daily notes, the previous head's last 3 exchanges verbatim |
-| Surface | one line where the user message came from; on the web, the chain divider (`new session — idle 1h`) |
+| Seed (every chain session, the first included) | `MEMORY.md`, the run ledger (in flight, and finished since the previous head started), today's and yesterday's daily notes, the previous head's last 3 exchanges verbatim |
+| Surface | on the web, the chain divider (`new session — idle 1h`); Gap: the IM line (Phase 3) |
 | Within a stretch | Pi auto-compaction on, triggered near 100K context, the last ~20K kept |
 | Task-run children (workers, leads) | never rotate; auto-compaction triggered near 150K context |
 | Head missing from Pi (not live, not on disk) | a new head with reason `lost`; on the web its divider reads `new session — the previous one was lost` and the lost session's place an error row |
@@ -176,18 +151,12 @@ Mechanics:
 
 ## Run ledger
 
-Today `pier task list` shows definitions only and the skill forbids status
-checks; the dispatcher needs the runs it launched.
-
 - Source: `task_runs` via `TaskStore.activityRuns` (in flight, plus at most
   200 finished runs queued in the window), filtered to `invokedBySessionId`
   in the chain (`TaskService.ledger`).
-- Surface: `pier task runs` → JSON, in-flight runs plus runs finished in the
-  last 24h, each `{runId, name, state, targetSessionId, cwd, queuedAt,
-  finishedAt}`; in a lead session the runs that lead launched, switch on or
-  off; elsewhere refused outside a chain session and while the switch is off.
-- The same read feeds the rotation seed and IM `/status`; `skills/pier-tasks`
-  names it for the dispatcher.
+- Surface: `pier task runs`, the last 24h ([09 §`runs`](09-tasks-cli.md#runs));
+  in a lead session, the lead's own runs.
+- The same read feeds the rotation seed (and IM `/status`, Phase 3).
 - Callbacks and ownership follow the chain: a run or group launched by an
   earlier head calls back to the current head (`MainChain.headOf` in
   `tasks/callbacks.ts`, `tasks/groups.ts`), and every chain member counts as
@@ -198,27 +167,19 @@ checks; the dispatcher needs the runs it launched.
 
 - No copy of any message: the continuous conversation is an ordered chain of
   Pi sessions, and their transcripts are the record.
-- The only new state is one table (a `db.ts` migration):
-
-```sql
-CREATE TABLE main_chain (
-  session_id TEXT PRIMARY KEY,
-  started_at INTEGER NOT NULL,
-  reason TEXT NOT NULL  -- 'first' | 'idle' | 'lost'
-);
-```
-
+- Its only state is the `main_chain` table (`db.ts` migration 28): one row
+  per session, `started_at` and `reason` (`first` | `idle` | `lost`).
 - The head is the row with the greatest `started_at` (`core/chain.ts`).
 - Every surface addresses the conversation through the chain, never by a
   session id: `MainChain.send` resolves the head — rotating first when due,
-  one send at a time — and dispatches to the head's own `web:<id>` key.
-  `core/router.ts` is unchanged.
+  one send at a time — and dispatches to the head's own `web:<id>` key; the
+  router knows nothing of the chain.
 
 ## Web
 
 - The instance switch lives in Settings → Instance (`settings.ts`
-  `continuous`, default off); off is today's workbench, unchanged.
-- On: a fixed first rail row opens the continuous conversation; the rail below
+  `continuous`, default off); off, the workbench is 03's.
+- On: a fixed first rail row, **Conversation**, opens it; the rail below
   it lists only the palette's Running set as **In progress**, and the group
   collapses when empty. Every other session is reached through ⌘K. The phone
   drawer shows the same two parts.
@@ -227,9 +188,8 @@ CREATE TABLE main_chain (
   top, or **Earlier session** at the top, pages back one chain session at a
   time, with a divider naming the rotation after it (`new session — idle 1h ·
   <time>`); a session that cannot be read pages in as an error row.
-- No paging within a session in the trial. Risk: a busy day without a 1h gap
-  is one large session and one large `/history`; a page re-reads the head,
-  and the pane stays as it is until that answer is in.
+- No paging within a session: a day without a 1h gap is one `/history`; a
+  page re-reads the head, and the pane stays as it is until that answer is in.
 - Only the head's turns are editable or rewindable; older sessions render
   read-only (no edit, no next-step buttons), and the composer always sends to
   the head.
@@ -237,29 +197,22 @@ CREATE TABLE main_chain (
   or no head) resolves the head first, so the pane is on the new head's
   stream before its message — and any failure of it — lands there; a send the
   server rotates anyway is followed after.
-- Children show as today's Background Run rows (`task-status`), never their
+- Children show as Background Run rows (`task-status`), never their
   content; a row opens the child session, which takes messages directly.
-- Routes (all 404 while the switch is off; [03](03-web-workbench.md) owns the
-  wire rows):
-  - `GET /api/continuous` → `{chain: [{sessionId, startedAt, reason}]}`,
-    newest first; the client pages with `/history` per member.
-  - `POST /api/continuous` → `{sessionId, rotated?}`: the head a send now
-    would reach, rotated first when due.
-  - `POST /api/continuous/messages` — the alias send, so a rotation between
-    snapshot and send cannot land a message on an old head; answers
-    `{sessionId, rotated?}`.
-  - `/history` for a non-head member reads the transcript off disk without
-    opening it (`AgentFactory.readHistory`) and answers `{turns,
-    backgroundRuns, readonly: true}`; `turns/:index/edit` is 409 there.
-  - A chain member's `/history`, steps and edit index read the branch
-    (`history({branch: true})`), so compacted turns stay in the view.
+- Routes: `GET`/`POST /api/continuous` (the chain; the head a send now would
+  reach) and `POST /api/continuous/messages` (the alias send, so a rotation
+  between snapshot and send cannot land on an old head), all 404 while the
+  switch is off; wire rows in [03](03-web-workbench.md).
+- A chain member's `/history`, steps and edit index read its branch
+  (`history({branch: true})`), so compacted turns stay in view; an earlier
+  member is read off disk, never opened (`AgentFactory.readHistory`).
 
 ## IM
 
-The switch is platform-level in the Console's Channels tab ("DMs use the
-continuous session"), default off, effective only while the instance switch
-is on. Off is today's behaviour: every top-level DM message opens its own
-thread and session. Group chats never change.
+Phase 3, not built. The switch is platform-level in the Console's Channels
+tab ("DMs use the continuous session"), default off, effective only while the
+instance switch is on. Off: every top-level DM message opens its own thread
+and session. Group chats never change.
 
 | Inbound (switch on) | Goes to | Reply posts |
 | --- | --- | --- |
@@ -304,14 +257,12 @@ thread and session. Group chats never change.
   Lark `message.patch`), and a consumer of the chain's `task-status` events
   drives it.
 
-## Optimization notes (not implemented)
+## Not built
 
 - A callback to a cold head (>1h) is deferred: card and ledger carry it, the
   next seed reports it.
-- Pier filters lead results by a milestone marker, so a non-milestone never
-  wakes main.
 - A lead keeps `"long"` cache retention during runs (runs switch to `"short"`,
-  `src/tasks/agent.ts:67`).
+  `tasks/agent.ts`).
 - The seed is capped near 8K: `MEMORY.md` capped, the ledger as compact lines,
   the last 3 exchanges as text only, no tool output.
 

@@ -12,7 +12,7 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
 | `list` | stored definitions, as JSON |
-| `runs` | the run ledger, in flight and finished in the last 24h, as JSON: the continuous conversation's, or in a lead session the lead's own ([10](10-continuous-session.md#run-ledger)) |
+| `runs` | the run ledger, as JSON (§`runs`) |
 | `cancel` | `--run <id>` or `--group <id>`, descendants included |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
 
@@ -33,15 +33,16 @@ pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--ta
         [--callback origin|none|steer] [--callback-session <id>] [--join all|first] [--member <flags…>]…
 ```
 
-`--role lead` rides as `launch.role` and makes the run's session a feature
-lead: the one delegated run that may delegate.
-
 - **New run**: `--prompt` (one-shot, fresh session in `--cwd`, default the
   caller's), or `--bash` (a one-shot script action in the same `--cwd`, no
-  session and no model — `--prompt`, `--model`, `--thinking` and `--session`
-  beside it are refused), or `--task-id` (a saved definition, as is), or
-  `--session <id>` with `--prompt` (continue an idle session; `--cwd`
+  session and no model — `--prompt`, `--model`, `--thinking`, `--role` and
+  `--session` beside it are refused), or `--task-id` (a saved definition, as
+  is), or `--session <id>` with `--prompt` (continue an idle session; `--cwd`
   refused).
+- **`--role lead`**: rides as `launch.role` on a fresh `--prompt` run, whose
+  session is a feature lead's for its life (§Two levels); any other value, and
+  `--role` beside `--session`, is refused by the server; beside `--task-id` or
+  `--bash`, by argv.
 - **Existing run** `--run <id>`: one `message {run_id, message, after?,
   callback?, callback_session_id?}` request. The server picks by the run's
   state: running → steer; `--after` → follow-up queued behind its current
@@ -73,6 +74,19 @@ hidden definition (`kind: subagent`) is refused. No trigger means `manual`.
 task's callback is a session (`--callback-session`) or nothing. Archiving is
 the Console's.
 
+## `runs`
+
+```
+pier task runs
+```
+
+No flags. Receipt: a JSON array, in-flight runs plus runs finished in the last
+24h, each `{runId, name, state, targetSessionId, cwd, queuedAt, finishedAt}`
+(`TaskService.ledger`). In a feature lead's session: the runs it launched. In a
+session of the continuous conversation while the switch is on: the runs any of
+its sessions launched. Anywhere else: `task: runs lists the continuous
+conversation's runs; this session is not one of its sessions`, exit 1.
+
 ## Models
 
 `--model <name>` rides as `launch.model`, a string, matched in `expandDraft`
@@ -101,28 +115,34 @@ result; the supervisor answers with `pier task run --run <id> --prompt
 
 ## Two levels, no tree
 
-A run with a supervisor (a `callbackSessionId` — its own, or its group's) may
-not call `pier task` while it is `running` on the caller's session: `task: a
-delegated run cannot delegate; ask in your result and let your supervisor run
-it`, exit 1. A queued run gates nothing. A worker's session — one a run
-launched from a session created, not a lead — is refused at any time, in a run
-or reopened after it (`task: a worker's session never delegates, …`). A
-top-level session, a cron or watch run's session, and a feature lead may; a
-lead launching a lead is refused (`task: a feature lead cannot launch a lead;
-…`), so depth stays 2.
+Who may call `pier task`, by the caller's session; each refusal exits 1:
+
+- a feature lead's (made by a `--role lead` run): may, but not launch a lead —
+  `--role lead`, a saved lead definition, a lead batch member — refused before
+  anything is filed (`task: a feature lead cannot launch a lead; …`);
+- a worker's (made by any other run launched from a session): never, in its
+  run or after it (`task: a worker's session never delegates, …`);
+- any other while a supervised run (a `callbackSessionId`, its own or its
+  group's) is `running` on it: refused (`task: a delegated run cannot
+  delegate; …`); a queued run gates nothing;
+- otherwise — a top-level session, a cron or watch run's — may.
+
+The run that made a session answers its role (`TaskStore.roleOf`); a resume or
+a `--session` continuation never changes it.
 
 Ownership: the session that launched a run controls it, and so does the run's
 own session; every session of the continuous conversation counts as the one
-that launched it. `parentRunId` links only a `task` action's child, which a cancel
-walks. The run preamble (`tasks/agent.ts`) tells a supervised run or a worker
+that launched it. `parentRunId` links only a `task` action's child, which a
+cancel walks. The run preamble (`tasks/agent.ts`) tells a supervised run or a worker
 in one sentence that `pier task` is refused, and a lead that it may delegate.
 
 ## Skill
 
 `skills/pier-tasks/SKILL.md` keeps every rule that governs behaviour: end the
 turn after launching; callbacks are the only delivery; ownership; the
-instance limit; delegated runs do not delegate; `recover` only for lost text;
-models by name. Its size is measured in the commit that changes it.
+instance limit; workers do not delegate, a lead delegates to workers only;
+`recover` only for lost text; models by name. Its size is measured in the
+commit that changes it.
 
 ## Tests
 
