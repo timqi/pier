@@ -147,10 +147,10 @@ export function createModelMenuPane(): { el: HTMLElement; load(): void } {
         onThinkingPick: (level) => {
           thinking = level;
         },
-        // A pinned row picked here passes its own level, which is always a twin.
-        onPick: (model, pinnedAt) => {
+        // A pinned row's own level is ignored: pinning it again means another level.
+        onPick: (model) => {
           closeMenu();
-          const level = pinnedAt ?? thinking;
+          const level = thinking;
           const twin = entries.findIndex((e) => key(e) === key(model) && e.thinking === level);
           if (twin >= 0) {
             setStatus(status, "failed", `${key(model)} is already pinned at ${thinkingLabel(level)} (row ${String(twin + 1)})`);

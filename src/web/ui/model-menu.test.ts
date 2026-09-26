@@ -123,11 +123,11 @@ it("pins a pinned model again at another level, refusing the same level twice by
   };
   pick("high");
   expect(el.textContent).toContain("anthropic/pinned-model is already pinned at High (row 1)");
-  // A pinned row picked in the list passes its own level: the same twin.
+  // A pinned row picked in the list takes the dialog's level, not its own.
   pick("low", "high");
-  expect(el.textContent).toContain("already pinned");
-  pick("low");
   expect(el.textContent).toContain("unsaved changes");
+  pick("low");
+  expect(el.textContent).toContain("anthropic/pinned-model is already pinned at Low (row 2)");
 
   vi.mocked(sendJson).mockResolvedValue({ ok: true, json: async () => ({ modelMenu: [] }) } as unknown as Response);
   button(el, /Save menu/)!.onclick!();
