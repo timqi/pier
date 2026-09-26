@@ -97,8 +97,8 @@ pier task list
 ```
 
 Every definition but a one-shot's, `nextRunAt` renamed `nextRun`, plus
-`lastRun`: `{runId, state, startedAt?, finishedAt?}` of `listRuns(id, 1)[0]`
-(the Console row's), or `null`.
+`lastRun`: `{runId, state, startedAt?, finishedAt?}` of `listRuns(id, 1)[0]`,
+or `null`.
 
 ## Schedule verbs
 
