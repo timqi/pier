@@ -713,6 +713,18 @@ main {
   }
   #turns > [data-time]:hover::after { opacity: 1; }
 }
+/* --- system rows (chat.ts appendSystemInput) ---------------------------------
+   Folded, a line at the divider's weight; opened, the card it was. One id on
+   the line: the run's when there is one, else the session's. */
+#turns > .system-row:not([data-expanded]) {
+  margin-block: 0.25rem;
+  padding-block: 0.125rem;
+  background: none;
+  box-shadow: none;
+}
+.system-row:not([data-expanded])::before { display: none; }
+.system-row:not([data-expanded]) :is(.run-thinking, .run-id ~ .run-session) { display: none; }
+/* --- end system rows --- */
 #composer { --composer-control-size: 2rem; position: relative; z-index: 1; }
 /* Center one line against the controls; keep the same last-line alignment as text grows. */
 #input { padding-block: max(0px, calc((var(--composer-control-size) - 1lh) / 2)); }

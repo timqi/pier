@@ -279,8 +279,8 @@ browser keeps no second session order.
   progress, tool activity; headline shows status, step count (every row:
   thinking, progress, tool), duration; tool rows reveal args/output, thinking
   rows tail-capped text; expanded logs scroll independently; simple replies
-  leave no empty log; interrupted work stays visible. System input cards: four-line preview,
-  type/status chips, expandable.
+  leave no empty log; interrupted work stays visible. System inputs: one line
+  with type/status chip, opening to the card ([12 §Transcript density](12-ui-shape.md#transcript-density)).
 - **Task communication**: runs launched by `pier task run` create Background
   Run rows, updated from `task-status` events; the header's running chip (`activeRuns`
   from the session list) reveals the newest one still in flight. A row whose run

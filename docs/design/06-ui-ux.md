@@ -109,8 +109,9 @@ updates this document.
 - Aborted work keeps its unfinished text; errors and states without a reply
   stay explicit. Nothing that happened may disappear.
 - Activity history limits never displace queued or running work.
-- System notices: wide neutral panels with visible outlines; topic first; four
-  rendered lines by default, expandable; IDs are supporting details.
+- System inputs (seed, callback, delegation): one line at the divider's weight
+  — chevron, kind chip, topic, id in mono — opening in place to a wide neutral
+  card; failure text stays on the line. Chat command answers stay open.
 - Status colors: cyan delegation/callbacks, amber for attention (a callback
   not yet landed), clear success/failure/interruption for results; running is
   neutral — the spinner carries the motion. Accents small.

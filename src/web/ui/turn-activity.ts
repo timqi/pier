@@ -2,7 +2,7 @@
 // steps) and the detached background-run cards, rendered into #turns between
 // chat rows.
 
-import { Check, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
+import { Check, ChevronRight, LoaderCircle, Minus, Pause, X, type IconNode } from "lucide";
 import { icon } from "./icons.js";
 import { getJson } from "./api.js";
 import type { ChatDeps } from "./chat.js";
@@ -48,18 +48,26 @@ export interface RunHead {
   runId?: string;
   /** The session doing the work when it is not this one; "console" is nobody. */
   sessionId?: string | null;
+  /** A failed or interrupted run's first line: on a collapsed line, never behind the chevron. */
+  failure?: string;
+  /** A system row's body: glyph, label and name become the button that shows
+   *  it, and the row wears `data-expanded` while it is shown. */
+  expands?: HTMLElement;
 }
 
 /** Quiet card body; the coloured edge and labelled chip carry type/status. */
 const cardClass = (tone: string): string => `system-card group relative mt-1.5 rounded-xl px-4 py-2.5 ${tone}`;
 export const runCard = (tone: string): HTMLElement => h("div", cardClass(tone));
+export const runBody = (text: string): HTMLElement =>
+  h("div", "mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500", text);
 
 /** Four rendered lines give the topic; the full text stays one click away.
  *  Hidden panes use a conservative guess until their content can be measured. */
 export function clampedBody(text: string): [content: HTMLElement, toggle: HTMLElement] {
   const long = text.length > 240 || text.split("\n").length > 4;
   const collapsed = ["max-h-[4lh]", "overflow-hidden"];
-  const content = h("div", `mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-normal text-neutral-500 ${collapsed.join(" ")}`, text);
+  const content = runBody(text);
+  content.classList.add(...collapsed);
   // Measured after the caller appends it: `clientHeight` is 0 until then and
   // the guess decides.
   const toggle = h(
@@ -94,11 +102,18 @@ export function clampedBody(text: string): [content: HTMLElement, toggle: HTMLEl
 
 /** Anything the caller appends after this lands right of the ids. */
 export function runHead(o: RunHead): HTMLElement {
-  const head = h("div", "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500", o.glyph);
-  head.append(h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
+  const head = h("div", `flex ${o.expands ? "" : "flex-wrap"} items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500`);
+  const lead = o.expands ? expander(head, o.expands) : head;
+  lead.append(o.glyph, h("span", `run-label flex-none font-semibold ${o.labelCls}`, o.label));
   // `basis-0`: a wrapping flex row breaks before it shrinks an item, and a
-  // subagent's name is its whole prompt line.
-  if (o.taskName) head.append(h("span", "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
+  // subagent's name is its whole prompt line. A collapsed line is one line.
+  if (o.taskName) lead.append(h("span", o.expands ? "min-w-0 truncate text-[12.5px] font-medium text-neutral-800" : "min-w-0 grow basis-0 truncate text-[12.5px] font-medium text-neutral-800 max-md:order-1 max-md:basis-full max-md:whitespace-normal max-md:line-clamp-2", o.taskName));
+  if (o.failure) {
+    const failure = h("span", `min-w-0 truncate text-[12.5px] ${o.labelCls}`, o.failure);
+    failure.title = o.failure;
+    lead.append(failure);
+  }
+  if (lead !== head) head.append(lead);
   const meta = h("div", "ml-auto flex min-w-0 flex-wrap items-center gap-x-2 font-mono");
   if (o.note) meta.append(h("span", "flex-none", o.note));
   if (o.model) {
@@ -107,26 +122,43 @@ export function runHead(o: RunHead): HTMLElement {
     meta.append(model);
   }
   if (o.thinking) {
-    const effort = h("span", "flex-none", o.thinking);
+    const effort = h("span", "run-thinking flex-none", o.thinking);
     effort.title = "Reasoning effort";
     meta.append(effort);
   }
   // The run id is text; the indigo session chip is the link. What each is
   // stays in its tooltip.
   if (o.runId) {
-    const run = h("span", "flex-none", shortId(o.runId));
+    const run = h("span", "run-id flex-none", shortId(o.runId));
     run.title = `Run ${o.runId}`;
     meta.append(run);
   }
   if (o.sessionId && o.sessionId !== "console") {
     const id = o.sessionId;
-    const session = h("button", "flex-none text-indigo-600 hover:underline", shortId(id));
+    const session = h("button", "run-session flex-none text-indigo-600 hover:underline", shortId(id));
     session.title = `Open session ${id}`;
     session.onclick = () => deps.select(id);
     meta.append(session);
   }
   head.append(meta);
   return head;
+}
+
+/** The chevron-led button of a collapsible head. A native button: Enter and
+ *  Space toggle it, and the session link beside it stays its own control. */
+function expander(head: HTMLElement, body: HTMLElement): HTMLElement {
+  const toggle = h("button", "flex min-w-0 grow cursor-pointer items-center gap-2 rounded-md text-left pointer-coarse:min-h-11", icon(ChevronRight, "chev h-3 w-3"));
+  toggle.setAttribute("type", "button");
+  toggle.setAttribute("aria-expanded", "false");
+  body.hidden = true;
+  toggle.onclick = () => {
+    const open = body.hidden === true;
+    body.hidden = !open;
+    toggle.classList.toggle("chev-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    head.parentElement?.toggleAttribute("data-expanded", open);
+  };
+  return toggle;
 }
 
 // --- background runs (detached task calls made from this session) ------------------

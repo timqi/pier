@@ -16,13 +16,13 @@ import { button } from "./form.js";
 import { renderSuggestions, resetSuggestions } from "./suggestions.js";
 import {
   activityProgress,
-  clampedBody,
   discardProgress,
   finishActivity,
   initTurnActivity,
   renderBackgroundRun,
   replayActivity,
   resetActivity,
+  runBody,
   runCard,
   runHead,
   sealActivity,
@@ -297,7 +297,7 @@ function speakerLine(speaker: Omit<Speaker, "text">): HTMLElement {
 
 /** Glyph and caption per input kind. */
 const INPUT_KIND: Record<string, [glyph: IconNode, label: string, cls: string]> = {
-  "task-delegation": [ArrowUpRight, "delegated", "text-cyan-700"],
+  "task-delegation": [ArrowUpRight, "delegation", "text-cyan-700"],
   "task-callback": [CornerDownLeft, "callback", "text-cyan-700"],
   "session-seed": [History, "session seed", "text-cyan-700"],
   "chat-command": [SquareSlash, "command", "text-cyan-700"],
@@ -334,6 +334,9 @@ function splitMetaBlock(text: string): [meta: string | null, body: string] {
   return [meta, text.slice(at + 2)];
 }
 
+/** Session seeds, callbacks and delegations are one line until opened: the
+ *  exchange is the reading, the line its receipt. A chat command's answer is
+ *  what the user asked to see, so it is never folded. */
 export function appendSystemInput(text: string, origin: SystemInputOrigin): void {
   const kindKey = origin.kind === "task-message" ? origin.messageKind : origin.kind;
   const [glyph, label, cls] = INPUT_KIND[kindKey] ?? [CornerDownLeft, kindKey.replace("_", " "), "text-cyan-700"];
@@ -342,8 +345,10 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
   const row = runCard(state ? STATE_STYLE[state].edge : "border-l-cyan-500");
   row.dataset.kind = "system";
   const [meta, body] = splitMetaBlock(text);
+  const content = runBody(body);
+  if (origin.kind !== "chat-command") row.classList.add("system-row");
   const head = origin.kind === "session-seed"
-    ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label, labelCls: cls, taskName: `new session — ${origin.reason}`, sessionId: origin.previousSessionId })
+    ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label, labelCls: cls, taskName: origin.reason, sessionId: origin.previousSessionId, expands: content })
     : origin.kind === "chat-command"
     ? runHead({ glyph: icon(glyph, `h-3 w-3 ${cls}`), label: `/${origin.command}`, labelCls: cls })
     : runHead({
@@ -353,13 +358,15 @@ export function appendSystemInput(text: string, origin: SystemInputOrigin): void
       ...(origin.source
         ? { taskName: origin.source.taskName, model: origin.source.model, thinking: origin.source.thinking }
         : meta ? { taskName: meta.split("\n")[0]! } : {}),
+      ...(state === "failed" || state === "interrupted"
+        ? { failure: body.split("\n").find((line) => line.trim())?.trim() ?? state }
+        : {}),
       runId: origin.runId,
       sessionId: origin.sourceSessionId,
+      expands: content,
     });
-  row.append(head);
-  const [content, toggle] = clampedBody(body);
   if (origin.kind === "chat-command" && origin.sessions) linkRuns(content, origin.sessions);
-  row.append(content, toggle);
+  row.append(head, content);
   turnsPane.append(row);
   trimRows();
   scrollBottom();
