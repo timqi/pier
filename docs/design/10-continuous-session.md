@@ -18,7 +18,7 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
 
 | Role | Session | Delegates |
 | --- | --- | --- |
-| main | the chain head, instance default model at `low` | leads and workers |
+| main | the chain head, the instance default model (the operator sets it to the `balanced` pin) at `low` | leads and workers |
 | lead | a `--role lead` run's, cwd the feature's worktree, long-lived | workers only |
 | worker | any other run's launched from a session | never |
 
@@ -26,10 +26,23 @@ a follow-up continues that child with the user's words verbatim (`DISPATCHER`,
   on or off (`createdRole`, `TaskStore.roleOf`); the gate is
   [09 §Two levels](09-tasks-cli.md#two-levels-no-tree).
 - A worker opens without the `pier-tasks` skill; a lead with `<pier>/lead.md`
-  (`LEAD`), never on disk, and its session is listed in the rail like the user's.
+  (`LEAD`), never on disk; its session stays in the rail for its life (idle
+  dot "lead — waiting for you") and leaves it when the session is deleted.
 - The user designs with the lead in its session, main not in that path; the
   lead's `Design final: <absolute path>` has main launch a new build lead on
   that doc, which launches and integrates workers; main gets milestones only.
+- Before the first tool call on a message main decides: answer from context,
+  or dispatch; one command may answer, a second means a worker.
+- A callback writes no note; a note records a decision or a fact the ledger
+  does not hold.
+- Main's reply to a callback says what it means and what is next, never
+  repeats it.
+- Models by tier: the dispatcher names `--model hardest|balanced|cheap`, the
+  operator assigns the tiers on the menu ([09 §Models](09-tasks-cli.md#models)),
+  a lead is `hardest --thinking high`; no model id appears in a prompt or here.
+- Every delegated run's preamble (`tasks/agent.ts`) asks for the conclusion and
+  the paths it rests on, no process; a deliverable longer than a screen goes
+  to a file the result names.
 
 ### Milestones
 
@@ -44,6 +57,10 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
   one transaction;
 - the lead's last run still running, or a drain: pending, asked again in 10 s;
 - nobody waiting on that run, or a resume that cannot be filed (logged): plain.
+
+A lead's own run owes main a callback only when it was a milestone resume or
+its result carries a `Design final:` line; otherwise it settles as
+`--callback none` does, `LEAD_TURN` (`tasks/callbacks.ts`) the reason on its record.
 
 ## Home and memory
 
@@ -62,16 +79,31 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 | Event | Rule |
 | --- | --- |
 | User message, head ≥ 1h (`CHAIN_IDLE_MS`) since its last user message, or its start | rotate first: create the next session, append a chain row, deliver to it; a streaming head never rotates |
+| User message, head past `CHAIN_FULL_TOKENS` (60K) | rotate first, reason `full`, the idle seed; `null` usage (right after a compaction) never rotates |
 | Head gone from Pi (not live, not on disk) | a new head, reason `lost` |
 | Rotation | the new head keeps the previous head's model and thinking (`first`/`lost`: default at `low`) and gets one `session-seed` system input, mode `append` (no turn) |
-| Seed | `MEMORY.md`, the ledger since the previous head started, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
+| Seed | `MEMORY.md`, the run ledger since the previous head started, one line per run `<runId> · <name> · <state> · session <id> · <cwd>`, today's and yesterday's notes, the previous head's last 3 exchanges; an unreadable file says so; built before the session is created, so a seed that fails creates nothing and fails the send with its reason |
 
-- Rotation is lazy, on the next user message; no timer. `MainChain.send` runs
+- Rotation is lazy, only on a user message, so a head fed by callbacks alone
+  grows to its compaction cap, the backstop; no timer. `MainChain.send` runs
   one at a time, so a race rotates once.
 - Compaction, decided at open (`agent/pi.ts`) while the switch is on: a
-  session in the home at 100K, a lead's or worker's at 150K, any other at the
-  instance's setting; `reserveTokens = window − cap`, never later than the
-  instance's reserve, recomputed on `setModel`. Children never rotate.
+  session in the home at 100K, a lead's or worker's at 150K (under the 200K
+  price tier; a lead's state is its doc), any other at the instance's
+  setting; `reserveTokens = window − cap`, never later than the instance's
+  reserve, recomputed on `setModel`. Children never rotate.
+- `ContextUsage.compactAt` is that point, and the session header shows
+  `used/compactAt`.
+
+### Cache
+
+- The head's system prompt is the same bytes every turn: the clock and the
+  sender ride the user message, the ledger the seed.
+- A head keeps its model and thinking for its life; a rotation carries them.
+- Every system input appends; the head requests the 1h TTL, which is
+  `CHAIN_IDLE_MS`.
+- Accepted one-time misses: a rotation, a settings change that edits the
+  prompt (skills, the home's `AGENTS.md`), the user switching model.
 
 ## Run ledger
 
@@ -95,7 +127,9 @@ Every run or group callback owed to a lead session asks `TaskService.milestone`
 The routes (`/api/continuous*`), the rail and the pane are
 [03](03-web-workbench.md)'s. A bare address or any chain member opens the
 conversation at its head; earlier members page in read-only, read off disk
-and never opened (`AgentFactory.readHistory`); no paging within a session. Children show as Background Run rows opening their sessions.
+and never opened (`AgentFactory.readHistory`); no paging within a session; the
+divider between members names the rotation's reason (`DIVIDER`,
+`web/ui/main.ts`). Children show as Background Run rows opening their sessions.
 
 ## IM
 
@@ -117,7 +151,9 @@ instance switch is on; group chats never change.
 ## Not built
 
 - A callback to a cold head (>1h) deferred to the next seed.
-- A lead keeping `"long"` cache retention during runs.
+- A rotation on a callback to a full head.
+- A lead keeping the 1h cache TTL while its workers run.
+- Chat commands `/new`, `/status`, `/stop`.
 - The seed capped near 8K.
 - `pier search <q>` over the CLI socket (the index is `GET /api/search` only).
 
@@ -129,3 +165,6 @@ instance switch is on; group chats never change.
   home; one feature runs through a lead with main seeing milestones only.
 - The week's largest head is recorded; above ~300K tokens, intra-session
   paging is next.
+- From the heads' transcript usage: main averages ≤ 2 model calls per user
+  message; uncached input stays under 2% of input; no head compacts; `full`
+  rotations lose nothing the user has to repeat.

@@ -236,7 +236,7 @@ describe("a feature lead", () => {
     service.stop();
   });
 
-  // docs/design/continuous-token-workflow.md §8: the user reads every other turn in the lead's session.
+  // docs/design/10-continuous-session.md §Milestones: the user reads every other turn in the lead's session.
   it("reports to main only a milestone: a plain turn owes nothing and says why, a milestone or a Design final: delivers", async () => {
     const { service, sessions, store, leadRan } = rig();
     await leadRan();
