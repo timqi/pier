@@ -439,11 +439,11 @@ describe("workbench server", () => {
       { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2 },
       { id: "builder", cwd: "/tmp", createdAt: 3, modified: 3 },
     ]);
-    const lead = async (runId: string, sessionId: string, prompt: string, live = false) => {
+    const lead = async (runId: string, sessionId: string, design?: true, live = false) => {
       const task = await tasks.create({
         name: "feature",
         trigger: { type: "manual" },
-        action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt, launch: prompt === "design" ? { role: "lead", design: true } : { role: "lead" } },
+        action: { type: "agent", session: { mode: "fresh", cwd: "/tmp" }, prompt: "go", launch: { role: "lead", ...(design ? { design } : {}) } },
       });
       new TaskStore(db).saveRun(storedRun(task, runId, {
         sourceSessionId: "s1", targetSessionId: sessionId, sessionMode: "fresh", callbackSessionId: "s1",
@@ -451,8 +451,8 @@ describe("workbench server", () => {
         ...(live ? { state: "running" } : { state: "succeeded", finishedAt: 2 }),
       }));
     };
-    await lead("lead-run", "lead", "design");
-    await lead("build-run", "builder", "Build per /tmp/design.md: go", true);
+    await lead("lead-run", "lead", true);
+    await lead("build-run", "builder", undefined, true);
     expect(await (await app.request("/api/sessions")).json()).toEqual([
       { id: "s1", cwd: "/tmp", createdAt: 1, modified: 1, state: "idle", unread: false, activeRuns: 1, channel: "web" },
       { id: "lead", cwd: "/tmp", createdAt: 2, modified: 2, state: "idle", unread: false, activeRuns: 0, channel: "web", phase: "design", designOpen: true },
