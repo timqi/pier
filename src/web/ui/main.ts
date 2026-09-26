@@ -71,6 +71,7 @@ import {
   refreshActivity,
   refreshTasks,
   refreshRuns,
+  setConversationHash,
   setSessionHash,
   showChat,
   showConsole,
@@ -147,6 +148,7 @@ let pagedAt = 0;
 let headSpokeAt: number | null = null;
 
 const headId = (): string | null => chain?.[0]?.sessionId ?? null;
+const inConversation = (id: string): boolean => chain?.some((m) => m.sessionId === id) ?? false;
 const continuousOpen = (): boolean => chain !== null && (unstarted || (currentId !== null && currentId === headId()));
 
 const DIVIDER: Record<ChainReason, string> = {
@@ -168,6 +170,11 @@ async function loadChain(): Promise<ChainMember[] | null> {
 function openContinuous(): void {
   const head = headId();
   if (head) return void select(head);
+  if (unstarted) {
+    showChat();
+    closeDrawer();
+    return setConversationHash();
+  }
   ++selectionSeq;
   ++loadSeq;
   saveDraft();
@@ -182,7 +189,7 @@ function openContinuous(): void {
   earlier = [];
   resetPane();
   appendTurn("system", "The continuous conversation — your first message starts it.");
-  history.replaceState(null, "", "#/");
+  setConversationHash();
   renderSessions();
   renderHeader();
   updateComposer();
@@ -527,7 +534,7 @@ function connect(id: string, cursor: string, generation: number): void {
 
 async function select(id: string): Promise<void> {
   // Any session of the continuous conversation opens the conversation, at its head.
-  if (chain?.some((m) => m.sessionId === id)) id = headId()!;
+  if (inConversation(id)) id = headId()!;
   if (id !== currentId || unstarted) {
     earlier = [];
     unstarted = false;
@@ -685,7 +692,7 @@ initHeader({
   openFiles: showFiles,
   toggleFiles,
   closeSession: (s) => void closeSession(s),
-  inConversation: (id) => chain?.some((m) => m.sessionId === id) ?? false,
+  inConversation,
   continuousOpen,
 });
 initViews({
@@ -694,6 +701,9 @@ initViews({
   currentId: () => currentId,
   currentSession,
   select: (id) => void select(id),
+  continuousOn: () => chain !== null,
+  inConversation,
+  openContinuous,
   maybeAckRead,
 });
 
@@ -712,5 +722,4 @@ document.addEventListener("visibilitychange", maybeAckRead);
 window.addEventListener("focus", maybeAckRead);
 
 connectWorkspace();
-// With the switch on, a bare address opens the conversation, not the rail's first row.
-void refreshSessions().then(() => (chain && !location.hash.replace(/^#\/?/, "") ? openContinuous() : applyRoute()));
+void refreshSessions().then(applyRoute);

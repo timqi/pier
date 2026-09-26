@@ -135,8 +135,8 @@ its result carries a `Design final:` line, or it did not succeed; otherwise it s
 ## Web
 
 The routes (`/api/continuous*`), the rail and the pane are
-[03](03-web-workbench.md)'s. A bare address or any chain member opens the
-conversation at its head; earlier members page in read-only, read off disk
+[03](03-web-workbench.md)'s. A bare address, `#/conversation` (its one address)
+or any chain member opens the conversation at its head; earlier members page in read-only, read off disk
 and never opened (`AgentFactory.readHistory`); no paging within a session; the
 divider between members names the rotation's reason (`DIVIDER`,
 `web/ui/main.ts`). Children show as Background Run rows opening their sessions.

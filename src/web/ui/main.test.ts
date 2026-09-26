@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({
   sidebar: null as unknown as Parameters<typeof import("./sidebar.js").initSidebar>[0],
   header: null as unknown as Parameters<typeof import("./session-header.js").initHeader>[0],
   composer: null as unknown as Parameters<typeof import("./composer.js").initComposer>[0],
+  views: null as unknown as Parameters<typeof import("./views.js").initViews>[0],
   history: vi.fn<(url: string) => Promise<Response>>(),
   create: vi.fn<() => Promise<Response>>(),
   renderSnapshot: vi.fn(),
@@ -49,8 +50,11 @@ vi.mock("./turn-activity.js", () => ({
   noteTurnError: vi.fn(), renderBackgroundRun: vi.fn(),
 }));
 vi.mock("./views.js", () => ({
-  applyRoute: vi.fn(), initViews: vi.fn(), isChatVisible: vi.fn(() => true),
-  refreshActivity: vi.fn(), refreshTasks: vi.fn(), refreshRuns: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
+  // The router's one call main.ts relies on here: a bare address opens the conversation (views.test.ts covers the rest).
+  applyRoute: vi.fn(() => { if (h.views.continuousOn() && !location.hash) h.views.openContinuous(); }),
+  initViews: (deps: typeof h.views) => { h.views = deps; }, isChatVisible: vi.fn(() => true),
+  refreshActivity: vi.fn(), refreshTasks: vi.fn(), refreshRuns: vi.fn(),
+  setConversationHash: vi.fn(), setSessionHash: vi.fn(), showChat: vi.fn(),
   showConsole: vi.fn(), showFiles: vi.fn(), showRun: vi.fn(),
   syncBar: vi.fn(), toggleFiles: vi.fn(),
 }));

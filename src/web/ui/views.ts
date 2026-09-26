@@ -20,6 +20,11 @@ export interface ViewsDeps {
   currentId: () => string | null;
   currentSession: () => SessionInfo | undefined;
   select: (id: string) => void;
+  /** The continuous switch is on: `#/conversation` and a bare address open the conversation. */
+  continuousOn: () => boolean;
+  /** One of the continuous conversation's sessions, which its route names instead. */
+  inConversation: (id: string) => boolean;
+  openContinuous: () => void;
   /** The selected session's turns just came (back) on screen. */
   maybeAckRead: () => void;
 }
@@ -210,11 +215,19 @@ export function showChat(): void {
 // --- routing -----------------------------------------------------------------------
 // Hash, not path: the static file server stays a static file server.
 
-type Route = { kind: "session"; id: string } | { kind: "console"; name: ConsoleName; arg?: string; query?: string };
+// The conversation's own route: its head session rotates, the address does not.
+type Route =
+  | { kind: "session"; id: string }
+  | { kind: "conversation" }
+  | { kind: "console"; name: ConsoleName; arg?: string; query?: string };
+
+const CONVERSATION: Route = { kind: "conversation" };
 
 const hashOf = (r: Route): string =>
   r.kind === "session"
     ? `#/session/${encodeURIComponent(r.id)}`
+    : r.kind === "conversation"
+    ? "#/conversation"
     : `#/${r.name}${r.arg ? `/${encodeURIComponent(r.arg)}` : ""}${r.query ? `?${r.query}` : ""}`;
 
 /** Pre-fold bookmarks still land: the old top-level views are Settings tabs now. */
@@ -233,6 +246,7 @@ function parseHash(): Route | null {
   // built. hasOwn, not `in`: `#/toString` is a hash anyone can type.
   if (Object.hasOwn(CONSOLE_LABELS, head)) return { kind: "console", name: head as ConsoleName, arg, query };
   if (head === "session" && arg) return { kind: "session", id: arg };
+  if (head === "conversation") return CONVERSATION;
   return null; // unknown or empty → the fallback in applyRoute()
 }
 
@@ -248,11 +262,25 @@ function setHash(r: Route, replace = false): void {
   else location.hash = next; // pushes an entry, so Back returns to the last view
 }
 
-export const setSessionHash = (id: string): void => setHash({ kind: "session", id });
+const chatRoute = (id: string): Route => (deps.inConversation(id) ? CONVERSATION : { kind: "session", id });
+
+export const setSessionHash = (id: string): void => setHash(chatRoute(id));
+export const setConversationHash = (): void => setHash(CONVERSATION);
 
 /** Hash → UI. Session routes may name sessions not listed yet; select verifies them. */
 export function applyRoute(): void {
-  const route = parseHash();
+  // With the switch on, an empty or unknown hash is the conversation, not the rail's first row.
+  const continuous = deps.continuousOn();
+  const route = parseHash() ?? (continuous ? CONVERSATION : null);
+  if (route?.kind === "conversation" && continuous) {
+    applyingRoute = true;
+    try {
+      deps.openContinuous();
+    } finally {
+      applyingRoute = false;
+    }
+    return setHash(CONVERSATION, true);
+  }
   const sessions = deps.sessions();
   const currentId = deps.currentId();
   const wanted = route?.kind === "session" ? route.id : null;
@@ -270,7 +298,7 @@ export function applyRoute(): void {
     applyingRoute = false;
   }
   // Boot with no hash: name where we landed without adding a history entry.
-  if (route?.kind !== "console" && id) setHash({ kind: "session", id }, true);
+  if (route?.kind !== "console" && id) setHash(chatRoute(id), true);
 }
 
 /** One dynamic import per view, with the deps it is built from. `deps` is read

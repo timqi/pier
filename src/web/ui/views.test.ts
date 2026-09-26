@@ -26,15 +26,21 @@ const bar = (): [string, boolean] => [el("#mobile-title").textContent, shown(el(
 const litRows = (): string[] => ["tasks", "boards", "settings"].filter((name) => lit(el(`#open-${name}`)));
 const settled = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 let views: typeof import("./views.js");
+const conversation = { on: false, select: vi.fn(), open: vi.fn() };
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks();
+  conversation.on = false;
   installPage();
   vi.stubGlobal("location", { hash: "#/" });
   vi.stubGlobal("history", { replaceState: (_a: unknown, _b: string, hash: string) => { location.hash = hash; } });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: vi.fn() }) });
   views = await import("./views.js");
-  views.initViews({ sessions: () => [], loadSessions: async () => {}, currentId: () => null, currentSession: () => undefined, select: vi.fn(), maybeAckRead: vi.fn() });
+  views.initViews({
+    sessions: () => [], loadSessions: async () => {}, currentId: () => null, currentSession: () => undefined, select: conversation.select,
+    continuousOn: () => conversation.on, inConversation: (id) => conversation.on && id.startsWith("chain-"), openContinuous: conversation.open,
+    maybeAckRead: vi.fn(),
+  });
 });
 afterEach(() => vi.unstubAllGlobals());
 it("hosts Tasks, Runs and Activity as tabs of one Automation entry", async () => {
@@ -98,4 +104,23 @@ it("places creation in the Tasks tab strip only on the list route", async () => 
 });
 it("ignores malformed encoded routes without crashing", () => {
   location.hash = "#/runs/%E0%A4%A"; expect(() => views.applyRoute()).not.toThrow();
+});
+// The conversation's head rotates; its address is #/conversation, whichever session is the head.
+it("names the continuous conversation by its own route, not its head session", () => {
+  conversation.on = true;
+  for (const hash of ["", "#/", "#/conversation", "#/nowhere"]) {
+    location.hash = hash; views.applyRoute();
+    expect(location.hash).toBe("#/conversation");
+  }
+  expect(conversation.open).toHaveBeenCalledTimes(4);
+  views.setSessionHash("chain-head"); expect(location.hash).toBe("#/conversation");
+  views.setSessionHash("other"); expect(location.hash).toBe("#/session/other");
+  // An old member's link still lands, canonicalised to the conversation.
+  location.hash = "#/session/chain-old"; views.applyRoute();
+  expect(conversation.select).toHaveBeenLastCalledWith("chain-old");
+  expect(location.hash).toBe("#/conversation");
+});
+it("falls back to a session route for #/conversation while the switch is off", () => {
+  location.hash = "#/conversation"; views.applyRoute();
+  expect(conversation.open).not.toHaveBeenCalled();
 });

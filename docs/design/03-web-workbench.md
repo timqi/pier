@@ -208,7 +208,9 @@ browser keeps no second session order.
   disappears when empty; the "Sessions" label and Load more go, everything
   else is ⌘K's. The phone drawer is the same list; picking a row closes it.
   The chords walk these rows. The chat header (and the phone bar) titles it
-  **Conversation**, never the head's own title.
+  **Conversation**, never the head's own title. Its route is
+  `#/conversation`, whichever session is the head; a bare or unknown hash and
+  `#/session/<member>` land there too, the address rewritten to it.
 - One row is lit, the route's: a session row or Conversation only while the
   chat is on screen, a Console row while its view is.
 - A lead's session (`role: "lead"`) is in that set for its life, idle and read
