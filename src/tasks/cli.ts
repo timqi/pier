@@ -40,10 +40,13 @@ const COMMANDS: Record<string, { usage: string; help: string }> = {
   save: {
     usage: "save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)\n" +
       "        [--cron \"<expr>\" --tz <zone> | --watch <script> --every <seconds> [--repeat]]\n" +
-      "        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id>]",
-    help: "file a definition the operator sees, or update one by --task-id; no trigger means manual",
+      "        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id|none>]",
+    help: "file a definition the operator sees, or update one by --task-id; no trigger means manual; results reach the continuous conversation unless --callback-session",
   },
-  list: { usage: "list", help: "stored definitions, as JSON" },
+  list: { usage: "list", help: "stored definitions with nextRun and lastRun, as JSON" },
+  pause: { usage: "pause --task-id <id>", help: "stop a definition's schedule; run --task-id still runs it" },
+  resume: { usage: "resume --task-id <id>", help: "restart a paused definition's schedule" },
+  archive: { usage: "archive --task-id <id>", help: "retire a definition for good" },
   runs: { usage: "runs", help: "the runs you launched (in the continuous conversation, any of its sessions), in flight and finished in the last 24h, as JSON" },
   cancel: { usage: "cancel (--run <id> | --group <id>)", help: "a run or a group, descendants included" },
   recover: { usage: "recover (--run <id> | --group <id>) --reason <text>", help: "a finished result after its callback settled; never a progress check" },
@@ -154,6 +157,9 @@ function build(name: string, parsed: Values[], io: TaskCliIo): Params {
     return compact({ operation: name, run_id: values.run, group_id: values.group, reason: values.reason });
   }
   if (name === "save") return saveParams(values, text);
+  if (name === "pause" || name === "resume" || name === "archive") {
+    return { operation: name, task_id: values["task-id"] ?? refuse(`${name} needs --task-id`) };
+  }
 
   /** One new run, in the three shapes `tasks[]` accepts. A saved
    *  definition runs as is: batch defaults pass it by, its own flags are refused. */
@@ -218,7 +224,9 @@ function saveParams(v: Values, text: (raw: string | boolean | undefined) => stri
     name: v.name,
     timeoutSeconds: seconds("timeout", v.timeout),
     trigger,
-    callback: v["callback-session"] === undefined ? undefined : { type: "session", sessionId: v["callback-session"] },
+    callback: v["callback-session"] === undefined
+      ? { type: "conversation" }
+      : v["callback-session"] === "none" ? { type: "none" } : { type: "session", sessionId: v["callback-session"] },
     ...(v.bash === undefined
       ? { prompt: text(v.prompt), cwd: v.cwd, launch }
       : { action: compact({ type: "bash", script: v.bash, cwd: v.cwd }) }),

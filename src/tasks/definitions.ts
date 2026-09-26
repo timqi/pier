@@ -162,7 +162,7 @@ export class TaskDefinitions {
       revision: 1,
       trigger: draft.trigger,
       action: draft.action,
-      callback: draft.callback ?? { type: "none" },
+      callback: draft.callback ?? { type: "conversation" },
       timeoutSeconds: draft.timeoutSeconds ?? DEFAULT_TIMEOUT,
       nextRunAt: null,
       creator,
@@ -338,7 +338,7 @@ export class TaskDefinitions {
   private async parseCallback(raw: unknown): Promise<TaskCallback | undefined> {
     if (raw === undefined) return undefined;
     const value = record(raw);
-    if (!value || (value.type !== "none" && value.type !== "origin" && value.type !== "session")) {
+    if (!value || (value.type !== "conversation" && value.type !== "none" && value.type !== "origin" && value.type !== "session")) {
       throw new Error("invalid callback");
     }
     if (value.type !== "session") return { type: value.type };

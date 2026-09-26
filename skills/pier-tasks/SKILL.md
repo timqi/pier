@@ -5,7 +5,7 @@ description: Subagents and scheduled tasks with `pier task`. Read before delegat
 
 # Pier tasks
 
-`pier task --help` lists the six commands and their flags. Each prints one
+`pier task --help` lists the nine commands and their flags. Each prints one
 JSON receipt, exit 0; a refusal is a `task:` line, exit 1; a bad flag is
 `task:` plus the usage, exit 2. `--prompt -` reads stdin.
 
@@ -27,7 +27,7 @@ drops the result; `--callback-session <id>` delivers elsewhere.
 
 | Flags | Run |
 | --- | --- |
-| `--task-id <id>` | a saved definition, as is |
+| `--task-id <id>` | a saved definition, as is (run now) |
 | `--session <id> --prompt …` | continue an idle session (it keeps its cwd and model) |
 | `--run <id> --prompt …` | existing run: running → steer; `--after` → after its turn; finished → resume (`--callback*` apply only then). The receipt's `delivery` says which |
 | `--member --prompt … --member …` | batch: flags before the first `--member` are defaults, ≥2 members, `--join all` (default) or `first`; the callback is the group's |
@@ -92,9 +92,25 @@ its reply to the last result owed it reaches its supervisor.
 pier task save --name nightly --bash "make check" --cwd /repo --cron "0 3 * * *" --tz UTC
 ```
 
-Only for schedules or roles run more than once; `--task-id` updates. A
-schedule's results reach nobody unless `--callback-session <id>` names a
-session; `pier task list` shows definitions, never runs.
+Only for schedules or roles run more than once; `--task-id` updates, restating
+every flag. Results reach the continuous conversation while it is on;
+`--callback-session <id>` pins a session, `--callback-session none` silences.
+`pier task list` shows definitions with `nextRun` and `lastRun`, never runs.
+
+| Command | Does |
+| --- | --- |
+| `pier task pause --task-id <id>` | schedule off; still runs on demand |
+| `pier task resume --task-id <id>` | schedule on |
+| `pier task run --task-id <id>` | run now |
+| `pier task archive --task-id <id>` | retired for good |
+
+## Answering the user about the schedule
+
+- Run `pier task list`; the schedule is its cron and watch definitions.
+- One line each: name, trigger (cron + zone, or watch every N s), next run,
+  last run's state and age. Paused: say so in place of next run.
+- One-shots and manual tasks are runs, not schedule.
+- Older runs: `pier task runs`; a finished result's full text: `recover`.
 
 ## Limits
 

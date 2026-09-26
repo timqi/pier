@@ -35,6 +35,8 @@ export const LEAD_TURN = "a lead's turn, not a milestone";
  *  A turn that did not succeed is not a turn the user read: it calls back. */
 export function settleCallback(run: TaskRun, store: Pick<TaskStore, "leadPhaseOf" | "awaitsResults">): void {
   if (!run.callbackSessionId) return;
+  // A watch probe that did not match is the interval passing, not a result.
+  if (run.matched === false && run.state === "succeeded") return;
   // The session's creator fixes its role: a `--session` or `--run` turn on a lead's session is a lead's.
   const lead = run.targetSessionId;
   const phase = lead === null ? undefined : store.leadPhaseOf(lead);
@@ -66,6 +68,8 @@ export class TaskCallbacks {
     /** Where a result owed to a session goes now: the continuous conversation's head, for a member. */
     private readonly headOf: (sessionId: string) => string = (id) => id,
     milestone?: Milestone,
+    /** The continuous conversation's head while its switch is on. */
+    private readonly conversation: () => string | null = () => null,
   ) {
     this.outbox = new Outbox<TaskRun>(router, {
       id: (run) => run.id,
@@ -93,6 +97,7 @@ export class TaskCallbacks {
   target(callback: TaskCallback, origin: string | null): string | null {
     if (callback.type === "session") return callback.sessionId;
     if (callback.type === "origin") return origin;
+    if (callback.type === "conversation") return this.conversation();
     return null;
   }
 

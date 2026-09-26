@@ -47,12 +47,14 @@ const menu = [
 
 /** A store with these rows and a host that only knows how to read them: the
  *  recover branch touches nothing else on the service. */
-function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
+function rig(runs: TaskRun[], groups: TaskGroup[] = [], filed: TaskDefinition[] = []) {
   const db = openDb(":memory:");
   onTestFinished(() => db.close());
   const store = new TaskStore(db);
   store.saveTask(task);
+  for (const t of filed) store.saveTask(t);
   for (const r of runs) store.saveRun(r);
+  const changed: string[] = [];
   for (const g of groups) store.saveGroup(g);
   const host = {
     getRun: (id: string) => {
@@ -67,6 +69,15 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
     },
     control: async (id: string, _from: string, kind: string, message: string) => ({ id: "m1", runId: id, kind, content: message }),
     models: async () => ({ source: "menu", models: menu }),
+    listRuns: (id: string, limit: number) => store.listRuns(id, limit),
+    setEnabled: (id: string, enabled: boolean) => {
+      changed.push(`${id} ${enabled ? "resumed" : "paused"}`);
+      return { ...store.getTask(id)!, enabled };
+    },
+    archive: (id: string) => {
+      changed.push(`${id} archived`);
+      return { ...store.getTask(id)!, archived: true, enabled: false };
+    },
     run: (_taskId: string, _input: unknown, _source: string, _parent: null, prov: Partial<TaskRun>) =>
       run("new", { state: "queued", callbackState: null, finishedAt: null, result: null, callbackSessionId: prov.callbackSessionId ?? null, callbackMode: prov.callbackMode }),
     resume: (_id: string, _message: string, prov: Partial<TaskRun>) =>
@@ -74,8 +85,12 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
   } as unknown as TaskService;
   const created: Record<string, unknown>[] = [];
   const definitions = {
-    get: () => task,
-    list: () => [],
+    get: (id: string) => {
+      const found = store.getTask(id);
+      if (!found) throw new Error(`unknown task: ${id}`);
+      return found;
+    },
+    list: () => [task, ...filed],
     sessionExists: async () => true,
     sessionCwd: async () => "/tmp",
     create: async (draft: Record<string, unknown>) => {
@@ -84,7 +99,7 @@ function rig(runs: TaskRun[], groups: TaskGroup[] = []) {
     },
   } as unknown as TaskDefinitions;
   const ask = (input: Record<string, unknown>) => handleTask(host, definitions, store, input, "s1");
-  return Object.assign(ask, { created });
+  return Object.assign(ask, { created, changed });
 }
 
 const notYet = /not recoverable yet/;
@@ -329,6 +344,35 @@ describe("task operations", () => {
     const ask = rig([]);
     await expect(ask({ operation: "save", task_id: task.id, task: { name: "nightly", action: { type: "bash", script: "true", cwd: "/tmp" } } }))
       .rejects.toThrow("t1 is a one-shot run's own definition; save without --task-id to file a task");
+  });
+
+  it("pauses, resumes and archives a filed definition, never a one-shot's", async () => {
+    const nightly: TaskDefinition = { ...task, id: "t2", kind: "task", name: "nightly" };
+    const ask = rig([], [], [nightly]);
+    expect(await ask({ operation: "pause", task_id: "t2" })).toMatchObject({ id: "t2", enabled: false });
+    expect(await ask({ operation: "resume", task_id: "t2" })).toMatchObject({ id: "t2", enabled: true });
+    expect(await ask({ operation: "archive", task_id: "t2" })).toMatchObject({ id: "t2", archived: true });
+    expect(ask.changed).toEqual(["t2 paused", "t2 resumed", "t2 archived"]);
+    for (const operation of ["pause", "resume", "archive"]) {
+      await expect(ask({ operation, task_id: task.id })).rejects.toThrow("t1 is a one-shot run's own definition");
+    }
+    await expect(ask({ operation: "pause" })).rejects.toThrow("task_id required");
+    expect(ask.changed).toHaveLength(3);
+  });
+
+  it("lists each filed definition with its next occurrence and its last run's state", async () => {
+    const nightly: TaskDefinition = { ...task, id: "t2", kind: "task", name: "nightly", trigger: { type: "cron", expression: "0 3 * * *", timezone: "UTC" }, nextRunAt: now + 60_000 };
+    const idle: TaskDefinition = { ...task, id: "t3", kind: "task", name: "idle" };
+    const ask = rig([
+      run("old", { taskId: "t2", queuedAt: now - 2000 }),
+      run("last", { taskId: "t2", state: "failed", queuedAt: now - 1000, startedAt: now - 900, finishedAt: now - 500 }),
+    ], [], [nightly, idle]);
+    const listed = await ask({ operation: "list" }) as Record<string, unknown>[];
+    expect(listed.map((t) => [t.id, t.nextRun, t.lastRun])).toEqual([
+      ["t2", now + 60_000, { runId: "last", state: "failed", startedAt: now - 900, finishedAt: now - 500 }],
+      ["t3", null, null],
+    ]);
+    expect(listed[0]).not.toHaveProperty("nextRunAt");
   });
 
   // The skill is what the agent acts on; a level added here and not there is a

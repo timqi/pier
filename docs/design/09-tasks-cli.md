@@ -1,6 +1,6 @@
 # `pier task` (design)
 
-The whole agent-collaboration surface: six shell commands over the CLI
+The whole agent-collaboration surface: nine shell commands over the CLI
 socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 (`tasks/operations.ts`). Scheduling, delivery, limits and callbacks are
 `tasks/`'s and unchanged by this surface.
@@ -11,7 +11,8 @@ socket ([08-cli-socket.md](08-cli-socket.md)), served by `handleTask`
 | --- | --- |
 | `run` | puts a prompt on a run: a new one, a batch of new ones (`--member`), or an existing one (`--run`) |
 | `save` | files or updates a definition the operator sees — cron, watch, or a role run more than once |
-| `list` | stored definitions, as JSON |
+| `list` | stored definitions, as JSON, each with `nextRun` and `lastRun` (§`list`) |
+| `pause` · `resume` · `archive` | `--task-id <id>`: a definition's schedule off, on, or retired (§Schedule verbs) |
 | `runs` | the run ledger, as JSON (§`runs`) |
 | `cancel` | `--run <id>` or `--group <id>`, descendants included |
 | `recover` | `--run`/`--group` + `--reason`: the full result after its callback settled; never a progress check |
@@ -72,14 +73,46 @@ pier task run [--prompt <text|-> | --bash <script>] [--run <id> [--after]] [--ta
 ```
 pier task save [--task-id <id>] --name <text> (--prompt <text|-> | --bash <script>)
         [--cron "<expr>" --tz <zone> | --watch <script> --every <seconds> [--repeat]]
-        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id>]
+        [--cwd <dir>] [--timeout <seconds>] [--model <name>] [--thinking <level>] [--callback-session <id|none>]
 ```
 
 `--task-id` updates, otherwise creates; an archived task or a one-shot's
 hidden definition (`kind: subagent`) is refused. No trigger means `manual`.
-`--bash` is a script action, `--prompt` an agent action; exactly one. A saved
-task's callback is a session (`--callback-session`) or nothing. Archiving is
-the Console's.
+`--bash` is a script action, `--prompt` an agent action; exactly one. `save`
+restates the whole definition, callback included:
+
+- no `--callback-session` → `{type: "conversation"}`, also `definitions.create`'s
+  default: each run's callback is the continuous conversation's head when the
+  run is prepared (`callbacks.target`), so a rotated head gets it; switch off →
+  no callback;
+- `--callback-session none` → `{type: "none"}`, the one silent definition;
+- `--callback-session <id>` → that session.
+
+A watch probe that did not match settles with no callback, whatever the target.
+
+## `list`
+
+```
+pier task list
+```
+
+Every definition but a one-shot's, `nextRunAt` renamed `nextRun`, plus
+`lastRun`: `{runId, state, startedAt?, finishedAt?}` of `listRuns(id, 1)[0]`
+(the Console row's), or `null`.
+
+## Schedule verbs
+
+```
+pier task pause --task-id <id>
+pier task resume --task-id <id>
+pier task archive --task-id <id>
+```
+
+One socket op each (`operation: "pause" | "resume" | "archive"`), calling
+`TaskService.setEnabled(id, false | true)` / `archive(id)` as the
+`/api/tasks/:id/*` routes do; a `subagent` definition and a Pier-owned one are
+refused. Receipt: the definition. Run now is `run --task-id`; a paused
+definition still runs on demand, an archived one never.
 
 ## `runs`
 
@@ -161,6 +194,8 @@ commit that changes it.
 running run (server answer), `--prompt -` once, usage exit 2 without the
 socket. `tasks/operations.test.ts`: the supervised-run gate, ownership,
 `message`'s three branches, `recover`'s refusals, model matching (one, none,
-many, full id, `?`). `tasks/continuous.test.ts`: the chain's callbacks,
-ownership, `runs`, the children's cap. `tasks/lead.test.ts`: roles, depth,
+many, full id, `?`), the schedule verbs, `list`'s two fields.
+`tasks/continuous.test.ts`: the chain's callbacks, a saved definition's
+default reaching the current head, `none` and switch off silent, ownership,
+`runs`, the children's cap. `tasks/lead.test.ts`: roles, depth,
 the milestone flow.
