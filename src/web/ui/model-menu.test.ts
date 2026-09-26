@@ -152,3 +152,33 @@ it("draws the default model from settings.json, writes a change at once and redr
   await vi.waitFor(() => expect(el.textContent).toContain("failed"));
   expect(vi.mocked(launchField).mock.lastCall![1]).toEqual({ model: free, thinking: "low" });
 });
+
+it("stages a row's tier from its select and saves it on the entry, none leaving it off", async () => {
+  vi.mocked(getJson).mockImplementation((url: string) =>
+    Promise.resolve(
+      url.startsWith("/api/models")
+        ? { ok: true, value: [pinned, free] }
+        : url.startsWith("/api/config/defaults")
+        ? { ok: true, value: { defaultModel: null, defaultThinkingLevel: null } }
+        : { ok: true, value: { modelMenu: [{ ...stored, tier: "hardest" }, { ...free, thinking: "low" }] } },
+    ) as never
+  );
+  const el = await pane();
+  const tiers = el.querySelectorAll("select").filter((s) => s.textContent.includes("tier: none"));
+  expect(tiers.map((s) => s.value)).toEqual(["hardest", ""]);
+  tiers[0]!.value = "";
+  tiers[0]!.onchange!();
+  tiers[1]!.value = "cheap";
+  tiers[1]!.onchange!();
+  expect(el.textContent).toContain("unsaved changes");
+
+  vi.mocked(sendJson).mockResolvedValue({ ok: true, json: async () => ({ modelMenu: [] }) } as unknown as Response);
+  button(el, /Save menu/)!.onclick!();
+  await vi.waitFor(() => expect(sendJson).toHaveBeenCalled());
+  expect(vi.mocked(sendJson).mock.lastCall![1]).toEqual({
+    modelMenu: [
+      { provider: "anthropic", id: "pinned-model", thinking: "high" },
+      { provider: "openai", id: "free-model", thinking: "low", tier: "cheap" },
+    ],
+  });
+});

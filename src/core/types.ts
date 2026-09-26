@@ -300,6 +300,15 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const isThinkingLevel = (v: unknown): v is ThinkingLevel =>
   typeof v === "string" && (THINKING_LEVELS as readonly string[]).includes(v);
 
+/** The work classes a dispatcher names instead of a model; the operator pins
+ *  at most one menu entry to each. Here, not in settings.ts, so the browser shares it. */
+export const MODEL_TIERS = ["hardest", "balanced", "cheap"] as const;
+
+export type ModelTier = (typeof MODEL_TIERS)[number];
+
+export const isModelTier = (v: unknown): v is ModelTier =>
+  typeof v === "string" && (MODEL_TIERS as readonly string[]).includes(v);
+
 /** Core ↔ Pi seam. Must stay implementable over RPC later. */
 export interface AgentSession {
   readonly id: string;

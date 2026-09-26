@@ -15,7 +15,7 @@ import { SettingsStore } from "./settings.js";
 
 const SOURCE = "https://source.example/config-sync/token";
 const agent = (text = "local"): AgentConfigSnapshot => ({ files: { "SYSTEM.md": text, "AGENTS.md": null }, providers: {} });
-const document = (text = "remote") => ({ schemaVersion: 1, instanceId: "other-instance", agent: agent(text), modelMenu: [{ provider: "anthropic", id: "model", thinking: "medium" }] });
+const document = (text = "remote") => ({ schemaVersion: 1, instanceId: "other-instance", agent: agent(text), modelMenu: [{ provider: "anthropic", id: "model", thinking: "medium", tier: "balanced" }] });
 const answer = (text = "remote", etag = '"one"'): ConfigDownload => ({ status: 200, etag, body: JSON.stringify(document(text)) });
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -71,6 +71,7 @@ describe("configuration subscription", () => {
   it("rejects malformed/version/secret-bearing documents without replacing a good configuration or ETag", async () => {
     const r = rig(); await r.enable();
     for (const body of ["{bad", JSON.stringify({ ...document(), schemaVersion: 2 }), JSON.stringify({ ...document(), settings: {} }),
+      JSON.stringify({ ...document(), modelMenu: [...document().modelMenu, { provider: "a", id: "b", thinking: "low", tier: "balanced" }] }),
       JSON.stringify({ ...document(), agent: { ...agent(), providers: { evil: { models: [], apiKey: "secret" } } } })]) {
       r.download.mockResolvedValueOnce({ status: 200, etag: '"bad"', body });
       await expect(r.sync.sync()).rejects.toThrow();
