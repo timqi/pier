@@ -231,7 +231,7 @@ export class PiSession implements AgentSession {
 
   get contextUsage(): ContextUsage | undefined {
     const u = this.pi.getContextUsage();
-    return u ? { tokens: u.tokens, contextWindow: u.contextWindow } : undefined;
+    return u ? { tokens: u.tokens, contextWindow: u.contextWindow, compactAt: u.contextWindow - this.reserve(u.contextWindow) } : undefined;
   }
 
   async setModel(ref: ModelRef): Promise<void> {
@@ -282,9 +282,15 @@ export class PiSession implements AgentSession {
   private applyCap(): void {
     const window = this.pi.model?.contextWindow;
     if (this.cap === undefined || !window) return;
+    this.pi.settingsManager.applyOverrides({ compaction: { reserveTokens: this.reserve(window) } });
+  }
+
+  /** The instance's reserve is read once under a cap, before the first override replaces it. */
+  private reserve(window: number): number {
     const settings = this.pi.settingsManager;
+    if (this.cap === undefined) return settings.getCompactionSettings().reserveTokens;
     this.instanceReserve ??= settings.getCompactionSettings().reserveTokens;
-    settings.applyOverrides({ compaction: { reserveTokens: Math.max(window - this.cap, this.instanceReserve) } });
+    return Math.max(window - this.cap, this.instanceReserve);
   }
 
   async pendingQueue(): Promise<{ steering: string[]; followUp: string[] }> {

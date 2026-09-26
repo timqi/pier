@@ -130,13 +130,19 @@ export type SystemInputOrigin = {
 };
 
 /** Why a session joined the continuous conversation's chain: the first one,
- *  the previous one idle past the rotation boundary, or the previous one gone. */
-export type ChainReason = "first" | "idle" | "lost";
+ *  the previous one idle past the rotation boundary, the previous one gone, or
+ *  the previous one's context past the size ceiling. */
+export type ChainReason = "first" | "idle" | "lost" | "full";
 
 /** How long the continuous conversation's head may go without a user message
  *  before the next one starts a new session: the "long" prompt-cache TTL
  *  interactive sessions request, past which the cache is cold anyway. */
 export const CHAIN_IDLE_MS = 60 * 60_000;
+
+/** How large the continuous conversation's head's context may grow before the
+ *  next user message starts a new session: past it, a turn costs more than the
+ *  rotation's one cache write pays back. */
+export const CHAIN_FULL_TOKENS = 60_000;
 
 /** One session of the continuous conversation, as `GET /api/continuous` lists it. */
 export interface ChainMember {
@@ -283,6 +289,7 @@ export interface TurnMeta {
 export interface ContextUsage {
   tokens: number | null; // null right after compaction, before the next response
   contextWindow: number;
+  compactAt: number; // where Pi compacts: the window minus this session's reserve
 }
 
 /** Backend-neutral model reference. */

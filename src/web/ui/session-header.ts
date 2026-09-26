@@ -135,11 +135,11 @@ const CONTEXT_WARN = 70;
 const contextUsed = (tokens: number, u: ContextUsage): number =>
   Math.min(100, Math.round((tokens / u.contextWindow) * 100));
 
-/** Full context reading for the session info panel. */
+/** Full context reading for the session info panel: used against where it compacts. */
 const contextLabel = (u: ContextUsage): string =>
   u.tokens === null
-    ? `?/${compact(u.contextWindow)}`
-    : `${compact(u.tokens)}/${compact(u.contextWindow)} · ${100 - contextUsed(u.tokens, u)}% left`;
+    ? `?/${compact(u.compactAt)}`
+    : `${compact(u.tokens)}/${compact(u.compactAt)} · ${100 - contextUsed(u.tokens, u)}% left`;
 
 /** Title-row meta: background runs · model · reasoning · current context size. */
 function renderSessionMeta(): void {
